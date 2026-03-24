@@ -313,7 +313,12 @@ class ProformaConversionService:
         from apps.billing.models import ProformaInvoice  # noqa: PLC0415  # Deferred: test mockability
 
         try:
-            proforma = ProformaInvoice.objects.select_related("customer", "currency").get(id=proforma_id)
+            # RC-1: Lock proforma to prevent concurrent conversion creating duplicate invoices
+            proforma = (
+                ProformaInvoice.objects.select_for_update(of=("self",))
+                .select_related("customer", "currency")
+                .get(id=proforma_id)
+            )
         except ProformaInvoice.DoesNotExist:
             return Err(f"Proforma not found: {proforma_id}")
 
@@ -360,15 +365,27 @@ class ProformaConversionService:
                 invoice.issue()
                 invoice.save()
 
-                # Copy line items
+                # Copy line items — copy ALL fields including EN16931 and financial fields
                 for line in proforma.lines.all():
                     InvoiceLine.objects.create(
                         invoice=invoice,
-                        kind="service",
+                        kind=line.kind,
+                        service=line.service,
                         description=line.description,
                         quantity=line.quantity,
                         unit_price_cents=line.unit_price_cents,
+                        tax_rate=line.tax_rate,
+                        tax_cents=line.tax_cents,
                         line_total_cents=line.line_total_cents,
+                        domain_name=line.domain_name,
+                        period_start=line.period_start,
+                        period_end=line.period_end,
+                        unit_code=line.unit_code,
+                        tax_category_code=line.tax_category_code,
+                        note=line.note,
+                        discount_amount_cents=line.discount_amount_cents,
+                        seller_item_id=line.seller_item_id,
+                        sort_order=line.sort_order,
                     )
 
                 # Update proforma status via FSM transition

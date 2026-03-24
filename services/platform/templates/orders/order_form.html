@@ -97,9 +97,9 @@
 
           <div>
             {% if order %}
-              {% input_field name="status" input_type="text" label=_("Status") value=order.get_status_display readonly=True help_text=_("Use 'Change Status' button on order detail page to update status") %}
+              {% input_field name="status_display" input_type="text" label=_("Status") value=order.get_status_display readonly=True help_text=_("Use 'Change Status' button on order detail page to update status") %}
             {% else %}
-              {% input_field name="status" input_type="text" label=_("Status") value=_("Draft") readonly=True help_text=_("Status will be set after order creation") %}
+              {% input_field name="status_display" input_type="text" label=_("Status") value=_("Draft") readonly=True help_text=_("Status will be set after order creation") %}
             {% endif %}
           </div>
         </div>

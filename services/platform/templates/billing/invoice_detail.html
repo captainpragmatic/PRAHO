@@ -126,8 +126,11 @@
         <tbody class="bg-slate-800 divide-y divide-slate-700">
           {% for item in items %}
           <tr>
-            <td class="px-6 py-4 whitespace-nowrap text-sm text-white">
+            <td class="px-6 py-4 text-sm text-white">
               {{ item.description }}
+              {% if item.domain_name %}
+              <div class="text-blue-400 text-xs mt-1">{{ item.domain_name }}</div>
+              {% endif %}
             </td>
             <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-400">
               {{ item.get_kind_display }}
@@ -209,13 +212,13 @@
               {{ payment.created_at|date:"d.m.Y H:i" }}
             </td>
             <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-400">
-              {{ payment.get_method_display }}
+              {{ payment.get_payment_method_display }}
             </td>
             <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-green-400 text-right">
               {{ payment.amount|romanian_currency:payment.currency.code }}
             </td>
             <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-400">
-              {{ payment.reference|default:"-" }}
+              {{ payment.reference_number|default:"-" }}
             </td>
           </tr>
           {% endfor %}

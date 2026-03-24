@@ -28,12 +28,23 @@
 ### Key Features
 
 - **Customer Management** - Multi-user accounts with role-based access and soft deletes
-- **EU VAT Billing** - All 27 EU country rates, Romanian 21% (Aug 2025), reverse charge for EU B2B, e-Factura XML
+- **EU VAT Billing** - All 27 EU country rates, Romanian 21% (Aug 2025), reverse charge for EU B2B, e-Factura XML, EN16931-compliant line items
 - **Service Provisioning** - Virtualmin integration with two-phase provisioning and rollback
 - **Support System** - SLA-based ticket management with time tracking
 - **Domain Management** - Multi-registrar support (.ro via ROTLD, international)
 - **Security** - 2FA (TOTP), encrypted credentials, HMAC inter-service auth
 - **Compliance** - GDPR with data export/erasure, immutable audit trails
+
+### EU Invoicing Compliance (EN16931)
+
+PRAHO's invoice and proforma line items implement the European Standard EN16931 for electronic invoicing:
+
+- **Service periods** (BT-134/BT-135) — line-level start/end dates for subscription billing
+- **Unit of measure** (BT-130) — UN/ECE Rec. 20 codes (MON, ANN, C62) per line item
+- **VAT category codes** (BT-151) — S (standard), Z (zero-rated), E (exempt), AE (reverse charge), O (outside scope)
+- **Seller item identification** (BT-155) — product catalog cross-reference per line
+- **Line-level notes** (BT-127) — per-item memos for prorated periods, special terms
+- **Romanian e-Factura** (RO_CIUS) — full XML generation with `InvoicePeriod`, `ClassifiedTaxCategory`, `SellersItemIdentification`, and `AdditionalItemProperty` at line level
 
 ## Architecture
 

@@ -86,6 +86,9 @@ class Invoice:
     # Optional field - not always provided by platform API
     customer_id: int | None = None
 
+    # Metadata (e.g., proforma_number for invoices converted from proformas)
+    meta: dict[str, Any] = field(default_factory=dict)
+
     # E-factura integration
     efactura_id: str = ""
     efactura_sent: bool = False
@@ -188,7 +191,14 @@ class Proforma:
     valid_until: datetime
     created_at: datetime
     notes: str = ""
+    bill_to_name: str = ""
+    bill_to_email: str = ""
+    bill_to_tax_id: str = ""
+    bill_to_address1: str = ""
+    bill_to_city: str = ""
+    bill_to_country: str = ""
     lines: list[ProformaLine] = field(default_factory=list)
+    meta: dict[str, Any] = field(default_factory=dict)
 
     @property
     def is_expired(self) -> bool:

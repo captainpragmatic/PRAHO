@@ -808,6 +808,10 @@ _STATUS_LABEL_MAP: dict[str, str | _StrPromise] = {
     "in_progress": _("In Progress"),
     "not_consented": _("Not Consented"),
     "not consented": _("Not Consented"),
+    # Order lifecycle statuses (renamed in Phase A)
+    "awaiting_payment": _("Awaiting Payment"),
+    "in_review": _("Under Review"),
+    "provisioning": _("Provisioning"),
 }
 
 # ⚡ O(1) lookup — all known statuses across billing, services, orders, tickets
@@ -825,11 +829,13 @@ _STATUS_VARIANT_MAP: dict[str, str] = {
     "consented": "success",
     # Warning / pending
     "pending": "warning",
+    "awaiting_payment": "warning",
     "overdue": "danger",
     "warning": "warning",
     "waiting": "warning",
     "waiting_on_customer": "warning",
     "processing": "info",
+    "in_review": "warning",
     "not consented": "danger",
     # Informational / in-progress
     "draft": "info",
@@ -870,9 +876,11 @@ _STATUS_ICON_MAP: dict[str, str] = {
     "healthy": "check",
     "consented": "check",
     "pending": "clock",
+    "awaiting_payment": "clock",
     "waiting": "clock",
     "waiting_on_customer": "clock",
     "processing": "clock",
+    "in_review": "alert",
     "expired": "clock",
     "overdue": "alert",
     "warning": "alert",

@@ -44,12 +44,14 @@ ALERT_SAMPLES = [
 STATUS_SAMPLES = [
     "active",
     "pending",
+    "awaiting_payment",
     "suspended",
     "cancelled",
     "provisioning",
     "failed",
     "open",
     "paid",
+    "in_review",
     "overdue",
     "draft",
 ]

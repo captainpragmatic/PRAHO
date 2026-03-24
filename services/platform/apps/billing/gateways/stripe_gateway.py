@@ -192,7 +192,12 @@ class StripeGateway(BasePaymentGateway):
 
             self.logger.info(f"💳 Payment {payment_intent_id} status: {payment_intent.status}")
 
-            return PaymentConfirmResult(success=True, status=payment_intent.status, error=None)
+            result = PaymentConfirmResult(success=True, status=payment_intent.status, error=None)
+            # TDA-1: Only include amount_received when Stripe provides it (NotRequired[int]).
+            amount = getattr(payment_intent, "amount_received", None)
+            if amount is not None:
+                result["amount_received"] = amount
+            return result
 
         except self._stripe.error.StripeError as e:
             self.logger.error(f"🔥 Failed to retrieve PaymentIntent {payment_intent_id}: {e}")

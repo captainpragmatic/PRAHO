@@ -55,7 +55,7 @@ def _make_pending_order(customer: Customer, currency: Currency, **kwargs: object
         currency=currency,
         customer_email=customer.primary_email,
         customer_name=customer.company_name,
-        status="pending",
+        status="awaiting_payment",
         **kwargs,
     )
 
@@ -99,7 +99,7 @@ class StripePaymentVerificationTest(TestCase):
 
         mock_gateway = MagicMock()
         mock_gateway.confirm_payment.return_value = PaymentConfirmResult(
-            success=True, status="succeeded", error=None,
+            success=True, status="succeeded", error=None, amount_received=0,
         )
 
         with (
@@ -192,8 +192,12 @@ class StripePaymentVerificationTest(TestCase):
         self.assertEqual(response.status_code, 503)
         self.assertIn("Payment gateway not configured", response.data["error"])
 
-    def test_bank_transfer_skips_stripe_verification(self) -> None:
-        """Orders without payment_intent_id skip Stripe verification entirely."""
+    def test_bank_transfer_rejected_by_confirm_endpoint(self) -> None:
+        """Non-card orders are rejected by the confirm endpoint (security fix).
+
+        Bank-transfer orders must be confirmed via billing/webhook/admin paths,
+        not the customer-facing API endpoint — prevents payment-free self-confirmation.
+        """
         order = _make_pending_order(
             self.customer,
             self.currency,
@@ -201,16 +205,10 @@ class StripePaymentVerificationTest(TestCase):
         )
         request = self._make_request({"payment_status": "bank_transfer"})
 
-        with (
-            patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)),
-            patch("apps.api.orders.views._provision_confirmed_order_item"),
-            patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway") as mock_factory,
-        ):
+        with patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)):
             response = confirm_order(request, str(order.id))
 
-        self.assertEqual(response.status_code, 200)
-        self.assertTrue(response.data["success"])
-        mock_factory.assert_not_called()
+        self.assertEqual(response.status_code, 400)
 
     def test_confirm_returns_409_when_order_confirmed_between_phases(self) -> None:
         """Phase 3 concurrency guard: if order is confirmed between Phase 1 and Phase 3, return 409.
@@ -232,14 +230,14 @@ class StripePaymentVerificationTest(TestCase):
 
         mock_gateway = MagicMock()
         mock_gateway.confirm_payment.return_value = PaymentConfirmResult(
-            success=True, status="succeeded", error=None,
+            success=True, status="succeeded", error=None, amount_received=0,
         )
 
         def confirm_order_between_phases(*args: object, **kwargs: object) -> PaymentConfirmResult:
             """Side effect: simulate concurrent confirmation during Phase 2 Stripe call."""
-            # While Phase 2 is calling Stripe, another request confirms the order
-            Order.objects.filter(id=order.id).update(status="confirmed")
-            return PaymentConfirmResult(success=True, status="succeeded", error=None)
+            # While Phase 2 is calling Stripe, another request marks the order as paid
+            Order.objects.filter(id=order.id).update(status="paid")  # fsm-bypass: simulate concurrent request in test
+            return PaymentConfirmResult(success=True, status="succeeded", error=None, amount_received=0)
 
         mock_gateway.confirm_payment.side_effect = confirm_order_between_phases
 
@@ -249,9 +247,9 @@ class StripePaymentVerificationTest(TestCase):
         ):
             response = confirm_order(request, str(order.id))
 
-        # Phase 3 re-checks status and finds it's no longer "pending"
-        self.assertEqual(response.status_code, 409)
-        self.assertIn("already processed", response.data["error"])
+        # CODEX-8 fix: idempotent — already-confirmed orders return 200
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data["success"])
 
     def test_confirm_verifies_stored_pi_when_request_omits_it(self) -> None:
         """Bug 1 regression: Stripe verification uses order.payment_intent_id, not request payload.

@@ -50,14 +50,14 @@ class OrderListStatusCountsTestCase(TestCase):
         return order
 
     def test_status_counts_includes_all_valid_statuses(self) -> None:
-        """status_counts must have keys for all 9 Order statuses + total."""
+        """status_counts must have keys for all Order statuses + total."""
         response = self.client.get(reverse("orders:order_list"))
         self.assertEqual(response.status_code, 200)
         status_counts = response.context["status_counts"]
 
         expected_keys = {
-            "total", "draft", "pending", "confirmed", "processing",
-            "completed", "cancelled", "failed", "refunded", "partially_refunded",
+            "total", "draft", "awaiting_payment", "paid", "in_review",
+            "provisioning", "completed", "cancelled", "failed",
         }
         self.assertEqual(set(status_counts.keys()), expected_keys)
 
@@ -77,7 +77,7 @@ class OrderListStatusCountsTestCase(TestCase):
         self.assertEqual(counts["completed"], 1)
         self.assertEqual(counts["cancelled"], 1)
         self.assertEqual(counts["failed"], 1)
-        self.assertEqual(counts["pending"], 0)
+        self.assertEqual(counts["awaiting_payment"], 0)
 
     def test_status_counts_zero_when_empty(self) -> None:
         """All counts should be 0 (or None from aggregate) when no orders exist."""

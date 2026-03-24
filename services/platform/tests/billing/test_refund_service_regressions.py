@@ -6,6 +6,7 @@ Targets all uncovered lines/branches to maximize coverage.
 import uuid
 from datetime import timedelta
 from decimal import Decimal
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -495,10 +496,10 @@ class TestGetRefundEligibility(TestCase):
         # Draft status leads to is_eligible False from _check_entity_status_eligibility
         # but _check_entity_refund_eligibility returns it as error which propagates
 
-    def test_pending_order_not_eligible(self):
-        o = _make_order(self.customer, self.currency, status="pending")
+    def test_awaiting_payment_order_not_eligible(self):
+        o = _make_order(self.customer, self.currency, status="awaiting_payment")
         RefundService.get_refund_eligibility("order", o.id)
-        # pending is not in [paid, completed] so status check returns not eligible
+        # awaiting_payment is not in [paid, completed] so status check returns not eligible
 
     def test_exception_in_eligibility(self):
         with patch.object(RefundService, "_get_entity_for_refund_check", side_effect=Exception("boom")):
@@ -527,8 +528,8 @@ class TestCheckEntityStatusEligibility(TestCase):
         assert r.is_ok()
         assert r.unwrap()["is_eligible"] is True
 
-    def test_pending_not_eligible(self):
-        r = RefundService._check_entity_status_eligibility("pending", "order")
+    def test_awaiting_payment_not_eligible(self):
+        r = RefundService._check_entity_status_eligibility("awaiting_payment", "order")
         assert r.is_ok()
         assert r.unwrap()["is_eligible"] is False
         assert "not in refundable state" in r.unwrap()["reason"]
@@ -612,8 +613,8 @@ class TestValidateOrderRefundEligibility(TestCase):
         # MagicMock with spec won't have status, triggering the no-status branch
         # But _get_order_refunded_amount may fail on mock, hitting exception
         r = RefundService._validate_order_refund_eligibility(order, {"refund_type": "full"})
-        # Either ok with not eligible or err from exception
-        assert r.is_ok() or r.is_err()
+        # M7 fix: Order without status attribute should return an error
+        assert r.is_err(), f"Expected Err for order without status, got Ok: {r}"
 
     def test_exception_in_eligibility(self):
         with patch.object(RefundService, "_get_order_refunded_amount", side_effect=Exception("boom")):
@@ -665,10 +666,6 @@ class TestCheckOrderStatusEligibility(TestCase):
 
     def test_completed(self):
         r = RefundService._check_order_status_eligibility("completed", 0, 10000, 10000)
-        assert r["is_eligible"] is True
-
-    def test_partially_refunded(self):
-        r = RefundService._check_order_status_eligibility("partially_refunded", 5000, 10000, 5000)
         assert r["is_eligible"] is True
 
     def test_fully_refunded_already(self):
@@ -1086,7 +1083,7 @@ class TestProcessEntityUpdates(TestCase):
         r = RefundService._process_entity_updates(order, None, "ref-1", None)
         assert r.is_ok()
         data = r.unwrap()
-        assert data["order_status_updated"] is True
+        assert data["order_status_updated"] is False  # Phase A: order status not changed on refund
         assert data["order_id"] == 1
         assert data["invoice_id"] is None
         mock_update.assert_called_once_with(order, refund_data=None)
@@ -1109,7 +1106,7 @@ class TestProcessEntityUpdates(TestCase):
         r = RefundService._process_entity_updates(order, inv, "ref-3", None)
         assert r.is_ok()
         data = r.unwrap()
-        assert data["order_status_updated"] is True
+        assert data["order_status_updated"] is False  # Phase A: order status not changed on refund
         assert data["invoice_status_updated"] is True
 
     def test_with_neither(self) -> None:
@@ -1174,6 +1171,9 @@ class TestProcessPaymentRefundIfExists(TestCase):
 # _update_order_refund_status
 # ===========================================================================
 class TestUpdateOrderRefundStatus(TestCase):
+    """Phase A: _update_order_refund_status no longer changes Order status.
+    Refunds are tracked at Invoice/Payment level. Method now only logs."""
+
     def test_full_refund(self):
         c = _make_customer()
         cur = _make_currency()
@@ -1181,7 +1181,8 @@ class TestUpdateOrderRefundStatus(TestCase):
         r = RefundService._update_order_refund_status(o, refund_data={"refund_type": "full"})
         assert r.is_ok()
         o.refresh_from_db()
-        assert o.status == "refunded"
+        # Phase A: order stays completed — refund is on Invoice/Payment
+        assert o.status == "completed"
 
     def test_partial_refund(self):
         c = _make_customer()
@@ -1192,20 +1193,25 @@ class TestUpdateOrderRefundStatus(TestCase):
         )
         assert r.is_ok()
         o.refresh_from_db()
-        assert o.status == "partially_refunded"
+        # Phase A: order stays completed — refund is on Invoice/Payment
+        assert o.status == "completed"
 
     def test_no_status_attr(self):
-        order = MagicMock(spec=["total_cents"])
+        # Phase A: method no longer checks hasattr(order, "status"),
+        # it just logs and returns Ok
+        order = MagicMock(spec=["total_cents", "order_number", "pk"])
         order.total_cents = 10000
-        del order.status
         r = RefundService._update_order_refund_status(order, refund_data={"refund_type": "full"})
-        assert r.is_err()
-        assert "Order update failed" in r.unwrap_err()
+        assert r.is_ok()
 
     def test_exception_path(self):
+        # Phase A: _update_order_refund_status no longer changes order status,
+        # so the only exception path is if logging itself fails.
+        # Force an exception by making refund_data access raise.
         order = MagicMock(status="completed", total_cents=10000)
-        order.save.side_effect = Exception("db error")
-        r = RefundService._update_order_refund_status(order, refund_data={"refund_type": "full"})
+        bad_data: Any = MagicMock()
+        bad_data.get.side_effect = Exception("bad data")
+        r = RefundService._update_order_refund_status(order, refund_data=bad_data)
         assert r.is_err()
         assert "Failed to update" in r.unwrap_err()
 
@@ -1223,7 +1229,8 @@ class TestUpdateOrderRefundStatus(TestCase):
         r = RefundService._update_order_refund_status(o, refund_amount_cents=10000)
         assert r.is_ok()
         o.refresh_from_db()
-        assert o.status == "refunded"
+        # Phase A: order stays completed — refund is on Invoice/Payment
+        assert o.status == "completed"
 
 
 # ===========================================================================
@@ -1400,10 +1407,10 @@ class TestValidateAndPrepareOrderRefund(TestCase):
         assert r.is_ok()
         assert r.unwrap()["is_eligible"] is False
 
-    def test_pending_order(self):
+    def test_awaiting_payment_order(self):
         c = _make_customer()
         cur = _make_currency()
-        o = _make_order(c, cur, status="pending")
+        o = _make_order(c, cur, status="awaiting_payment")
         r = RefundService._validate_and_prepare_order_refund(o, {"refund_type": "full"})
         assert r.is_ok()
         assert r.unwrap()["is_eligible"] is False
@@ -1451,8 +1458,9 @@ class TestValidateAndPrepareOrderRefund(TestCase):
         order.total_cents = 10000
         del order.status
         r = RefundService._validate_and_prepare_order_refund(order, {"refund_type": "full"})
-        # Without status, goes to get_order_refunded_amount path
-        assert r.is_ok() or r.is_err()
+        # M7 fix: Order without status should still return a result (Ok or Err)
+        # but we should assert the specific expected behavior
+        assert r.is_err(), f"Expected Err for order without status, got Ok: {r}"
 
 
 # ===========================================================================
@@ -1637,7 +1645,7 @@ class TestProcessBidirectionalRefund(TestCase):
         )
         assert r.is_ok()
         data = r.unwrap()
-        assert data["order_status_updated"] is True
+        assert data["order_status_updated"] is False  # Phase A: order status not changed on refund
 
     def test_success_with_invoice(self):
         inv = _make_invoice(self.customer, self.currency, status="paid", total_cents=10000)

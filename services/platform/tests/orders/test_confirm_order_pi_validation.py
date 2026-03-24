@@ -45,7 +45,7 @@ def _make_pending_order(customer: Customer, currency: Currency, **kwargs: object
         currency=currency,
         customer_email=customer.primary_email,
         customer_name=customer.company_name,
-        status="pending",
+        status="awaiting_payment",
         **kwargs,
     )
 
@@ -117,7 +117,7 @@ class ConfirmOrderPaymentIntentValidationTest(TestCase):
         request = self._make_request({"payment_intent_id": "pi_validXYZ1234567890", "payment_status": "succeeded"})
 
         mock_gateway = MagicMock()
-        mock_gateway.confirm_payment.return_value = PaymentConfirmResult(success=True, status="succeeded", error=None)
+        mock_gateway.confirm_payment.return_value = PaymentConfirmResult(success=True, status="succeeded", error=None, amount_received=0)
 
         with patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)), \
              patch("apps.api.orders.views._provision_confirmed_order_item"), \
@@ -129,10 +129,15 @@ class ConfirmOrderPaymentIntentValidationTest(TestCase):
         mock_gateway.confirm_payment.assert_called_once_with("pi_validXYZ1234567890")
 
         order.refresh_from_db()
-        self.assertEqual(order.status, "confirmed")
+        # After confirmation, order advances through lifecycle (paid → provisioning or in_review)
+        self.assertIn(order.status, ["paid", "in_review", "provisioning"])
 
-    def test_no_pi_order_confirms_without_pi(self) -> None:
-        """Orders confirmed without a payment_intent_id proceed normally."""
+    def test_no_pi_order_rejects_non_card_payment(self) -> None:
+        """Non-card orders are rejected by the confirm endpoint (security fix).
+
+        Bank-transfer orders must be confirmed via billing/webhook/admin paths,
+        not the customer-facing API endpoint.
+        """
         from apps.api.orders.views import confirm_order  # noqa: PLC0415
 
         order = _make_pending_order(
@@ -141,9 +146,108 @@ class ConfirmOrderPaymentIntentValidationTest(TestCase):
         )
         request = self._make_request({"payment_status": "succeeded"})
 
-        with patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)), \
-             patch("apps.api.orders.views._provision_confirmed_order_item"):
+        with patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)):
             response = confirm_order(request, str(order.id))
 
-        self.assertEqual(response.status_code, 200)
-        self.assertTrue(response.data["success"])
+        self.assertEqual(response.status_code, 400)
+
+
+# ===============================================================================
+# H4 FIX: Stripe amount_received verification
+# ===============================================================================
+
+
+class ConfirmOrderAmountVerificationTest(TestCase):
+    """H4: confirm_order must verify Stripe amount_received matches order total_cents."""
+
+    def setUp(self) -> None:
+        self.user = _make_user("amount-test@pragmatichost.com")
+        self.currency = _make_currency()
+        self.customer = _make_customer(self.user)
+        self.factory = APIRequestFactory()
+
+    def _make_request(self, data: dict) -> object:
+        request = self.factory.post("/api/orders/confirm/", data=data, content_type="application/json")
+        request._portal_authenticated = True
+        request.user = self.user
+        return request
+
+    def test_mismatched_amount_returns_400(self) -> None:
+        """Stripe PI amount_received != order.total_cents must be rejected."""
+        from apps.api.orders.views import confirm_order  # noqa: PLC0415
+
+        order = _make_pending_order(
+            self.customer, self.currency,
+            payment_method="card",
+            payment_intent_id="pi_amountMismatch12345",
+            total_cents=100000,  # 1000 RON
+        )
+        request = self._make_request({"payment_intent_id": "pi_amountMismatch12345", "payment_status": "succeeded"})
+
+        mock_gateway = MagicMock()
+        # Stripe says 5000 cents was charged, but order is 100000 cents
+        mock_gateway.confirm_payment.return_value = {
+            "success": True, "status": "succeeded", "error": None, "amount_received": 5000,
+        }
+
+        with (
+            patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)),
+            patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway", return_value=mock_gateway),
+        ):
+            response = confirm_order(request, str(order.id))
+
+        self.assertEqual(response.status_code, 400, f"Response: {response.data}")
+        self.assertIn("amount", response.data["error"].lower())
+
+    def test_matching_amount_succeeds(self) -> None:
+        """Stripe PI amount_received == order.total_cents proceeds normally."""
+        from apps.api.orders.views import confirm_order  # noqa: PLC0415
+
+        # total_cents=0 (free order path) so Phase 3 succeeds without proforma
+        order = _make_pending_order(
+            self.customer, self.currency,
+            payment_method="card",
+            payment_intent_id="pi_amountMatch123456789",
+            total_cents=0,
+        )
+        request = self._make_request({"payment_intent_id": "pi_amountMatch123456789", "payment_status": "succeeded"})
+
+        mock_gateway = MagicMock()
+        mock_gateway.confirm_payment.return_value = {
+            "success": True, "status": "succeeded", "error": None, "amount_received": 0,
+        }
+
+        with (
+            patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)),
+            patch("apps.api.orders.views._provision_confirmed_order_item"),
+            patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway", return_value=mock_gateway),
+        ):
+            response = confirm_order(request, str(order.id))
+
+        # Phase 2 passes (amount matches), Phase 3 free order path → 200
+        self.assertEqual(response.status_code, 200, f"Response: {response.data}")
+
+    def test_missing_amount_received_is_rejected(self) -> None:
+        """SFH-2 fix: Missing amount_received must be rejected (fail-closed, not fail-open)."""
+        from apps.api.orders.views import confirm_order  # noqa: PLC0415
+
+        order = _make_pending_order(
+            self.customer, self.currency,
+            payment_method="card",
+            payment_intent_id="pi_noAmountField123456",
+            total_cents=0,
+        )
+        request = self._make_request({"payment_intent_id": "pi_noAmountField123456", "payment_status": "succeeded"})
+
+        mock_gateway = MagicMock()
+        # No amount_received key → should be rejected, not silently passed
+        mock_gateway.confirm_payment.return_value = {"success": True, "status": "succeeded", "error": None}
+
+        with (
+            patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)),
+            patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway", return_value=mock_gateway),
+        ):
+            response = confirm_order(request, str(order.id))
+
+        self.assertEqual(response.status_code, 400, f"Response: {response.data}")
+        self.assertIn("amount", response.data["error"].lower())

@@ -63,6 +63,7 @@ class ButtonConfig:
     disabled: bool = False
     class_: str = ""
     attrs: str = ""
+    button_id: str = ""
 
 
 @dataclass
@@ -281,6 +282,7 @@ def button(
         "disabled": config.disabled,
         "class": config.class_,
         "attrs": clean_attrs,
+        "button_id": config.button_id,
     }
 
 

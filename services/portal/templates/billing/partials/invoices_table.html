@@ -57,6 +57,8 @@
                 {% trans "Accepted" as bt5 %}{% badge bt5 variant="success" icon="check" css_class="w-28 justify-center" %}
               {% elif invoice.status == 'expired' %}
                 {% trans "Expired" as bt6 %}{% badge bt6 variant="danger" icon="x" css_class="w-28 justify-center" %}
+              {% elif invoice.status == 'converted' %}
+                {% trans "Converted" as bt6c %}{% badge bt6c variant="success" icon="check" css_class="w-28 justify-center opacity-60" %}
               {% else %}
                 {% badge invoice.status_display variant="secondary" css_class="w-28 justify-center" %}
               {% endif %}
@@ -111,6 +113,8 @@
             {% trans "Accepted" as bt18 %}{% badge bt18 variant="success" icon="check" css_class="w-28 justify-center" %}
           {% elif invoice.status == 'expired' %}
             {% trans "Expired" as bt19 %}{% badge bt19 variant="danger" icon="x" css_class="w-28 justify-center" %}
+          {% elif invoice.status == 'converted' %}
+            {% trans "Converted" as bt19c %}{% badge bt19c variant="success" icon="check" css_class="w-28 justify-center opacity-60" %}
           {% else %}
             {% badge invoice.status_display variant="secondary" css_class="w-28 justify-center" %}
           {% endif %}

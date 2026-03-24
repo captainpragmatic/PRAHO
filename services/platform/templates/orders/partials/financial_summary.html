@@ -54,35 +54,30 @@
       {% endif %}
     </div>
 
-    <!-- Order Status Information -->
+    <!-- Payment & Related Documents -->
     <div class="mt-4 pt-4 border-t border-slate-700">
-      <div class="flex justify-between text-sm">
-        <span class="text-slate-400">{% trans "Status:" %}</span>
-        <span class="text-white">
-          {% if order.status == "draft" %}
-            {% icon "document" %} {% trans "Draft" %}
-          {% elif order.status == "pending" %}
-            {% icon "clock" %} {% trans "Pending" %}
-          {% elif order.status == "processing" %}
-            {% icon "settings" %} {% trans "Processing" %}
-          {% elif order.status == "completed" %}
-            {% icon "check" %} {% trans "Completed" %}
-          {% elif order.status == "cancelled" %}
-            {% icon "x" %} {% trans "Cancelled" %}
-          {% elif order.status == "failed" %}
-            {% icon "warning" %} {% trans "Failed" %}
-          {% elif order.status == "refunded" %}
-            {% icon "currency" %} {% trans "Refunded" %}
-          {% elif order.status == "partially_refunded" %}
-            {% icon "currency" %} {% trans "Partially Refunded" %}
-          {% endif %}
-        </span>
-      </div>
-
       {% if order.payment_method %}
-        <div class="flex justify-between text-sm mt-1">
+        <div class="flex justify-between text-sm">
           <span class="text-slate-400">{% trans "Payment:" %}</span>
           <span class="text-white">{{ order.get_payment_method_display }}</span>
+        </div>
+      {% endif %}
+
+      {% if order.proforma %}
+        <div class="flex justify-between text-sm mt-1">
+          <span class="text-slate-400">{% trans "Proforma:" %}</span>
+          <a href="{% url 'billing:proforma_detail' pk=order.proforma.pk %}" class="text-blue-400 hover:text-blue-300">
+            {{ order.proforma.number }}
+          </a>
+        </div>
+      {% endif %}
+
+      {% if order.invoice %}
+        <div class="flex justify-between text-sm mt-1">
+          <span class="text-slate-400">{% trans "Invoice:" %}</span>
+          <a href="{% url 'billing:invoice_detail' pk=order.invoice.pk %}" class="text-blue-400 hover:text-blue-300">
+            {{ order.invoice.number }}
+          </a>
         </div>
       {% endif %}
     </div>

@@ -12,4 +12,7 @@ class OrdersConfig(AppConfig):
 
     def ready(self) -> None:
         """Import signals when Django starts."""
-        from . import signals  # noqa: F401  # Signal registration
+        from . import signals  # Signal registration
+
+        # Connect cross-app billing signals (Phase B: proforma_payment_received)
+        signals._connect_billing_signals()

@@ -61,13 +61,13 @@ def create_invoice_from_api(data: dict[str, Any], lines: list[dict[str, Any]] | 
         subtotal_cents=data.get("subtotal_cents", 0),  # Not in list API
         tax_cents=data.get("tax_cents", 0),  # Not in list API
         total_cents=data["total_cents"],
-        issued_at=None,  # Not provided by list API
+        issued_at=parse_date_field("issued_at"),
         due_at=parse_date_field("due_at"),
         created_at=cast(datetime, parse_datetime(data["created_at"])),
         updated_at=cast(datetime, parse_datetime(data["updated_at"])) if data.get("updated_at") else None,
-        locked_at=None,  # Not provided by list API
-        sent_at=None,  # Not provided by list API
-        paid_at=None,  # Not provided by list API
+        locked_at=parse_date_field("locked_at"),
+        sent_at=parse_date_field("sent_at"),
+        paid_at=parse_date_field("paid_at"),
         bill_to_name=data.get("bill_to_name", ""),
         bill_to_tax_id=data.get("bill_to_tax_id", ""),
         bill_to_email=data.get("bill_to_email", ""),
@@ -79,7 +79,16 @@ def create_invoice_from_api(data: dict[str, Any], lines: list[dict[str, Any]] | 
         bill_to_country=data.get("bill_to_country", ""),
         efactura_id=data.get("efactura_id", ""),
         efactura_sent=data.get("efactura_sent", False),
+        meta=data.get("meta", {}),
     )
+
+    # Extract bill_to data if present (API returns nested dict, not flat fields)
+    bill_to = data.get("bill_to", {})
+    if bill_to:
+        invoice.bill_to_name = bill_to.get("name", "") or invoice.bill_to_name
+        invoice.bill_to_email = bill_to.get("email", "") or invoice.bill_to_email
+        invoice.bill_to_tax_id = bill_to.get("tax_id", "") or invoice.bill_to_tax_id
+        invoice.bill_to_address1 = bill_to.get("address", "") or invoice.bill_to_address1
 
     # Add line items if provided
     if lines:
@@ -141,7 +150,23 @@ def create_proforma_from_api(data: dict[str, Any], lines: list[dict[str, Any]] |
         valid_until=cast(datetime, parse_datetime(data["valid_until"])),
         created_at=cast(datetime, parse_datetime(data["created_at"])),
         notes=data.get("notes", ""),
+        bill_to_name=data.get("bill_to_name", ""),
+        bill_to_email=data.get("bill_to_email", ""),
+        bill_to_tax_id=data.get("bill_to_tax_id", ""),
+        bill_to_address1=data.get("bill_to_address1", ""),
+        bill_to_city=data.get("bill_to_city", ""),
+        bill_to_country=data.get("bill_to_country", ""),
+        meta=data.get("meta", {}),
     )
+
+    # Extract bill_to data if present (structured billing address block)
+    bill_to = data.get("bill_to", {})
+    if bill_to:
+        proforma.bill_to_name = bill_to.get("name", "") or proforma.bill_to_name
+        proforma.bill_to_email = bill_to.get("email", "") or proforma.bill_to_email
+        proforma.bill_to_tax_id = bill_to.get("tax_id", "") or proforma.bill_to_tax_id
+        # Address may be a single string or structured
+        proforma.bill_to_address1 = bill_to.get("address", "") or proforma.bill_to_address1
 
     # Add line items if provided
     if lines:

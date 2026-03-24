@@ -641,34 +641,10 @@ def handle_proforma_invoice_conversion(
                 description=f"Proforma {instance.number} {'created' if created else 'updated'}",
             )
             BillingAuditService.log_proforma_event(event_data)
-        if not created:
-            old_values = _serialize_values_for_audit(getattr(instance, "_original_proforma_values", {}))
-            old_status = old_values.get("status")
-
-            # Auto-convert proforma to invoice when paid
-            if instance.status == "paid" and old_status != "paid" and not hasattr(instance, "converted_invoice"):
-                try:
-                    from apps.billing.services import (
-                        ProformaConversionService,
-                    )
-
-                    result = ProformaConversionService.convert_to_invoice(  # type: ignore[call-arg]
-                        proforma_id=str(instance.id), conversion_reason="payment_received"
-                    )
-
-                    if result.is_ok():
-                        invoice = result.unwrap()
-                        logger.info(f"📋 [Proforma] Auto-converted {instance.number} → {invoice.number}")
-
-                        # Link any related orders to the new invoice
-                        if hasattr(instance, "orders") and instance.orders.exists():
-                            invoice.orders.set(instance.orders.all())
-
-                    else:
-                        logger.error(f"🔥 [Proforma] Conversion failed: {result.unwrap_err()}")
-
-                except Exception as e:
-                    logger.exception(f"🔥 [Proforma] Auto-conversion failed: {e}")
+        # NOTE: Proforma-to-invoice conversion is handled exclusively by
+        # ProformaPaymentService.record_payment_and_convert() (ADR-0038).
+        # This signal handler does NOT convert proformas — the convergence
+        # point handles locking, idempotency, and signal emission.
 
     except Exception as e:
         logger.exception(f"🔥 [Proforma Signal] Conversion handling failed: {e}")
@@ -836,25 +812,34 @@ def _sync_orders_on_invoice_status_change(invoice: Invoice, old_status: str, new
         if not invoice.orders.exists():
             return
 
-        from apps.orders.services import OrderService, StatusChangeData
+        from apps.orders.services import OrderPaymentConfirmationService, OrderService, StatusChangeData
 
         if new_status == "paid" and old_status != "paid":
-            # Invoice paid - advance orders to processing
-            for order in invoice.orders.filter(status="pending"):
-                status_change = StatusChangeData(
-                    new_status="processing",
-                    notes=f"Payment received for invoice {invoice.number}",
-                    changed_by=None,  # System change
-                )
-
-                result = OrderService.update_order_status(order, status_change)
+            # Invoice paid — confirm orders through the full confirmation service.
+            # RC-3 fix: Skip proforma-linked orders — those are handled by
+            # proforma_payment_received signal which does the full double-transition
+            # (mark_paid + start_provisioning). If we advance them here to "paid"
+            # only, the on_commit signal handler sees them already paid and skips,
+            # leaving them stuck without provisioning.
+            # Finding #4 fix: Use confirm_order() instead of update_order_status() so
+            # non-proforma orders (admin-created direct invoices) also pass through the
+            # review gate and advance to provisioning or in_review, not just "paid".
+            for order in invoice.orders.filter(status="awaiting_payment", proforma__isnull=True):
+                result = OrderPaymentConfirmationService.confirm_order(order, invoice=invoice)
                 if result.is_ok():
-                    logger.info(f"📋 [Order] Advanced {order.order_number} to processing")
+                    order.refresh_from_db()
+                    logger.info(f"📋 [Order] Confirmed {order.order_number} → {order.status}")
+                else:
+                    logger.error(
+                        "🔥 [Order] Failed to confirm order %s on invoice paid: %s",
+                        order.order_number,
+                        result.unwrap_err() if result.is_err() else "unknown",
+                    )
 
         elif new_status == "void" and old_status != "void":
             # Invoice voided - cancel related orders
             for order in invoice.orders.all():
-                if order.status in ["pending", "processing"]:
+                if order.status in ["awaiting_payment", "paid", "in_review", "provisioning"]:
                     status_change = StatusChangeData(
                         new_status="cancelled", notes=f"Related invoice {invoice.number} was voided", changed_by=None
                     )
@@ -862,6 +847,12 @@ def _sync_orders_on_invoice_status_change(invoice: Invoice, old_status: str, new
                     result = OrderService.update_order_status(order, status_change)
                     if result.is_ok():
                         logger.info(f"📋 [Order] Cancelled {order.order_number} due to voided invoice")
+                    else:
+                        logger.error(
+                            "🔥 [Order] Failed to cancel order %s on invoice void: %s",
+                            order.order_number,
+                            result.unwrap_err() if result.is_err() else "unknown",
+                        )
 
         elif new_status == "overdue" and old_status != "overdue":
             # Invoice overdue - may suspend related services
@@ -925,21 +916,27 @@ def _update_customer_payment_credit(payment: Payment, old_status: str) -> None:
 def _handle_invoice_refund_completion(invoice: Invoice) -> None:
     """Handle side effects when invoice refund is completed"""
     try:
-        # 1. Send invoice refund confirmation
-        _send_invoice_refund_confirmation(invoice)
+        # H5 fix: Send email via on_commit to prevent ghost emails on rollback.
+        # If an outer transaction rolls back, the email would have already been sent.
+        _inv = invoice
+        transaction.on_commit(lambda: _send_invoice_refund_confirmation(_inv))
 
         # 2. Update customer invoice payment patterns
         _update_customer_invoice_history(invoice, "refunded")
 
         # 3. Handle Romanian e-Factura refund reporting
-        _handle_efactura_refund_reporting(invoice)
+        # M5 fix: Wrap in on_commit — ANAF submission is an external side effect.
+        # If the enclosing transaction rolls back, ANAF must NOT receive a phantom report.
+        transaction.on_commit(lambda inv=invoice: _handle_efactura_refund_reporting(inv))
 
         # 4. Update billing analytics and KPIs
         _update_billing_refund_metrics(invoice)
 
         # 5. Create finance team notification for significant refunds
+        # M5 fix: Wrap in on_commit — email notification is an external side effect.
+        # If the enclosing transaction rolls back, finance must NOT receive a ghost notification.
         if invoice.total_cents >= LARGE_REFUND_THRESHOLD_CENTS:
-            _notify_finance_team_large_refund(invoice)
+            transaction.on_commit(lambda inv=invoice: _notify_finance_team_large_refund(inv))
 
         # 6. Compliance and audit logging
         log_security_event(
@@ -950,6 +947,22 @@ def _handle_invoice_refund_completion(invoice: Invoice) -> None:
                 "customer_id": str(invoice.customer.id),
                 "refund_amount_cents": invoice.total_cents,
             },
+        )
+
+        # D4: Emit invoice_refunded signal for cross-app handlers (Provisioning, Orders)
+        from apps.billing.custom_signals import (
+            invoice_refunded,  # Deferred: avoids circular import at module level (PLC0415 suppressed per-file in pyproject.toml)
+        )
+
+        transaction.on_commit(
+            lambda inv=invoice: invoice_refunded.send(
+                sender=Invoice,
+                invoice=inv,
+                # TODO: Derive refund_type from invoice state when partial refund support is added.
+                # Currently _handle_invoice_refund_completion is only called for status=="refunded"
+                # (full refund path). Partial refunds route to a different handler.
+                refund_type="full",
+            )
         )
 
         logger.info(f"💰 [Refund] Completed invoice refund for {invoice.number}")
@@ -1703,8 +1716,12 @@ def _handle_efactura_refund_reporting(invoice: Invoice) -> None:
                     AuditService.log_compliance_event(compliance_request)
 
             except EFacturaDocument.DoesNotExist:
-                # No e-Factura document for this invoice
-                pass
+                # Expected: not all Romanian invoices have an e-Factura document
+                # (only those submitted to ANAF). No credit note needed.
+                logger.info(
+                    "💡 [e-Factura] No e-Factura document found for refunded invoice %s — skipping credit note",
+                    invoice.number,
+                )
 
     except Exception as e:
         logger.exception(f"🔥 [e-Factura] Refund reporting failed: {e}")

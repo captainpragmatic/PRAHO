@@ -169,7 +169,7 @@ class CustomerAnalyticsService:
                 total=Count("id"),
                 completed=Count("id", filter=Q(status="completed")),
                 cancelled=Count("id", filter=Q(status="cancelled")),
-                pending=Count("id", filter=Q(status__in=["pending", "processing"])),
+                pending=Count("id", filter=Q(status__in=["awaiting_payment", "paid", "in_review", "provisioning"])),
                 avg_value=Avg("total_cents"),
                 last_date=Max("created_at"),
             )

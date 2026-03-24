@@ -332,6 +332,23 @@ class ProformaLine(models.Model):
     tax_cents = models.BigIntegerField(default=0, help_text=_("Tax amount in cents"))
     line_total_cents = models.BigIntegerField(default=0)
 
+    # EN16931 compliance fields
+    domain_name = models.CharField(max_length=255, blank=True, default="", help_text=_("Hosting domain for this line"))
+    period_start = models.DateField(null=True, blank=True, help_text=_("Service period start (BT-134)"))
+    period_end = models.DateField(null=True, blank=True, help_text=_("Service period end (BT-135)"))
+    unit_code = models.CharField(
+        max_length=10, blank=True, default="C62", help_text=_("UN/ECE Rec. 20 unit code (BT-130)")
+    )
+    tax_category_code = models.CharField(
+        max_length=5, blank=True, default="S", help_text=_("EU VAT category: S/Z/E/AE/O (BT-151)")
+    )
+    note = models.TextField(blank=True, default="", help_text=_("Per-line memo (BT-127)"))
+    discount_amount_cents = models.BigIntegerField(default=0, help_text=_("Line-level discount in cents (BT-147)"))
+    seller_item_id = models.CharField(
+        max_length=100, blank=True, default="", help_text=_("Seller product code/SKU (BT-155)")
+    )
+    sort_order = models.PositiveSmallIntegerField(default=0, help_text=_("Display/XML sequence (BT-126)"))
+
     class Meta:
         db_table = "billing_proforma_lines"
         indexes = (models.Index(fields=["service"]),)

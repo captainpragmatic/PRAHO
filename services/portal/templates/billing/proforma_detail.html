@@ -35,8 +35,25 @@
   </div>
 
   <!-- Status Banner -->
-  <!-- Status Banner -->
-  {% if proforma.is_expired %}
+  {% if proforma.status == "converted" %}
+  <div class="bg-blue-900 border border-blue-700 rounded-lg p-4 mb-6">
+    <div class="flex items-start">
+      <span class="text-blue-300">{% icon "check" size="lg" %}</span>
+      <div class="ml-3">
+        <h3 class="text-sm font-medium text-blue-200">{% trans 'Converted to Invoice' %}</h3>
+        <p class="mt-1 text-sm text-blue-300">{% trans 'This proforma has been paid and converted to an invoice.' %}</p>
+        {% if proforma.meta.invoice_number %}
+        <p class="mt-2">
+          <a href="{% url 'billing:invoice_detail' invoice_number=proforma.meta.invoice_number %}"
+             class="text-blue-300 underline hover:text-blue-200 text-sm font-medium">
+            {% trans 'View Invoice' %} {{ proforma.meta.invoice_number }}
+          </a>
+        </p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  {% elif proforma.is_expired %}
     {% trans "Proforma Expired" as alert_title %}
     {# nosemgrep: template-blocktranslate-no-escape — asvar stores in variable, autoescaped when rendered #}
     {% blocktrans with date=proforma.valid_until|romanian_date asvar alert_msg %}This proforma expired on {{ date }}. It can no longer be processed.{% endblocktrans %}
@@ -133,6 +150,9 @@
               <tr>
                 <td class="px-4 py-4">
                   <div class="text-sm text-white font-medium">{{ line.description }}</div>
+                  {% if line.domain_name %}
+                  <div class="text-blue-400 text-xs mt-1">{{ line.domain_name }}</div>
+                  {% endif %}
                 </td>
                 <td class="px-4 py-4 text-right text-sm text-white">
                   {{ line.quantity|floatformat:0 }}
@@ -165,6 +185,9 @@
             <!-- Description -->
             <div class="mb-2">
               <p class="text-white text-sm font-medium">{{ line.description }}</p>
+              {% if line.domain_name %}
+              <p class="text-blue-400 text-xs mt-1">{{ line.domain_name }}</p>
+              {% endif %}
             </div>
 
             <!-- Price and Total -->

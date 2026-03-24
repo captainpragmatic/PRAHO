@@ -61,6 +61,12 @@ class InvoiceLineSerializer(serializers.ModelSerializer):
 
     unit_price = serializers.SerializerMethodField()
     line_total = serializers.SerializerMethodField()
+    domain_name = serializers.CharField(max_length=255, allow_blank=True)
+    period_start = serializers.DateField(allow_null=True)
+    period_end = serializers.DateField(allow_null=True)
+    unit_code = serializers.CharField(max_length=10, allow_blank=True)
+    seller_item_id = serializers.CharField(max_length=100, allow_blank=True)
+    note = serializers.CharField(allow_blank=True)
 
     class Meta:
         model = InvoiceLine
@@ -73,6 +79,12 @@ class InvoiceLineSerializer(serializers.ModelSerializer):
             "line_total_cents",
             "unit_price",
             "line_total",
+            "domain_name",
+            "period_start",
+            "period_end",
+            "unit_code",
+            "seller_item_id",
+            "note",
         ]
 
     def get_unit_price(self, obj: InvoiceLine) -> str:
@@ -119,6 +131,7 @@ class InvoiceDetailSerializer(serializers.ModelSerializer):
             "bill_to",
             "pdf_url",
             "efactura_sent",
+            "meta",
         ]
 
     def get_subtotal(self, obj: Invoice) -> str:
@@ -251,6 +264,12 @@ class ProformaLineSerializer(serializers.ModelSerializer):
 
     unit_price = serializers.SerializerMethodField()
     line_total = serializers.SerializerMethodField()
+    domain_name = serializers.CharField(max_length=255, allow_blank=True)
+    period_start = serializers.DateField(allow_null=True)
+    period_end = serializers.DateField(allow_null=True)
+    unit_code = serializers.CharField(max_length=10, allow_blank=True)
+    seller_item_id = serializers.CharField(max_length=100, allow_blank=True)
+    note = serializers.CharField(allow_blank=True)
 
     class Meta:
         model = ProformaLine
@@ -263,6 +282,12 @@ class ProformaLineSerializer(serializers.ModelSerializer):
             "line_total_cents",
             "unit_price",
             "line_total",
+            "domain_name",
+            "period_start",
+            "period_end",
+            "unit_code",
+            "seller_item_id",
+            "note",
         ]
 
     def get_unit_price(self, obj: ProformaLine) -> str:
@@ -304,6 +329,7 @@ class ProformaDetailSerializer(serializers.ModelSerializer):
             "bill_to",
             "pdf_url",
             "notes",
+            "meta",
         ]
 
     def get_subtotal(self, obj: ProformaInvoice) -> str:

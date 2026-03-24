@@ -54,6 +54,8 @@ _DEFAULT_MAX_PRICE_OVERRIDE_CENTS = 100_000_000  # 1 million EUR in cents
 MAX_PRICE_OVERRIDE_CENTS = _DEFAULT_MAX_PRICE_OVERRIDE_CENTS
 _DEFAULT_MAX_PRICE_OVERRIDE_MULTIPLIER = 10
 MAX_PRICE_OVERRIDE_MULTIPLIER = _DEFAULT_MAX_PRICE_OVERRIDE_MULTIPLIER
+# H3: Roles that can approve/reject orders under review
+_REVIEW_APPROVE_ROLES = frozenset({"admin", "billing"})
 
 
 def get_max_search_query_length() -> int:
@@ -291,14 +293,13 @@ def order_list(request: HttpRequest) -> HttpResponse:
     status_counts = base_qs.aggregate(
         total=Count("id"),
         draft=Count("id", filter=Q(status="draft")),
-        pending=Count("id", filter=Q(status="pending")),
-        confirmed=Count("id", filter=Q(status="confirmed")),
-        processing=Count("id", filter=Q(status="processing")),
+        awaiting_payment=Count("id", filter=Q(status="awaiting_payment")),
+        paid=Count("id", filter=Q(status="paid")),
+        in_review=Count("id", filter=Q(status="in_review")),
+        provisioning=Count("id", filter=Q(status="provisioning")),
         completed=Count("id", filter=Q(status="completed")),
         failed=Count("id", filter=Q(status="failed")),
         cancelled=Count("id", filter=Q(status="cancelled")),
-        refunded=Count("id", filter=Q(status="refunded")),
-        partially_refunded=Count("id", filter=Q(status="partially_refunded")),
     )
 
     context = {
@@ -399,9 +400,7 @@ def order_detail(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
 
     # Determine if order can be edited based on status and user permissions
     can_edit = (
-        is_staff
-        and len(editable_fields) > 0
-        and order.status not in ["completed", "cancelled", "refunded"]  # Terminal states
+        is_staff and len(editable_fields) > 0 and order.status not in ["completed", "cancelled"]  # Terminal states
     )
 
     # Preflight validation (only for draft orders)
@@ -619,7 +618,7 @@ def order_create_preview(request: HttpRequest) -> HttpResponse:
                 },
             )
 
-        unit_cents = int(price.effective_price_cents)
+        unit_cents = int(price.get_price_cents_for_period(billing_period))
         setup_cents = int(price.setup_cents)
         subtotal_cents = (unit_cents * quantity) + setup_cents
 
@@ -754,7 +753,7 @@ def order_create_with_item(request: HttpRequest) -> HttpResponse:
                     product_type=product.product_type,
                     billing_period=billing_period,
                     quantity=quantity,
-                    unit_price_cents=int(price.effective_price_cents),
+                    unit_price_cents=int(price.get_price_cents_for_period(billing_period)),
                     setup_cents=int(price.setup_cents),
                     config={"product_price_id": str(price.id)},
                     domain_name=domain_name,
@@ -795,7 +794,11 @@ def order_edit(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
     if request.method == "POST":
         # Determine which fields to process
         if editable_fields == ["*"]:
-            valid_field_names = {f.name for f in Order._meta.get_fields() if hasattr(f, "column")}
+            # Exclude FSM-managed fields and internal fields from wildcard editing
+            fsm_fields = {"status", "id", "created_at", "updated_at", "deleted_at"}
+            valid_field_names = {
+                f.name for f in Order._meta.get_fields() if hasattr(f, "column") and f.name not in fsm_fields
+            }
             fields_to_update = [k for k in request.POST if k in valid_field_names]
         else:
             fields_to_update = [k for k in request.POST if k in editable_fields]
@@ -807,8 +810,13 @@ def order_edit(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
             updated_fields.append(field_name)
 
         if updated_fields:
+            # Only validate the fields that were actually changed — full_clean() would
+            # fail on unrelated required fields (e.g., empty billing_address on legacy orders).
+            all_field_names = {f.name for f in Order._meta.get_fields() if hasattr(f, "column")}
+            exclude_from_validation = all_field_names - set(updated_fields)
+            exclude_from_validation.add("status")  # FSM-protected, never validate via full_clean
             try:
-                order.full_clean()
+                order.full_clean(exclude=list(exclude_from_validation))
             except ValidationError as e:
                 for field, errors in e.message_dict.items():
                     for error in errors:
@@ -821,6 +829,18 @@ def order_edit(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
                 details={"order": order.order_number, "fields": updated_fields},
                 user_email=getattr(request.user, "email", None),
             )
+            # M4 fix: Flag payment_method changes on non-draft orders — potential bypass vector.
+            if "payment_method" in updated_fields and order.status != "draft":
+                log_security_event(
+                    event_type="payment_method_changed_non_draft",
+                    details={
+                        "order_id": str(order.id),
+                        "order_number": order.order_number,
+                        "order_status": order.status,
+                        "payment_method": order.payment_method,
+                    },
+                    user_email=getattr(request.user, "email", None),
+                )
             messages.success(request, _("✅ Order updated successfully."))
         else:
             messages.info(request, _("No changes were made."))
@@ -853,6 +873,18 @@ def order_change_status(request: HttpRequest, pk: uuid.UUID) -> JsonResponse:
 
     if not new_status:
         return json_error("Status is required")
+
+    # H3 fix: Review gate transitions require admin/billing privileges.
+    # @staff_required_strict only checks bool(staff_role); any staff can reach here.
+    if order.status == "in_review" and new_status in ("provisioning", "cancelled"):
+        user = request.user
+        if not (user.is_superuser or user.staff_role in _REVIEW_APPROVE_ROLES):
+            log_security_event(
+                "review_gate_unauthorized_attempt",
+                {"order_id": str(order.id), "staff_role": user.staff_role, "target": new_status},
+                user_email=user.email,
+            )
+            return json_error("Only admin or billing staff can approve/reject orders under review")
 
     # Use service to change status
     status_data = StatusChangeData(new_status=new_status, notes=notes, changed_by=request.user)
@@ -892,12 +924,26 @@ def order_cancel(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
         messages.error(request, _("❌ This order cannot be cancelled."))
         return redirect("orders:order_detail", pk=pk)
 
+    # CODEX-5 fix: Review gate cancellation requires admin/billing privileges.
+    # Consistent with order_change_status role guard (H3 fix).
+    if order.status == "in_review":
+        if not isinstance(request.user, User):
+            return redirect("orders:order_detail", pk=pk)
+        if not (request.user.is_superuser or request.user.staff_role in _REVIEW_APPROVE_ROLES):
+            log_security_event(
+                "review_gate_cancel_unauthorized",
+                {"order_id": str(order.id), "staff_role": request.user.staff_role, "action": "cancel"},
+                user_email=request.user.email,
+            )
+            messages.error(request, _("❌ Only admin or billing staff can cancel orders under review."))
+            return redirect("orders:order_detail", pk=pk)
+
     notes = request.POST.get("cancellation_reason", "Order cancelled by staff")
 
     # Type guard: request.user is always User due to @staff_required_strict decorator
-    user = request.user if request.user.is_authenticated else None
+    changed_by = request.user if isinstance(request.user, User) else None
 
-    status_data = StatusChangeData(new_status="cancelled", notes=notes, changed_by=user)
+    status_data = StatusChangeData(new_status="cancelled", notes=notes, changed_by=changed_by)
 
     result = OrderService.update_order_status(order, status_data)
 
@@ -963,7 +1009,7 @@ def order_refund_request(request: HttpRequest, pk: uuid.UUID) -> JsonResponse:
         return json_error("You do not have permission to request refunds for this order")
 
     # Only allow refund requests for completed or partially refunded orders
-    if order.status not in ["completed", "partially_refunded"]:
+    if order.status != "completed":
         return json_error("Refund requests are only allowed for completed orders")
 
     try:
@@ -1109,9 +1155,7 @@ def order_items_list(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
 
     # Use consistent can_edit logic with order_detail view
     can_edit = (
-        is_staff
-        and len(editable_fields) > 0
-        and order.status not in ["completed", "cancelled", "refunded"]  # Terminal states
+        is_staff and len(editable_fields) > 0 and order.status not in ["completed", "cancelled"]  # Terminal states
     )
 
     context = {
@@ -1220,7 +1264,7 @@ def order_item_create(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
         return access_denied
 
     # Check if order can be edited
-    if not (order.is_draft or order.status == "pending"):
+    if not (order.is_draft or order.status == "awaiting_payment"):
         return json_error("Order cannot be modified in current status")
 
     # Dynamic form creation for OrderItem
@@ -1438,7 +1482,7 @@ def order_item_edit(request: HttpRequest, pk: uuid.UUID, item_pk: uuid.UUID) -> 
         return access_denied
 
     # Check if order can be edited
-    if not (order.is_draft or order.status == "pending"):
+    if not (order.is_draft or order.status == "awaiting_payment"):
         return json_error("Order cannot be modified in current status")
 
     item = get_object_or_404(OrderItem, id=item_pk, order=order)
@@ -1483,7 +1527,7 @@ def order_item_delete(request: HttpRequest, pk: uuid.UUID, item_pk: uuid.UUID) -
         return json_error("Access denied")
 
     # Check if order can be edited
-    if not (order.is_draft or order.status == "pending"):
+    if not (order.is_draft or order.status == "awaiting_payment"):
         return json_error("Order cannot be modified in current status")
 
     try:

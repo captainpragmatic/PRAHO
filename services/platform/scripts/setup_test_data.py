@@ -145,6 +145,12 @@ def create_test_data() -> (  # Complexity: multi-step business logic
         if created:
             print("✅ Created primary address")
 
+        # 5b. Ensure primary address is also billing (required for order preflight)
+        if not CustomerAddress.objects.filter(customer=customer, is_billing=True).exists():
+            _primary_address.is_billing = True
+            _primary_address.save(update_fields=["is_billing"])
+            print("✅ Marked primary address as billing")
+
         # 6. Create customer user
         customer_user, created = User.objects.get_or_create(
             email="customer@pragmatichost.com",
@@ -832,6 +838,15 @@ def create_orders_if_missing(customer: Any, customer_user: Any) -> None:
 
         if orders_created > 0:
             print(f"✅ Created {orders_created} test orders with various statuses")
+
+        # Re-snapshot billing address on existing orders with empty billing_address
+        for order in Order.objects.filter(customer=customer):
+            if not order.billing_address or order.billing_address == {}:
+                billing_addr = customer.get_billing_address()
+                if billing_addr:
+                    order.billing_address = billing_addr
+                    order.save(update_fields=["billing_address"])
+                    print(f"  ✅ Re-snapshotted billing address on {order.order_number}")
 
     except Exception as e:
         print(f"⚠️  Orders creation failed: {e}")

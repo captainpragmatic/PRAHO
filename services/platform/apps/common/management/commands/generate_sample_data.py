@@ -1704,8 +1704,17 @@ class Command(BaseCommand):
         services = list(Service.objects.filter(customer=customer))
         currency = self._get_ron_currency()
 
-        # Order statuses: draft, pending, confirmed, processing, completed, cancelled, failed
-        order_statuses = ["draft", "pending", "confirmed", "processing", "completed", "cancelled", "failed"]
+        # Order statuses reflect current FSM states (Phase A renames applied)
+        order_statuses = [
+            "draft",
+            "awaiting_payment",
+            "paid",
+            "in_review",
+            "provisioning",
+            "completed",
+            "cancelled",
+            "failed",
+        ]
         payment_methods = ["card", "bank_transfer", "paypal", "manual"]
         now = timezone.now()
 
