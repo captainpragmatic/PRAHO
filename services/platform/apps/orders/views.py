@@ -927,12 +927,13 @@ def order_cancel(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
     # CODEX-5 fix: Review gate cancellation requires admin/billing privileges.
     # Consistent with order_change_status role guard (H3 fix).
     if order.status == "in_review":
-        user = request.user
-        if not (user.is_superuser or user.staff_role in _REVIEW_APPROVE_ROLES):
+        if not isinstance(request.user, User):
+            return redirect("orders:order_detail", pk=pk)
+        if not (request.user.is_superuser or request.user.staff_role in _REVIEW_APPROVE_ROLES):
             log_security_event(
                 "review_gate_cancel_unauthorized",
-                {"order_id": str(order.id), "staff_role": user.staff_role, "action": "cancel"},
-                user_email=user.email,
+                {"order_id": str(order.id), "staff_role": request.user.staff_role, "action": "cancel"},
+                user_email=request.user.email,
             )
             messages.error(request, _("❌ Only admin or billing staff can cancel orders under review."))
             return redirect("orders:order_detail", pk=pk)
@@ -940,9 +941,9 @@ def order_cancel(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
     notes = request.POST.get("cancellation_reason", "Order cancelled by staff")
 
     # Type guard: request.user is always User due to @staff_required_strict decorator
-    user = request.user if request.user.is_authenticated else None
+    changed_by = request.user if isinstance(request.user, User) else None
 
-    status_data = StatusChangeData(new_status="cancelled", notes=notes, changed_by=user)
+    status_data = StatusChangeData(new_status="cancelled", notes=notes, changed_by=changed_by)
 
     result = OrderService.update_order_status(order, status_data)
 
