@@ -94,8 +94,11 @@ def test_address_add(monitored_customer_page: Page) -> None:
     page.locator('input[name="postal_code"]').fill("010101")
     # Country defaults to RO — leave as-is
 
-    # Submit without marking is_primary or is_billing so it is safe to delete later
-    save_btn = page.locator('button[type="submit"]').first
+    # Submit without marking is_primary or is_billing so it is safe to delete later.
+    # Scope to the address form submit button by label to avoid the nav Logout button.
+    save_btn = page.locator('button[type="submit"]').filter(
+        has_text=re.compile(r"Save Address|Salvează", re.IGNORECASE)
+    ).first
     save_btn.click()
     page.wait_for_load_state("networkidle")
 
@@ -205,7 +208,10 @@ def test_address_delete_undesignated(monitored_customer_page: Page) -> None:
     page.locator('input[name="city"]').fill("Cluj-Napoca")
     page.locator('input[name="postal_code"]').fill("400001")
 
-    page.locator('button[type="submit"]').first.click()
+    # Scope submit to the address form button to avoid the nav Logout button
+    page.locator('button[type="submit"]').filter(
+        has_text=re.compile(r"Save Address|Salvează", re.IGNORECASE)
+    ).first.click()
     page.wait_for_load_state("networkidle")
 
     expect(page).to_have_url(re.compile(r"/company/addresses/$"))
@@ -232,10 +238,10 @@ def test_address_delete_primary_blocked(monitored_customer_page: Page) -> None:
     page.goto(f"{BASE_URL}/company/addresses/")
     page.wait_for_load_state("networkidle")
 
-    # Find address cards that contain a "Primary" badge
-    # The template only renders Delete form when `not addr.is_primary and not addr.is_billing`
+    # Find address cards that contain a "Primary" badge.
+    # Use :has-text() (Playwright CSS extension) — NOT :has(text="...") which is invalid CSS.
     primary_cards = page.locator(
-        'div.bg-slate-800:has(text="Primary"), div.bg-slate-800:has(text="Primar")'
+        'div.bg-slate-800:has-text("Primary"), div.bg-slate-800:has-text("Primar")'
     )
     if primary_cards.count() == 0:
         print("  [i] No primary address found on the page — skipping delete-blocked check")
@@ -339,7 +345,10 @@ def test_team_invite_member(monitored_customer_page: Page) -> None:
     page.locator('input[name="last_name"]').fill(invite_last)
     page.locator('select[name="role"]').select_option("viewer")
 
-    page.locator('button[type="submit"]').first.click()
+    # Scope submit to the invite form button to avoid the nav Logout button
+    page.locator('button[type="submit"]').filter(
+        has_text=re.compile(r"Send Invitation|Invită|Trimite", re.IGNORECASE)
+    ).first.click()
     page.wait_for_load_state("networkidle")
 
     # Should redirect to the team list on success

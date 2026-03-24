@@ -85,7 +85,7 @@ class TestSignupWorkflow(TestCase):
         # Step 4: Create legal address
         address = CustomerAddress.objects.create(
             customer=customer,
-            address_type='legal',
+            is_primary=True,
             address_line1='Str. Noua Nr. 10',
             city='București',
             county='Sector 1',
@@ -126,7 +126,7 @@ class TestSignupWorkflow(TestCase):
         # Create billing address
         address = CustomerAddress.objects.create(
             customer=customer,
-            address_type='billing',
+            is_billing=True,
             address_line1='Bd. Unirii Nr. 5, Ap. 10',
             city='București',
             county='Sector 3',
@@ -169,10 +169,10 @@ class TestSignupWorkflow(TestCase):
             created_by=self.admin,
         )
 
-        # Legal address
+        # Legal address (primary)
         CustomerAddress.objects.create(
             customer=customer,
-            address_type='legal',
+            is_primary=True,
             address_line1='Str. Legala Nr. 1',
             city='București',
             county='Sector 1',
@@ -184,7 +184,7 @@ class TestSignupWorkflow(TestCase):
         # Billing address
         CustomerAddress.objects.create(
             customer=customer,
-            address_type='billing',
+            is_billing=True,
             address_line1='Str. Facturare Nr. 2',
             city='Cluj-Napoca',
             county='Cluj',
@@ -196,7 +196,6 @@ class TestSignupWorkflow(TestCase):
         # Shipping address
         CustomerAddress.objects.create(
             customer=customer,
-            address_type='shipping',
             address_line1='Str. Livrare Nr. 3',
             city='Timișoara',
             county='Timiș',
@@ -312,7 +311,7 @@ class TestCustomerOnboardingFlow(TestCase):
         # Add legal address
         CustomerAddress.objects.create(
             customer=customer,
-            address_type='legal',
+            is_primary=True,
             address_line1='Str. Onboarding Nr. 1',
             city='București',
             county='Sector 2',

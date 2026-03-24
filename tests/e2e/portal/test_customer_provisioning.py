@@ -250,26 +250,31 @@ def test_customer_provisioning_comprehensive_security_validation(monitored_custo
     page.goto(f"{BASE_URL}/services/")
     page.wait_for_load_state("networkidle")
     service_link = page.locator('a[href*="/services/"][href$="/"]').first
-    svc_id = "1"  # fallback
+    svc_id: str | None = None
     if service_link.count() > 0:
         href = service_link.get_attribute("href") or ""
         match = re.search(r"/services/(\d+)/", href)
         if match:
             svc_id = match.group(1)
 
+    # Use a fake ID for blocked-path tests (these routes don't exist in portal anyway)
+    fake_svc_id = svc_id or "99999"
+
     # Test various provisioning URLs with correct security expectations
-    test_urls = [
+    test_urls: list[tuple[str, bool, str]] = [
         # Should be BLOCKED (staff-only management — routes don't exist in portal)
         ("/services/create/", False, "service creation"),
-        (f"/services/{svc_id}/edit/", False, "service editing"),
-        (f"/services/{svc_id}/suspend/", False, "service suspension"),
-        (f"/services/{svc_id}/activate/", False, "service activation"),
+        (f"/services/{fake_svc_id}/edit/", False, "service editing"),
+        (f"/services/{fake_svc_id}/suspend/", False, "service suspension"),
+        (f"/services/{fake_svc_id}/activate/", False, "service activation"),
 
         # Should be ALLOWED (customer viewing)
         ("/services/", True, "services list"),
-        (f"/services/{svc_id}/", True, "service details"),
         ("/services/plans/", True, "plans catalog"),
     ]
+    # Only test service detail if a real service exists (avoids API 404 errors)
+    if svc_id:
+        test_urls.append((f"/services/{svc_id}/", True, "service details"))
 
     correct_count = 0
     for test_url, should_allow, description in test_urls:

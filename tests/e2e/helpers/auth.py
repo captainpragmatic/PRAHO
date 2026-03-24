@@ -292,7 +292,7 @@ def login_user_with_retry(page: Page, email: str, password: str, max_attempts: i
             email_input = page.locator('input[name="email"], input[name="username"], input[type="email"]').first
             email_input.wait_for(state="visible", timeout=8000)
             page.wait_for_selector('input[name="password"]', timeout=8000)
-            page.wait_for_selector('button[type="submit"], input[type="submit"]', timeout=8000)
+            page.wait_for_selector('button[type="submit"]:visible, input[type="submit"]:visible', timeout=8000)
             print("  ✅ Login form visible")
         except Exception as e:
             print(f"❌ Login form not ready: {str(e)[:50]}")
@@ -323,7 +323,7 @@ def login_user_with_retry(page: Page, email: str, password: str, max_attempts: i
 
         # Submit form with enhanced waiting
         try:
-            submit_button = page.locator('button[type="submit"], input[type="submit"]').first
+            submit_button = page.locator('button[type="submit"]:visible, input[type="submit"]:visible').first
             submit_button.click()
             print("  ✅ Form submitted")
 
@@ -399,7 +399,7 @@ def login_user(page: Page, email: str, password: str) -> bool:
         email_input = page.locator('input[name="email"], input[name="username"], input[type="email"]').first
         email_input.wait_for(state="visible", timeout=5000)
         page.wait_for_selector('input[name="password"]', timeout=5000)
-        page.wait_for_selector('button[type="submit"]', timeout=5000)
+        page.wait_for_selector('button[type="submit"]:visible', timeout=5000)
         print("  ✅ Login form visible")
     except Exception as e:
         print(f"❌ Login form not ready: {str(e)[:50]}")
@@ -409,7 +409,7 @@ def login_user(page: Page, email: str, password: str) -> bool:
     try:
         email_input.fill(email)
         page.fill('input[name="password"]', password)
-        page.click('button[type="submit"]')
+        page.click('button[type="submit"]:visible')
     except Exception as e:
         print(f"❌ Cannot fill login form: {str(e)[:50]}")
         return False

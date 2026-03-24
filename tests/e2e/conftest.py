@@ -107,7 +107,7 @@ def _staff_storage_state(browser: Browser, tmp_path_factory) -> str | None:
         email_input.wait_for(state="visible", timeout=8000)
         email_input.fill(STAFF_EMAIL)
         page.fill('input[name="password"]', STAFF_PASSWORD)
-        page.click('button[type="submit"]')
+        page.locator('button[type="submit"]:visible').first.click()
         page.wait_for_url(lambda url: PLATFORM_LOGIN_URL not in url, timeout=15000)
         page.wait_for_load_state("networkidle", timeout=5000)
 
@@ -138,7 +138,7 @@ def _customer_storage_state(browser: Browser, tmp_path_factory) -> str | None:
         email_input.wait_for(state="visible", timeout=8000)
         email_input.fill(CUSTOMER_EMAIL)
         page.fill('input[name="password"]', CUSTOMER_PASSWORD)
-        page.click('button[type="submit"]')
+        page.locator('button[type="submit"]:visible').first.click()
         page.wait_for_url(lambda url: LOGIN_URL not in url, timeout=15000)
         page.wait_for_load_state("networkidle", timeout=5000)
 
@@ -169,7 +169,7 @@ def _superuser_storage_state(browser: Browser, tmp_path_factory) -> str | None:
         email_input.wait_for(state="visible", timeout=8000)
         email_input.fill(SUPERUSER_EMAIL)
         page.fill('input[name="password"]', SUPERUSER_PASSWORD)
-        page.click('button[type="submit"]')
+        page.locator('button[type="submit"]:visible').first.click()
         page.wait_for_url(lambda url: LOGIN_URL not in url, timeout=15000)
         page.wait_for_load_state("networkidle", timeout=5000)
 

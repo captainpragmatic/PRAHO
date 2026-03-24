@@ -86,7 +86,7 @@ class TestOrderToBillingWorkflow(TestCase):
 
         CustomerAddress.objects.create(
             customer=self.customer,
-            address_type='legal',
+            is_primary=True,
             address_line1='Str. Billing Nr. 1',
             city='București',
             county='Sector 1',
