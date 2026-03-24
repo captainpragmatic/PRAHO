@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-import copy
+import ast
+import pathlib
 from types import SimpleNamespace
 
 from django.test import SimpleTestCase
@@ -18,13 +19,43 @@ from apps.common.performance.rate_limiting import (
     PortalHMACRateThrottle,
     StandardAPIThrottle,
 )
-from config.settings.base import THROTTLE_RATES as _BASE_THROTTLE_RATES
 
-# Frozen snapshot taken at module-import time (before any parallel test worker
-# has had a chance to mutate the shared THROTTLE_RATES dict in-place).
-# Tests that verify canonical rate values MUST use this snapshot, not the
-# live dict, to remain stable under --parallel.
-_THROTTLE_RATES_SNAPSHOT: dict[str, str] = copy.deepcopy(_BASE_THROTTLE_RATES)
+
+def _parse_canonical_throttle_rates() -> dict[str, str]:
+    """Read THROTTLE_RATES from the base settings source file via AST.
+
+    Reading the source file (not the live Python object) makes this function
+    completely immune to any in-process mutation of the shared THROTTLE_RATES
+    dict that may occur during --parallel test runs.
+
+    Handles both plain string literals ("5/minute") and os.environ.get() calls
+    by extracting the default value from the second argument.
+    """
+    base_py = pathlib.Path(__file__).resolve().parents[2] / "config" / "settings" / "base.py"
+    tree = ast.parse(base_py.read_text())
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign):
+            continue
+        if not any(isinstance(t, ast.Name) and t.id == "THROTTLE_RATES" for t in node.targets):
+            continue
+        if not isinstance(node.value, ast.Dict):
+            continue
+        result: dict[str, str] = {}
+        for key_node, val_node in zip(node.value.keys, node.value.values, strict=False):
+            if not isinstance(key_node, ast.Constant):
+                continue
+            if isinstance(val_node, ast.Constant):
+                result[key_node.value] = val_node.value
+            elif isinstance(val_node, ast.Call) and len(val_node.args) >= 2 and isinstance(val_node.args[1], ast.Constant):
+                # os.environ.get("KEY", "default") → use the default
+                result[key_node.value] = val_node.args[1].value
+        return result
+    raise RuntimeError("THROTTLE_RATES dict not found in config/settings/base.py")  # pragma: no cover
+
+
+# Parse once at module load; result is a plain dict of string literals from
+# base.py — completely decoupled from the live runtime objects.
+_CANONICAL_THROTTLE_RATES: dict[str, str] = _parse_canonical_throttle_rates()
 
 
 class PlatformExceptionHandlerTests(SimpleTestCase):
@@ -51,10 +82,10 @@ class PlatformExceptionHandlerTests(SimpleTestCase):
 
 class ThrottleConfigurationTests(SimpleTestCase):
     def test_default_throttle_rates_have_single_source_scopes(self) -> None:
-        # Use the frozen snapshot (captured at import time) so the assertion is
-        # stable even when another parallel worker mutates the live THROTTLE_RATES
-        # dict in-place during its own test run.
-        rates = _THROTTLE_RATES_SNAPSHOT
+        # Compare against _CANONICAL_THROTTLE_RATES which is parsed from the
+        # base.py source file via AST — completely independent of the live
+        # THROTTLE_RATES dict that parallel workers may mutate in-place.
+        rates = _CANONICAL_THROTTLE_RATES
 
         self.assertEqual(rates["auth"], "5/minute")
         self.assertEqual(rates["sustained"], "1000/hour")
