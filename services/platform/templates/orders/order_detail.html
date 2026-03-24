@@ -45,14 +45,14 @@
             {% url 'orders:order_validate' pk=order.id as validate_url %}
             {% trans "Run Validation" as validate_btn %}{% button validate_btn variant="success" icon="check" hx_get=validate_url hx_target="#preflight-container" hx_swap="innerHTML" %}
           {% endif %}
-          {% trans "Change Status" as change_status_btn %}{% button change_status_btn variant="secondary" icon="refresh" attrs='id="changeStatusBtn"' %}
+          {% trans "Change Status" as change_status_btn %}{% button change_status_btn variant="secondary" icon="refresh" button_id="changeStatusBtn" %}
         {% endif %}
       {% elif not is_staff and order.status == "completed" %}
         <!-- Refund Request Button for Customers -->
         {% trans "Request Refund" as bt4 %}{% button bt4 onclick="showOrderRefundRequestModal()" variant="primary" %}
 
         {% if order.status != "cancelled" and order.status != "completed" %}
-          {% trans "Change Status" as change_status_btn2 %}{% button change_status_btn2 variant="secondary" icon="refresh" attrs='id="changeStatusBtn"' %}
+          {% trans "Change Status" as change_status_btn2 %}{% button change_status_btn2 variant="secondary" icon="refresh" button_id="changeStatusBtn" %}
         {% endif %}
       {% endif %}
     </div>

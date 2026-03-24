@@ -63,6 +63,7 @@ class ButtonConfig:
     disabled: bool = False
     class_: str = ""
     attrs: str = ""
+    button_id: str = ""
 
 
 @dataclass
@@ -246,10 +247,12 @@ def button(
             # Handle already encoded dangerous content
             s = re.sub(r"alert\([^)]*\)", "", s, flags=re.IGNORECASE)
 
-        # Strip angle brackets to prevent tag injection, but preserve quotes
-        # for valid HTML attributes (attrs is rendered with |safe in template)
-        s = s.replace("<", "")
-        s = s.replace(">", "")
+        # Manual HTML escaping to return plain string, not SafeString
+        s = s.replace("&", "&amp;")
+        s = s.replace("<", "&lt;")
+        s = s.replace(">", "&gt;")
+        s = s.replace('"', "&quot;")
+        s = s.replace("'", "&#x27;")
         return s
 
     # Return sanitized and escaped attrs
@@ -279,6 +282,7 @@ def button(
         "disabled": config.disabled,
         "class": config.class_,
         "attrs": clean_attrs,
+        "button_id": config.button_id,
     }
 
 
