@@ -80,7 +80,10 @@ jobs:
         MODULES: ${{ steps.affected.outputs.modules }}
       run: |
         cd services/platform
-        PYTHONPATH=$(pwd) "$UV_PROJECT_ENVIRONMENT/bin/python" manage.py test $MODULES --verbosity=2 --failfast --parallel
+        # Convert dotted module paths to directory paths to avoid Python 3.13
+        # unittest.discover() bug where __file__ is None for namespace packages.
+        DIRS=$(echo "$MODULES" | tr ' ' '\n' | sed 's/\./\//g' | tr '\n' ' ')
+        PYTHONPATH=$(pwd) "$UV_PROJECT_ENVIRONMENT/bin/python" manage.py test $DIRS --verbosity=2 --failfast
 
     - name: Run full platform tests with coverage
       if: github.event_name != 'pull_request' || steps.affected.outputs.modules == 'FULL' || steps.affected.outputs.modules == ''
