@@ -1827,6 +1827,7 @@ class Command(BaseCommand):
                         product=product,
                         product_name=service.service_plan.name,
                         product_type=service.service_plan.plan_type,
+                        product_slug=product.slug,
                         quantity=1,
                         unit_price_cents=unit_price_cents,
                         tax_rate=Decimal("0.2100"),
@@ -1982,6 +1983,7 @@ class Command(BaseCommand):
                 tax_rate=tax_rate,
                 line_total_cents=line_total_cents,
                 service=linked_service,
+                domain_name=linked_service.domain if linked_service and linked_service.domain else "",
             )
 
     def create_customer_proformas(
@@ -2082,6 +2084,7 @@ class Command(BaseCommand):
                     tax_rate=tax_rate,
                     line_total_cents=line_total_cents,
                     service=linked_service,
+                    domain_name=linked_service.domain if linked_service and linked_service.domain else "",
                 )
 
             proformas.append(proforma)

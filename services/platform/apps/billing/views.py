@@ -975,6 +975,10 @@ def _process_proforma_line_items(proforma: ProformaInvoice, request_data: dict[s
             line_tax = line_subtotal * (vat_rate / 100)
             line_total = line_subtotal + line_tax
 
+            # EN16931 auto-derived fields
+            domain_name = (request_data.get(f"line_{line_counter}_domain_name") or "").strip()
+            tax_category = "Z" if vat_rate == 0 else "S"  # Z=Zero-rated, S=Standard
+
             ProformaLine.objects.create(
                 proforma=proforma,
                 kind="service",
@@ -983,6 +987,12 @@ def _process_proforma_line_items(proforma: ProformaInvoice, request_data: dict[s
                 unit_price_cents=int(unit_price * 100),
                 tax_rate=vat_rate / 100,
                 line_total_cents=int(line_total * 100),
+                domain_name=domain_name,
+                sort_order=line_counter,
+                unit_code="C62",
+                tax_category_code=tax_category,
+                period_start=proforma.created_at.date() if proforma.created_at else None,
+                period_end=proforma.valid_until,
             )
 
             total_subtotal += line_subtotal

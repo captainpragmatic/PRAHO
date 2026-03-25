@@ -622,6 +622,14 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
             self._add_cbc(period, "StartDate", line.period_start.isoformat())
             self._add_cbc(period, "EndDate", line.period_end.isoformat())
 
+        # BT-147: Line-level discount (AllowanceCharge)
+        if line.discount_amount_cents and line.discount_amount_cents > 0:
+            allowance = self._add_cac(invoice_line, "AllowanceCharge")
+            self._add_cbc(allowance, "ChargeIndicator", "false")
+            discount_amount = Decimal(line.discount_amount_cents) / 100
+            amount_elem = self._add_cbc(allowance, "Amount", self._format_amount(discount_amount))
+            amount_elem.set("currencyID", self.invoice.currency.code)
+
         # Item
         self._add_line_item(invoice_line, line)
 

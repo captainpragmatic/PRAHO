@@ -153,6 +153,12 @@
                   {% if line.domain_name %}
                   <div class="text-blue-400 text-xs mt-1">{{ line.domain_name }}</div>
                   {% endif %}
+                  {% if line.seller_item_id %}
+                  <div class="text-xs text-slate-500 mt-1">SKU: {{ line.seller_item_id }}</div>
+                  {% endif %}
+                  {% if line.period_start and line.period_end %}
+                  <div class="text-xs text-slate-500">{{ line.period_start|date:"d.m.Y" }} — {{ line.period_end|date:"d.m.Y" }}</div>
+                  {% endif %}
                 </td>
                 <td class="px-4 py-4 text-right text-sm text-white">
                   {{ line.quantity|floatformat:0 }}
@@ -187,6 +193,12 @@
               <p class="text-white text-sm font-medium">{{ line.description }}</p>
               {% if line.domain_name %}
               <p class="text-blue-400 text-xs mt-1">{{ line.domain_name }}</p>
+              {% endif %}
+              {% if line.seller_item_id %}
+              <p class="text-xs text-slate-500 mt-1">SKU: {{ line.seller_item_id }}</p>
+              {% endif %}
+              {% if line.period_start and line.period_end %}
+              <p class="text-xs text-slate-500">{{ line.period_start|date:"d.m.Y" }} — {{ line.period_end|date:"d.m.Y" }}</p>
               {% endif %}
             </div>
 

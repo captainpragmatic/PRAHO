@@ -536,6 +536,9 @@ class OrderItem(models.Model):
     # Product information snapshot (in case product changes)
     product_name = models.CharField(max_length=200, help_text=_("Product name at time of order"))
     product_type = models.CharField(max_length=30, help_text=_("Product type at time of order"))
+    product_slug = models.CharField(
+        max_length=200, blank=True, default="", help_text=_("Product slug/SKU at time of order (EN16931 BT-155)")
+    )
 
     # Quantity and pricing
     quantity = models.PositiveIntegerField(
@@ -651,6 +654,8 @@ class OrderItem(models.Model):
         if self.product and not self.product_name:
             self.product_name = self.product.name
             self.product_type = self.product.product_type
+        if self.product and not self.product_slug:
+            self.product_slug = self.product.slug
 
         # Apply default VAT when tax_rate was not explicitly set.
         # This keeps direct model creation aligned with the authoritative VAT rules.

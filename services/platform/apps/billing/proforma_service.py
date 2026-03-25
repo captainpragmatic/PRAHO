@@ -202,7 +202,8 @@ class ProformaService:
                     unit_price_cents=item.unit_price_cents,
                     tax_rate=vat_rate_decimal,
                     domain_name=getattr(item, "domain_name", "") or "",
-                    seller_item_id=getattr(item.product, "slug", "") if getattr(item, "product", None) else "",
+                    seller_item_id=getattr(item, "product_slug", "")
+                    or (getattr(item.product, "slug", "") if getattr(item, "product", None) else ""),
                     unit_code=BILLING_PERIOD_TO_UNIT_CODE.get(billing_period, "C62"),
                     period_start=order.created_at.date(),
                     period_end=(order.created_at + _period_delta(billing_period)).date(),

@@ -102,7 +102,9 @@
   <!-- Invoice Lines -->
   <div class="mt-8">
     <h2 class="text-lg font-medium text-white mb-4">{% trans "Invoice Lines" %}</h2>
-    <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg overflow-hidden">
+
+    <!-- Desktop Table (hidden on mobile) -->
+    <div class="hidden md:block bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg overflow-hidden">
       <table class="min-w-full divide-y divide-slate-700">
         <thead class="bg-slate-900">
           <tr>
@@ -130,6 +132,12 @@
               {{ item.description }}
               {% if item.domain_name %}
               <div class="text-blue-400 text-xs mt-1">{{ item.domain_name }}</div>
+              {% endif %}
+              {% if item.seller_item_id %}
+              <div class="text-xs text-slate-500 mt-1">SKU: {{ item.seller_item_id }}</div>
+              {% endif %}
+              {% if item.period_start and item.period_end %}
+              <div class="text-xs text-slate-500">{{ item.period_start|date:"d.m.Y" }} — {{ item.period_end|date:"d.m.Y" }}</div>
               {% endif %}
             </td>
             <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-400">
@@ -180,6 +188,56 @@
           </tr>
         </tfoot>
       </table>
+    </div>
+
+    <!-- Mobile Card List (visible on mobile only) -->
+    <div class="md:hidden bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg overflow-hidden">
+      {% for item in items %}
+      <div class="p-4 border-b border-slate-700 last:border-b-0">
+        <div class="flex items-center justify-between mb-2">
+          {% badge item.get_kind_display variant="primary" size="xs" %}
+          <span class="text-white font-medium text-sm">
+            {{ item.total_cents|cents_to_currency|romanian_currency:invoice.currency.code }}
+          </span>
+        </div>
+        <div class="mb-2">
+          <p class="text-white text-sm font-medium">{{ item.description }}</p>
+          {% if item.domain_name %}
+          <p class="text-blue-400 text-xs mt-1">{{ item.domain_name }}</p>
+          {% endif %}
+          {% if item.seller_item_id %}
+          <p class="text-xs text-slate-500 mt-1">SKU: {{ item.seller_item_id }}</p>
+          {% endif %}
+          {% if item.period_start and item.period_end %}
+          <p class="text-xs text-slate-500">{{ item.period_start|date:"d.m.Y" }} — {{ item.period_end|date:"d.m.Y" }}</p>
+          {% endif %}
+        </div>
+        <div class="flex items-center justify-between text-xs text-slate-400">
+          <span>{% trans "Qty:" %} {{ item.quantity }}</span>
+          <span>{% trans "Unit:" %} {{ item.unit_price_cents|cents_to_currency|romanian_currency:invoice.currency.code }}</span>
+        </div>
+      </div>
+      {% empty %}
+      <div class="p-6 text-center text-sm text-slate-500">
+        {% trans "No invoice lines found" %}
+      </div>
+      {% endfor %}
+
+      <!-- Mobile Summary -->
+      <div class="bg-slate-900 p-4 space-y-2">
+        <div class="flex justify-between text-sm text-slate-400">
+          <span>{% trans "Subtotal:" %}</span>
+          <span class="text-white">{{ invoice.subtotal_cents|cents_to_currency|romanian_currency:invoice.currency.code }}</span>
+        </div>
+        <div class="flex justify-between text-sm text-slate-400">
+          <span>{% trans "VAT:" %}</span>
+          <span class="text-white">{{ invoice.tax_cents|cents_to_currency|romanian_currency:invoice.currency.code }}</span>
+        </div>
+        <div class="flex justify-between text-lg font-bold border-t border-slate-600 pt-2">
+          <span class="text-slate-300">{% trans "Total:" %}</span>
+          <span class="text-white">{{ invoice.total_cents|cents_to_currency|romanian_currency:invoice.currency.code }}</span>
+        </div>
+      </div>
     </div>
   </div>
 
