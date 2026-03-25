@@ -87,14 +87,14 @@ class ThrottleConfigurationTests(SimpleTestCase):
         # THROTTLE_RATES dict that parallel workers may mutate in-place.
         rates = _CANONICAL_THROTTLE_RATES
 
-        self.assertEqual(rates["auth"], "5/minute")
-        self.assertEqual(rates["sustained"], "1000/hour")
-        self.assertEqual(rates["api_burst"], "60/min")
+        self.assertEqual(rates["auth"], "10/minute")
+        self.assertEqual(rates["sustained"], "2000/hour")
+        self.assertEqual(rates["api_burst"], "120/min")
         self.assertEqual(rates["anon"], "20/minute")
-        self.assertEqual(rates["burst"], "30/10s")
-        self.assertEqual(rates["customer"], "100/minute")
-        self.assertEqual(rates["portal_hmac"], "100/minute")
-        self.assertEqual(rates["portal_hmac_burst"], "50/10s")
+        self.assertEqual(rates["burst"], "60/10s")
+        self.assertEqual(rates["customer"], "200/minute")
+        self.assertEqual(rates["portal_hmac"], "200/minute")
+        self.assertEqual(rates["portal_hmac_burst"], "100/10s")
 
     def test_api_core_throttles_use_scopes_from_throttle_rates(self) -> None:
         self.assertEqual(StandardAPIThrottle.scope, "sustained")

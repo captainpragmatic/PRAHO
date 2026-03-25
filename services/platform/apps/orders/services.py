@@ -333,7 +333,7 @@ class OrderService:
 
     @staticmethod
     @transaction.atomic
-    def create_order(data: OrderCreateData, created_by: User | None = None) -> Result[Order, str]:
+    def create_order(data: OrderCreateData, created_by: User | None = None) -> Result[Order, str]:  # noqa: PLR0915
         """Create new order with validation and audit trail"""
         logger.warning(f"🧮 [OrderService] Starting order creation for customer {data.customer.id}")
         try:
@@ -491,6 +491,7 @@ class OrderService:
             raise
         except Exception as e:
             logger.exception(f"Failed to create order: {e}")
+            transaction.set_rollback(True)
             return Err(f"Failed to create order: {e!s}")
 
     @staticmethod

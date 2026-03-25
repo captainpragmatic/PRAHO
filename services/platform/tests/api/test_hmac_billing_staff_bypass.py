@@ -108,7 +108,7 @@ class BillingStaffSessionBypassTests(TestCase):
         response = self._make_staff_request("/billing/process-refund/")
         self.assertEqual(response.status_code, 401)
 
-    # ── Anonymous users: MUST be rejected for all billing paths ──
+    # ── Anonymous users: UI paths pass through middleware (view enforces auth) ──
 
     def test_anonymous_passes_through_middleware_on_billing_ui_path(self) -> None:
         # /billing/invoices/ is a staff UI path — PortalServiceHMACMiddleware passes it

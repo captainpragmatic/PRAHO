@@ -107,7 +107,7 @@ class OrderNumberingServiceTestCase(TestCase):
         order_number = OrderNumberingService.generate_order_number(self.customer)
 
         # Should follow format: ORD-YYYY-CUSTOMER_ID_PREFIX-XXXX
-        from datetime import datetime
+        from datetime import datetime  # noqa: PLC0415
         current_year = str(datetime.now().year)
         self.assertTrue(order_number.startswith(f"ORD-{current_year}-"))
         self.assertTrue(order_number.endswith("-0001"))
@@ -127,7 +127,7 @@ class OrderNumberingServiceTestCase(TestCase):
 
         # Should be sequential - same base format but with incremented sequence
         parts = order1.order_number.split('-')  # ['ORD', '2025', 'XXXXXXXX', '0001']
-        expected_parts = parts[:-1] + ['0002']  # Replace sequence with 0002
+        expected_parts = [*parts[:-1], '0002']  # Replace sequence with 0002
         expected_number2 = '-'.join(expected_parts)
         self.assertEqual(order_number2, expected_number2)
 
@@ -607,7 +607,7 @@ class OrderServiceCreationTestCase(TestCase):
         )
 
         # Create service plan
-        from apps.provisioning.models import ServicePlan
+        from apps.provisioning.models import ServicePlan  # noqa: PLC0415
         self.service_plan = ServicePlan.objects.create(
             name="Basic Hosting Plan",
             plan_type="shared_hosting",
@@ -710,7 +710,7 @@ class OrderServiceCreationTestCase(TestCase):
         self.assertTrue(result.is_ok())
 
         # Manually update services to provisioning (signals may not work in tests)
-        from apps.orders.services import OrderServiceCreationService
+        from apps.orders.services import OrderServiceCreationService  # noqa: PLC0415
         update_result = OrderServiceCreationService.update_service_status_on_payment(order)
         self.assertTrue(update_result.is_ok())
 
@@ -733,7 +733,7 @@ class OrderServiceCreationTestCase(TestCase):
 
     def test_service_creation_without_service_plan(self):
         """Test service creation when product has no default service plan"""
-        from apps.orders.services import OrderServiceCreationService
+        from apps.orders.services import OrderServiceCreationService  # noqa: PLC0415
 
         # Remove service plan from product
         self.product.default_service_plan = None
@@ -789,8 +789,8 @@ class OrderServiceCreationTestCase(TestCase):
 
     def test_service_not_created_if_already_exists(self):
         """Test that services are not duplicated if they already exist for order items"""
-        from apps.orders.services import OrderServiceCreationService
-        from apps.provisioning.models import Service
+        from apps.orders.services import OrderServiceCreationService  # noqa: PLC0415
+        from apps.provisioning.models import Service  # noqa: PLC0415
 
         # Create order
         order_data = OrderCreateData(
@@ -841,7 +841,6 @@ class OrderServiceCreationTestCase(TestCase):
         self.assertEqual(total_services, 1)
 
 
-<<<<<<< HEAD
 class AuditTrailOnConfirmOrderTestCase(TestCase):
     """C6: confirm_order must call AuditService.log_simple_event('order_payment_confirmed')."""
 
@@ -1248,7 +1247,7 @@ class OrderCreateMissingProductIdRegressionTests(TestCase):
             is_vat_payer=True,
         )
 
-    def _make_order_data(self, product_id: int | None) -> OrderCreateData:
+    def _make_order_data(self, product_id: uuid.UUID | None) -> OrderCreateData:
         return OrderCreateData(
             customer=self.customer,
             currency="RON",
@@ -1271,9 +1270,22 @@ class OrderCreateMissingProductIdRegressionTests(TestCase):
 
     def test_order_fails_when_item_missing_product_id(self) -> None:
         """create_order must return Err (not silently skip) when any item has no product_id."""
+        order_count_before = Order.objects.count()
+        order_item_count_before = OrderItem.objects.count()
+
         result = OrderService.create_order(self._make_order_data(None))
         self.assertTrue(result.is_err(), "Expected Err when product_id is None")
         self.assertIn("product_id", result.unwrap_err())
+
+        # Verify the atomic transaction rolled back — no partial data persisted
+        self.assertEqual(
+            Order.objects.count(), order_count_before,
+            "Order count should remain unchanged on failed create_order call",
+        )
+        self.assertEqual(
+            OrderItem.objects.count(), order_item_count_before,
+            "OrderItem count should remain unchanged on failed create_order call",
+        )
 
     def test_order_succeeds_when_all_items_have_product_id(self) -> None:
         """Sanity check: a valid product_id still creates the order successfully."""
