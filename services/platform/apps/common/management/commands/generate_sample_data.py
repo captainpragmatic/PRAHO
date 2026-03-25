@@ -708,7 +708,7 @@ class Command(BaseCommand):
                 "last_name": fake.last_name(),
                 "email": f"user{i + 1}@example.com",  # Use unique predictable emails
                 "is_active": True,
-                "staff_role": "customer",
+                "staff_role": "",
             }
 
             user = User.objects.create_user(password="testpass123", **user_data)
@@ -744,7 +744,7 @@ class Command(BaseCommand):
                 email=test_user_email,
                 password="testpass123",
                 is_active=True,
-                staff_role="customer",
+                staff_role="",
             )
             users.append(test_user)
             self.stdout.write(f"  ✓ Created test user: {test_user_email}")
@@ -1140,7 +1140,7 @@ class Command(BaseCommand):
                 "first_name": "Maria",
                 "last_name": "Ionescu",
                 "is_active": True,
-                "staff_role": "customer",
+                "staff_role": "",
             },
         )
         # Intentional: reset password on re-runs for idempotent fixture state
@@ -1154,7 +1154,7 @@ class Command(BaseCommand):
                 "first_name": "Andrei",
                 "last_name": "Popa",
                 "is_active": False,
-                "staff_role": "customer",
+                "staff_role": "",
             },
         )
         suspended_user.is_active = False

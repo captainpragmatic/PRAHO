@@ -247,7 +247,7 @@ def _validate_internal_note_permission(
     request: HttpRequest, user: User, is_internal: bool, ticket_pk: int
 ) -> HttpResponse | None:
     """Validate user permission to create internal notes."""
-    if is_internal and not (user.is_staff or getattr(user, "staff_role", None)):
+    if is_internal and not user.is_staff_user:
         messages.error(request, _("❌ You do not have permission to create internal notes."))
         return redirect("tickets:detail", pk=ticket_pk)
     return None
@@ -255,9 +255,9 @@ def _validate_internal_note_permission(
 
 def _determine_comment_type(user: User, is_internal: bool) -> str:
     """Determine the appropriate comment type based on user permissions."""
-    if is_internal and (user.is_staff or getattr(user, "staff_role", None)):
+    if is_internal and user.is_staff_user:
         return "internal"
-    elif user.staff_role in ["support", "admin", "manager"]:
+    elif user.is_staff_user:
         return "support"
     else:
         return "customer"
@@ -426,7 +426,7 @@ def _handle_ticket_reply_post(request: HttpRequest, ticket: Ticket) -> HttpRespo
 
     # Create comment with reply action
     comment_type = _determine_comment_type(user, reply_data.is_internal)
-    is_public = not (reply_data.is_internal and (user.is_staff or getattr(user, "staff_role", None)))
+    is_public = not (reply_data.is_internal and user.is_staff_user)
 
     logger.debug(
         f"🔍 [Tickets] Reply processing: action={reply_data.reply_action}, is_internal={reply_data.is_internal}, comment_type={comment_type}, is_public={is_public}"
@@ -609,7 +609,7 @@ def download_attachment(request: HttpRequest, attachment_id: int) -> HttpRespons
         attachment.comment
         and hasattr(attachment.comment, "comment_type")
         and attachment.comment.comment_type == "internal"
-        and not user.is_staff
+        and not user.is_staff_user
     ):
         raise PermissionDenied("Access denied to internal attachments.")
 

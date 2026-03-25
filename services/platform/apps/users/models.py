@@ -40,6 +40,13 @@ class UserManager(BaseUserManager["User"]):
         # Ensure safe defaults for nullable-but-not-null-constrained fields
         if "staff_role" not in extra_fields or extra_fields.get("staff_role") is None:
             extra_fields["staff_role"] = ""
+        # Reject invalid staff_role values (e.g. "customer")
+        staff_role = extra_fields.get("staff_role", "")
+        valid_roles = {role for role, _ in User.STAFF_ROLE_CHOICES}
+        if staff_role and staff_role not in valid_roles:
+            raise ValueError(
+                f"Invalid staff_role '{staff_role}'. Must be one of: {', '.join(sorted(valid_roles))} or empty."
+            )
         user = self.model(email=email, **extra_fields)
         # SECURITY: validation done at form/serializer level per Django convention
         user.set_password(  # nosemgrep: unvalidated-password
@@ -52,6 +59,7 @@ class UserManager(BaseUserManager["User"]):
         """Create and return a superuser with email and password"""
         extra_fields.setdefault("is_staff", True)
         extra_fields.setdefault("is_superuser", True)
+        extra_fields.setdefault("staff_role", "admin")
 
         if extra_fields.get("is_staff") is not True:
             raise ValueError("Superuser must have is_staff=True.")
@@ -147,10 +155,12 @@ class User(AbstractUser):
         full_name = super().get_full_name()
         return full_name if full_name.strip() else self.email
 
+    VALID_STAFF_ROLES: ClassVar[frozenset[str]] = frozenset(role for role, _ in STAFF_ROLE_CHOICES)
+
     @property
     def is_staff_user(self) -> bool:
-        """Check if user is internal staff"""
-        return bool(self.staff_role)
+        """Check if user is internal staff (by role, Django flag, or superuser status)"""
+        return bool(self.staff_role) or self.is_staff or self.is_superuser
 
     @property
     def is_customer_user(self) -> bool:
