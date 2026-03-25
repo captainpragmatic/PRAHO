@@ -149,7 +149,18 @@ class Payment(ConcurrentTransitionMixin, models.Model):
                 name="payment_amount_non_negative",
             ),
             models.CheckConstraint(
-                condition=models.Q(status__in=["pending", "succeeded", "failed", "refunded", "partially_refunded"]),
+                condition=models.Q(
+                    status__in=[
+                        "pending",
+                        "succeeded",
+                        "failed",
+                        "refunded",
+                        "partially_refunded",
+                        "cancelled",
+                        "canceled",
+                        "disputed",
+                    ]
+                ),
                 name="payment_status_valid_values",
             ),
         ]

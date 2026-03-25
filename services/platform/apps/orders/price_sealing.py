@@ -126,19 +126,18 @@ class PriceSealingService:
         return sealed_token
 
     @staticmethod
-    def unseal_price(sealed_token: str, client_ip: str) -> dict[str, Any]:
+    def unseal_price(sealed_token: str) -> dict[str, Any]:
         """
         🔒 Validate and extract price data from a sealed token.
 
         Args:
             sealed_token: The sealed price token to validate
-            client_ip: Client IP address to validate against token binding
 
         Returns:
             Dictionary containing price data if valid
 
         Raises:
-            ValidationError: If token is invalid, expired, tampered with, or IP mismatch
+            ValidationError: If token is invalid, expired, or tampered with
         """
         try:
             # Split token into payload and signature
