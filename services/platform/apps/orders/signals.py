@@ -343,9 +343,6 @@ def _handle_order_cancellation(order: Order, old_status: str) -> None:  # noqa: 
                     },
                 )
 
-        # Send cancellation email after transaction commits to avoid ghost emails on rollback (#130/M6)
-        transaction.on_commit(lambda: _send_order_cancelled_email(order))
-
             # M4 fix: Void proforma if it exists and is in a voidable state.
             # Orders cancelled from awaiting_payment have a draft/sent proforma that should
             # be voided. Orders cancelled after payment have invoices that need manual review.
@@ -410,17 +407,8 @@ def _handle_order_cancellation(order: Order, old_status: str) -> None:  # noqa: 
                         order.order_number,
                     )
 
-        # Send cancellation email (deliberately vague per plan).
-        # Isolated try/except so a failed email never masks a succeeded cancellation.
-        try:
-            _send_order_cancelled_email(order)
-        except Exception as e:
-            logger.error(
-                "🔥 [Order] Cancellation succeeded but email failed for %s: %s",
-                order.order_number,
-                e,
-                exc_info=True,
-            )
+        # Send cancellation email after transaction commits to avoid ghost emails on rollback (#130/M6)
+        transaction.on_commit(lambda: _send_order_cancelled_email(order))
 
         # If order was provisioning or paid, may need to handle refunds
         if old_status in ("provisioning", "paid", "in_review"):

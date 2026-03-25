@@ -306,7 +306,7 @@ class PortalAuthenticationMiddleware:
             fail_count = cache.get(fail_open_key, 0) + 1
             cache.set(fail_open_key, fail_count, timeout=3600)  # 1h window
 
-            if fail_count > _MAX_FAIL_OPEN_COUNT:
+            if fail_count >= _MAX_FAIL_OPEN_COUNT:
                 logger.warning(
                     "🔥 [Auth] Circuit breaker tripped for user %s — %d consecutive fail-opens, forcing logout",
                     user_id,
@@ -314,7 +314,12 @@ class PortalAuthenticationMiddleware:
                 )
                 return False
 
-            logger.info(f"🛡️ [Auth] Failing open for user {user_id} ({fail_count}/5) due to API unavailability")
+            logger.info(
+                "🛡️ [Auth] Failing open for user %s (%d/%d) due to API unavailability",
+                user_id,
+                fail_count,
+                _MAX_FAIL_OPEN_COUNT,
+            )
             return True
 
         except Exception as e:

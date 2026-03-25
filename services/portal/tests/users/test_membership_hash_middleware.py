@@ -1,9 +1,11 @@
-"""Portal middleware tests for membership_hash cache invalidation.
+"""Portal middleware tests for membership_hash cache invalidation and circuit breaker.
 
-Covers the three behavioral contracts introduced by PR #115:
+Covers the behavioral contracts introduced by PR #115 and #130:
 1. Hash changes       → user_memberships session cache is cleared
 2. Hash unchanged     → cache is preserved
 3. Hash absent        → no crash, no invalidation (backward compat)
+4. Circuit breaker    → fail-open up to threshold, then forced logout
+5. Circuit breaker    → reset on successful validation
 """
 
 from __future__ import annotations
@@ -15,7 +17,8 @@ from django.contrib.sessions.middleware import SessionMiddleware
 from django.test import RequestFactory, SimpleTestCase, override_settings
 from django.utils import timezone as django_timezone
 
-from apps.users.middleware import PortalAuthenticationMiddleware
+from apps.api_client.services import PlatformAPIError
+from apps.users.middleware import _MAX_FAIL_OPEN_COUNT, PortalAuthenticationMiddleware
 
 
 def _make_authenticated_request(session_data: dict | None = None) -> object:
@@ -115,3 +118,60 @@ class MembershipHashMiddlewareTest(SimpleTestCase):
         assert "user_memberships" in request.session
         # Old hash must remain unchanged
         assert request.session.get("membership_hash") == "ddeeff1122334455"
+
+
+@override_settings(
+    PLATFORM_API_BASE_URL="http://localhost:8700/api",
+    PLATFORM_API_SECRET="test-secret",
+)
+class CircuitBreakerMiddlewareTest(SimpleTestCase):
+    """Test fail-open circuit breaker in PortalAuthenticationMiddleware (#130/M1)."""
+
+    def _make_middleware(self) -> PortalAuthenticationMiddleware:
+        return PortalAuthenticationMiddleware(get_response=lambda r: None)
+
+    @patch("apps.users.middleware.cache")
+    def test_fail_open_below_threshold_returns_true(self, mock_cache: object) -> None:
+        """API errors below threshold allow access (fail-open)."""
+        mock_cache.get.return_value = 0  # No prior failures
+        request = _make_authenticated_request()
+        middleware = self._make_middleware()
+
+        with patch(
+            "apps.api_client.services.api_client.validate_session_secure",
+            side_effect=PlatformAPIError("API down", status_code=503, is_rate_limited=False),
+        ):
+            result = middleware._perform_validation(request, "42", django_timezone.now())
+
+        assert result is True, "Should fail-open when below threshold"
+        mock_cache.set.assert_called_with("auth:fail_open:42", 1, timeout=3600)
+
+    @patch("apps.users.middleware.cache")
+    def test_circuit_breaker_trips_at_threshold(self, mock_cache: object) -> None:
+        """After _MAX_FAIL_OPEN_COUNT consecutive fail-opens, access is denied."""
+        mock_cache.get.return_value = _MAX_FAIL_OPEN_COUNT - 1  # One more will trip
+        request = _make_authenticated_request()
+        middleware = self._make_middleware()
+
+        with patch(
+            "apps.api_client.services.api_client.validate_session_secure",
+            side_effect=PlatformAPIError("API down", status_code=503, is_rate_limited=False),
+        ):
+            result = middleware._perform_validation(request, "42", django_timezone.now())
+
+        assert result is False, f"Should trip after {_MAX_FAIL_OPEN_COUNT} consecutive fail-opens"
+
+    @patch("apps.users.middleware.cache")
+    def test_successful_validation_resets_circuit_breaker(self, mock_cache: object) -> None:
+        """A successful validation clears the fail-open counter."""
+        request = _make_authenticated_request()
+        middleware = self._make_middleware()
+
+        with patch(
+            "apps.api_client.services.api_client.validate_session_secure",
+            return_value={"active": True},
+        ):
+            result = middleware._perform_validation(request, "42", django_timezone.now())
+
+        assert result is True
+        mock_cache.delete.assert_called_with("auth:fail_open:42")

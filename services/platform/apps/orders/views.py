@@ -216,8 +216,10 @@ def _get_vat_rate_for_customer(customer: Customer) -> Decimal:
         result = OrderVATCalculator.calculate_vat(subtotal_cents=10000, customer_info=info)
         return (result.vat_rate / Decimal("100")).quantize(Decimal("0.0001"))
     except Exception as e:
-        logger.warning("⚠️ [Orders] VAT rate lookup failed for customer %s: %s — using 21%%", customer.id, e)
-        return Decimal("0.2100")
+        from apps.billing.config import get_vat_rate  # noqa: PLC0415
+
+        logger.warning("⚠️ [Orders] VAT rate lookup failed for customer %s: %s — using default VAT", customer.id, e)
+        return get_vat_rate("RO")
 
 
 def _get_accessible_customer_ids(user: User) -> list[int]:

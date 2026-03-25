@@ -26,7 +26,7 @@ from .models import Domain, Registrar
 from .services import DomainRegistrarGateway
 
 # Webhook payload validation constants (#130/M8)
-_MAX_REGISTRAR_ID_LENGTH = 255
+_MAX_REGISTRAR_ID_LENGTH = 100  # Must match Domain.registrar_domain_id max_length
 _MAX_HOSTNAME_LENGTH = 253
 _HOSTNAME_RE = re.compile(
     r"^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$"

@@ -529,7 +529,7 @@ def check_session_security_configuration(app_configs: Any, **kwargs: Any) -> lis
 
 
 @register(Tags.security, deploy=True)
-def check_csp_nonce_middleware_order(**kwargs: Any) -> list[Error | DjangoWarning]:
+def check_csp_nonce_middleware_order(app_configs: Any, **kwargs: Any) -> list[Error | DjangoWarning]:
     """Verify CSPNonceMiddleware is active and ordered before SecurityHeadersMiddleware (#130/M4)."""
     errors: list[Error | DjangoWarning] = []
     middleware = list(getattr(settings, "MIDDLEWARE", []))

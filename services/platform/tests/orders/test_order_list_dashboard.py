@@ -57,7 +57,7 @@ class OrderListStatusCountsTestCase(TestCase):
 
         expected_keys = {
             "total", "draft", "awaiting_payment", "paid", "in_review",
-            "provisioning", "completed", "cancelled", "failed",
+            "provisioning", "completed", "cancelled", "failed", "refunded",
         }
         self.assertEqual(set(status_counts.keys()), expected_keys)
 
