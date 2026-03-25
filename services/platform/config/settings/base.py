@@ -793,5 +793,5 @@ INTERNAL_SERVICE_ALLOWED_DOMAINS: list[str] = ["localhost"]
 # Portal HMAC bypass for test runners only.
 # Setting this to True in any internet-reachable environment is a critical
 # security vulnerability — _require_customer_auth_for_portal_api will raise
-# ImproperlyConfigured if this is True when DEBUG=False.
+# ImproperlyConfigured if this is True when neither TESTING nor DEBUG is True.
 PORTAL_HMAC_BYPASS: bool = False

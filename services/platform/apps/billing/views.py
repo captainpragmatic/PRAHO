@@ -86,8 +86,9 @@ def _get_max_payment_amount_cents() -> int:
 def _require_customer_auth_for_portal_api(request: HttpRequest) -> tuple[Customer | None, JsonResponse | None]:
     """Validate portal HMAC + customer membership and return JsonResponse on failure."""
     # Test runner compatibility: PORTAL_HMAC_BYPASS=True is set only in test.py
-    # and e2e.py. Hard-fail if it is somehow True in a non-debug environment
-    # (staging/prod always have DEBUG=False, making this unreachable in practice).
+    # and e2e.py. Hard-fail if bypass is enabled outside a safe environment.
+    # Safe = TESTING=True (test runner) or DEBUG=True (local dev).
+    # Staging/prod have both False, so bypass cannot activate there.
     _is_test_env = getattr(settings, "TESTING", False) or settings.DEBUG
     if getattr(settings, "PORTAL_HMAC_BYPASS", False) and not _is_test_env:
         raise ImproperlyConfigured(

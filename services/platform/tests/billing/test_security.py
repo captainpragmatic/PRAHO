@@ -515,6 +515,38 @@ class BillingPortalAuthBypassTests(TestCase):
             _require_customer_auth_for_portal_api(request)
 
     @patch("apps.billing.views.settings")
+    def test_bypass_allowed_with_testing_true_debug_false(self, mock_settings: object) -> None:
+        """🔒 PORTAL_HMAC_BYPASS=True is safe when TESTING=True even if DEBUG=False."""
+        mock_settings.DEBUG = False
+        mock_settings.TESTING = True
+        mock_settings.PORTAL_HMAC_BYPASS = True
+        customer = Customer.objects.create(
+            name="Test", company_name="Test Co",
+            primary_email="t@t.com", customer_type="company", status="active",
+        )
+        request = self._make_request(body=f'{{"customer_id": {customer.pk}}}'.encode())
+
+        result_customer, error = _require_customer_auth_for_portal_api(request)
+        self.assertIsNotNone(result_customer)
+        self.assertIsNone(error)
+
+    @patch("apps.billing.views.settings")
+    def test_bypass_allowed_with_debug_true_testing_false(self, mock_settings: object) -> None:
+        """🔒 PORTAL_HMAC_BYPASS=True is safe when DEBUG=True even if TESTING=False."""
+        mock_settings.DEBUG = True
+        mock_settings.TESTING = False
+        mock_settings.PORTAL_HMAC_BYPASS = True
+        customer = Customer.objects.create(
+            name="Test2", company_name="Test2 Co",
+            primary_email="t2@t.com", customer_type="company", status="active",
+        )
+        request = self._make_request(body=f'{{"customer_id": {customer.pk}}}'.encode())
+
+        result_customer, error = _require_customer_auth_for_portal_api(request)
+        self.assertIsNotNone(result_customer)
+        self.assertIsNone(error)
+
+    @patch("apps.billing.views.settings")
     def test_bypass_inactive_when_flag_false(self, mock_settings: object) -> None:
         """🔒 Bypass must not activate when PORTAL_HMAC_BYPASS=False."""
         mock_settings.DEBUG = True
