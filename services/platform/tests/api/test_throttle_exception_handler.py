@@ -90,7 +90,7 @@ class ThrottleConfigurationTests(SimpleTestCase):
         self.assertEqual(rates["auth"], "10/minute")
         self.assertEqual(rates["sustained"], "2000/hour")
         self.assertEqual(rates["api_burst"], "120/min")
-        self.assertEqual(rates["anon"], "20/minute")
+        self.assertEqual(rates["anon"], "40/minute")
         self.assertEqual(rates["burst"], "60/10s")
         self.assertEqual(rates["customer"], "200/minute")
         self.assertEqual(rates["portal_hmac"], "200/minute")
