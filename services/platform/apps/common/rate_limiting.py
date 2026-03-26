@@ -214,8 +214,8 @@ def rate_limit(
                         return HttpResponse("Rate limit exceeded", status=429)
 
             except Exception:
-                # Rate limiting should never break the view
-                logger.exception("Rate limiting error for %s", fn.__qualname__)
+                logger.critical("Rate limiting cache failure for %s — failing closed", fn.__qualname__)
+                return HttpResponse("Service temporarily unavailable", status=503, content_type="text/plain")
 
             return cast(HttpResponse, fn(request, *args, **kwargs))
 

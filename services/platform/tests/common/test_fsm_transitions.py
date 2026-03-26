@@ -22,7 +22,7 @@ from apps.billing.currency_models import Currency
 from apps.billing.efactura.models import EFacturaDocument
 from apps.billing.invoice_models import Invoice
 from apps.billing.metering_models import BillingCycle, UsageAggregation, UsageMeter
-from apps.billing.payment_models import TERMINAL_PAYMENT_STATUSES, Payment
+from apps.billing.payment_models import _GATEWAY_TERMINAL_STATUSES, TERMINAL_PAYMENT_STATUSES, Payment
 from apps.billing.proforma_models import ProformaInvoice
 from apps.billing.refund_models import Refund
 from apps.billing.subscription_models import Subscription
@@ -1911,6 +1911,70 @@ class TestH4TerminalPaymentStatuses(TestCase):
         valid_statuses = {choice[0] for choice in Payment.STATUS_CHOICES}
         invalid = TERMINAL_PAYMENT_STATUSES - valid_statuses
         self.assertEqual(invalid, set(), f"Invalid statuses in TERMINAL_PAYMENT_STATUSES: {invalid}")
+
+
+class TestGatewayWebhookTransitions(FSMTestMixin, TestCase):
+    """Verify apply_gateway_event() allows refund transitions on non-terminal states.
+
+    Regression coverage for the bug where TERMINAL_PAYMENT_STATUSES was used as the
+    early-return guard in apply_gateway_event(), silently dropping Stripe refund/dispute
+    webhooks on succeeded or partially_refunded payments.
+    """
+
+    @classmethod
+    def setUpTestData(cls) -> None:
+        cls.customer = cls._create_customer()
+        cls.currency = cls._create_currency()
+
+    def _make_payment(self, status: str = "pending") -> Payment:
+        p = Payment.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            amount_cents=10000,
+            payment_method="stripe",
+        )
+        if status != "pending":
+            force_status(p, status)
+        return p
+
+    def test_succeeded_payment_accepts_refund_webhook(self) -> None:
+        """Stripe charge.refunded on succeeded payment must transition to refunded."""
+        payment = self._make_payment("succeeded")
+        result = payment.apply_gateway_event("refunded")
+        self.assertTrue(result)
+        self.assertEqual(payment.status, "refunded")
+
+    def test_succeeded_payment_accepts_partial_refund_webhook(self) -> None:
+        """Stripe charge.refunded (partial) on succeeded payment must transition."""
+        payment = self._make_payment("succeeded")
+        result = payment.apply_gateway_event("partially_refunded")
+        self.assertTrue(result)
+        self.assertEqual(payment.status, "partially_refunded")
+
+    def test_partially_refunded_accepts_complete_refund_webhook(self) -> None:
+        """Complete refund on partially_refunded payment must transition to refunded."""
+        payment = self._make_payment("partially_refunded")
+        result = payment.apply_gateway_event("refunded")
+        self.assertTrue(result)
+        self.assertEqual(payment.status, "refunded")
+
+    def test_duplicate_succeeded_webhook_is_idempotent(self) -> None:
+        """Duplicate succeeded webhook on succeeded payment returns False (no-op)."""
+        payment = self._make_payment("succeeded")
+        result = payment.apply_gateway_event("succeeded")
+        # succeed() requires source="pending", so TransitionNotAllowed is caught → False
+        self.assertFalse(result)
+        self.assertEqual(payment.status, "succeeded")
+
+    def test_truly_terminal_state_returns_false(self) -> None:
+        """Payments in truly terminal states (failed, refunded, etc.) reject all webhooks."""
+        for terminal_status in _GATEWAY_TERMINAL_STATUSES:
+            payment = self._make_payment(terminal_status)
+            result = payment.apply_gateway_event("succeeded")
+            self.assertFalse(
+                result,
+                f"apply_gateway_event should return False for status={terminal_status!r}",
+            )
 
 
 class TestH6TaskLockAtomicity(TestCase):

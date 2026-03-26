@@ -21,7 +21,10 @@ from typing import Any
 
 from django.test import SimpleTestCase
 from django.urls import URLPattern, URLResolver, get_resolver
+from rest_framework import permissions as drf_permissions
 from rest_framework.views import APIView
+
+from apps.api.core.permissions import IsAuthenticatedAndAccessible
 
 # Names of auth decorator wrapper functions (matched via __qualname__)
 _AUTH_DECORATOR_QUALNAMES = {
@@ -37,6 +40,13 @@ _AUTH_PERMISSION_CLASSES = {
     "IsAuthenticatedAndAccessible",
     "IsAdminUser",
 }
+
+# Base classes — any subclass of these also satisfies the auth requirement
+_AUTH_PERMISSION_BASE_CLASSES = (
+    drf_permissions.IsAuthenticated,
+    drf_permissions.IsAdminUser,
+    IsAuthenticatedAndAccessible,
+)
 
 
 def _walk_url_patterns(
@@ -137,32 +147,36 @@ def _has_public_marker(func: Any) -> bool:
     return False
 
 
+def _pc_satisfies_auth(pc: Any) -> bool:
+    """Return True if a permission class (or name) satisfies the auth requirement."""
+    if isinstance(pc, type):
+        pc_name = pc.__name__
+        if pc_name in _AUTH_PERMISSION_CLASSES:
+            return True
+        # Also accept any subclass of the known auth base classes
+        return issubclass(pc, _AUTH_PERMISSION_BASE_CLASSES)
+    pc_name = type(pc).__name__
+    return pc_name in _AUTH_PERMISSION_CLASSES
+
+
 def _has_auth_permission_class(func: Any) -> bool:
     """Check if the view has IsAuthenticated or similar in permission_classes."""
     # DRF @api_view: check cls.permission_classes
     cls = getattr(func, "cls", None)
     if cls:
         pcs = getattr(cls, "permission_classes", [])
-        for pc in pcs:
-            pc_name = pc.__name__ if isinstance(pc, type) else type(pc).__name__
-            if pc_name in _AUTH_PERMISSION_CLASSES:
-                return True
+        if any(_pc_satisfies_auth(pc) for pc in pcs):
+            return True
 
     # CBV: check class directly
-    if inspect.isclass(func) and issubclass(func, APIView):
-        for pc in getattr(func, "permission_classes", []):
-            pc_name = pc.__name__ if isinstance(pc, type) else type(pc).__name__
-            if pc_name in _AUTH_PERMISSION_CLASSES:
-                return True
+    if inspect.isclass(func) and issubclass(func, APIView) and any(
+        _pc_satisfies_auth(pc) for pc in getattr(func, "permission_classes", [])
+    ):
+        return True
 
     # Check initkwargs (sometimes used by ViewSets)
     initkwargs = getattr(func, "initkwargs", {})
-    for pc in initkwargs.get("permission_classes", []):
-        pc_name = pc.__name__ if isinstance(pc, type) else type(pc).__name__
-        if pc_name in _AUTH_PERMISSION_CLASSES:
-            return True
-
-    return False
+    return any(_pc_satisfies_auth(pc) for pc in initkwargs.get("permission_classes", []))
 
 
 def _view_has_auth_coverage(func: Any) -> bool:

@@ -468,11 +468,13 @@ def order_create(request: HttpRequest) -> HttpResponse:
     """
     ✨ Create new order (staff only) with Romanian business compliance
     """
-    # Dynamic form creation for Order
+    # Dynamic form creation for Order — scope customer queryset to accessible customers (H13)
+    accessible_customer_ids = _get_accessible_customer_ids(request.user) if isinstance(request.user, User) else []
     order_form = modelform_factory(Order, fields=["customer", "currency", "payment_method", "notes", "customer_notes"])
 
     if request.method == "POST":
         form = order_form(request.POST)
+        form.fields["customer"].queryset = Customer.objects.filter(id__in=accessible_customer_ids)
         if form.is_valid():
             try:
                 with transaction.atomic():
@@ -541,9 +543,10 @@ def order_create(request: HttpRequest) -> HttpResponse:
             messages.error(request, _("❌ Please correct the errors below. All required fields must be filled in."))
     else:
         form = order_form()
+        form.fields["customer"].queryset = Customer.objects.filter(id__in=accessible_customer_ids)
 
-    # Get customers and products for selection
-    customers = Customer.objects.filter(status="active").order_by("company_name")
+    # Get customers and products for selection — scoped to accessible customers (H13)
+    customers = Customer.objects.filter(status="active", id__in=accessible_customer_ids).order_by("company_name")
     currencies = Currency.objects.all().order_by("code")
     products = Product.objects.filter(is_active=True).order_by("name")
 
@@ -603,7 +606,9 @@ def order_create_preview(request: HttpRequest) -> HttpResponse:
                 },
             )
 
-        customer = get_object_or_404(Customer, id=customer_id)
+        # Scope customer lookup to accessible customers (H13)
+        accessible_customer_ids = _get_accessible_customer_ids(request.user) if isinstance(request.user, User) else []
+        customer = get_object_or_404(Customer, id=customer_id, id__in=accessible_customer_ids)
         product = get_object_or_404(Product, id=product_id)
 
         # Resolve price for selected period + currency
@@ -677,9 +682,11 @@ def order_create_with_item(request: HttpRequest) -> HttpResponse:
     ✨ Create order and first item in one transaction (staff UI).
     Uses server-side price resolution and VAT rules.
     """
-    # Base order form
+    # Scope customer queryset to accessible customers (H13)
+    accessible_customer_ids = _get_accessible_customer_ids(request.user) if isinstance(request.user, User) else []
     order_form = modelform_factory(Order, fields=["customer", "currency", "payment_method", "notes", "customer_notes"])
     form = order_form(request.POST)
+    form.fields["customer"].queryset = Customer.objects.filter(id__in=accessible_customer_ids)
     if not form.is_valid():
         messages.error(request, _("❌ Please correct the errors below."))
         return redirect("orders:order_create")

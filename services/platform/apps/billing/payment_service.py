@@ -10,7 +10,7 @@ from typing import Any
 
 from django.conf import settings
 from django.db import transaction
-from django_fsm import TransitionNotAllowed
+from django_fsm import ConcurrentTransition, TransitionNotAllowed
 
 from apps.common.validators import log_security_event
 from apps.customers.models import (
@@ -23,6 +23,9 @@ from .gateways import PaymentGatewayFactory
 from .gateways.base import PaymentConfirmResult, PaymentIntentResult, SubscriptionResult
 from .models import Payment
 from .payment_models import TERMINAL_PAYMENT_STATUSES
+
+# Order statuses that permit a new payment intent to be created (H18).
+_PAYABLE_ORDER_STATUSES: frozenset[str] = frozenset({"draft", "awaiting_payment"})
 
 # Maps internal payment status names to the FSM transition method names on Payment.
 _PAYMENT_TRANSITION_MAP: dict[str, str] = {
@@ -159,7 +162,7 @@ class PaymentService:
             )
 
     @staticmethod
-    def create_payment_intent_direct(  # payment processing fields  # noqa: PLR0913  # Business logic parameters
+    def create_payment_intent_direct(  # payment processing fields  # noqa: PLR0913, PLR0911  # Business logic parameters
         order_id: str,
         amount_cents: int | None = None,
         currency: str = "RON",
@@ -215,6 +218,15 @@ class PaymentService:
                     error="Order not found for this customer",
                 )
 
+            # H18: Only allow payment intent creation for orders in a payable state.
+            if order.status not in _PAYABLE_ORDER_STATUSES:
+                return PaymentIntentResult(
+                    success=False,
+                    payment_intent_id="",
+                    client_secret=None,
+                    error=f"Order status '{order.status}' is not eligible for payment",
+                )
+
             expected_amount_cents = int(order.total_cents)
             if amount_cents is not None and int(amount_cents) != expected_amount_cents:
                 return PaymentIntentResult(
@@ -222,6 +234,34 @@ class PaymentService:
                     payment_intent_id="",
                     client_secret=None,
                     error="amount_cents does not match order total",
+                )
+
+            # H19: Idempotency — return the existing pending payment intent if one
+            # already exists for this order, preventing duplicate gateway calls.
+            existing_payment = (
+                Payment.objects.filter(
+                    customer_id=customer_id_int,
+                    status="pending",
+                )
+                .order_by("-created_at")
+                .first()
+            )
+
+            if (
+                existing_payment is not None
+                and existing_payment.meta
+                and existing_payment.meta.get("order_id") == str(order.id)
+            ):
+                logger.info(
+                    "♻️ [PaymentService] Returning existing pending payment %s for order %s",
+                    existing_payment.id,
+                    order.id,
+                )
+                return PaymentIntentResult(
+                    success=True,
+                    payment_intent_id=existing_payment.gateway_txn_id or "",
+                    client_secret=existing_payment.meta.get("client_secret"),
+                    error=None,
                 )
 
             resolved_currency = (order.currency.code if order.currency else None) or currency or "RON"
@@ -330,7 +370,7 @@ class PaymentService:
             )
 
     @staticmethod
-    def confirm_payment(
+    def confirm_payment(  # noqa: PLR0911  # Early-return guards for ownership + idempotency
         payment_intent_id: str, gateway: str = "stripe", customer_id: str | int | None = None
     ) -> PaymentConfirmResult:
         """
@@ -344,6 +384,32 @@ class PaymentService:
             PaymentConfirmResult with current status
         """
         try:
+            # Ownership check BEFORE gateway call — prevent IDOR where an attacker
+            # confirms someone else's payment intent by guessing the ID.
+            if customer_id is not None:
+                try:
+                    expected_customer_id = int(customer_id)
+                except (TypeError, ValueError):
+                    return PaymentConfirmResult(
+                        success=False,
+                        status="failed",
+                        error="customer_id must be a valid integer",
+                    )
+                try:
+                    pre_check = Payment.objects.only("customer_id").get(gateway_txn_id=payment_intent_id)
+                except Payment.DoesNotExist:
+                    return PaymentConfirmResult(
+                        success=False,
+                        status="failed",
+                        error="Payment not found",
+                    )
+                if pre_check.customer_id != expected_customer_id:
+                    return PaymentConfirmResult(
+                        success=False,
+                        status="failed",
+                        error="Payment does not belong to this customer",
+                    )
+
             payment_gateway = PaymentGatewayFactory.create_gateway(gateway)
             result = payment_gateway.confirm_payment(payment_intent_id)
 
@@ -351,23 +417,7 @@ class PaymentService:
                 # Update payment record status
                 try:
                     with transaction.atomic():
-                        payment = Payment.objects.select_for_update().get(gateway_txn_id=payment_intent_id)
-
-                        if customer_id is not None:
-                            try:
-                                expected_customer_id = int(customer_id)
-                            except (TypeError, ValueError):
-                                return PaymentConfirmResult(
-                                    success=False,
-                                    status="failed",
-                                    error="customer_id must be a valid integer",
-                                )
-                            if payment.customer_id != expected_customer_id:
-                                return PaymentConfirmResult(
-                                    success=False,
-                                    status="failed",
-                                    error="Payment does not belong to this customer",
-                                )
+                        payment = Payment.objects.select_for_update(of=("self",)).get(gateway_txn_id=payment_intent_id)
 
                         # Idempotency guard — skip if already in terminal state
                         if payment.status in TERMINAL_PAYMENT_STATUSES:
@@ -418,7 +468,7 @@ class PaymentService:
                                             "critical_financial_operation": True,
                                         },
                                     )
-                                except TransitionNotAllowed:
+                                except (TransitionNotAllowed, ConcurrentTransition):
                                     logger.warning(
                                         "⚠️ [PaymentService] confirm_payment: transition %s → %s not allowed "
                                         "for payment %s (already in state %s)",

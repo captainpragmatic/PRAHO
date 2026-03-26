@@ -336,14 +336,12 @@ class ProformaConversionService:
                         code="RON", defaults={"name": "Romanian Leu", "symbol": "lei", "is_active": True}
                     )
 
-                # Recalculate tax
+                # C1 fix: Copy proforma totals verbatim — never recalculate.
+                # The proforma IS the agreed quote. Recalculating would cause
+                # invoice amounts to diverge if VAT rates changed after quoting.
                 subtotal_cents = proforma.subtotal_cents or 0
-                vat_result = TaxService.calculate_vat_for_document(
-                    subtotal_cents=subtotal_cents,
-                    customer_info=_build_customer_vat_info(proforma.customer),
-                )
-                tax_cents = vat_result.vat_cents
-                total_cents = vat_result.total_cents
+                tax_cents = proforma.tax_cents or 0
+                total_cents = proforma.total_cents or 0
 
                 invoice = Invoice.objects.create(
                     customer=proforma.customer,
@@ -357,7 +355,10 @@ class ProformaConversionService:
                     bill_to_email=proforma.bill_to_email or "",
                     bill_to_tax_id=getattr(proforma, "bill_to_tax_id", "") or "",
                     bill_to_address1=getattr(proforma, "bill_to_address1", "") or "",
+                    bill_to_address2=getattr(proforma, "bill_to_address2", "") or "",
                     bill_to_city=getattr(proforma, "bill_to_city", "") or "",
+                    bill_to_region=getattr(proforma, "bill_to_region", "") or "",
+                    bill_to_postal=getattr(proforma, "bill_to_postal", "") or "",
                     bill_to_country=getattr(proforma, "bill_to_country", "RO") or "RO",
                     meta={"proforma_id": str(proforma.id), "proforma_number": proforma.number},
                 )

@@ -17,6 +17,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.api.core import ReadOnlyAPIViewSet
+from apps.api.core.permissions import IsAuthenticatedAndAccessible
 from apps.api.core.throttling import AuthThrottle, BurstAPIThrottle
 from apps.api.secure_auth import public_api_endpoint, require_customer_authentication, require_portal_authentication
 from apps.customers.contact_models import CustomerAddress
@@ -46,6 +47,18 @@ SEARCH_QUERY_MIN_LENGTH = 2
 # ===============================================================================
 
 
+class CustomerSearchPermission(IsAuthenticatedAndAccessible):
+    """Object-level permission for CustomerSearchViewSet detail endpoints."""
+
+    def has_object_permission(self, request: HttpRequest, view: Any, obj: Customer) -> bool:
+        """Allow access only if the user has membership for this customer."""
+        user = cast(User, request.user)
+        accessible = user.get_accessible_customers()
+        if isinstance(accessible, QuerySet):
+            return accessible.filter(id=obj.id).exists()
+        return any(c.id == obj.id for c in accessible)
+
+
 class CustomerSearchViewSet(ReadOnlyAPIViewSet):
     """
     🔍 Customer search API for dropdowns and autocomplete.
@@ -54,6 +67,7 @@ class CustomerSearchViewSet(ReadOnlyAPIViewSet):
     Now uses DRF with proper rate limiting and permissions.
     """
 
+    permission_classes: ClassVar = [CustomerSearchPermission]
     serializer_class = CustomerSearchSerializer
 
     def get_queryset(self) -> QuerySet[Customer]:
@@ -110,6 +124,18 @@ class CustomerSearchViewSet(ReadOnlyAPIViewSet):
 # ===============================================================================
 
 
+class CustomerServicesPermission(IsAuthenticatedAndAccessible):
+    """Object-level permission for CustomerServicesViewSet detail endpoints."""
+
+    def has_object_permission(self, request: HttpRequest, view: Any, obj: Customer) -> bool:
+        """Allow access only if the user has membership for this customer."""
+        user = cast(User, request.user)
+        accessible = user.get_accessible_customers()
+        if isinstance(accessible, QuerySet):
+            return accessible.filter(id=obj.id).exists()
+        return any(c.id == obj.id for c in accessible)
+
+
 class CustomerServicesViewSet(ReadOnlyAPIViewSet):
     """
     🔗 Customer services API for ticket forms and service management.
@@ -118,6 +144,7 @@ class CustomerServicesViewSet(ReadOnlyAPIViewSet):
     Currently returns empty list - placeholder for future service management.
     """
 
+    permission_classes: ClassVar = [CustomerServicesPermission]
     serializer_class = CustomerServiceSerializer
 
     def get_queryset(self) -> QuerySet[Customer]:

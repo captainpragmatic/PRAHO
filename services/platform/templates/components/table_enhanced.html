@@ -45,8 +45,8 @@ Modern, standardized enhanced table component with:
       {% if rows %}
         {% for row in rows %}
         <tr class="hover:bg-slate-700 {% if row.clickable %}cursor-pointer transition-colors{% endif %}"
-            {% if row.clickable and row.click_url %}onclick="window.location.href='{{ row.click_url }}'"{% endif %}
-            {% if row.click_js %}onclick="{{ row.click_js }}"{% endif %}>
+            {% if row.clickable and row.click_url %}onclick="window.location.href='{{ row.click_url|escapejs }}'"{% endif %}
+            {% if row.click_js %}data-click-action="{{ row.click_js|escapejs }}"{% endif %}>
 
           {% for cell in row.cells %}
           <td class="px-6 py-4 {% if cell.no_wrap %}whitespace-nowrap{% endif %} text-{{ cell.align|default:'left' }} text-sm {% if cell.text_color %}{{ cell.text_color }}{% else %}text-slate-300{% endif %} {% if cell.font_class %}{{ cell.font_class }}{% endif %}">
@@ -103,6 +103,12 @@ Modern, standardized enhanced table component with:
   <!-- Pagination -->
   {% include 'components/pagination.html' with page_obj=page_obj extra_params=extra_params htmx_target=htmx_target htmx_url=htmx_url %}
 {% endif %}
+
+<script>
+document.querySelectorAll('[data-click-action]').forEach(function(el) {
+    el.addEventListener('click', function() { new Function(this.dataset.clickAction)(); });
+});
+</script>
 
 {% if include_js %}
 <script>

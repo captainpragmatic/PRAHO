@@ -13,7 +13,7 @@ from typing import Any, TypedDict
 
 from django.db import DatabaseError, IntegrityError, transaction
 from django.db.models import Count, Q, Sum
-from django_fsm import TransitionNotAllowed
+from django_fsm import ConcurrentTransition, TransitionNotAllowed
 
 from apps.billing.gateways.base import GATEWAY_PAYMENT_METHODS, PaymentGatewayFactory
 from apps.billing.models import Currency, Invoice, Refund, RefundStatusHistory, log_security_event
@@ -157,7 +157,7 @@ class RefundService:
         """
         try:
             # SECURITY: Lock the order row to prevent concurrent refund processing
-            order = Order.objects.select_for_update().select_related("customer").get(id=order_id)
+            order = Order.objects.select_for_update(of=("self",)).select_related("customer").get(id=order_id)
             return Ok(order)
         except Order.DoesNotExist:
             return Err("Failed to process refund: Order not found")
@@ -974,13 +974,7 @@ class RefundService:
         if not order:
             return 0
 
-        # Check metadata for refunds tracking
-        if hasattr(order, "meta") and isinstance(order.meta, dict):
-            refunds = order.meta.get("refunds", [])
-            if refunds:
-                return sum(r.get("amount_cents", 0) for r in refunds)
-
-        # Check related refunds — must not silently return 0 on failure (over-refund risk, #119)
+        # Single source of truth: Refund model (#125 — removed meta.refunds fallback)
         try:
             return int(Refund.objects.filter(order=order).aggregate(total=Sum("amount_cents", default=0))["total"])
         except (TypeError, AttributeError) as exc:
@@ -997,13 +991,7 @@ class RefundService:
         if not invoice:
             return 0
 
-        # Check metadata for refunds tracking
-        if hasattr(invoice, "meta") and isinstance(invoice.meta, dict):
-            refunds = invoice.meta.get("refunds", [])
-            if refunds:
-                return sum(r.get("amount_cents", 0) for r in refunds)
-
-        # Check related refunds — must not silently return 0 on failure (over-refund risk, #119)
+        # Single source of truth: Refund model (#125 — removed meta.refunds fallback)
         try:
             return int(Refund.objects.filter(invoice=invoice).aggregate(total=Sum("amount_cents", default=0))["total"])
         except (TypeError, AttributeError) as exc:
@@ -1147,6 +1135,14 @@ class RefundService:
             if not payment:
                 return Err("No successful payments found to refund")
 
+            # Lock the payment row to prevent concurrent refund double-execution.
+            # Without this, two concurrent refund requests can both read status="succeeded",
+            # both call the gateway, and the customer receives double the refund.
+            from apps.billing.payment_models import Payment  # noqa: PLC0415
+
+            if isinstance(payment, Payment) and payment.pk:
+                payment = Payment.objects.select_for_update(of=("self",)).get(pk=payment.pk)
+
             # Determine refund type for status update (used after gateway succeeds)
             refund_type = refund_data.get("refund_type", "partial") if refund_data else "partial"
             if refund_amount_cents and hasattr(payment, "amount_cents"):
@@ -1181,8 +1177,9 @@ class RefundService:
                     else:
                         payment.partially_refund()
                     payment.save()
-                except TransitionNotAllowed:
-                    # Payment may already be in refunded/partially_refunded state.
+                except (TransitionNotAllowed, ConcurrentTransition):
+                    # Payment may already be in refunded/partially_refunded state,
+                    # or a concurrent process is modifying the same record (ADR-0034).
                     # Log at ERROR: gateway refund succeeded but local status is now inconsistent.
                     logger.error(
                         "🔥 [Refund] Gateway refund succeeded but Payment %s FSM transition "
@@ -1327,58 +1324,25 @@ class RefundQueryService:
             if entity_type not in ["order", "invoice"]:
                 return Err("Invalid entity type")
 
-            refunds = []
-
-            # First, try to get the entity to check metadata
-            try:
-                entity: Order | Invoice
-                if entity_type == "order":
-                    entity = Order.objects.get(id=entity_id)
-                else:  # invoice
-                    entity = Invoice.objects.get(id=entity_id)
-
-                # Check metadata for refunds first
-                if hasattr(entity, "meta") and isinstance(entity.meta, dict):
-                    metadata_refunds = entity.meta.get("refunds", [])
-                    refunds.extend(
-                        [
-                            {
-                                "id": refund_meta.get("refund_id", ""),
-                                "reference_number": refund_meta.get("reference_number", ""),
-                                "status": refund_meta.get("status", "completed"),
-                                "refund_type": refund_meta.get("refund_type", "partial"),
-                                "reason": refund_meta.get("reason", "customer_request"),
-                                "amount_cents": refund_meta.get("amount_cents", 0),
-                                "created_at": refund_meta.get("created_at", ""),
-                                "processed_at": refund_meta.get("processed_at", ""),
-                            }
-                            for refund_meta in metadata_refunds
-                        ]
-                    )
-            except (Order.DoesNotExist, Invoice.DoesNotExist):
-                pass
-
-            # Also check the Refund model database table
+            # Query the Refund model — sole source of truth after migration 0024
             if entity_type == "order":
                 refunds_qs = Refund.objects.filter(order__id=entity_id)
             else:  # invoice
                 refunds_qs = Refund.objects.filter(invoice__id=entity_id)
 
-            refunds.extend(
-                [
-                    {
-                        "id": str(refund.id),
-                        "reference_number": refund.reference_number,
-                        "status": refund.status,
-                        "refund_type": refund.refund_type,
-                        "reason": refund.reason.value if hasattr(refund.reason, "value") else refund.reason,
-                        "amount_cents": refund.amount_cents,
-                        "created_at": refund.created_at.isoformat(),
-                        "processed_at": refund.processed_at.isoformat() if refund.processed_at else None,
-                    }
-                    for refund in refunds_qs.order_by("-created_at")
-                ]
-            )
+            refunds: list[dict[str, Any]] = [
+                {
+                    "id": str(refund.id),
+                    "reference_number": refund.reference_number,
+                    "status": refund.status,
+                    "refund_type": refund.refund_type,
+                    "reason": refund.reason.value if hasattr(refund.reason, "value") else refund.reason,
+                    "amount_cents": refund.amount_cents,
+                    "created_at": refund.created_at.isoformat(),
+                    "processed_at": refund.processed_at.isoformat() if refund.processed_at else None,
+                }
+                for refund in refunds_qs.order_by("-created_at")
+            ]
 
             return Ok(refunds)
         except Exception:

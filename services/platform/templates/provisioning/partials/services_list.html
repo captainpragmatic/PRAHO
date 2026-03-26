@@ -150,12 +150,12 @@
               {% url 'provisioning:service_edit' service.pk as edit_url %}
               {% trans "Edit" as edit_label %}{% button edit_label variant="secondary" href=edit_url %}
               {% if service.status == 'active' %}
-              <button onclick="confirmSuspend('{{ service.pk }}', '{{ service.service_name }}')"
+              <button onclick="confirmSuspend('{{ service.pk }}', '{{ service.service_name|escapejs }}')"
                       class="text-red-400 hover:text-red-300 transition-colors">
                 {% icon "clock" %}
               </button>
               {% elif service.status == 'suspended' %}
-              <button onclick="confirmReactivate('{{ service.pk }}', '{{ service.service_name }}')"
+              <button onclick="confirmReactivate('{{ service.pk }}', '{{ service.service_name|escapejs }}')"
                       class="text-green-400 hover:text-green-300 transition-colors">
                 {% icon "services" %}
               </button>
@@ -222,12 +222,12 @@
           {% url 'provisioning:service_edit' service.pk as edit_url_m %}
           {% trans "Edit" as edit_label_m %}{% button edit_label_m variant="secondary" href=edit_url_m %}
           {% if service.status == 'active' %}
-          <button onclick="confirmSuspend('{{ service.pk }}', '{{ service.service_name }}')"
+          <button onclick="confirmSuspend('{{ service.pk }}', '{{ service.service_name|escapejs }}')"
                   class="text-red-400 hover:text-red-300 transition-colors text-sm">
             {% icon "clock" %}
           </button>
           {% elif service.status == 'suspended' %}
-          <button onclick="confirmReactivate('{{ service.pk }}', '{{ service.service_name }}')"
+          <button onclick="confirmReactivate('{{ service.pk }}', '{{ service.service_name|escapejs }}')"
                   class="text-green-400 hover:text-green-300 transition-colors text-sm">
             {% icon "services" %}
           </button>

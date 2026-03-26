@@ -367,6 +367,7 @@ def _update_category_settings(request: HttpRequest, category_key: str) -> JsonRe
     return JsonResponse({"success": True, "updated": updated_count})
 
 
+@user_passes_test(is_staff_user)
 @login_required
 @require_http_methods(["GET", "POST"])
 def category_management_partial(request: HttpRequest, category_key: str) -> HttpResponse:
@@ -649,11 +650,6 @@ def export_settings_full(request: HttpRequest) -> HttpResponse:
     except Exception as e:
         logger.error(f"💥 Error exporting full settings: {e}")
         return JsonResponse({"success": False, "error": "Failed to export settings"}, status=500)
-
-
-def test_export(request: HttpRequest) -> HttpResponse:
-    """Test view to debug URL routing issues"""
-    return JsonResponse({"message": "Test view works", "user": str(request.user)})
 
 
 # ===============================================================================

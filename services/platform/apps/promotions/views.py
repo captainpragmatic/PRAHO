@@ -87,9 +87,9 @@ def _user_can_access_order(request: HttpRequest, order: Any) -> bool:
     SECURITY: Prevents unauthorized order access by validating ownership.
     """
     if not request.user.is_authenticated:
-        # Anonymous users can only access their own session's draft orders
-        # For now, we allow this as draft orders are tied to sessions
-        return bool(order.status == "draft")
+        # Anonymous users cannot access orders without proper session binding
+        # TODO: Implement session-cart binding for anonymous checkout if needed
+        return False
 
     # Staff can access all orders
     if request.user.is_staff:

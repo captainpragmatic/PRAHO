@@ -37,8 +37,14 @@ class OrderEditableFieldsTests(TestCase):
         )
 
     def test_draft_order_fully_editable(self):
-        """Draft orders return ['*'] for editable fields"""
-        self.assertEqual(self.order.get_editable_fields(), ["*"])
+        """Draft orders return _SAFE_DRAFT_FIELDS — all safe editable fields"""
+        editable = self.order.get_editable_fields()
+        # Draft status should expose all safe draft fields (notes, contact, delivery, etc.)
+        self.assertIn("notes", editable)
+        self.assertIn("customer_notes", editable)
+        self.assertIn("customer_email", editable)
+        self.assertIn("meta", editable)
+        self.assertGreater(len(editable), 10, "Draft orders should have many editable fields")
 
     def test_completed_order_limited_editable(self):
         """Completed orders only allow notes editing"""

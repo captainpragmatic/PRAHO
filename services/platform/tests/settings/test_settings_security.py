@@ -385,3 +385,31 @@ class InputValidationSecurityTests(TestCase):
             _safe_json_loads(nested_json)
 
         self.assertIn("JSON too deeply nested", str(cm.exception))
+
+
+class CategoryManagementStaffCheckTests(TestCase):
+    """H2: category_management_partial must require staff user."""
+
+    def setUp(self) -> None:
+        self.client = Client()
+        self.non_staff = User.objects.create_user(
+            email="customer@test.ro", password="TestPass123!",
+            is_staff=False,
+        )
+        self.staff_user = User.objects.create_user(
+            email="staff@test.ro", password="TestPass123!",
+            is_staff=True, staff_role="admin",
+        )
+        SettingCategory.objects.get_or_create(
+            key="test_billing", defaults={"name": "Test Billing", "is_active": True}
+        )
+
+    def test_non_staff_get_redirected(self) -> None:
+        self.client.force_login(self.non_staff)
+        response = self.client.get("/settings/manage/category/test_billing/")
+        self.assertIn(response.status_code, [302, 403])
+
+    def test_non_staff_post_rejected(self) -> None:
+        self.client.force_login(self.non_staff)
+        response = self.client.post("/settings/manage/category/test_billing/", data={"setting_foo": "bar"})
+        self.assertIn(response.status_code, [302, 403])

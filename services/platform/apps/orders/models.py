@@ -93,8 +93,21 @@ class Order(ConcurrentTransitionMixin, models.Model):
         "shipping_postal_code",
         "shipping_country",
     ]
+    # Safe draft fields: contact/address snapshots, notes, payment method, delivery,
+    # source tracking, and metadata. Financial fields (totals, currency, payment IDs)
+    # are intentionally excluded — they are derived/set by the order service only.
+    _SAFE_DRAFT_FIELDS: ClassVar[list[str]] = [
+        *_SAFE_CONTACT_FIELDS,
+        *_SAFE_DELIVERY_FIELDS,
+        "payment_method",
+        "utm_source",
+        "utm_medium",
+        "utm_campaign",
+        "referrer",
+        "meta",
+    ]
     EDITABLE_FIELDS_BY_STATUS: ClassVar[dict[str, list[str]]] = {
-        "draft": ["*"],  # Everything editable (pre-payment)
+        "draft": _SAFE_DRAFT_FIELDS,  # Safe fields only — financial fields are service-managed
         "awaiting_payment": [*_SAFE_CONTACT_FIELDS, *_SAFE_DELIVERY_FIELDS],  # No financial fields
         "paid": ["notes", *_SAFE_DELIVERY_FIELDS],  # Delivery and notes only
         "in_review": ["notes"],  # Only notes while under review
@@ -536,6 +549,9 @@ class OrderItem(models.Model):
     # Product information snapshot (in case product changes)
     product_name = models.CharField(max_length=200, help_text=_("Product name at time of order"))
     product_type = models.CharField(max_length=30, help_text=_("Product type at time of order"))
+    product_slug = models.CharField(
+        max_length=200, blank=True, default="", help_text=_("Product slug/SKU at time of order (EN16931 BT-155)")
+    )
 
     # Quantity and pricing
     quantity = models.PositiveIntegerField(
@@ -651,6 +667,8 @@ class OrderItem(models.Model):
         if self.product and not self.product_name:
             self.product_name = self.product.name
             self.product_type = self.product.product_type
+        if self.product and not self.product_slug:
+            self.product_slug = self.product.slug
 
         # Apply default VAT when tax_rate was not explicitly set.
         # This keeps direct model creation aligned with the authoritative VAT rules.

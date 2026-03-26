@@ -175,8 +175,8 @@ class TestCreateFromOrder(ProformaLifecycleTestBase):
         self.assertEqual(line.unit_price_cents, 10000)
         self.assertEqual(line.quantity, Decimal("1.000"))
 
-    def test_sets_valid_until_7_days(self):
-        """Proforma valid_until defaults to 7 days from now."""
+    def test_sets_valid_until_from_settings(self):
+        """Proforma valid_until uses billing.proforma_validity_days setting (default 30)."""
         from apps.billing.proforma_service import ProformaService  # noqa: PLC0415
 
         order = self._create_order_with_items()
@@ -185,8 +185,9 @@ class TestCreateFromOrder(ProformaLifecycleTestBase):
         result = ProformaService.create_from_order(order)
         proforma = result.unwrap()
 
-        expected_min = timezone.now() + timedelta(days=6)
-        expected_max = timezone.now() + timedelta(days=8)
+        # H1 fix: default is 30 days from SettingsService, not hardcoded 7
+        expected_min = timezone.now() + timedelta(days=29)
+        expected_max = timezone.now() + timedelta(days=31)
         self.assertGreater(proforma.valid_until, expected_min)
         self.assertLess(proforma.valid_until, expected_max)
 

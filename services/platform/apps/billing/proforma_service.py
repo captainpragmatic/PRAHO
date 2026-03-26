@@ -11,7 +11,7 @@ from datetime import timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
-from django.db import transaction
+from django.db import DatabaseError, transaction
 from django.utils import timezone
 from django.utils.translation import gettext as _t
 
@@ -54,6 +54,13 @@ if TYPE_CHECKING:
     from .proforma_models import ProformaInvoice
 
 logger = logging.getLogger(__name__)
+
+
+def _get_proforma_validity_days() -> int:
+    """Get proforma validity days from SettingsService (H1 fix)."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return SettingsService.get_integer_setting("billing.proforma_validity_days", 30)
 
 
 # ===============================================================================
@@ -180,7 +187,7 @@ class ProformaService:
                 subtotal_cents=vat_result.subtotal_cents,
                 tax_cents=vat_result.vat_cents,
                 total_cents=vat_result.total_cents,
-                valid_until=timezone.now() + timedelta(days=7),
+                valid_until=timezone.now() + timedelta(days=_get_proforma_validity_days()),
                 bill_to_name=bill_to_name,
                 bill_to_email=order.customer_email,
                 bill_to_country=bill_to_country,
@@ -202,7 +209,8 @@ class ProformaService:
                     unit_price_cents=item.unit_price_cents,
                     tax_rate=vat_rate_decimal,
                     domain_name=getattr(item, "domain_name", "") or "",
-                    seller_item_id=getattr(item.product, "slug", "") if getattr(item, "product", None) else "",
+                    seller_item_id=getattr(item, "product_slug", "")
+                    or (getattr(item.product, "slug", "") if getattr(item, "product", None) else ""),
                     unit_code=BILLING_PERIOD_TO_UNIT_CODE.get(billing_period, "C62"),
                     period_start=order.created_at.date(),
                     period_end=(order.created_at + _period_delta(billing_period)).date(),
@@ -438,7 +446,9 @@ class ProformaPaymentService:
                     },
                     actor_type="system",
                 )
-            except Exception:
+            except (OSError, DatabaseError, RuntimeError):
+                # SFH-3 + H4 fix: Catch infra errors only — let code bugs
+                # (TypeError, AttributeError) propagate so they surface in CI/Sentry.
                 logger.error(
                     "🔥 [ProformaPayment] Audit log failed for order-invoice link %s → %s",
                     linked_order.order_number,

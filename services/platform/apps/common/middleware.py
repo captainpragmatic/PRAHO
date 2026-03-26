@@ -4,6 +4,7 @@ Security headers, Romanian compliance, and audit logging.
 """
 
 import base64
+import contextlib
 import hashlib
 import hmac
 import json
@@ -122,7 +123,7 @@ class SecurityHeadersMiddleware:
                 "default-src 'self'; "
                 "style-src 'self' 'unsafe-inline' fonts.googleapis.com cdn.tailwindcss.com; "
                 "font-src 'self' fonts.gstatic.com; "
-                "script-src 'self' 'unsafe-inline' 'unsafe-eval' unpkg.com cdn.tailwindcss.com; "
+                "script-src 'self' 'unsafe-inline' unpkg.com cdn.tailwindcss.com; "
                 "img-src 'self' data: https:; "
                 "connect-src 'self'; "
                 "object-src 'none'; "
@@ -254,14 +255,18 @@ class JSONResponseMiddleware:
     def process_exception(self, request: HttpRequest, exception: Exception) -> HttpResponse | None:
         """Handle API exceptions as JSON"""
         if request.path.startswith("/api/"):
-            error_data = {
-                "error": True,
-                "message": str(exception),
-                "type": exception.__class__.__name__,
-            }
-
             if settings.DEBUG:
-                error_data["traceback"] = traceback.format_exc()
+                error_data = {
+                    "error": True,
+                    "message": str(exception),
+                    "type": exception.__class__.__name__,
+                    "traceback": traceback.format_exc(),
+                }
+            else:
+                error_data = {
+                    "error": True,
+                    "message": "Internal server error",
+                }
 
             response = HttpResponse(json.dumps(error_data), content_type="application/json", status=500)
 
@@ -367,10 +372,19 @@ class PortalServiceHMACMiddleware:
             current = cache.incr(key)
         except Exception:
             # Fallback if backend doesn't support incr reliably
-            current = (cache.get(key) or 0) + 1
-            cache.set(key, current, timeout=self._rl_window)
-            if cache.get(window_start_key) is None:
-                cache.set(window_start_key, now, timeout=self._rl_window)
+            try:
+                current = (cache.get(key) or 0) + 1
+                cache.set(key, current, timeout=self._rl_window)
+                if cache.get(window_start_key) is None:
+                    cache.set(window_start_key, now, timeout=self._rl_window)
+            except Exception:
+                # Cache is completely unreachable — deny the request (fail-closed)
+                logger.critical(
+                    "🔥 [HMACRateLimiter] Cache unreachable for rate limiting — denying request for portal %s from %s",
+                    portal_id,
+                    client_ip,
+                )
+                return True, self._rl_window
 
         if current <= self._rl_max_calls:
             return False, 0
@@ -646,8 +660,11 @@ class SessionSecurityMiddleware:
                 self._check_shared_device_expiry(request)
 
         except Exception as e:
-            # Don't break the request if session security fails
-            logger.error(f"🔥 [SessionSecurityMiddleware] Error processing session security: {e}")
+            logger.critical(
+                "🔥 [SessionSecurityMiddleware] Session security check failed — invalidating session for safety: %s", e
+            )
+            with contextlib.suppress(Exception):
+                request.session.flush()
 
     def _should_log_activity(self, request: HttpRequest) -> bool:
         """Determine if this request should be logged for activity tracking"""

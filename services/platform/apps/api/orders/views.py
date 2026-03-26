@@ -22,7 +22,6 @@ from rest_framework.throttling import ScopedRateThrottle
 
 from apps.api.secure_auth import public_api_endpoint, require_customer_authentication
 from apps.billing.models import Currency
-from apps.common.request_ip import get_safe_client_ip
 from apps.common.types import CurrencyCode, Err, Ok
 from apps.customers.models import Customer
 from apps.orders.models import Order
@@ -650,11 +649,8 @@ def create_order(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-
 
             if sealed_token:
                 try:
-                    # Get client IP for validation
-                    client_ip = get_safe_client_ip(request)
-
-                    # Unseal and validate token with IP binding
-                    unsealed_data = PriceSealingService.unseal_price(sealed_token, client_ip)
+                    # Unseal and validate token (HMAC signature prevents tampering)
+                    unsealed_data = PriceSealingService.unseal_price(sealed_token)
                     validated_data_result = PriceSealingService.validate_price_against_database(
                         unsealed_data, expected_product_price_id=price.id
                     )
@@ -1002,6 +998,9 @@ def confirm_order(request: Request, customer: Customer, order_id: str) -> Respon
             order_number_for_log = order.order_number
             order_total_cents = order.total_cents
         # Phase 1 transaction ends here — DB lock released before any network call.
+        # C2: The gap between Phase 1 and Phase 3 is safe because Phase 3 re-acquires
+        # the lock and OrderPaymentConfirmationService.confirm_order() is idempotent.
+        # See tests/orders/test_confirm_order_concurrency.py for proof.
 
         # CRITICAL GUARD: This endpoint requires a valid Stripe PaymentIntent.
         # Without a PI, there is no payment to verify — reject ALL orders without one.

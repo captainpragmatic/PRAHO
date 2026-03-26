@@ -22,7 +22,11 @@ import hmac
 import json
 import logging
 from typing import Any
+from urllib.parse import urlparse
 
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.x509 import load_pem_x509_certificate
 from django.conf import settings
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.utils.decorators import method_decorator
@@ -32,6 +36,8 @@ from django.views.decorators.csrf import csrf_exempt
 from apps.common.outbound_http import OutboundPolicy, OutboundSecurityError, safe_request
 from apps.common.validators import log_security_event
 from apps.notifications.services import EmailPreferenceService, EmailService
+
+_HTTP_OK = 200
 
 SNS_CONFIRMATION_POLICY = OutboundPolicy(
     name="sns_confirmation",
@@ -129,6 +135,14 @@ class SESWebhookView(View):
             except json.JSONDecodeError:
                 return HttpResponse("Invalid JSON", status=400)
 
+            # Verify SNS signature before any processing
+            if not self._validate_sns_signature(data):
+                log_security_event(
+                    "email_webhook_invalid_signature",
+                    {"provider": "ses", "remote_addr": request.META.get("REMOTE_ADDR")},
+                )
+                return HttpResponse("Forbidden", status=403)
+
             message_type = data.get("Type")
 
             # Handle SNS subscription confirmation
@@ -144,6 +158,88 @@ class SESWebhookView(View):
         except Exception as e:
             logger.exception(f"SES webhook error: {e}")
             return HttpResponse("Error", status=500)
+
+    def _validate_sns_signature(self, data: dict[str, Any]) -> bool:
+        """Validate AWS SNS message signature.
+
+        Returns True if the signature is valid or can be accepted, False otherwise.
+        In DEBUG mode, accepts unsigned messages for dev convenience — matching the
+        pattern used by the SendGrid and Mailgun handlers.
+
+        See: https://docs.aws.amazon.com/sns/latest/dg/sns-verify-signature-of-message.html
+        """
+        # In DEBUG mode, bypass signature check for unsigned messages (dev convenience)
+        if getattr(settings, "DEBUG", False) and not data.get("Signature"):
+            logger.warning("SES webhook: accepting unsigned SNS message (DEBUG mode)")
+            return True
+
+        # Pre-flight checks: version, cert URL validity, non-empty signature
+        if not self._sns_preflight_checks(data):
+            return False
+
+        # Build canonical message and verify cryptographic signature
+        return self._sns_verify_crypto(data)
+
+    def _sns_preflight_checks(self, data: dict[str, Any]) -> bool:
+        """Validate SNS header fields before attempting crypto verification."""
+        if data.get("SignatureVersion") != "1":
+            logger.warning("SES webhook: unsupported SignatureVersion: %s", data.get("SignatureVersion"))
+            return False
+
+        signing_cert_url = data.get("SigningCertURL", "")
+        parsed = urlparse(signing_cert_url)
+        cert_url_ok = parsed.scheme == "https" and bool(parsed.hostname) and parsed.hostname.endswith(".amazonaws.com")
+        if not cert_url_ok:
+            logger.warning("SES webhook: invalid SigningCertURL: %s", signing_cert_url)
+            return False
+
+        if not data.get("Signature", ""):
+            logger.warning("SES webhook: empty signature")
+            return False
+
+        return True
+
+    def _sns_build_canonical_message(self, data: dict[str, Any]) -> str:
+        """Build the canonical string to verify per the AWS SNS signing specification."""
+        message_type = data.get("Type", "")
+        if message_type == "Notification":
+            candidate_fields = ["Message", "MessageId", "Subject", "Timestamp", "TopicArn", "Type"]
+        else:
+            # SubscriptionConfirmation and UnsubscribeConfirmation
+            candidate_fields = ["Message", "MessageId", "SubscribeURL", "Timestamp", "Token", "TopicArn", "Type"]
+
+        canonical_parts: list[str] = []
+        for field in candidate_fields:
+            value = data.get(field)
+            if value is not None:
+                canonical_parts.append(field)
+                canonical_parts.append(str(value))
+        return "\n".join(canonical_parts) + "\n"
+
+    def _sns_verify_crypto(self, data: dict[str, Any]) -> bool:
+        """Fetch the signing cert and verify the RSA-SHA1 signature."""
+        signing_cert_url = data.get("SigningCertURL", "")
+        signature_b64 = data.get("Signature", "")
+        canonical_message = self._sns_build_canonical_message(data)
+        try:
+            cert_response = safe_request("GET", signing_cert_url, timeout=10)
+            if not cert_response or cert_response.status_code != _HTTP_OK:
+                logger.warning("SES webhook: failed to fetch signing certificate from %s", signing_cert_url)
+                return False
+
+            cert = load_pem_x509_certificate(cert_response.content)
+            signature = base64.b64decode(signature_b64)
+
+            cert.public_key().verify(
+                signature,
+                canonical_message.encode("utf-8"),
+                padding.PKCS1v15(),
+                hashes.SHA1(),  # noqa: S303  — AWS SNS uses SHA1 for signature v1
+            )
+            return True
+        except Exception:
+            logger.warning("SES webhook: signature verification failed", exc_info=True)
+            return False
 
     def _handle_subscription_confirmation(self, data: dict[str, Any]) -> HttpResponse:
         """Handle SNS subscription confirmation."""

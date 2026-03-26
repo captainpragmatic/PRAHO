@@ -374,8 +374,8 @@ def _check_rate_limit(key_prefix: str, limit: int, request_ip: str, user: Any = 
             # Re-raise ValidationError (rate limit exceeded)
             raise
         except Exception as e:
-            # If cache is not available, allow the request but log the issue
-            logger.warning(f"🚨 [Security] Rate limiting failed due to cache issue: {e}")
+            logger.critical("[Security] Rate limiting cache unreachable — failing closed: %s", e)
+            raise ValidationError(_("Service temporarily unavailable. Please try again later.")) from e
 
 
 def _validate_user_registration_input(args: tuple[Any, ...], kwargs: dict[str, Any]) -> None:
