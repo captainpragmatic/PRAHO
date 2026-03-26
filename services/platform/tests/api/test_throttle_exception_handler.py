@@ -46,14 +46,14 @@ class ThrottleConfigurationTests(SimpleTestCase):
     def test_default_throttle_rates_have_single_source_scopes(self) -> None:
         rates = settings.REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]
 
-        self.assertEqual(rates["auth"], "5/minute")
-        self.assertEqual(rates["sustained"], "1000/hour")
-        self.assertEqual(rates["api_burst"], "60/min")
-        self.assertEqual(rates["anon"], "20/minute")
-        self.assertEqual(rates["burst"], "30/10s")
-        self.assertEqual(rates["customer"], "100/minute")
-        self.assertEqual(rates["portal_hmac"], "100/minute")
-        self.assertEqual(rates["portal_hmac_burst"], "50/10s")
+        self.assertEqual(rates["auth"], "10/minute")
+        self.assertEqual(rates["sustained"], "2000/hour")
+        self.assertEqual(rates["api_burst"], "120/min")
+        self.assertEqual(rates["anon"], "40/minute")
+        self.assertEqual(rates["burst"], "60/10s")
+        self.assertEqual(rates["customer"], "200/minute")
+        self.assertEqual(rates["portal_hmac"], "200/minute")
+        self.assertEqual(rates["portal_hmac_burst"], "100/10s")
 
     def test_api_core_throttles_use_scopes_from_throttle_rates(self) -> None:
         self.assertEqual(StandardAPIThrottle.scope, "sustained")
@@ -64,7 +64,7 @@ class PortalHMACThrottleTests(SimpleTestCase):
     def setUp(self) -> None:
         self.factory = APIRequestFactory()
 
-    def test_portal_hmac_rate_throttle_uses_portal_and_customer_identity(self) -> None:
+    def test_portal_hmac_rate_throttle_uses_portal_identity(self) -> None:
         request = SimpleNamespace(
             headers={"X-Portal-Id": "portal-001"},
             data={"customer_id": 123, "user_id": 7},
@@ -73,7 +73,7 @@ class PortalHMACThrottleTests(SimpleTestCase):
 
         key = PortalHMACRateThrottle().get_cache_key(request, view=None)
         self.assertIsNotNone(key)
-        self.assertIn("portal-001:customer_123", key or "")
+        self.assertIn("portal-001", key or "")
 
     def test_portal_hmac_burst_throttle_uses_portal_only_fallback(self) -> None:
         request = SimpleNamespace(

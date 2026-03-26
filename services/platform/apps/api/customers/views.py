@@ -260,9 +260,9 @@ def customer_create_api(request: HttpRequest) -> Response:
         if not user_id or action != "create_company":
             return Response({"success": False, "error": "Invalid request format"}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Validate user exists
+        # Validate user exists and is active
         try:
-            user = User.objects.get(id=user_id)
+            user = User.objects.get(id=user_id, is_active=True)
         except User.DoesNotExist:
             return Response({"success": False, "error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
 
@@ -821,7 +821,7 @@ def update_customer_billing_address(  # noqa: C901, PLR0912, PLR0915  # Complexi
                 if not created:
                     for field, value in tax_fields.items():
                         setattr(tax_profile, field, value)
-                    tax_profile.save()
+                    tax_profile.save(update_fields=[*tax_fields.keys(), "updated_at"])
 
         logger.info(f"✅ [Billing Address API] Successfully updated billing address for customer {customer.id}")
 
@@ -1253,6 +1253,15 @@ def customer_tax_profile_update(request: HttpRequest, customer: Customer) -> Res
                         status=status.HTTP_400_BAD_REQUEST,
                     )
                 value = value.strip()
+                if field == "cui" and value:
+                    from apps.common.cui_validator import CUIValidator  # noqa: PLC0415
+
+                    result = CUIValidator.validate_strict(value)
+                    if not result.is_valid:
+                        return Response(
+                            {"success": False, "error": f"Invalid CUI: {result.error_message}"},
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
             setattr(tax_profile, field, value)
             update_fields.append(field)
 

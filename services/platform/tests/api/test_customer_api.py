@@ -17,6 +17,7 @@ from apps.api.customers.views import (
     customer_addresses_delete,
     customer_addresses_list,
     customer_addresses_update,
+    customer_create_api,
     customer_tax_profile_update,
     customer_update,
     customer_users_add,
@@ -281,14 +282,27 @@ class CustomerProfileUpdateAPITests(TestCase):
 
         request = _make_request(self.factory, "/api/customers/tax-profile/", {
             "customer_id": self.customer.pk, "user_id": self.owner_user.pk,
-            "cui": "RO12345678", "is_vat_payer": True, "timestamp": int(time.time()),
+            "cui": "RO12345673", "is_vat_payer": True, "timestamp": int(time.time()),
         })
         response = customer_tax_profile_update(request)
         self.assertEqual(response.status_code, 200)
         self.customer.refresh_from_db()
         tax = self.customer.tax_profile
-        self.assertEqual(tax.cui, "RO12345678")
+        self.assertEqual(tax.cui, "RO12345673")
         self.assertTrue(tax.is_vat_payer)
+
+    @patch("apps.api.secure_auth.get_authenticated_customer")
+    def test_tax_profile_rejects_invalid_cui(self, mock_auth):
+        """Invalid CUI (bad check digit) must be rejected."""
+        mock_auth.return_value = (self.customer, None)
+
+        request = _make_request(self.factory, "/api/customers/tax-profile/", {
+            "customer_id": self.customer.pk, "user_id": self.owner_user.pk,
+            "cui": "RO12345678", "timestamp": int(time.time()),
+        })
+        response = customer_tax_profile_update(request)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Invalid CUI", response.data["error"])
 
 
 class CustomerAddressAPITests(TestCase):
@@ -708,3 +722,31 @@ class AddressRequiredFieldTests(TestCase):
         response = customer_addresses_add(request)
         self.assertEqual(response.status_code, 400)
         self.assertIn("city", response.data["error"])
+
+
+# ===============================================================================
+# Inactive user — company creation guard (#143)
+# ===============================================================================
+
+
+class InactiveUserCompanyCreationTests(TestCase):
+    """#143: deactivated users must not be able to create companies."""
+
+    def setUp(self):
+        self.factory = RequestFactory()
+        self.inactive_user = User.objects.create_user(email="banned@example.com", password="pass123")
+        self.inactive_user.is_active = False
+        self.inactive_user.save(update_fields=["is_active"])
+
+    def test_inactive_user_cannot_create_company(self):
+        """POST with inactive user_id must return 404."""
+        request = _make_request(self.factory, "/api/customers/create/", {
+            "user_id": self.inactive_user.pk,
+            "action": "create_company",
+            "company_data": {"name": "Evil Corp", "customer_type": "company"},
+            "timestamp": int(time.time()),
+        })
+        request._portal_authenticated = True
+        response = customer_create_api(request)
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(response.data["success"])
