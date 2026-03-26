@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import uuid
 from typing import Any
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 from django.test import TestCase
 from django.utils import timezone
@@ -811,54 +811,65 @@ class RefundQueryServiceComprehensiveCoverageTestCase(TestCase):
         )
 
     def test_get_entity_refunds_order_with_refunds(self) -> None:
-        """Test get_entity_refunds for order with refund history (Line 780-781)."""
-        mock_order = Mock()
-        mock_order.meta = {
-            'refunds': [
-                {'refund_id': '123', 'amount_cents': 5000},
-                {'refund_id': '456', 'amount_cents': 3000}
-            ]
-        }
+        """Test get_entity_refunds for order with Refund rows (#125)."""
+        from apps.orders.models import Order
+        order = Order.objects.create(
+            customer=self.customer, currency=self.currency, status="draft",
+            subtotal_cents=10000, tax_cents=1900, total_cents=11900,
+        )
+        Refund.objects.create(
+            customer=self.customer, order=order, amount_cents=5000,
+            currency=self.currency, original_amount_cents=11900,
+            reference_number="REF-ENTITY-ORD-001", status="completed",
+        )
+        Refund.objects.create(
+            customer=self.customer, order=order, amount_cents=3000,
+            currency=self.currency, original_amount_cents=11900,
+            reference_number="REF-ENTITY-ORD-002", status="completed",
+        )
 
-        with patch('apps.orders.models.Order.objects.get', return_value=mock_order):
-            result = RefundQueryService.get_entity_refunds('order', uuid.uuid4())
+        result = RefundQueryService.get_entity_refunds('order', order.id)
 
-            self.assertTrue(result.is_ok())
-            refunds = result.unwrap()
-            self.assertEqual(len(refunds), 2)
+        self.assertTrue(result.is_ok())
+        refunds = result.unwrap()
+        self.assertEqual(len(refunds), 2)
 
     def test_get_entity_refunds_order_no_refunds(self) -> None:
-        """Test get_entity_refunds for order without refunds (Line 775, 789)."""
-        mock_order = Mock()
-        mock_order.meta = {}
+        """Test get_entity_refunds for order without refunds."""
+        from apps.orders.models import Order
+        order = Order.objects.create(
+            customer=self.customer, currency=self.currency, status="draft",
+            subtotal_cents=10000, tax_cents=1900, total_cents=11900,
+        )
 
-        with patch('apps.orders.models.Order.objects.get', return_value=mock_order):
-            result = RefundQueryService.get_entity_refunds('order', uuid.uuid4())
+        result = RefundQueryService.get_entity_refunds('order', order.id)
 
-            self.assertTrue(result.is_ok())
-            refunds = result.unwrap()
-            self.assertEqual(len(refunds), 0)
+        self.assertTrue(result.is_ok())
+        refunds = result.unwrap()
+        self.assertEqual(len(refunds), 0)
 
     def test_get_entity_refunds_invoice_with_refunds(self) -> None:
-        """Test get_entity_refunds for invoice with refund history (Line 786-787)."""
-        self.invoice.meta = {
-            'refunds': [
-                {'refund_id': '789', 'amount_cents': 2000}
-            ]
-        }
-        self.invoice.save()
+        """Test get_entity_refunds for invoice with Refund rows (#125)."""
+        Refund.objects.create(
+            customer=self.customer,
+            invoice=self.invoice,
+            amount_cents=2000,
+            currency=self.currency,
+            original_amount_cents=10000,
+            reference_number="REF-ENTITY-INV-001",
+            status="completed",
+        )
 
-        with patch('apps.billing.models.Invoice.objects.get', return_value=self.invoice):
-            result = RefundQueryService.get_entity_refunds('invoice', self.invoice.id)
+        result = RefundQueryService.get_entity_refunds('invoice', self.invoice.id)
 
-            self.assertTrue(result.is_ok())
-            refunds = result.unwrap()
-            self.assertEqual(len(refunds), 1)
-            self.assertEqual(refunds[0]['amount_cents'], 2000)
+        self.assertTrue(result.is_ok())
+        refunds = result.unwrap()
+        self.assertEqual(len(refunds), 1)
+        self.assertEqual(refunds[0]['amount_cents'], 2000)
 
     def test_get_entity_refunds_unexpected_exception(self) -> None:
-        """Test get_entity_refunds with unexpected exception (Line 791-793)."""
-        with patch('apps.orders.models.Order.objects.get', side_effect=Exception("DB Error")):
+        """Test get_entity_refunds with unexpected exception."""
+        with patch('apps.billing.models.Refund.objects.filter', side_effect=Exception("DB Error")):
             result = RefundQueryService.get_entity_refunds('order', uuid.uuid4())
 
             self.assertTrue(result.is_err())

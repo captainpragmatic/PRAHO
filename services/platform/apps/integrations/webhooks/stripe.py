@@ -428,7 +428,7 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
             # Update payment record with dispute flag
             try:
                 with transaction.atomic():
-                    payment = Payment.objects.select_for_update().filter(gateway_txn_id=charge_id).first()
+                    payment = Payment.objects.select_for_update(of=("self",)).filter(gateway_txn_id=charge_id).first()
                     if payment:
                         meta_update = {
                             "dispute_id": charge.get("dispute", {}).get("id"),

@@ -36,6 +36,11 @@ TERMINAL_PAYMENT_STATUSES: frozenset[str] = frozenset(
     }
 )
 
+# Subset: states from which no gateway-initiated transitions are possible.
+# "succeeded" excluded — has outbound refund_payment(), partially_refund().
+# "partially_refunded" excluded — has outbound complete_refund().
+_GATEWAY_TERMINAL_STATUSES: frozenset[str] = frozenset({"failed", "refunded", "cancelled", "canceled", "disputed"})
+
 
 # TypedDict definitions for private tracking attributes
 class _PaymentSnapshot(TypedDict, total=False):
@@ -51,6 +56,7 @@ _GATEWAY_TRANSITION_MAP: dict[str, str] = {
     "failed": "fail_payment",
     "refunded": "refund_payment",
     "partially_refunded": "partially_refund",
+    "disputed": "dispute_payment",
 }
 
 
@@ -214,6 +220,10 @@ class Payment(ConcurrentTransitionMixin, models.Model):
     def complete_refund(self) -> None:
         """Complete refund on partially refunded payment."""
 
+    @transition(field=status, source=["pending", "succeeded", "partially_refunded"], target="disputed")
+    def dispute_payment(self) -> None:
+        """Mark payment as disputed (Stripe charge.dispute.created)."""
+
     # =========================================================================
     # STRIPE / GATEWAY INTEGRATION
     # =========================================================================
@@ -268,7 +278,7 @@ class Payment(ConcurrentTransitionMixin, models.Model):
         already in terminal state or if the transition is not allowed
         from the current state (idempotent no-op).
         """
-        if self.status in TERMINAL_PAYMENT_STATUSES:
+        if self.status in _GATEWAY_TERMINAL_STATUSES:
             return False
 
         # State-aware routing: a partially_refunded payment completing a full

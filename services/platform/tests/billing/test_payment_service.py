@@ -390,6 +390,30 @@ class ConfirmPaymentTests(TestCase):
         self.payment.refresh_from_db()
         self.assertEqual(self.payment.status, "pending")
 
+    @patch("apps.billing.payment_service.PaymentGatewayFactory.create_gateway")
+    def test_confirm_payment_handles_concurrent_transition(self, mock_create_gw: MagicMock) -> None:
+        """ADR-0034: ConcurrentTransition must be caught alongside TransitionNotAllowed."""
+        from django_fsm import ConcurrentTransition  # noqa: PLC0415
+
+        # Gateway reports success — the transition should fire but a concurrent
+        # process has already modified the row (optimistic locking conflict).
+        mock_create_gw.return_value = _make_mock_gateway(
+            confirm_result=_confirm_result(success=True, status="succeeded")
+        )
+
+        with patch.object(
+            type(self.payment), "succeed", side_effect=ConcurrentTransition("concurrent write")
+        ):
+            result = PaymentService.confirm_payment("pi_confirm_test")
+
+        # The handler must NOT re-raise — it returns a structured fsm_conflict result.
+        self.assertFalse(result["success"])
+        self.assertEqual(result["status"], "fsm_conflict")
+        self.assertIn("transition", result.get("error", "").lower())
+        # Payment status is unchanged (transition was blocked by optimistic lock).
+        self.payment.refresh_from_db()
+        self.assertEqual(self.payment.status, "pending")
+
 
 # ---------------------------------------------------------------------------
 # create_subscription

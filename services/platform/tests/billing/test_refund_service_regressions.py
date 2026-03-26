@@ -3,6 +3,7 @@ Comprehensive coverage tests for apps.billing.refund_service
 Targets all uncovered lines/branches to maximize coverage.
 """
 
+import importlib
 import uuid
 from datetime import timedelta
 from decimal import Decimal
@@ -10,6 +11,7 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
+from django.apps import apps as django_apps
 from django.test import TestCase
 from django.utils import timezone
 
@@ -1618,6 +1620,39 @@ class TestProcessPaymentRefund(TestCase):
         r = RefundService._process_payment_refund(None, None, order=order)
         assert r.is_err()
 
+    def test_concurrent_transition_caught_and_logged(self):
+        """ADR-0034: ConcurrentTransition on payment FSM must be caught (not re-raised).
+
+        When a concurrent process holds an optimistic lock on the same Payment row,
+        the refund gateway call may have already succeeded but the local FSM transition
+        raises ConcurrentTransition. The service must log the error and return the
+        (already-succeeded) gateway result rather than crashing.
+        """
+        from django_fsm import ConcurrentTransition  # noqa: PLC0415
+
+        from apps.billing.payment_models import Payment  # noqa: PLC0415
+
+        payment = self._make_succeeded_payment(gateway_txn_id="tx_concurrent_refund")
+
+        # Mock select_for_update to return the same payment instance (so our
+        # patch.object on refund_payment survives the re-fetch).
+        mock_qs = MagicMock()
+        mock_qs.get.return_value = payment
+
+        with (
+            self._mock_gateway_success(),
+            patch.object(Payment.objects, "select_for_update", return_value=mock_qs),
+            patch.object(payment, "refund_payment", side_effect=ConcurrentTransition("concurrent write")),
+        ):
+            # Must not raise — the exception is caught, logged at ERROR, and gateway_result is returned.
+            r = RefundService._process_payment_refund(payment, {"refund_type": "full"})
+
+        # Gateway result is propagated even when the FSM transition fails.
+        assert r.is_ok()
+        # The local payment status is unchanged (FSM was blocked by concurrent lock).
+        payment.refresh_from_db()
+        assert payment.status == "succeeded"
+
 
 # ===========================================================================
 # _process_bidirectional_refund
@@ -1793,13 +1828,17 @@ class TestRefundQueryService(TestCase):
         # Entity not found, but should still check DB refunds
         assert isinstance(r.unwrap(), list)
 
-    def test_get_entity_refunds_with_meta(self):
-        o = _make_order(self.customer, self.currency, status="completed", total_cents=10000,
-                        meta={"refunds": [{"refund_id": "r1", "amount_cents": 2000, "status": "completed"}]})
+    def test_get_entity_refunds_with_db_rows(self):
+        o = _make_order(self.customer, self.currency, status="completed", total_cents=10000)
+        ref = Refund.objects.create(
+            customer=self.customer, order=o, amount_cents=2000, currency=self.currency,
+            original_amount_cents=10000, reference_number=f"REF-{uuid.uuid4().hex[:8]}",
+            reason="customer_request",
+        )
         r = RefundQueryService.get_entity_refunds("order", o.id)
         assert r.is_ok()
         refunds = r.unwrap()
-        assert any(ref.get("id") == "r1" for ref in refunds)
+        assert any(row.get("id") == str(ref.id) for row in refunds)
 
     @patch("apps.billing.refund_service.Refund.objects")
     def test_get_entity_refunds_exception(self, mock_qs):
@@ -1808,13 +1847,17 @@ class TestRefundQueryService(TestCase):
         assert r.is_err()
         assert "Failed to get refund history" in r.unwrap_err()
 
-    def test_get_entity_refunds_invoice_with_meta(self):
+    def test_get_entity_refunds_invoice_with_db_rows(self):
         inv = _make_invoice(self.customer, self.currency, status="paid", total_cents=10000)
-        # Update meta after creation
-        Invoice.objects.filter(id=inv.id).update(meta={"refunds": [{"refund_id": "r2", "amount_cents": 1000}]})
-        inv.refresh_from_db()
+        ref = Refund.objects.create(
+            customer=self.customer, invoice=inv, amount_cents=1000, currency=self.currency,
+            original_amount_cents=10000, reference_number=f"REF-{uuid.uuid4().hex[:8]}",
+            reason="customer_request",
+        )
         r = RefundQueryService.get_entity_refunds("invoice", inv.id)
         assert r.is_ok()
+        refunds = r.unwrap()
+        assert any(row.get("id") == str(ref.id) for row in refunds)
 
     def test_get_entity_refunds_with_processed_at(self):
         from django.utils import timezone  # noqa: PLC0415
@@ -1828,3 +1871,128 @@ class TestRefundQueryService(TestCase):
         assert r.is_ok()
         refunds = r.unwrap()
         assert any(ref.get("processed_at") is not None for ref in refunds)
+
+
+# ===========================================================================
+# Migration 0024 — backfill Refund rows from legacy meta["refunds"] JSON
+# ===========================================================================
+class TestBackfillRefundsFromMeta(TestCase):
+    """Test 0024 migration: backfill Refund rows from legacy meta.refunds JSON."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.customer = _make_customer()
+        cls.currency = _make_currency()
+
+    def _forward(self):
+        # Migration modules with a leading digit cannot be imported via a normal
+        # import statement.  importlib handles the dotted path correctly.
+        mod = importlib.import_module("apps.billing.migrations.0024_backfill_refunds_from_meta")
+        mod.backfill_refunds_from_meta(django_apps, None)
+
+    def test_backfill_creates_refund_rows_for_order(self):
+        """Legacy meta.refunds entries on an Order are converted to Refund model rows."""
+        order = _make_order(self.customer, self.currency, status="completed", total_cents=10000)
+        Order.objects.filter(pk=order.pk).update(
+            meta={"refunds": [{"amount_cents": 3000, "reason": "customer_request", "refund_id": "gw_abc123"}]}
+        )
+
+        self._forward()
+
+        refunds = list(Refund.objects.filter(order=order))
+        assert len(refunds) == 1
+        r = refunds[0]
+        assert r.amount_cents == 3000
+        assert r.status == "completed"
+        assert r.refund_type == "partial"
+        assert r.reason == "customer_request"
+        assert r.gateway_refund_id == "gw_abc123"
+        assert r.reference_number.startswith("LEGACY-")
+        assert r.currency == self.currency
+        assert r.original_amount_cents == 10000
+
+        order.refresh_from_db()
+        assert "refunds" not in order.meta
+
+    def test_backfill_creates_refund_rows_for_invoice(self):
+        """Legacy meta.refunds entries on an Invoice are converted to Refund model rows."""
+        inv = _make_invoice(self.customer, self.currency, status="paid", total_cents=8000)
+        Invoice.objects.filter(pk=inv.pk).update(
+            meta={"refunds": [{"amount_cents": 2000, "reason": "dispute"}]}
+        )
+
+        self._forward()
+
+        refunds = list(Refund.objects.filter(invoice=inv))
+        assert len(refunds) == 1
+        assert refunds[0].amount_cents == 2000
+        assert refunds[0].reason == "dispute"
+        assert refunds[0].reference_number.startswith("LEGACY-")
+
+        inv.refresh_from_db()
+        assert "refunds" not in inv.meta
+
+    def test_backfill_dedupes_existing_refunds(self):
+        """If a matching Refund row already exists (same order + amount_cents), no duplicate is created."""
+        order = _make_order(self.customer, self.currency, status="completed", total_cents=10000)
+        Order.objects.filter(pk=order.pk).update(
+            meta={"refunds": [{"amount_cents": 5000, "reason": "customer_request"}]}
+        )
+        Refund.objects.create(
+            customer=self.customer,
+            order=order,
+            amount_cents=5000,
+            currency=self.currency,
+            original_amount_cents=10000,
+            reference_number=f"REF-{uuid.uuid4().hex[:8]}",
+            reason="customer_request",
+        )
+
+        self._forward()
+
+        assert Refund.objects.filter(order=order).count() == 1
+
+    def test_backfill_handles_malformed_meta(self):
+        """Malformed meta.refunds entries (missing amount_cents) are skipped without aborting."""
+        order = _make_order(self.customer, self.currency, status="completed", total_cents=10000)
+        Order.objects.filter(pk=order.pk).update(
+            meta={"refunds": [{"bad": "data", "no_amount": True}]}
+        )
+
+        self._forward()
+
+        assert Refund.objects.filter(order=order).count() == 0
+
+    def test_backfill_handles_non_dict_entry(self):
+        """Non-dict entries inside meta.refunds are skipped without aborting."""
+        order = _make_order(self.customer, self.currency, status="completed", total_cents=10000)
+        Order.objects.filter(pk=order.pk).update(
+            meta={"refunds": ["not-a-dict", 42, None]}
+        )
+
+        self._forward()
+
+        assert Refund.objects.filter(order=order).count() == 0
+
+    def test_backfill_ignores_entities_without_meta_refunds(self):
+        """Orders with no meta.refunds key are untouched."""
+        order = _make_order(self.customer, self.currency, status="completed", total_cents=10000)
+        Order.objects.filter(pk=order.pk).update(meta={"other_key": "value"})
+
+        initial_count = Refund.objects.count()
+        self._forward()
+
+        assert Refund.objects.count() == initial_count
+
+    def test_backfill_reason_fallback_for_invalid_value(self):
+        """An unrecognised reason value is normalised to customer_request."""
+        order = _make_order(self.customer, self.currency, status="completed", total_cents=10000)
+        Order.objects.filter(pk=order.pk).update(
+            meta={"refunds": [{"amount_cents": 1000, "reason": "totally_made_up_reason"}]}
+        )
+
+        self._forward()
+
+        refunds = list(Refund.objects.filter(order=order))
+        assert len(refunds) == 1
+        assert refunds[0].reason == "customer_request"

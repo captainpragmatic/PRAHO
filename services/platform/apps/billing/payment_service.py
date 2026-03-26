@@ -10,7 +10,7 @@ from typing import Any
 
 from django.conf import settings
 from django.db import transaction
-from django_fsm import TransitionNotAllowed
+from django_fsm import ConcurrentTransition, TransitionNotAllowed
 
 from apps.common.validators import log_security_event
 from apps.customers.models import (
@@ -370,7 +370,7 @@ class PaymentService:
             )
 
     @staticmethod
-    def confirm_payment(
+    def confirm_payment(  # noqa: PLR0911  # Early-return guards for ownership + idempotency
         payment_intent_id: str, gateway: str = "stripe", customer_id: str | int | None = None
     ) -> PaymentConfirmResult:
         """
@@ -384,6 +384,32 @@ class PaymentService:
             PaymentConfirmResult with current status
         """
         try:
+            # Ownership check BEFORE gateway call — prevent IDOR where an attacker
+            # confirms someone else's payment intent by guessing the ID.
+            if customer_id is not None:
+                try:
+                    expected_customer_id = int(customer_id)
+                except (TypeError, ValueError):
+                    return PaymentConfirmResult(
+                        success=False,
+                        status="failed",
+                        error="customer_id must be a valid integer",
+                    )
+                try:
+                    pre_check = Payment.objects.only("customer_id").get(gateway_txn_id=payment_intent_id)
+                except Payment.DoesNotExist:
+                    return PaymentConfirmResult(
+                        success=False,
+                        status="failed",
+                        error="Payment not found",
+                    )
+                if pre_check.customer_id != expected_customer_id:
+                    return PaymentConfirmResult(
+                        success=False,
+                        status="failed",
+                        error="Payment does not belong to this customer",
+                    )
+
             payment_gateway = PaymentGatewayFactory.create_gateway(gateway)
             result = payment_gateway.confirm_payment(payment_intent_id)
 
@@ -392,22 +418,6 @@ class PaymentService:
                 try:
                     with transaction.atomic():
                         payment = Payment.objects.select_for_update(of=("self",)).get(gateway_txn_id=payment_intent_id)
-
-                        if customer_id is not None:
-                            try:
-                                expected_customer_id = int(customer_id)
-                            except (TypeError, ValueError):
-                                return PaymentConfirmResult(
-                                    success=False,
-                                    status="failed",
-                                    error="customer_id must be a valid integer",
-                                )
-                            if payment.customer_id != expected_customer_id:
-                                return PaymentConfirmResult(
-                                    success=False,
-                                    status="failed",
-                                    error="Payment does not belong to this customer",
-                                )
 
                         # Idempotency guard — skip if already in terminal state
                         if payment.status in TERMINAL_PAYMENT_STATUSES:
@@ -458,7 +468,7 @@ class PaymentService:
                                             "critical_financial_operation": True,
                                         },
                                     )
-                                except TransitionNotAllowed:
+                                except (TransitionNotAllowed, ConcurrentTransition):
                                     logger.warning(
                                         "⚠️ [PaymentService] confirm_payment: transition %s → %s not allowed "
                                         "for payment %s (already in state %s)",
