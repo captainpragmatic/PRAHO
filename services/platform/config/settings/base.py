@@ -789,3 +789,9 @@ PLATFORM_TO_PORTAL_WEBHOOK_SECRET: str = os.environ.get("PLATFORM_TO_PORTAL_WEBH
 
 # Outbound HTTP: allowed domains for INTERNAL_SERVICE policy (empty = unrestricted)
 INTERNAL_SERVICE_ALLOWED_DOMAINS: list[str] = ["localhost"]
+
+# Portal HMAC bypass for test runners only.
+# Setting this to True in any internet-reachable environment is a critical
+# security vulnerability — _require_customer_auth_for_portal_api will raise
+# ImproperlyConfigured if this is True when neither TESTING nor DEBUG is True.
+PORTAL_HMAC_BYPASS: bool = False

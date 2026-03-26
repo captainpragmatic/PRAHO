@@ -168,6 +168,9 @@ ALLOWED_HOSTS = ["testserver", "localhost", "127.0.0.1"]
 
 # Explicit test flag so views can soften behaviors (e.g., rate limits)
 TESTING = True
+# Allows _require_customer_auth_for_portal_api to bypass HMAC in the test runner.
+# Safe here because TESTING=True — hard-fails if neither TESTING nor DEBUG is True.
+PORTAL_HMAC_BYPASS: bool = True
 
 # Ensure rate limiting is disabled in test environment to prevent race conditions
 configure_rate_limiting(globals(), enabled=False)
