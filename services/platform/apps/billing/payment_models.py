@@ -30,6 +30,9 @@ TERMINAL_PAYMENT_STATUSES: frozenset[str] = frozenset(
         "failed",
         "refunded",
         "partially_refunded",
+        "cancelled",
+        "canceled",
+        "disputed",
     }
 )
 
@@ -68,6 +71,9 @@ class Payment(ConcurrentTransitionMixin, models.Model):
         ("failed", _("Failed")),
         ("refunded", _("Refunded")),
         ("partially_refunded", _("Partially Refunded")),
+        ("cancelled", _("Cancelled")),
+        ("canceled", _("Canceled")),  # Stripe uses US spelling
+        ("disputed", _("Disputed")),
     )
 
     METHOD_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
@@ -143,7 +149,18 @@ class Payment(ConcurrentTransitionMixin, models.Model):
                 name="payment_amount_non_negative",
             ),
             models.CheckConstraint(
-                condition=models.Q(status__in=["pending", "succeeded", "failed", "refunded", "partially_refunded"]),
+                condition=models.Q(
+                    status__in=[
+                        "pending",
+                        "succeeded",
+                        "failed",
+                        "refunded",
+                        "partially_refunded",
+                        "cancelled",
+                        "canceled",
+                        "disputed",
+                    ]
+                ),
                 name="payment_status_valid_values",
             ),
         ]

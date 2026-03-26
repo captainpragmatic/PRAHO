@@ -22,7 +22,6 @@ from rest_framework.throttling import ScopedRateThrottle
 
 from apps.api.secure_auth import public_api_endpoint, require_customer_authentication
 from apps.billing.models import Currency
-from apps.common.request_ip import get_safe_client_ip
 from apps.common.types import CurrencyCode, Err, Ok
 from apps.customers.models import Customer
 from apps.orders.models import Order
@@ -650,11 +649,8 @@ def create_order(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-
 
             if sealed_token:
                 try:
-                    # Get client IP for validation
-                    client_ip = get_safe_client_ip(request)
-
-                    # Unseal and validate token with IP binding
-                    unsealed_data = PriceSealingService.unseal_price(sealed_token, client_ip)
+                    # Unseal and validate token (HMAC signature prevents tampering)
+                    unsealed_data = PriceSealingService.unseal_price(sealed_token)
                     validated_data_result = PriceSealingService.validate_price_against_database(
                         unsealed_data, expected_product_price_id=price.id
                     )

@@ -35,7 +35,7 @@ class PriceData(TypedDict):
 
 
 # Security constants
-PRICE_SEAL_TTL_SECONDS = 60  # 🔒 SECURITY: 1 minute window - prices must be used within this tight window
+PRICE_SEAL_TTL_SECONDS = 900  # 🔒 SECURITY: 15 minute window — allows browse→cart→checkout flow (#126)
 HMAC_ALGORITHM = "sha256"
 
 # Module-level flag to emit the dev-mode warning only once per process (B4/BUG-9)
@@ -126,19 +126,18 @@ class PriceSealingService:
         return sealed_token
 
     @staticmethod
-    def unseal_price(sealed_token: str, client_ip: str) -> dict[str, Any]:
+    def unseal_price(sealed_token: str) -> dict[str, Any]:
         """
         🔒 Validate and extract price data from a sealed token.
 
         Args:
             sealed_token: The sealed price token to validate
-            client_ip: Client IP address to validate against token binding
 
         Returns:
             Dictionary containing price data if valid
 
         Raises:
-            ValidationError: If token is invalid, expired, tampered with, or IP mismatch
+            ValidationError: If token is invalid, expired, or tampered with
         """
         try:
             # Split token into payload and signature
@@ -181,10 +180,8 @@ class PriceSealingService:
                 if field not in price_data:
                     raise ValidationError(_("Missing required field in price token: %(field)s") % {"field": field})
 
-            # 🔒 SECURITY: Validate IP address binding
-            token_ip = price_data.get("client_ip", "")
-            if token_ip != client_ip:
-                raise ValidationError(_("Price token IP address mismatch - token not valid for this client"))
+            # IP binding removed (#126): HMAC signature already prevents tampering,
+            # and IP binding blocks mobile users behind rotating IPs and corporate proxies.
 
             return price_data
 
