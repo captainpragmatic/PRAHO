@@ -8,11 +8,8 @@ from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ImproperlyConfigured, PermissionDenied, ValidationError
-from django.http import JsonResponse
-from django.test import RequestFactory, TestCase
-from django.core.exceptions import PermissionDenied, ValidationError
-from django.http import HttpResponseForbidden
-from django.test import Client, TestCase
+from django.http import HttpResponseForbidden, JsonResponse
+from django.test import Client, RequestFactory, TestCase
 from django.utils import timezone
 
 from apps.audit.models import AuditEvent
