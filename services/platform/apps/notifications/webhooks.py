@@ -25,7 +25,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from cryptography.x509 import load_pem_x509_certificate
 from django.conf import settings
 from django.http import HttpRequest, HttpResponse, JsonResponse
@@ -230,7 +230,11 @@ class SESWebhookView(View):
             cert = load_pem_x509_certificate(cert_response.content)
             signature = base64.b64decode(signature_b64)
 
-            cert.public_key().verify(
+            public_key = cert.public_key()
+            if not isinstance(public_key, rsa.RSAPublicKey):
+                logger.warning("SES webhook: unexpected public key type %s", type(public_key).__name__)
+                return False
+            public_key.verify(
                 signature,
                 canonical_message.encode("utf-8"),
                 padding.PKCS1v15(),
