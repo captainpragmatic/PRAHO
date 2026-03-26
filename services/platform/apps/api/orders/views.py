@@ -1002,6 +1002,9 @@ def confirm_order(request: Request, customer: Customer, order_id: str) -> Respon
             order_number_for_log = order.order_number
             order_total_cents = order.total_cents
         # Phase 1 transaction ends here — DB lock released before any network call.
+        # C2: The gap between Phase 1 and Phase 3 is safe because Phase 3 re-acquires
+        # the lock and OrderPaymentConfirmationService.confirm_order() is idempotent.
+        # See tests/orders/test_confirm_order_concurrency.py for proof.
 
         # CRITICAL GUARD: This endpoint requires a valid Stripe PaymentIntent.
         # Without a PI, there is no payment to verify — reject ALL orders without one.

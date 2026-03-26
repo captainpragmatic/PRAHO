@@ -24,6 +24,9 @@ from .gateways.base import PaymentConfirmResult, PaymentIntentResult, Subscripti
 from .models import Payment
 from .payment_models import TERMINAL_PAYMENT_STATUSES
 
+# Order statuses that permit a new payment intent to be created (H18).
+_PAYABLE_ORDER_STATUSES: frozenset[str] = frozenset({"draft", "awaiting_payment"})
+
 # Maps internal payment status names to the FSM transition method names on Payment.
 _PAYMENT_TRANSITION_MAP: dict[str, str] = {
     "succeeded": "succeed",
@@ -159,7 +162,7 @@ class PaymentService:
             )
 
     @staticmethod
-    def create_payment_intent_direct(  # payment processing fields  # noqa: PLR0913  # Business logic parameters
+    def create_payment_intent_direct(  # payment processing fields  # noqa: PLR0913, PLR0911  # Business logic parameters
         order_id: str,
         amount_cents: int | None = None,
         currency: str = "RON",
@@ -215,6 +218,15 @@ class PaymentService:
                     error="Order not found for this customer",
                 )
 
+            # H18: Only allow payment intent creation for orders in a payable state.
+            if order.status not in _PAYABLE_ORDER_STATUSES:
+                return PaymentIntentResult(
+                    success=False,
+                    payment_intent_id="",
+                    client_secret=None,
+                    error=f"Order status '{order.status}' is not eligible for payment",
+                )
+
             expected_amount_cents = int(order.total_cents)
             if amount_cents is not None and int(amount_cents) != expected_amount_cents:
                 return PaymentIntentResult(
@@ -222,6 +234,34 @@ class PaymentService:
                     payment_intent_id="",
                     client_secret=None,
                     error="amount_cents does not match order total",
+                )
+
+            # H19: Idempotency — return the existing pending payment intent if one
+            # already exists for this order, preventing duplicate gateway calls.
+            existing_payment = (
+                Payment.objects.filter(
+                    customer_id=customer_id_int,
+                    status="pending",
+                )
+                .order_by("-created_at")
+                .first()
+            )
+
+            if (
+                existing_payment is not None
+                and existing_payment.meta
+                and existing_payment.meta.get("order_id") == str(order.id)
+            ):
+                logger.info(
+                    "♻️ [PaymentService] Returning existing pending payment %s for order %s",
+                    existing_payment.id,
+                    order.id,
+                )
+                return PaymentIntentResult(
+                    success=True,
+                    payment_intent_id=existing_payment.gateway_txn_id or "",
+                    client_secret=existing_payment.meta.get("client_secret"),
+                    error=None,
                 )
 
             resolved_currency = (order.currency.code if order.currency else None) or currency or "RON"

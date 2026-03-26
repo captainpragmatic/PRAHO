@@ -198,11 +198,25 @@ class Invoice(models.Model):
     def __str__(self) -> str:
         return f"{self.number} - {self.customer}"
 
+    # Fields frozen once invoice is locked (issued).
+    _FINANCIAL_FIELDS: ClassVar[frozenset[str]] = frozenset(
+        {
+            "total_cents",
+            "subtotal_cents",
+            "tax_cents",
+        }
+    )
+
     def save(self, *args: Any, **kwargs: Any) -> None:
         """Calculate subtotal from total and tax on save with validation"""
-        # Call clean to trigger validation
-        self.clean()
+        update_fields = kwargs.get("update_fields")
+        # H2 fix: Skip clean() when update_fields contains no financial fields.
+        # This avoids the immutability DB query on status/meta-only saves.
+        if update_fields and not (set(update_fields) & self._FINANCIAL_FIELDS):
+            super().save(*args, **kwargs)
+            return
 
+        self.clean()
         if self.total_cents and self.tax_cents:
             self.subtotal_cents = self.total_cents - self.tax_cents
         super().save(*args, **kwargs)

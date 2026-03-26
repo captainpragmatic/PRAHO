@@ -171,6 +171,9 @@
     </div>
 </div>
 
+{{ providers_data|json_script:"providers-data" }}
+{{ regions_data|json_script:"regions-data" }}
+{{ sizes_data|json_script:"sizes-data" }}
 <script>
 function deploymentForm() {
     return {
@@ -181,11 +184,11 @@ function deploymentForm() {
         nodeSize: '',
         hostname: '',
         fqdn: '',
-        dnsZone: '{{ dns_zone }}',
+        dnsZone: '{{ dns_zone|escapejs }}',
 
-        regions: {{ regions_json|safe }},
-        sizes: {{ sizes_json|safe }},
-        providers: {{ providers_json|safe }},
+        regions: JSON.parse(document.getElementById('regions-data').textContent),
+        sizes: JSON.parse(document.getElementById('sizes-data').textContent),
+        providers: JSON.parse(document.getElementById('providers-data').textContent),
 
         get filteredRegions() {
             if (!this.provider) return [];

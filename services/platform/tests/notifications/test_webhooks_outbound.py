@@ -5,14 +5,19 @@ from __future__ import annotations
 import json
 from unittest.mock import MagicMock, patch
 
-from django.test import RequestFactory, TestCase
+from django.test import RequestFactory, TestCase, override_settings
 
 from apps.common.outbound_http import OutboundSecurityError
 from apps.notifications.webhooks import SESWebhookView
 
 
 class SNSConfirmationOutboundTests(TestCase):
-    """Verify SNS subscription confirmation uses safe_request() with SNS policy."""
+    """Verify SNS subscription confirmation uses safe_request() with SNS policy.
+
+    These tests focus on SSRF protection in _handle_subscription_confirmation and
+    run in DEBUG=True mode so that SNS signature verification is bypassed — the
+    signature check is tested separately in test_ses_webhook_signature.py.
+    """
 
     def setUp(self) -> None:
         self.factory = RequestFactory()
@@ -30,6 +35,7 @@ class SNSConfirmationOutboundTests(TestCase):
             content_type="application/json",
         )
 
+    @override_settings(DEBUG=True)
     @patch("apps.notifications.webhooks.safe_request")
     def test_uses_safe_request_for_confirmation(self, mock_safe_request: MagicMock) -> None:
         """SNS confirmation must use safe_request() not raw requests.get()."""
@@ -46,6 +52,7 @@ class SNSConfirmationOutboundTests(TestCase):
         self.assertEqual(call_args[0][0], "GET")
         self.assertEqual(call_args[0][1], url)
 
+    @override_settings(DEBUG=True)
     @patch("apps.notifications.webhooks.safe_request")
     def test_sns_policy_allows_amazonaws(self, mock_safe_request: MagicMock) -> None:
         """SNS policy should allow amazonaws.com domains."""
@@ -60,6 +67,7 @@ class SNSConfirmationOutboundTests(TestCase):
         if policy is not None:
             self.assertIn("amazonaws.com", policy.allowed_domains)
 
+    @override_settings(DEBUG=True)
     @patch("apps.notifications.webhooks.safe_request")
     def test_non_aws_domain_rejected(self, mock_safe_request: MagicMock) -> None:
         """Non-AWS domains should be rejected by the policy."""

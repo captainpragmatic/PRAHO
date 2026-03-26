@@ -93,8 +93,21 @@ class Order(ConcurrentTransitionMixin, models.Model):
         "shipping_postal_code",
         "shipping_country",
     ]
+    # Safe draft fields: contact/address snapshots, notes, payment method, delivery,
+    # source tracking, and metadata. Financial fields (totals, currency, payment IDs)
+    # are intentionally excluded — they are derived/set by the order service only.
+    _SAFE_DRAFT_FIELDS: ClassVar[list[str]] = [
+        *_SAFE_CONTACT_FIELDS,
+        *_SAFE_DELIVERY_FIELDS,
+        "payment_method",
+        "utm_source",
+        "utm_medium",
+        "utm_campaign",
+        "referrer",
+        "meta",
+    ]
     EDITABLE_FIELDS_BY_STATUS: ClassVar[dict[str, list[str]]] = {
-        "draft": ["*"],  # Everything editable (pre-payment)
+        "draft": _SAFE_DRAFT_FIELDS,  # Safe fields only — financial fields are service-managed
         "awaiting_payment": [*_SAFE_CONTACT_FIELDS, *_SAFE_DELIVERY_FIELDS],  # No financial fields
         "paid": ["notes", *_SAFE_DELIVERY_FIELDS],  # Delivery and notes only
         "in_review": ["notes"],  # Only notes while under review

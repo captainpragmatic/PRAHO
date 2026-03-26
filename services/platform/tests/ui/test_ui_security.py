@@ -3,9 +3,11 @@
 Tests all security enhancements implemented for the UI components.
 """
 
+from pathlib import Path
+
 from django.contrib.auth import get_user_model
 from django.template import Context, Template
-from django.test import TestCase, override_settings
+from django.test import SimpleTestCase, TestCase, override_settings
 from django.utils.html import escape
 
 from apps.ui.templatetags.ui_components import button, icon
@@ -288,3 +290,21 @@ class CORSSecurityTests(TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertIn("Access-Control-Allow-Methods", response)
+
+
+"""H5: table_enhanced must escape click_url in onclick handlers."""
+
+
+class TableEnhancedXSSTests(SimpleTestCase):
+    """H5: click_url must use |escapejs, click_js must not be raw in onclick."""
+
+    def test_click_url_uses_escapejs(self):
+        template_path = Path(__file__).resolve().parents[2] / "templates/components/table_enhanced.html"
+        content = template_path.read_text()
+        self.assertIn("click_url|escapejs", content)
+        self.assertNotIn("window.location.href='{{ row.click_url }}'", content)
+
+    def test_click_js_not_raw_in_onclick(self):
+        template_path = Path(__file__).resolve().parents[2] / "templates/components/table_enhanced.html"
+        content = template_path.read_text()
+        self.assertNotIn('onclick="{{ row.click_js }}"', content)

@@ -106,7 +106,11 @@ def _log_billing_model_event(  # Django signal parameters  # noqa: PLR0913  # Bu
 ) -> None:
     """Log a lightweight lifecycle audit event for billing models."""
     if getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
-        return
+        if getattr(settings, "TESTING", False):
+            return
+        logger.critical(
+            "DISABLE_AUDIT_SIGNALS is set outside of TESTING context — ignoring flag and continuing audit for safety"
+        )
 
     try:
         event_metadata = {
@@ -358,7 +362,14 @@ def handle_invoice_created_or_updated(sender: type[Invoice], instance: Invoice, 
             }
         )
 
-        if not getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
+        _disable_flag = getattr(settings, "DISABLE_AUDIT_SIGNALS", False)
+        _in_testing = getattr(settings, "TESTING", False)
+        if _disable_flag and not _in_testing:
+            logger.critical(
+                "DISABLE_AUDIT_SIGNALS is set outside of TESTING context — "
+                "ignoring flag and continuing audit for safety"
+            )
+        if not _disable_flag or not _in_testing:
             # Use specialized billing audit service for richer metadata
             from apps.audit.services import BusinessEventData
 
@@ -520,7 +531,14 @@ def handle_payment_created_or_updated(sender: type[Payment], instance: Payment, 
         )
 
         # Enhanced payment audit logging
-        if not getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
+        _disable_flag = getattr(settings, "DISABLE_AUDIT_SIGNALS", False)
+        _in_testing = getattr(settings, "TESTING", False)
+        if _disable_flag and not _in_testing:
+            logger.critical(
+                "DISABLE_AUDIT_SIGNALS is set outside of TESTING context — "
+                "ignoring flag and continuing audit for safety"
+            )
+        if not _disable_flag or not _in_testing:
             # Determine specific event type based on status change
             audit_event_type = "payment_initiated" if created else f"payment_{instance.status}"
 

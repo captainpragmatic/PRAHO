@@ -8,9 +8,11 @@ from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.test import TestCase
+from django.http import HttpResponseForbidden
+from django.test import Client, TestCase
 from django.utils import timezone
 
+from apps.audit.models import AuditEvent
 from apps.billing.models import (
     Currency,
     Invoice,
@@ -24,6 +26,7 @@ from apps.billing.models import (
 from apps.billing.security import sanitize_financial_input, validate_efactura_url, validate_external_api_url
 from apps.billing.views import _validate_financial_document_access
 from apps.customers.models import Customer
+from apps.users.models import CustomerMembership
 
 User = get_user_model()
 
@@ -340,7 +343,6 @@ class BillingAccessControlTests(TestCase):
         self.unauthorized_user.can_access_customer = lambda customer: False
 
         result = _validate_financial_document_access(self.unauthorized_request, self.invoice, 'download')
-        from django.http import HttpResponseForbidden
         self.assertIsInstance(result, HttpResponseForbidden)
 
         # Should log access denial
@@ -360,7 +362,6 @@ class BillingAccessControlTests(TestCase):
         unauthenticated_request = MockUnauthenticatedRequest()
 
         result = _validate_financial_document_access(unauthenticated_request, self.invoice, 'view')
-        from django.http import HttpResponseForbidden
         self.assertIsInstance(result, HttpResponseForbidden)
 
         # Should log unauthenticated access attempt
@@ -472,8 +473,6 @@ class BillingSecurityLoggingTests(TestCase):
 
     def test_security_event_logging_format(self):
         """🔒 Test that security events create audit trail entries"""
-        from apps.audit.models import AuditEvent
-
         initial_count = AuditEvent.objects.count()
 
         log_security_event(
@@ -521,3 +520,48 @@ class BillingSecurityLoggingTests(TestCase):
         call_args = mock_log.call_args[1]
         self.assertEqual(call_args['event_type'], 'proforma_validation')
         self.assertTrue(call_args['details']['validation_passed'])
+
+
+class ProformaListIDORTests(TestCase):
+    """H1: proforma_list must enforce billing-staff scoping, not expose all proformas."""
+
+    def setUp(self) -> None:
+        self.client = Client()
+        self.currency, _ = Currency.objects.get_or_create(
+            code="RON", defaults={"name": "Romanian Leu", "symbol": "lei", "decimals": 2}
+        )
+        self.customer_a = Customer.objects.create(
+            customer_type="company", company_name="Company A SRL",
+            primary_email="a@test.ro", status="active",
+        )
+        self.customer_b = Customer.objects.create(
+            customer_type="company", company_name="Company B SRL",
+            primary_email="b@test.ro", status="active",
+        )
+        self.staff_a = User.objects.create_user(
+            email="staff_a@test.ro", password="TestPass123!",
+            is_staff=True, staff_role="billing",
+        )
+        CustomerMembership.objects.create(user=self.staff_a, customer=self.customer_a, role="billing")
+        self.regular_user = User.objects.create_user(
+            email="regular@test.ro", password="TestPass123!",
+        )
+        self.proforma_a = ProformaInvoice.objects.create(
+            customer=self.customer_a, currency=self.currency,
+            total_cents=10000, number="PRO-A-001",
+        )
+        self.proforma_b = ProformaInvoice.objects.create(
+            customer=self.customer_b, currency=self.currency,
+            total_cents=20000, number="PRO-B-001",
+        )
+
+    def test_non_staff_user_rejected(self) -> None:
+        self.client.force_login(self.regular_user)
+        response = self.client.get("/billing/proformas/")
+        self.assertIn(response.status_code, [302, 403])
+
+    def test_staff_a_cannot_see_customer_b_proformas(self) -> None:
+        self.client.force_login(self.staff_a)
+        response = self.client.get("/billing/proformas/")
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "PRO-B-001")

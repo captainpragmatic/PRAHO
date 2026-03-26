@@ -409,7 +409,7 @@ def billing_list(request: HttpRequest) -> HttpResponse:
         return render(request, "billing/billing_list.html", context)
 
 
-@login_required
+@billing_staff_required
 def proforma_list(request: HttpRequest) -> HttpResponse:
     """
     🧾 Display list of proformas only (Romanian business practice)
@@ -419,8 +419,7 @@ def proforma_list(request: HttpRequest) -> HttpResponse:
         return redirect("users:login")
 
     try:
-        # Staff can access all customers
-        customer_ids = list(Customer.objects.values_list("id", flat=True))
+        customer_ids = _get_accessible_customer_ids(request.user)
 
         # ✅ Get search context for template
         search_context = get_search_context(request, "search")

@@ -264,46 +264,108 @@ document.addEventListener('DOMContentLoaded', function() {
 
             if (data.success) {
                 if (data.available) {
-                    searchResults.innerHTML = `
-                        <div class="border border-green-200 dark:border-green-700 rounded-lg p-4 bg-green-50 dark:bg-green-900/20">
-                            <div class="flex items-center justify-between">
-                                <div>
-                                    <h3 class="font-mono text-lg font-bold text-slate-900 dark:text-white">${data.domain_name}</h3>
-                                    <p class="text-sm text-green-600 dark:text-green-400">{% icon "check" %} {% trans "Available for registration" %}</p>
-                                    <p class="text-sm text-slate-500 dark:text-slate-400">${data.registrar}</p>
-                                </div>
-                                <div class="text-right">
-                                    <p class="text-lg font-bold text-slate-900 dark:text-white">${(data.pricing['1_year'].total_cost_cents / 100).toFixed(2)} RON</p>
-                                    <button
-                                        type="button"
-                                        onclick="selectDomain('${data.domain_name}', ${data.pricing['1_year'].total_cost_cents})"
-                                        class="mt-2 inline-flex items-center px-3 py-1 border border-transparent text-xs font-medium rounded text-white bg-green-600 hover:bg-green-700"
-                                    >
-                                        {% trans "Select" %}
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    `;
+                    // C1 fix: build DOM imperatively — no innerHTML with API response data
+                    const outerDiv = document.createElement('div');
+                    outerDiv.className = 'border border-green-200 dark:border-green-700 rounded-lg p-4 bg-green-50 dark:bg-green-900/20';
+
+                    const rowDiv = document.createElement('div');
+                    rowDiv.className = 'flex items-center justify-between';
+
+                    const infoDiv = document.createElement('div');
+
+                    const nameEl = document.createElement('h3');
+                    nameEl.className = 'font-mono text-lg font-bold text-slate-900 dark:text-white';
+                    nameEl.textContent = data.domain_name;
+
+                    const availableEl = document.createElement('p');
+                    availableEl.className = 'text-sm text-green-600 dark:text-green-400';
+                    // Django-rendered static icon — no user data
+                    availableEl.innerHTML = '{% icon "check" %} {% trans "Available for registration" %}';
+
+                    const registrarEl = document.createElement('p');
+                    registrarEl.className = 'text-sm text-slate-500 dark:text-slate-400';
+                    registrarEl.textContent = data.registrar;
+
+                    infoDiv.appendChild(nameEl);
+                    infoDiv.appendChild(availableEl);
+                    infoDiv.appendChild(registrarEl);
+
+                    const actionDiv = document.createElement('div');
+                    actionDiv.className = 'text-right';
+
+                    const priceEl = document.createElement('p');
+                    priceEl.className = 'text-lg font-bold text-slate-900 dark:text-white';
+                    priceEl.textContent = (data.pricing['1_year'].total_cost_cents / 100).toFixed(2) + ' RON';
+
+                    const selectBtn = document.createElement('button');
+                    selectBtn.type = 'button';
+                    selectBtn.className = 'mt-2 inline-flex items-center px-3 py-1 border border-transparent text-xs font-medium rounded text-white bg-green-600 hover:bg-green-700';
+                    selectBtn.textContent = '{% trans "Select" %}';
+                    // Use data attributes and an event listener — no inline onclick with interpolated values
+                    selectBtn.dataset.domain = data.domain_name;
+                    selectBtn.dataset.costCents = String(data.pricing['1_year'].total_cost_cents);
+                    selectBtn.addEventListener('click', function() {
+                        selectDomain(this.dataset.domain, parseInt(this.dataset.costCents, 10));
+                    });
+
+                    actionDiv.appendChild(priceEl);
+                    actionDiv.appendChild(selectBtn);
+
+                    rowDiv.appendChild(infoDiv);
+                    rowDiv.appendChild(actionDiv);
+                    outerDiv.appendChild(rowDiv);
+
+                    searchResults.innerHTML = '';
+                    searchResults.appendChild(outerDiv);
                 } else {
-                    searchResults.innerHTML = `
-                        <div class="border border-red-200 dark:border-red-700 rounded-lg p-4 bg-red-50 dark:bg-red-900/20">
-                            <div class="flex items-center">
-                                <span class="text-red-600 dark:text-red-400 mr-3">{% icon "x" %}</span>
-                                <div>
-                                    <h3 class="font-mono text-lg font-bold text-slate-900 dark:text-white">${data.domain_name}</h3>
-                                    <p class="text-sm text-red-600 dark:text-red-400">${data.message}</p>
-                                </div>
-                            </div>
-                        </div>
-                    `;
+                    // C1 fix: build DOM imperatively — no innerHTML with API response data
+                    const outerDiv = document.createElement('div');
+                    outerDiv.className = 'border border-red-200 dark:border-red-700 rounded-lg p-4 bg-red-50 dark:bg-red-900/20';
+
+                    const rowDiv = document.createElement('div');
+                    rowDiv.className = 'flex items-center';
+
+                    const iconSpan = document.createElement('span');
+                    iconSpan.className = 'text-red-600 dark:text-red-400 mr-3';
+                    // Django-rendered static icon — no user data
+                    iconSpan.innerHTML = '{% icon "x" %}';
+
+                    const textDiv = document.createElement('div');
+
+                    const nameEl = document.createElement('h3');
+                    nameEl.className = 'font-mono text-lg font-bold text-slate-900 dark:text-white';
+                    nameEl.textContent = data.domain_name;
+
+                    const msgEl = document.createElement('p');
+                    msgEl.className = 'text-sm text-red-600 dark:text-red-400';
+                    msgEl.textContent = data.message;
+
+                    textDiv.appendChild(nameEl);
+                    textDiv.appendChild(msgEl);
+
+                    rowDiv.appendChild(iconSpan);
+                    rowDiv.appendChild(textDiv);
+                    outerDiv.appendChild(rowDiv);
+
+                    searchResults.innerHTML = '';
+                    searchResults.appendChild(outerDiv);
                 }
             } else {
-                searchResults.innerHTML = `
-                    <div class="border border-red-200 dark:border-red-700 rounded-lg p-4 bg-red-50 dark:bg-red-900/20">
-                        <p class="text-red-600 dark:text-red-400">{% icon "x" %} ${data.error}</p>
-                    </div>
-                `;
+                // C1 fix: build DOM imperatively — no innerHTML with API response data
+                const outerDiv = document.createElement('div');
+                outerDiv.className = 'border border-red-200 dark:border-red-700 rounded-lg p-4 bg-red-50 dark:bg-red-900/20';
+
+                const errEl = document.createElement('p');
+                errEl.className = 'text-red-600 dark:text-red-400';
+                // Django-rendered static icon prefix — no user data
+                errEl.innerHTML = '{% icon "x" %} ';
+                // Append user-controlled error text as a safe text node
+                errEl.appendChild(document.createTextNode(data.error));
+
+                outerDiv.appendChild(errEl);
+
+                searchResults.innerHTML = '';
+                searchResults.appendChild(outerDiv);
             }
         } catch (error) {
             searchResults.innerHTML = `

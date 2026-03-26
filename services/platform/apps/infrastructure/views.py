@@ -4,7 +4,6 @@ Infrastructure Views
 Staff interface for managing node deployments, providers, and configurations.
 """
 
-import json
 import logging
 from datetime import datetime
 from decimal import Decimal
@@ -356,9 +355,9 @@ def deployment_create(request: HttpRequest) -> HttpResponse:
         "page_title": "Deploy New Node",
         "breadcrumb_items": breadcrumb_items,
         "form": form,
-        "providers_json": json.dumps(providers),
-        "regions_json": json.dumps(regions),
-        "sizes_json": json.dumps(sizes, default=str),
+        "providers_data": providers,
+        "regions_data": regions,
+        "sizes_data": sizes,
         "dns_zone": SettingsService.get_setting("node_deployment.dns_default_zone", ""),
         "form_action": reverse("infrastructure:deployment_create"),
         "cancel_url": reverse("infrastructure:deployment_list"),

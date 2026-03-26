@@ -27,7 +27,6 @@ urlpatterns = [
     # Export/Import endpoints (must come before generic patterns)
     path("api/export/", views.export_settings, name="export_settings"),
     path("api/export/full/", views.export_settings_full, name="export_settings_full"),
-    path("api/export/test/", views.test_export, name="test_export"),
     path("api/import/", views.import_settings, name="import_settings"),
     # Settings CRUD API
     path("api/", views.SettingsAPIView.as_view(), name="settings_api"),

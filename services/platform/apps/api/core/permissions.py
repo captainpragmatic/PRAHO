@@ -22,7 +22,6 @@ class IsAuthenticatedAndAccessible(permissions.BasePermission):
     def has_object_permission(self, request: HttpRequest, view: Any, obj: Any) -> bool:
         """
         Check object-level permissions using PRAHO's customer access system.
-        This will be customized per domain (customer, billing, tickets).
+        Defaults to deny — subclasses must override for detail-endpoint access.
         """
-        # Default implementation - can be overridden by specific viewsets
-        return True
+        return False
