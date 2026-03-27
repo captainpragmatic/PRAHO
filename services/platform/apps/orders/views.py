@@ -202,6 +202,7 @@ def _get_vat_rate_for_customer(customer: Customer) -> Decimal:
             try:
                 tp = customer.tax_profile
                 vat_number = getattr(tp, "vat_number", "") or ""
+                is_business = is_business or getattr(tp, "is_vat_payer", False)
             except Exception:  # noqa: S110
                 pass  # No tax profile — use defaults
 
@@ -212,6 +213,16 @@ def _get_vat_rate_for_customer(customer: Customer) -> Decimal:
             "customer_id": str(customer.id),
             "order_id": None,
         }
+        # Include per-customer overrides from tax profile if available
+        if hasattr(customer, "tax_profile"):
+            try:
+                tp = customer.tax_profile
+                if hasattr(tp, "is_vat_payer") and tp.is_vat_payer is not None:
+                    info["is_vat_payer"] = tp.is_vat_payer
+                if hasattr(tp, "custom_vat_rate") and tp.custom_vat_rate is not None:
+                    info["custom_vat_rate"] = tp.custom_vat_rate
+            except Exception:  # noqa: S110
+                pass
         # Use 10000 (100.00) as dummy subtotal — we only need the rate
         result = OrderVATCalculator.calculate_vat(subtotal_cents=10000, customer_info=info)
         return (result.vat_rate / Decimal("100")).quantize(Decimal("0.0001"))
