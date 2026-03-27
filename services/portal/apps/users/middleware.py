@@ -303,8 +303,11 @@ class PortalAuthenticationMiddleware:
             # Fail-open with circuit breaker (#130/M1): allow access during API outages
             # but force logout after too many consecutive fail-opens for same user.
             fail_open_key = f"auth:fail_open:{user_id}"
-            fail_count = cache.get(fail_open_key, 0) + 1
-            cache.set(fail_open_key, fail_count, timeout=3600)  # 1h window
+            try:
+                fail_count = cache.incr(fail_open_key)
+            except ValueError:
+                cache.set(fail_open_key, 1, timeout=3600)  # 1h window
+                fail_count = 1
 
             if fail_count >= _MAX_FAIL_OPEN_COUNT:
                 logger.warning(

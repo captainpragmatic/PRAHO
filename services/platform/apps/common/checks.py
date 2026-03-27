@@ -545,7 +545,7 @@ def check_csp_nonce_middleware_order(app_configs: Any, **kwargs: Any) -> list[Er
             DjangoWarning(
                 "CSPNonceMiddleware is not in MIDDLEWARE — CSP nonces will be empty strings",
                 hint=f"Add '{csp_path}' to MIDDLEWARE before SecurityHeadersMiddleware",
-                id="security.W060",
+                id="security.W061",
             )
         )
     elif sec_idx != -1 and csp_idx > sec_idx:
@@ -553,7 +553,7 @@ def check_csp_nonce_middleware_order(app_configs: Any, **kwargs: Any) -> list[Er
             Error(
                 "CSPNonceMiddleware must appear before SecurityHeadersMiddleware in MIDDLEWARE",
                 hint="Move CSPNonceMiddleware above SecurityHeadersMiddleware so the nonce is set before CSP headers are written",
-                id="security.E060",
+                id="security.E061",
             )
         )
 

@@ -250,31 +250,21 @@ class RegistrarWebhookView(View):
     def _handle_domain_renewed(self, domain: Domain, webhook_data: dict[str, Any], client_ip: str) -> tuple[bool, str]:
         """🔄 Handle domain renewal notification"""
         try:
-            # Update expiration date
-            expires_at = webhook_data.get("expires_at")
-            if expires_at:
-                try:
-                    domain.expires_at = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
-                    domain.renewal_notices_sent = 0  # Reset renewal notices
-                    domain.save()
+            self._apply_webhook_domain_fields(domain, webhook_data)
+            domain.renewal_notices_sent = 0  # Reset renewal notices
+            domain.save()
 
-                    # Log audit event
-                    DomainsAuditService.log_domain_event(
-                        event_type="domain_renewed_webhook",
-                        domain=domain,
-                        user=None,
-                        context=AuditContext(actor_type="system", ip_address=client_ip),
-                        description=f"Domain renewal processed via webhook from {domain.registrar.name}",
-                    )
+            # Log audit event
+            DomainsAuditService.log_domain_event(
+                event_type="domain_renewed_webhook",
+                domain=domain,
+                user=None,
+                context=AuditContext(actor_type="system", ip_address=client_ip),
+                description=f"Domain renewal processed via webhook from {domain.registrar.name}",
+            )
 
-                    logger.info(f"🔄 [Webhook] Domain renewed: {domain.name} expires {domain.expires_at}")
-                    return True, "Domain renewal processed successfully"
-
-                except ValueError as e:
-                    logger.warning(f"⚠️ [Webhook] Invalid expires_at format: {expires_at}")
-                    return False, f"Invalid expiration date format: {e}"
-            else:
-                return False, "Missing expires_at in renewal webhook"
+            logger.info(f"🔄 [Webhook] Domain renewed: {domain.name} expires {domain.expires_at}")
+            return True, "Domain renewal processed successfully"
 
         except Exception as e:
             logger.error(f"🔥 [Webhook] Failed to process domain renewal: {e}")
@@ -295,11 +285,7 @@ class RegistrarWebhookView(View):
                     logger.warning(f"⚠️ [Webhook] Cannot activate domain {domain.name} from status '{domain.status}'")
                     return False, f"Domain {domain.name} cannot transition from '{domain.status}' to active"
 
-            # Update registrar domain ID and EPP code if provided
-            if "registrar_domain_id" in webhook_data:
-                domain.registrar_domain_id = webhook_data["registrar_domain_id"]
-            if "epp_code" in webhook_data:
-                domain.set_encrypted_epp_code(webhook_data["epp_code"])
+            self._apply_webhook_domain_fields(domain, webhook_data)
 
             try:
                 domain.save()
