@@ -46,12 +46,42 @@ INVOICE_TYPE_COMMERCIAL = "380"  # Commercial invoice
 INVOICE_TYPE_CREDIT_NOTE = "381"  # Credit note
 INVOICE_TYPE_DEBIT_NOTE = "383"  # Debit note
 
+# Payment means codes (UNCL4461)
+PAYMENT_MEANS_CODES: dict[str, str] = {
+    "bank": "30",  # Credit transfer
+    "stripe": "48",  # Bank card payment
+    "card": "48",  # Bank card payment
+    "paypal": "68",  # Online payment service
+    "direct_debit": "49",  # Direct debit
+    "cash": "10",  # Cash
+    "other": "30",  # Default to credit transfer
+}
+
 # Tax category codes (UNCL5305)
 TAX_CATEGORY_STANDARD = "S"  # Standard rate
 TAX_CATEGORY_ZERO = "Z"  # Zero rated
 TAX_CATEGORY_EXEMPT = "E"  # Exempt
 TAX_CATEGORY_REVERSE_CHARGE = "AE"  # Reverse charge
+TAX_CATEGORY_INTRA_COMMUNITY = "K"  # Intra-community supply
 TAX_CATEGORY_NOT_SUBJECT = "O"  # Not subject to VAT
+
+# EN16931 BT-121: Tax exemption reason text
+TAX_EXEMPTION_REASONS: dict[str, str] = {
+    "AE": "Reverse charge — Art. 196 Council Directive 2006/112/EC",
+    "E": "Exempt from tax",
+    "K": "Intra-community supply — Art. 138 Council Directive 2006/112/EC",
+    "O": "Not subject to VAT",
+    "Z": "Zero rated goods",
+}
+
+# EN16931 BT-121: Tax exemption reason codes (VATEX codelist)
+TAX_EXEMPTION_REASON_CODES: dict[str, str] = {
+    "AE": "VATEX-EU-AE",
+    "E": "VATEX-EU-E",
+    "K": "VATEX-EU-IC",
+    "O": "VATEX-EU-O",
+    "Z": "VATEX-EU-Z",
+}
 
 # Unit codes (UN/ECE Recommendation 20)
 UNIT_CODE_PIECE = "C62"  # One (piece)
@@ -225,10 +255,26 @@ class BaseUBLBuilder:
         return f"{Decimal(str(percent)):.2f}"
 
     def _get_tax_category(self) -> str:
-        """Determine tax category code based on invoice."""
-        # Check for reverse charge (B2B EU)
+        """Determine tax category code based on invoice.
+
+        Checks line-level tax_category_code first (frozen at invoice creation),
+        then derives from customer location and tax amounts.
+        """
+        # Check if lines have an explicitly set (non-default) tax category
+        lines = getattr(self.invoice, "lines", None)
+        if lines is not None:
+            first_line = lines.first() if hasattr(lines, "first") else None
+            if first_line is not None:
+                line_cat: str | None = getattr(first_line, "tax_category_code", None)
+                if line_cat and line_cat != TAX_CATEGORY_STANDARD:
+                    return line_cat
+
         customer = self._get_customer_info()
+
+        # Intra-community supply (EU B2B, not domestic)
         if customer.country_code != "RO" and customer.tax_id:
+            # EU member with VAT ID → could be K (intra-community) or AE (reverse charge)
+            # EN16931: K = goods, AE = services. Default to AE for hosting (services).
             return TAX_CATEGORY_REVERSE_CHARGE
 
         # Check for zero rate
@@ -237,10 +283,17 @@ class BaseUBLBuilder:
             tax_total_cents = getattr(self.invoice, "tax_cents", 0)
 
         if tax_total_cents == 0:
+            # B2C without VAT → not subject
+            if not customer.tax_id and customer.country_code != "RO":
+                return TAX_CATEGORY_NOT_SUBJECT
             return TAX_CATEGORY_ZERO
 
         # Default to standard rate
         return TAX_CATEGORY_STANDARD
+
+    def _get_tax_exemption_reason(self, category: str) -> str | None:
+        """Get EN16931 BT-121 tax exemption reason text for non-standard categories."""
+        return TAX_EXEMPTION_REASONS.get(category)
 
     def _get_tax_rate(self) -> Decimal:
         """Get tax rate as percentage from the invoice's own stored data.
@@ -345,6 +398,7 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
         self._add_customer_party()
         self._add_payment_means()
         self._add_payment_terms()
+        self._add_document_allowances_charges()
         self._add_tax_total()
         self._add_legal_monetary_total()
         self._add_invoice_lines()
@@ -498,13 +552,32 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
         # Contact - Optional
         self._add_contact(party, customer)
 
+    def _get_payment_means_code(self) -> str:
+        """Derive UNCL4461 payment means code from invoice's payment method."""
+        # Check associated payments for the method
+        payments = getattr(self.invoice, "payments", None)
+        if payments is not None:
+            payment = payments.order_by("-created_at").first() if hasattr(payments, "order_by") else None
+            if payment is not None:
+                method = getattr(payment, "payment_method", "")
+                if method in PAYMENT_MEANS_CODES:
+                    return PAYMENT_MEANS_CODES[method]
+
+        # Check invoice meta for payment_method hint
+        meta = getattr(self.invoice, "meta", {}) or {}
+        method = meta.get("payment_method", "")
+        if method in PAYMENT_MEANS_CODES:
+            return PAYMENT_MEANS_CODES[method]
+
+        # Default: credit transfer (bank)
+        return PAYMENT_MEANS_CODES["bank"]
+
     def _add_payment_means(self) -> None:
-        """Add PaymentMeans element."""
+        """Add PaymentMeans element (BG-16)."""
         payment_means = self._add_cac(self.root, "PaymentMeans")
 
-        # Payment Means Code - Mandatory
-        # 30 = Credit transfer, 49 = Direct debit, 48 = Bank card
-        self._add_cbc(payment_means, "PaymentMeansCode", "30")
+        # Payment Means Code (BT-81) - Mandatory
+        self._add_cbc(payment_means, "PaymentMeansCode", self._get_payment_means_code())
 
         # Payment Due Date
         if self.invoice.due_at:
@@ -525,13 +598,18 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
                 self._add_cbc(branch, "Name", bank_name)
 
     def _add_payment_terms(self) -> None:
-        """Add PaymentTerms element."""
+        """Add PaymentTerms element (BG-17, BT-20).
+
+        Generates structured note with net days and explicit due date
+        per EN16931 requirements.
+        """
         if self.invoice.due_at and self.invoice.issued_at:
             payment_terms = self._add_cac(self.root, "PaymentTerms")
 
-            # Calculate days
             days = (self.invoice.due_at - self.invoice.issued_at).days
-            note = f"Net {days} days" if days > 0 else "Due on receipt"
+            due_date_str = self._format_date(self.invoice.due_at.date())
+
+            note = f"Net {days} days, due {due_date_str}" if days > 0 else f"Due on receipt ({due_date_str})"
 
             self._add_cbc(payment_terms, "Note", note)
 
@@ -560,11 +638,79 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
 
         # Tax Category
         tax_category = self._add_cac(tax_subtotal, "TaxCategory")
-        self._add_cbc(tax_category, "ID", self._get_tax_category())
+        category_code = self._get_tax_category()
+        self._add_cbc(tax_category, "ID", category_code)
         self._add_cbc(tax_category, "Percent", self._format_percent(self._get_tax_rate()))
+
+        # BT-121/BT-120: Tax exemption reason (mandatory for non-S categories)
+        exemption_reason = self._get_tax_exemption_reason(category_code)
+        if exemption_reason:
+            self._add_cbc(
+                tax_category, "TaxExemptionReasonCode", TAX_EXEMPTION_REASON_CODES.get(category_code, category_code)
+            )
+            self._add_cbc(tax_category, "TaxExemptionReason", exemption_reason)
 
         tax_scheme = self._add_cac(tax_category, "TaxScheme")
         self._add_cbc(tax_scheme, "ID", "VAT")
+
+    def _add_document_allowances_charges(self) -> None:
+        """Add document-level AllowanceCharge elements (BG-20/BG-21).
+
+        Reads from invoice.meta['allowances'] and invoice.meta['charges']
+        lists. Each entry: {amount_cents, reason, tax_category, tax_rate}.
+        """
+        meta = getattr(self.invoice, "meta", {}) or {}
+        currency = self.invoice.currency.code
+
+        for allowance in meta.get("allowances", []):
+            ac = self._add_cac(self.root, "AllowanceCharge")
+            self._add_cbc(ac, "ChargeIndicator", "false")
+            self._add_cbc(ac, "AllowanceChargeReasonCode", "95")  # Discount
+            self._add_cbc(ac, "AllowanceChargeReason", allowance.get("reason", "Discount"))
+            amount = Decimal(str(allowance.get("amount_cents", 0))) / 100
+            amount_elem = self._add_cbc(ac, "Amount", self._format_amount(amount))
+            amount_elem.set("currencyID", currency)
+
+            # Tax category for the allowance
+            tax_cat = self._add_cac(ac, "TaxCategory")
+            self._add_cbc(tax_cat, "ID", allowance.get("tax_category", self._get_tax_category()))
+            self._add_cbc(tax_cat, "Percent", self._format_percent(allowance.get("tax_rate", self._get_tax_rate())))
+            scheme = self._add_cac(tax_cat, "TaxScheme")
+            self._add_cbc(scheme, "ID", "VAT")
+
+        for charge in meta.get("charges", []):
+            ac = self._add_cac(self.root, "AllowanceCharge")
+            self._add_cbc(ac, "ChargeIndicator", "true")
+            self._add_cbc(ac, "AllowanceChargeReasonCode", "FC")  # Freight charge
+            self._add_cbc(ac, "AllowanceChargeReason", charge.get("reason", "Charge"))
+            amount = Decimal(str(charge.get("amount_cents", 0))) / 100
+            amount_elem = self._add_cbc(ac, "Amount", self._format_amount(amount))
+            amount_elem.set("currencyID", currency)
+
+            tax_cat = self._add_cac(ac, "TaxCategory")
+            self._add_cbc(tax_cat, "ID", charge.get("tax_category", self._get_tax_category()))
+            self._add_cbc(tax_cat, "Percent", self._format_percent(charge.get("tax_rate", self._get_tax_rate())))
+            scheme = self._add_cac(tax_cat, "TaxScheme")
+            self._add_cbc(scheme, "ID", "VAT")
+
+    def _get_document_level_totals(self) -> tuple[Decimal, Decimal]:
+        """Calculate document-level allowance and charge totals from meta."""
+        meta = getattr(self.invoice, "meta", {}) or {}
+        allowance_total = (
+            sum(
+                (Decimal(a.get("amount_cents", 0)) for a in meta.get("allowances", [])),
+                Decimal(0),
+            )
+            / 100
+        )
+        charge_total = (
+            sum(
+                (Decimal(c.get("amount_cents", 0)) for c in meta.get("charges", [])),
+                Decimal(0),
+            )
+            / 100
+        )
+        return allowance_total, charge_total
 
     def _add_legal_monetary_total(self) -> None:
         """Add LegalMonetaryTotal element."""
@@ -576,8 +722,18 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
         line_ext = self._add_cbc(monetary_total, "LineExtensionAmount", self._format_amount(subtotal))
         line_ext.set("currencyID", currency)
 
-        # Tax Exclusive Amount (same as line extension for simple invoices)
-        tax_excl = self._add_cbc(monetary_total, "TaxExclusiveAmount", self._format_amount(subtotal))
+        # Document-level allowances/charges (BT-107/BT-108)
+        allowance_total, charge_total = self._get_document_level_totals()
+        if allowance_total > 0:
+            allow_elem = self._add_cbc(monetary_total, "AllowanceTotalAmount", self._format_amount(allowance_total))
+            allow_elem.set("currencyID", currency)
+        if charge_total > 0:
+            charge_elem = self._add_cbc(monetary_total, "ChargeTotalAmount", self._format_amount(charge_total))
+            charge_elem.set("currencyID", currency)
+
+        # Tax Exclusive Amount (line extension - allowances + charges)
+        tax_exclusive = subtotal - allowance_total + charge_total
+        tax_excl = self._add_cbc(monetary_total, "TaxExclusiveAmount", self._format_amount(tax_exclusive))
         tax_excl.set("currencyID", currency)
 
         # Tax Inclusive Amount (total with tax)
@@ -834,8 +990,16 @@ class UBLCreditNoteBuilder(BaseUBLBuilder):
         tax_elem.set("currencyID", self.invoice.currency.code)
 
         tax_category = self._add_cac(tax_subtotal, "TaxCategory")
-        self._add_cbc(tax_category, "ID", self._get_tax_category())
+        category_code = self._get_tax_category()
+        self._add_cbc(tax_category, "ID", category_code)
         self._add_cbc(tax_category, "Percent", self._format_percent(self._get_tax_rate()))
+
+        exemption_reason = self._get_tax_exemption_reason(category_code)
+        if exemption_reason:
+            self._add_cbc(
+                tax_category, "TaxExemptionReasonCode", TAX_EXEMPTION_REASON_CODES.get(category_code, category_code)
+            )
+            self._add_cbc(tax_category, "TaxExemptionReason", exemption_reason)
 
         tax_scheme = self._add_cac(tax_category, "TaxScheme")
         self._add_cbc(tax_scheme, "ID", "VAT")
