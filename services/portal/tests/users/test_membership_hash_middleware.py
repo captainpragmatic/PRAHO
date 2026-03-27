@@ -133,7 +133,7 @@ class CircuitBreakerMiddlewareTest(SimpleTestCase):
     @patch("apps.users.middleware.cache")
     def test_fail_open_below_threshold_returns_true(self, mock_cache: object) -> None:
         """API errors below threshold allow access (fail-open)."""
-        mock_cache.get.return_value = 0  # No prior failures
+        mock_cache.incr.side_effect = ValueError("Key not found")  # First failure
         request = _make_authenticated_request()
         middleware = self._make_middleware()
 
@@ -149,7 +149,7 @@ class CircuitBreakerMiddlewareTest(SimpleTestCase):
     @patch("apps.users.middleware.cache")
     def test_circuit_breaker_trips_at_threshold(self, mock_cache: object) -> None:
         """After _MAX_FAIL_OPEN_COUNT consecutive fail-opens, access is denied."""
-        mock_cache.get.return_value = _MAX_FAIL_OPEN_COUNT - 1  # One more will trip
+        mock_cache.incr.return_value = _MAX_FAIL_OPEN_COUNT  # At threshold
         request = _make_authenticated_request()
         middleware = self._make_middleware()
 
