@@ -18,7 +18,7 @@
         <a href="{% url 'tickets:list' %}" class="inline-block align-baseline font-bold text-sm text-blue-400 hover:text-blue-300">
             ← {% trans 'Back to Tickets' %}
         </a>
-        {% if ticket.status == 'closed' and user.is_staff %}
+        {% if ticket.status == 'closed' and user.is_staff_user %}
             <!-- Reopen button for closed tickets -->
             <form method="post" action="{% url 'tickets:reopen' pk=ticket.pk %}" class="inline-block">
                 {% csrf_token %}

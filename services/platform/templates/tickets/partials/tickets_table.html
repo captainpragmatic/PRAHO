@@ -14,7 +14,7 @@
           <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
             {% trans 'Subject' %}
           </th>
-          {% if user.is_staff %}
+          {% if user.is_staff_user %}
           <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">
             {% trans 'Customer' %}
           </th>
@@ -59,7 +59,7 @@
               {% if ticket.title %}{{ ticket.title }}{% elif ticket.subject %}{{ ticket.subject }}{% else %}{{ ticket.description|truncatechars:50 }}{% endif %}
             </div>
           </td>
-          {% if user.is_staff %}
+          {% if user.is_staff_user %}
           <td class="px-6 py-4 whitespace-nowrap">
             <div class="text-sm text-white">{{ ticket.customer.name }}</div>
             {% if ticket.contact_email %}
@@ -137,7 +137,7 @@
       <p class="text-white text-sm truncate">
         {% if ticket.title %}{{ ticket.title }}{% elif ticket.subject %}{{ ticket.subject }}{% else %}{{ ticket.description|truncatechars:50 }}{% endif %}
       </p>
-      {% if user.is_staff %}
+      {% if user.is_staff_user %}
       <p class="text-slate-400 text-xs mt-1">{{ ticket.customer.name }}</p>
       {% endif %}
     </div>
@@ -164,7 +164,7 @@
     <p class="text-slate-400 mb-6 max-w-sm mx-auto">
       {% if search_query or status_filter %}
         {% trans 'No tickets match your current filters. Try adjusting your search criteria.' %}
-      {% elif user.is_staff %}
+      {% elif user.is_staff_user %}
         {% trans 'No support tickets have been created yet. Customers can create tickets when they need assistance with their services.' %}
       {% else %}
         {% trans 'You have not created any support tickets yet. Create a ticket when you need help with your services.' %}
