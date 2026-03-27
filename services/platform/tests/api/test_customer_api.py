@@ -148,7 +148,10 @@ class CustomerUsersCreateAPITests(TestCase):
         new_user = User.objects.get(email="newuser@example.com")
         self.assertTrue(CustomerMembership.objects.filter(customer=self.customer, user=new_user).exists())
         self.assertFalse(new_user.has_usable_password())
-        mock_send_email.assert_called_once_with(new_user, self.customer)
+        mock_send_email.assert_called_once()
+        call_args = mock_send_email.call_args
+        self.assertEqual(call_args[0], (new_user, self.customer))
+        self.assertIn("request_ip", call_args[1])
         self.assertTrue(response.data["invite_email_sent"])
 
     @patch("apps.api.customers.views.SecureCustomerUserService._send_welcome_email_secure")

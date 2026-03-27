@@ -13,6 +13,7 @@ from django.utils.translation import gettext_lazy as _
 from django.views.decorators.http import require_http_methods, require_POST
 
 from apps.common.decorators import staff_required
+from apps.common.request_ip import get_safe_client_ip
 from apps.customers.customer_service import CustomerService
 from apps.customers.models import Customer
 from apps.users.models import CustomerMembership, User
@@ -119,7 +120,9 @@ def customer_create_user(request: HttpRequest, customer_id: int) -> HttpResponse
         CustomerMembership.objects.create(customer=customer, user=user, role=role)
 
         # Send invite email with password reset link
-        email_sent = SecureCustomerUserService._send_welcome_email_secure(user, customer)
+        email_sent = SecureCustomerUserService._send_welcome_email_secure(
+            user, customer, request_ip=get_safe_client_ip(request)
+        )
         if not email_sent:
             messages.warning(request, _("User created but invite email could not be sent."))
 

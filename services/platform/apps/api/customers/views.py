@@ -20,6 +20,7 @@ from apps.api.core import ReadOnlyAPIViewSet
 from apps.api.core.permissions import IsAuthenticatedAndAccessible
 from apps.api.core.throttling import AuthThrottle, BurstAPIThrottle
 from apps.api.secure_auth import public_api_endpoint, require_customer_authentication, require_portal_authentication
+from apps.common.request_ip import get_safe_client_ip
 from apps.customers.contact_models import CustomerAddress
 from apps.customers.contact_service import AddressData, ContactService
 from apps.customers.models import Customer, CustomerTaxProfile
@@ -1025,7 +1026,9 @@ def customer_users_create(request: HttpRequest, customer: Customer) -> Response:
         )
 
     # Send invite email with password reset link
-    email_sent = SecureCustomerUserService._send_welcome_email_secure(new_user, customer)
+    email_sent = SecureCustomerUserService._send_welcome_email_secure(
+        new_user, customer, request_ip=get_safe_client_ip(request)
+    )
 
     logger.info(f"✅ [User Management API] New user {email} created and added to customer {customer.id}")
     return Response(

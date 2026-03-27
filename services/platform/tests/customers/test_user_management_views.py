@@ -126,7 +126,10 @@ class CustomerCreateUserInviteEmailTests(TestCase):
             self.assertEqual(response.status_code, 302)
             self.assertTrue(User.objects.filter(email="invited@example.com").exists())
             new_user = User.objects.get(email="invited@example.com")
-            mock_send_email.assert_called_once_with(new_user, self.customer)
+            mock_send_email.assert_called_once()
+            call_args = mock_send_email.call_args
+            self.assertEqual(call_args[0], (new_user, self.customer))
+            self.assertIn("request_ip", call_args[1])
 
     @patch("apps.customers.user_management_views.SecureCustomerUserService._send_welcome_email_secure")
     def test_create_user_warns_on_email_failure(self, mock_send_email):
