@@ -125,9 +125,10 @@ jobs:
         uv sync --group platform --group dev
 
     - name: Run Bandit SAST Security Scan
+      continue-on-error: true
       run: |
         cd services/platform
-        "$UV_PROJECT_ENVIRONMENT/bin/bandit" -r apps/ -ll -ii --exclude '*/tests/*,*/test_*' -f txt || echo "Bandit scan completed with findings"
+        "$UV_PROJECT_ENVIRONMENT/bin/bandit" -r apps/ -ll -ii --exclude '*/tests/*,*/test_*' -f json -o bandit-report.json
 
     - name: Upload Security Reports
       uses: actions/upload-artifact@v4

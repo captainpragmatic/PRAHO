@@ -552,7 +552,8 @@ class PortalServiceHMACMiddleware:
                     "/api/customers/",  # Ticket form: fetch customer services
                 ]
                 if (
-                    getattr(request, "user", None)
+                    request.method == "GET"
+                    and getattr(request, "user", None)
                     and getattr(request.user, "is_authenticated", False)
                     and getattr(request.user, "is_staff", False)
                     and any(request.path.startswith(p) for p in staff_session_allowed_prefixes)

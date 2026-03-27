@@ -5,10 +5,10 @@ import time
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
-
-from apps.customers.models import Customer
-from apps.users.models import CustomerMembership
 from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin
+
+from apps.customers.models import Customer, CustomerTaxProfile
+from apps.users.models import CustomerMembership
 
 
 @override_settings(PLATFORM_API_SECRET=HMAC_TEST_SECRET, MIDDLEWARE=HMAC_TEST_MIDDLEWARE)
@@ -16,9 +16,9 @@ class CustomerDetailsAPITests(HMACTestMixin, TestCase):
     """Integration tests for POST /api/customers/details/ with HMAC + membership"""
 
     def setUp(self) -> None:
-        User = get_user_model()
-        self.user = User.objects.create_user(email='owner@example.com', password='testpass123', is_active=True)
-        self.other_user = User.objects.create_user(email='viewer@example.com', password='testpass123', is_active=True)
+        user_model = get_user_model()
+        self.user = user_model.objects.create_user(email='owner@example.com', password='testpass123', is_active=True)
+        self.other_user = user_model.objects.create_user(email='viewer@example.com', password='testpass123', is_active=True)
 
         self.customer = Customer.objects.create(
             name='Test Customer',
@@ -29,6 +29,12 @@ class CustomerDetailsAPITests(HMACTestMixin, TestCase):
         )
 
         CustomerMembership.objects.create(customer=self.customer, user=self.user, role='owner', is_primary=True)
+
+        # Create a tax profile with a CNP to verify it is excluded from API responses.
+        CustomerTaxProfile.objects.create(
+            customer=self.customer,
+            cnp="1234567890123",
+        )
 
     def test_customer_details_success_hmac_and_membership(self):
         resp = self.portal_post('/api/customers/details/', {
@@ -44,8 +50,8 @@ class CustomerDetailsAPITests(HMACTestMixin, TestCase):
         cust = data['customer']
         self.assertEqual(cust['id'], self.customer.id)
         self.assertIn('tax_profile', cust)
-        if cust['tax_profile'] is not None:
-            self.assertNotIn('cnp', cust['tax_profile'])
+        self.assertIsNotNone(cust['tax_profile'], "tax_profile should be present — setUp creates a CustomerTaxProfile")
+        self.assertNotIn('cnp', cust['tax_profile'])
 
     def test_customer_details_denied_without_membership(self):
         resp = self.portal_post('/api/customers/details/', {

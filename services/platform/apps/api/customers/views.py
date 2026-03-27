@@ -628,8 +628,12 @@ def customer_detail_api(request: HttpRequest, customer: Customer) -> Response:
                         membership = CustomerMembership.objects.get(user_id=user_id, customer=customer)
                         meta["membership"] = {"role": membership.role}
                     except CustomerMembership.DoesNotExist:
-                        # Default role if membership not found (shouldn't happen due to auth decorator)
-                        meta["membership"] = {"role": "member"}
+                        logger.warning(
+                            "Membership not found for user %s on customer %s during detail expansion",
+                            user_id,
+                            customer.id,
+                        )
+                        meta["membership"] = {"role": None}
 
             # Add stats if requested (cheap aggregates)
             if "stats" in includes:
@@ -809,6 +813,14 @@ def update_customer_billing_address(  # noqa: C901, PLR0912, PLR0915  # Complexi
             # Update or create tax profile for Romanian compliance
             tax_fields = {}
             if validated_data.get("fiscal_code"):
+                from apps.common.cui_validator import CUIValidator  # noqa: PLC0415
+
+                cui_result = CUIValidator.validate_strict(validated_data["fiscal_code"])
+                if not cui_result.is_valid:
+                    return Response(
+                        {"success": False, "error": f"Invalid CUI: {cui_result.error_message}"},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
                 tax_fields["cui"] = validated_data["fiscal_code"]
             if validated_data.get("vat_number"):
                 tax_fields["vat_number"] = validated_data["vat_number"]
