@@ -909,15 +909,18 @@ class EmailPreference(models.Model):
         return category_map.get(category, True)
 
     def update_marketing_consent(self, consent: bool, source: str = "") -> None:
-        """Update marketing consent with GDPR tracking."""
-        self.marketing = consent
-        if consent:
-            self.marketing_consent_date = timezone.now()
-            self.marketing_consent_source = source
-        else:
-            # Don't clear the date - keep for audit trail
-            pass
-        self.save(update_fields=["marketing", "marketing_consent_date", "marketing_consent_source", "updated_at"])
+        """Update marketing consent with GDPR tracking and row-level locking."""
+        with transaction.atomic():
+            locked = EmailPreference.objects.select_for_update(of=("self",)).get(pk=self.pk)
+            locked.marketing = consent
+            if consent:
+                locked.marketing_consent_date = timezone.now()
+                locked.marketing_consent_source = source
+            locked.save(update_fields=["marketing", "marketing_consent_date", "marketing_consent_source", "updated_at"])
+            # Refresh self from locked instance
+            self.marketing = locked.marketing
+            self.marketing_consent_date = locked.marketing_consent_date
+            self.marketing_consent_source = locked.marketing_consent_source
 
 
 # ===============================================================================
@@ -959,7 +962,11 @@ class UnsubscribeToken(models.Model):
         return timezone.now() > self.created_at + timedelta(days=TOKEN_EXPIRY_DAYS)
 
     def consume(self) -> bool:
-        """Mark token as consumed. Returns False if already used or expired."""
+        """Mark token as consumed. Returns False if already used or expired.
+
+        Caller must hold a select_for_update() lock on this row (or be inside
+        an atomic block that does) to prevent TOCTOU races.
+        """
         if self.used_at is not None:
             return False
         if self.is_expired():

@@ -5,7 +5,7 @@ Verifies GDPR Art. 5(1)(c) data minimization — no email addresses in URLs.
 """
 
 from datetime import timedelta
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 from uuid import uuid4
 
 from django.test import TestCase
@@ -165,17 +165,16 @@ class ProcessUnsubscribeTests(TestCase):
     """Tests for the updated process_unsubscribe using DB tokens."""
 
     def test_valid_token_processes_unsubscribe(self) -> None:
-        """Test valid token triggers unsubscribe flow."""
+        """Test valid token triggers unsubscribe flow when no customer exists."""
         token = UnsubscribeToken.objects.create(
             email="unsub@example.com",
             template_key="marketing",
         )
 
-        with patch("apps.customers.models.Customer.objects") as mock_mgr:
-            mock_mgr.get.side_effect = Customer.DoesNotExist()
-            with patch("apps.notifications.services.EmailSuppressionService.suppress_email"):
-                result = EmailPreferenceService.process_unsubscribe(str(token.id))
-                self.assertTrue(result)
+        with patch("apps.notifications.services.EmailSuppressionService.suppress_email") as mock_suppress:
+            result = EmailPreferenceService.process_unsubscribe(str(token.id))
+            self.assertTrue(result)
+            mock_suppress.assert_called_once_with("unsub@example.com", "unsubscribe")
 
         # Token should be consumed
         token.refresh_from_db()
@@ -211,21 +210,21 @@ class ProcessUnsubscribeTests(TestCase):
 
     def test_unsubscribe_with_customer(self) -> None:
         """Test unsubscribe when customer exists updates preferences."""
+        customer = Customer.objects.create(
+            name="Unsubscribe Customer",
+            customer_type="individual",
+            primary_email="customer@example.com",
+            marketing_consent=True,
+        )
         token = UnsubscribeToken.objects.create(
             email="customer@example.com",
             template_key="marketing",
         )
 
-        mock_customer = MagicMock()
-        mock_customer.id = uuid4()
-        mock_customer.marketing_consent = True
-
-        with patch("apps.customers.models.Customer.objects") as mock_mgr:
-            mock_mgr.get.return_value = mock_customer
-            with patch("apps.notifications.services.validators"):
-                result = EmailPreferenceService.process_unsubscribe(
-                    str(token.id), "marketing"
-                )
-                self.assertTrue(result)
-                self.assertFalse(mock_customer.marketing_consent)
-                mock_customer.save.assert_called_once()
+        with patch("apps.audit.services.AuditService.log_simple_event"):
+            result = EmailPreferenceService.process_unsubscribe(
+                str(token.id), "marketing"
+            )
+            self.assertTrue(result)
+            customer.refresh_from_db()
+            self.assertFalse(customer.marketing_consent)

@@ -27,6 +27,7 @@ from django.conf import settings
 from django.core.cache import cache
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.mail import EmailMessage, EmailMultiAlternatives
+from django.db import transaction
 from django.template import Context, Template
 from django.utils import timezone
 from django.utils.html import strip_tags
@@ -1383,21 +1384,30 @@ class EmailPreferenceService:
 
     @staticmethod
     def update_preferences(customer: Customer, preferences: dict[str, bool]) -> None:
-        """Update email preferences for a customer."""
-        if "marketing" in preferences:
-            customer.marketing_consent = preferences["marketing"]
-        if "newsletters" in preferences:
-            customer.marketing_consent = preferences["newsletters"]
-        customer.save(update_fields=["marketing_consent"])
+        """Update email preferences for a customer with atomic consent tracking."""
+        from apps.audit.services import AuditService  # noqa: PLC0415
+        from apps.customers.models import Customer as CustomerModel  # noqa: PLC0415
 
-        # Log the preference change
-        validators.log_security_event(
-            "email_preferences_updated",
-            {
-                "customer_id": str(customer.id),
-                "preferences": preferences,
-            },
-        )
+        with transaction.atomic():
+            locked = CustomerModel.objects.select_for_update(of=("self",)).get(id=customer.id)
+            old_marketing = locked.marketing_consent
+
+            if "marketing" in preferences:
+                locked.marketing_consent = preferences["marketing"]
+            if "newsletters" in preferences:
+                locked.marketing_consent = preferences["newsletters"]
+
+            locked.save(update_fields=["marketing_consent"])
+
+            if old_marketing != locked.marketing_consent:
+                AuditService.log_simple_event(
+                    "marketing_consent_granted" if locked.marketing_consent else "marketing_consent_withdrawn",
+                    content_object=locked,
+                    description=f"Email preferences updated for customer {locked.id}",
+                    old_values={"marketing_consent": old_marketing},
+                    new_values={"marketing_consent": locked.marketing_consent},
+                    metadata={"source": "preference_center"},
+                )
 
     @staticmethod
     def can_send_category(customer: Customer, category: str) -> bool:
@@ -1418,6 +1428,10 @@ class EmailPreferenceService:
         """
         Process an unsubscribe request using opaque DB token.
 
+        Token consumption and customer consent withdrawal are wrapped in a
+        single atomic block to prevent partial state (token consumed but
+        consent not withdrawn, or vice-versa).
+
         Args:
             token_id: UUID of the UnsubscribeToken
             category: Optional specific category to unsubscribe from
@@ -1425,44 +1439,50 @@ class EmailPreferenceService:
         Returns:
             True if unsubscribe was successful
         """
+        from apps.audit.services import AuditService  # noqa: PLC0415
         from apps.customers.models import (  # noqa: PLC0415  # Deferred: avoids circular import
             Customer,  # Circular: cross-app  # Deferred: avoids circular import
         )
         from apps.notifications.models import UnsubscribeToken  # noqa: PLC0415
 
         try:
-            token_obj = UnsubscribeToken.objects.get(id=token_id)
-        except (UnsubscribeToken.DoesNotExist, Exception):
-            logger.warning("⚠️ [Unsubscribe] Invalid or unknown token")
+            with transaction.atomic():
+                try:
+                    token_obj = UnsubscribeToken.objects.select_for_update().get(id=token_id)
+                except (UnsubscribeToken.DoesNotExist, Exception):
+                    logger.warning("⚠️ [Unsubscribe] Invalid or unknown token")
+                    return False
+
+                if not token_obj.consume():
+                    logger.warning("⚠️ [Unsubscribe] Token already used or expired")
+                    return False
+
+                email = token_obj.email
+
+                try:
+                    customer = Customer.objects.select_for_update(of=("self",)).get(primary_email=email)
+                except Customer.DoesNotExist:
+                    EmailSuppressionService.suppress_email(email, "unsubscribe")
+                    return True
+
+                old_marketing = customer.marketing_consent
+                if category == "marketing" or category is None:
+                    customer.marketing_consent = False
+                customer.save(update_fields=["marketing_consent"])
+
+                if old_marketing != customer.marketing_consent:
+                    AuditService.log_simple_event(
+                        "marketing_consent_withdrawn",
+                        content_object=customer,
+                        description=f"Unsubscribe via token for {email[:3]}***",
+                        old_values={"marketing_consent": old_marketing},
+                        new_values={"marketing_consent": False},
+                        metadata={"source": "unsubscribe_link", "category": category or "all_marketing"},
+                    )
+
+                logger.info(f"✅ [Unsubscribe] Processed for {email[:3]}***")
+                return True
+
+        except Exception:
+            logger.exception("🔥 [Unsubscribe] Failed to process token %s", token_id)
             return False
-
-        if not token_obj.consume():
-            logger.warning("⚠️ [Unsubscribe] Token already used or expired")
-            return False
-
-        email = token_obj.email
-
-        # Find customer
-        try:
-            customer = Customer.objects.get(primary_email=email)
-
-            if category == "marketing" or category is None:
-                customer.marketing_consent = False
-            customer.save(update_fields=["marketing_consent"])
-
-            # Log the unsubscribe
-            validators.log_security_event(
-                "email_unsubscribe",
-                {
-                    "customer_id": str(customer.id),
-                    "category": category or "all_marketing",
-                },
-            )
-
-            logger.info(f"✅ [Unsubscribe] Processed for {email[:3]}***")
-            return True
-
-        except Customer.DoesNotExist:
-            # Suppress the email address anyway
-            EmailSuppressionService.suppress_email(email, "unsubscribe")
-            return True
