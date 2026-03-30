@@ -95,7 +95,7 @@ class HMACTimingAttackProtectionTestCase(SimpleTestCase):
             client = PlatformAPIClient()
 
             for _ in range(iterations):
-                with patch('requests.request', side_effect=mock_platform_timing_validation):
+                with patch('apps.common.outbound_http._session.request', side_effect=mock_platform_timing_validation):
                     start_time = time.perf_counter()
                     client.authenticate_customer('test@example.com', 'password123')
                     end_time = time.perf_counter()
@@ -187,7 +187,7 @@ class HMACTimingAttackProtectionTestCase(SimpleTestCase):
             # Measure timing for this error position
             times = []
             for _ in range(20):
-                with patch('requests.request', side_effect=mock_validation_with_modified_signature):
+                with patch('apps.common.outbound_http._session.request', side_effect=mock_validation_with_modified_signature):
                     start_time = time.perf_counter()
                     client.authenticate_customer('test@example.com', 'password123')
                     end_time = time.perf_counter()
@@ -264,7 +264,7 @@ class HMACTimingAttackProtectionTestCase(SimpleTestCase):
             client = PlatformAPIClient()
 
             for _ in range(30):
-                with patch('requests.request', side_effect=mock_nonce_timing_validation(True)):
+                with patch('apps.common.outbound_http._session.request', side_effect=mock_nonce_timing_validation(True)):
                     start_time = time.perf_counter()
                     client.authenticate_customer('test@example.com', 'password123')
                     end_time = time.perf_counter()
@@ -274,7 +274,7 @@ class HMACTimingAttackProtectionTestCase(SimpleTestCase):
         invalid_nonce_times = []
 
         for _ in range(30):
-            with patch('requests.request', side_effect=mock_nonce_timing_validation(False)):
+            with patch('apps.common.outbound_http._session.request', side_effect=mock_nonce_timing_validation(False)):
                 start_time = time.perf_counter()
                 client.authenticate_customer('test@example.com', 'password123')
                 end_time = time.perf_counter()
@@ -372,7 +372,7 @@ class HMACTimingAttackProtectionTestCase(SimpleTestCase):
                             'Accept': 'application/json'
                         }
 
-                        with patch('requests.request', side_effect=mock_timestamp_validation):
+                        with patch('apps.common.outbound_http._session.request', side_effect=mock_timestamp_validation):
                             start_time = time.perf_counter()
                             client.authenticate_customer('test@example.com', 'password123')
                             end_time = time.perf_counter()
@@ -458,7 +458,7 @@ class HMACTimingAttackProtectionTestCase(SimpleTestCase):
                         header_modifier(headers)
                         mock_headers.return_value = headers
 
-                        with patch('requests.request', side_effect=mock_error_validation):
+                        with patch('apps.common.outbound_http._session.request', side_effect=mock_error_validation):
                             start_time = time.perf_counter()
                             client.authenticate_customer('test@example.com', 'password123')
                             end_time = time.perf_counter()
@@ -701,7 +701,7 @@ class HMACStatisticalTimingAnalysisTestCase(SimpleTestCase):
 
             # Measure complete authentication flow timing
             for i in range(50):
-                with patch('requests.request', side_effect=mock_realistic_platform):
+                with patch('apps.common.outbound_http._session.request', side_effect=mock_realistic_platform):
                     start_time = time.perf_counter()
                     result = client.authenticate_customer(f'user{i}@example.com', 'password123')
                     end_time = time.perf_counter()

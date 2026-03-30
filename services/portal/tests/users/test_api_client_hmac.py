@@ -133,7 +133,7 @@ class HMACAuthenticationTestCase(unittest.TestCase):
         self.assertNotEqual(headers1['X-Body-Hash'], headers2['X-Body-Hash'])
         self.assertNotEqual(headers1['X-Signature'], headers2['X-Signature'])
 
-    @patch('apps.api_client.services.requests.request')
+    @patch('apps.common.outbound_http._session.request')
     def test_successful_authentication_request(self, mock_request):
         """Test successful HMAC authenticated request to platform"""
         # Mock successful response
@@ -169,7 +169,7 @@ class HMACAuthenticationTestCase(unittest.TestCase):
         self.assertTrue(result['valid'])
         self.assertEqual(result['customer_id'], 123)
 
-    @patch('apps.api_client.services.requests.request')
+    @patch('apps.common.outbound_http._session.request')
     def test_authentication_failure_401_response(self, mock_request):
         """Test handling of 401 authentication failure from platform"""
         # Mock 401 response (invalid HMAC)
@@ -185,7 +185,7 @@ class HMACAuthenticationTestCase(unittest.TestCase):
 
         self.assertIsNone(result)
 
-    @patch('apps.api_client.services.requests.request')
+    @patch('apps.common.outbound_http._session.request')
     def test_connection_error_handling(self, mock_request):
         """Test handling of connection errors to platform service"""
         # Mock connection error
@@ -196,7 +196,7 @@ class HMACAuthenticationTestCase(unittest.TestCase):
         # Should return None for connection errors
         self.assertIsNone(result)
 
-    @patch('apps.api_client.services.requests.request')
+    @patch('apps.common.outbound_http._session.request')
     def test_request_timeout_handling(self, mock_request):
         """Test handling of request timeouts"""
         # Mock timeout error
@@ -297,7 +297,7 @@ class HMACAuthenticationTestCase(unittest.TestCase):
         self.assertEqual(client.portal_secret, 'test-secret-override')
         self.assertEqual(client.portal_id, 'test-portal-override')
 
-    @patch('apps.api_client.services.requests.request')
+    @patch('apps.common.outbound_http._session.request')
     def test_header_timestamp_matches_body_timestamp(self, mock_request):
         """Ensure X-Timestamp equals the body timestamp sent by client."""
         mock_response = Mock()
@@ -329,7 +329,7 @@ class HMACCustomerIdExtractionTestCase(unittest.TestCase):
              patch.object(settings, "PLATFORM_API_TIMEOUT", 10):
             self.client = PlatformAPIClient()
 
-    @patch("apps.api_client.services.requests.request")
+    @patch("apps.common.outbound_http._session.request")
     def test_customer_id_extracted_from_response(self, mock_request):
         """customer_id from Platform user dict must be propagated to the auth result."""
         mock_response = Mock()
@@ -352,7 +352,7 @@ class HMACCustomerIdExtractionTestCase(unittest.TestCase):
         self.assertEqual(result["customer_id"], 55)
         self.assertEqual(result["user_id"], 10)
 
-    @patch("apps.api_client.services.requests.request")
+    @patch("apps.common.outbound_http._session.request")
     def test_missing_customer_id_returns_none_value(self, mock_request):
         """If Platform doesn't include customer_id, the field should be None (not crash)."""
         mock_response = Mock()
@@ -380,7 +380,7 @@ class PlatformAPIClientIntegrationTestCase(unittest.TestCase):
     def setUp(self):
         self.client = PlatformAPIClient()
 
-    @patch('apps.api_client.services.requests.request')
+    @patch('apps.common.outbound_http._session.request')
     def test_full_authentication_workflow(self, mock_request):
         """Test complete authentication workflow with proper HMAC"""
         # Mock platform response
@@ -430,7 +430,7 @@ class PlatformAPIClientIntegrationTestCase(unittest.TestCase):
         # New scheme includes timestamp in body; user_id may be absent for auth endpoints
         self.assertIn('timestamp', body)
 
-    @patch('apps.api_client.services.requests.request')
+    @patch('apps.common.outbound_http._session.request')
     def test_user_id_injected_in_body_when_provided(self, mock_request):
         mock_response = Mock()
         mock_response.status_code = 200
