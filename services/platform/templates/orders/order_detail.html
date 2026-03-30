@@ -330,7 +330,7 @@
               <option value="">{% trans "Select new status..." %}</option>
               {% if order.status == "draft" %}
                 <option value="awaiting_payment" {% if not preflight_ok %}disabled{% endif %}>⏳ {% trans "Submit for Payment" %}</option>
-                <option value="cancelled">❌ {% trans "Cancelled" %}</option>
+                <option value="cancelled" data-destructive="true">❌ {% trans "Cancelled" %}</option>
               {% elif order.status == "awaiting_payment" %}
                 {# "Mark as Paid" removed — payment must go through the proforma flow #}
                 {# (Record Payment on proforma → auto-converts to invoice → order transitions to paid) #}
@@ -339,22 +339,22 @@
                 {% else %}
                 <option value="paid">✅ {% trans "Mark as Paid" %}</option>
                 {% endif %}
-                <option value="cancelled">❌ {% trans "Cancelled" %}</option>
-                <option value="failed">🔥 {% trans "Failed" %}</option>
+                <option value="cancelled" data-destructive="true">❌ {% trans "Cancelled" %}</option>
+                <option value="failed" data-destructive="true">🔥 {% trans "Failed" %}</option>
               {% elif order.status == "paid" %}
                 <option value="provisioning">⚙️ {% trans "Start Provisioning" %}</option>
                 <option value="in_review">🔍 {% trans "Flag for Review" %}</option>
-                <option value="cancelled">❌ {% trans "Cancelled" %}</option>
+                <option value="cancelled" data-destructive="true">❌ {% trans "Cancelled" %}</option>
               {% elif order.status == "in_review" %}
                 <option value="provisioning">✅ {% trans "Approve & Provision" %}</option>
-                <option value="cancelled">❌ {% trans "Reject & Cancel" %}</option>
+                <option value="cancelled" data-destructive="true">❌ {% trans "Reject & Cancel" %}</option>
               {% elif order.status == "provisioning" %}
                 <option value="completed">✅ {% trans "Completed" %}</option>
-                <option value="failed">🔥 {% trans "Failed" %}</option>
-                <option value="cancelled">❌ {% trans "Cancelled" %}</option>
+                <option value="failed" data-destructive="true">🔥 {% trans "Failed" %}</option>
+                <option value="cancelled" data-destructive="true">❌ {% trans "Cancelled" %}</option>
               {% elif order.status == "failed" %}
                 <option value="awaiting_payment">⏳ {% trans "Retry" %}</option>
-                <option value="cancelled">❌ {% trans "Cancelled" %}</option>
+                <option value="cancelled" data-destructive="true">❌ {% trans "Cancelled" %}</option>
               {% endif %}
             </select>
           </div>
@@ -379,6 +379,19 @@
                       class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
                       placeholder="{% trans 'Add a note about this status change...' %}"></textarea>
           </div>
+
+          <!-- Destructive action confirmation (hidden by default) -->
+          <div id="destructiveConfirm" class="hidden mb-4 bg-red-900/30 border border-red-700/50 rounded-lg p-3">
+            <p class="text-red-300 text-sm mb-2">
+              {% trans "This action is irreversible. Type" %} <strong id="confirmWord" class="font-mono">CANCEL</strong> {% trans "to confirm." %}
+            </p>
+            <input id="confirmInput" type="text" autocomplete="off"
+                   class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-red-500"
+                   placeholder="{% trans 'Type here to confirm...' %}">
+          </div>
+
+          <!-- Error display (populated by JS on failed submit) -->
+          <div id="statusError" class="hidden mb-4 bg-red-900/30 border border-red-700/50 text-red-300 text-sm rounded-lg p-3"></div>
         </div>
 
         <div class="px-6 py-4 bg-slate-900 flex justify-end space-x-3">
@@ -386,8 +399,8 @@
                   class="px-4 py-2 text-sm font-medium text-slate-400 hover:text-white">
             {% trans "Cancel" %}
           </button>
-          <button type="submit"
-                  class="inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg border border-transparent bg-blue-600 text-white hover:bg-blue-700 focus:ring-2 focus:ring-blue-500">
+          <button type="submit" id="statusSubmitBtn"
+                  class="inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg border border-transparent bg-blue-600 text-white hover:bg-blue-700 focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed">
             {% icon "refresh" %} {% trans "Change Status" %}
           </button>
         </div>
@@ -411,9 +424,8 @@ function showStatusModal() {
     const modal = document.getElementById('statusModal');
     if (modal) {
         modal.classList.remove('hidden');
-        // Ensure modal is properly displayed
         modal.style.display = 'block';
-        document.body.style.overflow = 'hidden'; // Prevent background scrolling
+        document.body.style.overflow = 'hidden';
     }
 }
 
@@ -422,13 +434,18 @@ function hideStatusModal() {
     if (modal) {
         modal.classList.add('hidden');
         modal.style.display = 'none';
-        document.body.style.overflow = ''; // Restore scrolling
+        document.body.style.overflow = '';
     }
+    // Reset confirmation state
+    const confirmArea = document.getElementById('destructiveConfirm');
+    const confirmInput = document.getElementById('confirmInput');
+    const errorDiv = document.getElementById('statusError');
+    if (confirmArea) confirmArea.classList.add('hidden');
+    if (confirmInput) confirmInput.value = '';
+    if (errorDiv) errorDiv.classList.add('hidden');
 }
 
-// Event listeners - wait for DOM to be ready
 document.addEventListener('DOMContentLoaded', function() {
-    // Change status button listener
     const changeStatusBtn = document.getElementById('changeStatusBtn');
     if (changeStatusBtn) {
         changeStatusBtn.addEventListener('click', function(e) {
@@ -437,11 +454,46 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
+    const statusSelect = document.getElementById('new_status');
+    const confirmArea = document.getElementById('destructiveConfirm');
+    const confirmInput = document.getElementById('confirmInput');
+    const confirmWord = document.getElementById('confirmWord');
+    const submitBtn = document.getElementById('statusSubmitBtn');
+
+    // Show/hide destructive confirmation when status selection changes
+    if (statusSelect) {
+        statusSelect.addEventListener('change', function() {
+            const selected = this.options[this.selectedIndex];
+            const isDestructive = selected && selected.dataset.destructive === 'true';
+            if (isDestructive) {
+                const word = this.value === 'failed' ? 'FAILED' : 'CANCEL';
+                confirmWord.textContent = word;
+                confirmArea.classList.remove('hidden');
+                confirmInput.value = '';
+                submitBtn.disabled = true;
+            } else {
+                confirmArea.classList.add('hidden');
+                confirmInput.value = '';
+                submitBtn.disabled = false;
+            }
+        });
+    }
+
+    // Enable submit only when confirmation word matches
+    if (confirmInput) {
+        confirmInput.addEventListener('input', function() {
+            const expected = confirmWord.textContent;
+            submitBtn.disabled = this.value.trim().toUpperCase() !== expected;
+        });
+    }
+
     // Handle form submission with AJAX
     const statusForm = document.getElementById('statusForm');
     if (statusForm) {
         statusForm.addEventListener('submit', function(e) {
             e.preventDefault();
+            const errorDiv = document.getElementById('statusError');
+            errorDiv.classList.add('hidden');
 
             const formData = new FormData(this);
 
@@ -453,26 +505,24 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             })
             .then(response => {
-                console.log('Response status:', response.status);
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                return response.json();
+                return response.json().then(data => ({ ok: response.ok, data }));
             })
-            .then(data => {
-                console.log('Response data:', data);
-                if (data.success) {
-                    showToast('Status changed to ' + (data.new_status || ''), 'success');
+            .then(({ ok, data }) => {
+                if (ok && data.success) {
+                    hideStatusModal();
+                    showToast('{% trans "Status changed to" %}' + ' ' + (data.new_status || ''), 'success');
                     setTimeout(() => window.location.reload(), 600);
                 } else {
-                    showToast('Error: ' + (data.error || 'Unknown error'), 'error');
+                    const msg = data.error || data.message || '{% trans "Unknown error" %}';
+                    errorDiv.textContent = msg;
+                    errorDiv.classList.remove('hidden');
                 }
             })
-            .catch(error => {
-                console.error('Error:', error);
+            .catch(() => {
                 {# nosemgrep: template-translate-as-no-escape — developer-managed translation string, escaped at output #}
                 {% trans "An error occurred while updating the status." as status_error_msg %}
-                alert('{{ status_error_msg|escapejs }}');
+                errorDiv.textContent = '{{ status_error_msg|escapejs }}';
+                errorDiv.classList.remove('hidden');
             });
         });
     }
