@@ -5,6 +5,8 @@ Romanian hosting provider authentication with multi-customer support.
 
 from __future__ import annotations
 
+import hashlib
+import secrets
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any, ClassVar, cast
 
@@ -542,6 +544,96 @@ class UserLoginLog(models.Model):
     def __str__(self) -> str:
         user_display = self.user.email if self.user else "Unknown User"
         return f"{user_display} - {self.status} at {self.timestamp}"
+
+
+# ===============================================================================
+# API TOKEN MODEL (ADR-0031 Gaps 2-6)
+# ===============================================================================
+
+
+class APIToken(models.Model):
+    """
+    Hashed API token with multi-token support, expiry, and usage tracking.
+
+    Replaces DRF's built-in ``rest_framework.authtoken.Token`` which stores
+    tokens in plaintext and enforces one token per user (OneToOneField).
+
+    Security properties:
+    - Tokens are SHA-256 hashed at rest — a DB dump does not expose raw keys
+    - Raw key is returned ONCE at creation and never stored
+    - Multiple tokens per user for per-script/per-device isolation
+    - Optional expiry with ``expires_at``
+    - Usage tracking via ``last_used_at`` (throttled to avoid write-per-request)
+
+    See ADR-0031 and issue #77 for full context.
+    """
+
+    TOKEN_BYTE_LENGTH = 20  # 20 bytes = 40 hex chars, same entropy as DRF authtoken
+    LAST_USED_UPDATE_INTERVAL = timedelta(minutes=5)
+    MAX_TOKENS_PER_USER = 20
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="api_tokens",
+    )
+    key_hash = models.CharField(
+        max_length=64,
+        unique=True,
+        db_index=True,
+        help_text=_("SHA-256 hex digest of the raw token key."),
+    )
+    key_prefix = models.CharField(
+        max_length=8,
+        help_text=_("First 8 characters of the raw key, for identification without exposing the full token."),
+    )
+    name = models.CharField(
+        max_length=100,
+        default="default",
+        help_text=_("Human-readable label for this token (e.g. 'ci-pipeline', 'monitoring-script')."),
+    )
+    description = models.TextField(
+        blank=True,
+        help_text=_("Optional longer description of this token's purpose."),
+    )
+    expires_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text=_("When this token expires. Null means no expiry."),
+    )
+    last_used_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text=_("Last time this token was used for authentication. Updated at most every 5 minutes."),
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "users_api_tokens"
+        verbose_name = _("API Token")
+        verbose_name_plural = _("API Tokens")
+        indexes: ClassVar[list[models.Index]] = [
+            models.Index(fields=["user", "created_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.name} ({self.key_prefix}\u2026) \u2014 {self.user}"
+
+    @property
+    def is_expired(self) -> bool:
+        if self.expires_at is None:
+            return False
+        return timezone.now() >= self.expires_at
+
+    @staticmethod
+    def generate_key() -> str:
+        """Generate a cryptographically random 40-character hex token."""
+        return secrets.token_hex(APIToken.TOKEN_BYTE_LENGTH)
+
+    @staticmethod
+    def hash_key(raw_key: str) -> str:
+        """Return the SHA-256 hex digest of a raw token key."""
+        return hashlib.sha256(raw_key.encode("utf-8")).hexdigest()
 
 
 # Import MFA models to ensure they're recognized by Django
