@@ -4,6 +4,7 @@ Customer-facing dashboard with API integration - STATELESS ARCHITECTURE.
 """
 
 import logging
+import time
 from typing import Any
 
 from django.http import HttpRequest, HttpResponse
@@ -101,9 +102,12 @@ def _get_customer_data(customer_id: str, user_id: int) -> tuple[list[Any], str |
     return customers, greeting_name
 
 
-def _get_ticket_data(tickets_api: TicketsAPIClient, customer_id: str, user_id: int) -> tuple[list[Any], int]:
-    """Get recent tickets and open tickets count"""
+def _get_ticket_data(
+    tickets_api: TicketsAPIClient, customer_id: str, user_id: int
+) -> tuple[list[Any], int, dict[str, Any]]:
+    """Get recent tickets, open tickets count, and raw summary for session seeding."""
     recent_tickets = []
+    tickets_summary: dict[str, Any] = {}
     try:
         ticket_response = tickets_api.get_customer_tickets(int(customer_id), user_id, TicketFilters(page=1))
         raw_tickets = ticket_response.get("results", [])[:4]
@@ -116,19 +120,19 @@ def _get_ticket_data(tickets_api: TicketsAPIClient, customer_id: str, user_id: i
         logger.debug(f"⚠️ [Dashboard] Failed to load ticket data: {e}")
         open_tickets_count = len(recent_tickets)
 
-    return recent_tickets, open_tickets_count
+    return recent_tickets, open_tickets_count, tickets_summary
 
 
-def _get_services_data(services_api: ServicesAPIClient, customer_id: str, user_id: int) -> int:
-    """Get active services count"""
+def _get_services_data(services_api: ServicesAPIClient, customer_id: str, user_id: int) -> tuple[int, dict[str, Any]]:
+    """Get active services count and raw summary for session seeding."""
     try:
         services_summary = services_api.get_services_summary(int(customer_id), user_id)
-        return int(services_summary.get("active_services", 0))
+        return int(services_summary.get("active_services", 0)), services_summary
     except (PlatformAPIError, KeyError, TypeError, ValueError) as e:
         if is_rate_limited_error(e):
             raise
         logger.debug(f"⚠️ [Dashboard] Failed to load services summary: {e}")
-        return 0
+        return 0, {}
 
 
 def dashboard_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912, PLR0915
@@ -197,8 +201,9 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912
         customers, greeting_name = [], None
 
     # --- Tickets section ---
+    tickets_summary: dict[str, Any] = {}
     try:
-        recent_tickets, open_tickets_count = _get_ticket_data(tickets_api, cid_str, user_id)
+        recent_tickets, open_tickets_count, tickets_summary = _get_ticket_data(tickets_api, cid_str, user_id)
     except PlatformAPIError as e:
         if is_rate_limited_error(e):
             sections_rate_limited.add("tickets")
@@ -210,8 +215,9 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912
         recent_tickets, open_tickets_count = [], 0
 
     # --- Services section ---
+    services_summary: dict[str, Any] = {}
     try:
-        active_services = _get_services_data(services_api, cid_str, user_id)
+        active_services, services_summary = _get_services_data(services_api, cid_str, user_id)
     except PlatformAPIError as e:
         if is_rate_limited_error(e):
             sections_rate_limited.add("services")
@@ -221,6 +227,15 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912
         else:
             logger.error("🔥 [Dashboard] Failed to load services data for customer %s: %s", customer_id, e)
         active_services = 0
+
+    # Seed account_health session cache so the context processor skips
+    # redundant API calls for the same billing/services/tickets summaries.
+    request.session["account_health_data"] = {
+        "invoice": invoice_summary,
+        "services": services_summary,
+        "tickets": tickets_summary,
+    }
+    request.session["account_health_fetched_at"] = time.time()
 
     # Fallback for greeting name if not resolved
     if not greeting_name:

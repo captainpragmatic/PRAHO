@@ -48,8 +48,8 @@ class DashboardPerSectionRateLimitTests(SimpleTestCase):
     def _call_dashboard(self, request: MagicMock) -> MagicMock:
         return dashboard_view(request)
 
-    @patch("apps.dashboard.views._get_services_data", return_value=2)
-    @patch("apps.dashboard.views._get_ticket_data", return_value=([], 0))
+    @patch("apps.dashboard.views._get_services_data", return_value=(2, {}))
+    @patch("apps.dashboard.views._get_ticket_data", return_value=([], 0, {}))
     @patch("apps.dashboard.views._get_customer_data", return_value=([], None))
     @patch("apps.dashboard.views._get_billing_data")
     def test_billing_rate_limited_preserves_ticket_data(
@@ -62,7 +62,7 @@ class DashboardPerSectionRateLimitTests(SimpleTestCase):
         mock_billing.side_effect = _rate_limited_error(15)
         # Tickets returns data
         ticket_obj = SimpleNamespace(id=1, title="Test", status="open", created_at="2026-01-01", ticket_number="T-1")
-        mock_tickets.return_value = ([ticket_obj], 1)
+        mock_tickets.return_value = ([ticket_obj], 1, {})
 
         request = _authenticated_request()
         response = self._call_dashboard(request)
@@ -71,7 +71,7 @@ class DashboardPerSectionRateLimitTests(SimpleTestCase):
         # The response should render successfully; verify template was called
         self.assertIn(b"Dashboard", response.content)
 
-    @patch("apps.dashboard.views._get_services_data", return_value=0)
+    @patch("apps.dashboard.views._get_services_data", return_value=(0, {}))
     @patch("apps.dashboard.views._get_ticket_data")
     @patch("apps.dashboard.views._get_customer_data", return_value=([], None))
     @patch("apps.dashboard.views._get_billing_data", return_value=([], {"total_invoices": 5}))
@@ -113,8 +113,8 @@ class DashboardPerSectionRateLimitTests(SimpleTestCase):
         content = response.content.decode()
         self.assertIn("rate limited", content.lower())
 
-    @patch("apps.dashboard.views._get_services_data", return_value=3)
-    @patch("apps.dashboard.views._get_ticket_data", return_value=([], 0))
+    @patch("apps.dashboard.views._get_services_data", return_value=(3, {}))
+    @patch("apps.dashboard.views._get_ticket_data", return_value=([], 0, {}))
     @patch("apps.dashboard.views._get_customer_data", return_value=([], "John"))
     @patch("apps.dashboard.views._get_billing_data", return_value=([], {"total_invoices": 2}))
     def test_no_rate_limit_shows_full_dashboard(
@@ -132,7 +132,7 @@ class DashboardPerSectionRateLimitTests(SimpleTestCase):
         # No rate-limit message when everything succeeds
         self.assertNotIn("rate limited", content.lower().replace("temporarily rate limited", ""))
 
-    @patch("apps.dashboard.views._get_services_data", return_value=0)
+    @patch("apps.dashboard.views._get_services_data", return_value=(0, {}))
     @patch("apps.dashboard.views._get_ticket_data")
     @patch("apps.dashboard.views._get_customer_data", return_value=([], None))
     @patch("apps.dashboard.views._get_billing_data")
