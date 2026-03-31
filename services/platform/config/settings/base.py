@@ -29,7 +29,7 @@ DJANGO_APPS: list[str] = [
 
 THIRD_PARTY_APPS: list[str] = [
     "rest_framework",
-    "rest_framework.authtoken",  # 🔐 Token authentication for API access
+    "rest_framework.authtoken",  # Legacy — kept for data migration; custom APIToken in apps.users replaces this
     "corsheaders",  # Defense-in-depth: protects staff sessions from cross-site credential-riding
     "ipware",
     "django_q",  # Async task processing
@@ -341,8 +341,8 @@ REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
         # Session auth for web UI (HTMX calls from platform)
         "rest_framework.authentication.SessionAuthentication",
-        # Token auth for portal service and external clients
-        "rest_framework.authentication.TokenAuthentication",
+        # Hashed token auth with Bearer/Token support, expiry, and multi-token (ADR-0031)
+        "apps.api.users.authentication.HashedTokenAuthentication",
     ],
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.IsAuthenticated",
