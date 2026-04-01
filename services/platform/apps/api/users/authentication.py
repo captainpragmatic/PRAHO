@@ -21,7 +21,7 @@ _ACCEPTED_KEYWORDS = ("bearer", "token")
 _EXPECTED_AUTH_PARTS = 2
 
 
-class HashedTokenAuthentication(BaseAuthentication):
+class HashedTokenAuthentication(BaseAuthentication):  # type: ignore[misc]  # DRF stub types BaseAuthentication as Any
     """
     Authenticate requests via ``Authorization: Bearer <key>`` or ``Token <key>``.
 
