@@ -2,6 +2,7 @@
 # COMPREHENSIVE BILLING PDF GENERATORS TESTS
 # ===============================================================================
 
+from datetime import date
 from decimal import Decimal
 from io import BytesIO
 from unittest.mock import Mock, patch
@@ -19,6 +20,7 @@ from apps.billing.pdf_generators import (
     RomanianDocumentPDFGenerator,
     RomanianInvoicePDFGenerator,
     RomanianProformaPDFGenerator,
+    generate_invoice_pdf,
 )
 from apps.customers.models import Customer
 from tests.helpers.fsm_helpers import force_status
@@ -88,6 +90,10 @@ class BaseRomanianDocumentPDFGeneratorTestCase(TestCase):
         self.assertIsNotNone(company_info['country'])
         self.assertIsNotNone(company_info['cui'])
         self.assertIsNotNone(company_info['email'])
+        self.assertIsNotNone(company_info['registration_number'])
+        self.assertIsNotNone(company_info['bank_name'])
+        self.assertIsNotNone(company_info['bank_account'])
+        self.assertIsNotNone(company_info['phone'])
 
         # Test that values match current project settings (not hard-coded defaults)
         self.assertEqual(company_info['name'], settings.COMPANY_NAME)
@@ -99,7 +105,11 @@ class BaseRomanianDocumentPDFGeneratorTestCase(TestCase):
         COMPANY_CITY='Test City',
         COMPANY_COUNTRY='Test Country',
         COMPANY_CUI='RO87654321',
-        COMPANY_EMAIL='test@company.ro'
+        COMPANY_EMAIL='test@company.ro',
+        COMPANY_REGISTRATION_NUMBER='J40/999/2024',
+        COMPANY_BANK_NAME='Test Bank',
+        COMPANY_BANK_ACCOUNT='RO00TEST0000000000',
+        COMPANY_PHONE='+40 700 000 000'
     )
     def test_get_company_info_from_settings(self):
         """Test _get_company_info with custom settings"""
@@ -112,6 +122,10 @@ class BaseRomanianDocumentPDFGeneratorTestCase(TestCase):
         self.assertEqual(company_info['country'], 'Test Country')
         self.assertEqual(company_info['cui'], 'RO87654321')
         self.assertEqual(company_info['email'], 'test@company.ro')
+        self.assertEqual(company_info['registration_number'], 'J40/999/2024')
+        self.assertEqual(company_info['bank_name'], 'Test Bank')
+        self.assertEqual(company_info['bank_account'], 'RO00TEST0000000000')
+        self.assertEqual(company_info['phone'], '+40 700 000 000')
 
     def test_setup_document_header(self):
         """Test _setup_document_header method"""
@@ -296,7 +310,7 @@ class RomanianInvoicePDFGeneratorTestCase(TestCase):
         generator = RomanianInvoicePDFGenerator(self.invoice)
         disclaimer = generator._get_legal_disclaimer()
 
-        self.assertIn('Romanian legislation', disclaimer)
+        self.assertIn('art. 319', disclaimer)
 
     def test_get_total_label(self):
         """Test _get_total_label method"""
@@ -446,7 +460,7 @@ class RomanianProformaPDFGeneratorTestCase(TestCase):
         generator = RomanianProformaPDFGenerator(self.proforma)
         disclaimer = generator._get_legal_disclaimer()
 
-        self.assertIn('not a fiscal invoice', disclaimer)
+        self.assertIn('nu constituie document fiscal', disclaimer)
 
     def test_render_document_details(self):
         """Test _render_document_details method"""
@@ -967,6 +981,201 @@ class PDFGeneratorEdgeCasesTestCase(TestCase):
         # Test line drawing
         generator.canvas.line(50, 30, 100, 30)
 
+
+class EN16931PDFComplianceTests(TestCase):
+    """Tests for EN16931 and Romanian law compliance in PDF generation."""
+
+    def setUp(self):
+        self.currency_ron, _ = Currency.objects.get_or_create(
+            code='RON', defaults={'symbol': 'lei', 'decimals': 2}
+        )
+        self.currency_eur, _ = Currency.objects.get_or_create(
+            code='EUR', defaults={'symbol': '€', 'decimals': 2}
+        )
+        self.customer = Customer.objects.create(
+            customer_type='company',
+            company_name='EN16931 Test SRL',
+            primary_email='en16931@test.ro',
+            status='active',
+        )
+        self.invoice = Invoice.objects.create(
+            customer=self.customer,
+            currency=self.currency_ron,
+            number='INV-EN16931-001',
+            subtotal_cents=10000,
+            tax_cents=2100,
+            total_cents=12100,
+            status='issued',
+            bill_to_name='Client Test SRL',
+            bill_to_email='client@test.ro',
+            bill_to_tax_id='RO99887766',
+            bill_to_registration_number='J40/555/2023',
+            bill_to_address1='Strada Test 42',
+            bill_to_address2='Etaj 3, Ap. 12',
+            bill_to_city='Cluj-Napoca',
+            bill_to_region='Cluj',
+            bill_to_postal='400001',
+            bill_to_country='RO',
+        )
+
+    def _generate_pdf_bytes(self, invoice=None):
+        """Generate PDF bytes and return them."""
+        return generate_invoice_pdf(invoice or self.invoice)
+
+    def _get_canvas_calls(self, invoice=None):
+        """Generate PDF and capture all drawString calls as a single text blob."""
+        generator = RomanianInvoicePDFGenerator(invoice or self.invoice)
+        calls = []
+        original_draw = generator.canvas.drawString
+        def capture_draw(x, y, text):
+            calls.append(text)
+            return original_draw(x, y, text)
+        generator.canvas.drawString = capture_draw
+        generator._create_pdf_document()
+        return calls
+
+    def test_seller_bank_details_rendered(self):
+        """Seller section must show IBAN and bank name."""
+        calls = self._get_canvas_calls()
+        text = ' '.join(calls)
+        self.assertIn('IBAN', text)
+        self.assertIn('Banca', text)
+
+    def test_seller_registration_number_rendered(self):
+        """Seller section must show Nr. Reg. Com."""
+        calls = self._get_canvas_calls()
+        text = ' '.join(calls)
+        self.assertIn('Nr. Reg. Com.', text)
+
+    def test_client_full_address_rendered(self):
+        """Client section must show full address including address2, city, region, postal."""
+        calls = self._get_canvas_calls()
+        text = ' '.join(calls)
+        self.assertIn('Strada Test 42', text)
+        self.assertIn('Etaj 3, Ap. 12', text)
+        self.assertIn('Cluj-Napoca', text)
+        self.assertIn('400001', text)
+
+    def test_client_registration_number_rendered(self):
+        """Client section must show bill_to_registration_number when set."""
+        calls = self._get_canvas_calls()
+        text = ' '.join(calls)
+        self.assertIn('J40/555/2023', text)
+
+    def test_client_tax_id_rendered(self):
+        """Client section must show CUI/CIF."""
+        calls = self._get_canvas_calls()
+        text = ' '.join(calls)
+        self.assertIn('RO99887766', text)
+
+    def test_vat_breakdown_multiple_rates(self):
+        """Totals section must show VAT breakdown per rate when multiple rates exist."""
+        # Add lines with different VAT rates
+        InvoiceLine.objects.create(
+            invoice=self.invoice, kind='service', description='Standard VAT service',
+            quantity=1, unit_price_cents=10000, tax_rate=Decimal('0.21'),
+            tax_cents=2100, line_total_cents=12100,
+        )
+        InvoiceLine.objects.create(
+            invoice=self.invoice, kind='service', description='Reduced VAT service',
+            quantity=1, unit_price_cents=5000, tax_rate=Decimal('0.09'),
+            tax_cents=450, line_total_cents=5450,
+        )
+        calls = self._get_canvas_calls()
+        text = ' '.join(calls)
+        self.assertIn('TVA 21%', text)
+        self.assertIn('TVA 9%', text)
+
+    def test_reverse_charge_notation(self):
+        """Reverse charge notice must appear when any line has tax_category_code=AE."""
+        InvoiceLine.objects.create(
+            invoice=self.invoice, kind='service', description='EU B2B service',
+            quantity=1, unit_price_cents=10000, tax_rate=Decimal('0.00'),
+            tax_cents=0, line_total_cents=10000,
+            tax_category_code='AE',
+        )
+        calls = self._get_canvas_calls()
+        text = ' '.join(calls)
+        self.assertIn('Taxare invers', text)  # Partial match avoids encoding issues
+
+    def test_currency_code_not_hardcoded(self):
+        """Line totals must use the invoice's currency code, not hardcoded RON."""
+        eur_invoice = Invoice.objects.create(
+            customer=self.customer, currency=self.currency_eur,
+            number='INV-EUR-001', subtotal_cents=10000, tax_cents=2100,
+            total_cents=12100, status='issued', bill_to_name='EUR Client',
+        )
+        InvoiceLine.objects.create(
+            invoice=eur_invoice, kind='service', description='EUR service',
+            quantity=1, unit_price_cents=10000, tax_rate=Decimal('0.21'),
+            tax_cents=2100, line_total_cents=12100,
+        )
+        calls = self._get_canvas_calls(invoice=eur_invoice)
+        text = ' '.join(calls)
+        self.assertIn('EUR', text)
+
+    def test_exchange_rate_shown_for_non_ron(self):
+        """Exchange rate must be shown when invoice currency is not RON."""
+        eur_invoice = Invoice.objects.create(
+            customer=self.customer, currency=self.currency_eur,
+            number='INV-EUR-002', subtotal_cents=10000, tax_cents=2100,
+            total_cents=12100, status='issued', bill_to_name='EUR Client',
+            meta={'exchange_rate': '4.9750'},
+        )
+        InvoiceLine.objects.create(
+            invoice=eur_invoice, kind='service', description='EUR service',
+            quantity=1, unit_price_cents=10000, tax_rate=Decimal('0.21'),
+            tax_cents=2100, line_total_cents=12100,
+        )
+        calls = self._get_canvas_calls(invoice=eur_invoice)
+        text = ' '.join(calls)
+        self.assertIn('4.9750', text)
+        self.assertIn('Curs valutar', text)
+
+    def test_line_level_en16931_fields(self):
+        """EN16931 line-level fields (domain, period, SKU) must be rendered."""
+        InvoiceLine.objects.create(
+            invoice=self.invoice, kind='service', description='Hosting Plan',
+            quantity=1, unit_price_cents=10000, tax_rate=Decimal('0.21'),
+            tax_cents=2100, line_total_cents=12100,
+            domain_name='example.ro',
+            period_start=date(2026, 1, 1),
+            period_end=date(2026, 1, 31),
+            seller_item_id='HOST-PRO-001',
+        )
+        calls = self._get_canvas_calls()
+        text = ' '.join(calls)
+        self.assertIn('example.ro', text)
+        self.assertIn('01.01.2026', text)
+        self.assertIn('31.01.2026', text)
+        self.assertIn('HOST-PRO-001', text)
+
+    def test_fiscal_invoice_disclaimer(self):
+        """Invoice PDF must contain proper Romanian fiscal disclaimer."""
+        calls = self._get_canvas_calls()
+        text = ' '.join(calls)
+        self.assertIn('art. 319', text)
+        self.assertIn('227/2015', text)
+
+    def test_proforma_disclaimer(self):
+        """Proforma PDF must state it's not a fiscal document."""
+        proforma = ProformaInvoice.objects.create(
+            customer=self.customer, currency=self.currency_ron,
+            number='PRO-EN16931-001', subtotal_cents=5000, tax_cents=1050,
+            total_cents=6050, status='draft', bill_to_name='Proforma Client',
+            valid_until=timezone.now() + timezone.timedelta(days=30),
+        )
+        generator = RomanianProformaPDFGenerator(proforma)
+        calls = []
+        original_draw = generator.canvas.drawString
+        def capture_draw(x, y, text):
+            calls.append(text)
+            return original_draw(x, y, text)
+        generator.canvas.drawString = capture_draw
+        generator._create_pdf_document()
+        text = ' '.join(calls)
+        self.assertIn('nu constituie document fiscal', text)
+
         self.assertTrue(True)
 
     def test_document_footer_with_unicode_company_name(self):
@@ -1059,7 +1268,11 @@ class PDFGeneratorMockingTestCase(TestCase):
             'city': 'Test City',
             'country': 'Test Country',
             'cui': 'RO12345678',
-            'email': 'test@company.ro'
+            'email': 'test@company.ro',
+            'registration_number': 'J40/1234/2020',
+            'bank_name': 'Test Bank',
+            'bank_account': 'RO00TEST0000000000',
+            'phone': '+40 700 000 000',
         }
 
         generator = RomanianInvoicePDFGenerator(self.invoice)

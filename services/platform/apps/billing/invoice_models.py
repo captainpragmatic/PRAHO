@@ -134,6 +134,7 @@ class Invoice(models.Model):
     # Billing address snapshot (immutable once issued)
     bill_to_name = models.CharField(max_length=255, default="")
     bill_to_tax_id = models.CharField(max_length=50, blank=True)
+    bill_to_registration_number = models.CharField(max_length=50, blank=True)  # Nr. Reg. Com. / J number
     bill_to_email = models.EmailField(blank=True)
     bill_to_address1 = models.CharField(max_length=255, blank=True)
     bill_to_address2 = models.CharField(max_length=255, blank=True)
