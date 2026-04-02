@@ -29,27 +29,8 @@
         {% for ticket in tickets %}
         <tr class="hover:bg-slate-700/50 transition-colors cursor-pointer" onclick="window.location.href='{% url 'tickets:detail' ticket_id=ticket.id %}';">
           <td class="px-6 py-4 whitespace-nowrap">
-            <div class="flex items-center">
-              <div class="flex-shrink-0 h-10 w-10">
-                <div class="h-10 w-10 rounded-full bg-primary/20 flex items-center justify-center">
-                  <span class="text-sm font-medium text-primary">
-                    {% if ticket.ticket_number %}
-                    {{ ticket.ticket_number|slice:":2" }}
-                    {% else %}
-                    #{{ ticket.id }}
-                    {% endif %}
-                  </span>
-                </div>
-              </div>
-              <div class="ml-4">
-                <div class="text-sm font-medium text-white">
-                  {% if ticket.ticket_number %}
-                  {{ ticket.ticket_number }}
-                  {% else %}
-                  #{{ ticket.id }}
-                  {% endif %}
-                </div>
-              </div>
+            <div class="text-sm font-medium text-white font-mono">
+              {% if ticket.ticket_number %}{{ ticket.ticket_number }}{% else %}#{{ ticket.id }}{% endif %}
             </div>
           </td>
           <td class="px-6 py-4">
