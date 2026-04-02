@@ -86,9 +86,15 @@ class Ok[T]:
 
 @dataclass(frozen=True)
 class Err[E]:
-    """Error result containing an error value"""
+    """Error result containing an error value.
+
+    The ``retriable`` flag signals whether the operation that produced this
+    error might succeed on retry (e.g. transient DB timeout, lock contention).
+    Callers such as Django-Q tasks can use this to decide whether to re-queue.
+    """
 
     error: E
+    retriable: bool = False
 
     def is_ok(self) -> bool:
         return False
