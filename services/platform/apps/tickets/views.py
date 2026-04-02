@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 # Module-level default for file size limit (must match tickets.security)
 _DEFAULT_MAX_FILE_SIZE_BYTES = 2097152  # 2MB
 
-TICKET_STATUS_TABS: list[dict[str, str]] = [
+TICKET_STATUS_TABS = [
     {"value": "", "label": _("All"), "border_class": "border-blue-500", "text_class": "text-blue-400"},
     {"value": "open", "label": _("Open"), "border_class": "border-blue-500", "text_class": "text-blue-400"},
     {
