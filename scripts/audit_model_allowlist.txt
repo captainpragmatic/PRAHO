@@ -61,6 +61,7 @@ billing.ProformaLine            # child of ProformaInvoice
 billing.ProformaSequence        # internal counter (no business significance)
 billing.SubscriptionChange      # child of Subscription
 billing.SubscriptionItem        # child of Subscription
+domains.DomainOperation         # operational task tracking (audited via gateway _audit_api_call)
 domains.DomainOrderItem         # child of Order (audited via Order signal)
 orders.OrderItem                # child of Order
 provisioning.ServiceDomain      # child of Service
