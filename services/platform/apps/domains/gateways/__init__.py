@@ -16,8 +16,12 @@ from . import gandi, rotld  # noqa: F401  # registration side effects
 from .base import (
     BaseRegistrarGateway,
     DomainAvailabilityResult,
+    DomainInfoResult,
+    DomainLockResult,
     DomainRegistrationResult,
     DomainRenewalResult,
+    DomainTransferResult,
+    NameserverUpdateResult,
     RegistrarGatewayFactory,
 )
 from .errors import (
@@ -33,8 +37,12 @@ from .errors import (
 __all__ = [
     "BaseRegistrarGateway",
     "DomainAvailabilityResult",
+    "DomainInfoResult",
+    "DomainLockResult",
     "DomainRegistrationResult",
     "DomainRenewalResult",
+    "DomainTransferResult",
+    "NameserverUpdateResult",
     "RegistrarAPIError",
     "RegistrarAuthError",
     "RegistrarConflictError",
