@@ -91,6 +91,46 @@ class DomainAvailabilityResult:
     price_cents: int | None = None
 
 
+# -- Phase 2 result types ---------------------------------------------------
+
+
+@dataclass(frozen=True)
+class DomainTransferResult:
+    """Result from initiating a domain transfer."""
+
+    transfer_id: str
+    status: str  # e.g. "pending", "approved", "rejected"
+    expected_completion: datetime | None = None
+
+
+@dataclass(frozen=True)
+class DomainInfoResult:
+    """Current domain state at the registrar."""
+
+    registrar_domain_id: str
+    domain_name: str
+    status: str
+    expires_at: datetime | None
+    nameservers: list[str]
+    locked: bool = False
+    whois_privacy: bool = False
+    epp_code: str = ""
+
+
+@dataclass(frozen=True)
+class NameserverUpdateResult:
+    """Result from a nameserver update operation."""
+
+    nameservers: list[str]
+
+
+@dataclass(frozen=True)
+class DomainLockResult:
+    """Result from a lock/unlock operation."""
+
+    locked: bool
+
+
 # ===============================================================================
 # ABSTRACT BASE GATEWAY
 # ===============================================================================
@@ -148,6 +188,54 @@ class BaseRegistrarGateway(ABC):
     @abstractmethod
     def _do_verify_webhook(self, payload: str, signature: str, secret: str) -> bool:
         """Registrar-specific webhook signature verification."""
+
+    # -- Phase 2 optional interface (override to enable) ---------------------
+
+    def _do_initiate_transfer(
+        self,
+        domain_name: str,
+        epp_code: str,
+    ) -> Result[DomainTransferResult, RegistrarAPIError]:
+        """Registrar-specific transfer initiation. Override to enable."""
+        raise NotImplementedError(f"{self.gateway_name} does not support transfers")
+
+    def _do_get_domain_info(
+        self,
+        domain_name: str,
+    ) -> Result[DomainInfoResult, RegistrarAPIError]:
+        """Registrar-specific domain info retrieval. Override to enable."""
+        raise NotImplementedError(f"{self.gateway_name} does not support domain info")
+
+    def _do_update_nameservers(
+        self,
+        domain_name: str,
+        nameservers: list[str],
+    ) -> Result[NameserverUpdateResult, RegistrarAPIError]:
+        """Registrar-specific nameserver update. Override to enable."""
+        raise NotImplementedError(f"{self.gateway_name} does not support nameserver updates")
+
+    def _do_set_lock(
+        self,
+        domain_name: str,
+        locked: bool,
+    ) -> Result[DomainLockResult, RegistrarAPIError]:
+        """Registrar-specific lock/unlock. Override to enable."""
+        raise NotImplementedError(f"{self.gateway_name} does not support lock/unlock")
+
+    def _do_check_availability_bulk(
+        self,
+        domain_names: list[str],
+    ) -> Result[list[DomainAvailabilityResult], RegistrarAPIError]:
+        """Bulk availability check. Override for registrar-native batch API."""
+        # Default: sequential fallback
+        results: list[DomainAvailabilityResult] = []
+        for name in domain_names:
+            r = self._do_check_availability(name)
+            if r.is_ok():
+                results.append(r.unwrap())
+            else:
+                results.append(DomainAvailabilityResult(domain_name=name, available=False))
+        return Ok(results)
 
     # -- Public interface (with circuit breaker + idempotency) ----------------
 
@@ -258,6 +346,160 @@ class BaseRegistrarGateway(ABC):
             return False
 
         return self._do_verify_webhook(payload, signature, secret.strip())
+
+    # -- Phase 2 public interface --------------------------------------------
+
+    def initiate_transfer(
+        self,
+        domain_name: str,
+        epp_code: str,
+    ) -> Result[DomainTransferResult, RegistrarAPIError]:
+        """Initiate domain transfer with circuit breaker and idempotency."""
+        if err := self._check_circuit_breaker():
+            return err
+
+        idempotency_key = f"domain_transfer:{self.gateway_name}:{domain_name}"
+        cached = cache.get(idempotency_key)
+        if cached is not None:
+            self.logger.info("Idempotency hit for %s transfer", domain_name)
+            return Ok(cached)
+
+        try:
+            result = self._retry(
+                lambda: self._do_initiate_transfer(domain_name, epp_code),
+                operation=f"transfer:{domain_name}",
+            )
+        except NotImplementedError:
+            return Err(
+                RegistrarAPIError(
+                    f"{self.gateway_name} does not support transfers",
+                    code=RegistrarErrorCode.INTERNAL_ERROR,
+                    registrar_name=self.registrar.name,
+                )
+            )
+
+        if result.is_ok():
+            cache.set(idempotency_key, result.unwrap(), IDEMPOTENCY_TTL_SECONDS)
+            self._record_success()
+            self._audit_api_call("domain_transfer", domain_name, success=True)
+        else:
+            self._record_failure(result.unwrap_err())
+            self._audit_api_call("domain_transfer", domain_name, success=False, error=str(result.unwrap_err()))
+
+        return result
+
+    def get_domain_info(
+        self,
+        domain_name: str,
+    ) -> Result[DomainInfoResult, RegistrarAPIError]:
+        """Get current domain state from the registrar."""
+        if err := self._check_circuit_breaker():
+            return err
+
+        try:
+            result = self._retry(
+                lambda: self._do_get_domain_info(domain_name),
+                operation=f"info:{domain_name}",
+            )
+        except NotImplementedError:
+            return Err(
+                RegistrarAPIError(
+                    f"{self.gateway_name} does not support domain info",
+                    code=RegistrarErrorCode.INTERNAL_ERROR,
+                    registrar_name=self.registrar.name,
+                )
+            )
+
+        if result.is_ok():
+            self._record_success()
+        else:
+            self._record_failure(result.unwrap_err())
+
+        return result
+
+    def update_nameservers(
+        self,
+        domain_name: str,
+        nameservers: list[str],
+    ) -> Result[NameserverUpdateResult, RegistrarAPIError]:
+        """Update domain nameservers at the registrar."""
+        if err := self._check_circuit_breaker():
+            return err
+
+        try:
+            result = self._retry(
+                lambda: self._do_update_nameservers(domain_name, nameservers),
+                operation=f"ns_update:{domain_name}",
+            )
+        except NotImplementedError:
+            return Err(
+                RegistrarAPIError(
+                    f"{self.gateway_name} does not support nameserver updates",
+                    code=RegistrarErrorCode.INTERNAL_ERROR,
+                    registrar_name=self.registrar.name,
+                )
+            )
+
+        if result.is_ok():
+            self._record_success()
+            self._audit_api_call("nameserver_update", domain_name, success=True, metadata={"nameservers": nameservers})
+        else:
+            self._record_failure(result.unwrap_err())
+            self._audit_api_call("nameserver_update", domain_name, success=False, error=str(result.unwrap_err()))
+
+        return result
+
+    def set_lock(
+        self,
+        domain_name: str,
+        locked: bool,
+    ) -> Result[DomainLockResult, RegistrarAPIError]:
+        """Lock or unlock a domain at the registrar."""
+        if err := self._check_circuit_breaker():
+            return err
+
+        try:
+            result = self._retry(
+                lambda: self._do_set_lock(domain_name, locked),
+                operation=f"lock:{domain_name}",
+            )
+        except NotImplementedError:
+            return Err(
+                RegistrarAPIError(
+                    f"{self.gateway_name} does not support lock/unlock",
+                    code=RegistrarErrorCode.INTERNAL_ERROR,
+                    registrar_name=self.registrar.name,
+                )
+            )
+
+        if result.is_ok():
+            self._record_success()
+            self._audit_api_call("domain_lock", domain_name, success=True, metadata={"locked": locked})
+        else:
+            self._record_failure(result.unwrap_err())
+            self._audit_api_call("domain_lock", domain_name, success=False, error=str(result.unwrap_err()))
+
+        return result
+
+    def check_availability_bulk(
+        self,
+        domain_names: list[str],
+    ) -> Result[list[DomainAvailabilityResult], RegistrarAPIError]:
+        """Check availability of multiple domains in one call."""
+        if err := self._check_circuit_breaker():
+            return err
+
+        result = self._retry(
+            lambda: self._do_check_availability_bulk(domain_names),
+            operation=f"bulk_check:{len(domain_names)}_domains",
+        )
+
+        if result.is_ok():
+            self._record_success()
+        else:
+            self._record_failure(result.unwrap_err())
+
+        return result
 
     # -- HTTP helper for subclasses ------------------------------------------
 

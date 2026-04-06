@@ -28,8 +28,12 @@ from .base import (
     HTTP_OK,
     BaseRegistrarGateway,
     DomainAvailabilityResult,
+    DomainInfoResult,
+    DomainLockResult,
     DomainRegistrationResult,
     DomainRenewalResult,
+    DomainTransferResult,
+    NameserverUpdateResult,
     RegistrarGatewayFactory,
 )
 from .errors import RegistrarAPIError, RegistrarTransientError
@@ -173,6 +177,86 @@ class ROTLDGateway(BaseRegistrarGateway):
 
     def _do_verify_webhook(self, payload: str, signature: str, secret: str) -> bool:
         return self._verify_hmac_sha256(payload, signature, secret)
+
+    # -- Phase 2 operations --------------------------------------------------
+
+    def _do_initiate_transfer(self, domain_name: str, epp_code: str) -> Result[DomainTransferResult, RegistrarAPIError]:
+        url = f"{self._api_base}/domain/transfer"
+        body = {"domain": domain_name, "authcode": epp_code}
+
+        try:
+            response = self._api_request("POST", url, json=body, headers=self._auth_headers())
+        except requests.RequestException as exc:
+            return Err(
+                RegistrarTransientError(self.registrar.name, f"Network error during transfer: {exc}"), retriable=True
+            )
+
+        if response.status_code in (HTTP_OK, HTTP_CREATED, HTTP_ACCEPTED):
+            data = response.json()
+            return Ok(
+                DomainTransferResult(
+                    transfer_id=str(data.get("id", "")),
+                    status=data.get("status", "pending"),
+                    expected_completion=_parse_rotld_date(data.get("expected_at", "")),
+                )
+            )
+        return self._handle_error_response(response, f"transfer {domain_name}")
+
+    def _do_get_domain_info(self, domain_name: str) -> Result[DomainInfoResult, RegistrarAPIError]:
+        url = f"{self._api_base}/domain/info"
+        params = {"domain": domain_name}
+
+        try:
+            response = self._api_request("GET", url, params=params, headers=self._auth_headers())
+        except requests.RequestException as exc:
+            return Err(RegistrarTransientError(self.registrar.name, f"Network error: {exc}"), retriable=True)
+
+        if response.status_code == HTTP_OK:
+            data = response.json()
+            domain_data = data.get("domain", data)
+            ns_data = domain_data.get("nameservers", [])
+            nameservers = [ns.get("hostname", ns) if isinstance(ns, dict) else ns for ns in ns_data]
+            return Ok(
+                DomainInfoResult(
+                    registrar_domain_id=str(domain_data.get("id", domain_name)),
+                    domain_name=domain_name,
+                    status=domain_data.get("status", "unknown"),
+                    expires_at=_parse_rotld_date(domain_data.get("expire_at", "")),
+                    nameservers=nameservers,
+                    locked=domain_data.get("locked", False),
+                    whois_privacy=False,  # ROTLD doesn't support WHOIS privacy for .ro
+                    epp_code=domain_data.get("authcode", ""),
+                )
+            )
+        return self._handle_error_response(response, f"info {domain_name}")
+
+    def _do_update_nameservers(
+        self, domain_name: str, nameservers: list[str]
+    ) -> Result[NameserverUpdateResult, RegistrarAPIError]:
+        url = f"{self._api_base}/domain/nameservers"
+        body = {"domain": domain_name, "nameservers": [{"hostname": ns} for ns in nameservers]}
+
+        try:
+            response = self._api_request("PUT", url, json=body, headers=self._auth_headers())
+        except requests.RequestException as exc:
+            return Err(RegistrarTransientError(self.registrar.name, f"Network error: {exc}"), retriable=True)
+
+        if response.status_code in (HTTP_OK, HTTP_ACCEPTED):
+            return Ok(NameserverUpdateResult(nameservers=nameservers))
+        return self._handle_error_response(response, f"update nameservers for {domain_name}")
+
+    def _do_set_lock(self, domain_name: str, locked: bool) -> Result[DomainLockResult, RegistrarAPIError]:
+        url = f"{self._api_base}/domain/lock"
+        body = {"domain": domain_name, "locked": locked}
+
+        try:
+            response = self._api_request("PUT", url, json=body, headers=self._auth_headers())
+        except requests.RequestException as exc:
+            return Err(RegistrarTransientError(self.registrar.name, f"Network error: {exc}"), retriable=True)
+
+        if response.status_code in (HTTP_OK, HTTP_ACCEPTED):
+            return Ok(DomainLockResult(locked=locked))
+        return self._handle_error_response(response, f"{'lock' if locked else 'unlock'} {domain_name}")
 
     # -- Helpers -------------------------------------------------------------
 

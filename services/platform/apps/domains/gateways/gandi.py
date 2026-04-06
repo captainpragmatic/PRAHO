@@ -22,8 +22,12 @@ from .base import (
     HTTP_OK,
     BaseRegistrarGateway,
     DomainAvailabilityResult,
+    DomainInfoResult,
+    DomainLockResult,
     DomainRegistrationResult,
     DomainRenewalResult,
+    DomainTransferResult,
+    NameserverUpdateResult,
     RegistrarGatewayFactory,
 )
 from .errors import RegistrarAPIError, RegistrarTransientError
@@ -185,6 +189,90 @@ class GandiGateway(BaseRegistrarGateway):
 
     def _do_verify_webhook(self, payload: str, signature: str, secret: str) -> bool:
         return self._verify_hmac_sha256(payload, signature, secret)
+
+    # -- Phase 2 operations --------------------------------------------------
+
+    def _do_initiate_transfer(self, domain_name: str, epp_code: str) -> Result[DomainTransferResult, RegistrarAPIError]:
+        url = f"{GANDI_API_BASE}/domain/transferin"
+        body: dict[str, Any] = {"fqdn": domain_name, "auth_info": epp_code}
+
+        sharing_id = self._get_sharing_id()
+        if sharing_id:
+            body["sharing_id"] = sharing_id
+
+        try:
+            response = self._api_request("POST", url, json=body, headers=self._auth_headers())
+        except requests.RequestException as exc:
+            return Err(
+                RegistrarTransientError(self.registrar.name, f"Network error during transfer: {exc}"), retriable=True
+            )
+
+        if response.status_code in (HTTP_OK, HTTP_ACCEPTED):
+            data = response.json()
+            return Ok(
+                DomainTransferResult(
+                    transfer_id=data.get("id", ""),
+                    status=data.get("status", "pending"),
+                    expected_completion=_parse_gandi_date(data.get("expected_completion", "")),
+                )
+            )
+        return self._handle_error_response(response, f"transfer {domain_name}")
+
+    def _do_get_domain_info(self, domain_name: str) -> Result[DomainInfoResult, RegistrarAPIError]:
+        url = f"{GANDI_API_BASE}/domain/domains/{domain_name}"
+
+        try:
+            response = self._api_request("GET", url, headers=self._auth_headers())
+        except requests.RequestException as exc:
+            return Err(RegistrarTransientError(self.registrar.name, f"Network error: {exc}"), retriable=True)
+
+        if response.status_code == HTTP_OK:
+            data = response.json()
+            return Ok(
+                DomainInfoResult(
+                    registrar_domain_id=data.get("id", domain_name),
+                    domain_name=data.get("fqdn", domain_name),
+                    status=data.get("status", "unknown"),
+                    expires_at=_parse_gandi_date(data.get("dates", {}).get("registry_ends_at", "")),
+                    nameservers=data.get("nameservers", []),
+                    locked="clientTransferProhibited" in data.get("status", [])
+                    if isinstance(data.get("status"), list)
+                    else False,
+                    whois_privacy=data.get("whois_privacy", False),
+                    epp_code=data.get("auth_info", ""),
+                )
+            )
+        return self._handle_error_response(response, f"info {domain_name}")
+
+    def _do_update_nameservers(
+        self, domain_name: str, nameservers: list[str]
+    ) -> Result[NameserverUpdateResult, RegistrarAPIError]:
+        url = f"{GANDI_API_BASE}/domain/domains/{domain_name}/nameservers"
+
+        try:
+            response = self._api_request("PUT", url, json=nameservers, headers=self._auth_headers())
+        except requests.RequestException as exc:
+            return Err(RegistrarTransientError(self.registrar.name, f"Network error: {exc}"), retriable=True)
+
+        if response.status_code in (HTTP_OK, HTTP_ACCEPTED):
+            return Ok(NameserverUpdateResult(nameservers=nameservers))
+        return self._handle_error_response(response, f"update nameservers for {domain_name}")
+
+    def _do_set_lock(self, domain_name: str, locked: bool) -> Result[DomainLockResult, RegistrarAPIError]:
+        url = f"{GANDI_API_BASE}/domain/domains/{domain_name}"
+        # Gandi uses PATCH on domain to toggle transfer lock
+        body = {"autorenew": None}  # Gandi lock is via domain status update
+        if locked:
+            body = {"tags": ["locked"]}
+
+        try:
+            response = self._api_request("PATCH", url, json=body, headers=self._auth_headers())
+        except requests.RequestException as exc:
+            return Err(RegistrarTransientError(self.registrar.name, f"Network error: {exc}"), retriable=True)
+
+        if response.status_code in (HTTP_OK, HTTP_ACCEPTED):
+            return Ok(DomainLockResult(locked=locked))
+        return self._handle_error_response(response, f"{'lock' if locked else 'unlock'} {domain_name}")
 
     # -- Helpers -------------------------------------------------------------
 
