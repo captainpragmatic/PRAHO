@@ -261,9 +261,7 @@ class GandiGateway(BaseRegistrarGateway):
     def _do_set_lock(self, domain_name: str, locked: bool) -> Result[DomainLockResult, RegistrarAPIError]:
         url = f"{GANDI_API_BASE}/domain/domains/{domain_name}"
         # Gandi uses PATCH on domain to toggle transfer lock
-        body = {"autorenew": None}  # Gandi lock is via domain status update
-        if locked:
-            body = {"tags": ["locked"]}
+        body: dict[str, Any] = {"tags": ["locked"]} if locked else {"autorenew": None}
 
         try:
             response = self._api_request("PATCH", url, json=body, headers=self._auth_headers())
