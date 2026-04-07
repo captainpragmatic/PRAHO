@@ -183,6 +183,7 @@ REST_FRAMEWORK["DEFAULT_THROTTLE_CLASSES"] = []
 # ===============================================================================
 
 ENCRYPTION_KEY = "iuTrSBoKchmRt7RiySTHNuANNDmWe_xIqZWtMQaLMXs="
+ENCRYPTION_KEYS = [ENCRYPTION_KEY]  # Ordered keyring [current, ...previous]
 
 # Webhook signing secret (platform→portal) — matches portal test.py
 PLATFORM_TO_PORTAL_WEBHOOK_SECRET = "test-webhook-secret-do-not-use-in-prod"
