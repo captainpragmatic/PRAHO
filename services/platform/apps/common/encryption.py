@@ -130,7 +130,7 @@ def encrypt_sensitive_data(data: str, *, aad: bytes | None = None) -> str:
         return ""
 
     try:
-        key = get_encryption_keys()[0]
+        key = get_encryption_key()
         aesgcm = _get_aesgcm(key)
         nonce = os.urandom(NONCE_SIZE)
         ciphertext_and_tag = aesgcm.encrypt(nonce, data.encode("utf-8"), aad)
