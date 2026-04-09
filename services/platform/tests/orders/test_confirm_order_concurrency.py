@@ -140,8 +140,8 @@ class TestC2ConfirmOrderIdempotency(TestCase):
             self.assertEqual(resp2.status_code, status.HTTP_200_OK)
             self.assertTrue(resp2.data["success"])
 
-    def test_only_one_invoice_created_after_double_confirm(self):
-        """Even after two confirm calls, exactly one invoice exists for the proforma."""
+    def test_no_duplicate_invoice_after_double_confirm(self):
+        """Double confirm must not create duplicate invoices (at most 1 for the proforma)."""
         order, proforma = self._create_order_with_proforma()
 
         mock_result = PaymentConfirmResult(

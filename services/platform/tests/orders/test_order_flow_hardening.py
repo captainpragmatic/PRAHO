@@ -258,7 +258,7 @@ class TestDuplicateVATAuditPrevention(TestCase):
         cls.customer = _make_customer('bug10@test.ro')
 
     def test_single_preflight_single_audit_event(self) -> None:
-        """One preflight validate() call must emit at most one order_vat_calculation event."""
+        """Preflight validate() with cached _preflight_vat_result must emit zero order_vat_calculation events."""
         order = Order.objects.create(
             customer=self.customer,
             currency=self.currency,
