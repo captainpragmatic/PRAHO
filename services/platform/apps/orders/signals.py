@@ -408,7 +408,7 @@ def _handle_order_cancellation(order: Order, old_status: str) -> None:  # noqa: 
                     )
 
         # Send cancellation email after transaction commits to avoid ghost emails on rollback (#130/M6)
-        transaction.on_commit(lambda: _send_order_cancelled_email(order))
+        transaction.on_commit(lambda o=order: _send_order_cancelled_email(o))
 
         # If order was provisioning or paid, may need to handle refunds
         if old_status in ("provisioning", "paid", "in_review"):
