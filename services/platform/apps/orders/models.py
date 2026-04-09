@@ -673,7 +673,7 @@ class OrderItem(models.Model):
         # Skip VAT recalculation for non-financial field updates (#130/M5)
         update_fields = kwargs.get("update_fields")
         _financial_fields = {"unit_price_cents", "tax_rate", "tax_cents", "quantity", "setup_cents", "line_total_cents"}
-        if update_fields and not (set(update_fields) & _financial_fields):
+        if self.pk and update_fields and not (set(update_fields) & _financial_fields):
             super().save(*args, **kwargs)
             return
 

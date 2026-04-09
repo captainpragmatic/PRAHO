@@ -556,5 +556,13 @@ def check_csp_nonce_middleware_order(app_configs: Any, **kwargs: Any) -> list[Er
                 id="security.E061",
             )
         )
+    elif sec_idx == -1:
+        errors.append(
+            DjangoWarning(
+                "SecurityHeadersMiddleware is not in MIDDLEWARE — security headers, including CSP, will not be added to responses",
+                hint=f"Add '{sec_path}' to MIDDLEWARE so security and CSP headers are written",
+                id="security.W062",
+            )
+        )
 
     return errors
