@@ -192,7 +192,7 @@ class RegistrarWebhookView(View):
             logger.warning(
                 "⚠️ [Webhook] Invalid epp_code (type=%s, len=%s)",
                 type(raw_epp).__name__,
-                len(str(raw_epp)) if raw_epp else 0,
+                len(raw_epp) if isinstance(raw_epp, (str, bytes, list)) else "N/A",
             )
 
         expires_at = webhook_data.get("expires_at")
@@ -257,9 +257,13 @@ class RegistrarWebhookView(View):
     def _handle_domain_renewed(self, domain: Domain, webhook_data: dict[str, Any], client_ip: str) -> tuple[bool, str]:
         """🔄 Handle domain renewal notification"""
         try:
-            self._apply_webhook_domain_fields(domain, webhook_data)
-            if not webhook_data.get("expires_at"):
+            expires_at_raw = webhook_data.get("expires_at")
+            if not expires_at_raw or not isinstance(expires_at_raw, str):
                 return False, "Missing expires_at in renewal webhook"
+            old_expires_at = domain.expires_at
+            self._apply_webhook_domain_fields(domain, webhook_data)
+            if domain.expires_at == old_expires_at:
+                return False, "expires_at present but could not be parsed — renewal aborted"
             domain.renewal_notices_sent = 0  # Reset renewal notices
             domain.save()
 
