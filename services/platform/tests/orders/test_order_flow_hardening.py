@@ -295,7 +295,7 @@ class TestDuplicateVATAuditPrevention(TestCase):
         after_count = AuditEvent.objects.filter(action='order_vat_calculation').count()
         new_events = after_count - before_count
 
-        assert new_events <= 1, (
+        assert new_events == 0, (
             f"BUG-10: preflight emitted {new_events} 'order_vat_calculation' events. "
             f"Expected 0 (reuse of _preflight_vat_result should skip redundant calculation)."
         )
