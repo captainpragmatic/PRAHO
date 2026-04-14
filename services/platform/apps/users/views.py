@@ -91,9 +91,7 @@ def _handle_account_lockout(
 def _handle_successful_login(request: HttpRequest, user: User, form: LoginForm) -> HttpResponse:
     """Handle successful login logic - staff only on platform"""
     # Check if user is staff - customers must use portal
-    is_staff_user = user.is_staff or getattr(user, "staff_role", None)
-
-    if not is_staff_user:
+    if not user.is_staff_user:
         # Log the rejected customer login attempt
         UserLoginLog.objects.create(
             user=user,

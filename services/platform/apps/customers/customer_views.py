@@ -325,7 +325,7 @@ def customer_detail(request: HttpRequest, customer_id: int) -> HttpResponse:
         "is_last_owner": owner_count <= 1,
         # Navigation and access
         "breadcrumb_items": breadcrumb_items,
-        "is_staff_user": user.is_staff or bool(user.staff_role),
+        "is_staff_user": user.is_staff_user,
     }
 
     return render(request, "customers/detail.html", context)
