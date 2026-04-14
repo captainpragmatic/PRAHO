@@ -26,8 +26,7 @@ def fix_staff_role_data(apps, schema_editor):
 
 
 def reverse_fix(apps, schema_editor):
-    # No safe reverse — clearing "customer" role is intentionally not reversible
-    pass
+    raise RuntimeError("Migration 0002_fix_staff_role_data cannot be reversed — staff_role cleanup is a security fix")
 
 
 class Migration(migrations.Migration):
