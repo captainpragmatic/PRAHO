@@ -26,7 +26,7 @@ class AdminRequiredMixin(UserPassesTestMixin):
 class StaffRequiredMixin(UserPassesTestMixin):
     def test_func(self) -> bool:  # pragma: no cover - simple boolean
         user = self.request.user
-        return bool(user and user.is_authenticated and user.is_staff)
+        return bool(user and user.is_authenticated and getattr(user, "is_staff_user", False))
 
     def handle_no_permission(self) -> HttpResponse:  # type: ignore[override]
         if not self.request.user.is_authenticated:
@@ -73,7 +73,7 @@ def template_api(request: HttpRequest) -> HttpResponse:
 @login_required
 def email_stats_api(request: HttpRequest) -> HttpResponse:
     # Staff or admin may access basic stats
-    if not (request.user.is_staff or request.user.is_superuser):
+    if not getattr(request.user, "is_staff_user", False):
         return HttpResponseForbidden()
 
     total = EmailLog.objects.count()

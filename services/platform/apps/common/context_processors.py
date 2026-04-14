@@ -169,7 +169,7 @@ def navigation_dropdowns(request: HttpRequest) -> dict[str, Any]:
         return {}
 
     # Staff/Admin Navigation Items
-    if request.user.is_staff or getattr(request.user, "staff_role", None):
+    if request.user.is_staff_user:
         business_items = [
             {"text": "Customers", "url": "/customers/", "icon": "users"},
             {"text": "Products", "url": "/products/", "icon": "orders"},

@@ -42,10 +42,9 @@ class UserManager(BaseUserManager["User"]):
             extra_fields["staff_role"] = ""
         # Reject invalid staff_role values (e.g. "customer")
         staff_role = extra_fields.get("staff_role", "")
-        valid_roles = {role for role, _ in User.STAFF_ROLE_CHOICES}
-        if staff_role and staff_role not in valid_roles:
+        if staff_role and staff_role not in User.VALID_STAFF_ROLES:
             raise ValueError(
-                f"Invalid staff_role '{staff_role}'. Must be one of: {', '.join(sorted(valid_roles))} or empty."
+                f"Invalid staff_role '{staff_role}'. Must be one of: {', '.join(sorted(User.VALID_STAFF_ROLES))} or empty."
             )
         user = self.model(email=email, **extra_fields)
         # SECURITY: validation done at form/serializer level per Django convention
@@ -203,7 +202,7 @@ class User(AbstractUser):
         falls back to optimized database query if not prefetched.
         """
         # Staff can see all customers
-        if self.is_staff or self.staff_role:
+        if self.is_staff_user:
             return Customer.objects.all()
 
         # Try to use prefetched data first (O(N) where N = user's memberships)
@@ -216,7 +215,7 @@ class User(AbstractUser):
 
     def can_access_customer(self, customer: Customer) -> bool:
         """Check if user can access specific customer"""
-        if self.is_staff or self.staff_role:
+        if self.is_staff_user:
             return True
 
         return CustomerMembership.objects.filter(user=self, customer=customer).exists()

@@ -406,7 +406,7 @@ class AccessControlSecurityTests(OrderSecurityTestCase):
         response = self.client.get(reverse('orders:list'))
 
         self.assertEqual(response.status_code, 200)
-        self.assertFalse(response.context['is_staff'])  # Should be False for regular staff
+        self.assertTrue(response.context['is_staff'])  # is_staff=True → is_staff_user=True
 
     def test_order_detail_permission_context(self) -> None:
         """📄 Test that order detail uses proper permission checking"""
@@ -423,8 +423,8 @@ class AccessControlSecurityTests(OrderSecurityTestCase):
         response = self.client.get(reverse('orders:detail', kwargs={'pk': self.order.pk}))
 
         self.assertEqual(response.status_code, 200)
-        self.assertFalse(response.context['is_staff'])  # Should be False for regular staff
-        self.assertFalse(response.context['can_edit'])  # Should NOT be able to edit
+        self.assertTrue(response.context['is_staff'])  # is_staff=True → is_staff_user=True
+        self.assertTrue(response.context['can_edit'])  # Staff can edit orders
 
     def test_superuser_bypass(self) -> None:
         """👑 Test that superusers have all permissions"""

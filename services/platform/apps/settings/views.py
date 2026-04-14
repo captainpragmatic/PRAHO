@@ -40,8 +40,8 @@ logger = logging.getLogger(__name__)
 
 
 def is_staff_user(user: User | AnonymousUser) -> bool:
-    """Check if user is staff member"""
-    return user.is_authenticated and hasattr(user, "is_staff") and user.is_staff
+    """Check if user is staff member (delegates to User.is_staff_user property)"""
+    return user.is_authenticated and getattr(user, "is_staff_user", False)
 
 
 # ===============================================================================

@@ -152,7 +152,7 @@ class TicketCommentSerializer(serializers.ModelSerializer):
         Any Django staff user or a user with a non-empty staff_role is treated as Staff.
         """
         author = getattr(obj, "author", None)
-        if author and (getattr(author, "is_staff", False) or getattr(author, "staff_role", "") != ""):
+        if author and getattr(author, "is_staff_user", False):
             return "Staff"
         return "Customer"
 
@@ -164,7 +164,7 @@ class TicketCommentSerializer(serializers.ModelSerializer):
         if obj.comment_type in ["support", "internal"]:
             return True
         author = getattr(obj, "author", None)
-        return bool(author and (getattr(author, "is_staff", False) or getattr(author, "staff_role", "") != ""))
+        return bool(author and getattr(author, "is_staff_user", False))
 
     def get_attachments(self, obj: "TicketComment") -> list[dict[str, Any]]:
         """Get attachments for this comment"""

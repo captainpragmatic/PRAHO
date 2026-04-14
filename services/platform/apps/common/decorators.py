@@ -47,7 +47,7 @@ def staff_required(view_func: Callable[..., HttpResponse]) -> Callable[..., Http
 
         user = request.user
         # Authenticated but non-staff -> redirect to dashboard with message (orders tests)
-        if not (user.is_staff or bool(getattr(user, "staff_role", "")) or getattr(user, "is_superuser", False)):
+        if not user.is_staff_user:
             messages.error(request, _("❌ Access denied. Staff privileges required."))
             return redirect("dashboard")
 
@@ -86,7 +86,7 @@ def staff_required_strict(view_func: Callable[..., HttpResponse]) -> Callable[..
             return HttpResponseRedirect(_build_login_url(request))
 
         user = request.user
-        if not (user.is_staff or bool(getattr(user, "staff_role", "")) or getattr(user, "is_superuser", False)):
+        if not user.is_staff_user:
             return HttpResponseForbidden("Staff privileges required")
 
         return view_func(request, *args, **kwargs)
@@ -153,10 +153,8 @@ def customer_or_staff_required(view_func: Callable[..., HttpResponse]) -> Callab
         # Allow access if user is either staff or has customer memberships
         # Check if user is authenticated and has the required attributes
         # Type guard: AnonymousUser doesn't have is_customer_user attribute
-        if (
-            (hasattr(user, "is_staff") and user.is_staff)
-            or bool(getattr(user, "staff_role", ""))
-            or (user.is_authenticated and hasattr(user, "is_customer_user") and user.is_customer_user)
+        if getattr(user, "is_staff_user", False) or (
+            user.is_authenticated and hasattr(user, "is_customer_user") and user.is_customer_user
         ):
             return view_func(request, *args, **kwargs)
 
@@ -172,7 +170,7 @@ def can_edit_proforma(user: User, proforma: Any) -> bool:
     Only staff can edit proformas - customers can only view them.
     """
     # Only staff can edit proformas
-    if not (user.is_staff or bool(getattr(user, "staff_role", ""))):
+    if not user.is_staff_user:
         return False
 
     # Staff can edit non-expired proformas
@@ -184,7 +182,7 @@ def can_create_internal_notes(user: User) -> bool:
     Business logic check for creating internal notes in tickets.
     Only staff can create internal notes.
     """
-    return user.is_staff or bool(getattr(user, "staff_role", ""))
+    return user.is_staff_user
 
 
 def can_view_internal_notes(user: User) -> bool:
@@ -192,7 +190,7 @@ def can_view_internal_notes(user: User) -> bool:
     Business logic check for viewing internal notes in tickets.
     Only staff can view internal notes.
     """
-    return user.is_staff or bool(getattr(user, "staff_role", ""))
+    return user.is_staff_user
 
 
 def can_manage_financial_data(user: User) -> bool:

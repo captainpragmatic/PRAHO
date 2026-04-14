@@ -29,7 +29,7 @@ class CustomerService:
         # Late import to avoid circular dependencies
         from .customer_models import Customer  # noqa: PLC0415  # Deferred: avoids circular import
 
-        if user.is_staff or user.staff_role:
+        if user.is_staff_user:
             return Customer.objects.all()
 
         # Regular users can only access customers they are members of

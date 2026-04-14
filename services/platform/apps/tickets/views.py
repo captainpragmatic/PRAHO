@@ -457,7 +457,7 @@ def _handle_ticket_reply_post(request: HttpRequest, ticket: Ticket) -> HttpRespo
         # Refresh ticket data and comments
         ticket.refresh_from_db()
         comments = ticket.comments.all().order_by("created_at")
-        can_edit = ticket.status != "closed" or user.is_staff
+        can_edit = ticket.status != "closed" or user.is_staff_user
         return render(
             request,
             "tickets/partials/status_and_comments.html",

@@ -135,7 +135,7 @@ class SyncResults(TypedDict):
 
 def is_staff_or_superuser(user: User | AnonymousUser) -> bool:
     """Check if user is staff or superuser."""
-    return user.is_authenticated and (user.is_staff or user.is_superuser)
+    return user.is_authenticated and getattr(user, "is_staff_user", False)
 
 
 # ===============================================================================

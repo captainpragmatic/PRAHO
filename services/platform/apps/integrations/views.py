@@ -206,12 +206,12 @@ class PayPalWebhookView(WebhookView):
 @rate_limit(key="user", rate="45/m", method="GET")
 def webhook_status(request: HttpRequest) -> JsonResponse:
     """📊 Webhook processing status and statistics"""
-    if not request.user.is_staff:
+    if not getattr(request.user, "is_staff_user", False):
         return JsonResponse({"error": "Unauthorized"}, status=403)
 
     if not request.user.has_perm("integrations.view_webhook_stats"):
         logger.warning(
-            f"🚨 [Security] Webhook stats access denied for user {request.user.email} - insufficient permissions"
+            f"🚨 [Security] Webhook stats access denied for user {request.user.email} - insufficient permissions"  # type: ignore[union-attr]  # staff guard above ensures authenticated user
         )
         return JsonResponse({"error": "Insufficient permissions"}, status=403)
 
@@ -283,11 +283,11 @@ def webhook_status(request: HttpRequest) -> JsonResponse:
 
 def _check_webhook_retry_permissions(request: HttpRequest) -> JsonResponse | None:
     """Check webhook retry permissions and rate limits, return error response or None if authorized"""
-    if not request.user.is_staff:
+    if not getattr(request.user, "is_staff_user", False):
         return JsonResponse({"error": "Unauthorized"}, status=403)
 
     if not request.user.has_perm("integrations.retry_webhook"):
-        logger.warning(f"🚨 [Security] User {request.user.email} attempted webhook retry without permission")
+        logger.warning(f"🚨 [Security] User {request.user.email} attempted webhook retry without permission")  # type: ignore[union-attr]  # staff guard above ensures authenticated user
         return JsonResponse({"error": "Insufficient permissions"}, status=403)
 
     # Audit logging for rate limit violations handled by @rate_limit decorator

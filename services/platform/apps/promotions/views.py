@@ -56,7 +56,7 @@ class StaffRequiredMixin(LoginRequiredMixin, UserPassesTestMixin):
     """Mixin requiring user to be staff."""
 
     def test_func(self) -> bool:
-        return bool(self.request.user.is_staff)
+        return bool(getattr(self.request.user, "is_staff_user", False))
 
 
 # ===============================================================================
@@ -92,7 +92,7 @@ def _user_can_access_order(request: HttpRequest, order: Any) -> bool:
         return False
 
     # Staff can access all orders
-    if request.user.is_staff:
+    if getattr(request.user, "is_staff_user", False):
         return True
 
     # Check if user is associated with the order's customer

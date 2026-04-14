@@ -40,8 +40,8 @@ PERM_MANAGE_REGIONS = "infrastructure.manage_regions"
 
 
 def is_staff_or_superuser(user: User) -> bool:
-    """Check if user is staff or superuser"""
-    return user.is_authenticated and (user.is_staff or user.is_superuser)
+    """Check if user is staff or superuser (delegates to User.is_staff_user)"""
+    return user.is_authenticated and user.is_staff_user
 
 
 def can_view_infrastructure(user: User) -> bool:
@@ -53,7 +53,7 @@ def can_view_infrastructure(user: User) -> bool:
     if not user.is_authenticated:
         return False  # type: ignore[unreachable]
 
-    if user.is_superuser or user.is_staff:
+    if user.is_staff_user:
         return True
 
     return user.has_perm(PERM_VIEW_INFRASTRUCTURE)
@@ -68,7 +68,7 @@ def can_manage_deployments(user: User) -> bool:
     if not user.is_authenticated:
         return False  # type: ignore[unreachable]
 
-    if user.is_superuser or user.is_staff:
+    if user.is_staff_user:
         return True
 
     return user.has_perm(PERM_MANAGE_DEPLOYMENTS)
