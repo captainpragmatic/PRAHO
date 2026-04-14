@@ -66,7 +66,7 @@ def _build_domain_table_data(domains: QuerySet[Domain] | list[Domain], user: Use
         {"label": "Customer", "width": "w-1/4"},
     ]
 
-    can_manage = user.is_staff or getattr(user, "staff_role", None)
+    can_manage = user.is_staff_user
 
     expiry_critical_days = SettingsService.get_integer_setting(
         "domains.expiry_critical_days", _DEFAULT_DOMAIN_EXPIRY_CRITICAL_DAYS
@@ -306,7 +306,7 @@ def domain_detail(request: HttpRequest, domain_id: str) -> HttpResponse:
             expiry_message = f"Domain expires in {days_until_expiry} days"
 
     # Check user permissions for management actions
-    can_manage = user.is_staff or getattr(user, "staff_role", None)
+    can_manage = user.is_staff_user
     can_renew = domain.status == "active"
     can_transfer = domain.status in ["active", "suspended"]
     can_modify_dns = domain.status == "active" and can_manage

@@ -206,7 +206,7 @@ class PayPalWebhookView(WebhookView):
 @rate_limit(key="user", rate="45/m", method="GET")
 def webhook_status(request: HttpRequest) -> JsonResponse:
     """📊 Webhook processing status and statistics"""
-    if not request.user.is_staff:
+    if not getattr(request.user, "is_staff_user", False):
         return JsonResponse({"error": "Unauthorized"}, status=403)
 
     if not request.user.has_perm("integrations.view_webhook_stats"):
@@ -283,7 +283,7 @@ def webhook_status(request: HttpRequest) -> JsonResponse:
 
 def _check_webhook_retry_permissions(request: HttpRequest) -> JsonResponse | None:
     """Check webhook retry permissions and rate limits, return error response or None if authorized"""
-    if not request.user.is_staff:
+    if not getattr(request.user, "is_staff_user", False):
         return JsonResponse({"error": "Unauthorized"}, status=403)
 
     if not request.user.has_perm("integrations.retry_webhook"):

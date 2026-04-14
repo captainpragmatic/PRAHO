@@ -811,7 +811,7 @@ class UserListView(LoginRequiredMixin, ListView):
     paginate_by = 50
 
     def dispatch(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
-        if not request.user.is_authenticated or not request.user.is_staff:
+        if not request.user.is_authenticated or not getattr(request.user, "is_staff_user", False):
             messages.error(request, _("You do not have permission to access this page."))
             return redirect("dashboard")
         return cast(HttpResponse, super().dispatch(request, *args, **kwargs))
@@ -852,7 +852,7 @@ class UserDetailView(LoginRequiredMixin, DetailView):
         return obj
 
     def dispatch(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
-        if not request.user.is_authenticated or not request.user.is_staff:
+        if not request.user.is_authenticated or not getattr(request.user, "is_staff_user", False):
             messages.error(request, _("You do not have permission to access this page."))
             return redirect("dashboard")
         return cast(HttpResponse, super().dispatch(request, *args, **kwargs))

@@ -64,7 +64,7 @@ def service_list(request: HttpRequest) -> HttpResponse:
     services_page = paginator.get_page(page_number)
 
     # Only staff can manage services (edit/suspend)
-    can_manage_services = user.is_staff or getattr(user, "staff_role", None)
+    can_manage_services = user.is_staff_user
 
     # For filtered views, show filtered count as "active" count in header
     if status_filter:
@@ -101,7 +101,7 @@ def service_detail(request: HttpRequest, pk: int) -> HttpResponse:
         return redirect("provisioning:services")
 
     # Only staff can manage services (edit/suspend)
-    can_manage = (user.is_staff or getattr(user, "staff_role", None)) and service.status in ["active", "suspended"]
+    can_manage = user.is_staff_user and service.status in ["active", "suspended"]
 
     context = {
         "service": service,

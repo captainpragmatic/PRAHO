@@ -99,7 +99,7 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:
     # System status (cached from daily Django-Q2 task, or empty on first boot)
     from apps.common.system_status import get_cached_status  # noqa: PLC0415
 
-    system_status = get_cached_status() if user.is_staff else []
+    system_status = get_cached_status() if getattr(user, "is_staff_user", False) else []
 
     context = {
         "stats": stats,

@@ -322,10 +322,8 @@ def billing_list(request: HttpRequest) -> HttpResponse:
                     "currency": proforma.currency,
                     "created_at": proforma.created_at,
                     "status": proforma.status,
-                    "can_edit": (request.user.is_staff or getattr(request.user, "staff_role", None))
-                    and not proforma.is_expired,
-                    "can_convert": (request.user.is_staff or getattr(request.user, "staff_role", None))
-                    and not proforma.is_expired,
+                    "can_edit": request.user.is_staff_user and not proforma.is_expired,
+                    "can_convert": request.user.is_staff_user and not proforma.is_expired,
                 }
                 for proforma in proformas_qs
             ]
@@ -456,10 +454,8 @@ def proforma_list(request: HttpRequest) -> HttpResponse:
                 "currency": proforma.currency,
                 "created_at": proforma.created_at,
                 "status": "valid" if not proforma.is_expired else "expired",
-                "can_edit": (request.user.is_staff or getattr(request.user, "staff_role", None))
-                and not proforma.is_expired,
-                "can_convert": (request.user.is_staff or getattr(request.user, "staff_role", None))
-                and not proforma.is_expired,
+                "can_edit": request.user.is_staff_user and not proforma.is_expired,
+                "can_convert": request.user.is_staff_user and not proforma.is_expired,
             }
             for proforma in proformas_qs
         ]
@@ -579,10 +575,8 @@ def billing_list_htmx(request: HttpRequest) -> HttpResponse:
                     "currency": proforma.currency,
                     "created_at": proforma.created_at,
                     "status": proforma.status,
-                    "can_edit": (request.user.is_staff or getattr(request.user, "staff_role", None))
-                    and not proforma.is_expired,
-                    "can_convert": (request.user.is_staff or getattr(request.user, "staff_role", None))
-                    and not proforma.is_expired,
+                    "can_edit": request.user.is_staff_user and not proforma.is_expired,
+                    "can_convert": request.user.is_staff_user and not proforma.is_expired,
                 }
                 for proforma in proformas_qs
             ]
@@ -786,7 +780,7 @@ def proforma_detail(request: HttpRequest, pk: int) -> HttpResponse:
         "lines": lines,
         "can_edit": can_edit_proforma(request.user, proforma),  # type: ignore[arg-type]
         "can_convert": can_edit_proforma(request.user, proforma),  # type: ignore[arg-type]
-        "is_staff_user": request.user.is_staff,
+        "is_staff_user": getattr(request.user, "is_staff_user", False),
         "document_type": "proforma",
     }
 

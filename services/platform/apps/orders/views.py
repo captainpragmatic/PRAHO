@@ -318,7 +318,7 @@ def order_list(request: HttpRequest) -> HttpResponse:
         "status_counts": status_counts,
         "current_status": status_filter,
         # Only superusers or users with a staff_role are considered staff for UI permissions
-        "is_staff": getattr(request.user, "is_superuser", False) or bool(getattr(request.user, "staff_role", "")),
+        "is_staff": getattr(request.user, "is_staff_user", False),
         **search_context,
     }
 
@@ -378,7 +378,7 @@ def order_list_htmx(request: HttpRequest) -> HttpResponse:
         "page_obj": orders,
         "extra_params": extra_params,
         "current_status": status_filter,
-        "is_staff": getattr(request.user, "is_superuser", False) or bool(getattr(request.user, "staff_role", "")),
+        "is_staff": getattr(request.user, "is_staff_user", False),
     }
 
     return render(request, "orders/partials/order_list.html", context)
@@ -406,7 +406,7 @@ def order_detail(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
         return access_denied
 
     # Basic staff access for viewing and general management (UI-level)
-    is_staff = getattr(request.user, "is_superuser", False) or bool(getattr(request.user, "staff_role", ""))
+    is_staff = getattr(request.user, "is_staff_user", False)
     editable_fields = order.get_editable_fields()
 
     # Determine if order can be edited based on status and user permissions
@@ -1168,7 +1168,7 @@ def order_items_list(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
     order.calculate_totals()
 
     # Basic staff access for viewing and general management
-    is_staff = request.user.is_staff or bool(getattr(request.user, "staff_role", ""))
+    is_staff = request.user.is_staff_user
     editable_fields = order.get_editable_fields()
 
     # Use consistent can_edit logic with order_detail view

@@ -758,7 +758,7 @@ class StaffOnlyPlatformMiddleware:
             return self.get_response(request)
 
         # Allow staff users full access
-        if request.user.is_staff or getattr(request.user, "staff_role", None):
+        if request.user.is_staff_user:
             return self.get_response(request)
 
         # Block customer users - they should use portal
