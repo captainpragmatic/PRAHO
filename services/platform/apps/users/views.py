@@ -145,7 +145,7 @@ def _handle_successful_login(request: HttpRequest, user: User, form: LoginForm) 
     SessionSecurityService.update_session_timeout(request)
 
     # Only show welcome message for staff users since customers will be blocked by middleware
-    if user.is_staff or getattr(user, "staff_role", None):
+    if user.is_staff_user:
         messages.success(request, _("Welcome, {user_full_name}!").format(user_full_name=user.get_full_name()))
 
     next_url = _get_safe_redirect_target(request, fallback="dashboard")
@@ -643,7 +643,7 @@ def mfa_verify(request: HttpRequest) -> HttpResponse:
                     _handle_backup_code_warnings(request, user)
 
                 # Only show welcome message for staff users since customers will be blocked by middleware
-                if user.is_staff or getattr(user, "staff_role", None):
+                if user.is_staff_user:
                     messages.success(
                         request, _("Welcome, {user_full_name}!").format(user_full_name=user.get_full_name())
                     )
