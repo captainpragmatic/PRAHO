@@ -5,6 +5,7 @@
 """
 
 from django.db import migrations
+from django.db.migrations.exceptions import IrreversibleError
 
 
 def fix_staff_role_data(apps, schema_editor):
@@ -26,7 +27,7 @@ def fix_staff_role_data(apps, schema_editor):
 
 
 def reverse_fix(apps, schema_editor):
-    raise RuntimeError("Migration 0002_fix_staff_role_data cannot be reversed — staff_role cleanup is a security fix")
+    raise IrreversibleError("Migration 0002_fix_staff_role_data cannot be reversed — staff_role cleanup is a security fix")
 
 
 class Migration(migrations.Migration):

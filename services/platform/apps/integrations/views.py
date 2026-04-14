@@ -211,7 +211,7 @@ def webhook_status(request: HttpRequest) -> JsonResponse:
 
     if not request.user.has_perm("integrations.view_webhook_stats"):
         logger.warning(
-            f"🚨 [Security] Webhook stats access denied for user {request.user.email} - insufficient permissions"
+            f"🚨 [Security] Webhook stats access denied for user {request.user.email} - insufficient permissions"  # type: ignore[union-attr]  # staff guard above ensures authenticated user
         )
         return JsonResponse({"error": "Insufficient permissions"}, status=403)
 
@@ -287,7 +287,7 @@ def _check_webhook_retry_permissions(request: HttpRequest) -> JsonResponse | Non
         return JsonResponse({"error": "Unauthorized"}, status=403)
 
     if not request.user.has_perm("integrations.retry_webhook"):
-        logger.warning(f"🚨 [Security] User {request.user.email} attempted webhook retry without permission")
+        logger.warning(f"🚨 [Security] User {request.user.email} attempted webhook retry without permission")  # type: ignore[union-attr]  # staff guard above ensures authenticated user
         return JsonResponse({"error": "Insufficient permissions"}, status=403)
 
     # Audit logging for rate limit violations handled by @rate_limit decorator
