@@ -1279,9 +1279,8 @@ def confirm_payment(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911, PLR
         if not re.match(r"^pi_[a-zA-Z0-9]{10,64}$", str(payment_intent_id)):
             return JsonResponse({"success": False, "error": "Invalid payment reference"}, status=400)
 
-        # Get customer context
-        customer_id = getattr(request, "customer_id", None) or request.session.get("active_customer_id")
-        user_id = getattr(request, "user_id", None) or request.session.get("user_id")
+        # Get customer context (decorator already validated, helper centralises extraction)
+        customer_id, user_id = _get_customer_context(request)
 
         if not customer_id:
             return JsonResponse({"success": False, "error": "Customer authentication required"}, status=401)

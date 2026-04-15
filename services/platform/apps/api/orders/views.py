@@ -171,54 +171,79 @@ def calculate_cart_totals(  # noqa: PLR0912, PLR0915  # Complexity: multi-step b
         order_items = []
         warnings = []
 
+        # Batch-fetch products and prices to avoid N+1 queries (#100).
+        # Collect all identifiers first, then issue 2 queries total.
+        item_ids = [item.get("product_id") for item in cart_items if item.get("product_id")]
+        item_slugs = [
+            item.get("product_slug") for item in cart_items if item.get("product_slug") and not item.get("product_id")
+        ]
+        products_by_id = (
+            {p.id: p for p in Product.objects.filter(id__in=item_ids, is_active=True, is_public=True)}
+            if item_ids
+            else {}
+        )
+        products_by_slug = (
+            {p.slug: p for p in Product.objects.filter(slug__in=item_slugs, is_active=True, is_public=True)}
+            if item_slugs
+            else {}
+        )
+        all_product_ids = [p.id for p in products_by_id.values()] + [p.id for p in products_by_slug.values()]
+        prices_by_product_id = (
+            {
+                pp.product_id: pp
+                for pp in ProductPrice.objects.filter(product_id__in=all_product_ids, currency=currency, is_active=True)
+            }
+            if all_product_ids
+            else {}
+        )
+
         for item_data in cart_items:
-            try:
-                product_id = item_data.get("product_id")
-                product_slug = item_data.get("product_slug")
-                if product_id:
-                    product = Product.objects.get(id=product_id, is_active=True, is_public=True)
-                elif product_slug:
-                    product = Product.objects.get(slug=product_slug, is_active=True, is_public=True)
-                else:
-                    warnings.append(
-                        {"type": "missing_identifier", "message": "Cart item missing product_id and product_slug"}
-                    )
-                    continue
+            product_id = item_data.get("product_id")
+            product_slug = item_data.get("product_slug")
+            if product_id:
+                product = products_by_id.get(product_id)
+            elif product_slug:
+                product = products_by_slug.get(product_slug)
+            else:
+                warnings.append(
+                    {"type": "missing_identifier", "message": "Cart item missing product_id and product_slug"}
+                )
+                continue
 
-                # Get current pricing (server-authoritative)
-                try:
-                    product_price = ProductPrice.objects.get(product=product, currency=currency, is_active=True)
-                except ProductPrice.DoesNotExist:
-                    warnings.append(
-                        {
-                            "type": "pricing_unavailable",
-                            "product_name": product.name,
-                            "message": f"Pricing not available for {product.name}",
-                        }
-                    )
-                    continue
+            if not product:
+                identifier = product_id or product_slug or "unknown"
+                warnings.append({"type": "product_not_found", "message": f"Product not found: {identifier}"})
+                continue
 
-                # Build order item data (include setup fee for accurate totals)
-                # Include product_slug + billing_period as stable identifiers so callers
-                # can map per-item totals deterministically (not by list index).
-                order_items.append(
+            # Get current pricing (server-authoritative)
+            product_price = prices_by_product_id.get(product.id)
+            if not product_price:
+                warnings.append(
                     {
-                        "product_id": product.id,
-                        "product_slug": product.slug,
-                        "billing_period": item_data.get("billing_period", "monthly"),
-                        "quantity": item_data["quantity"],
-                        "unit_price_cents": int(product_price.effective_monthly_price_cents),
-                        "setup_cents": int(product_price.setup_cents),
-                        "description": product.name,
-                        "meta": item_data.get("config", {}),
-                        "domain_name": item_data.get("domain_name", ""),
-                        "product_type": product.product_type,
+                        "type": "pricing_unavailable",
+                        "product_name": product.name,
+                        "message": f"Pricing not available for {product.name}",
                     }
                 )
+                continue
 
-            except Product.DoesNotExist:
-                identifier = item_data.get("product_id") or item_data.get("product_slug", "unknown")
-                warnings.append({"type": "product_not_found", "message": f"Product not found: {identifier}"})
+            # Build order item data (include setup fee for accurate totals)
+            # Include product_slug + billing_period as stable identifiers so callers
+            # can map per-item totals deterministically (not by list index).
+            order_items.append(
+                {
+                    "product_id": product.id,
+                    "product_slug": product.slug,
+                    "billing_period": item_data.get("billing_period", "monthly"),
+                    "quantity": item_data["quantity"],
+                    "unit_price_cents": int(product_price.effective_monthly_price_cents),
+                    "setup_cents": int(product_price.setup_cents),
+                    "description": product.name,
+                    "meta": item_data.get("config", {}),
+                    "domain_name": item_data.get("domain_name", ""),
+                    "product_type": product.product_type,
+                }
+            )
 
         # 🔒 SECURITY: Calculate totals with proper VAT compliance
         # Get customer for VAT calculation - DEFAULT TO ROMANIAN SETTINGS for compliance
