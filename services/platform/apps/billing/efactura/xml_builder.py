@@ -585,8 +585,18 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
         tax_incl = self._add_cbc(monetary_total, "TaxInclusiveAmount", self._format_amount(total))
         tax_incl.set("currencyID", currency)
 
-        # Payable Amount (amount to be paid)
-        payable = self._add_cbc(monetary_total, "PayableAmount", self._format_amount(total))
+        # BT-113 PrepaidAmount + BT-115 PayableAmount: subtract already-collected payments
+        # so a partially-paid invoice reports the correct balance due.
+        # Per EN16931: PayableAmount = TaxInclusiveAmount - PrepaidAmount.
+        remaining_cents = self.invoice.get_remaining_amount()
+        prepaid_cents = max(0, (self.invoice.total_cents or 0) - remaining_cents)
+        if prepaid_cents > 0:
+            prepaid_amount = Decimal(prepaid_cents) / 100
+            prepaid_elem = self._add_cbc(monetary_total, "PrepaidAmount", self._format_amount(prepaid_amount))
+            prepaid_elem.set("currencyID", currency)
+
+        payable_amount = Decimal(remaining_cents) / 100
+        payable = self._add_cbc(monetary_total, "PayableAmount", self._format_amount(payable_amount))
         payable.set("currencyID", currency)
 
     def _add_invoice_lines(self) -> None:
@@ -610,9 +620,11 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
         quantity_elem = self._add_cbc(invoice_line, "InvoicedQuantity", self._format_quantity(quantity))
         quantity_elem.set("unitCode", self._get_unit_code(line))
 
-        # Line Extension Amount (quantity * unit price, without tax)
+        # BT-131: LineExtensionAmount must be NET of line-level allowances (EN16931 BR-CO-10).
+        # Invoice.subtotal_cents is already net, so the line sum must match.
         unit_price = Decimal(line.unit_price_cents or 0) / 100
-        line_amount = unit_price * Decimal(str(quantity))
+        discount_amount = Decimal(line.discount_amount_cents or 0) / 100
+        line_amount = unit_price * Decimal(str(quantity)) - discount_amount
         line_ext = self._add_cbc(invoice_line, "LineExtensionAmount", self._format_amount(line_amount))
         line_ext.set("currencyID", self.invoice.currency.code)
 
@@ -622,11 +634,12 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
             self._add_cbc(period, "StartDate", line.period_start.isoformat())
             self._add_cbc(period, "EndDate", line.period_end.isoformat())
 
-        # BT-147: Line-level discount (AllowanceCharge)
+        # BT-136/BT-137/BT-140: Line-level AllowanceCharge with reason (EN16931 BR-42)
         if line.discount_amount_cents and line.discount_amount_cents > 0:
             allowance = self._add_cac(invoice_line, "AllowanceCharge")
             self._add_cbc(allowance, "ChargeIndicator", "false")
-            discount_amount = Decimal(line.discount_amount_cents) / 100
+            self._add_cbc(allowance, "AllowanceChargeReasonCode", "95")  # UNTDID 5189: Discount
+            self._add_cbc(allowance, "AllowanceChargeReason", "Discount")
             amount_elem = self._add_cbc(allowance, "Amount", self._format_amount(discount_amount))
             amount_elem.set("currencyID", self.invoice.currency.code)
 
@@ -856,7 +869,16 @@ class UBLCreditNoteBuilder(BaseUBLBuilder):
         tax_incl = self._add_cbc(monetary_total, "TaxInclusiveAmount", self._format_amount(total))
         tax_incl.set("currencyID", currency)
 
-        payable = self._add_cbc(monetary_total, "PayableAmount", self._format_amount(total))
+        # BT-113/BT-115: subtract already-collected payments so partial payments are honoured.
+        remaining_cents = self.invoice.get_remaining_amount()
+        prepaid_cents = max(0, (self.invoice.total_cents or 0) - remaining_cents)
+        if prepaid_cents > 0:
+            prepaid_amount = Decimal(prepaid_cents) / 100
+            prepaid_elem = self._add_cbc(monetary_total, "PrepaidAmount", self._format_amount(prepaid_amount))
+            prepaid_elem.set("currencyID", currency)
+
+        payable_amount = Decimal(remaining_cents) / 100
+        payable = self._add_cbc(monetary_total, "PayableAmount", self._format_amount(payable_amount))
         payable.set("currencyID", currency)
 
     def _add_credit_note_lines(self) -> None:
@@ -874,10 +896,20 @@ class UBLCreditNoteBuilder(BaseUBLBuilder):
         quantity_elem = self._add_cbc(cn_line, "CreditedQuantity", self._format_quantity(quantity))
         quantity_elem.set("unitCode", UNIT_CODE_PIECE)
 
+        # BT-131 net: line LineExtensionAmount must be net of line-level allowances.
         unit_price = Decimal(line.unit_price_cents or 0) / 100
-        line_amount = unit_price * Decimal(str(quantity))
+        discount_amount = Decimal(line.discount_amount_cents or 0) / 100
+        line_amount = unit_price * Decimal(str(quantity)) - discount_amount
         line_ext = self._add_cbc(cn_line, "LineExtensionAmount", self._format_amount(line_amount))
         line_ext.set("currencyID", self.invoice.currency.code)
+
+        if line.discount_amount_cents and line.discount_amount_cents > 0:
+            allowance = self._add_cac(cn_line, "AllowanceCharge")
+            self._add_cbc(allowance, "ChargeIndicator", "false")
+            self._add_cbc(allowance, "AllowanceChargeReasonCode", "95")  # UNTDID 5189: Discount
+            self._add_cbc(allowance, "AllowanceChargeReason", "Discount")
+            amount_elem = self._add_cbc(allowance, "Amount", self._format_amount(discount_amount))
+            amount_elem.set("currencyID", self.invoice.currency.code)
 
         # Item
         item = self._add_cac(cn_line, "Item")
