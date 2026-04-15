@@ -23,6 +23,7 @@ from lxml import etree
 if TYPE_CHECKING:
     from apps.billing.invoice_models import Invoice, InvoiceLine
 
+from apps.billing.config import is_eu_country
 from apps.common.tax_service import TaxService
 
 logger = logging.getLogger(__name__)
@@ -271,22 +272,23 @@ class BaseUBLBuilder:
 
         customer = self._get_customer_info()
 
-        # Intra-community supply (EU B2B, not domestic)
-        if customer.country_code != "RO" and customer.tax_id:
-            # EU member with VAT ID → could be K (intra-community) or AE (reverse charge)
-            # EN16931: K = goods, AE = services. Default to AE for hosting (services).
-            return TAX_CATEGORY_REVERSE_CHARGE
-
-        # Check for zero rate
+        # Zero-tax invoices must be classified first: a zero-rated/exempt/not-subject
+        # invoice is distinguished by tax category, not by customer location.
         tax_total_cents = getattr(self.invoice, "tax_total_cents", None)
         if tax_total_cents is None:
             tax_total_cents = getattr(self.invoice, "tax_cents", 0)
 
         if tax_total_cents == 0:
-            # B2C without VAT → not subject
+            # Non-RO customer without VAT ID → outside Romanian VAT system
             if not customer.tax_id and customer.country_code != "RO":
                 return TAX_CATEGORY_NOT_SUBJECT
             return TAX_CATEGORY_ZERO
+
+        # Intra-community supply: reverse charge only applies within the EU VAT system.
+        # A non-EU customer (e.g. US) with a tax ID is NOT eligible for AE.
+        if customer.country_code != "RO" and customer.tax_id and is_eu_country(customer.country_code):
+            # EN16931: K = goods, AE = services. Default to AE for hosting (services).
+            return TAX_CATEGORY_REVERSE_CHARGE
 
         # Default to standard rate
         return TAX_CATEGORY_STANDARD
@@ -640,7 +642,10 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
         tax_category = self._add_cac(tax_subtotal, "TaxCategory")
         category_code = self._get_tax_category()
         self._add_cbc(tax_category, "ID", category_code)
-        self._add_cbc(tax_category, "Percent", self._format_percent(self._get_tax_rate()))
+        # EN16931 BR-AE-05/BR-E-05/BR-Z-05/BR-K-05/BR-O-05 require Percent=0 for
+        # any non-standard category — ANAF Schematron rejects otherwise.
+        rate = Decimal(0) if category_code != TAX_CATEGORY_STANDARD else self._get_tax_rate()
+        self._add_cbc(tax_category, "Percent", self._format_percent(rate))
 
         # BT-121/BT-120: Tax exemption reason (mandatory for non-S categories)
         exemption_reason = self._get_tax_exemption_reason(category_code)
@@ -696,16 +701,19 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
     def _get_document_level_totals(self) -> tuple[Decimal, Decimal]:
         """Calculate document-level allowance and charge totals from meta."""
         meta = getattr(self.invoice, "meta", {}) or {}
+        # Use Decimal(str(...)) consistently with _add_document_allowances_charges
+        # so JSON-deserialised floats don't introduce precision drift between the
+        # AllowanceCharge XML elements and LegalMonetaryTotal.
         allowance_total = (
             sum(
-                (Decimal(a.get("amount_cents", 0)) for a in meta.get("allowances", [])),
+                (Decimal(str(a.get("amount_cents", 0))) for a in meta.get("allowances", [])),
                 Decimal(0),
             )
             / 100
         )
         charge_total = (
             sum(
-                (Decimal(c.get("amount_cents", 0)) for c in meta.get("charges", [])),
+                (Decimal(str(c.get("amount_cents", 0))) for c in meta.get("charges", [])),
                 Decimal(0),
             )
             / 100
@@ -992,7 +1000,10 @@ class UBLCreditNoteBuilder(BaseUBLBuilder):
         tax_category = self._add_cac(tax_subtotal, "TaxCategory")
         category_code = self._get_tax_category()
         self._add_cbc(tax_category, "ID", category_code)
-        self._add_cbc(tax_category, "Percent", self._format_percent(self._get_tax_rate()))
+        # EN16931 BR-AE-05/BR-E-05/BR-Z-05/BR-K-05/BR-O-05 require Percent=0 for
+        # any non-standard category — ANAF Schematron rejects otherwise.
+        rate = Decimal(0) if category_code != TAX_CATEGORY_STANDARD else self._get_tax_rate()
+        self._add_cbc(tax_category, "Percent", self._format_percent(rate))
 
         exemption_reason = self._get_tax_exemption_reason(category_code)
         if exemption_reason:
