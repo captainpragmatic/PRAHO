@@ -6,6 +6,8 @@ import json
 import logging
 from typing import Any, ClassVar, cast
 
+from django.core.exceptions import ValidationError
+from django.core.validators import validate_email
 from django.db import IntegrityError, transaction
 from django.db.models import Q, QuerySet
 from django.http import HttpRequest
@@ -1000,6 +1002,14 @@ def customer_users_create(request: HttpRequest, customer: Customer) -> Response:
 
     if not email:
         return Response({"success": False, "error": "Email is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        validate_email(email)
+    except ValidationError:
+        return Response(
+            {"success": False, "error": "Invalid email address."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
 
     valid_roles = [c[0] for c in CustomerMembership.CUSTOMER_ROLE_CHOICES]
     if role not in valid_roles:

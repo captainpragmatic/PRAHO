@@ -1,4 +1,4 @@
-{% load i18n %}{% blocktrans with customer_name=customer.company_name %}Welcome to PragmaticHost!
+{% load i18n %}{% blocktrans with customer_name=customer.company_name %}Welcome to PRAHO!
 
 You have been invited to join {{ customer_name }}.{% endblocktrans %}
 
@@ -12,4 +12,4 @@ You have been invited to join {{ customer_name }}.{% endblocktrans %}
 {% blocktrans with support=support_email %}If you did not expect this invitation, please contact us at {{ support }}.{% endblocktrans %}
 
 {% trans "Best regards," %}
-{% trans "The PragmaticHost Team" %}
+{% trans "The PRAHO Team" %}
