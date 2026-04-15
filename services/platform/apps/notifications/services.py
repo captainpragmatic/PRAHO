@@ -1392,22 +1392,34 @@ class EmailPreferenceService:
             locked = CustomerModel.objects.select_for_update(of=("self",)).get(id=customer.id)
             old_marketing = locked.marketing_consent
 
+            # "marketing" is the canonical key; "newsletters" is accepted as an alias.
+            # If both are present, "marketing" wins so an explicit opt-out cannot be
+            # silently reversed by a concurrently-sent "newsletters": True.
             if "marketing" in preferences:
                 locked.marketing_consent = preferences["marketing"]
-            if "newsletters" in preferences:
+            elif "newsletters" in preferences:
                 locked.marketing_consent = preferences["newsletters"]
 
             locked.save(update_fields=["marketing_consent"])
 
             if old_marketing != locked.marketing_consent:
-                AuditService.log_simple_event(
-                    "marketing_consent_granted" if locked.marketing_consent else "marketing_consent_withdrawn",
-                    content_object=locked,
-                    description=f"Email preferences updated for customer {locked.id}",
-                    old_values={"marketing_consent": old_marketing},
-                    new_values={"marketing_consent": locked.marketing_consent},
-                    metadata={"source": "preference_center"},
-                )
+                # Audit is best-effort — never block a GDPR consent change (Art. 7(3))
+                # because of an audit-table failure. Savepoint isolates audit DB writes
+                # so a failure here does not mark the outer transaction for rollback.
+                try:
+                    with transaction.atomic():
+                        AuditService.log_simple_event(
+                            "marketing_consent_granted" if locked.marketing_consent else "marketing_consent_withdrawn",
+                            content_object=locked,
+                            description=f"Email preferences updated for customer {locked.id}",
+                            old_values={"marketing_consent": old_marketing},
+                            new_values={"marketing_consent": locked.marketing_consent},
+                            metadata={"source": "preference_center"},
+                        )
+                except Exception:
+                    logger.exception(
+                        "🔥 [Consent] Audit logging failed for marketing_consent change on customer %s", locked.id
+                    )
 
     @staticmethod
     def can_send_category(customer: Customer, category: str) -> bool:
@@ -1448,8 +1460,11 @@ class EmailPreferenceService:
         try:
             with transaction.atomic():
                 try:
-                    token_obj = UnsubscribeToken.objects.select_for_update().get(id=token_id)
-                except (UnsubscribeToken.DoesNotExist, Exception):
+                    token_obj = UnsubscribeToken.objects.select_for_update(of=("self",)).get(id=token_id)
+                except (UnsubscribeToken.DoesNotExist, ValueError):
+                    # DoesNotExist: unknown token. ValueError: malformed UUID.
+                    # Transient DB errors (OperationalError, lock timeouts) propagate
+                    # to the outer handler instead of being silently reported as invalid.
                     logger.warning("⚠️ [Unsubscribe] Invalid or unknown token")
                     return False
 
@@ -1471,14 +1486,20 @@ class EmailPreferenceService:
                 customer.save(update_fields=["marketing_consent"])
 
                 if old_marketing != customer.marketing_consent:
-                    AuditService.log_simple_event(
-                        "marketing_consent_withdrawn",
-                        content_object=customer,
-                        description=f"Unsubscribe via token for {email[:3]}***",
-                        old_values={"marketing_consent": old_marketing},
-                        new_values={"marketing_consent": False},
-                        metadata={"source": "unsubscribe_link", "category": category or "all_marketing"},
-                    )
+                    # Audit is best-effort — never block a GDPR consent withdrawal
+                    # (Art. 7(3)) because of an audit-table failure.
+                    try:
+                        with transaction.atomic():
+                            AuditService.log_simple_event(
+                                "marketing_consent_withdrawn",
+                                content_object=customer,
+                                description=f"Unsubscribe via token for {email[:3]}***",
+                                old_values={"marketing_consent": old_marketing},
+                                new_values={"marketing_consent": False},
+                                metadata={"source": "unsubscribe_link", "category": category or "all_marketing"},
+                            )
+                    except Exception:
+                        logger.exception("🔥 [Unsubscribe] Audit logging failed for customer %s", customer.id)
 
                 logger.info(f"✅ [Unsubscribe] Processed for {email[:3]}***")
                 return True
