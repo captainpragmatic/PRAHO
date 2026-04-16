@@ -109,6 +109,55 @@ class UserInvitationRequest:
 
 
 # ===============================================================================
+# SHARED INVITE EMAIL HELPER
+# ===============================================================================
+
+
+def send_welcome_email(user: User, customer: Customer, request_ip: str | None = None) -> bool:
+    """Send an invite email with a password-reset link to a newly created user.
+
+    This is the single source of truth for welcome emails — both
+    SecureUserRegistrationService and SecureCustomerUserService delegate here.
+    """
+    try:
+        token = default_token_generator.make_token(user)
+        uid = urlsafe_base64_encode(force_bytes(user.pk))
+        display_name = customer.company_name or customer.name or "your organization"
+
+        context = {
+            "user": user,
+            "customer": customer,
+            "domain": getattr(settings, "DOMAIN_NAME", "localhost:8700"),
+            "uid": uid,
+            "token": token,
+            "protocol": "https" if getattr(settings, "USE_HTTPS", False) else "http",
+            "support_email": getattr(settings, "SUPPORT_EMAIL", "support@praho.com"),
+        }
+
+        subject = _("Welcome to PRAHO - Account Created for {customer_name}").format(customer_name=display_name)
+        text_message = render_to_string("customers/emails/welcome_email.txt", context)
+        html_message = render_to_string("customers/emails/welcome_email.html", context)
+
+        send_mail(
+            subject=subject,
+            message=text_message,
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[user.email],
+            html_message=html_message,
+            fail_silently=False,
+        )
+
+        log_security_event("welcome_email_sent", {"user_id": user.id, "customer_id": customer.id}, request_ip)
+        logger.info(f"📧 [Secure Email] Welcome email sent to {user.email}")
+        return True
+
+    except Exception as e:
+        logger.error(f"📧 [Secure Email] Failed to send welcome email: {e!s}")
+        log_security_event("welcome_email_failed", {"user_id": user.id, "error": str(e)[:200]}, request_ip)
+        return False
+
+
+# ===============================================================================
 # SECURE USER REGISTRATION SERVICE
 # ===============================================================================
 
@@ -362,51 +411,7 @@ class SecureUserRegistrationService:
 
     @classmethod
     def _send_welcome_email_secure(cls, user: User, customer: Customer, request_ip: str | None = None) -> bool:
-        """
-        🔒 Secure welcome email with proper token generation
-        """
-        try:
-            # Generate secure password reset token
-            token = default_token_generator.make_token(user)
-            uid = urlsafe_base64_encode(force_bytes(user.pk))
-
-            # Prepare secure email context
-            context = {
-                "user": user,
-                "customer": customer,
-                "domain": getattr(settings, "DOMAIN_NAME", "localhost:8700"),
-                "uid": uid,
-                "token": token,
-                "protocol": "https" if getattr(settings, "USE_HTTPS", False) else "http",
-                "support_email": getattr(settings, "SUPPORT_EMAIL", "support@praho.com"),
-            }
-
-            # Render email templates (XSS-safe)
-            subject = _("Welcome to PRAHO - Account Created for {customer_name}").format(
-                customer_name=customer.company_name
-            )
-            text_message = render_to_string("customers/emails/welcome_email.txt", context)
-            html_message = render_to_string("customers/emails/welcome_email.html", context)
-
-            # Send email with error handling
-            send_mail(
-                subject=subject,
-                message=text_message,
-                from_email=settings.DEFAULT_FROM_EMAIL,
-                recipient_list=[user.email],
-                html_message=html_message,
-                fail_silently=False,
-            )
-
-            log_security_event("welcome_email_sent", {"user_id": user.id, "customer_id": customer.id}, request_ip)
-
-            logger.info(f"📧 [Secure Email] Welcome email sent to {user.email}")
-            return True
-
-        except Exception as e:
-            logger.error(f"📧 [Secure Email] Failed to send welcome email: {e!s}")
-            log_security_event("welcome_email_failed", {"user_id": user.id, "error": str(e)[:200]}, request_ip)
-            return False
+        return send_welcome_email(user, customer, request_ip)
 
     @classmethod
     def _find_customer_by_identifier_secure(
@@ -852,53 +857,7 @@ class SecureCustomerUserService:
 
     @classmethod
     def _send_welcome_email_secure(cls, user: User, customer: Customer, request_ip: str | None = None) -> bool:
-        """
-        🔒 Secure welcome email with proper token generation
-        """
-        try:
-            # These imports are already available at module level
-
-            # Generate secure password reset token
-            token = default_token_generator.make_token(user)
-            uid = urlsafe_base64_encode(force_bytes(user.pk))
-
-            # Prepare secure email context
-            context = {
-                "user": user,
-                "customer": customer,
-                "domain": getattr(settings, "DOMAIN_NAME", "localhost:8700"),
-                "uid": uid,
-                "token": token,
-                "protocol": "https" if getattr(settings, "USE_HTTPS", False) else "http",
-                "support_email": getattr(settings, "SUPPORT_EMAIL", "support@praho.com"),
-            }
-
-            # Render email templates (XSS-safe)
-            subject = _("Welcome to PRAHO - Account Created for {customer_name}").format(
-                customer_name=customer.company_name
-            )
-            text_message = render_to_string("customers/emails/welcome_email.txt", context)
-            html_message = render_to_string("customers/emails/welcome_email.html", context)
-
-            # Send email with error handling
-            send_mail(
-                subject=subject,
-                message=text_message,
-                from_email=settings.DEFAULT_FROM_EMAIL,
-                recipient_list=[user.email],
-                html_message=html_message,
-                fail_silently=False,
-            )
-
-            log_security_event("welcome_email_sent", {"user_id": user.id, "customer_id": customer.id}, request_ip)
-
-            logger.info(f"📧 [Secure Email] Welcome email sent to {user.email}")
-            return True
-
-        except Exception as e:
-            logger.error(f"📧 [Secure Email] Failed to send welcome email: {e!s}")
-            log_security_event("welcome_email_failed", {"user_id": user.id, "error": str(e)[:200]}, request_ip)
-            return False
+        return send_welcome_email(user, customer, request_ip)
 
     @classmethod
     def _notify_owners_of_join_request_secure(
