@@ -1,7 +1,7 @@
 {% load i18n %}
 {% load ui_components %}
 
-{% if request.user.is_staff or request.user.staff_role %}
+{% if request.user.is_staff_user %}
 <div class="htmx-stable">
   {% url 'customers:create' as create_url %}
   {% trans "New Customer" as bt_new %}{% button bt_new variant="primary" href=create_url responsive_text="New" size="sm" class="min-w-[80px] whitespace-nowrap" %}
