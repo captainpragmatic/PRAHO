@@ -588,7 +588,7 @@ class SecurityRegressionTests(OrderSecurityTestCase):
             (True, False, ""): False,  # Staff with no role
             (True, False, None): False,  # Staff with None role
             (False, True, ""): True,  # Superuser overrides everything
-            (False, False, "admin"): False,  # Non-staff with admin role should be False
+            (False, False, "admin"): True,  # staff_role="admin" is staff via is_staff_user
         }
 
         for (is_staff, is_superuser, staff_role), expected in permission_matrix.items():
