@@ -725,24 +725,34 @@ def _handle_gdpr_consent_change(customer: Customer, old_consent: bool, new_conse
 
 
 def _handle_marketing_consent_change(customer: Customer, old_consent: bool, new_consent: bool) -> None:
-    """Handle marketing consent changes"""
+    """Handle marketing consent changes.
+
+    GDPR Art. 7(3) requires consent withdrawal to always succeed. The audit
+    call is wrapped in a nested transaction.atomic() savepoint so a DatabaseError
+    inside log_compliance_event (e.g., OperationalError) rolls back only the
+    savepoint — without it, the connection enters InFailedSqlTransaction state
+    and forces a rollback of the outer transaction (the consent change itself).
+    A plain try/except is not enough: catching the Python exception does not
+    recover the connection.
+    """
+    consent_action = "granted" if new_consent else "withdrawn"
+
+    compliance_request = ComplianceEventRequest(
+        compliance_type="marketing_consent",
+        reference_id=f"customer_{customer.id}",
+        description=f"Marketing consent {consent_action}",
+        status="success",
+        evidence={"customer_id": str(customer.id), "old_consent": old_consent, "new_consent": new_consent},
+    )
+
     try:
-        consent_action = "granted" if new_consent else "withdrawn"
-
-        # Log compliance event
-        compliance_request = ComplianceEventRequest(
-            compliance_type="marketing_consent",
-            reference_id=f"customer_{customer.id}",
-            description=f"Marketing consent {consent_action}",
-            status="success",
-            evidence={"customer_id": str(customer.id), "old_consent": old_consent, "new_consent": new_consent},
-        )
-        AuditService.log_compliance_event(compliance_request)
-
-        logger.info(f"📧 [Customer] Marketing consent {consent_action}: {customer.get_display_name()}")
-
+        with transaction.atomic():
+            AuditService.log_compliance_event(compliance_request)
     except Exception as e:
-        logger.exception(f"🔥 [Customer Signal] Marketing consent change failed: {e}")
+        logger.exception(f"🔥 [Customer Signal] Marketing consent audit failed: {e}")
+        return
+
+    logger.info(f"📧 [Customer] Marketing consent {consent_action}: {customer.get_display_name()}")
 
 
 def _verify_romanian_company_compliance(customer: Customer) -> None:
