@@ -254,7 +254,11 @@ def handle_tax_profile_changes(
                     "customer_id": str(instance.customer.id),
                 },
             )
-            AuditService.log_compliance_event(compliance_request)
+            try:
+                with transaction.atomic():
+                    AuditService.log_compliance_event(compliance_request)
+            except Exception:
+                logger.exception("🔥 [Customer Signal] Romanian tax registration audit failed")
 
         logger.info(
             f"🏛️ [Customer] Tax profile {'created' if created else 'updated'}: {instance.customer.get_display_name()}"
@@ -695,11 +699,16 @@ def _handle_customer_status_change(customer: Customer, old_status: str, new_stat
 
 
 def _handle_gdpr_consent_change(customer: Customer, old_consent: bool, new_consent: bool) -> None:
-    """Handle GDPR consent changes"""
+    """Handle GDPR consent changes.
+
+    GDPR Art. 7(3) requires consent withdrawal to always succeed. Audit call
+    is wrapped in a savepoint so a DatabaseError during log_compliance_event
+    cannot leave the connection in InFailedSqlTransaction state and force
+    rollback of the outer transaction (the consent change itself).
+    """
     try:
         consent_action = "granted" if new_consent else "withdrawn"
 
-        # Log compliance event
         compliance_request = ComplianceEventRequest(
             compliance_type="gdpr_consent",
             reference_id=f"customer_{customer.id}",
@@ -712,9 +721,14 @@ def _handle_gdpr_consent_change(customer: Customer, old_consent: bool, new_conse
                 "consent_date": timezone.now().isoformat(),
             },
         )
-        AuditService.log_compliance_event(compliance_request)
+        try:
+            with transaction.atomic():
+                AuditService.log_compliance_event(compliance_request)
+        except Exception:
+            logger.exception("🔥 [Customer Signal] GDPR consent audit failed")
 
-        # Update consent timestamp
+        # Update consent timestamp (must run regardless of audit outcome —
+        # GDPR Art. 7(1) requires the controller to record when consent was given).
         if new_consent and not customer.gdpr_consent_date:
             Customer.objects.filter(pk=customer.pk).update(gdpr_consent_date=timezone.now())
 
@@ -748,9 +762,8 @@ def _handle_marketing_consent_change(customer: Customer, old_consent: bool, new_
     try:
         with transaction.atomic():
             AuditService.log_compliance_event(compliance_request)
-    except Exception as e:
-        logger.exception(f"🔥 [Customer Signal] Marketing consent audit failed: {e}")
-        return
+    except Exception:
+        logger.exception("🔥 [Customer Signal] Marketing consent audit failed")
 
     logger.info(f"📧 [Customer] Marketing consent {consent_action}: {customer.get_display_name()}")
 
@@ -772,7 +785,11 @@ def _verify_romanian_company_compliance(customer: Customer) -> None:
                     status="warning",
                     evidence={"customer_type": customer.customer_type, "missing": "cui"},
                 )
-                AuditService.log_compliance_event(compliance_request)
+                try:
+                    with transaction.atomic():
+                        AuditService.log_compliance_event(compliance_request)
+                except Exception:
+                    logger.exception("🔥 [Customer Signal] Romanian CUI compliance audit failed")
 
     except Exception as e:
         logger.exception(f"🔥 [Customer Signal] Romanian compliance verification failed: {e}")
@@ -796,7 +813,11 @@ def _validate_romanian_cui(tax_profile: CustomerTaxProfile) -> None:
                     status="validation_failed",
                     evidence={"cui": tax_profile.cui, "customer_id": str(tax_profile.customer.id)},
                 )
-                AuditService.log_compliance_event(compliance_request)
+                try:
+                    with transaction.atomic():
+                        AuditService.log_compliance_event(compliance_request)
+                except Exception:
+                    logger.exception("🔥 [Customer Signal] CUI validation audit failed")
 
     except Exception as e:
         logger.exception(f"🔥 [Customer Signal] CUI validation failed: {e}")
@@ -873,7 +894,11 @@ def _handle_payment_terms_change(billing_profile: CustomerBillingProfile, old_te
                     "customer_type": billing_profile.customer.customer_type,
                 },
             )
-            AuditService.log_compliance_event(compliance_request)
+            try:
+                with transaction.atomic():
+                    AuditService.log_compliance_event(compliance_request)
+            except Exception:
+                logger.exception("🔥 [Customer Signal] Extended payment terms audit failed")
 
     except Exception as e:
         logger.exception(f"🔥 [Customer Signal] Payment terms change handling failed: {e}")
@@ -911,7 +936,11 @@ def _verify_primary_address_compliance(address: CustomerAddress) -> None:
                     "postal_code": address.postal_code,
                 },
             )
-            AuditService.log_compliance_event(compliance_request)
+            try:
+                with transaction.atomic():
+                    AuditService.log_compliance_event(compliance_request)
+            except Exception:
+                logger.exception("🔥 [Customer Signal] Primary address compliance audit failed")
 
     except Exception as e:
         logger.exception(f"🔥 [Customer Signal] Primary address compliance verification failed: {e}")
