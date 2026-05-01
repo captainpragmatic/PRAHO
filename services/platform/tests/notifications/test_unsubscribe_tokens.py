@@ -5,7 +5,7 @@ Verifies GDPR Art. 5(1)(c) data minimization — no email addresses in URLs.
 """
 
 from datetime import timedelta
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 from uuid import uuid4
 
 from django.test import TestCase
@@ -165,17 +165,16 @@ class ProcessUnsubscribeTests(TestCase):
     """Tests for the updated process_unsubscribe using DB tokens."""
 
     def test_valid_token_processes_unsubscribe(self) -> None:
-        """Test valid token triggers unsubscribe flow."""
+        """Test valid token triggers unsubscribe flow when no customer exists."""
         token = UnsubscribeToken.objects.create(
             email="unsub@example.com",
             template_key="marketing",
         )
 
-        with patch("apps.customers.models.Customer.objects") as mock_mgr:
-            mock_mgr.get.side_effect = Customer.DoesNotExist()
-            with patch("apps.notifications.services.EmailSuppressionService.suppress_email"):
-                result = EmailPreferenceService.process_unsubscribe(str(token.id))
-                self.assertTrue(result)
+        with patch("apps.notifications.services.EmailSuppressionService.suppress_email") as mock_suppress:
+            result = EmailPreferenceService.process_unsubscribe(str(token.id))
+            self.assertTrue(result)
+            mock_suppress.assert_called_once_with("unsub@example.com", "unsubscribe")
 
         # Token should be consumed
         token.refresh_from_db()
@@ -210,22 +209,123 @@ class ProcessUnsubscribeTests(TestCase):
         self.assertFalse(result)
 
     def test_unsubscribe_with_customer(self) -> None:
-        """Test unsubscribe when customer exists updates preferences."""
+        """Unsubscribe via token withdraws consent and emits a correct GDPR audit event."""
+        customer = Customer.objects.create(
+            name="Unsubscribe Customer",
+            customer_type="individual",
+            primary_email="customer@example.com",
+            marketing_consent=True,
+        )
         token = UnsubscribeToken.objects.create(
             email="customer@example.com",
             template_key="marketing",
         )
 
-        mock_customer = MagicMock()
-        mock_customer.id = uuid4()
-        mock_customer.marketing_consent = True
+        with patch("apps.audit.services.AuditService.log_simple_event") as mock_audit:
+            result = EmailPreferenceService.process_unsubscribe(
+                str(token.id), "marketing"
+            )
 
-        with patch("apps.customers.models.Customer.objects") as mock_mgr:
-            mock_mgr.get.return_value = mock_customer
-            with patch("apps.notifications.services.validators"):
-                result = EmailPreferenceService.process_unsubscribe(
-                    str(token.id), "marketing"
-                )
-                self.assertTrue(result)
-                self.assertFalse(mock_customer.marketing_consent)
-                mock_customer.save.assert_called_once()
+        self.assertTrue(result)
+        customer.refresh_from_db()
+        self.assertFalse(customer.marketing_consent)
+
+        mock_audit.assert_called_once()
+        call_args = mock_audit.call_args
+        self.assertEqual(call_args.args[0], "marketing_consent_withdrawn")
+        self.assertEqual(call_args.kwargs["content_object"], customer)
+        self.assertEqual(call_args.kwargs["old_values"], {"marketing_consent": True})
+        self.assertEqual(call_args.kwargs["new_values"], {"marketing_consent": False})
+        self.assertEqual(call_args.kwargs["metadata"]["source"], "unsubscribe_link")
+        self.assertEqual(call_args.kwargs["metadata"]["category"], "marketing")
+
+    def test_unsubscribe_audit_failure_does_not_block_consent_withdrawal(self) -> None:
+        """GDPR Art. 7(3): audit errors must never block a consent withdrawal."""
+        customer = Customer.objects.create(
+            name="Resilient Customer",
+            customer_type="individual",
+            primary_email="resilient@example.com",
+            marketing_consent=True,
+        )
+        token = UnsubscribeToken.objects.create(
+            email="resilient@example.com",
+            template_key="marketing",
+        )
+
+        with patch(
+            "apps.audit.services.AuditService.log_simple_event",
+            side_effect=RuntimeError("audit table down"),
+        ):
+            result = EmailPreferenceService.process_unsubscribe(str(token.id), "marketing")
+
+        self.assertTrue(result)
+        customer.refresh_from_db()
+        self.assertFalse(customer.marketing_consent)
+
+
+class UpdatePreferencesTests(TestCase):
+    """Tests for EmailPreferenceService.update_preferences."""
+
+    def _make_customer(self, *, marketing: bool = False) -> Customer:
+        return Customer.objects.create(
+            name="Pref Customer",
+            customer_type="individual",
+            primary_email="prefs@example.com",
+            marketing_consent=marketing,
+        )
+
+    def test_update_preferences_persists_marketing_consent(self) -> None:
+        """Setting marketing=True persists and emits a granted audit event."""
+        customer = self._make_customer(marketing=False)
+
+        with patch("apps.audit.services.AuditService.log_simple_event") as mock_audit:
+            EmailPreferenceService.update_preferences(customer, {"marketing": True})
+
+        customer.refresh_from_db()
+        self.assertTrue(customer.marketing_consent)
+        mock_audit.assert_called_once()
+        self.assertEqual(mock_audit.call_args.args[0], "marketing_consent_granted")
+        self.assertEqual(mock_audit.call_args.kwargs["old_values"], {"marketing_consent": False})
+        self.assertEqual(mock_audit.call_args.kwargs["new_values"], {"marketing_consent": True})
+
+    def test_update_preferences_no_audit_when_unchanged(self) -> None:
+        """If consent value is unchanged, no audit event is emitted."""
+        customer = self._make_customer(marketing=True)
+
+        with patch("apps.audit.services.AuditService.log_simple_event") as mock_audit:
+            EmailPreferenceService.update_preferences(customer, {"marketing": True})
+
+        mock_audit.assert_not_called()
+
+    def test_marketing_key_wins_over_newsletters_alias(self) -> None:
+        """Explicit marketing=False cannot be silently reversed by newsletters=True."""
+        customer = self._make_customer(marketing=True)
+
+        EmailPreferenceService.update_preferences(
+            customer, {"marketing": False, "newsletters": True}
+        )
+
+        customer.refresh_from_db()
+        self.assertFalse(customer.marketing_consent)
+
+    def test_newsletters_alias_applies_when_marketing_absent(self) -> None:
+        """Legacy clients sending only 'newsletters' still update marketing_consent."""
+        customer = self._make_customer(marketing=False)
+
+        EmailPreferenceService.update_preferences(customer, {"newsletters": True})
+
+        customer.refresh_from_db()
+        self.assertTrue(customer.marketing_consent)
+
+    def test_update_preferences_audit_failure_does_not_block_consent_change(self) -> None:
+        """GDPR Art. 7(3): audit errors must never block a consent change."""
+        customer = self._make_customer(marketing=False)
+
+        with patch(
+            "apps.audit.services.AuditService.log_simple_event",
+            side_effect=RuntimeError("audit table down"),
+        ):
+            EmailPreferenceService.update_preferences(customer, {"marketing": True})
+
+        customer.refresh_from_db()
+        self.assertTrue(customer.marketing_consent)
