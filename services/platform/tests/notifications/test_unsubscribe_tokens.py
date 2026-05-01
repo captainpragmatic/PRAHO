@@ -8,6 +8,7 @@ from datetime import timedelta
 from unittest.mock import patch
 from uuid import uuid4
 
+from django.db.utils import OperationalError
 from django.test import TestCase
 from django.utils import timezone
 
@@ -185,6 +186,17 @@ class ProcessUnsubscribeTests(TestCase):
         result = EmailPreferenceService.process_unsubscribe(str(uuid4()))
         self.assertFalse(result)
 
+    def test_malformed_uuid_rejected_as_invalid(self) -> None:
+        """Malformed UUID (legacy ?token=... path) returns False without raising.
+
+        Django's UUIDField.to_python raises ValidationError (NOT ValueError) for
+        non-UUID strings — the inner except clause must catch ValidationError so
+        a malformed token is logged as WARNING ("invalid token") rather than
+        bubbling to the outer handler and being logged as ERROR ("failed to process").
+        """
+        result = EmailPreferenceService.process_unsubscribe("not-a-valid-uuid")
+        self.assertFalse(result)
+
     def test_already_used_token_rejected(self) -> None:
         """Test already-consumed token is rejected."""
         token = UnsubscribeToken.objects.create(
@@ -254,7 +266,7 @@ class ProcessUnsubscribeTests(TestCase):
 
         with patch(
             "apps.audit.services.AuditService.log_simple_event",
-            side_effect=RuntimeError("audit table down"),
+            side_effect=OperationalError("audit table down"),
         ):
             result = EmailPreferenceService.process_unsubscribe(str(token.id), "marketing")
 
@@ -323,7 +335,7 @@ class UpdatePreferencesTests(TestCase):
 
         with patch(
             "apps.audit.services.AuditService.log_simple_event",
-            side_effect=RuntimeError("audit table down"),
+            side_effect=OperationalError("audit table down"),
         ):
             EmailPreferenceService.update_preferences(customer, {"marketing": True})
 

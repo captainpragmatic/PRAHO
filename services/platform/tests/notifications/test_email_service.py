@@ -427,6 +427,25 @@ class EmailPreferenceModelTests(TestCase):
         self.assertIsNotNone(self.preference.marketing_consent_date)
         self.assertEqual(self.preference.marketing_consent_source, "preference_center")
 
+    def test_withdrawal_preserves_consent_date_and_source(self):
+        """GDPR Art. 7: withdrawal must preserve historical grant evidence.
+
+        marketing_consent_date and marketing_consent_source record WHEN and
+        HOW the original grant occurred. Withdrawal flips the marketing flag
+        but must NOT clear those fields — the grant remained demonstrable
+        for the period it was active.
+        """
+        self.preference.update_marketing_consent(True, source="preference_center")
+        original_date = self.preference.marketing_consent_date
+        original_source = self.preference.marketing_consent_source
+
+        self.preference.update_marketing_consent(False, source="unsubscribe_link")
+
+        self.preference.refresh_from_db()
+        self.assertFalse(self.preference.marketing)
+        self.assertEqual(self.preference.marketing_consent_date, original_date)
+        self.assertEqual(self.preference.marketing_consent_source, original_source)
+
 
 class DeliveryEventHandlerTests(TestCase):
     """Test email delivery event handling."""

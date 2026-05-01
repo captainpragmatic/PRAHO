@@ -909,14 +909,25 @@ class EmailPreference(models.Model):
         return category_map.get(category, True)
 
     def update_marketing_consent(self, consent: bool, source: str = "") -> None:
-        """Update marketing consent with GDPR tracking and row-level locking."""
+        """Update marketing consent with GDPR tracking and row-level locking.
+
+        Withdrawal preserves marketing_consent_date / marketing_consent_source
+        as audit-trail evidence of when the original grant occurred (GDPR Art. 7
+        "demonstrate consent" — historical grant remains demonstrable even after
+        withdrawal). Only the grant branch updates those fields.
+        """
         with transaction.atomic():
             locked = EmailPreference.objects.select_for_update(of=("self",)).get(pk=self.pk)
             locked.marketing = consent
             if consent:
                 locked.marketing_consent_date = timezone.now()
                 locked.marketing_consent_source = source
-            locked.save(update_fields=["marketing", "marketing_consent_date", "marketing_consent_source", "updated_at"])
+                locked.save(
+                    update_fields=["marketing", "marketing_consent_date", "marketing_consent_source", "updated_at"]
+                )
+            else:
+                # Withdrawal does NOT touch consent_date/source — keep historical grant evidence.
+                locked.save(update_fields=["marketing", "updated_at"])
             # Refresh self from locked instance
             self.marketing = locked.marketing
             self.marketing_consent_date = locked.marketing_consent_date
