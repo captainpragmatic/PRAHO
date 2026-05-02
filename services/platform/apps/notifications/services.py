@@ -1461,8 +1461,10 @@ class EmailPreferenceService:
             with transaction.atomic():
                 try:
                     token_obj = UnsubscribeToken.objects.select_for_update(of=("self",)).get(id=token_id)
-                except (UnsubscribeToken.DoesNotExist, ValueError):
-                    # DoesNotExist: unknown token. ValueError: malformed UUID.
+                except (UnsubscribeToken.DoesNotExist, ValueError, DjangoValidationError):
+                    # DoesNotExist: unknown token. ValueError / ValidationError:
+                    # malformed UUID (Django's UUIDField.to_python raises ValidationError,
+                    # not ValueError, for non-UUID strings on the legacy ?token=... path).
                     # Transient DB errors (OperationalError, lock timeouts) propagate
                     # to the outer handler instead of being silently reported as invalid.
                     logger.warning("⚠️ [Unsubscribe] Invalid or unknown token")

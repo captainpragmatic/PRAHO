@@ -8,6 +8,7 @@ from datetime import timedelta
 from unittest.mock import patch
 from uuid import uuid4
 
+from django.db.utils import OperationalError
 from django.test import TestCase
 from django.utils import timezone
 
@@ -185,6 +186,29 @@ class ProcessUnsubscribeTests(TestCase):
         result = EmailPreferenceService.process_unsubscribe(str(uuid4()))
         self.assertFalse(result)
 
+    def test_malformed_uuid_rejected_as_invalid(self) -> None:
+        """Malformed UUID (legacy ?token=... path) is logged as WARNING, not ERROR.
+
+        Django's UUIDField.to_python raises ValidationError (NOT ValueError) for
+        non-UUID strings. The inner except clause must catch ValidationError so
+        a malformed token is logged as WARNING ("invalid or unknown token") rather
+        than bubbling to the outer except Exception and being logged as ERROR
+        ("failed to process token") — the latter would generate spurious oncall
+        pages for normal user input. Asserting log level (not just return value)
+        is the only proof that distinguishes the fixed code from the pre-fix code,
+        since both return False.
+        """
+        with self.assertLogs("apps.notifications.services", level="WARNING") as captured:
+            result = EmailPreferenceService.process_unsubscribe("not-a-valid-uuid")
+
+        self.assertFalse(result)
+        # Exactly one WARNING about the invalid token; no ERROR-level "failed to process".
+        warnings = [r for r in captured.records if r.levelname == "WARNING"]
+        errors = [r for r in captured.records if r.levelname == "ERROR"]
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("Invalid or unknown token", warnings[0].getMessage())
+        self.assertEqual(errors, [])
+
     def test_already_used_token_rejected(self) -> None:
         """Test already-consumed token is rejected."""
         token = UnsubscribeToken.objects.create(
@@ -240,7 +264,14 @@ class ProcessUnsubscribeTests(TestCase):
         self.assertEqual(call_args.kwargs["metadata"]["category"], "marketing")
 
     def test_unsubscribe_audit_failure_does_not_block_consent_withdrawal(self) -> None:
-        """GDPR Art. 7(3): audit errors must never block a consent withdrawal."""
+        """GDPR Art. 7(3): service-layer audit errors must never block a consent withdrawal.
+
+        Note: patching log_simple_event raises a Python exception, which the savepoint
+        catches. It does NOT simulate the full PostgreSQL InFailedSqlTransaction recovery
+        path (that would require a real failed SQL statement inside the savepoint, which
+        is not feasible in a unit test). The savepoint pattern is correct by code reading;
+        this test verifies the Python-level exception handling.
+        """
         customer = Customer.objects.create(
             name="Resilient Customer",
             customer_type="individual",
@@ -254,7 +285,44 @@ class ProcessUnsubscribeTests(TestCase):
 
         with patch(
             "apps.audit.services.AuditService.log_simple_event",
-            side_effect=RuntimeError("audit table down"),
+            side_effect=OperationalError("audit table down"),
+        ):
+            result = EmailPreferenceService.process_unsubscribe(str(token.id), "marketing")
+
+        self.assertTrue(result)
+        customer.refresh_from_db()
+        self.assertFalse(customer.marketing_consent)
+
+    def test_unsubscribe_signal_audit_failure_does_not_block_consent_withdrawal(self) -> None:
+        """GDPR Art. 7(3): signal-side audit errors must also not block consent.
+
+        Customer.save() fires post_save → _handle_marketing_consent_change → log_compliance_event.
+        On real Postgres, an OperationalError mid-SQL inside log_compliance_event would mark the
+        connection InFailedSqlTransaction and force a rollback of the outer transaction unless
+        wrapped in a savepoint. This test patches log_compliance_event (the signal-side path),
+        distinct from the log_simple_event test above (the service-layer path).
+
+        Test limitation: SQLite does not implement InFailedSqlTransaction state, so this test
+        cannot empirically distinguish "savepoint present" from "savepoint absent" — falsified
+        in this session by removing the savepoint and observing the test still pass. The
+        savepoint is required for production Postgres correctness; this test verifies the
+        Python-level exception flow only. Project-wide test-config limitation, also affects
+        select_for_update() coverage.
+        """
+        customer = Customer.objects.create(
+            name="Signal Resilient",
+            customer_type="individual",
+            primary_email="signal-resilient@example.com",
+            marketing_consent=True,
+        )
+        token = UnsubscribeToken.objects.create(
+            email="signal-resilient@example.com",
+            template_key="marketing",
+        )
+
+        with patch(
+            "apps.audit.services.AuditService.log_compliance_event",
+            side_effect=OperationalError("compliance audit table down"),
         ):
             result = EmailPreferenceService.process_unsubscribe(str(token.id), "marketing")
 
@@ -318,12 +386,34 @@ class UpdatePreferencesTests(TestCase):
         self.assertTrue(customer.marketing_consent)
 
     def test_update_preferences_audit_failure_does_not_block_consent_change(self) -> None:
-        """GDPR Art. 7(3): audit errors must never block a consent change."""
+        """GDPR Art. 7(3): service-layer audit errors must never block a consent change.
+
+        See test_unsubscribe_audit_failure_does_not_block_consent_withdrawal for the
+        note on why a Python-level OperationalError mock is the practical limit of
+        unit testing here.
+        """
         customer = self._make_customer(marketing=False)
 
         with patch(
             "apps.audit.services.AuditService.log_simple_event",
-            side_effect=RuntimeError("audit table down"),
+            side_effect=OperationalError("audit table down"),
+        ):
+            EmailPreferenceService.update_preferences(customer, {"marketing": True})
+
+        customer.refresh_from_db()
+        self.assertTrue(customer.marketing_consent)
+
+    def test_update_preferences_signal_audit_failure_does_not_block_consent_change(self) -> None:
+        """GDPR Art. 7(3): signal-side audit errors must also not block consent.
+
+        Counterpart to test_update_preferences_audit_failure: patches log_compliance_event
+        (the customers.signals path) instead of log_simple_event (the service-layer path).
+        """
+        customer = self._make_customer(marketing=False)
+
+        with patch(
+            "apps.audit.services.AuditService.log_compliance_event",
+            side_effect=OperationalError("compliance audit table down"),
         ):
             EmailPreferenceService.update_preferences(customer, {"marketing": True})
 
