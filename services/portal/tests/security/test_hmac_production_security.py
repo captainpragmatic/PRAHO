@@ -112,7 +112,7 @@ class HMACProductionSecurityTestCase(SimpleTestCase):
                     # Production should warn about or reject insecure URLs
                     if insecure_url.startswith('http://'):
                         # Should either upgrade to HTTPS or reject
-                        with patch('requests.request') as mock_request:
+                        with patch('apps.common.outbound_http._session.request') as mock_request:
                             mock_response = Mock()
                             mock_response.status_code = 200
                             mock_response.json.return_value = {'success': True}
@@ -140,7 +140,7 @@ class HMACProductionSecurityTestCase(SimpleTestCase):
         """🔐 Test production validates all HMAC headers are present and properly formatted"""
         client = PlatformAPIClient()
 
-        with patch('requests.request') as mock_request:
+        with patch('apps.common.outbound_http._session.request') as mock_request:
             mock_response = Mock()
             mock_response.status_code = 200
             mock_response.json.return_value = {'success': True, 'authenticated': True}
@@ -195,7 +195,7 @@ class HMACProductionSecurityTestCase(SimpleTestCase):
 
             for exception, expected_category in error_scenarios:
                 with self.subTest(error=expected_category):
-                    with patch('requests.request') as mock_request:
+                    with patch('apps.common.outbound_http._session.request') as mock_request:
                         mock_request.side_effect = exception
 
                         # Error handling should be safe
@@ -260,7 +260,7 @@ class HMACProductionSecurityTestCase(SimpleTestCase):
             # Measure timing for correct signature
             correct_times = []
             for _ in range(5):
-                with patch('requests.request', side_effect=mock_platform_with_timing_simulation):
+                with patch('apps.common.outbound_http._session.request', side_effect=mock_platform_with_timing_simulation):
                     start_time = time.time()
                     result = client.authenticate_customer('test@example.com', 'password123')
                     correct_times.append(time.time() - start_time)
@@ -271,7 +271,7 @@ class HMACProductionSecurityTestCase(SimpleTestCase):
             with override_settings(PLATFORM_API_SECRET="wrong-secret-key-for-timing-test"):
                 client = PlatformAPIClient()
                 for _ in range(5):
-                    with patch('requests.request', side_effect=mock_platform_with_timing_simulation):
+                    with patch('apps.common.outbound_http._session.request', side_effect=mock_platform_with_timing_simulation):
                         start_time = time.time()
                         result = client.authenticate_customer('test@example.com', 'password123')
                         incorrect_times.append(time.time() - start_time)
@@ -437,7 +437,7 @@ class HMACProductionDeploymentTestCase(SimpleTestCase):
 
             for error_scenario in error_recovery_scenarios:
                 with self.subTest(error=str(error_scenario)):
-                    with patch('requests.request') as mock_request:
+                    with patch('apps.common.outbound_http._session.request') as mock_request:
                         if isinstance(error_scenario, Exception):
                             mock_request.side_effect = error_scenario
                         else:

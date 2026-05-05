@@ -113,7 +113,7 @@ class HMACConcurrentAttackTestCase(SimpleTestCase):
                         headers['X-Signature'] = signature_prefix + headers['X-Signature'][len(signature_prefix):]
                         mock_headers.return_value = headers
 
-                        with patch('requests.request', side_effect=mock_brute_force_validation):
+                        with patch('apps.common.outbound_http._session.request', side_effect=mock_brute_force_validation):
                             result = client.authenticate_customer(f'attacker{worker_id}@example.com', 'password123')
                             if result:
                                 successful_auths += 1
@@ -186,7 +186,7 @@ class HMACConcurrentAttackTestCase(SimpleTestCase):
 
                 # Attempt to use many nonces rapidly
                 for i in range(50):
-                    with patch('requests.request', side_effect=mock_nonce_tracking), contextlib.suppress(PlatformAPIError):
+                    with patch('apps.common.outbound_http._session.request', side_effect=mock_nonce_tracking), contextlib.suppress(PlatformAPIError):
                         client.authenticate_customer(f'nonce_attacker{worker_id}@example.com', 'password123')
 
                 return {
@@ -268,7 +268,7 @@ class HMACConcurrentAttackTestCase(SimpleTestCase):
                 while time.time() < end_time:
                     attack_results['attempts'] += 1
 
-                    with patch('requests.request', side_effect=mock_coordinated_defense):
+                    with patch('apps.common.outbound_http._session.request', side_effect=mock_coordinated_defense):
                         try:
                             result = client.authenticate_customer(
                                 f'coordinated_attacker{worker_id}@example.com',

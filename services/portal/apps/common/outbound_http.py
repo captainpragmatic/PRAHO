@@ -20,6 +20,13 @@ logger = logging.getLogger(__name__)
 PORTAL_DEFAULT_TIMEOUT: float = 30.0
 DEFAULT_USER_AGENT = "PRAHO-Portal/1.0 (+https://pragmatichost.com)"
 
+# Module-level session for HTTP keep-alive connection reuse.
+# requests.Session is thread-safe for concurrent reads; each request
+# gets its own prepared-request/response cycle. The underlying urllib3
+# connection pool handles per-host connection reuse automatically.
+_session = requests.Session()
+_session.headers["User-Agent"] = DEFAULT_USER_AGENT
+
 
 class OutboundSecurityError(Exception):
     """Raised when an outbound request violates security policy."""
@@ -39,12 +46,13 @@ def portal_request(
     - ``allow_redirects=False`` (prevents redirect-based SSRF)
     - Bounded timeout (never ``None``)
     - TLS verification enabled
+    - HTTP keep-alive via connection pooling (reuses TCP connections)
 
     Args:
         method: HTTP method (GET, POST, etc.)
         url: Target URL
         timeout: Override default timeout
-        **kwargs: Passed through to ``requests.request``
+        **kwargs: Passed through to ``requests.Session.request``
 
     Returns:
         requests.Response
@@ -65,4 +73,4 @@ def portal_request(
     headers.setdefault("User-Agent", DEFAULT_USER_AGENT)
     kwargs["headers"] = headers
 
-    return requests.request(method=method, url=url, **kwargs)  # noqa: S113  # timeout set via kwargs
+    return _session.request(method=method, url=url, **kwargs)

@@ -19,21 +19,21 @@ class PortalRequestHTTPSEnforcementTest(SimpleTestCase):
             portal_request("GET", "http://platform.example.com/api/test/")
 
     @override_settings(DEBUG=True)
-    @patch("apps.common.outbound_http.requests.request")
+    @patch("apps.common.outbound_http._session.request")
     def test_allows_http_in_debug(self, mock_request):
         mock_request.return_value = MagicMock(status_code=200)
         resp = portal_request("GET", "http://localhost:8700/api/test/")
         self.assertEqual(resp.status_code, 200)
 
     @override_settings(DEBUG=False, PLATFORM_API_ALLOW_INSECURE_HTTP=True)
-    @patch("apps.common.outbound_http.requests.request")
+    @patch("apps.common.outbound_http._session.request")
     def test_allows_http_with_insecure_setting(self, mock_request):
         mock_request.return_value = MagicMock(status_code=200)
         resp = portal_request("GET", "http://platform.example.com/api/test/")
         self.assertEqual(resp.status_code, 200)
 
     @override_settings(DEBUG=False)
-    @patch("apps.common.outbound_http.requests.request")
+    @patch("apps.common.outbound_http._session.request")
     def test_allows_https_in_production(self, mock_request):
         mock_request.return_value = MagicMock(status_code=200)
         resp = portal_request("GET", "https://platform.example.com/api/test/")
@@ -44,7 +44,7 @@ class PortalRequestRedirectTest(SimpleTestCase):
     """portal_request() must block redirects."""
 
     @override_settings(DEBUG=True)
-    @patch("apps.common.outbound_http.requests.request")
+    @patch("apps.common.outbound_http._session.request")
     def test_sets_allow_redirects_false(self, mock_request):
         mock_request.return_value = MagicMock(status_code=200)
         portal_request("GET", "http://localhost:8700/api/test/")
@@ -52,7 +52,7 @@ class PortalRequestRedirectTest(SimpleTestCase):
         self.assertFalse(kwargs["allow_redirects"])
 
     @override_settings(DEBUG=True)
-    @patch("apps.common.outbound_http.requests.request")
+    @patch("apps.common.outbound_http._session.request")
     def test_overrides_caller_allow_redirects(self, mock_request):
         mock_request.return_value = MagicMock(status_code=200)
         portal_request("GET", "http://localhost:8700/api/test/", allow_redirects=True)
@@ -64,7 +64,7 @@ class PortalRequestTimeoutTest(SimpleTestCase):
     """portal_request() must always set a timeout."""
 
     @override_settings(DEBUG=True, PLATFORM_API_TIMEOUT=15)
-    @patch("apps.common.outbound_http.requests.request")
+    @patch("apps.common.outbound_http._session.request")
     def test_uses_settings_timeout(self, mock_request):
         mock_request.return_value = MagicMock(status_code=200)
         portal_request("GET", "http://localhost:8700/api/test/")
@@ -72,7 +72,7 @@ class PortalRequestTimeoutTest(SimpleTestCase):
         self.assertEqual(kwargs["timeout"], 15)
 
     @override_settings(DEBUG=True)
-    @patch("apps.common.outbound_http.requests.request")
+    @patch("apps.common.outbound_http._session.request")
     def test_uses_explicit_timeout(self, mock_request):
         mock_request.return_value = MagicMock(status_code=200)
         portal_request("GET", "http://localhost:8700/api/test/", timeout=5.0)
@@ -80,7 +80,7 @@ class PortalRequestTimeoutTest(SimpleTestCase):
         self.assertEqual(kwargs["timeout"], 5.0)
 
     @override_settings(DEBUG=True)
-    @patch("apps.common.outbound_http.requests.request")
+    @patch("apps.common.outbound_http._session.request")
     def test_default_timeout_when_no_setting(self, mock_request):
         """Falls back to PORTAL_DEFAULT_TIMEOUT (30s) when setting is absent."""
         mock_request.return_value = MagicMock(status_code=200)
@@ -94,7 +94,7 @@ class PortalRequestTLSVerificationTest(SimpleTestCase):
     """portal_request() must always verify TLS."""
 
     @override_settings(DEBUG=True)
-    @patch("apps.common.outbound_http.requests.request")
+    @patch("apps.common.outbound_http._session.request")
     def test_always_sets_verify_true(self, mock_request):
         mock_request.return_value = MagicMock(status_code=200)
         portal_request("GET", "http://localhost:8700/api/test/")
@@ -102,7 +102,7 @@ class PortalRequestTLSVerificationTest(SimpleTestCase):
         self.assertTrue(kwargs["verify"])
 
     @override_settings(DEBUG=True)
-    @patch("apps.common.outbound_http.requests.request")
+    @patch("apps.common.outbound_http._session.request")
     def test_overrides_caller_verify_false(self, mock_request):
         mock_request.return_value = MagicMock(status_code=200)
         portal_request("GET", "http://localhost:8700/api/test/", verify=False)
@@ -114,7 +114,7 @@ class PortalRequestHMACPreservationTest(SimpleTestCase):
     """portal_request() must not alter URL or headers — HMAC must stay intact."""
 
     @override_settings(DEBUG=True)
-    @patch("apps.common.outbound_http.requests.request")
+    @patch("apps.common.outbound_http._session.request")
     def test_url_passed_unchanged(self, mock_request):
         mock_request.return_value = MagicMock(status_code=200)
         url = "http://localhost:8700/api/users/login/"
@@ -124,7 +124,7 @@ class PortalRequestHMACPreservationTest(SimpleTestCase):
         self.assertEqual(kwargs["url"], url)
 
     @override_settings(DEBUG=True)
-    @patch("apps.common.outbound_http.requests.request")
+    @patch("apps.common.outbound_http._session.request")
     def test_headers_passed_through(self, mock_request):
         mock_request.return_value = MagicMock(status_code=200)
         custom_headers = {"X-Portal-Id": "portal-1", "X-Signature": "sig123", "X-Nonce": "nonce"}

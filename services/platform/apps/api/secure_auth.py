@@ -261,12 +261,12 @@ def require_customer_authentication(view_func: Callable[..., Any]) -> Callable[.
     """
 
     def wrapper(request: HttpRequest, *args: Any, **kwargs: Any) -> Response:
-        logger.info(f"🔧 [Auth Decorator] require_customer_authentication called for {request.path}")
+        logger.debug(f"🔧 [Auth Decorator] require_customer_authentication called for {request.path}")
         customer, error_response = get_authenticated_customer(request)
         if error_response:
             logger.warning(f"🔧 [Auth Decorator] Authentication failed for {request.path}")
             return error_response
-        logger.info(
+        logger.debug(
             f"🔧 [Auth Decorator] Authentication successful for {request.path} - Customer: {customer.company_name if customer else 'None'}"
         )
         return view_func(request, customer, *args, **kwargs)
