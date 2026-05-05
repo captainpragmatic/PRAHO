@@ -274,7 +274,7 @@
 
 <!-- Status Change Modal (for staff) -->
 {% if is_staff and order.status != "cancelled" and order.status != "completed" %}
-<div id="statusModal" class="hidden fixed inset-0 z-50 overflow-y-auto">
+<div id="statusModal" class="hidden fixed inset-0 z-50 overflow-y-auto" role="dialog" aria-modal="true" aria-labelledby="statusModalTitle">
   <!-- Backdrop -->
   <div class="fixed inset-0 bg-slate-900 opacity-75 transition-opacity" aria-hidden="true" onclick="hideStatusModal()"></div>
 
@@ -288,7 +288,7 @@
       <form id="statusForm" method="post" action="{% url 'orders:order_change_status' pk=order.id %}">
         {% csrf_token %}
         <div class="px-6 pt-6 pb-4">
-          <h3 class="text-lg font-medium text-white mb-4">{% icon "refresh" %} {% trans "Change Order Status" %}</h3>
+          <h3 id="statusModalTitle" class="text-lg font-medium text-white mb-4">{% icon "refresh" %} {% trans "Change Order Status" %}</h3>
           {% if order.status == 'draft' %}
           <!-- Inline validation summary -->
           <div id="modal-preflight" class="mb-4">
@@ -330,7 +330,7 @@
               <option value="">{% trans "Select new status..." %}</option>
               {% if order.status == "draft" %}
                 <option value="awaiting_payment" {% if not preflight_ok %}disabled{% endif %}>⏳ {% trans "Submit for Payment" %}</option>
-                <option value="cancelled" data-destructive="true">❌ {% trans "Cancelled" %}</option>
+                <option value="cancelled" data-destructive="true" data-confirm-word="CANCEL">❌ {% trans "Cancelled" %}</option>
               {% elif order.status == "awaiting_payment" %}
                 {# "Mark as Paid" removed — payment must go through the proforma flow #}
                 {# (Record Payment on proforma → auto-converts to invoice → order transitions to paid) #}
@@ -339,22 +339,22 @@
                 {% else %}
                 <option value="paid">✅ {% trans "Mark as Paid" %}</option>
                 {% endif %}
-                <option value="cancelled" data-destructive="true">❌ {% trans "Cancelled" %}</option>
-                <option value="failed" data-destructive="true">🔥 {% trans "Failed" %}</option>
+                <option value="cancelled" data-destructive="true" data-confirm-word="CANCEL">❌ {% trans "Cancelled" %}</option>
+                <option value="failed" data-destructive="true" data-confirm-word="FAILED">🔥 {% trans "Failed" %}</option>
               {% elif order.status == "paid" %}
                 <option value="provisioning">⚙️ {% trans "Start Provisioning" %}</option>
                 <option value="in_review">🔍 {% trans "Flag for Review" %}</option>
-                <option value="cancelled" data-destructive="true">❌ {% trans "Cancelled" %}</option>
+                <option value="cancelled" data-destructive="true" data-confirm-word="CANCEL">❌ {% trans "Cancelled" %}</option>
               {% elif order.status == "in_review" %}
                 <option value="provisioning">✅ {% trans "Approve & Provision" %}</option>
-                <option value="cancelled" data-destructive="true">❌ {% trans "Reject & Cancel" %}</option>
+                <option value="cancelled" data-destructive="true" data-confirm-word="CANCEL">❌ {% trans "Reject & Cancel" %}</option>
               {% elif order.status == "provisioning" %}
                 <option value="completed">✅ {% trans "Completed" %}</option>
-                <option value="failed" data-destructive="true">🔥 {% trans "Failed" %}</option>
-                <option value="cancelled" data-destructive="true">❌ {% trans "Cancelled" %}</option>
+                <option value="failed" data-destructive="true" data-confirm-word="FAILED">🔥 {% trans "Failed" %}</option>
+                <option value="cancelled" data-destructive="true" data-confirm-word="CANCEL">❌ {% trans "Cancelled" %}</option>
               {% elif order.status == "failed" %}
                 <option value="awaiting_payment">⏳ {% trans "Retry" %}</option>
-                <option value="cancelled" data-destructive="true">❌ {% trans "Cancelled" %}</option>
+                <option value="cancelled" data-destructive="true" data-confirm-word="CANCEL">❌ {% trans "Cancelled" %}</option>
               {% endif %}
             </select>
           </div>
@@ -382,16 +382,17 @@
 
           <!-- Destructive action confirmation (hidden by default) -->
           <div id="destructiveConfirm" class="hidden mb-4 bg-red-900/30 border border-red-700/50 rounded-lg p-3">
-            <p class="text-red-300 text-sm mb-2">
+            <label id="destructiveConfirmLabel" for="confirmInput" class="block text-red-300 text-sm mb-2">
               {% trans "This action is irreversible. Type" %} <strong id="confirmWord" class="font-mono">CANCEL</strong> {% trans "to confirm." %}
-            </p>
+            </label>
             <input id="confirmInput" type="text" autocomplete="off"
+                   aria-labelledby="destructiveConfirmLabel"
                    class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-red-500"
                    placeholder="{% trans 'Type here to confirm...' %}">
           </div>
 
           <!-- Error display (populated by JS on failed submit) -->
-          <div id="statusError" class="hidden mb-4 bg-red-900/30 border border-red-700/50 text-red-300 text-sm rounded-lg p-3"></div>
+          <div id="statusError" class="hidden mb-4 bg-red-900/30 border border-red-700/50 text-red-300 text-sm rounded-lg p-3" role="alert" aria-live="assertive"></div>
         </div>
 
         <div class="px-6 py-4 bg-slate-900 flex justify-end space-x-3">
@@ -420,12 +421,29 @@ function showToast(message, variant) {
   setTimeout(() => { toast.style.opacity = '0'; toast.style.transition = 'opacity 0.3s'; }, 2000);
   setTimeout(() => { if (toast.parentNode) toast.parentNode.removeChild(toast); }, 2400);
 }
+
+// Element to return focus to when the modal closes (the trigger that opened it).
+let statusModalTriggerEl = null;
+// Bound Esc handler so we can remove it on close.
+function statusModalEscHandler(e) {
+    if (e.key === 'Escape') {
+        e.preventDefault();
+        hideStatusModal();
+    }
+}
+
 function showStatusModal() {
     const modal = document.getElementById('statusModal');
-    if (modal) {
-        modal.classList.remove('hidden');
-        modal.style.display = 'block';
-        document.body.style.overflow = 'hidden';
+    if (!modal) return;
+    statusModalTriggerEl = document.activeElement;
+    modal.classList.remove('hidden');
+    modal.style.display = 'block';
+    document.body.style.overflow = 'hidden';
+    document.addEventListener('keydown', statusModalEscHandler);
+    // Move focus into the dialog. Prefer the status select; fall back to the dialog itself.
+    const firstField = document.getElementById('new_status') || modal;
+    if (firstField && typeof firstField.focus === 'function') {
+        firstField.focus();
     }
 }
 
@@ -436,13 +454,27 @@ function hideStatusModal() {
         modal.style.display = 'none';
         document.body.style.overflow = '';
     }
-    // Reset confirmation state
+    document.removeEventListener('keydown', statusModalEscHandler);
+    // Reset all interactive state so reopening starts fresh
+    // (close→reopen must NOT bypass the destructive-action confirmation).
+    const statusSelect = document.getElementById('new_status');
     const confirmArea = document.getElementById('destructiveConfirm');
     const confirmInput = document.getElementById('confirmInput');
     const errorDiv = document.getElementById('statusError');
+    const submitBtn = document.getElementById('statusSubmitBtn');
+    if (statusSelect) statusSelect.selectedIndex = 0;
     if (confirmArea) confirmArea.classList.add('hidden');
     if (confirmInput) confirmInput.value = '';
-    if (errorDiv) errorDiv.classList.add('hidden');
+    if (errorDiv) {
+        errorDiv.textContent = '';
+        errorDiv.classList.add('hidden');
+    }
+    if (submitBtn) submitBtn.disabled = false;
+    // Return focus to the trigger so keyboard users land where they came from.
+    if (statusModalTriggerEl && typeof statusModalTriggerEl.focus === 'function') {
+        statusModalTriggerEl.focus();
+    }
+    statusModalTriggerEl = null;
 }
 
 document.addEventListener('DOMContentLoaded', function() {
@@ -460,13 +492,15 @@ document.addEventListener('DOMContentLoaded', function() {
     const confirmWord = document.getElementById('confirmWord');
     const submitBtn = document.getElementById('statusSubmitBtn');
 
-    // Show/hide destructive confirmation when status selection changes
+    // Show/hide destructive confirmation when status selection changes.
+    // Reads the confirmation word from the option's data-confirm-word attribute
+    // so the JS stays locale-invariant and the option markup is the single source of truth.
     if (statusSelect) {
         statusSelect.addEventListener('change', function() {
             const selected = this.options[this.selectedIndex];
             const isDestructive = selected && selected.dataset.destructive === 'true';
             if (isDestructive) {
-                const word = this.value === 'failed' ? 'FAILED' : 'CANCEL';
+                const word = (selected.dataset.confirmWord || '').trim();
                 confirmWord.textContent = word;
                 confirmArea.classList.remove('hidden');
                 confirmInput.value = '';
@@ -493,9 +527,14 @@ document.addEventListener('DOMContentLoaded', function() {
         statusForm.addEventListener('submit', function(e) {
             e.preventDefault();
             const errorDiv = document.getElementById('statusError');
+            errorDiv.textContent = '';
             errorDiv.classList.add('hidden');
 
             const formData = new FormData(this);
+
+            // Re-entrancy guard: disable both the submit button and the trigger
+            // so a slow network or the 600ms reload window cannot double-submit.
+            if (submitBtn) submitBtn.disabled = true;
 
             fetch(this.action, {
                 method: 'POST',
@@ -505,24 +544,43 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             })
             .then(response => {
+                // Session expired — Django redirects to LOGIN_URL with an HTML page.
+                // Send the user there instead of trying to parse HTML as JSON.
+                if (response.status === 401 || response.status === 403) {
+                    window.location.href = '/auth/login/?next=' + encodeURIComponent(window.location.pathname);
+                    return Promise.reject(new Error('session_expired'));
+                }
+                // Server returned non-JSON (5xx HTML error page, redirect, etc.) — surface a friendly error.
+                const ct = response.headers.get('content-type') || '';
+                if (!ct.includes('application/json')) {
+                    return Promise.reject(new Error('non_json_response'));
+                }
                 return response.json().then(data => ({ ok: response.ok, data }));
             })
             .then(({ ok, data }) => {
                 if (ok && data.success) {
+                    // Disable the trigger button to prevent re-opening during the reload window.
+                    if (changeStatusBtn) changeStatusBtn.disabled = true;
                     hideStatusModal();
-                    showToast('{% trans "Status changed to" %}' + ' ' + (data.new_status || ''), 'success');
+                    // Use server-translated display label so Romanian users see the localized status name.
+                    const statusText = data.status_display || data.new_status || '';
+                    showToast('{% trans "Status changed to" %}' + ' ' + statusText, 'success');
                     setTimeout(() => window.location.reload(), 600);
                 } else {
                     const msg = data.error || data.message || '{% trans "Unknown error" %}';
                     errorDiv.textContent = msg;
                     errorDiv.classList.remove('hidden');
+                    if (submitBtn) submitBtn.disabled = false;
                 }
             })
-            .catch(() => {
+            .catch((err) => {
+                // session_expired already navigated away — nothing to render.
+                if (err && err.message === 'session_expired') return;
                 {# nosemgrep: template-translate-as-no-escape — developer-managed translation string, escaped at output #}
                 {% trans "An error occurred while updating the status." as status_error_msg %}
                 errorDiv.textContent = '{{ status_error_msg|escapejs }}';
                 errorDiv.classList.remove('hidden');
+                if (submitBtn) submitBtn.disabled = false;
             });
         });
     }
