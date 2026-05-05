@@ -386,7 +386,6 @@
               {% trans "This action is irreversible. Type" %} <strong id="confirmWord" class="font-mono">CANCEL</strong> {% trans "to confirm." %}
             </label>
             <input id="confirmInput" type="text" autocomplete="off"
-                   aria-labelledby="destructiveConfirmLabel"
                    class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-red-500"
                    placeholder="{% trans 'Type here to confirm...' %}">
           </div>
@@ -435,10 +434,15 @@ function statusModalEscHandler(e) {
 function showStatusModal() {
     const modal = document.getElementById('statusModal');
     if (!modal) return;
-    statusModalTriggerEl = document.activeElement;
+    // If already open, do not overwrite the trigger reference (would break focus return).
+    if (modal.classList.contains('hidden')) {
+        statusModalTriggerEl = document.activeElement;
+    }
     modal.classList.remove('hidden');
     modal.style.display = 'block';
     document.body.style.overflow = 'hidden';
+    // Remove first to guarantee single registration even if showStatusModal is called twice.
+    document.removeEventListener('keydown', statusModalEscHandler);
     document.addEventListener('keydown', statusModalEscHandler);
     // Move focus into the dialog. Prefer the status select; fall back to the dialog itself.
     const firstField = document.getElementById('new_status') || modal;
@@ -513,10 +517,12 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // Enable submit only when confirmation word matches
+    // Enable submit only when confirmation word matches.
+    // Uppercase both sides so the markup invariant ("data-confirm-word should be uppercase")
+    // failing softly does not silently disable the gate.
     if (confirmInput) {
         confirmInput.addEventListener('input', function() {
-            const expected = confirmWord.textContent;
+            const expected = (confirmWord.textContent || '').toUpperCase();
             submitBtn.disabled = this.value.trim().toUpperCase() !== expected;
         });
     }
@@ -544,14 +550,19 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             })
             .then(response => {
-                // Session expired — Django redirects to LOGIN_URL with an HTML page.
-                // Send the user there instead of trying to parse HTML as JSON.
-                if (response.status === 401 || response.status === 403) {
+                // Session expired — Django's @staff_required_strict returns either a 302
+                // redirect to LOGIN_URL (unauthenticated) or a 403 (non-staff).
+                // fetch() follows the 302 transparently and we land on a 200 HTML login page,
+                // so detect via response.redirected || response.url containing the login path,
+                // OR an explicit 401/403 status. Send the user to login with a next= hint.
+                const ct = (response.headers.get('content-type') || '').toLowerCase();
+                const looksLikeLoginRedirect = response.redirected
+                    && (response.url.includes('/auth/login') || ct.includes('text/html'));
+                if (response.status === 401 || response.status === 403 || looksLikeLoginRedirect) {
                     window.location.href = '/auth/login/?next=' + encodeURIComponent(window.location.pathname);
                     return Promise.reject(new Error('session_expired'));
                 }
-                // Server returned non-JSON (5xx HTML error page, redirect, etc.) — surface a friendly error.
-                const ct = response.headers.get('content-type') || '';
+                // Server returned non-JSON (5xx HTML error page, etc.) — surface a friendly error.
                 if (!ct.includes('application/json')) {
                     return Promise.reject(new Error('non_json_response'));
                 }
