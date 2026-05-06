@@ -34,6 +34,7 @@ from .user_management_views import (
     change_user_role,
     customer_add_user,
     customer_create_user,
+    customer_resend_invite,
     remove_user,
     toggle_user_status,
 )
@@ -57,6 +58,7 @@ __all__ = [
     "customer_edit",
     "customer_list",
     "customer_note_add",
+    "customer_resend_invite",
     "customer_search_api",
     "customer_search_htmx",
     "customer_services_api",

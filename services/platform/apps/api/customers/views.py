@@ -7,7 +7,6 @@ import logging
 from typing import Any, ClassVar, cast
 
 from django.core.exceptions import ValidationError
-from django.core.validators import validate_email
 from django.db import IntegrityError, transaction
 from django.db.models import Q, QuerySet
 from django.http import HttpRequest
@@ -23,6 +22,7 @@ from apps.api.core.permissions import IsAuthenticatedAndAccessible
 from apps.api.core.throttling import AuthThrottle, BurstAPIThrottle
 from apps.api.secure_auth import public_api_endpoint, require_customer_authentication, require_portal_authentication
 from apps.common.request_ip import get_safe_client_ip
+from apps.common.validators import SecureInputValidator
 from apps.customers.contact_models import CustomerAddress
 from apps.customers.contact_service import AddressData, ContactService
 from apps.customers.models import Customer, CustomerTaxProfile
@@ -982,6 +982,7 @@ def customer_users_add(request: HttpRequest, customer: Customer) -> Response:  #
 @api_view(["POST"])
 @authentication_classes([])
 @permission_classes([AllowAny])
+@throttle_classes([BurstAPIThrottle])
 @require_customer_authentication
 def customer_users_create(request: HttpRequest, customer: Customer) -> Response:  # noqa: PLR0911
     """Create a new user and add them to the customer organization."""
@@ -995,16 +996,17 @@ def customer_users_create(request: HttpRequest, customer: Customer) -> Response:
     if owner_error:
         return owner_error
 
-    email = data.get("email", "").strip()
+    email_input = data.get("email", "")
     role = data.get("role", "viewer")
     first_name = data.get("first_name", "").strip()
     last_name = data.get("last_name", "").strip()
 
-    if not email:
+    if not email_input:
         return Response({"success": False, "error": "Email is required."}, status=status.HTTP_400_BAD_REQUEST)
 
     try:
-        validate_email(email)
+        # Timing-safe validator that also normalizes (strip + lowercase).
+        email = str(SecureInputValidator.validate_email_secure(email_input, context="customer_user_creation"))
     except ValidationError:
         return Response(
             {"success": False, "error": "Invalid email address."},
@@ -1020,9 +1022,20 @@ def customer_users_create(request: HttpRequest, customer: Customer) -> Response:
 
     try:
         with transaction.atomic():
-            if User.objects.filter(email=email).exists():
+            existing_user = User.objects.select_for_update().filter(email=email).first()
+            if existing_user is not None:
+                # The inviter is allowed to know about members of THEIR own customer.
+                # Cross-tenant existence is not disclosed — return a generic message instead.
+                if CustomerMembership.objects.filter(customer=customer, user=existing_user).exists():
+                    return Response(
+                        {"success": False, "error": "This user is already a member of your organization."},
+                        status=status.HTTP_409_CONFLICT,
+                    )
                 return Response(
-                    {"success": False, "error": "A user with this email already exists."},
+                    {
+                        "success": False,
+                        "error": "Cannot create a user with this email. Contact support if you need help.",
+                    },
                     status=status.HTTP_400_BAD_REQUEST,
                 )
             # Invite-only flow: user is created with an unusable password.
@@ -1030,13 +1043,15 @@ def customer_users_create(request: HttpRequest, customer: Customer) -> Response:
             new_user = User.objects.create_user(email=email, first_name=first_name, last_name=last_name)
             CustomerMembership.objects.create(customer=customer, user=new_user, role=role)
     except IntegrityError:
+        # Race: a concurrent request created the same email between the SELECT and the INSERT.
+        # Mirror the cross-tenant generic message; do not disclose where the row landed.
         return Response(
-            {"success": False, "error": "A user with this email already exists."},
+            {"success": False, "error": "Cannot create a user with this email. Contact support if you need help."},
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    # Send invite email with password reset link
-    email_sent = SecureCustomerUserService._send_welcome_email_secure(
+    # Send invite email with password reset link via the public, rate-limited wrapper.
+    email_sent = SecureCustomerUserService.send_welcome_invite(
         new_user, customer, request_ip=get_safe_client_ip(request)
     )
 

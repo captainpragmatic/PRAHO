@@ -67,6 +67,73 @@ else:
 logger = logging.getLogger(__name__)
 
 
+# Conversion factor between settings.PASSWORD_RESET_TIMEOUT (seconds) and the
+# {{ expiry_hours }} value rendered into the welcome email templates.
+SECONDS_PER_HOUR = 3600
+
+
+def _render_and_send_welcome_email(user: User, customer: Customer, request_ip: str | None = None) -> bool:
+    """🔒 Render & send the customer welcome / password-reset invite email.
+
+    Module-level helper shared by SecureUserRegistrationService and
+    SecureCustomerUserService — they both need to send the same email after
+    creating a customer-scoped user, and previously had byte-for-byte
+    duplicate copies of this logic. A bug fix to one would not propagate to
+    the other; consolidating here closes that drift surface.
+
+    Returns True on success, False on any send failure (caller decides how
+    to surface that — the staff view warns the operator, the API view sets
+    invite_email_sent=false in the response).
+    """
+    try:
+        token = default_token_generator.make_token(user)
+        uid = urlsafe_base64_encode(force_bytes(user.pk))
+
+        # get_display_name returns company_name for company-type customers
+        # (when set) and falls back to .name otherwise. Avoids the empty-string
+        # rendering bug for individual-type customers where company_name is
+        # blank ("Account Created for " in the subject).
+        display_name = customer.get_display_name()
+
+        # Derive the human-readable expiry from the actual setting so the email
+        # body cannot drift from PASSWORD_RESET_TIMEOUT.
+        expiry_hours = max(1, settings.PASSWORD_RESET_TIMEOUT // SECONDS_PER_HOUR)
+
+        context = {
+            "user": user,
+            "customer": customer,
+            "display_name": display_name,
+            "expiry_hours": expiry_hours,
+            "domain": getattr(settings, "DOMAIN_NAME", "localhost:8700"),
+            "uid": uid,
+            "token": token,
+            "protocol": "https" if getattr(settings, "USE_HTTPS", False) else "http",
+            "support_email": getattr(settings, "SUPPORT_EMAIL", "support@praho.com"),
+        }
+
+        subject = _("Welcome to PRAHO - Account Created for {customer_name}").format(customer_name=display_name)
+        text_message = render_to_string("customers/emails/welcome_email.txt", context)
+        html_message = render_to_string("customers/emails/welcome_email.html", context)
+
+        send_mail(
+            subject=subject,
+            message=text_message,
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[user.email],
+            html_message=html_message,
+            fail_silently=False,
+        )
+
+        log_security_event("welcome_email_sent", {"user_id": user.id, "customer_id": customer.id}, request_ip)
+        logger.info(f"📧 [Secure Email] Welcome email sent to {user.email}")
+        return True
+
+    except Exception as e:
+        logger.error(f"📧 [Secure Email] Failed to send welcome email: {e!s}")
+        log_security_event("welcome_email_failed", {"user_id": user.id, "error": str(e)[:200]}, request_ip)
+        return False
+
+
 # ===============================================================================
 # USER SERVICE PARAMETER OBJECTS
 # ===============================================================================
@@ -362,51 +429,8 @@ class SecureUserRegistrationService:
 
     @classmethod
     def _send_welcome_email_secure(cls, user: User, customer: Customer, request_ip: str | None = None) -> bool:
-        """
-        🔒 Secure welcome email with proper token generation
-        """
-        try:
-            # Generate secure password reset token
-            token = default_token_generator.make_token(user)
-            uid = urlsafe_base64_encode(force_bytes(user.pk))
-
-            # Prepare secure email context
-            context = {
-                "user": user,
-                "customer": customer,
-                "domain": getattr(settings, "DOMAIN_NAME", "localhost:8700"),
-                "uid": uid,
-                "token": token,
-                "protocol": "https" if getattr(settings, "USE_HTTPS", False) else "http",
-                "support_email": getattr(settings, "SUPPORT_EMAIL", "support@praho.com"),
-            }
-
-            # Render email templates (XSS-safe)
-            subject = _("Welcome to PRAHO - Account Created for {customer_name}").format(
-                customer_name=customer.company_name
-            )
-            text_message = render_to_string("customers/emails/welcome_email.txt", context)
-            html_message = render_to_string("customers/emails/welcome_email.html", context)
-
-            # Send email with error handling
-            send_mail(
-                subject=subject,
-                message=text_message,
-                from_email=settings.DEFAULT_FROM_EMAIL,
-                recipient_list=[user.email],
-                html_message=html_message,
-                fail_silently=False,
-            )
-
-            log_security_event("welcome_email_sent", {"user_id": user.id, "customer_id": customer.id}, request_ip)
-
-            logger.info(f"📧 [Secure Email] Welcome email sent to {user.email}")
-            return True
-
-        except Exception as e:
-            logger.error(f"📧 [Secure Email] Failed to send welcome email: {e!s}")
-            log_security_event("welcome_email_failed", {"user_id": user.id, "error": str(e)[:200]}, request_ip)
-            return False
+        """🔒 Secure welcome email — delegates to shared module-level helper."""
+        return _render_and_send_welcome_email(user, customer, request_ip)
 
     @classmethod
     def _find_customer_by_identifier_secure(
@@ -852,53 +876,55 @@ class SecureCustomerUserService:
 
     @classmethod
     def _send_welcome_email_secure(cls, user: User, customer: Customer, request_ip: str | None = None) -> bool:
+        """🔒 Secure welcome email — delegates to shared module-level helper."""
+        return _render_and_send_welcome_email(user, customer, request_ip)
+
+    @classmethod
+    def send_welcome_invite(cls, user: User, customer: Customer, request_ip: str | None = None) -> bool:
         """
-        🔒 Secure welcome email with proper token generation
+        🔒 Public entry point for sending a welcome / password-reset invite email.
+
+        Wraps the private email helper with a per-user rate limit (3/hour) so a
+        compromised inviter credential cannot bomb the same target with invite
+        emails. Returns False when the cache guard rejects the send so callers
+        can surface a warning to staff.
         """
+        guard_key = f"welcome_invite:{user.pk}"
+        invite_limit = SettingsService.get_integer_setting("security.welcome_invite_limit_per_user_per_hour", 3)
+
+        # Atomic check-and-claim: cache.add seeds the counter at 0 only if it
+        # does not already exist (no-op when the window is in flight); cache.incr
+        # is atomic on memcached/Redis backends. The previous get+set pattern
+        # raced under concurrency — two callers could observe count=2 and both
+        # write count=3, exceeding the intended cap.
         try:
-            # These imports are already available at module level
+            cache.add(guard_key, 0, timeout=3600)
+            sent_count = cache.incr(guard_key)
+        except ValueError:
+            # Backend lacks persistent storage / atomic incr (e.g. DummyCache
+            # used in some test settings). Skip the rate-limit guard — the
+            # view-layer @throttle_classes still bounds traffic, and falling
+            # through preserves correctness in the non-cached case.
+            return cls._send_welcome_email_secure(user, customer, request_ip=request_ip)
 
-            # Generate secure password reset token
-            token = default_token_generator.make_token(user)
-            uid = urlsafe_base64_encode(force_bytes(user.pk))
-
-            # Prepare secure email context
-            context = {
-                "user": user,
-                "customer": customer,
-                "domain": getattr(settings, "DOMAIN_NAME", "localhost:8700"),
-                "uid": uid,
-                "token": token,
-                "protocol": "https" if getattr(settings, "USE_HTTPS", False) else "http",
-                "support_email": getattr(settings, "SUPPORT_EMAIL", "support@praho.com"),
-            }
-
-            # Render email templates (XSS-safe)
-            subject = _("Welcome to PRAHO - Account Created for {customer_name}").format(
-                customer_name=customer.company_name
+        if sent_count > invite_limit:
+            cache.decr(guard_key)  # release our claim — we will not send
+            logger.warning(
+                f"🚦 [Welcome Invite] Rate limit hit for user {user.pk} ({sent_count - 1}/{invite_limit} per hour)"
             )
-            text_message = render_to_string("customers/emails/welcome_email.txt", context)
-            html_message = render_to_string("customers/emails/welcome_email.html", context)
-
-            # Send email with error handling
-            send_mail(
-                subject=subject,
-                message=text_message,
-                from_email=settings.DEFAULT_FROM_EMAIL,
-                recipient_list=[user.email],
-                html_message=html_message,
-                fail_silently=False,
+            log_security_event(
+                "welcome_invite_rate_limited",
+                {"user_id": user.id, "customer_id": customer.id, "count": sent_count - 1},
+                request_ip,
             )
-
-            log_security_event("welcome_email_sent", {"user_id": user.id, "customer_id": customer.id}, request_ip)
-
-            logger.info(f"📧 [Secure Email] Welcome email sent to {user.email}")
-            return True
-
-        except Exception as e:
-            logger.error(f"📧 [Secure Email] Failed to send welcome email: {e!s}")
-            log_security_event("welcome_email_failed", {"user_id": user.id, "error": str(e)[:200]}, request_ip)
             return False
+
+        sent = cls._send_welcome_email_secure(user, customer, request_ip=request_ip)
+        if not sent:
+            # Underlying send failed — give the quota slot back so retries are
+            # not penalised for a transient SMTP failure.
+            cache.decr(guard_key)
+        return sent
 
     @classmethod
     def _notify_owners_of_join_request_secure(

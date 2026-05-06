@@ -1,15 +1,22 @@
-{% load i18n %}{% blocktrans with customer_name=customer.company_name %}Welcome to PRAHO!
-
-You have been invited to join {{ customer_name }}.{% endblocktrans %}
+{% load i18n %}
+{% blocktrans trimmed with customer_name=display_name %}
+You have been invited to {{ customer_name }} on PRAHO.
+{% endblocktrans %}
 
 {% trans "To get started, please set your password by clicking the link below:" %}
 
 {{ protocol }}://{{ domain }}{% url 'users:password_reset_confirm' uidb64=uid token=token %}
 
-{% trans "This link will expire in 2 hours. If it has expired, you can request a new one at:" %}
+{% blocktrans trimmed count counter=expiry_hours %}
+This link will expire in {{ counter }} hour. If it has expired, you can request a new one at:
+{% plural %}
+This link will expire in {{ counter }} hours. If it has expired, you can request a new one at:
+{% endblocktrans %}
 {{ protocol }}://{{ domain }}{% url 'users:password_reset' %}
 
-{% blocktrans with support=support_email %}If you did not expect this invitation, please contact us at {{ support }}.{% endblocktrans %}
+{% blocktrans trimmed with support=support_email %}
+If you did not expect this invitation, please contact us at {{ support }}.
+{% endblocktrans %}
 
 {% trans "Best regards," %}
 {% trans "The PRAHO Team" %}
