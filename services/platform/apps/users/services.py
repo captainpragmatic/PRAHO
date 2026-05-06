@@ -891,21 +891,39 @@ class SecureCustomerUserService:
         """
         guard_key = f"welcome_invite:{user.pk}"
         invite_limit = SettingsService.get_integer_setting("security.welcome_invite_limit_per_user_per_hour", 3)
-        sent_count = cache.get(guard_key, 0)
-        if sent_count >= invite_limit:
+
+        # Atomic check-and-claim: cache.add seeds the counter at 0 only if it
+        # does not already exist (no-op when the window is in flight); cache.incr
+        # is atomic on memcached/Redis backends. The previous get+set pattern
+        # raced under concurrency — two callers could observe count=2 and both
+        # write count=3, exceeding the intended cap.
+        try:
+            cache.add(guard_key, 0, timeout=3600)
+            sent_count = cache.incr(guard_key)
+        except ValueError:
+            # Backend lacks persistent storage / atomic incr (e.g. DummyCache
+            # used in some test settings). Skip the rate-limit guard — the
+            # view-layer @throttle_classes still bounds traffic, and falling
+            # through preserves correctness in the non-cached case.
+            return cls._send_welcome_email_secure(user, customer, request_ip=request_ip)
+
+        if sent_count > invite_limit:
+            cache.decr(guard_key)  # release our claim — we will not send
             logger.warning(
-                f"🚦 [Welcome Invite] Rate limit hit for user {user.pk} ({sent_count}/{invite_limit} per hour)"
+                f"🚦 [Welcome Invite] Rate limit hit for user {user.pk} ({sent_count - 1}/{invite_limit} per hour)"
             )
             log_security_event(
                 "welcome_invite_rate_limited",
-                {"user_id": user.id, "customer_id": customer.id, "count": sent_count},
+                {"user_id": user.id, "customer_id": customer.id, "count": sent_count - 1},
                 request_ip,
             )
             return False
 
         sent = cls._send_welcome_email_secure(user, customer, request_ip=request_ip)
-        if sent:
-            cache.set(guard_key, sent_count + 1, timeout=3600)
+        if not sent:
+            # Underlying send failed — give the quota slot back so retries are
+            # not penalised for a transient SMTP failure.
+            cache.decr(guard_key)
         return sent
 
     @classmethod

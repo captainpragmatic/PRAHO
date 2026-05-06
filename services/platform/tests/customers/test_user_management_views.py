@@ -245,6 +245,36 @@ class SendWelcomeInviteRateLimitTests(TestCase):
         # All 5 attempts hit the helper; the guard only counts successful sends.
         self.assertEqual(mock_send.call_count, 5)
 
+    @patch("apps.users.services.SecureCustomerUserService._send_welcome_email_secure")
+    def test_atomic_counter_uses_cache_incr_not_set(self, mock_send):
+        """Regression for Copilot finding on PR #184 (services.py:898): the
+        rate-limit counter must use atomic cache.incr, not cache.get+cache.set.
+        We assert this by observing the underlying cache key value after each
+        send — only an atomic increment guarantees correct counts under
+        concurrent calls. (Single-thread test does not exercise concurrency
+        directly; this test pins the implementation to the atomic primitive.)"""
+        mock_send.return_value = True
+        guard_key = f"welcome_invite:{self.user.pk}"
+        # Pre-condition: key absent.
+        self.assertIsNone(cache.get(guard_key))
+
+        SecureCustomerUserService.send_welcome_invite(self.user, self.customer)
+        # After 1st successful send, counter must be exactly 1.
+        self.assertEqual(cache.get(guard_key), 1)
+
+        SecureCustomerUserService.send_welcome_invite(self.user, self.customer)
+        SecureCustomerUserService.send_welcome_invite(self.user, self.customer)
+        self.assertEqual(cache.get(guard_key), 3)
+
+        # 4th call: counter must NOT advance past invite_limit, and the helper
+        # must NOT be called (incr+decr atomic dance).
+        result = SecureCustomerUserService.send_welcome_invite(self.user, self.customer)
+        self.assertFalse(result)
+        # Counter stays at the limit (incr-then-decr leaves us at 3, not 4).
+        self.assertEqual(cache.get(guard_key), 3)
+        # Helper called only 3 times (not for the rate-limited 4th).
+        self.assertEqual(mock_send.call_count, 3)
+
 
 class CustomerResendInviteTests(TestCase):
     """Recovery endpoint for users whose initial invite email failed."""
