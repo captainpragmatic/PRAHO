@@ -8,9 +8,8 @@ from django.urls import reverse
 
 from apps.common.encryption import decrypt_sensitive_data, is_encrypted
 from apps.domains.forms import RegistrarForm
-from apps.domains.models import Registrar, TLD, Domain
+from apps.domains.models import TLD, Registrar
 from apps.domains.services import DomainLifecycleService
-
 
 User = get_user_model()
 
@@ -125,29 +124,29 @@ class DomainRegistrationRaceConditionTests(TestCase):
         )
 
     def test_duplicate_registration_returns_already_registered(self) -> None:
-        ok, res = DomainLifecycleService.create_domain_registration(
+        result = DomainLifecycleService.create_domain_registration(
             customer=self.customer,
             domain_name="example.com",
             years=1,
         )
-        self.assertTrue(ok, res)
+        self.assertTrue(result.is_ok(), result)
 
-        ok2, res2 = DomainLifecycleService.create_domain_registration(
+        result2 = DomainLifecycleService.create_domain_registration(
             customer=self.customer,
             domain_name="example.com",
             years=1,
         )
-        self.assertFalse(ok2)
-        self.assertIn("already registered", str(res2).lower())
+        self.assertTrue(result2.is_err())
+        self.assertIn("already registered", str(result2.unwrap_err()).lower())
 
     def test_years_out_of_range_rejected(self) -> None:
-        ok, res = DomainLifecycleService.create_domain_registration(
+        result = DomainLifecycleService.create_domain_registration(
             customer=self.customer,
             domain_name="too.com",
             years=20,
         )
-        self.assertFalse(ok)
-        self.assertIn("period", str(res).lower())
+        self.assertTrue(result.is_err())
+        self.assertIn("period", str(result.unwrap_err()).lower())
 
 
 class RegistrarAdminAuthorizationTests(TestCase):

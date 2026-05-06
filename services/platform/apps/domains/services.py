@@ -15,8 +15,6 @@ Provides business logic for domain operations including:
 
 from __future__ import annotations
 
-import hashlib
-import hmac
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -27,7 +25,7 @@ from django.db.models import Q, QuerySet
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
-from apps.common.encryption import DecryptionError
+from apps.common.types import Err, Ok, Result
 from apps.settings.services import SettingsService
 
 from .models import TLD, Domain, DomainOrderItem, Registrar
@@ -342,20 +340,22 @@ class DomainLifecycleService:
     @staticmethod
     def create_domain_registration(
         customer: Customer, domain_name: str, years: int = 1, whois_privacy: bool = False, auto_renew: bool = True
-    ) -> tuple[bool, Domain | str]:
-        """🆕 Create new domain registration"""
+    ) -> Result[Domain, str]:
+        """Create new domain registration.
 
+        Returns Ok(Domain) on success, Err(message) on failure.
+        """
         # Run all validation checks
         validation_result = DomainLifecycleService._validate_registration_preconditions(domain_name, years)
         if validation_result is not None:
-            return False, validation_result
+            return Err(validation_result)
 
         # Get validated components
-        components_result = DomainLifecycleService._get_registration_components(domain_name)
-        if isinstance(components_result, str):
-            return False, components_result
+        components = DomainLifecycleService._get_registration_components(domain_name)
+        if components.is_err():
+            return Err(components.unwrap_err())
 
-        tld, registrar = components_result
+        tld, registrar = components.unwrap()
 
         # Execute registration
         config = DomainRegistrationConfig(
@@ -370,13 +370,11 @@ class DomainLifecycleService:
 
     @staticmethod
     def _validate_registration_preconditions(domain_name: str, years: int) -> str | None:
-        """Validate all preconditions for domain registration"""
-        # Validate domain name format
+        """Validate all preconditions for domain registration."""
         is_valid, error_msg = DomainValidationService.validate_domain_name(domain_name)
         if not is_valid:
             return error_msg
 
-        # Validate registration period
         if years < MIN_REGISTRATION_YEARS or years > MAX_REGISTRATION_YEARS:
             return str(
                 _("Registration period must be between {min} and {max} years").format(
@@ -384,31 +382,28 @@ class DomainLifecycleService:
                 )
             )
 
-        # Check if domain already exists
         if Domain.objects.filter(name=domain_name.lower()).exists():
             return cast(str, _("Domain is already registered in the system"))
 
         return None
 
     @staticmethod
-    def _get_registration_components(domain_name: str) -> tuple[Any, Any] | str:
-        """Get TLD and registrar for domain registration"""
-        # Extract and validate TLD
+    def _get_registration_components(domain_name: str) -> Result[tuple[Any, Any], str]:
+        """Get TLD and registrar for domain registration."""
         tld_extension = DomainValidationService.extract_tld_from_domain(domain_name)
         tld = TLDService.get_tld_pricing(tld_extension)
         if not tld:
-            return cast(str, _(f"TLD '.{tld_extension}' is not supported"))
+            return Err(cast(str, _(f"TLD '.{tld_extension}' is not supported")))
 
-        # Select registrar
         registrar = RegistrarService.select_best_registrar_for_tld(tld)
         if not registrar:
-            return cast(str, _("No available registrar for this TLD"))
+            return Err(cast(str, _("No available registrar for this TLD")))
 
-        return tld, registrar
+        return Ok((tld, registrar))
 
     @staticmethod
-    def _execute_domain_registration(config: DomainRegistrationConfig) -> tuple[bool, Domain | str]:
-        """Execute the actual domain registration"""
+    def _execute_domain_registration(config: DomainRegistrationConfig) -> Result[Domain, str]:
+        """Execute the actual domain registration."""
         try:
             with transaction.atomic():
                 domain = Domain.objects.create(
@@ -421,55 +416,52 @@ class DomainLifecycleService:
                     auto_renew=config.auto_renew,
                 )
 
-                logger.info(
-                    f"🆕 [Domain] Created domain registration record: {config.domain_name} for customer {config.customer.id}"
-                )
-                return True, domain
+                logger.info("Created domain registration: %s for customer %s", config.domain_name, config.customer.id)
+                return Ok(domain)
 
         except Exception as e:
-            logger.error(f"🔥 [Domain] Failed to create domain registration: {e}")
-            return False, cast(str, _("Failed to create domain registration"))
+            logger.error("Failed to create domain registration: %s", e)
+            return Err(cast(str, _("Failed to create domain registration")))
 
     @staticmethod
-    def process_domain_renewal(domain: Domain, years: int = 1) -> tuple[bool, str]:
-        """🔄 Process domain renewal"""
+    def process_domain_renewal(domain: Domain, years: int = 1) -> Result[str, str]:
+        """Process domain renewal.
+
+        Returns Ok(success_message) on success, Err(error_message) on failure.
+        """
         if domain.status != "active":
-            return False, cast(str, _("Domain must be active to renew"))
+            return Err(cast(str, _("Domain must be active to renew")))
 
         if not domain.expires_at:
-            return False, cast(str, _("Domain expiration date is not set"))
+            return Err(cast(str, _("Domain expiration date is not set")))
 
         try:
             with transaction.atomic():
-                # Calculate new expiration date
                 new_expiration = domain.expires_at + timedelta(days=365 * years)
-
-                # Update domain
                 domain.expires_at = new_expiration
-                domain.renewal_notices_sent = 0  # Reset renewal notices
+                domain.renewal_notices_sent = 0
                 domain.save(update_fields=["expires_at", "renewal_notices_sent", "updated_at"])
 
-                logger.info(f"🔄 [Domain] Renewed domain {domain.name} for {years} years, expires: {new_expiration}")
-
-                return True, cast(str, _("Domain renewed successfully"))
+                logger.info("Renewed domain %s for %d years, expires: %s", domain.name, years, new_expiration)
+                return Ok(cast(str, _("Domain renewed successfully")))
 
         except Exception as e:
-            logger.error(f"🔥 [Domain] Failed to renew domain {domain.name}: {e}")
-            return False, cast(str, _("Failed to renew domain"))
+            logger.error("Failed to renew domain %s: %s", domain.name, e)
+            return Err(cast(str, _("Failed to renew domain")))
 
     @staticmethod
-    def update_domain_expiration(domain: Domain, new_expiration: datetime) -> bool:
-        """📅 Update domain expiration date (from registrar sync)"""
+    def update_domain_expiration(domain: Domain, new_expiration: datetime) -> Result[bool, str]:
+        """Update domain expiration date (from registrar sync)."""
         try:
             domain.expires_at = new_expiration
             domain.save(update_fields=["expires_at", "updated_at"])
 
-            logger.info(f"📅 [Domain] Updated expiration for {domain.name}: {new_expiration}")
-            return True
+            logger.info("Updated expiration for %s: %s", domain.name, new_expiration)
+            return Ok(True)
 
         except Exception as e:
-            logger.error(f"🔥 [Domain] Failed to update expiration for {domain.name}: {e}")
-            return False
+            logger.error("Failed to update expiration for %s: %s", domain.name, e)
+            return Err(cast(str, _("Failed to update domain expiration")))
 
 
 # ===============================================================================
@@ -596,7 +588,7 @@ class DomainOrderService:
 
         for item in domain_items:
             if item.action == "register":
-                success, result = DomainLifecycleService.create_domain_registration(
+                result = DomainLifecycleService.create_domain_registration(
                     customer=order.customer,
                     domain_name=item.domain_name,
                     years=item.years,
@@ -604,23 +596,23 @@ class DomainOrderService:
                     auto_renew=item.auto_renew,
                 )
 
-                if success and isinstance(result, Domain):
-                    item.domain = result
+                if result.is_ok():
+                    domain = result.unwrap()
+                    item.domain = domain
                     item.save(update_fields=["domain"])
-                    processed_domains.append(result)
-
-                    logger.info(f"✅ [Domain] Processed registration: {item.domain_name}")
+                    processed_domains.append(domain)
+                    logger.info("Processed registration: %s", item.domain_name)
                 else:
-                    logger.error(f"🔥 [Domain] Failed to process registration: {item.domain_name}")
+                    logger.error("Failed to process registration %s: %s", item.domain_name, result.unwrap_err())
 
             elif item.action == "renew" and item.domain:
-                success, _msg = DomainLifecycleService.process_domain_renewal(domain=item.domain, years=item.years)
+                renewal_result = DomainLifecycleService.process_domain_renewal(domain=item.domain, years=item.years)
 
-                if success:
+                if renewal_result.is_ok():
                     processed_domains.append(item.domain)
-                    logger.info(f"✅ [Domain] Processed renewal: {item.domain_name}")
+                    logger.info("Processed renewal: %s", item.domain_name)
                 else:
-                    logger.error(f"🔥 [Domain] Failed to process renewal: {item.domain_name}")
+                    logger.error("Failed to process renewal %s: %s", item.domain_name, renewal_result.unwrap_err())
 
         return processed_domains
 
@@ -631,75 +623,89 @@ class DomainOrderService:
 
 
 class DomainRegistrarGateway:
-    """
-    🌐 External registrar API integration gateway
+    """Backward-compatible facade that delegates to the gateway layer.
 
-    Provides abstraction layer for different registrar APIs (Namecheap, GoDaddy, ROTLD).
-    This is a placeholder implementation for future registrar integrations.
+    The real implementations live in apps.domains.gateways (Gandi, ROTLD, etc.).
+    This class preserves the existing tuple-based return types so callers
+    (webhooks.py, DomainOrderService) don't need to change yet.
     """
 
     @staticmethod
     def register_domain(
         registrar: Registrar, domain_name: str, years: int, customer_data: dict[str, Any]
     ) -> tuple[bool, dict[str, Any]]:
-        """🆕 Register domain with external registrar"""
-        logger.info(f"🌐 [Gateway] Would register {domain_name} via {registrar.name}")
+        from .gateways import RegistrarGatewayFactory  # noqa: PLC0415
 
-        # TODO: Implement actual registrar API calls
-        # This is a placeholder implementation
-        return True, {
-            "registrar_domain_id": f"DOM_{domain_name}_{timezone.now().timestamp()}",
-            "expires_at": timezone.now() + timedelta(days=365 * years),
-            "nameservers": registrar.default_nameservers or [],
-            "epp_code": f"EPP_{domain_name[:10].upper()}",
-        }
+        try:
+            gateway = RegistrarGatewayFactory.create_gateway(registrar)
+        except ValueError:
+            logger.error("No gateway registered for %s — cannot register %s", registrar.name, domain_name)
+            return False, {"error": f"No gateway for registrar {registrar.name}"}
+
+        result = gateway.register_domain(domain_name, years, customer_data)
+        if result.is_ok():
+            reg = result.unwrap()
+            return True, {
+                "registrar_domain_id": reg.registrar_domain_id,
+                "expires_at": reg.expires_at,
+                "nameservers": reg.nameservers,
+                "epp_code": reg.epp_code,
+            }
+        return False, {"error": str(result.unwrap_err())}
 
     @staticmethod
     def renew_domain(registrar: Registrar, domain: Domain, years: int) -> tuple[bool, dict[str, Any]]:
-        """🔄 Renew domain with external registrar"""
-        logger.info(f"🌐 [Gateway] Would renew {domain.name} via {registrar.name}")
+        from .gateways import RegistrarGatewayFactory  # noqa: PLC0415
 
-        # TODO: Implement actual registrar API calls
-        return True, {
-            "new_expires_at": (domain.expires_at or timezone.now()) + timedelta(days=365 * years),
-        }
+        try:
+            gateway = RegistrarGatewayFactory.create_gateway(registrar)
+        except ValueError:
+            logger.error("No gateway registered for %s — cannot renew %s", registrar.name, domain.name)
+            return False, {"error": f"No gateway for registrar {registrar.name}"}
+
+        result = gateway.renew_domain(domain.registrar_domain_id, domain.name, years)
+        if result.is_ok():
+            renewal = result.unwrap()
+            return True, {"new_expires_at": renewal.new_expires_at}
+        return False, {"error": str(result.unwrap_err())}
 
     @staticmethod
-    def check_domain_availability(registrar: Registrar, domain_name: str) -> tuple[bool, bool]:  # (success, available)
-        """🔍 Check domain availability with registrar"""
-        logger.info(f"🌐 [Gateway] Would check availability for {domain_name} via {registrar.name}")
+    def check_domain_availability(registrar: Registrar, domain_name: str) -> tuple[bool, bool]:
+        from .gateways import RegistrarGatewayFactory  # noqa: PLC0415
 
-        # TODO: Implement actual availability check
-        # For now, assume domain is available if not in our database
-        is_available = not Domain.objects.filter(name=domain_name.lower()).exists()
+        try:
+            gateway = RegistrarGatewayFactory.create_gateway(registrar)
+        except ValueError:
+            logger.error("No gateway registered for %s — cannot check %s", registrar.name, domain_name)
+            return False, False
 
-        return True, is_available
+        result = gateway.check_availability(domain_name)
+        if result.is_ok():
+            return True, result.unwrap().available
+        return False, False
 
     @staticmethod
     def verify_webhook_signature(registrar: Registrar, payload: str, signature: str) -> bool:
-        """🔐 Verify webhook signature using registrar's HMAC-SHA256 webhook secret.
+        import hashlib  # noqa: PLC0415
+        import hmac as hmac_mod  # noqa: PLC0415
 
-        Fail-closed: returns False on any error (missing secret, missing signature,
-        decryption failure, empty secret, mismatch, or unexpected exception).
-        Uses timing-safe comparison to prevent side-channel attacks.
-        """
-        if not registrar.webhook_secret or not signature:
-            logger.warning(f"⚠️ [Gateway] Missing webhook secret or signature for {registrar.name}")
-            return False
+        from .gateways import RegistrarGatewayFactory  # noqa: PLC0415
 
         try:
-            decrypted = registrar.get_decrypted_webhook_secret()
-        except DecryptionError:
-            logger.error(
-                f"🔥 [Gateway] Webhook secret decryption failed for {registrar.name} — encryption key may have rotated"
-            )
+            gateway = RegistrarGatewayFactory.create_gateway(registrar)
+            return gateway.verify_webhook_signature(payload, signature)
+        except ValueError:
+            pass
+
+        # Fallback: direct HMAC-SHA256 for registrars without a gateway
+        if not registrar.webhook_secret or not signature:
             return False
-
-        if not decrypted or not decrypted.strip():
-            logger.error(f"🔥 [Gateway] Webhook secret for {registrar.name} decrypted to empty value")
+        try:
+            secret = registrar.get_decrypted_webhook_secret()
+        except Exception:
             return False
-
-        webhook_secret = decrypted.strip().encode("utf-8")
-
-        expected = hmac.new(webhook_secret, payload.encode("utf-8"), hashlib.sha256).hexdigest()
-        return hmac.compare_digest(f"sha256={expected}", signature)
+        if not secret or not secret.strip():
+            return False
+        webhook_secret = secret.strip().encode("utf-8")
+        expected = hmac_mod.new(webhook_secret, payload.encode("utf-8"), hashlib.sha256).hexdigest()
+        return hmac_mod.compare_digest(f"sha256={expected}", signature)
