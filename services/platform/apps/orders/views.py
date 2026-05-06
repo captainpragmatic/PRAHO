@@ -144,14 +144,14 @@ def _validate_manual_price_override(
     manual_price_cents: int, product_price_cents: int, user: User, context: str = ""
 ) -> tuple[bool, str]:
     """🔒 Validate manual price override for security"""
-    if not hasattr(user, "is_staff") or not user.is_staff:
+    if not getattr(user, "is_staff_user", False):
         logger.warning(
             f"⛔ [Orders] Price Security: Unauthorized price override attempt by user {getattr(user, 'id', 'Unknown')} ({getattr(user, 'email', 'Unknown')}) in context: {context}"
         )
         return False, "Insufficient permissions for price override"
 
     # Check for specific financial permissions (staff role required)
-    if not (user.is_superuser or (hasattr(user, "staff_role") and user.staff_role in ["admin", "billing"])):
+    if not (user.is_superuser or getattr(user, "staff_role", "") in ["admin", "billing"]):
         logger.warning(
             f"⛔ [Orders] Price Security: Staff user {getattr(user, 'id', 'Unknown')} ({getattr(user, 'email', 'Unknown')}) lacks financial permissions for price override in context: {context}"
         )

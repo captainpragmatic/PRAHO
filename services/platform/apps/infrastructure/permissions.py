@@ -87,7 +87,7 @@ def can_deploy_nodes(user: User) -> bool:
         return True
 
     # Staff with deploy permission
-    if user.is_staff and user.has_perm(PERM_DEPLOY_NODES):
+    if user.is_staff_user and user.has_perm(PERM_DEPLOY_NODES):
         return True
 
     return user.has_perm(PERM_DEPLOY_NODES)
