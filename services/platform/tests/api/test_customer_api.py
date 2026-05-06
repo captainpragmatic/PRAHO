@@ -10,6 +10,7 @@ import time
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.db import IntegrityError as DjangoIntegrityError
 from django.test import RequestFactory, TestCase
 
 from apps.api.customers.views import (
@@ -171,18 +172,36 @@ class CustomerUsersCreateAPITests(TestCase):
         self.assertFalse(response.data["invite_email_sent"])
 
     @patch("apps.api.secure_auth.get_authenticated_customer")
-    def test_create_user_duplicate_email_returns_400(self, mock_auth):
-        """Creating a user with an existing email returns 400."""
+    def test_create_user_existing_in_other_customer_returns_generic_400(self, mock_auth):
+        """Cross-tenant existing user returns generic 400 (no enumeration leak)."""
         mock_auth.return_value = (self.customer, None)
-        User.objects.create_user(email="existing@example.com", password="pass123")
+        # User exists globally but is NOT a member of self.customer.
+        User.objects.create_user(email="elsewhere@example.com", password="pass123")
         request = _make_request(self.factory, "/api/customers/users/create/", {
             "customer_id": self.customer.pk, "user_id": self.owner_user.pk,
-            "email": "existing@example.com", "first_name": "Dup", "last_name": "User",
+            "email": "elsewhere@example.com", "first_name": "Dup", "last_name": "User",
             "role": "viewer", "timestamp": int(time.time()),
         })
         response = customer_users_create(request)
         self.assertEqual(response.status_code, 400)
-        self.assertIn("already exists", response.data["error"])
+        # Generic message — must not reveal that the user exists in another tenant.
+        self.assertIn("Cannot create", response.data["error"])
+        self.assertNotIn("already", response.data["error"].lower())
+
+    @patch("apps.api.secure_auth.get_authenticated_customer")
+    def test_create_user_already_in_this_customer_returns_409(self, mock_auth):
+        """User already in THIS customer returns 409 with explicit message."""
+        mock_auth.return_value = (self.customer, None)
+        existing = User.objects.create_user(email="member@example.com", password="pass123")
+        CustomerMembership.objects.create(customer=self.customer, user=existing, role="viewer")
+        request = _make_request(self.factory, "/api/customers/users/create/", {
+            "customer_id": self.customer.pk, "user_id": self.owner_user.pk,
+            "email": "member@example.com", "first_name": "Dup", "last_name": "User",
+            "role": "viewer", "timestamp": int(time.time()),
+        })
+        response = customer_users_create(request)
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("already a member", response.data["error"])
 
     @patch("apps.api.secure_auth.get_authenticated_customer")
     def test_create_user_invalid_role_returns_400(self, mock_auth):
@@ -208,6 +227,58 @@ class CustomerUsersCreateAPITests(TestCase):
         })
         response = customer_users_create(request)
         self.assertEqual(response.status_code, 403)
+
+    @patch("apps.api.secure_auth.get_authenticated_customer")
+    def test_create_user_invalid_email_returns_400_before_db_write(self, mock_auth):
+        """Malformed email is rejected by validate_email_secure before any User row is created."""
+        mock_auth.return_value = (self.customer, None)
+        baseline_users = User.objects.count()
+        request = _make_request(self.factory, "/api/customers/users/create/", {
+            "customer_id": self.customer.pk, "user_id": self.owner_user.pk,
+            "email": "notanemail", "first_name": "Bad", "last_name": "Email",
+            "role": "viewer", "timestamp": int(time.time()),
+        })
+        response = customer_users_create(request)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Invalid email", response.data["error"])
+        self.assertEqual(User.objects.count(), baseline_users)
+
+    @patch("apps.api.customers.views.CustomerMembership.objects.create")
+    @patch("apps.api.secure_auth.get_authenticated_customer")
+    def test_create_user_membership_failure_rolls_back_user(self, mock_auth, mock_membership_create):
+        """If CustomerMembership.create raises after User.create_user, the User row must roll back."""
+        mock_auth.return_value = (self.customer, None)
+        mock_membership_create.side_effect = DjangoIntegrityError("simulated FK violation")
+        baseline_users = User.objects.count()
+        request = _make_request(self.factory, "/api/customers/users/create/", {
+            "customer_id": self.customer.pk, "user_id": self.owner_user.pk,
+            "email": "rollback@example.com", "first_name": "Roll", "last_name": "Back",
+            "role": "viewer", "timestamp": int(time.time()),
+        })
+        response = customer_users_create(request)
+        self.assertEqual(response.status_code, 400)
+        # The User row created before the IntegrityError must have rolled back.
+        self.assertEqual(User.objects.count(), baseline_users)
+        self.assertFalse(User.objects.filter(email="rollback@example.com").exists())
+
+    @patch("apps.api.customers.views.SecureCustomerUserService._send_welcome_email_secure")
+    @patch("apps.api.customers.views.get_safe_client_ip")
+    @patch("apps.api.secure_auth.get_authenticated_customer")
+    def test_create_user_propagates_request_ip(self, mock_auth, mock_safe_ip, mock_send_email):
+        """The request_ip from get_safe_client_ip is propagated through to the email helper."""
+        mock_auth.return_value = (self.customer, None)
+        mock_safe_ip.return_value = "203.0.113.42"
+        mock_send_email.return_value = True
+        request = _make_request(self.factory, "/api/customers/users/create/", {
+            "customer_id": self.customer.pk, "user_id": self.owner_user.pk,
+            "email": "ipcheck@example.com", "first_name": "IP", "last_name": "Check",
+            "role": "viewer", "timestamp": int(time.time()),
+        })
+        response = customer_users_create(request)
+        self.assertEqual(response.status_code, 201)
+        # send_welcome_invite forwards request_ip kwarg into _send_welcome_email_secure unchanged.
+        mock_send_email.assert_called_once()
+        self.assertEqual(mock_send_email.call_args.kwargs["request_ip"], "203.0.113.42")
 
 
 class CustomerUsersRoleAPITests(TestCase):
