@@ -3,13 +3,17 @@ Tests for user_management_views security fixes.
 Verifies @staff_required decorator and server-side delete confirmation.
 """
 
+import re
 from unittest.mock import patch
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.contrib.auth.tokens import default_token_generator
+from django.core import mail
 from django.core.cache import cache
 from django.test import Client, TestCase, override_settings
 from django.urls import reverse
+from django.utils.http import urlsafe_base64_decode
 
 from apps.customers.models import Customer
 from apps.users.models import CustomerMembership
@@ -305,6 +309,82 @@ class CustomerResendInviteTests(TestCase):
         mock_send.assert_not_called()
         messages_list = [str(m) for m in response.context["messages"]]
         self.assertTrue(any("not a member" in m for m in messages_list))
+
+
+@override_settings(CACHES=LOCMEM_TEST_CACHE)
+class CustomerCreateUserEmailRenderingIntegrationTests(TestCase):
+    """End-to-end: staff create-user POST renders the welcome email template
+    against the live mail backend and produces a usable password-reset token.
+
+    No mocks of _send_welcome_email_secure or send_welcome_invite — this is the
+    only test in the suite that catches template rendering regressions
+    (e.g. a broken {% url %} tag, a misspelled context var, an XSS-unsafe
+    edit). Closes item 5 of issue #173.
+    """
+
+    def setUp(self):
+        cache.clear()
+        mail.outbox = []
+        self.staff_user = User.objects.create_user(
+            email="staff@example.com", password="staffpass", is_staff=True, staff_role="admin"
+        )
+        # company_name is non-empty — required to assert subject contains it.
+        self.customer = Customer.objects.create(
+            name="Render Customer",
+            company_name="Render Co SRL",
+            primary_email="render@co.com",
+            customer_type="company",
+        )
+        self.client = Client()
+        self.url = reverse("customers:create_user", kwargs={"customer_id": self.customer.id})
+
+    def test_create_user_renders_welcome_email_with_valid_reset_token(self):
+        """The full template path runs, mail.outbox receives the message, the
+        embedded password-reset token validates against default_token_generator."""
+        self.client.force_login(self.staff_user)
+        with patch("apps.customers.customer_service.CustomerService.get_accessible_customers") as mock:
+            mock.return_value = Customer.objects.filter(id=self.customer.id)
+            response = self.client.post(
+                self.url,
+                {
+                    "email": "newhire@example.com",
+                    "first_name": "New",
+                    "last_name": "Hire",
+                    "role": "viewer",
+                },
+            )
+        self.assertEqual(response.status_code, 302)
+
+        # ---- Outbox shape ----
+        self.assertEqual(len(mail.outbox), 1, "Exactly one email should have been sent")
+        msg = mail.outbox[0]
+        self.assertEqual(msg.to, ["newhire@example.com"])
+        self.assertIn(self.customer.company_name, msg.subject)
+
+        # ---- Plain-text body has the full reset URL ----
+        self.assertIn("/password-reset-confirm/", msg.body)
+
+        # ---- HTML alternative present and references the same URL ----
+        self.assertEqual(len(msg.alternatives), 1)
+        html_body, mimetype = msg.alternatives[0]
+        self.assertEqual(mimetype, "text/html")
+        self.assertIn("/password-reset-confirm/", html_body)
+
+        # ---- Token validity: extract uidb64 + token from the body and verify
+        # against default_token_generator. This is the assertion that fails if
+        # the template renders {{ token }} as a literal string or if the token
+        # was generated for the wrong user. ----
+        match = re.search(r"/password-reset-confirm/([^/]+)/([^/]+)/", msg.body)
+        self.assertIsNotNone(match, "Body must contain /password-reset-confirm/<uidb64>/<token>/ URL")
+        uidb64, token = match.groups()
+
+        decoded_pk = int(urlsafe_base64_decode(uidb64).decode())
+        new_user = User.objects.get(email="newhire@example.com")
+        self.assertEqual(decoded_pk, new_user.pk, "uidb64 in URL must decode to the new user's pk")
+        self.assertTrue(
+            default_token_generator.check_token(new_user, token),
+            "Token in URL must validate against default_token_generator for the new user",
+        )
 
 
 class CustomerDeleteConfirmationTests(TestCase):
