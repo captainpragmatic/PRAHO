@@ -338,21 +338,21 @@ class CustomerCreateUserEmailRenderingIntegrationTests(TestCase):
         self.client = Client()
         self.url = reverse("customers:create_user", kwargs={"customer_id": self.customer.id})
 
+    def _post_create(self, email, customer=None):
+        """Helper: log in as staff and POST a create-user form for the given customer."""
+        target = customer or self.customer
+        self.client.force_login(self.staff_user)
+        with patch("apps.customers.customer_service.CustomerService.get_accessible_customers") as mock:
+            mock.return_value = Customer.objects.filter(id=target.id)
+            return self.client.post(
+                reverse("customers:create_user", kwargs={"customer_id": target.id}),
+                {"email": email, "first_name": "New", "last_name": "Hire", "role": "viewer"},
+            )
+
     def test_create_user_renders_welcome_email_with_valid_reset_token(self):
         """The full template path runs, mail.outbox receives the message, the
         embedded password-reset token validates against default_token_generator."""
-        self.client.force_login(self.staff_user)
-        with patch("apps.customers.customer_service.CustomerService.get_accessible_customers") as mock:
-            mock.return_value = Customer.objects.filter(id=self.customer.id)
-            response = self.client.post(
-                self.url,
-                {
-                    "email": "newhire@example.com",
-                    "first_name": "New",
-                    "last_name": "Hire",
-                    "role": "viewer",
-                },
-            )
+        response = self._post_create("newhire@example.com")
         self.assertEqual(response.status_code, 302)
 
         # ---- Outbox shape ----
@@ -385,6 +385,60 @@ class CustomerCreateUserEmailRenderingIntegrationTests(TestCase):
             default_token_generator.check_token(new_user, token),
             "Token in URL must validate against default_token_generator for the new user",
         )
+
+    def test_individual_customer_renders_name_when_company_name_empty(self):
+        """Customer with empty company_name (individual type) must render the
+        .name fallback so the subject is not 'Account Created for ' and the
+        body is not 'invited to  on PRAHO'. Closes #173 item 3."""
+        individual = Customer.objects.create(
+            name="John Doe",
+            company_name="",
+            primary_email="john@example.com",
+            customer_type="individual",
+        )
+        response = self._post_create("invitee-individual@example.com", customer=individual)
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(len(mail.outbox), 1)
+        msg = mail.outbox[0]
+        # Subject and body must contain "John Doe", NOT a trailing-space artifact.
+        self.assertIn("John Doe", msg.subject)
+        self.assertNotRegex(msg.subject, r"Account Created for\s*$")
+        self.assertIn("John Doe", msg.body)
+        # Double-space is the canonical signature of the empty-company-name bug
+        # in the heading "invited to {{ name }} on PRAHO".
+        self.assertNotIn("invited to  on PRAHO", msg.body)
+        # HTML alternative must reflect the same fallback.
+        html_body, _mime = msg.alternatives[0]
+        self.assertIn("John Doe", html_body)
+        self.assertNotIn("invited to  on PRAHO", html_body)
+
+    @override_settings(PASSWORD_RESET_TIMEOUT=14400)  # 4 hours
+    def test_expiry_hours_derives_from_password_reset_timeout(self):
+        """Expiry copy must reflect settings.PASSWORD_RESET_TIMEOUT, not a
+        hardcoded value. Closes #173 item 6."""
+        response = self._post_create("expiry@example.com")
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(len(mail.outbox), 1)
+        msg = mail.outbox[0]
+        # Plain text must say "4 hours"; HTML alt must too.
+        self.assertIn("4 hours", msg.body)
+        self.assertNotIn("2 hours", msg.body)
+        self.assertNotIn("3 hours", msg.body)
+        html_body, _mime = msg.alternatives[0]
+        self.assertIn("4 hours", html_body)
+
+    @override_settings(PASSWORD_RESET_TIMEOUT=3600)  # 1 hour — singular form
+    def test_expiry_hours_singular_pluralization(self):
+        """When PASSWORD_RESET_TIMEOUT is exactly 1 hour, the email uses the
+        singular form 'hour' (not 'hours'). Verifies the {% plural %} branch
+        added with the dynamic-expiry refactor."""
+        response = self._post_create("singular@example.com")
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(len(mail.outbox), 1)
+        msg = mail.outbox[0]
+        # Singular: "expire in 1 hour" — and not "1 hours".
+        self.assertIn("1 hour", msg.body)
+        self.assertNotIn("1 hours", msg.body)
 
 
 class CustomerDeleteConfirmationTests(TestCase):
