@@ -17,6 +17,8 @@ from apps.billing.efactura.xml_builder import (
     UBLInvoiceBuilder,
     XMLBuilderError,
 )
+from apps.billing.payment_models import Payment
+from tests.factories import InvoiceLineFactory
 
 
 @override_settings(
@@ -260,6 +262,91 @@ class UBLInvoiceBuilderTestCase(TestCase):
             builder.build()
 
         self.assertIn("Supplier company name not configured", str(context.exception))
+
+    def test_line_discount_emits_allowance_with_reason_code(self):
+        """EN16931 BR-42: line-level AllowanceCharge must carry BT-140 reason code."""
+        self.line.delete()
+        InvoiceLineFactory(
+            invoice=self.invoice,
+            description="Discounted item",
+            unit_price_cents=100000,
+            quantity=1,
+            tax_rate=Decimal("0.1900"),
+            discount_amount_cents=10000,
+        )
+
+        builder = UBLInvoiceBuilder(self.invoice)
+        xml = builder.build()
+        doc = etree.fromstring(xml.encode())
+
+        invoice_line = doc.find(f".//{{{NAMESPACES['cac']}}}InvoiceLine")
+        allowance = invoice_line.find(f"{{{NAMESPACES['cac']}}}AllowanceCharge")
+        self.assertIsNotNone(allowance)
+
+        reason_code = allowance.find(f"{{{NAMESPACES['cbc']}}}AllowanceChargeReasonCode")
+        self.assertIsNotNone(reason_code)
+        self.assertEqual(reason_code.text, "95")
+
+        reason = allowance.find(f"{{{NAMESPACES['cbc']}}}AllowanceChargeReason")
+        self.assertIsNotNone(reason)
+        self.assertEqual(reason.text, "Discount")
+
+    def test_line_extension_amount_is_net_of_discount(self):
+        """EN16931 BT-131: LineExtensionAmount must be net of line-level allowances."""
+        self.line.delete()
+        InvoiceLineFactory(
+            invoice=self.invoice,
+            description="Discounted item",
+            unit_price_cents=100000,
+            quantity=1,
+            tax_rate=Decimal("0.1900"),
+            discount_amount_cents=10000,
+        )
+
+        builder = UBLInvoiceBuilder(self.invoice)
+        xml = builder.build()
+        doc = etree.fromstring(xml.encode())
+
+        invoice_line = doc.find(f".//{{{NAMESPACES['cac']}}}InvoiceLine")
+        line_ext = invoice_line.find(f"{{{NAMESPACES['cbc']}}}LineExtensionAmount")
+        # 1000.00 unit_price - 100.00 discount = 900.00 net
+        self.assertEqual(Decimal(line_ext.text), Decimal("900.00"))
+
+    def test_payable_amount_subtracts_prepaid_payments(self):
+        """EN16931 BT-113/BT-115: partially-paid invoice must report prepaid + remaining balance."""
+        Payment.objects.create(
+            customer=self.customer,
+            invoice=self.invoice,
+            currency=self.currency,
+            amount_cents=50000,
+            status="succeeded",
+        )
+
+        builder = UBLInvoiceBuilder(self.invoice)
+        xml = builder.build()
+        doc = etree.fromstring(xml.encode())
+
+        monetary_total = doc.find(f".//{{{NAMESPACES['cac']}}}LegalMonetaryTotal")
+
+        prepaid = monetary_total.find(f"{{{NAMESPACES['cbc']}}}PrepaidAmount")
+        self.assertIsNotNone(prepaid)
+        self.assertEqual(Decimal(prepaid.text), Decimal("500.00"))
+
+        payable = monetary_total.find(f"{{{NAMESPACES['cbc']}}}PayableAmount")
+        # 1190.00 total - 500.00 prepaid = 690.00 due
+        self.assertEqual(Decimal(payable.text), Decimal("690.00"))
+
+    def test_payable_amount_omits_prepaid_when_unpaid(self):
+        """A fully-unpaid invoice must not emit a PrepaidAmount element."""
+        builder = UBLInvoiceBuilder(self.invoice)
+        xml = builder.build()
+        doc = etree.fromstring(xml.encode())
+
+        monetary_total = doc.find(f".//{{{NAMESPACES['cac']}}}LegalMonetaryTotal")
+        self.assertIsNone(monetary_total.find(f"{{{NAMESPACES['cbc']}}}PrepaidAmount"))
+
+        payable = monetary_total.find(f"{{{NAMESPACES['cbc']}}}PayableAmount")
+        self.assertEqual(Decimal(payable.text), Decimal("1190.00"))
 
 
 @override_settings(
