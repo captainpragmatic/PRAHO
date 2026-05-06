@@ -9,6 +9,7 @@ from django.contrib import messages
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.http import HttpRequest, HttpResponse
+from django.middleware.csrf import get_token
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils.html import format_html
@@ -145,12 +146,22 @@ def customer_create_user(request: HttpRequest, customer_id: int) -> HttpResponse
         )
         if not email_sent:
             resend_url = reverse("customers:resend_invite", kwargs={"customer_id": customer.id, "user_id": user.id})
+            # The resend endpoint is @require_POST (the action has side effects:
+            # it generates a fresh password-reset token that invalidates the prior
+            # one). A bare <a href> would issue a GET and 405, breaking the
+            # recovery flow exactly when staff need it. Render an inline POST form
+            # with a CSRF token so clicking "Resend invite" actually works.
             messages.warning(
                 request,
                 format_html(
-                    '{} <a href="{}" class="underline">{}</a>',
+                    '{} <form method="post" action="{}" style="display:inline;margin:0">'
+                    '<input type="hidden" name="csrfmiddlewaretoken" value="{}">'
+                    '<button type="submit" class="underline" '
+                    'style="background:none;border:0;padding:0;cursor:pointer;color:inherit;font:inherit">'
+                    "{}</button></form>",
                     _("User created but invite email could not be sent."),
                     resend_url,
+                    get_token(request),
                     _("Resend invite"),
                 ),
             )

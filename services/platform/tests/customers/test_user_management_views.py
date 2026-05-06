@@ -293,6 +293,76 @@ class CustomerResendInviteTests(TestCase):
         self.assertTrue(any("password reset" in m.lower() for m in messages_list))
 
     @patch("apps.users.services.SecureCustomerUserService._send_welcome_email_secure")
+    def test_failure_warning_renders_post_form_not_get_link(self, mock_send):
+        """Regression for codex P1 on PR #184: the resend link in the warning
+        must be an inline POST form (the endpoint is @require_POST). A bare
+        <a href> would 405 when clicked."""
+        # Create the user via the staff create-user flow with email failure.
+        mock_send.return_value = False  # force email failure -> warning rendered
+        staff = User.objects.create_user(
+            email="staff-warn@example.com", password="x", is_staff=True, staff_role="admin"
+        )
+        customer = Customer.objects.create(
+            name="Warn Co", company_name="Warn Co", primary_email="warn@co.com", customer_type="company"
+        )
+        self.client.force_login(staff)
+        with patch("apps.customers.customer_service.CustomerService.get_accessible_customers") as mock:
+            mock.return_value = Customer.objects.filter(id=customer.id)
+            response = self.client.post(
+                reverse("customers:create_user", kwargs={"customer_id": customer.id}),
+                {"email": "warned@example.com", "first_name": "W", "last_name": "U", "role": "viewer"},
+                follow=True,
+            )
+        warnings = [str(m) for m in response.context["messages"] if m.level_tag == "warning"]
+        self.assertEqual(len(warnings), 1)
+        warning_html = warnings[0]
+        # Must be a POST form, NOT a GET link.
+        self.assertIn('method="post"', warning_html)
+        self.assertIn("csrfmiddlewaretoken", warning_html)
+        self.assertNotRegex(warning_html, r'<a\s+href=[^>]*resend-invite')
+
+    @patch("apps.users.services.SecureCustomerUserService._send_welcome_email_secure")
+    def test_clicking_resend_form_actually_resends(self, mock_send):
+        """End-to-end: extract the action URL from the rendered warning,
+        POST to it, assert the resend endpoint runs successfully."""
+        # First call: initial create — email "fails" so warning is rendered.
+        mock_send.return_value = False
+        staff = User.objects.create_user(
+            email="staff-flow@example.com", password="x", is_staff=True, staff_role="admin"
+        )
+        customer = Customer.objects.create(
+            name="Flow Co", company_name="Flow Co", primary_email="flow@co.com", customer_type="company"
+        )
+        self.client.force_login(staff)
+        with patch("apps.customers.customer_service.CustomerService.get_accessible_customers") as mock:
+            mock.return_value = Customer.objects.filter(id=customer.id)
+            create_response = self.client.post(
+                reverse("customers:create_user", kwargs={"customer_id": customer.id}),
+                {"email": "recovery@example.com", "first_name": "R", "last_name": "U", "role": "viewer"},
+                follow=True,
+            )
+        warnings = [str(m) for m in create_response.context["messages"] if m.level_tag == "warning"]
+        self.assertEqual(len(warnings), 1)
+        warning_html = warnings[0]
+
+        # Pull the form's action URL out of the rendered HTML.
+        action_match = re.search(r'action="([^"]+resend-invite[^"]*)"', warning_html)
+        self.assertIsNotNone(action_match, f"Warning must contain a form action URL: {warning_html}")
+        resend_url = action_match.group(1)
+
+        # Second call: simulate clicking the form's submit button. mock_send
+        # now returns True so the resend reports success.
+        mock_send.return_value = True
+        with patch("apps.customers.customer_service.CustomerService.get_accessible_customers") as mock:
+            mock.return_value = Customer.objects.filter(id=customer.id)
+            resend_response = self.client.post(resend_url, follow=True)
+        self.assertEqual(resend_response.status_code, 200)
+        success = [str(m) for m in resend_response.context["messages"] if m.level_tag == "success"]
+        self.assertTrue(any("resent" in m.lower() for m in success))
+        # send_welcome_invite was called once for the create + once for the resend.
+        self.assertEqual(mock_send.call_count, 2)
+
+    @patch("apps.users.services.SecureCustomerUserService._send_welcome_email_secure")
     def test_resend_invite_blocked_for_user_not_in_this_customer(self, mock_send):
         """Staff cannot re-invite a user who isn't a member of this customer."""
         outsider = User.objects.create_user(email="outsider@example.com")
