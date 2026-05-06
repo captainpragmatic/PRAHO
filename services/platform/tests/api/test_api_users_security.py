@@ -14,13 +14,25 @@ from datetime import timedelta
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 from django.utils import timezone
-from rest_framework.authtoken.models import Token
 from rest_framework.test import APIClient
 from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin
 
 from apps.common.middleware import _is_auth_exempt
+from apps.users.models import APIToken
 
 User = get_user_model()
+
+
+def _make_token(user, name="test"):
+    """Create an APIToken and return (token, raw_key) for test setup."""
+    raw_key = APIToken.generate_key()
+    token = APIToken.objects.create(
+        user=user,
+        key_hash=APIToken.hash_key(raw_key),
+        key_prefix=raw_key[:8],
+        name=name,
+    )
+    return token, raw_key
 
 
 # ===============================================================================
@@ -48,19 +60,19 @@ class TokenRevocationTests(TestCase):
 
     def test_revoke_token_self_revocation_deletes_token(self) -> None:
         """Authenticated DELETE with own token in Authorization header deletes the token."""
-        token = Token.objects.create(user=self.user)
-        self.client.credentials(HTTP_AUTHORIZATION=f"Token {token.key}")
+        token, raw_key = _make_token(self.user)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {raw_key}")
 
         response = self.client.delete(self.url)
 
         self.assertEqual(response.status_code, 200)
         # Token must be gone from DB after successful revocation
-        self.assertFalse(Token.objects.filter(user=self.user).exists())
+        self.assertFalse(APIToken.objects.filter(pk=token.pk).exists())
 
     def test_revoke_token_success_returns_message(self) -> None:
         """Successful revocation response body must contain the expected message key."""
-        token = Token.objects.create(user=self.user)
-        self.client.credentials(HTTP_AUTHORIZATION=f"Token {token.key}")
+        _token, raw_key = _make_token(self.user)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {raw_key}")
 
         response = self.client.delete(self.url)
         data = response.json()
@@ -75,14 +87,14 @@ class TokenRevocationTests(TestCase):
         Before #60, the endpoint accepted POST with a body token. Ensuring 405 here
         prevents accidental reintroduction of the insecure pattern.
         """
-        token = Token.objects.create(user=self.user)
-        self.client.credentials(HTTP_AUTHORIZATION=f"Token {token.key}")
+        token, raw_key = _make_token(self.user)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {raw_key}")
 
-        response = self.client.post(self.url, data={"token": token.key}, format="json")
+        response = self.client.post(self.url, data={"token": raw_key}, format="json")
 
         self.assertEqual(response.status_code, 405)
         # Token must still exist — the POST must not have deleted anything
-        self.assertTrue(Token.objects.filter(user=self.user).exists())
+        self.assertTrue(APIToken.objects.filter(pk=token.pk).exists())
 
     def test_revoke_token_uses_header_token_not_body(self) -> None:
         """Revocation must use request.auth (header token), ignoring any body payload.
@@ -96,18 +108,18 @@ class TokenRevocationTests(TestCase):
             first_name="Other",
             last_name="User",
         )
-        token_a = Token.objects.create(user=self.user)
-        token_b = Token.objects.create(user=user_b)
+        token_a, key_a = _make_token(self.user, name="token-a")
+        token_b, key_b = _make_token(user_b, name="token-b")
 
         # Authenticate as user_a but include user_b's key in the body
-        self.client.credentials(HTTP_AUTHORIZATION=f"Token {token_a.key}")
-        response = self.client.delete(self.url, data={"token": token_b.key}, format="json")
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {key_a}")
+        response = self.client.delete(self.url, data={"token": key_b}, format="json")
 
         self.assertEqual(response.status_code, 200)
         # user_a's token is gone — the body was ignored
-        self.assertFalse(Token.objects.filter(user=self.user).exists())
+        self.assertFalse(APIToken.objects.filter(pk=token_a.pk).exists())
         # user_b's token is untouched
-        self.assertTrue(Token.objects.filter(user=user_b).exists())
+        self.assertTrue(APIToken.objects.filter(pk=token_b.pk).exists())
 
 
 # ===============================================================================
@@ -219,23 +231,23 @@ class TokenInfoTests(TestCase):
         self.assertEqual(response.status_code, 401)
 
     def test_token_info_returns_caller_identity(self) -> None:
-        """Authenticated GET returns user_id, staff_role, and token_created."""
-        token = Token.objects.create(user=self.user)
-        self.client.credentials(HTTP_AUTHORIZATION=f"Token {token.key}")
+        """Authenticated GET returns user_id, staff_role, and created_at."""
+        _token, raw_key = _make_token(self.user)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {raw_key}")
 
         response = self.client.get(self.url)
         data = response.json()
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(data["user_id"], self.user.id)
-        self.assertIn("token_created", data)
+        self.assertIn("created_at", data)
         self.assertIn("staff_role", data)
 
     def test_token_info_does_not_require_hmac_headers(self) -> None:
         """No portal HMAC headers needed — pure token auth is sufficient."""
-        token = Token.objects.create(user=self.user)
+        _token, raw_key = _make_token(self.user)
         # Only set Authorization header, no X-Portal-Id, X-Signature, etc.
-        self.client.credentials(HTTP_AUTHORIZATION=f"Token {token.key}")
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {raw_key}")
 
         response = self.client.get(self.url)
 

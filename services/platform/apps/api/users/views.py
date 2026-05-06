@@ -16,8 +16,6 @@ from django.views.decorators.cache import never_cache
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from rest_framework import status
-from rest_framework.authentication import TokenAuthentication
-from rest_framework.authtoken.models import Token
 from rest_framework.decorators import api_view, authentication_classes, permission_classes, throttle_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
@@ -30,12 +28,13 @@ from apps.api.secure_auth import (
     require_portal_authentication,
     require_user_authentication,
 )
+from apps.api.users.authentication import HashedTokenAuthentication
 from apps.common.constants import HMAC_NTP_SKEW_SECONDS, HMAC_TIMESTAMP_WINDOW_SECONDS
 from apps.common.performance.rate_limiting import PortalHMACBurstThrottle, PortalHMACRateThrottle
 from apps.common.request_ip import get_safe_client_ip
 from apps.customers.models import Customer
 from apps.users.forms import UserRegistrationForm
-from apps.users.models import CustomerMembership, User, UserProfile
+from apps.users.models import APIToken, CustomerMembership, User, UserProfile
 from apps.users.services import SessionSecurityService
 
 from .serializers import (
@@ -241,62 +240,85 @@ def obtain_token(request: HttpRequest) -> Response:
     user.account_locked_until = None
     user.save(update_fields=["failed_login_attempts", "account_locked_until"])
 
-    # Get or create token
-    token, created = Token.objects.get_or_create(user=user)
+    # Enforce per-user token limit to prevent token sprawl
+    active_count = APIToken.objects.filter(user=user).count()
+    if active_count >= APIToken.MAX_TOKENS_PER_USER:
+        return Response(
+            {"error": f"Maximum of {APIToken.MAX_TOKENS_PER_USER} active tokens per user. Revoke unused tokens first."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
 
-    if created:
-        logger.info(  # nosemgrep: python-logger-credential-disclosure — email masked via _mask_email()
-            "[Auth] New token created for user: %s", _mask_email(user.email)
-        )
-    else:
-        logger.info(  # nosemgrep: python-logger-credential-disclosure — email masked via _mask_email()
-            "[Auth] Existing token returned for user: %s", _mask_email(user.email)
-        )
+    # Create a new API token (multi-token: each call creates a fresh token)
+    raw_key = APIToken.generate_key()
+    name = request.data.get("name", "default")
+    token = APIToken.objects.create(
+        user=user,
+        key_hash=APIToken.hash_key(raw_key),
+        key_prefix=raw_key[:8],
+        name=name[:100],  # Enforce max_length
+    )
+
+    logger.info(  # nosemgrep: python-logger-credential-disclosure — email masked via _mask_email()
+        "[Auth] New API token '%s' (%s…) created for user: %s",
+        token.name,
+        token.key_prefix,
+        _mask_email(user.email),
+    )
 
     return Response(
         {
-            "token": token.key,
+            "token": raw_key,
             "user_id": user.id,
             "email": user.email,
+            "key_prefix": token.key_prefix,
+            "name": token.name,
+            "expires_at": None,
         }
     )
 
 
 @api_view(["DELETE"])
-@authentication_classes([TokenAuthentication])
+@authentication_classes([HashedTokenAuthentication])
 @permission_classes([IsAuthenticated])
 def revoke_token(request: HttpRequest) -> Response:
     """🗑️ Revoke the caller's own authentication token."""
-    token = request.auth  # Set by TokenAuthentication — no extra DB query needed
+    token = request.auth  # Set by HashedTokenAuthentication — no extra DB query needed
     user_email = _mask_email(token.user.email)
+    token_label = f"'{token.name}' ({token.key_prefix}\u2026)"
     token.delete()
-    logger.info("[Auth] Token revoked for: %s", user_email)  # nosemgrep: python-logger-credential-disclosure
+    logger.info(  # nosemgrep: python-logger-credential-disclosure
+        "[Auth] Token %s revoked for: %s", token_label, user_email
+    )
     return Response({"message": "Token revoked successfully"})
 
 
 @api_view(["GET"])
-@authentication_classes([TokenAuthentication])
+@authentication_classes([HashedTokenAuthentication])
 @permission_classes([IsAuthenticated])
 def token_info(request: HttpRequest) -> Response:
     """
     Return identity of the authenticated token caller.
 
     GET /api/users/token/me/
-    Authorization: Token <key>
+    Authorization: Bearer <key>   (or Token <key>)
 
     Designed for CLI tools and scripts to confirm their token is valid and
-    see which user it belongs to. Uses TokenAuthentication only — no HMAC
-    or session required.
+    see which user it belongs to. Uses HashedTokenAuthentication only — no
+    HMAC or session required.
     """
     user = cast(User, request.user)
-    token = request.auth
+    token: APIToken = request.auth
     return Response(
         {
             "user_id": user.id,
             "email": user.email,
             "staff_role": user.staff_role,
             "is_active": user.is_active,
-            "token_created": token.created.isoformat(),
+            "token_name": token.name,
+            "key_prefix": token.key_prefix,
+            "created_at": token.created_at.isoformat(),
+            "expires_at": token.expires_at.isoformat() if token.expires_at else None,
+            "last_used_at": token.last_used_at.isoformat() if token.last_used_at else None,
         }
     )
 
