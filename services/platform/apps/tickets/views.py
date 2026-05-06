@@ -18,6 +18,7 @@ from django.core.paginator import Paginator
 from django.db.models import Q
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils.html import format_html
 from django.utils.translation import gettext_lazy as _
 
@@ -33,6 +34,24 @@ logger = logging.getLogger(__name__)
 
 # Module-level default for file size limit (must match tickets.security)
 _DEFAULT_MAX_FILE_SIZE_BYTES = 2097152  # 2MB
+
+TICKET_STATUS_TABS = [
+    {"value": "", "label": _("All"), "border_class": "border-blue-500", "text_class": "text-blue-400"},
+    {"value": "open", "label": _("Open"), "border_class": "border-blue-500", "text_class": "text-blue-400"},
+    {
+        "value": "in_progress",
+        "label": _("In Progress"),
+        "border_class": "border-purple-500",
+        "text_class": "text-purple-400",
+    },
+    {
+        "value": "waiting_on_customer",
+        "label": _("Waiting on Customer"),
+        "border_class": "border-yellow-500",
+        "text_class": "text-yellow-400",
+    },
+    {"value": "closed", "label": _("Closed"), "border_class": "border-red-500", "text_class": "text-red-400"},
+]
 
 
 @dataclass
@@ -93,14 +112,36 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
         url_params.append(f"status={status_filter}")
     url_params_str = "&".join(url_params)
 
+    open_count = tickets.filter(status__in=["open", "in_progress"]).count()
+    waiting_count = tickets.filter(status="waiting_on_customer").count()
+    total_count = tickets.count()
+
     context = {
         "tickets": tickets_page,
-        "open_count": tickets.filter(status__in=["open", "in_progress"]).count(),
-        "waiting_count": tickets.filter(status="waiting_on_customer").count(),
-        "total_count": tickets.count(),
+        "open_count": open_count,
+        "waiting_count": waiting_count,
+        "total_count": total_count,
         "search_query": search_query,
         "status_filter": status_filter,
         "url_params": url_params_str,
+        # Shared component: header
+        "list_icon_bg": "bg-blue-600",
+        "list_icon_name": "chat",
+        "list_title": _("Support Tickets"),
+        "list_subtitle": _("Manage customer support requests"),
+        "list_stats": [
+            {"value": str(open_count), "label": _("Open"), "color": "text-amber-400"},
+            {"value": str(waiting_count), "label": _("Waiting"), "color": "text-yellow-400"},
+            {"value": str(total_count), "label": _("Total"), "color": "text-slate-400"},
+        ],
+        # Shared component: filters
+        "filter_search_url": reverse("tickets:search_htmx"),
+        "filter_content_id": "tickets-content",
+        "filter_skeleton_id": "tickets-skeleton",
+        "filter_tabs": TICKET_STATUS_TABS,
+        "filter_active_tab": status_filter,
+        "filter_search_value": search_query,
+        "filter_search_placeholder": _("Search tickets…"),
     }
 
     return render(request, "tickets/list.html", context)
