@@ -91,7 +91,7 @@
         </h3>
     </div>
 
-    <div class="px-6 py-4 max-h-96 overflow-y-auto" id="comments-container">
+    <div class="px-6 py-4 max-h-150 overflow-y-auto" id="comments-container">
         {% include 'tickets/partials/comments_list.html' with comments=comments %}
     </div>
 
@@ -138,7 +138,7 @@
                         </div>
 
                         <!-- Staff Reply Actions -->
-                        {% if user.is_staff or user.staff_role %}
+                        {% if user.is_staff_user %}
                         <div class="flex flex-col sm:flex-row sm:items-center gap-3">
                             <!-- Reply Action Dropdown -->
                             <div class="flex-1 min-w-0">
@@ -182,7 +182,7 @@
                     <div class="mt-2 flex items-center space-x-1 text-xs text-slate-500">
                         {% icon "info" size="xs" css_class="flex-shrink-0" %}
                         <p>
-                            {% if user.is_staff or user.staff_role %}
+                            {% if user.is_staff_user %}
                                 {% trans 'Your reply will be visible to the customer unless marked as internal.' %}
                             {% else %}
                                 {% trans 'Your reply will be visible to both you and the customer.' %}
