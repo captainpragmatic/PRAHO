@@ -2,12 +2,76 @@ import ast
 import json
 import time
 from pathlib import Path
+from unittest.mock import patch
 
 from django.http import HttpRequest
 from django.test import SimpleTestCase, TestCase
+from rest_framework import status
+from rest_framework.response import Response
 
-from apps.api.secure_auth import validate_hmac_authenticated_request
+from apps.api.secure_auth import (
+    require_user_authentication,
+    validate_hmac_authenticated_request,
+)
 from apps.api.services import views as svc_views
+
+
+class RequireUserAuthenticationLoggingTests(SimpleTestCase):
+    """require_user_authentication must emit decorator-level entry,
+    success, and failure logs at the same severity levels as the sibling
+    require_customer_authentication decorator. Without these logs, an
+    auth-failure storm on session-validation endpoints leaves no trace
+    in the logger=apps.api.secure_auth log stream and operators can't
+    correlate it to a specific decorator path (PR #164 review M3).
+    """
+
+    @staticmethod
+    def _decorated_view():
+        @require_user_authentication
+        def view(request, user):
+            return Response({"ok": True})
+        return view
+
+    @patch("apps.api.secure_auth.get_authenticated_user")
+    def test_logs_failure_at_warning(self, mock_get_user) -> None:
+        """When get_authenticated_user returns an error_response, the
+        decorator must emit a WARNING with the request path so failure
+        spikes are visible in log aggregators."""
+        mock_get_user.return_value = (None, Response({"error": "no auth"}, status=status.HTTP_401_UNAUTHORIZED))
+        view = self._decorated_view()
+        request = HttpRequest()
+        request.path = "/api/users/session/validate/"
+
+        with self.assertLogs("apps.api.secure_auth", level="WARNING") as ctx:
+            response = view(request)
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+        self.assertTrue(
+            any("require_user_authentication" in msg or "User auth failed" in msg
+                for msg in ctx.output),
+            msg=f"Expected a WARNING about user auth failure; got: {ctx.output}",
+        )
+
+    @patch("apps.api.secure_auth.get_authenticated_user")
+    def test_logs_entry_and_success_at_debug(self, mock_get_user) -> None:
+        """When auth succeeds, the decorator must emit DEBUG entry and
+        success logs (silent at INFO+/WARNING+ to avoid log noise per
+        the PR #164 perf optimization, but visible at DEBUG for tracing)."""
+        fake_user = type("U", (), {"email": "test@example.com"})()
+        mock_get_user.return_value = (fake_user, None)
+        view = self._decorated_view()
+        request = HttpRequest()
+        request.path = "/api/users/session/validate/"
+
+        with self.assertLogs("apps.api.secure_auth", level="DEBUG") as ctx:
+            response = view(request)
+
+        self.assertEqual(response.status_code, 200)
+        # Entry log fires regardless of outcome.
+        self.assertTrue(
+            any("require_user_authentication" in msg for msg in ctx.output),
+            msg=f"Expected a DEBUG entry log; got: {ctx.output}",
+        )
 
 
 class SecureAuthValidationTests(TestCase):

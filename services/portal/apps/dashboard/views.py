@@ -230,12 +230,17 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912
 
     # Seed account_health session cache so the context processor skips
     # redundant API calls for the same billing/services/tickets summaries.
-    request.session["account_health_data"] = {
-        "invoice": invoice_summary,
-        "services": services_summary,
-        "tickets": tickets_summary,
-    }
-    request.session["account_health_fetched_at"] = time.time()
+    # Only seed when ALL three summaries succeeded — caching empty fallback
+    # data after a partial failure suppresses the overdue/suspended/waiting
+    # banners for ACCOUNT_HEALTH_CACHE_TTL (300s) even after the platform
+    # recovers (PR #164 review finding H2).
+    if not sections_rate_limited and invoice_summary and services_summary and tickets_summary:
+        request.session["account_health_data"] = {
+            "invoice": invoice_summary,
+            "services": services_summary,
+            "tickets": tickets_summary,
+        }
+        request.session["account_health_fetched_at"] = time.time()
 
     # Fallback for greeting name if not resolved
     if not greeting_name:

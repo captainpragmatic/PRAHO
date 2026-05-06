@@ -19,6 +19,29 @@ def _raise_if_rate_limited(exc: Exception) -> None:
         raise exc
 
 
+def _empty_tickets_summary() -> dict[str, Any]:
+    """Canonical zero-shape for tickets summary fallback paths.
+
+    Matches the keys emitted by the platform handler at
+    services/platform/apps/api/tickets/views.py:475-555 so consumers
+    (dashboard, account_health) get the same key set whether the call
+    succeeded or fell back to this empty result. Without shape parity,
+    consumers' .get('waiting_on_customer', 0) silently returns 0 only
+    on the fallback path while the success path supplies a real count
+    — the exact divergence flagged in PR #164 review finding H5.
+    """
+    return {
+        "total_tickets": 0,
+        "open_tickets": 0,
+        "pending_tickets": 0,
+        "waiting_on_customer": 0,
+        "resolved_tickets": 0,
+        "average_response_time_hours": 0.0,
+        "satisfaction_rating": 0.0,
+        "recent_tickets": [],
+    }
+
+
 @dataclass
 class TicketFilters:
     """Filter parameters for ticket listing"""
@@ -269,25 +292,13 @@ class TicketsAPIClient(PlatformAPIClient):
                 return cast(dict[str, Any], summary_data)
             else:
                 logger.warning(f"⚠️ [Tickets API] Unexpected summary response format: {response}")
-                return {
-                    "total_tickets": 0,
-                    "open_tickets": 0,
-                    "pending_tickets": 0,
-                    "resolved_tickets": 0,
-                    "by_priority": {"critical": 0, "urgent": 0, "high": 0, "normal": 0, "low": 0},
-                }
+                return _empty_tickets_summary()
 
         except PlatformAPIError as e:
             logger.error(f"🔥 [Tickets API] Error retrieving ticket summary for customer {customer_id}: {e}")
             _raise_if_rate_limited(e)
             # Return empty summary on error to avoid breaking dashboard
-            return {
-                "total_tickets": 0,
-                "open_tickets": 0,
-                "pending_tickets": 0,
-                "resolved_tickets": 0,
-                "by_priority": {"critical": 0, "urgent": 0, "high": 0, "normal": 0, "low": 0},
-            }
+            return _empty_tickets_summary()
 
 
 # Global instance for easy importing

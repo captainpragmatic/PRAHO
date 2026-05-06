@@ -75,6 +75,34 @@ def stabilize_auth_timing_for_security_tests(request: pytest.FixtureRequest, set
 
 
 @pytest.fixture(autouse=True)
+def reset_outbound_http_session() -> Generator[None]:
+    """
+    Reset module-level _session in apps.common.outbound_http between tests.
+
+    The shared _session is created at module import time and persists
+    across tests. Six HMAC test files patch _session.request directly
+    via @patch; that's safe (the patch context replaces .request and
+    restores it on exit). What's NOT automatically restored is
+    _session.cookies, which can be populated by direct .cookies.set()
+    calls in test setup or by Set-Cookie headers from a real request
+    that escaped a patch.
+
+    This fixture clears _session.cookies before AND after each test so
+    pollution from one test cannot affect another. It deliberately does
+    NOT touch _session.headers (the User-Agent set at module load time
+    must persist) or reassign _session itself (would break the import
+    references in 6 HMAC test files that patch the bound method).
+
+    PR #164 review L3.
+    """
+    from apps.common.outbound_http import _session  # noqa: PLC0415
+
+    _session.cookies.clear()
+    yield
+    _session.cookies.clear()
+
+
+@pytest.fixture(autouse=True)
 def mock_middleware_api_calls() -> Generator[None]:
     """
     Mock Platform API calls made by PortalAuthenticationMiddleware.

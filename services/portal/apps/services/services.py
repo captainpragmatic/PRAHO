@@ -27,6 +27,34 @@ def _raise_if_rate_limited(exc: Exception) -> None:
         raise exc
 
 
+def _empty_services_summary() -> dict[str, Any]:
+    """Canonical zero-shape for services summary fallback paths.
+
+    Matches the keys emitted by the platform handler at
+    services/platform/apps/api/services/views.py:264-277. Consumers
+    (dashboard active_services badge, account_health expiring_soon /
+    suspended_services banner) get the same key set whether the call
+    succeeded or fell back to this empty result. PR #164 review
+    finding H6: previous fallback dicts omitted expiring_soon and
+    overdue, silently suppressing the expiring-services banner during
+    platform outages.
+    """
+    return {
+        "total_services": 0,
+        "active_services": 0,
+        "suspended_services": 0,
+        "pending_services": 0,
+        "overdue": 0,
+        "expiring_soon": 0,
+        "total_monthly_cost": 0.0,
+        "total_monthly_cost_with_vat": 0.0,
+        "total_disk_usage_gb": 0.0,
+        "total_bandwidth_usage_gb": 0.0,
+        "service_types": {},
+        "recent_services": [],
+    }
+
+
 class ServicesAPIClient(PlatformAPIClient):
     """
     Customer hosting services API client for portal service.
@@ -191,24 +219,13 @@ class ServicesAPIClient(PlatformAPIClient):
                 return cast(dict[str, Any], summary_data)
             else:
                 logger.warning(f"⚠️ [Services API] Unexpected summary response format: {response}")
-                return {
-                    "total_services": 0,
-                    "active_services": 0,
-                    "suspended_services": 0,
-                    "pending_services": 0,
-                }
+                return _empty_services_summary()
 
         except PlatformAPIError as e:
             logger.error(f"🔥 [Services API] Error retrieving services summary for customer {customer_id}: {e}")
             _raise_if_rate_limited(e)
             # Return empty summary on error
-            return {
-                "total_services": 0,
-                "active_services": 0,
-                "suspended_services": 0,
-                "pending_services": 0,
-                "by_type": {},
-            }
+            return _empty_services_summary()
 
     def get_service_domains(self, customer_id: int, service_id: int) -> list[dict[str, Any]]:
         """

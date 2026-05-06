@@ -23,8 +23,8 @@ from django.utils.translation import ngettext
 
 from apps.api_client.services import PlatformAPIError
 from apps.billing.services import InvoiceViewService
-from apps.services.services import ServicesAPIClient
-from apps.tickets.services import TicketsAPIClient
+from apps.services.services import ServicesAPIClient, _empty_services_summary
+from apps.tickets.services import TicketsAPIClient, _empty_tickets_summary
 
 logger = logging.getLogger(__name__)
 
@@ -204,28 +204,57 @@ def blend_banner(conditions: list[AccountCondition]) -> AccountHealthBanner | No
     )
 
 
-def _fetch_summaries(customer_id: int, user_id: int) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
-    """Fetch all three summaries from Platform API. Returns safe defaults on error."""
+def _fetch_summaries(
+    customer_id: int,
+    user_id: int,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], bool]:
+    """Fetch all three summaries from Platform API.
+
+    Returns ``(invoice, services, tickets, all_succeeded)`` where each
+    summary defaults to ``{}`` on per-call failure and ``all_succeeded``
+    is True only when every fetch completed without raising. The
+    orchestrator uses ``all_succeeded`` to gate session-cache writes —
+    caching the empty-fallback shape would suppress the overdue /
+    suspended / waiting banners for ACCOUNT_HEALTH_CACHE_TTL (300s)
+    even after the platform recovers (PR #164 review finding H2b).
+    """
     invoice_summary: dict[str, Any] = {}
     services_summary: dict[str, Any] = {}
     tickets_summary: dict[str, Any] = {}
+    all_succeeded = True
 
+    invoice_service = InvoiceViewService()
     try:
-        invoice_summary = InvoiceViewService().get_invoice_summary(customer_id, user_id)
+        invoice_summary = invoice_service.get_invoice_summary(customer_id, user_id)
     except (PlatformAPIError, Exception) as e:
         logger.warning("⚠️ [AccountHealth] Failed to fetch invoice summary: %s", e)
+        all_succeeded = False
+    else:
+        # The underlying client swallows non-rate-limit errors and returns the
+        # empty fallback. Comparing against the canonical empty shape lets us
+        # detect that swallowed failure here so we don't cache zeros.
+        if invoice_summary == invoice_service._empty_summary():
+            all_succeeded = False
 
     try:
         services_summary = ServicesAPIClient().get_services_summary(customer_id, user_id)
     except (PlatformAPIError, Exception) as e:
         logger.warning("⚠️ [AccountHealth] Failed to fetch services summary: %s", e)
+        all_succeeded = False
+    else:
+        if services_summary == _empty_services_summary():
+            all_succeeded = False
 
     try:
         tickets_summary = TicketsAPIClient().get_tickets_summary(customer_id, user_id)
     except (PlatformAPIError, Exception) as e:
         logger.warning("⚠️ [AccountHealth] Failed to fetch tickets summary: %s", e)
+        all_succeeded = False
+    else:
+        if tickets_summary == _empty_tickets_summary():
+            all_succeeded = False
 
-    return invoice_summary, services_summary, tickets_summary
+    return invoice_summary, services_summary, tickets_summary, all_succeeded
 
 
 def get_account_health(request: HttpRequest) -> AccountHealthBanner | None:
@@ -235,8 +264,15 @@ def get_account_health(request: HttpRequest) -> AccountHealthBanner | None:
     - Stores raw summaries + fetch timestamp in session
     - Refreshes when TTL expires
     - Pure functions run every request (sub-ms on small dicts)
+
+    Sources the active customer from ``request.customer_id`` (set by
+    ``apps.users.middleware`` on every authenticated request). The legacy
+    ``request.session['customer_id']`` key is the original login customer
+    and does NOT update on company-switcher actions, so reading it would
+    fetch the wrong customer's summaries after a switch (PR #164 review
+    finding H4).
     """
-    customer_id = request.session.get("customer_id")
+    customer_id = getattr(request, "customer_id", None)
     user_id = request.session.get("user_id")
     if not customer_id or not user_id:
         return None
@@ -251,14 +287,20 @@ def get_account_health(request: HttpRequest) -> AccountHealthBanner | None:
         services_summary = cached.get("services", {})
         tickets_summary = cached.get("tickets", {})
     else:
-        invoice_summary, services_summary, tickets_summary = _fetch_summaries(int(customer_id), int(user_id))
-        # Cache in session
-        request.session["account_health_data"] = {
-            "invoice": invoice_summary,
-            "services": services_summary,
-            "tickets": tickets_summary,
-        }
-        request.session["account_health_fetched_at"] = time.time()
+        invoice_summary, services_summary, tickets_summary, all_succeeded = _fetch_summaries(
+            int(customer_id),
+            int(user_id),
+        )
+        # Only cache when every summary fetch succeeded. Caching after a
+        # partial failure stamps an empty fallback as fresh-for-300s and
+        # silently suppresses banners that should have been shown (H2b).
+        if all_succeeded:
+            request.session["account_health_data"] = {
+                "invoice": invoice_summary,
+                "services": services_summary,
+                "tickets": tickets_summary,
+            }
+            request.session["account_health_fetched_at"] = time.time()
 
     conditions = evaluate_conditions(invoice_summary, services_summary, tickets_summary)
     return blend_banner(conditions)

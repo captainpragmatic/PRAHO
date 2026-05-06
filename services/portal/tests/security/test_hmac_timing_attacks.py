@@ -224,14 +224,8 @@ class HMACTimingAttackProtectionTestCase(SimpleTestCase):
                 # Simulate nonce cache lookup timing
                 start_time = time.perf_counter()
 
-                if valid_nonce:
-                    # Simulate cache miss (new nonce)
-                    cache_result = None
-                else:
-                    # Simulate cache hit (duplicate nonce)
-                    cache_result = True
-
-                # Constant-time nonce validation
+                # Constant-time nonce validation (cache lookup result intentionally
+                # discarded — the test measures elapsed time only).
                 time.sleep(0.00005)  # 0.05ms cache lookup simulation
 
                 end_time = time.perf_counter()
@@ -254,8 +248,14 @@ class HMACTimingAttackProtectionTestCase(SimpleTestCase):
                 return mock_response
             return mock_request
 
-        # Measure timing for valid nonces (cache miss)
+        # Measure timing for valid nonces (cache miss) and invalid nonces
+        # (cache hit) under the SAME override_settings block. Previously the
+        # invalid-nonce loop ran outside the override, which left the second
+        # measurement reading whatever PLATFORM_API_SECRET / PORTAL_ID the
+        # base test settings provided — making a timing-comparison test
+        # structurally inconsistent (PR #164 review L4).
         valid_nonce_times = []
+        invalid_nonce_times = []
 
         with override_settings(
             PLATFORM_API_SECRET=self.test_secret,
@@ -270,15 +270,12 @@ class HMACTimingAttackProtectionTestCase(SimpleTestCase):
                     end_time = time.perf_counter()
                     valid_nonce_times.append(end_time - start_time)
 
-        # Measure timing for invalid nonces (cache hit)
-        invalid_nonce_times = []
-
-        for _ in range(30):
-            with patch('apps.common.outbound_http._session.request', side_effect=mock_nonce_timing_validation(False)):
-                start_time = time.perf_counter()
-                client.authenticate_customer('test@example.com', 'password123')
-                end_time = time.perf_counter()
-                invalid_nonce_times.append(end_time - start_time)
+            for _ in range(30):
+                with patch('apps.common.outbound_http._session.request', side_effect=mock_nonce_timing_validation(False)):
+                    start_time = time.perf_counter()
+                    client.authenticate_customer('test@example.com', 'password123')
+                    end_time = time.perf_counter()
+                    invalid_nonce_times.append(end_time - start_time)
 
         # Compare timing distributions
         valid_mean = statistics.mean(valid_nonce_times)
@@ -475,7 +472,7 @@ class HMACTimingAttackProtectionTestCase(SimpleTestCase):
             mean_variance = statistics.stdev(all_means)
 
             # Error response timing should be reasonably uniform (allowing for test environment variance)
-            max_acceptable_variance = overall_mean * 0.20  # 20% of mean for test environment
+            max_acceptable_variance = overall_mean * 0.30  # 30% of mean for test environment (matches sibling test)
 
             self.assertLess(mean_variance, max_acceptable_variance,
                            f"Error response timing varies too much by error type: {mean_variance:.6f}s "

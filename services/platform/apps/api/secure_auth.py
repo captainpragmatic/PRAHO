@@ -286,9 +286,18 @@ def require_user_authentication(view_func: Callable[..., Any]) -> Callable[..., 
     """
 
     def wrapper(request: HttpRequest, *args: Any, **kwargs: Any) -> Response:
+        # Symmetric logging with require_customer_authentication so a failure
+        # storm on session-validation endpoints is visible in
+        # logger=apps.api.secure_auth (PR #164 review M3).
+        logger.debug(f"🔧 [Auth Decorator] require_user_authentication called for {request.path}")
         user, error_response = get_authenticated_user(request)
         if error_response:
+            logger.warning(f"🚨 [API Security] User auth failed for {request.path}")
             return error_response
+        logger.debug(
+            f"🔧 [Auth Decorator] User authentication successful for {request.path} "
+            f"- User: {getattr(user, 'email', None) or 'None'}"
+        )
         return view_func(request, user, *args, **kwargs)
 
     return wrapper

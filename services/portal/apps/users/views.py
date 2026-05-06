@@ -547,6 +547,13 @@ def profile_view(request: HttpRequest) -> HttpResponse:
             request.session["user_memberships"] = memberships
             if not request.session.get("selected_customer_id"):
                 request.session["selected_customer_id"] = customer_id
+                # Defensive: pop the account-health cache in case a caller
+                # populated it before initial customer selection. The lines
+                # above only run on first-time selection where no cache
+                # would normally exist; this is a guard against future
+                # reordering rather than a fix for a current bug (H3c).
+                request.session.pop("account_health_data", None)
+                request.session.pop("account_health_fetched_at", None)
 
     # Ensure selected customer name/role are always populated from memberships
     if request.session.get("user_memberships") and not request.session.get("selected_customer_name"):
@@ -1316,6 +1323,14 @@ def switch_customer_view(request: HttpRequest) -> HttpResponse:
     request.session["selected_customer_name"] = selected_customer_name
     request.session["selected_customer_role"] = selected_role
 
+    # Invalidate the account-health session cache so the banner reflects
+    # the newly-active customer instead of stale data for the previous
+    # customer (PR #164 review finding H3a). The cache TTL is 5 minutes;
+    # without this pop, users would see the wrong customer's overdue /
+    # suspended / waiting banner until expiry.
+    request.session.pop("account_health_data", None)
+    request.session.pop("account_health_fetched_at", None)
+
     # Update cached memberships with fresh data
     if memberships:
         request.session["user_memberships"] = memberships
@@ -1420,6 +1435,11 @@ def create_company_view(request: HttpRequest) -> HttpResponse:
                         request.session["selected_customer_id"] = str(new_customer_id)
                         request.session["selected_customer_name"] = company_name
                         request.session["selected_customer_role"] = "owner"
+                        # Auto-switch to a fresh customer context — invalidate
+                        # the account-health cache (H3b). Same rationale as the
+                        # explicit company-switcher view.
+                        request.session.pop("account_health_data", None)
+                        request.session.pop("account_health_fetched_at", None)
 
                     # Redirect to profile to see the new company
                     return redirect("users:profile")

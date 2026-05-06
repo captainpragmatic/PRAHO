@@ -507,10 +507,17 @@ def customer_tickets_summary_api(request: HttpRequest, customer: Customer) -> Re
         # Get tickets queryset for the authenticated customer
         tickets_qs = Ticket.objects.filter(customer=customer)
 
-        # Calculate summary statistics
+        # Calculate summary statistics. The Ticket model's status enum is
+        # open / in_progress / waiting_on_customer / closed (no `pending` and
+        # no `resolved` — `pending_tickets` and the `resolved` part of
+        # `resolved_tickets` filter on values that never occur). The shape is
+        # preserved here for backward-compatibility with portal callers; the
+        # waiting_on_customer field is added so the portal account-health
+        # banner that depends on it can fire.
         total_tickets = tickets_qs.count()
         open_tickets = tickets_qs.filter(status__in=["open", "in_progress"]).count()
         pending_tickets = tickets_qs.filter(status="pending").count()
+        waiting_on_customer = tickets_qs.filter(status="waiting_on_customer").count()
         resolved_tickets = tickets_qs.filter(status__in=["resolved", "closed"]).count()
 
         # Calculate average response time via Python (SQLite can't Avg() on datetime)
@@ -548,6 +555,7 @@ def customer_tickets_summary_api(request: HttpRequest, customer: Customer) -> Re
             "total_tickets": total_tickets,
             "open_tickets": open_tickets,
             "pending_tickets": pending_tickets,
+            "waiting_on_customer": waiting_on_customer,
             "resolved_tickets": resolved_tickets,
             "average_response_time_hours": round(average_response_time_hours, 1),
             "satisfaction_rating": round(satisfaction_rating, 1),

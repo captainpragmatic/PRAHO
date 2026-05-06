@@ -153,3 +153,73 @@ class DashboardPerSectionRateLimitTests(SimpleTestCase):
         content = response.content.decode()
         # Should use the max retry_after (30), not min (5)
         self.assertIn("30", content)
+
+
+@override_settings(
+    PLATFORM_API_BASE_URL="http://localhost:8700/api",
+    PLATFORM_API_SECRET="test-secret",
+    PLATFORM_API_TIMEOUT=5,
+    PORTAL_ID="portal-001",
+    ROOT_URLCONF="config.urls",
+)
+class DashboardCacheSeedingGuardTests(SimpleTestCase):
+    """dashboard_view must NOT seed account_health_data into the session
+    when any section fell back to empty data (rate-limited or upstream
+    error). Empty cache lasts ACCOUNT_HEALTH_CACHE_TTL (300s) and
+    suppresses overdue/suspended/waiting banners on every portal page
+    load until expiry, even when the underlying platform issue resolves.
+
+    PR #164 review finding H2.
+    """
+
+    def _call_dashboard(self, request: MagicMock) -> MagicMock:
+        return dashboard_view(request)
+
+    @patch("apps.dashboard.views._get_services_data", return_value=(0, {"active_services": 0}))
+    @patch("apps.dashboard.views._get_ticket_data", return_value=([], 0, {"open_tickets": 0}))
+    @patch("apps.dashboard.views._get_customer_data", return_value=([], None))
+    @patch("apps.dashboard.views._get_billing_data")
+    def test_does_not_seed_cache_when_billing_rate_limited(
+        self, mock_billing, mock_customer, mock_tickets, mock_services,
+    ) -> None:
+        mock_billing.side_effect = _rate_limited_error(15)
+        request = _authenticated_request()
+        self._call_dashboard(request)
+        self.assertNotIn("account_health_data", request.session)
+        self.assertNotIn("account_health_fetched_at", request.session)
+
+    @patch("apps.dashboard.views._get_services_data", return_value=(0, {"active_services": 0}))
+    @patch("apps.dashboard.views._get_ticket_data")
+    @patch("apps.dashboard.views._get_customer_data", return_value=([], None))
+    @patch("apps.dashboard.views._get_billing_data", return_value=([], {"total_invoices": 5, "overdue_invoices": 0}))
+    def test_does_not_seed_cache_when_tickets_5xx(
+        self, mock_billing, mock_customer, mock_tickets, mock_services,
+    ) -> None:
+        mock_tickets.side_effect = _server_error()
+        request = _authenticated_request()
+        self._call_dashboard(request)
+        self.assertNotIn("account_health_data", request.session)
+
+    @patch("apps.dashboard.views._get_services_data")
+    @patch("apps.dashboard.views._get_ticket_data", return_value=([], 0, {"open_tickets": 0}))
+    @patch("apps.dashboard.views._get_customer_data", return_value=([], None))
+    @patch("apps.dashboard.views._get_billing_data", return_value=([], {"total_invoices": 5, "overdue_invoices": 0}))
+    def test_does_not_seed_cache_when_services_5xx(
+        self, mock_billing, mock_customer, mock_tickets, mock_services,
+    ) -> None:
+        mock_services.side_effect = _server_error()
+        request = _authenticated_request()
+        self._call_dashboard(request)
+        self.assertNotIn("account_health_data", request.session)
+
+    @patch("apps.dashboard.views._get_services_data", return_value=(2, {"active_services": 2}))
+    @patch("apps.dashboard.views._get_ticket_data", return_value=([], 0, {"open_tickets": 0}))
+    @patch("apps.dashboard.views._get_customer_data", return_value=([], None))
+    @patch("apps.dashboard.views._get_billing_data", return_value=([], {"total_invoices": 5, "overdue_invoices": 0}))
+    def test_seeds_cache_when_all_sections_succeed(
+        self, mock_billing, mock_customer, mock_tickets, mock_services,
+    ) -> None:
+        request = _authenticated_request()
+        self._call_dashboard(request)
+        self.assertIn("account_health_data", request.session)
+        self.assertIn("account_health_fetched_at", request.session)

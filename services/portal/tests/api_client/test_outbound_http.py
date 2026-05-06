@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import requests
 from django.test import SimpleTestCase, override_settings
 
 from apps.api_client.services import PlatformAPIClient, PlatformAPIError
-from apps.common.outbound_http import OutboundSecurityError, portal_request
+from apps.common.outbound_http import OutboundSecurityError, _session, portal_request
 
 
 class PortalRequestHTTPSEnforcementTest(SimpleTestCase):
@@ -133,6 +134,52 @@ class PortalRequestHMACPreservationTest(SimpleTestCase):
         # portal_request merges in User-Agent; verify custom headers are present
         for key, value in custom_headers.items():
             self.assertEqual(kwargs["headers"][key], value)
+
+
+class PortalRequestCookieIsolationTest(SimpleTestCase):
+    """portal_request() must not let cookies leak across calls on the shared _session.
+
+    requests.Session persists Set-Cookie response cookies and merges session.cookies
+    into every outbound request. For inter-service HMAC traffic across tenants, this
+    is a cross-tenant leakage risk: a Set-Cookie from one Platform response would ride
+    on the next portal_request() call regardless of caller.
+    """
+
+    @override_settings(DEBUG=True)
+    @patch("apps.common.outbound_http._session.request")
+    def test_passes_empty_cookies_kwarg(self, mock_request):
+        """Per-call cookies={} suppresses any session-level cookie merge for this request."""
+        mock_request.return_value = MagicMock(status_code=200)
+        portal_request("GET", "http://localhost:8700/api/test/")
+        _, kwargs = mock_request.call_args
+        self.assertEqual(kwargs.get("cookies"), {})
+
+    @override_settings(DEBUG=True)
+    @patch("apps.common.outbound_http._session.request")
+    def test_clears_session_cookies_after_call(self, mock_request):
+        """_session.cookies is cleared after every call so a Set-Cookie from one
+        response cannot ride on the next portal_request() call."""
+        # Simulate a previously-set cookie (e.g., from a prior Set-Cookie response).
+        _session.cookies.set("leak", "yes")
+        self.assertEqual(_session.cookies.get("leak"), "yes")
+
+        mock_request.return_value = MagicMock(status_code=200)
+        portal_request("GET", "http://localhost:8700/api/test/")
+
+        self.assertEqual(len(_session.cookies), 0)
+        self.assertIsNone(_session.cookies.get("leak"))
+
+    @override_settings(DEBUG=True)
+    @patch("apps.common.outbound_http._session.request")
+    def test_clears_session_cookies_even_when_request_raises(self, mock_request):
+        """Exception path must still clean up to avoid stale cookies leaking on retry."""
+        _session.cookies.set("leak", "yes")
+        mock_request.side_effect = requests.exceptions.ConnectionError("boom")
+
+        with self.assertRaises(requests.exceptions.ConnectionError):
+            portal_request("GET", "http://localhost:8700/api/test/")
+
+        self.assertEqual(len(_session.cookies), 0)
 
 
 class PlatformAPIClientSecurityErrorTest(SimpleTestCase):
