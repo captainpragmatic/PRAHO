@@ -63,6 +63,13 @@ if not _encryption_key:
         'Generate one with: python -c "import secrets, base64; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"'
     )
 
+# Ordered keyring [current, ...previous]. Previous keys are used for decryption only.
+# To rotate: set DJANGO_ENCRYPTION_KEY to the new key, add old key to DJANGO_ENCRYPTION_KEY_PREVIOUS.
+_previous_keys = os.environ.get("DJANGO_ENCRYPTION_KEY_PREVIOUS", "")
+ENCRYPTION_KEYS = [_encryption_key] + (
+    [k.strip() for k in _previous_keys.split(",") if k.strip()] if _previous_keys else []
+)
+
 _vault_key = os.environ.get("CREDENTIAL_VAULT_MASTER_KEY", "")
 if not _vault_key:
     from django.core.exceptions import ImproperlyConfigured
