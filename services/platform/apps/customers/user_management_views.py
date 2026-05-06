@@ -91,7 +91,7 @@ def customer_create_user(request: HttpRequest, customer_id: int) -> HttpResponse
     customer = _get_accessible_customer(request, customer_id)
 
     if request.method == "POST":
-        email = request.POST.get("email", "").strip()
+        email = request.POST.get("email", "").strip().lower()
         first_name = request.POST.get("first_name", "").strip()
         last_name = request.POST.get("last_name", "").strip()
         role = request.POST.get("role", "viewer")

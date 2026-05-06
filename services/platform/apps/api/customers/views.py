@@ -978,6 +978,7 @@ def customer_users_add(request: HttpRequest, customer: Customer) -> Response:  #
 @api_view(["POST"])
 @authentication_classes([])
 @permission_classes([AllowAny])
+@throttle_classes([BurstAPIThrottle])
 @require_customer_authentication
 def customer_users_create(request: HttpRequest, customer: Customer) -> Response:  # noqa: PLR0911
     """Create a new user and add them to the customer organization."""
@@ -991,7 +992,7 @@ def customer_users_create(request: HttpRequest, customer: Customer) -> Response:
     if owner_error:
         return owner_error
 
-    email = data.get("email", "").strip()
+    email = data.get("email", "").strip().lower()
     role = data.get("role", "viewer")
     first_name = data.get("first_name", "").strip()
     last_name = data.get("last_name", "").strip()
