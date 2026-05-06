@@ -135,7 +135,7 @@
             <dd class="mt-1 text-sm text-white">
               {% if user.is_superuser %}
                 {% trans "Superuser" as bt1 %}{% badge bt1 variant="primary" icon="user" %}
-              {% elif user.is_staff %}
+              {% elif user.is_staff_user %}
                 {% trans "Staff" as bt2 %}{% badge bt2 variant="info" icon="settings" %}
               {% else %}
                 {% trans "User" as bt3 %}{% badge bt3 variant="success" icon="user" %}

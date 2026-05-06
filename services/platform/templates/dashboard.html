@@ -10,7 +10,7 @@
   <!-- Header -->
   <div class="mb-8">
     <h1 class="text-3xl font-bold text-white">
-      {% if user.is_staff %}
+      {% if user.is_staff_user %}
       {% icon "dashboard" size="lg" css_class="text-blue-400 mr-1" %} {% trans 'Dashboard PragmaticHost' %}
       {% else %}
       {% if user.first_name %}
@@ -21,7 +21,7 @@
       {% endif %}
     </h1>
     <p class="mt-2 text-slate-400">
-      {% if user.is_staff %}
+      {% if user.is_staff_user %}
       {% filter force_escape %}{% blocktrans with first_name=user.first_name|default:user.username %}Hello, {{ first_name }}! Here is an overview of your business activity.{% endblocktrans %}{% endfilter %}
       {% else %}
       {% trans 'Here is an overview of your hosting services and account.' %}
@@ -31,7 +31,7 @@
 
   <!-- Stats Cards -->
   <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-    {% if user.is_staff %}
+    {% if user.is_staff_user %}
     <!-- Staff View: Business Metrics -->
     <!-- Total Customers -->
     <div class="bg-slate-800 rounded-lg p-6 border border-slate-700">
@@ -146,7 +146,7 @@
     <div class="bg-slate-800 rounded-lg border border-slate-700">
       <div class="p-6">
         <h3 class="text-lg font-medium text-white mb-4">
-          {% if user.is_staff %}
+          {% if user.is_staff_user %}
           {% icon "receipt" size="md" css_class="text-slate-400 mr-1" %} {% trans 'Recent Invoices & Proformas' %}
           {% else %}
           {% icon "receipt" size="md" css_class="text-slate-400 mr-1" %} {% trans 'My Recent Invoices & Proformas' %}
@@ -163,7 +163,7 @@
             <div class="p-3 bg-slate-700 rounded-md hover:bg-slate-600 transition-colors border border-transparent hover:border-slate-500">
               <div class="flex items-center justify-between">
                 <div class="flex-1 min-w-0">
-                  {% if user.is_staff %}
+                  {% if user.is_staff_user %}
                   <p class="text-white font-medium group-hover:text-blue-400 transition-colors leading-5">{{ document.customer.company_name }}</p>
                   {% else %}
                   <p class="text-white font-medium group-hover:text-blue-400 transition-colors leading-5">
@@ -189,7 +189,7 @@
               </div>
               <div class="flex items-center justify-between mt-1">
                 <div class="text-slate-400 text-sm leading-4">
-                  {% if user.is_staff %}
+                  {% if user.is_staff_user %}
                     {% if document.document_type == 'invoice' %}
                     {% trans 'Invoice' %} #{{ document.number }} - {{ document.created_at|date:"d.m.Y" }}
                     {% else %}
@@ -207,7 +207,7 @@
           </a>
           {% empty %}
           <p class="text-slate-400 text-center py-4">
-            {% if user.is_staff %}
+            {% if user.is_staff_user %}
             {% trans 'No recent documents' %}
             {% else %}
             {% trans 'No recent documents found' %}
@@ -228,7 +228,7 @@
     <div class="bg-slate-800 rounded-lg border border-slate-700">
       <div class="p-6">
         <h3 class="text-lg font-medium text-white mb-4">
-          {% if user.is_staff %}
+          {% if user.is_staff_user %}
           {% icon "tickets" size="md" css_class="text-slate-400 mr-1" %} {% trans 'Recent Tickets' %}
           {% else %}
           {% icon "tickets" size="md" css_class="text-slate-400 mr-1" %} {% trans 'My Recent Tickets' %}
@@ -241,7 +241,7 @@
             <div class="p-3 bg-slate-700 rounded-md hover:bg-slate-600 transition-colors border border-transparent hover:border-slate-500">
               <div class="flex items-center justify-between">
                 <div class="flex-1 min-w-0">
-                  {% if user.is_staff %}
+                  {% if user.is_staff_user %}
                   <p class="text-white font-medium group-hover:text-blue-400 transition-colors leading-5">{{ ticket.customer.company_name }}</p>
                   {% else %}
                   <p class="text-white font-medium group-hover:text-blue-400 transition-colors leading-5 truncate">{{ ticket.title }}</p>
@@ -263,14 +263,14 @@
               </div>
               <div class="flex items-center justify-between mt-1">
                 <div class="text-slate-400 text-sm leading-4">
-                  {% if user.is_staff %}
+                  {% if user.is_staff_user %}
                   {{ ticket.title|truncatechars:40 }}
                   {% else %}
                   {{ ticket.created_at|date:"d.m.Y" }}
                   {% endif %}
                 </div>
                 <div class="text-slate-400 text-sm leading-4">
-                  {% if user.is_staff %}
+                  {% if user.is_staff_user %}
                   {{ ticket.created_at|date:"d.m.Y" }}
                   {% else %}
                   #{{ ticket.ticket_number }}
@@ -281,7 +281,7 @@
           </a>
           {% empty %}
           <p class="text-slate-400 text-center py-4">
-            {% if user.is_staff %}
+            {% if user.is_staff_user %}
             {% trans 'No recent tickets' %}
             {% else %}
             {% trans 'No recent support tickets' %}
@@ -305,7 +305,7 @@
           {% icon "lightning" size="md" css_class="text-slate-400 mr-1" %} {% trans 'Quick Actions' %}
         </h3>
 
-        {% if user.is_staff %}
+        {% if user.is_staff_user %}
         <!-- Staff Actions: Business Management -->
         <div class="grid grid-cols-2 gap-3">
           {% url 'customers:create' as create_customer_url %}
@@ -355,14 +355,14 @@
     <div class="bg-slate-800 rounded-lg border border-slate-700">
       <div class="p-6">
         <h3 class="text-lg font-medium text-white mb-4">
-          {% if user.is_staff %}
+          {% if user.is_staff_user %}
           {% icon "chart" size="md" css_class="text-slate-400 mr-1" %} {% trans 'System Status' %}
           {% else %}
           {% icon "building" size="md" css_class="text-slate-400 mr-1" %} {% trans 'Account Information' %}
           {% endif %}
         </h3>
 
-        {% if user.is_staff %}
+        {% if user.is_staff_user %}
         <!-- Staff: System Status (dynamic, cached, refreshable via HTMX) -->
         {% include "dashboard_partials/system_status.html" %}
         {% else %}

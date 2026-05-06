@@ -38,13 +38,13 @@ This demonstrates how to use our reusable table component across the platform.
         <div class="mb-4">{% icon "clipboard" size="2xl" %}</div>
         <h3 class="text-lg font-medium mb-2">{% trans 'No documents found' %}</h3>
         <p class="text-sm">
-          {% if user.is_staff %}
+          {% if user.is_staff_user %}
             {% trans 'Create your first proforma to get started.' %}
           {% else %}
             {% trans 'No billing documents available for your account.' %}
           {% endif %}
         </p>
-        {% if user.is_staff %}
+        {% if user.is_staff_user %}
           <div class="mt-4">
             {% url 'billing:proforma_create' as create_proforma_url %}
             {% trans "Create First Proforma" as bt1 %}{% button bt1 variant="primary" href=create_proforma_url %}
