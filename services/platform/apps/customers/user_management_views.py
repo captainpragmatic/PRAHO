@@ -6,6 +6,9 @@ Handles user assignment, role changes, and access management.
 from typing import cast
 
 from django.contrib import messages
+from django.core.exceptions import ValidationError
+from django.core.validators import validate_email
+from django.db import IntegrityError, transaction
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -13,9 +16,11 @@ from django.utils.translation import gettext_lazy as _
 from django.views.decorators.http import require_http_methods, require_POST
 
 from apps.common.decorators import staff_required
+from apps.common.request_ip import get_safe_client_ip
 from apps.customers.customer_service import CustomerService
 from apps.customers.models import Customer
 from apps.users.models import CustomerMembership, User
+from apps.users.services import SecureCustomerUserService
 
 
 def _get_accessible_customer(request: HttpRequest, customer_id: int) -> Customer:
@@ -86,7 +91,7 @@ def customer_add_user(request: HttpRequest, customer_id: int) -> HttpResponse:
 
 @staff_required
 @require_http_methods(["GET", "POST"])
-def customer_create_user(request: HttpRequest, customer_id: int) -> HttpResponse:
+def customer_create_user(request: HttpRequest, customer_id: int) -> HttpResponse:  # noqa: PLR0911
     """Create new user and assign to customer."""
     customer = _get_accessible_customer(request, customer_id)
 
@@ -100,22 +105,35 @@ def customer_create_user(request: HttpRequest, customer_id: int) -> HttpResponse
             messages.error(request, _("Email address is required."))
             return redirect("customers:detail", customer_id=customer.id)
 
+        try:
+            validate_email(email)
+        except ValidationError:
+            messages.error(request, _("Please enter a valid email address."))
+            return redirect("customers:detail", customer_id=customer.id)
+
         # Validate role against allowed choices
         valid_roles = [choice[0] for choice in CustomerMembership.CUSTOMER_ROLE_CHOICES]
         if role not in valid_roles:
             messages.error(request, _("Invalid role selected."))
             return redirect("customers:detail", customer_id=customer.id)
 
-        # Check if user already exists
-        if User.objects.filter(email=email).exists():
+        try:
+            with transaction.atomic():
+                if User.objects.filter(email=email).exists():
+                    messages.error(request, _("User with email '{}' already exists.").format(email))
+                    return redirect("customers:detail", customer_id=customer.id)
+                user = User.objects.create_user(email=email, first_name=first_name, last_name=last_name)
+                CustomerMembership.objects.create(customer=customer, user=user, role=role)
+        except IntegrityError:
             messages.error(request, _("User with email '{}' already exists.").format(email))
             return redirect("customers:detail", customer_id=customer.id)
 
-        # Create new user with proper password hashing
-        user = User.objects.create_user(email=email, first_name=first_name, last_name=last_name)
-
-        # Create membership
-        CustomerMembership.objects.create(customer=customer, user=user, role=role)
+        # Send invite email with password reset link
+        email_sent = SecureCustomerUserService._send_welcome_email_secure(
+            user, customer, request_ip=get_safe_client_ip(request)
+        )
+        if not email_sent:
+            messages.warning(request, _("User created but invite email could not be sent."))
 
         messages.success(request, _("New user '{}' created and assigned to customer.").format(user.email))
         return redirect("customers:detail", customer_id=customer.id)

@@ -6,6 +6,8 @@ import json
 import logging
 from typing import Any, ClassVar, cast
 
+from django.core.exceptions import ValidationError
+from django.core.validators import validate_email
 from django.db import IntegrityError, transaction
 from django.db.models import Q, QuerySet
 from django.http import HttpRequest
@@ -20,11 +22,13 @@ from apps.api.core import ReadOnlyAPIViewSet
 from apps.api.core.permissions import IsAuthenticatedAndAccessible
 from apps.api.core.throttling import AuthThrottle, BurstAPIThrottle
 from apps.api.secure_auth import public_api_endpoint, require_customer_authentication, require_portal_authentication
+from apps.common.request_ip import get_safe_client_ip
 from apps.customers.contact_models import CustomerAddress
 from apps.customers.contact_service import AddressData, ContactService
 from apps.customers.models import Customer, CustomerTaxProfile
 from apps.provisioning.service_models import Service
 from apps.users.models import CustomerMembership, User
+from apps.users.services import SecureCustomerUserService
 
 from .serializers import (
     CustomerBillingAddressUpdateSerializer,
@@ -999,6 +1003,14 @@ def customer_users_create(request: HttpRequest, customer: Customer) -> Response:
     if not email:
         return Response({"success": False, "error": "Email is required."}, status=status.HTTP_400_BAD_REQUEST)
 
+    try:
+        validate_email(email)
+    except ValidationError:
+        return Response(
+            {"success": False, "error": "Invalid email address."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
     valid_roles = [c[0] for c in CustomerMembership.CUSTOMER_ROLE_CHOICES]
     if role not in valid_roles:
         return Response(
@@ -1023,9 +1035,19 @@ def customer_users_create(request: HttpRequest, customer: Customer) -> Response:
             status=status.HTTP_400_BAD_REQUEST,
         )
 
+    # Send invite email with password reset link
+    email_sent = SecureCustomerUserService._send_welcome_email_secure(
+        new_user, customer, request_ip=get_safe_client_ip(request)
+    )
+
     logger.info(f"✅ [User Management API] New user {email} created and added to customer {customer.id}")
     return Response(
-        {"success": True, "user_id": new_user.id, "message": f"User created and added as {role}."},
+        {
+            "success": True,
+            "user_id": new_user.id,
+            "message": f"User created and added as {role}.",
+            "invite_email_sent": email_sent,
+        },
         status=status.HTTP_201_CREATED,
     )
 

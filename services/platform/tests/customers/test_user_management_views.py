@@ -91,6 +91,65 @@ class UserManagementStaffRequiredTests(TestCase):
             self.assertEqual(response.status_code, 200)
 
 
+class CustomerCreateUserInviteEmailTests(TestCase):
+    """Verify invite email is sent when staff creates a new user."""
+
+    def setUp(self):
+        self.staff_user = User.objects.create_user(
+            email="staff@example.com",
+            password="staffpass123",
+            is_staff=True,
+            staff_role="admin",
+        )
+        self.customer = Customer.objects.create(
+            name="Test Customer",
+            company_name="Test Co",
+            primary_email="test@co.com",
+            customer_type="company",
+        )
+        self.client = Client()
+        self.url = reverse("customers:create_user", kwargs={"customer_id": self.customer.id})
+
+    @patch("apps.customers.user_management_views.SecureCustomerUserService._send_welcome_email_secure")
+    def test_create_user_sends_invite_email(self, mock_send_email):
+        """Creating a new user should trigger an invite email."""
+        mock_send_email.return_value = True
+        self.client.force_login(self.staff_user)
+        with patch("apps.customers.customer_service.CustomerService.get_accessible_customers") as mock:
+            mock.return_value = Customer.objects.filter(id=self.customer.id)
+            response = self.client.post(self.url, {
+                "email": "invited@example.com",
+                "first_name": "Invited",
+                "last_name": "User",
+                "role": "viewer",
+            })
+            self.assertEqual(response.status_code, 302)
+            self.assertTrue(User.objects.filter(email="invited@example.com").exists())
+            new_user = User.objects.get(email="invited@example.com")
+            mock_send_email.assert_called_once()
+            call_args = mock_send_email.call_args
+            self.assertEqual(call_args[0], (new_user, self.customer))
+            self.assertIn("request_ip", call_args[1])
+
+    @patch("apps.customers.user_management_views.SecureCustomerUserService._send_welcome_email_secure")
+    def test_create_user_warns_on_email_failure(self, mock_send_email):
+        """User is still created when invite email fails, with a warning message."""
+        mock_send_email.return_value = False
+        self.client.force_login(self.staff_user)
+        with patch("apps.customers.customer_service.CustomerService.get_accessible_customers") as mock:
+            mock.return_value = Customer.objects.filter(id=self.customer.id)
+            response = self.client.post(self.url, {
+                "email": "noemail@example.com",
+                "first_name": "No",
+                "last_name": "Email",
+                "role": "viewer",
+            }, follow=True)
+            self.assertTrue(User.objects.filter(email="noemail@example.com").exists())
+            messages_list = list(response.context["messages"])
+            warning_messages = [m for m in messages_list if m.level_tag == "warning"]
+            self.assertTrue(len(warning_messages) >= 1)
+
+
 class CustomerDeleteConfirmationTests(TestCase):
     """Verify server-side delete confirmation (confirm_name must match)."""
 
