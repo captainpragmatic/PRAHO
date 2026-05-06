@@ -12,6 +12,7 @@ from unittest.mock import patch
 from django.contrib.auth import get_user_model
 from django.test import RequestFactory, TestCase
 
+from apps.api.core.throttling import AuthThrottle, BurstAPIThrottle
 from apps.api.customers.views import (
     customer_addresses_add,
     customer_addresses_delete,
@@ -185,6 +186,54 @@ class CustomerUsersCreateAPITests(TestCase):
         })
         response = customer_users_create(request)
         self.assertEqual(response.status_code, 403)
+
+    def test_create_user_uses_auth_throttle(self):
+        """Endpoint must use AuthThrottle, not BurstAPIThrottle.
+
+        BurstAPIThrottle on an authentication_classes([]) view degrades to IP
+        keying at 120/min — too permissive for an account-creation mutation.
+        AuthThrottle (10/min, scope=auth) is the correct strict mutation throttle.
+        """
+        view_throttles = customer_users_create.cls.throttle_classes  # type: ignore[attr-defined]  # DRF api_view exposes the wrapper view class via .cls
+        self.assertIn(AuthThrottle, view_throttles)
+        self.assertNotIn(BurstAPIThrottle, view_throttles)
+
+    @patch("apps.api.secure_auth.get_authenticated_customer")
+    def test_create_user_mixed_case_duplicate_returns_400(self, mock_auth):
+        """Existing lowercase email blocks mixed-case duplicate creation.
+
+        Pre-existing rows on case-sensitive DBs may not be lowercased; the
+        dedupe lookup must use iexact to catch them.
+        """
+        mock_auth.return_value = (self.customer, None)
+        User.objects.create_user(email="newuser@example.com", password="pass123")
+        request = _make_request(self.factory, "/api/customers/users/create/", {
+            "customer_id": self.customer.pk, "user_id": self.owner_user.pk,
+            "email": "NewUser@EXAMPLE.COM", "first_name": "Mixed", "last_name": "Case",
+            "role": "viewer", "timestamp": int(time.time()),
+        })
+        response = customer_users_create(request)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("already exists", response.data["error"])
+
+    @patch("apps.api.customers.views.send_welcome_email")
+    @patch("apps.api.secure_auth.get_authenticated_customer")
+    def test_create_user_dispatches_welcome_email(self, mock_auth, mock_send):
+        """Successful invite dispatches the welcome email so the new user
+        actually receives a password-reset link to complete account setup."""
+        mock_auth.return_value = (self.customer, None)
+        mock_send.return_value = True
+        request = _make_request(self.factory, "/api/customers/users/create/", {
+            "customer_id": self.customer.pk, "user_id": self.owner_user.pk,
+            "email": "invitee@example.com", "first_name": "Inv", "last_name": "Itee",
+            "role": "viewer", "timestamp": int(time.time()),
+        })
+        response = customer_users_create(request)
+        self.assertEqual(response.status_code, 201)
+        mock_send.assert_called_once()
+        sent_user, sent_customer = mock_send.call_args.args[:2]
+        self.assertEqual(sent_user.email, "invitee@example.com")
+        self.assertEqual(sent_customer.pk, self.customer.pk)
 
 
 class CustomerUsersRoleAPITests(TestCase):

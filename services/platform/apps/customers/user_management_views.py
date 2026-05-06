@@ -106,8 +106,9 @@ def customer_create_user(request: HttpRequest, customer_id: int) -> HttpResponse
             messages.error(request, _("Invalid role selected."))
             return redirect("customers:detail", customer_id=customer.id)
 
-        # Check if user already exists
-        if User.objects.filter(email=email).exists():
+        # Check if user already exists (iexact catches mixed-case rows on
+        # case-sensitive DBs where pre-existing data wasn't lowercased)
+        if User.objects.filter(email__iexact=email).exists():
             messages.error(request, _("User with email '{}' already exists.").format(email))
             return redirect("customers:detail", customer_id=customer.id)
 

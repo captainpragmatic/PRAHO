@@ -25,6 +25,7 @@ from apps.customers.contact_service import AddressData, ContactService
 from apps.customers.models import Customer, CustomerTaxProfile
 from apps.provisioning.service_models import Service
 from apps.users.models import CustomerMembership, User
+from apps.users.services import send_welcome_email
 
 from .serializers import (
     CustomerBillingAddressUpdateSerializer,
@@ -978,10 +979,13 @@ def customer_users_add(request: HttpRequest, customer: Customer) -> Response:  #
 @api_view(["POST"])
 @authentication_classes([])
 @permission_classes([AllowAny])
-@throttle_classes([BurstAPIThrottle])
+@throttle_classes([AuthThrottle])
 @require_customer_authentication
 def customer_users_create(request: HttpRequest, customer: Customer) -> Response:  # noqa: PLR0911
     """Create a new user and add them to the customer organization."""
+    # AuthThrottle (10/min) layers a stricter mutation throttle on top of the
+    # HMAC-aware portal throttles applied globally — replacing them with the
+    # default per-view burst would have weakened protection on this endpoint.
     data = _get_request_data(request)
     try:
         user_id = _extract_user_id(data)
@@ -1009,13 +1013,13 @@ def customer_users_create(request: HttpRequest, customer: Customer) -> Response:
 
     try:
         with transaction.atomic():
-            if User.objects.filter(email=email).exists():
+            # iexact catches mixed-case duplicates on case-sensitive DBs where
+            # pre-existing rows may not have been lowercased at write time.
+            if User.objects.filter(email__iexact=email).exists():
                 return Response(
                     {"success": False, "error": "A user with this email already exists."},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
-            # Invite-only flow: user is created with an unusable password.
-            # They must complete account setup via the password-reset link sent separately.
             new_user = User.objects.create_user(email=email, first_name=first_name, last_name=last_name)
             CustomerMembership.objects.create(customer=customer, user=new_user, role=role)
     except IntegrityError:
@@ -1023,6 +1027,8 @@ def customer_users_create(request: HttpRequest, customer: Customer) -> Response:
             {"success": False, "error": "A user with this email already exists."},
             status=status.HTTP_400_BAD_REQUEST,
         )
+
+    send_welcome_email(new_user, customer, request_ip=None)
 
     logger.info(f"✅ [User Management API] New user {email} created and added to customer {customer.id}")
     return Response(

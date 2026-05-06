@@ -116,8 +116,9 @@ class UserInvitationRequest:
 def send_welcome_email(user: User, customer: Customer, request_ip: str | None = None) -> bool:
     """Send an invite email with a password-reset link to a newly created user.
 
-    This is the single source of truth for welcome emails — both
-    SecureUserRegistrationService and SecureCustomerUserService delegate here.
+    Single source of truth for welcome emails. The ``display_name`` falls back
+    from ``company_name`` to ``name`` to a static label so individual customers
+    (no company_name) still get a sensible subject line.
     """
     try:
         token = default_token_generator.make_token(user)
@@ -408,10 +409,6 @@ class SecureUserRegistrationService:
 
         except Exception as e:
             return Err(SecureErrorHandler.safe_error_response(e, "join_request"))
-
-    @classmethod
-    def _send_welcome_email_secure(cls, user: User, customer: Customer, request_ip: str | None = None) -> bool:
-        return send_welcome_email(user, customer, request_ip)
 
     @classmethod
     def _find_customer_by_identifier_secure(
