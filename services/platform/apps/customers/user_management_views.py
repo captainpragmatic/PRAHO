@@ -7,16 +7,17 @@ from typing import cast
 
 from django.contrib import messages
 from django.core.exceptions import ValidationError
-from django.core.validators import validate_email
 from django.db import IntegrityError, transaction
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.utils.html import format_html
 from django.utils.translation import gettext_lazy as _
 from django.views.decorators.http import require_http_methods, require_POST
 
 from apps.common.decorators import staff_required
 from apps.common.request_ip import get_safe_client_ip
+from apps.common.validators import SecureInputValidator
 from apps.customers.customer_service import CustomerService
 from apps.customers.models import Customer
 from apps.users.models import CustomerMembership, User
@@ -96,17 +97,18 @@ def customer_create_user(request: HttpRequest, customer_id: int) -> HttpResponse
     customer = _get_accessible_customer(request, customer_id)
 
     if request.method == "POST":
-        email = request.POST.get("email", "").strip()
+        email_input = request.POST.get("email", "")
         first_name = request.POST.get("first_name", "").strip()
         last_name = request.POST.get("last_name", "").strip()
         role = request.POST.get("role", "viewer")
 
-        if not email:
+        if not email_input:
             messages.error(request, _("Email address is required."))
             return redirect("customers:detail", customer_id=customer.id)
 
         try:
-            validate_email(email)
+            # Timing-safe validator that also normalizes (strip + lowercase).
+            email = str(SecureInputValidator.validate_email_secure(email_input, context="customer_user_creation"))
         except ValidationError:
             messages.error(request, _("Please enter a valid email address."))
             return redirect("customers:detail", customer_id=customer.id)
@@ -119,21 +121,39 @@ def customer_create_user(request: HttpRequest, customer_id: int) -> HttpResponse
 
         try:
             with transaction.atomic():
-                if User.objects.filter(email=email).exists():
-                    messages.error(request, _("User with email '{}' already exists.").format(email))
+                existing_user = User.objects.select_for_update().filter(email=email).first()
+                if existing_user is not None:
+                    # Staff can be told about members of THIS customer; cross-tenant
+                    # existence is masked behind a generic message to prevent enumeration.
+                    if CustomerMembership.objects.filter(customer=customer, user=existing_user).exists():
+                        messages.error(request, _("This user is already a member of this customer."))
+                    else:
+                        messages.error(
+                            request, _("Cannot create a user with this email. Contact support if you need help.")
+                        )
                     return redirect("customers:detail", customer_id=customer.id)
                 user = User.objects.create_user(email=email, first_name=first_name, last_name=last_name)
                 CustomerMembership.objects.create(customer=customer, user=user, role=role)
         except IntegrityError:
-            messages.error(request, _("User with email '{}' already exists.").format(email))
+            # Race: concurrent insert. Same generic message — don't disclose where it landed.
+            messages.error(request, _("Cannot create a user with this email. Contact support if you need help."))
             return redirect("customers:detail", customer_id=customer.id)
 
-        # Send invite email with password reset link
-        email_sent = SecureCustomerUserService._send_welcome_email_secure(
+        # Send invite email with password reset link via the public, rate-limited wrapper.
+        email_sent = SecureCustomerUserService.send_welcome_invite(
             user, customer, request_ip=get_safe_client_ip(request)
         )
         if not email_sent:
-            messages.warning(request, _("User created but invite email could not be sent."))
+            resend_url = reverse("customers:resend_invite", kwargs={"customer_id": customer.id, "user_id": user.id})
+            messages.warning(
+                request,
+                format_html(
+                    '{} <a href="{}" class="underline">{}</a>',
+                    _("User created but invite email could not be sent."),
+                    resend_url,
+                    _("Resend invite"),
+                ),
+            )
 
         messages.success(request, _("New user '{}' created and assigned to customer.").format(user.email))
         return redirect("customers:detail", customer_id=customer.id)
@@ -153,6 +173,44 @@ def customer_create_user(request: HttpRequest, customer_id: int) -> HttpResponse
         ],
     }
     return render(request, "customers/create_user.html", context)
+
+
+@staff_required
+@require_POST
+def customer_resend_invite(request: HttpRequest, customer_id: int, user_id: int) -> HttpResponse:
+    """Resend the welcome / password-reset invite for an invited user that never set a password.
+
+    Recovery path for users where the original invite email failed (SMTP outage, typo'd
+    address corrected by staff, etc.) Restricted to users who still have an unusable
+    password — once they set one, password reset is the right flow, not invite resend.
+    """
+    customer = _get_accessible_customer(request, customer_id)
+    user = get_object_or_404(User, id=user_id)
+
+    # Membership scope: prevent staff from re-inviting a user who isn't in this customer.
+    if not CustomerMembership.objects.filter(customer=customer, user=user).exists():
+        messages.error(request, _("User is not a member of this customer."))
+        return redirect("customers:detail", customer_id=customer.id)
+
+    # Only re-invite users who never completed setup. Users with a password should use
+    # the standard password-reset flow so we don't inadvertently overwrite their session.
+    if user.has_usable_password():
+        messages.error(
+            request,
+            _("This user has already set a password. Ask them to use the password reset flow instead."),
+        )
+        return redirect("customers:detail", customer_id=customer.id)
+
+    email_sent = SecureCustomerUserService.send_welcome_invite(user, customer, request_ip=get_safe_client_ip(request))
+    if email_sent:
+        messages.success(request, _("Invite email resent to '{}'.").format(user.email))
+    else:
+        messages.warning(
+            request,
+            _("Invite email could not be sent (rate-limited or transient failure). Try again later."),
+        )
+
+    return redirect("customers:detail", customer_id=customer.id)
 
 
 @staff_required

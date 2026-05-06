@@ -901,6 +901,35 @@ class SecureCustomerUserService:
             return False
 
     @classmethod
+    def send_welcome_invite(cls, user: User, customer: Customer, request_ip: str | None = None) -> bool:
+        """
+        🔒 Public entry point for sending a welcome / password-reset invite email.
+
+        Wraps the private email helper with a per-user rate limit (3/hour) so a
+        compromised inviter credential cannot bomb the same target with invite
+        emails. Returns False when the cache guard rejects the send so callers
+        can surface a warning to staff.
+        """
+        guard_key = f"welcome_invite:{user.pk}"
+        invite_limit = SettingsService.get_integer_setting("security.welcome_invite_limit_per_user_per_hour", 3)
+        sent_count = cache.get(guard_key, 0)
+        if sent_count >= invite_limit:
+            logger.warning(
+                f"🚦 [Welcome Invite] Rate limit hit for user {user.pk} ({sent_count}/{invite_limit} per hour)"
+            )
+            log_security_event(
+                "welcome_invite_rate_limited",
+                {"user_id": user.id, "customer_id": customer.id, "count": sent_count},
+                request_ip,
+            )
+            return False
+
+        sent = cls._send_welcome_email_secure(user, customer, request_ip=request_ip)
+        if sent:
+            cache.set(guard_key, sent_count + 1, timeout=3600)
+        return sent
+
+    @classmethod
     def _notify_owners_of_join_request_secure(
         cls, customer: Customer, requesting_user: User, request_ip: str | None = None
     ) -> None:
