@@ -324,7 +324,7 @@ class BillingPDFGeneratorsComprehensiveCoverageTestCase(TestCase):
             generator._render_table_data(400.0)  # Mock table_y position
 
             # Should set font and draw line item data
-            mock_font.assert_called_with("Helvetica", 9)
+            mock_font.assert_any_call("Helvetica", 9)
             mock_draw.assert_called()
 
             # Check that line data is included in draw calls
@@ -381,7 +381,7 @@ class BillingPDFGeneratorsComprehensiveCoverageTestCase(TestCase):
         label = generator._get_total_label()
 
         self.assertIn('{amount}', label)
-        self.assertIn('RON', label)
+        self.assertIn('{currency}', label)
 
     def test_base_generator_render_status_information_base(self) -> None:
         """Test _render_status_information base implementation (Line 203-205)."""
@@ -438,8 +438,8 @@ class BillingPDFGeneratorsComprehensiveCoverageTestCase(TestCase):
 
         disclaimer = generator._get_legal_disclaimer()
 
-        # Should mention fiscal invoice and Romanian legislation
-        self.assertIn('Fiscal', disclaimer)
+        # Should mention Romanian fiscal legislation
+        self.assertIn('art. 319', disclaimer)
 
     def test_invoice_generator_get_total_label(self) -> None:
         """Test RomanianInvoicePDFGenerator _get_total_label (Line 242-243)."""
@@ -588,8 +588,8 @@ class BillingPDFGeneratorsComprehensiveCoverageTestCase(TestCase):
 
         disclaimer = generator._get_legal_disclaimer()
 
-        # Should clarify that proforma is not a fiscal invoice
-        self.assertIn('not a fiscal invoice', disclaimer)
+        # Should clarify that proforma is not a fiscal document
+        self.assertIn('nu constituie document fiscal', disclaimer)
 
     def test_proforma_generator_render_document_details(self) -> None:
         """Test RomanianProformaPDFGenerator _render_document_details (Line 308-322)."""

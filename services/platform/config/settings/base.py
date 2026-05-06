@@ -471,6 +471,9 @@ COMPANY_CUI = os.environ.get("COMPANY_CUI", "RO12345678")  # Romanian tax ID
 COMPANY_EMAIL = os.environ.get("COMPANY_EMAIL", "contact@praho.ro")
 COMPANY_PHONE = os.environ.get("COMPANY_PHONE", "+40 21 000 0000")
 COMPANY_WEBSITE = os.environ.get("COMPANY_WEBSITE", "https://praho.ro")
+COMPANY_REGISTRATION_NUMBER = os.environ.get("COMPANY_REGISTRATION_NUMBER", "J40/1234/2020")  # Nr. Reg. Com.
+COMPANY_BANK_NAME = os.environ.get("COMPANY_BANK_NAME", "Banca Transilvania")
+COMPANY_BANK_ACCOUNT = os.environ.get("COMPANY_BANK_ACCOUNT", "RO49AAAA1B31007593840000")  # IBAN
 
 # VAT settings for Romanian compliance
 # NOTE: VAT_RATE removed — use TaxService.get_vat_rate('RO'). See ADR-0005, ADR-0015.
