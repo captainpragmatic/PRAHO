@@ -6,7 +6,7 @@ Covers the retriable signal on Err (issue #121) and core Result behavior.
 
 from django.test import TestCase
 
-from apps.common.types import Err, Ok
+from apps.common.types import Err, Ok, Retriability
 
 
 class OkTests(TestCase):
@@ -79,49 +79,107 @@ class ErrTests(TestCase):
         self.assertEqual(result.unwrap_err(), "fail")
 
 
-class ErrRetriableTests(TestCase):
-    """Tests for the retriable signal on Err (issue #121)."""
+class ErrRetriabilityTests(TestCase):
+    """Tests for the retriability signal on Err (issue #121).
 
-    def test_err_defaults_to_not_retriable(self) -> None:
-        """Existing Err('msg') calls default to retriable=False."""
+    The signal is tri-state (RETRIABLE / NOT_RETRIABLE / UNKNOWN) so that
+    legacy ``Err(str(e))`` sites that cannot classify the underlying error
+    do not silently assert permanence. ``is_retriable`` is the conservative
+    "should I retry?" check used by non-idempotent consumers.
+    """
+
+    def test_err_defaults_to_unknown(self) -> None:
+        """Legacy Err('msg') calls default to UNKNOWN, not NOT_RETRIABLE."""
         err = Err("database timeout")
-        self.assertFalse(err.retriable)
+        self.assertEqual(err.retriability, Retriability.UNKNOWN)
+        self.assertFalse(err.is_retriable)
 
-    def test_err_explicit_retriable_true(self) -> None:
-        err = Err("lock contention", retriable=True)
-        self.assertTrue(err.retriable)
+    def test_err_explicit_retriable(self) -> None:
+        err = Err("lock contention", retriability=Retriability.RETRIABLE)
+        self.assertEqual(err.retriability, Retriability.RETRIABLE)
+        self.assertTrue(err.is_retriable)
 
-    def test_err_explicit_retriable_false(self) -> None:
-        err = Err("validation failed", retriable=False)
-        self.assertFalse(err.retriable)
+    def test_err_explicit_not_retriable(self) -> None:
+        err = Err("validation failed", retriability=Retriability.NOT_RETRIABLE)
+        self.assertEqual(err.retriability, Retriability.NOT_RETRIABLE)
+        self.assertFalse(err.is_retriable)
 
-    def test_retriable_preserved_through_map(self) -> None:
-        """Err.map() returns self, so retriable must survive."""
-        err = Err("timeout", retriable=True)
+    def test_is_retriable_only_true_for_retriable_state(self) -> None:
+        """is_retriable returns False for UNKNOWN — non-idempotent consumers fail closed."""
+        self.assertFalse(Err("x", retriability=Retriability.UNKNOWN).is_retriable)
+        self.assertFalse(Err("x", retriability=Retriability.NOT_RETRIABLE).is_retriable)
+        self.assertTrue(Err("x", retriability=Retriability.RETRIABLE).is_retriable)
+
+    def test_retriability_preserved_through_map(self) -> None:
+        """Err.map() returns self, so retriability must survive."""
+        err = Err("timeout", retriability=Retriability.RETRIABLE)
         result = err.map(lambda x: x)
         self.assertTrue(result.is_err())
-        self.assertTrue(result.retriable)
+        self.assertEqual(result.retriability, Retriability.RETRIABLE)
 
-    def test_retriable_preserved_through_and_then(self) -> None:
-        """Err.and_then() returns self, so retriable must survive."""
-        err = Err("timeout", retriable=True)
+    def test_retriability_preserved_through_and_then(self) -> None:
+        err = Err("timeout", retriability=Retriability.RETRIABLE)
         result = err.and_then(Ok)
         self.assertTrue(result.is_err())
-        self.assertTrue(result.retriable)
-
-    def test_non_retriable_preserved_through_map(self) -> None:
-        err = Err("bad input", retriable=False)
-        result = err.map(lambda x: x)
-        self.assertFalse(result.retriable)
+        self.assertEqual(result.retriability, Retriability.RETRIABLE)
 
     def test_frozen_dataclass_prevents_mutation(self) -> None:
-        """Err is frozen — retriable cannot be changed after creation."""
-        err = Err("fail", retriable=True)
+        err = Err("fail", retriability=Retriability.RETRIABLE)
         with self.assertRaises(AttributeError):
-            err.retriable = False  # type: ignore[misc]  # intentional: testing frozen dataclass rejects mutation
+            err.retriability = Retriability.NOT_RETRIABLE  # type: ignore[misc]  # intentional: testing frozen dataclass rejects mutation
 
-    def test_ok_map_exception_creates_non_retriable_err(self) -> None:
-        """When Ok.map() catches an exception, the resulting Err should not be retriable."""
+    def test_ok_map_exception_creates_unknown_err(self) -> None:
+        """When Ok.map() catches an exception, retriability is UNKNOWN — caller did not classify."""
         result = Ok(1).map(lambda x: 1 / 0)
         self.assertTrue(result.is_err())
-        self.assertFalse(result.retriable)
+        self.assertEqual(result.retriability, Retriability.UNKNOWN)
+
+
+class ErrEqualityContractTests(TestCase):
+    """Tests documenting the equality/hash contract change introduced by retriability.
+
+    Two ``Err`` instances are equal iff both ``error`` AND ``retriability`` match.
+    This is intentional: if a caller cares whether a failure is retriable, two
+    errs with different retriability should compare unequal.
+    """
+
+    def test_err_equal_when_default_retriability_matches(self) -> None:
+        self.assertEqual(Err("x"), Err("x"))
+        self.assertEqual(Err("x"), Err("x", retriability=Retriability.UNKNOWN))
+
+    def test_err_not_equal_when_retriability_differs(self) -> None:
+        self.assertNotEqual(Err("x"), Err("x", retriability=Retriability.RETRIABLE))
+        self.assertNotEqual(
+            Err("x", retriability=Retriability.NOT_RETRIABLE),
+            Err("x", retriability=Retriability.RETRIABLE),
+        )
+
+    def test_err_hash_matches_equality(self) -> None:
+        self.assertEqual(hash(Err("x")), hash(Err("x", retriability=Retriability.UNKNOWN)))
+        self.assertNotEqual(hash(Err("x")), hash(Err("x", retriability=Retriability.RETRIABLE)))
+
+
+class ErrPatternMatchTests(TestCase):
+    """``case Err(x)`` should still bind ``x`` to ``.error`` after the new field.
+
+    Dataclass ``__match_args__`` is positional, so ``case Err(msg)`` continues
+    to match the first field (``error``); ``retriability`` is reachable via
+    ``case Err(msg, r)`` if needed.
+    """
+
+    def test_single_positional_match_binds_error(self) -> None:
+        err: Err[str] = Err("boom", retriability=Retriability.RETRIABLE)
+        match err:
+            case Err(msg):
+                self.assertEqual(msg, "boom")
+            case _:  # pragma: no cover
+                self.fail("Err did not match")
+
+    def test_two_positional_match_binds_error_and_retriability(self) -> None:
+        err: Err[str] = Err("boom", retriability=Retriability.RETRIABLE)
+        match err:
+            case Err(msg, r):
+                self.assertEqual(msg, "boom")
+                self.assertEqual(r, Retriability.RETRIABLE)
+            case _:  # pragma: no cover
+                self.fail("Err did not match")

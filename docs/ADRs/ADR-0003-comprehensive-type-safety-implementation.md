@@ -60,8 +60,16 @@ class Ok(Generic[T]):
 @dataclass(frozen=True)
 class Err(Generic[E]):
     error: E
+    retriability: Retriability = Retriability.UNKNOWN  # see below
 
 Result = Union[Ok[T], Err[E]]
+
+
+# Tri-state retriability signal (issue #121)
+class Retriability(StrEnum):
+    RETRIABLE = "retriable"          # caller knows transient (DB timeout, 5xx)
+    NOT_RETRIABLE = "not_retriable"  # caller knows permanent (validation, 4xx)
+    UNKNOWN = "unknown"              # caller did not classify (default)
 
 # Romanian Business Domain Types
 CUIString = str  # Romanian CUI format: "RO12345678"

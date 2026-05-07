@@ -28,7 +28,7 @@ from django.utils import timezone
 
 from apps.common.encryption import DecryptionError
 from apps.common.outbound_http import OutboundPolicy, safe_request
-from apps.common.types import Err, Ok, Result
+from apps.common.types import Err, Ok, Result, Retriability
 from apps.settings.services import SettingsService
 
 from .virtualmin_models import VirtualminServer
@@ -748,7 +748,10 @@ class VirtualminGateway:
 
         # Rate limiting check
         if not self._check_rate_limit(program):
-            return Err(VirtualminRateLimitedError(f"Rate limit exceeded for {program}", self.server.hostname, program))
+            return Err(
+                VirtualminRateLimitedError(f"Rate limit exceeded for {program}", self.server.hostname, program),
+                retriability=Retriability.RETRIABLE,
+            )
 
         # Prepare request parameters
         api_params = {"program": program, **params}
@@ -809,7 +812,10 @@ class VirtualminGateway:
 
         logger.error(f"❌ [Virtualmin] {program} failed after {execution_time:.2f}s: {error_msg}")
 
-        return Err(VirtualminTransientError(error_msg, self.server.hostname, program))
+        return Err(
+            VirtualminTransientError(error_msg, self.server.hostname, program),
+            retriability=Retriability.RETRIABLE,
+        )
 
     def _make_request(self, params: dict[str, Any], attempt: int) -> requests.Response:
         """
@@ -931,10 +937,10 @@ class VirtualminGateway:
                 )
             else:
                 error = result.unwrap_err()
-                return Err(f"Connection test failed: {error}")
+                return Err(f"Connection test failed: {error}", retriability=Retriability.RETRIABLE)
 
         except Exception as e:
-            return Err(f"Connection test error: {e}")
+            return Err(f"Connection test error: {e}", retriability=Retriability.RETRIABLE)
 
     def get_server_info(self) -> Result[dict[str, Any], str]:
         """Get server information and statistics"""

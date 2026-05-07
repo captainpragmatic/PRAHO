@@ -24,12 +24,44 @@ from django.db import transaction
 from django.utils import timezone
 from django_fsm import TransitionNotAllowed
 
-from apps.common.types import Err, Ok, Result
+from apps.common.types import Err, Ok, Result, Retriability
 
 from .metering_models import BillingCycle, UsageAggregation, UsageMeter
 from .subscription_models import Subscription
 
 logger = logging.getLogger(__name__)
+
+
+# Stripe error class names that indicate a transient failure.
+# Names rather than imports because the stripe module is loaded lazily.
+_RETRIABLE_STRIPE_ERROR_NAMES = frozenset({"RateLimitError", "APIConnectionError", "Timeout", "TryAgain", "APIError"})
+# Stripe error class names that indicate a permanent failure (4xx semantics).
+_NOT_RETRIABLE_STRIPE_ERROR_NAMES = frozenset(
+    {
+        "InvalidRequestError",
+        "AuthenticationError",
+        "PermissionError",
+        "CardError",
+        "IdempotencyError",
+        "SignatureVerificationError",
+    }
+)
+
+
+def _classify_stripe_error(exc: BaseException) -> Retriability:
+    """Map a stripe exception to its retriability via class-name lookup.
+
+    Class names are used (not isinstance) because importing ``stripe.error.*``
+    at module load would defeat the lazy ``get_stripe()`` pattern. Unknown
+    StripeError subclasses fall back to UNKNOWN — the caller can still log
+    them but consumers will not auto-retry.
+    """
+    name = type(exc).__name__
+    if name in _RETRIABLE_STRIPE_ERROR_NAMES:
+        return Retriability.RETRIABLE
+    if name in _NOT_RETRIABLE_STRIPE_ERROR_NAMES:
+        return Retriability.NOT_RETRIABLE
+    return Retriability.UNKNOWN
 
 
 def get_stripe() -> Any:
@@ -91,7 +123,7 @@ class StripeMeterService:
 
         except self.stripe.error.StripeError as e:
             logger.error(f"Stripe error creating meter: {e}")
-            return Err(str(e))
+            return Err(str(e), retriability=_classify_stripe_error(e))
         except Exception as e:
             logger.exception(f"Error creating Stripe Meter: {e}")
             return Err(str(e))
@@ -105,7 +137,7 @@ class StripeMeterService:
             meter = self.stripe.billing.Meter.retrieve(meter_id)
             return Ok(meter)
         except self.stripe.error.StripeError as e:
-            return Err(str(e))
+            return Err(str(e), retriability=_classify_stripe_error(e))
 
     def list_meters(self, limit: int = 100) -> Result[Any, str]:
         """List all Stripe Meters"""
@@ -116,7 +148,7 @@ class StripeMeterService:
             meters = self.stripe.billing.Meter.list(limit=limit)
             return Ok(list(meters.data))
         except self.stripe.error.StripeError as e:
-            return Err(str(e))
+            return Err(str(e), retriability=_classify_stripe_error(e))
 
     def deactivate_meter(self, meter_id: str) -> Result[Any, str]:
         """Deactivate a Stripe Meter"""
@@ -128,7 +160,7 @@ class StripeMeterService:
             logger.info(f"Deactivated Stripe Meter: {meter_id}")
             return Ok(meter)
         except self.stripe.error.StripeError as e:
-            return Err(str(e))
+            return Err(str(e), retriability=_classify_stripe_error(e))
 
 
 class StripeMeterEventService:
@@ -202,7 +234,7 @@ class StripeMeterEventService:
 
         except self.stripe.error.StripeError as e:
             logger.error(f"Stripe error reporting usage: {e}")
-            return Err(str(e))
+            return Err(str(e), retriability=_classify_stripe_error(e))
         except Exception as e:
             logger.exception(f"Error reporting usage to Stripe: {e}")
             return Err(str(e))
@@ -294,7 +326,7 @@ class StripeSubscriptionMeterService:
 
         except self.stripe.error.StripeError as e:
             logger.error(f"Stripe error creating subscription: {e}")
-            return Err(str(e))
+            return Err(str(e), retriability=_classify_stripe_error(e))
 
     def add_metered_item(self, subscription_id: str, price_id: str) -> Result[Any, str]:
         """Add a metered item to an existing subscription"""
@@ -317,7 +349,7 @@ class StripeSubscriptionMeterService:
             )
 
         except self.stripe.error.StripeError as e:
-            return Err(str(e))
+            return Err(str(e), retriability=_classify_stripe_error(e))
 
     def get_usage_summary(
         self, subscription_item_id: str, start_time: datetime | None = None, end_time: datetime | None = None
@@ -356,7 +388,7 @@ class StripeSubscriptionMeterService:
             )
 
         except self.stripe.error.StripeError as e:
-            return Err(str(e))
+            return Err(str(e), retriability=_classify_stripe_error(e))
 
 
 class StripeUsageSyncService:
