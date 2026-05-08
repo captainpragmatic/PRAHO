@@ -1384,13 +1384,17 @@ class EmailPreferenceService:
 
     @staticmethod
     def update_preferences(customer: Customer, preferences: dict[str, bool]) -> None:
-        """Update email preferences for a customer with atomic consent tracking."""
-        from apps.audit.services import AuditService  # noqa: PLC0415
+        """Update email preferences for a customer with atomic consent tracking.
+
+        Source attribution is threaded into the post_save signal via
+        ``_consent_source`` on the locked instance so a single compliance audit
+        record (the signal-driven one in apps.customers.signals) carries the
+        origin. Issue #182 — drops a duplicate service-layer audit call.
+        """
         from apps.customers.models import Customer as CustomerModel  # noqa: PLC0415
 
         with transaction.atomic():
             locked = CustomerModel.objects.select_for_update(of=("self",)).get(id=customer.id)
-            old_marketing = locked.marketing_consent
 
             # "marketing" is the canonical key; "newsletters" is accepted as an alias.
             # If both are present, "marketing" wins so an explicit opt-out cannot be
@@ -1400,26 +1404,11 @@ class EmailPreferenceService:
             elif "newsletters" in preferences:
                 locked.marketing_consent = preferences["newsletters"]
 
+            # The signal compares against the pre-save DB value, so we don't
+            # need to gate the attribution here — if no consent change occurs,
+            # the signal won't emit an audit event regardless.
+            locked._consent_source = "preference_center"  # type: ignore[attr-defined]  # transient signal-instance attr; read via getattr in customers.signals
             locked.save(update_fields=["marketing_consent"])
-
-            if old_marketing != locked.marketing_consent:
-                # Audit is best-effort — never block a GDPR consent change (Art. 7(3))
-                # because of an audit-table failure. Savepoint isolates audit DB writes
-                # so a failure here does not mark the outer transaction for rollback.
-                try:
-                    with transaction.atomic():
-                        AuditService.log_simple_event(
-                            "marketing_consent_granted" if locked.marketing_consent else "marketing_consent_withdrawn",
-                            content_object=locked,
-                            description=f"Email preferences updated for customer {locked.id}",
-                            old_values={"marketing_consent": old_marketing},
-                            new_values={"marketing_consent": locked.marketing_consent},
-                            metadata={"source": "preference_center"},
-                        )
-                except Exception:
-                    logger.exception(
-                        "🔥 [Consent] Audit logging failed for marketing_consent change on customer %s", locked.id
-                    )
 
     @staticmethod
     def can_send_category(customer: Customer, category: str) -> bool:
@@ -1451,7 +1440,6 @@ class EmailPreferenceService:
         Returns:
             True if unsubscribe was successful
         """
-        from apps.audit.services import AuditService  # noqa: PLC0415
         from apps.customers.models import (  # noqa: PLC0415  # Deferred: avoids circular import
             Customer,  # Circular: cross-app  # Deferred: avoids circular import
         )
@@ -1482,26 +1470,13 @@ class EmailPreferenceService:
                     EmailSuppressionService.suppress_email(email, "unsubscribe")
                     return True
 
-                old_marketing = customer.marketing_consent
                 if category == "marketing" or category is None:
                     customer.marketing_consent = False
+                # Source + category are threaded into the post_save signal so
+                # the single compliance audit record records origin (issue #182).
+                customer._consent_source = "unsubscribe_link"  # type: ignore[attr-defined]  # transient signal-instance attr; read via getattr in customers.signals
+                customer._consent_category = category or "all_marketing"  # type: ignore[attr-defined]  # transient signal-instance attr; read via getattr in customers.signals
                 customer.save(update_fields=["marketing_consent"])
-
-                if old_marketing != customer.marketing_consent:
-                    # Audit is best-effort — never block a GDPR consent withdrawal
-                    # (Art. 7(3)) because of an audit-table failure.
-                    try:
-                        with transaction.atomic():
-                            AuditService.log_simple_event(
-                                "marketing_consent_withdrawn",
-                                content_object=customer,
-                                description=f"Unsubscribe via token for {email[:3]}***",
-                                old_values={"marketing_consent": old_marketing},
-                                new_values={"marketing_consent": False},
-                                metadata={"source": "unsubscribe_link", "category": category or "all_marketing"},
-                            )
-                    except Exception:
-                        logger.exception("🔥 [Unsubscribe] Audit logging failed for customer %s", customer.id)
 
                 logger.info(f"✅ [Unsubscribe] Processed for {email[:3]}***")
                 return True
