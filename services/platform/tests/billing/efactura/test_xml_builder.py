@@ -167,6 +167,89 @@ class UBLInvoiceBuilderTestCase(TestCase):
         self.assertEqual(tax_amount.text, "190.00")
         self.assertEqual(tax_amount.get("currencyID"), "RON")
 
+    # --- Tax-category regression guards (PR #160 review: 25ef21ab) ---------------
+
+    def _tax_category_for(self, *, bill_to_country, bill_to_tax_id, tax_total_cents, line_category="S"):
+        """Build a one-line invoice and return its TaxCategory (ID, Percent) from the XML."""
+        from tests.factories import CustomerFactory, InvoiceFactory, InvoiceLineFactory  # noqa: PLC0415
+
+        total = 100000 + tax_total_cents
+        invoice = InvoiceFactory(
+            customer=CustomerFactory(),
+            currency=self.currency,
+            number="INV-2024-TAXCAT",
+            bill_to_name="Buyer",
+            bill_to_country=bill_to_country,
+            bill_to_tax_id=bill_to_tax_id,
+            bill_to_street="Street 1",
+            bill_to_city="City",
+            bill_to_postal_code="010101",
+            status="issued",
+            issued_at=timezone.now(),
+            due_at=timezone.now() + timezone.timedelta(days=30),
+            subtotal_cents=100000,
+            tax_total_cents=tax_total_cents,
+            total_cents=total,
+        )
+        InvoiceLineFactory(
+            invoice=invoice,
+            description="Web Hosting Service",
+            unit_price_cents=100000,
+            quantity=1,
+            tax_rate=Decimal("0.1900"),  # non-zero stored rate, must be clamped for non-standard categories
+            tax_category_code=line_category,
+        )
+        doc = etree.fromstring(UBLInvoiceBuilder(invoice).build().encode())
+        category = doc.find(
+            f".//{{{NAMESPACES['cac']}}}TaxTotal/{{{NAMESPACES['cac']}}}TaxSubtotal/{{{NAMESPACES['cac']}}}TaxCategory"
+        )
+        self.assertIsNotNone(category)
+        cat_id = category.find(f"{{{NAMESPACES['cbc']}}}ID")
+        percent = category.find(f"{{{NAMESPACES['cbc']}}}Percent")
+        return (cat_id.text if cat_id is not None else None, percent.text if percent is not None else None)
+
+    def test_non_standard_category_clamps_percent_to_zero(self):
+        """CRITICAL (BR-AE/E/Z/K/O-05): Percent must be 0.00 for non-standard categories.
+
+        The line carries a 19% stored rate, but a reverse-charge (AE) category must
+        emit Percent=0.00 — ANAF Schematron rejects a non-zero rate otherwise.
+        """
+        cat_id, percent = self._tax_category_for(
+            bill_to_country="DE", bill_to_tax_id="DE123456789", tax_total_cents=19000, line_category="AE"
+        )
+        self.assertEqual(cat_id, "AE")
+        self.assertEqual(percent, "0.00")
+
+    def test_standard_category_keeps_line_rate(self):
+        """Standard category must keep the stored 19% rate (clamp only applies to non-standard)."""
+        cat_id, percent = self._tax_category_for(
+            bill_to_country="RO", bill_to_tax_id="RO87654321", tax_total_cents=19000, line_category="S"
+        )
+        self.assertEqual(cat_id, "S")
+        self.assertEqual(percent, "19.00")
+
+    def test_zero_tax_eu_customer_with_vat_id_is_zero_not_reverse_charge(self):
+        """HIGH: zero-tax check must precede the non-RO/VAT-ID reverse-charge branch.
+
+        An EU customer with a VAT ID on a zero-tax invoice is zero-rated (Z), not AE —
+        the old ordering returned AE because the location branch fired before the
+        tax_total_cents == 0 check.
+        """
+        cat_id, _ = self._tax_category_for(
+            bill_to_country="DE", bill_to_tax_id="DE123456789", tax_total_cents=0, line_category="S"
+        )
+        self.assertEqual(cat_id, "Z")
+
+    def test_non_eu_customer_with_tax_id_is_standard_not_reverse_charge(self):
+        """HIGH: reverse charge (AE) applies only inside the EU VAT system.
+
+        A US customer with a tax ID must classify as standard (S), not AE.
+        """
+        cat_id, _ = self._tax_category_for(
+            bill_to_country="US", bill_to_tax_id="US-EIN-123", tax_total_cents=19000, line_category="S"
+        )
+        self.assertEqual(cat_id, "S")
+
     def test_build_contains_legal_monetary_total(self):
         """Test that LegalMonetaryTotal is present and correct."""
         builder = UBLInvoiceBuilder(self.invoice)
