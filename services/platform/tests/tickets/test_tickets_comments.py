@@ -182,6 +182,37 @@ class TicketInternalCommentsSecurityTest(TestCase):
         self.assertNotContains(response, 'Internal staff note - CONFIDENTIAL')
         self.assertNotContains(response, 'STAFF INTERNAL NOTE')
 
+    def test_reply_htmx_response_filters_internal_notes_for_customer(self):
+        """Reply POST (HX-Request) must not leak internal notes to non-staff.
+
+        Regression: the reply HTMX branch refreshed comments with comments.all(),
+        relying solely on the template gate. A customer posting a reply received
+        the internal-note content in the rendered swap.
+        """
+        self.client.login(email='customer@example.com', password='testpass123')
+        response = self.client.post(
+            reverse('tickets:reply', kwargs={'pk': self.ticket.pk}),
+            {'reply': 'Customer follow-up reply'},
+            HTTP_HX_REQUEST='true',
+        )
+        self.assertEqual(response.status_code, 200)
+        # Customer-visible comments are present...
+        self.assertContains(response, 'Customer comment - visible to all')
+        self.assertContains(response, 'Support comment - visible to all')
+        # ...but the internal note is not in the rendered swap.
+        self.assertNotContains(response, 'Internal staff note - CONFIDENTIAL')
+
+    def test_reply_htmx_response_includes_internal_notes_for_staff(self):
+        """Staff posting a reply via HX-Request still see internal notes."""
+        self.client.login(email='admin@example.com', password='testpass123')
+        response = self.client.post(
+            reverse('tickets:reply', kwargs={'pk': self.ticket.pk}),
+            {'reply': 'Staff follow-up reply'},
+            HTTP_HX_REQUEST='true',
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Internal staff note - CONFIDENTIAL')
+
     def test_comment_filtering_in_views(self):
         """Test that view-level comment filtering works correctly"""
         # Test with staff user - should see all comments
