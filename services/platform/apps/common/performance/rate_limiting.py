@@ -195,6 +195,28 @@ class PortalHMACBurstThrottle(_CustomTimeRateMixin, SimpleRateThrottle):  # type
         return self.cache_format % {"scope": self.scope, "ident": ident}
 
 
+class PortalHMACCreateUserThrottle(SimpleRateThrottle):  # type: ignore[misc]  # DRF throttle base uses dynamic attrs
+    """Strict per-portal throttle for the HMAC user-creation mutation.
+
+    Layered on top of the global PortalHMAC*Throttle limits to bound account
+    creation specifically. Keyed on the verified portal identity (X-Portal-Id)
+    rather than client IP: customer_users_create runs with authentication_classes([])
+    so request.user is AnonymousUser, which means any UserRateThrottle/AnonRateThrottle
+    here would key on IP and be diluted by a caller distributing requests across IPs.
+    Returns None (no throttling) for non-portal traffic — the endpoint already
+    rejects unauthenticated callers via @require_customer_authentication.
+    """
+
+    scope = "portal_hmac_create_user"
+    cache_format = "throttle_portal_hmac_%(scope)s_%(ident)s"
+
+    def get_cache_key(self, request: Request, view: Any) -> str | None:
+        if not _is_portal_authenticated(request):
+            return None
+        ident = _extract_hmac_identity(request)
+        return self.cache_format % {"scope": self.scope, "ident": ident}
+
+
 class CustomerRateThrottle(SimpleRateThrottle):  # type: ignore[misc]
     """
     Rate throttling based on customer account.

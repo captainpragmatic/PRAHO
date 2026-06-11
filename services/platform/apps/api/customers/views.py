@@ -21,6 +21,11 @@ from apps.api.core import ReadOnlyAPIViewSet
 from apps.api.core.permissions import IsAuthenticatedAndAccessible
 from apps.api.core.throttling import AuthThrottle, BurstAPIThrottle
 from apps.api.secure_auth import public_api_endpoint, require_customer_authentication, require_portal_authentication
+from apps.common.performance.rate_limiting import (
+    PortalHMACBurstThrottle,
+    PortalHMACCreateUserThrottle,
+    PortalHMACRateThrottle,
+)
 from apps.common.request_ip import get_safe_client_ip
 from apps.common.validators import SecureInputValidator
 from apps.customers.contact_models import CustomerAddress
@@ -982,10 +987,18 @@ def customer_users_add(request: HttpRequest, customer: Customer) -> Response:  #
 @api_view(["POST"])
 @authentication_classes([])
 @permission_classes([AllowAny])
-@throttle_classes([BurstAPIThrottle])
+@throttle_classes([PortalHMACRateThrottle, PortalHMACBurstThrottle, PortalHMACCreateUserThrottle])
 @require_customer_authentication
 def customer_users_create(request: HttpRequest, customer: Customer) -> Response:  # noqa: PLR0911
-    """Create a new user and add them to the customer organization."""
+    """Create a new user and add them to the customer organization.
+
+    Throttling: a per-view ``@throttle_classes`` overrides DEFAULT_THROTTLE_CLASSES,
+    so we re-list the global per-portal HMAC throttles and layer a stricter
+    create-user cap on top. The previous BurstAPIThrottle (api_burst, 120/min)
+    was a regression here — it extends UserRateThrottle and this endpoint runs
+    with authentication_classes([]), so it keyed on client IP and a caller
+    distributing requests across IPs could bypass it. All three throttles below
+    key on the verified portal id (X-Portal-Id)."""
     data = _get_request_data(request)
     try:
         user_id = _extract_user_id(data)

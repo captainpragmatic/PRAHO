@@ -623,6 +623,8 @@ THROTTLE_RATES = {
     # Global DRF defaults (apps.common.performance.rate_limiting)
     "portal_hmac": os.environ.get("THROTTLE_RATE_PORTAL_HMAC", "200/minute"),
     "portal_hmac_burst": "100/10s",
+    # Strict per-portal cap on the user-creation mutation (apps.api.customers.views)
+    "portal_hmac_create_user": os.environ.get("THROTTLE_RATE_PORTAL_CREATE_USER", "30/min"),
     "customer": os.environ.get("THROTTLE_RATE_CUSTOMER", "200/minute"),
     "burst": "60/10s",
     # Per-view API throttles (apps.api.core.throttling)
