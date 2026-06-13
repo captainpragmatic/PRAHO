@@ -17,14 +17,14 @@
           </div>
           <div>
             <h1 class="text-2xl font-bold text-white">
-              {% if user.is_staff %}
+              {% if user.is_staff_user %}
                 {% trans "Support Tickets" %}
               {% else %}
                 {% trans "My Support Tickets" %}
               {% endif %}
             </h1>
             <p class="text-slate-400">
-              {% if user.is_staff %}
+              {% if user.is_staff_user %}
                 {% trans "Manage customer support requests" %}
               {% else %}
                 {% trans "Get help with your hosting services" %}
@@ -61,7 +61,7 @@
           </div>
           <div>
             <h1 class="text-lg font-bold text-white">
-              {% if user.is_staff %}
+              {% if user.is_staff_user %}
                 {% trans "Tickets" %}
               {% else %}
                 {% trans "Support Tickets" %}
@@ -117,7 +117,7 @@
           </div>
           <input type="text" id="search" name="q" value="{{ search_query|default:'' }}" autocomplete="off"
             class="block w-full pl-10 pr-3 py-2 border border-slate-600 rounded-lg bg-slate-700 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
-            placeholder="{% if user.is_staff %}{% trans 'Search by number, title or customer...' %}{% else %}{% trans 'Search' %}{% endif %}">
+            placeholder="{% if user.is_staff_user %}{% trans 'Search by number, title or customer...' %}{% else %}{% trans 'Search' %}{% endif %}">
         </div>
       </div>
       <select name="status"
@@ -137,10 +137,10 @@
     <div class="hidden md:block bg-slate-800/50 border border-slate-700 rounded-lg overflow-hidden">
       <div class="animate-pulse">
         <div class="bg-slate-800 px-6 py-3">
-          <div class="grid {% if user.is_staff %}grid-cols-5{% else %}grid-cols-4{% endif %} gap-4">
+          <div class="grid {% if user.is_staff_user %}grid-cols-5{% else %}grid-cols-4{% endif %} gap-4">
             <div class="h-4 bg-slate-600 rounded"></div>
             <div class="h-4 bg-slate-600 rounded"></div>
-            {% if user.is_staff %}<div class="h-4 bg-slate-600 rounded"></div>{% endif %}
+            {% if user.is_staff_user %}<div class="h-4 bg-slate-600 rounded"></div>{% endif %}
             <div class="h-4 bg-slate-600 rounded"></div>
             <div class="h-4 bg-slate-600 rounded"></div>
           </div>
@@ -201,10 +201,10 @@
         <div class="w-full bg-slate-800/50 border border-slate-700 rounded-lg overflow-hidden h-full">
           <div class="animate-pulse h-full">
             <div class="bg-slate-800 px-6 py-3">
-              <div class="grid {% if user.is_staff %}grid-cols-5{% else %}grid-cols-4{% endif %} gap-4">
+              <div class="grid {% if user.is_staff_user %}grid-cols-5{% else %}grid-cols-4{% endif %} gap-4">
                 <div class="h-4 bg-slate-600 rounded"></div>
                 <div class="h-4 bg-slate-600 rounded"></div>
-                {% if user.is_staff %}<div class="h-4 bg-slate-600 rounded"></div>{% endif %}
+                {% if user.is_staff_user %}<div class="h-4 bg-slate-600 rounded"></div>{% endif %}
                 <div class="h-4 bg-slate-600 rounded"></div>
                 <div class="h-4 bg-slate-600 rounded"></div>
               </div>

@@ -4,14 +4,14 @@
 {# HTMX Partial Template for Ticket Comments #}
 {% for comment in comments %}
     {# Only show internal comments to staff - following same pattern as billing templates #}
-    {% if comment.comment_type == 'internal' and user.is_staff %}
+    {% if comment.comment_type == 'internal' and user.is_staff_user %}
         <div class="bg-amber-900/50 border-2 border-amber-600 rounded-xl p-6 mb-8 shadow-2xl ring-1 ring-amber-500/50">
     {% elif comment.comment_type != 'internal' %}
         <div class="mb-8{% if not forloop.last %} border-b border-slate-700 pb-8{% endif %}">
     {% endif %}
 
     {# Render comment content only if it should be visible #}
-    {% if comment.comment_type != 'internal' or user.is_staff %}
+    {% if comment.comment_type != 'internal' or user.is_staff_user %}
         <div class="flex items-start space-x-3 sm:space-x-4">
             <!-- Avatar -->
             <div class="flex-shrink-0">
