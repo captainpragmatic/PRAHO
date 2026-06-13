@@ -110,7 +110,7 @@
               </a>
 
               <!-- Staff/Admin Navigation with Dropdowns -->
-              {% if user.is_staff or user.staff_role %}
+              {% if user.is_staff_user %}
 
               {% dropdown "Business" business_items icon="building" %}
               {% dropdown "Support" support_items icon="tickets" %}
