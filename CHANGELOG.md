@@ -7,18 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
+_No unreleased changes._
 
-- **Invoice refund button hidden from everyone (`billing/invoice_detail.html`)** — the staff "Refund Invoice" button and modal gated on an undefined `is_staff` context variable, so they rendered for no user (fail-closed) while the customer "Request Refund" branch rendered for staff too; now gated on the `user.is_staff_user` property
-- **Mobile nav staff items hidden from support agents (`components/mobile_nav_item.html`)** — staff-only mobile navigation items gated on the Django `is_staff` flag, locking out `staff_role="support"` agents (`is_staff=False`); now gated on `user.is_staff_user`, matching the already-correct desktop nav
+---
+
+## [0.28.0] - 2026-06-14
+
+### Added
+
+- **Order → Proforma → Invoice lifecycle** — full document lifecycle with EN16931 e-invoicing compliance (#138)
+- **Platform orders dashboard** — order dashboard with stats, number formatting, slug display, and responsive tables (#99, #132)
+- **Customer pages redesign** — complete customer pages redesign with Portal parity (#139)
 
 ### Changed
 
-- **Staff permission checks standardized to `user.is_staff_user` across templates** — replaced inconsistent `user.is_staff` and `user.is_staff or user.staff_role` gates with the `user.is_staff_user` property in ticket templates (#159, closes #151) and non-ticket templates — base nav, dashboard, billing list/proforma, customers header, user profile, mobile header (#180, #176). Support agents (`staff_role="support"`, `is_staff=False`) now see staff-only UI (reopen button, internal notes, list filters, customer column, refund actions) while customers remain excluded. Added render-level regression tests covering the discriminating `is_staff=False` support-agent case
+- **`is_staff_user` consolidation** — introduced `is_staff_user` (`bool(staff_role) or is_staff or is_superuser`) as the canonical staff-classification property and migrated the codebase off the inconsistent `user.is_staff` / `user.is_staff or user.staff_role` patterns: backend and decorators (#175), ticket templates (#151, #159), and the remaining non-ticket templates — base nav, dashboard, billing list/proforma, customers header, user profile, mobile header (#176, #180). Support agents (`staff_role="support"`, `is_staff=False`) now see staff-only UI (reopen button, internal notes, list filters, customer column, refund actions) while customers remain excluded. Added render-level regression tests covering the discriminating `is_staff=False` support-agent case
+
+### Performance
+
+- **Cart totals** — batch-fetch products and prices in `calculate_cart_totals`, removing per-item queries (#100, #161)
+- **Portal auth** — reduced auth log noise and enabled HTTP connection reuse (#83, #164)
+
+### Fixed
+
+- **Invoice refund & mobile nav gates** — `billing/invoice_detail.html` gated the staff "Refund Invoice" button/modal on an undefined `is_staff` context variable (rendered for no one, fail-closed); `components/mobile_nav_item.html` gated staff-only items on the Django `is_staff` flag (locking out support agents); both now gate on `user.is_staff_user` (#159, #180 review)
+- **Billing & refund integrity** — terminal statuses, row locking, refund source-of-truth, price seal, and order-item handling (#134); follow-up hardening for FSM gaps, TOCTOU, IDOR, and refund backfill; `ObjectDoesNotExist` instead of string matching in refund lookups (#120, #131); `InvoiceNumberingService.get_or_create_sequence` AttributeError; EN16931 field display, proforma UX, and standalone payment flow
+- **Orders** — status-change AJAX feedback and destructive-action confirmation (#98, #163); 302→login redirect handling and modal hardening; `transaction.set_rollback(True)` in the create_order error path; PR #132 review findings (aggregate query, billing address, Tailwind, fixtures)
+- **Notifications** — atomicity, audit-trail, and TOCTOU fixes for consent operations (#94, #162); marketing-consent audit dedup (#183); RSA public-key type narrowing in the SES webhook verifier
+- **Customers & API** — invite email sent on Portal user creation (#145, #149); PR #149 review findings and tracking issue #173 (#184); 17 review findings from PR #164; 3 security and data-integrity gaps in the customer API (#143, #144, #146)
+- **Staff role classification** — `is_staff_user` property, validation, and a data migration cleaning legacy `staff_role="customer"` rows (#150, #154)
+- **UI** — nav icons, missing mobile menu items, and section dividers; 19 E2E failures (mobile nav button, selectors, ORM fixtures)
+- **CI & tests** — use `config.settings.ci` for nightly integration and cache tests; deduplicate imports in `test_security.py`; webhook regression and test-quality fixes (#137, #172)
 
 ### Security
 
-- **`staff_role` validity enforced at the database layer** — added a `CheckConstraint` (`user_staff_role_valid`) on the `User` model so a truthy-but-invalid `staff_role` (e.g. `"customer"`) can no longer be persisted via raw `.update()` / `bulk_create` / fixtures / migrations and silently read as staff by the `is_staff_user` property (`bool(staff_role) or is_staff or is_superuser`). The `UserManager.create_user` guard remains as the application-layer check (#174)
+- **`staff_role` enforced at the database layer** — added a `CheckConstraint` (`user_staff_role_valid`) so a truthy-but-invalid `staff_role` (e.g. `"customer"`) can no longer be persisted via raw `.update()` / `bulk_create` / fixtures / migrations and silently read as staff by `is_staff_user`; the `UserManager.create_user` guard remains as the application-layer check (#174)
+- **Comprehensive security audit** — resolved 22 CRITICAL and HIGH vulnerabilities from a full audit
+- **Pre-release hardening** — all medium and low priority findings (#130, #137) plus 5 post-merge hardening fixes (#147)
+- **Auth bypass gating** — gated the `TESTING` auth bypass on `DEBUG=True` to prevent production exposure (#129)
 
 ---
 
