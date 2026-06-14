@@ -7,7 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_No unreleased changes._
+### Fixed
+
+- **e-Factura EN16931/CIUS-RO XML compliance** — completed the UBL 2.1 builder for ANAF Schematron conformance: EU cross-border B2B encoded as reverse charge (AE, VATEX-EU-AE, rate 0, all lines coherent per BR-AE-1) with deterministic tax-category derivation; corrected VATEX exemption codes (S/Z emit neither BT-120 nor BT-121; BT-121 only with a valid VATEX code); per-line and credit-note VAT rate clamped to 0 for non-standard categories; credit-note unit code from the line. Document-level allowance/charge totals reconciled in UBL element order with consistent TaxExclusive/TaxInclusive/Payable and a netted breakdown TaxableAmount (BR-CO-13/15/16/17), and allowance/charge metadata validated against malformed amounts (#158, #160)
 
 ---
 
