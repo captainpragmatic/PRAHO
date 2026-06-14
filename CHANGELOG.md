@@ -7,7 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_No unreleased changes._
+### Fixed
+
+- **Invoice refund button hidden from everyone (`billing/invoice_detail.html`)** — the staff "Refund Invoice" button and modal gated on an undefined `is_staff` context variable, so they rendered for no user (fail-closed) while the customer "Request Refund" branch rendered for staff too; now gated on the `user.is_staff_user` property
+- **Mobile nav staff items hidden from support agents (`components/mobile_nav_item.html`)** — staff-only mobile navigation items gated on the Django `is_staff` flag, locking out `staff_role="support"` agents (`is_staff=False`); now gated on `user.is_staff_user`, matching the already-correct desktop nav
+
+### Changed
+
+- **Staff permission checks standardized to `user.is_staff_user` across templates** — replaced inconsistent `user.is_staff` and `user.is_staff or user.staff_role` gates with the `user.is_staff_user` property in ticket templates (#159, closes #151) and non-ticket templates — base nav, dashboard, billing list/proforma, customers header, user profile, mobile header (#180, #176). Support agents (`staff_role="support"`, `is_staff=False`) now see staff-only UI (reopen button, internal notes, list filters, customer column, refund actions) while customers remain excluded. Added render-level regression tests covering the discriminating `is_staff=False` support-agent case
+
+### Security
+
+- **`staff_role` validity enforced at the database layer** — added a `CheckConstraint` (`user_staff_role_valid`) on the `User` model so a truthy-but-invalid `staff_role` (e.g. `"customer"`) can no longer be persisted via raw `.update()` / `bulk_create` / fixtures / migrations and silently read as staff by the `is_staff_user` property (`bool(staff_role) or is_staff or is_superuser`). The `UserManager.create_user` guard remains as the application-layer check (#174)
 
 ---
 

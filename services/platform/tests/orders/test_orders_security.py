@@ -455,8 +455,9 @@ class AccessControlSecurityTests(OrderSecurityTestCase):
             password="testpass123",
             is_staff=True
         )
+        # NOT persisted: the DB CheckConstraint (user_staff_role_valid) rejects invalid roles;
+        # can_manage_financial_data reads the in-memory staff_role.
         user_invalid_role.staff_role = "invalid_role"
-        user_invalid_role.save()
 
         self.assertFalse(can_manage_financial_data(user_invalid_role))
 

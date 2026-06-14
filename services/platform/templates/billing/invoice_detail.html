@@ -19,9 +19,9 @@
     </div>
     <div class="mt-4 sm:mt-0 sm:ml-16 sm:flex-none space-x-3">
       <!-- Refund Button for Staff -->
-      {% if is_staff and invoice.status == "paid" %}
+      {% if user.is_staff_user and invoice.status == "paid" %}
         {% trans "Refund Invoice" as bt1 %}{% button bt1 onclick="showInvoiceRefundModal()" variant="success" %}
-      {% elif not is_staff and invoice.status == "paid" %}
+      {% elif not user.is_staff_user and invoice.status == "paid" %}
         <!-- Refund Request Button for Customers -->
         {% trans "Request Refund" as bt2 %}{% button bt2 onclick="showInvoiceRefundRequestModal()" variant="primary" %}
       {% endif %}
@@ -288,7 +288,7 @@
 </div>
 
 <!-- Invoice Refund Modal (for staff) -->
-{% if is_staff and invoice.status == "paid" %}
+{% if user.is_staff_user and invoice.status == "paid" %}
 <div id="invoiceRefundModal" class="hidden fixed inset-0 z-50 overflow-y-auto">
   <div class="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
     <div class="fixed inset-0 transition-opacity" aria-hidden="true">
@@ -464,7 +464,7 @@ document.getElementById('invoiceRefundForm').addEventListener('submit', function
 {% endif %}
 
 <!-- Invoice Refund Request Modal (for customers) -->
-{% if not is_staff and invoice.status == "paid" %}
+{% if not user.is_staff_user and invoice.status == "paid" %}
 <div id="invoiceRefundRequestModal" class="hidden fixed inset-0 z-50 overflow-y-auto">
   <div class="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
     <div class="fixed inset-0 transition-opacity" aria-hidden="true">

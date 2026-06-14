@@ -41,6 +41,18 @@ class TicketInternalCommentsSecurityTest(TestCase):
         self.support_user.staff_role = 'support'
         self.support_user.save()
 
+        # Create a support agent WITHOUT the Django is_staff flag (staff_role only).
+        # This is the discriminating fixture for the is_staff_user migration: the
+        # support_user above sets is_staff=True, so it cannot detect a regression
+        # from is_staff_user back to is_staff.
+        self.support_no_django_staff = User.objects.create_user(
+            email='support-no-flag@example.com',
+            password='testpass123'
+        )
+        self.support_no_django_staff.is_staff = False
+        self.support_no_django_staff.staff_role = 'support'
+        self.support_no_django_staff.save()
+
         # Create customer user (non-staff)
         self.customer_user = User.objects.create_user(
             email='customer@example.com',
@@ -155,6 +167,49 @@ class TicketInternalCommentsSecurityTest(TestCase):
         # Check that customer does NOT see internal comments
         self.assertNotContains(response, 'Internal staff note - CONFIDENTIAL')
         self.assertNotContains(response, 'STAFF INTERNAL NOTE')
+
+    def test_support_role_without_django_staff_flag_sees_internal_comments(self):
+        """A support agent with staff_role='support' but is_staff=False (is_staff_user=True)
+        must see internal staff notes on the ticket detail page.
+
+        Regression guard for the is_staff_user migration in comments_list.html and the
+        ticket_detail comment filter (views.py:163). Uses a fixture WITHOUT the Django
+        is_staff flag, so reverting either gate to `is_staff` would re-lock this agent
+        and fail this test (the existing staff/support fixtures set is_staff=True and
+        cannot detect that regression).
+        """
+        self.client.login(email='support-no-flag@example.com', password='testpass123')
+        response = self.client.get(reverse('tickets:detail', kwargs={'pk': self.ticket.pk}))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Internal staff note - CONFIDENTIAL')
+        self.assertContains(response, 'STAFF INTERNAL NOTE')
+
+    def test_reopen_button_gated_on_is_staff_user_not_django_is_staff(self):
+        """The reopen action on a CLOSED ticket must show for staff_role agents
+        (is_staff_user=True) even without the Django is_staff flag, and stay hidden
+        from customers. Template gate: tickets/detail.html user.is_staff_user.
+        """
+        closed_ticket = Ticket.objects.create(
+            customer=self.customer,
+            title='Closed Ticket',
+            description='Closed ticket for reopen test',
+            priority='normal',
+            status='closed',
+            created_by=self.customer_user,
+        )
+        reopen_url = reverse('tickets:reopen', kwargs={'pk': closed_ticket.pk})
+
+        # Support agent (is_staff=False, staff_role='support') sees the reopen action
+        self.client.login(email='support-no-flag@example.com', password='testpass123')
+        staff_response = self.client.get(reverse('tickets:detail', kwargs={'pk': closed_ticket.pk}))
+        self.assertEqual(staff_response.status_code, 200)
+        self.assertContains(staff_response, reopen_url)
+
+        # Customer must NOT see the reopen action
+        self.client.login(email='customer@example.com', password='testpass123')
+        customer_response = self.client.get(reverse('tickets:detail', kwargs={'pk': closed_ticket.pk}))
+        self.assertEqual(customer_response.status_code, 200)
+        self.assertNotContains(customer_response, reopen_url)
 
     def test_htmx_comments_endpoint_security(self):
         """Test that HTMX comments endpoint respects internal comment security"""

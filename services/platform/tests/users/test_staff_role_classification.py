@@ -14,6 +14,7 @@ from __future__ import annotations
 from django.contrib.auth import get_user_model
 from django.contrib.messages.storage.fallback import FallbackStorage
 from django.contrib.sessions.backends.db import SessionStore
+from django.db import IntegrityError, transaction
 from django.test import RequestFactory, TestCase, override_settings
 
 from apps.tickets.views import _determine_comment_type, _validate_internal_note_permission
@@ -151,3 +152,33 @@ class ValidateInternalNotePermissionTests(TestCase):
         request._messages = FallbackStorage(request)
         result = _validate_internal_note_permission(request, user, is_internal=True, ticket_pk=1)
         self.assertIsNotNone(result)
+
+
+@override_settings(DISABLE_AUDIT_SIGNALS=True)
+class StaffRoleDatabaseConstraintTests(TestCase):
+    """The DB CheckConstraint enforces valid staff_role at the storage layer, so a
+    truthy-but-invalid role (e.g. "customer") cannot be persisted even when the
+    UserManager.create_user guard is bypassed via raw .save()/.update()/bulk ops.
+
+    Without it, is_staff_user (`bool(staff_role) or is_staff or is_superuser`) would
+    read such a value as staff — a privilege-escalation foot-gun (#174).
+    """
+
+    def test_db_rejects_invalid_staff_role_on_save(self):
+        user = User.objects.create_user(email="constraint-save@test.com", password="test123")
+        user.staff_role = "customer"  # bypasses the UserManager.create_user guard
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            user.save()
+
+    def test_db_rejects_invalid_staff_role_on_update(self):
+        user = User.objects.create_user(email="constraint-update@test.com", password="test123")
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            User.objects.filter(pk=user.pk).update(staff_role="hacker")
+
+    def test_db_accepts_empty_and_valid_staff_roles(self):
+        for role in ("", "admin", "support", "billing", "manager"):
+            user = User.objects.create_user(email=f"constraint-ok-{role or 'empty'}@test.com", password="test123")
+            # .update() bypasses the manager guard, proving the DB itself accepts the value
+            User.objects.filter(pk=user.pk).update(staff_role=role)
+            user.refresh_from_db()
+            self.assertEqual(user.staff_role, role)

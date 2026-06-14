@@ -25,7 +25,7 @@ Optional Parameters:
 {% load i18n ui_components %}
 
 <!-- Navigation Item -->
-{% if not staff_only or user.is_staff %}
+{% if not staff_only or user.is_staff_user %}
     {% if disabled %}
         <div class="mobile-nav-item group opacity-50 cursor-not-allowed">
             <div class="flex items-center space-x-5 p-4">

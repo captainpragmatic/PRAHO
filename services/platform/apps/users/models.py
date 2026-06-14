@@ -145,6 +145,17 @@ class User(AbstractUser):
             models.Index(fields=["two_factor_enabled"], name="idx_users_2fa_enabled"),
             models.Index(fields=["two_factor_enabled", "is_staff"], name="idx_users_2fa_enabled_staff"),
         )
+        constraints: ClassVar[list[models.BaseConstraint]] = [
+            # Defense-in-depth: enforce a valid staff_role at the storage layer so raw
+            # .update()/bulk_create/fixtures/migrations cannot persist a truthy-but-invalid
+            # role (e.g. "customer") that is_staff_user would read as staff. Mirrors
+            # STAFF_ROLE_CHOICES plus the empty customer default; UserManager.create_user
+            # remains the application-layer guard (#174).
+            models.CheckConstraint(
+                condition=models.Q(staff_role__in=("", "admin", "support", "billing", "manager")),
+                name="user_staff_role_valid",
+            ),
+        ]
 
     def __str__(self) -> str:
         return f"{self.get_full_name()} ({self.email})"

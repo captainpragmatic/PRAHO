@@ -329,9 +329,9 @@ class EnhancedUserModelTest(TestCase):
             self.user.save()
             self.assertEqual(self.user.get_staff_role_display_name(), expected_display)
 
-        # Unknown staff role
+        # Unknown staff role — NOT persisted: the DB CheckConstraint (user_staff_role_valid)
+        # rejects invalid roles; get_staff_role_display_name() reads the in-memory value.
         self.user.staff_role = 'unknown_role'
-        self.user.save()
         self.assertEqual(self.user.get_staff_role_display_name(), 'unknown_role')
 
     def test_two_factor_secret_encryption(self) -> None:
@@ -743,11 +743,10 @@ class ModelEdgeCasesTest(TestCase):
         )
         self.assertEqual(user.phone, long_phone)
 
-        # Test staff role max length (20 chars)
-        long_role = 'a' * 20
-        user.staff_role = long_role
-        user.save()
-        self.assertEqual(user.staff_role, long_role)
+        # staff_role field max length is 20. Value validity is enforced by the
+        # user_staff_role_valid CheckConstraint, so an invalid 20-char role can no longer
+        # be persisted — assert the declared max_length directly instead.
+        self.assertEqual(UserModel._meta.get_field('staff_role').max_length, 20)
 
     def test_model_timestamps(self) -> None:
         """Test timestamp fields are set correctly"""

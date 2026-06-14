@@ -108,6 +108,46 @@ class InvoiceDetailViewTestCase(TestCase):
         self.assertContains(response, 'INV-DETAIL-001')
         self.assertContains(response, 'Test Service')
 
+    def test_invoice_detail_refund_button_gated_on_is_staff_user(self):
+        """Refund UI in invoice_detail.html must gate on user.is_staff_user.
+
+        Regression guard: the template previously gated on an undefined `is_staff`
+        context variable, so the staff "Refund Invoice" button rendered for NOBODY
+        (fail-closed) while the customer "Request Refund" branch rendered for everyone.
+        A support agent (is_staff=False, staff_role="support") has is_staff_user=True
+        and must see the staff button; a customer must see the request-refund button.
+        """
+        paid_invoice = Invoice.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            number='INV-PAID-REFUND-001',
+            total_cents=12000,
+            status='paid',
+        )
+
+        # Support agent: Django is_staff flag is False, but staff_role grants is_staff_user
+        support_user = User.objects.create_user(email='support-refund@test.ro', password='testpass')
+        support_user.is_staff = False
+        support_user.staff_role = 'support'
+        support_user.save()
+
+        request = self.factory.get(f'/app/billing/invoices/{paid_invoice.pk}/')
+        request.user = support_user
+        request = self.add_middleware_to_request(request)
+        staff_response = invoice_detail(request, paid_invoice.pk)
+        self.assertEqual(staff_response.status_code, 200)
+        self.assertContains(staff_response, 'Refund Invoice')
+        self.assertNotContains(staff_response, 'Request Refund')
+
+        # Customer (membership only) sees the request-refund variant, never the staff button
+        request = self.factory.get(f'/app/billing/invoices/{paid_invoice.pk}/')
+        request.user = self.user
+        request = self.add_middleware_to_request(request)
+        customer_response = invoice_detail(request, paid_invoice.pk)
+        self.assertEqual(customer_response.status_code, 200)
+        self.assertContains(customer_response, 'Request Refund')
+        self.assertNotContains(customer_response, 'Refund Invoice')
+
     def test_invoice_detail_unauthorized_user(self):
         """Test invoice detail with unauthorized user"""
         unauthorized_user = User.objects.create_user(
