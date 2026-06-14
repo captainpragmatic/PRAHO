@@ -312,3 +312,102 @@ class TokenInfoTests(TestCase):
         self.client.credentials(HTTP_AUTHORIZATION=f"Token {self.raw_key}")
         response = self.client.get(self.url)
         self.assertNotIn("is_staff", response.json())
+
+
+# ===============================================================================
+# CREATION TIMESTAMP PRESERVATION (review M1)
+# ===============================================================================
+
+
+class APITokenCreatedAtTests(TestCase):
+    """created_at must be overridable so the DRF migration can preserve history."""
+
+    def test_explicit_created_at_is_preserved(self) -> None:
+        user = User.objects.create_user(email="ts@test.com", password="StrongPass123!")
+        historical = timezone.now() - timedelta(days=400)
+
+        token, _ = _create_token(user, created_at=historical)
+        token.refresh_from_db()
+
+        # auto_now_add would have clobbered this to "now"; default=timezone.now keeps it.
+        self.assertEqual(token.created_at, historical)
+
+
+# ===============================================================================
+# TOKEN EXPIRY ON ISSUANCE (review M2)
+# ===============================================================================
+
+
+class ObtainTokenExpiryTests(TestCase):
+    """obtain_token must apply a default rolling TTL so tokens are not immortal."""
+
+    def setUp(self) -> None:
+        self.client = APIClient()
+        self.password = "StrongPass123!"
+        self.user = User.objects.create_user(email="ttl@test.com", password=self.password)
+        self.url = "/api/users/token/"
+
+    def test_default_ttl_applied_when_not_requested(self) -> None:
+        before = timezone.now()
+        response = self.client.post(self.url, {"email": self.user.email, "password": self.password}, format="json")
+        self.assertEqual(response.status_code, 200)
+
+        self.assertIsNotNone(response.json()["expires_at"])
+        token = APIToken.objects.get(user=self.user)
+        self.assertIsNotNone(token.expires_at)
+        # ~90 days (settings default), allow a small window for clock + request time.
+        expected = before + timedelta(days=90)
+        self.assertAlmostEqual(token.expires_at, expected, delta=timedelta(minutes=5))
+
+    def test_requested_ttl_is_honored_and_clamped(self) -> None:
+        self.client.post(
+            self.url,
+            {"email": self.user.email, "password": self.password, "ttl_days": 7},
+            format="json",
+        )
+        token = APIToken.objects.get(user=self.user)
+        self.assertAlmostEqual(token.expires_at, timezone.now() + timedelta(days=7), delta=timedelta(minutes=5))
+
+    def test_requested_ttl_above_max_is_clamped(self) -> None:
+        self.client.post(
+            self.url,
+            {"email": self.user.email, "password": self.password, "ttl_days": 100000},
+            format="json",
+        )
+        token = APIToken.objects.get(user=self.user)
+        # Clamped to API_TOKEN_MAX_TTL_DAYS (365), not the requested 100000.
+        self.assertAlmostEqual(token.expires_at, timezone.now() + timedelta(days=365), delta=timedelta(minutes=5))
+
+
+# ===============================================================================
+# TOKEN-LIMIT COUNTS ONLY LIVE TOKENS (review M3)
+# ===============================================================================
+
+
+class ObtainTokenLimitExpiredTests(TestCase):
+    """Expired tokens must not count toward the per-user limit (no rotation lockout)."""
+
+    def setUp(self) -> None:
+        self.client = APIClient()
+        self.password = "StrongPass123!"
+        self.user = User.objects.create_user(email="limit@test.com", password=self.password)
+        self.url = "/api/users/token/"
+
+    def test_expired_tokens_do_not_block_new_token(self) -> None:
+        # Fill the quota entirely with already-expired tokens.
+        for i in range(APIToken.MAX_TOKENS_PER_USER):
+            _create_token(self.user, name=f"old-{i}", expires_at=timezone.now() - timedelta(days=1))
+
+        response = self.client.post(self.url, {"email": self.user.email, "password": self.password}, format="json")
+
+        # Live count is 0, so issuance must succeed rather than report "Maximum".
+        self.assertEqual(response.status_code, 200)
+
+    def test_live_tokens_still_enforce_limit(self) -> None:
+        for i in range(APIToken.MAX_TOKENS_PER_USER):
+            _create_token(self.user, name=f"live-{i}", expires_at=timezone.now() + timedelta(days=30))
+
+        response = self.client.post(self.url, {"email": self.user.email, "password": self.password}, format="json")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Maximum", response.json()["error"])

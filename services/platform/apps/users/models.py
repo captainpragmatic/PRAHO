@@ -626,7 +626,10 @@ class APIToken(models.Model):
         blank=True,
         help_text=_("Last time this token was used for authentication. Updated at most every 5 minutes."),
     )
-    created_at = models.DateTimeField(auto_now_add=True)
+    # default=timezone.now (not auto_now_add) so the DRF-token data migration can
+    # preserve the original creation timestamps — auto_now_add overrides any
+    # explicitly assigned value in bulk_create. editable=False keeps it off forms/admin.
+    created_at = models.DateTimeField(default=timezone.now, editable=False)
 
     class Meta:
         db_table = "users_api_tokens"

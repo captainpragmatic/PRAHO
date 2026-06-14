@@ -358,6 +358,12 @@ REST_FRAMEWORK = {
     "DEFAULT_THROTTLE_RATES": {},
 }
 
+# API token expiry (ADR-0031). obtain_token applies this default TTL so issued
+# tokens are not immortal; callers may request a shorter/longer TTL up to the max.
+# Set API_TOKEN_DEFAULT_TTL_DAYS=0 to disable default expiry (not recommended).
+API_TOKEN_DEFAULT_TTL_DAYS = int(os.environ.get("API_TOKEN_DEFAULT_TTL_DAYS", "90"))
+API_TOKEN_MAX_TTL_DAYS = int(os.environ.get("API_TOKEN_MAX_TTL_DAYS", "365"))
+
 # ===============================================================================
 # ROMANIAN BUSINESS CONFIGURATION
 # ===============================================================================

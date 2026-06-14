@@ -11,7 +11,10 @@ from typing import Any, cast
 
 from django.conf import settings
 from django.contrib.auth import authenticate
+from django.db import transaction
+from django.db.models import Q
 from django.http import HttpRequest, JsonResponse
+from django.utils import timezone
 from django.views.decorators.cache import never_cache
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
@@ -62,6 +65,29 @@ def _mask_email(email: str) -> str:
         local[:_EMAIL_MASK_LOCAL_VISIBLE_CHARS] + "***" if len(local) > _EMAIL_MASK_LOCAL_VISIBLE_CHARS else "***"
     )
     return f"{masked_local}@{domain}"
+
+
+def _resolve_token_expiry(ttl_days_raw: Any) -> datetime | None:
+    """Resolve an API token's expiry from an optional caller-supplied TTL (ADR-0031).
+
+    Falls back to ``settings.API_TOKEN_DEFAULT_TTL_DAYS`` when the caller does not
+    specify one. A caller-supplied TTL is clamped to ``[1, API_TOKEN_MAX_TTL_DAYS]``,
+    so callers can shorten but never opt out of expiry — only the server default may
+    select "no expiry" (a non-positive default). Returns None for no expiry.
+    """
+    default_ttl = getattr(settings, "API_TOKEN_DEFAULT_TTL_DAYS", 90)
+    max_ttl = getattr(settings, "API_TOKEN_MAX_TTL_DAYS", 365)
+
+    ttl_days = default_ttl
+    if ttl_days_raw is not None:
+        try:
+            ttl_days = min(max(int(ttl_days_raw), 1), max_ttl)
+        except (TypeError, ValueError):
+            ttl_days = default_ttl
+
+    if ttl_days <= 0:
+        return None
+    return timezone.now() + timedelta(days=ttl_days)
 
 
 @csrf_exempt  # nosemgrep: no-csrf-exempt — HMAC-authenticated inter-service endpoint
@@ -240,23 +266,37 @@ def obtain_token(request: HttpRequest) -> Response:
     user.account_locked_until = None
     user.save(update_fields=["failed_login_attempts", "account_locked_until"])
 
-    # Enforce per-user token limit to prevent token sprawl
-    active_count = APIToken.objects.filter(user=user).count()
-    if active_count >= APIToken.MAX_TOKENS_PER_USER:
-        return Response(
-            {"error": f"Maximum of {APIToken.MAX_TOKENS_PER_USER} active tokens per user. Revoke unused tokens first."},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
-
-    # Create a new API token (multi-token: each call creates a fresh token)
     raw_key = APIToken.generate_key()
     name = request.data.get("name", "default")
-    token = APIToken.objects.create(
-        user=user,
-        key_hash=APIToken.hash_key(raw_key),
-        key_prefix=raw_key[:8],
-        name=name[:100],  # Enforce max_length
-    )
+    expires_at = _resolve_token_expiry(request.data.get("ttl_days"))
+
+    # Enforce the per-user token limit atomically. Lock the user row so concurrent
+    # obtain_token calls serialize (TOCTOU-safe — the previous non-atomic count+create
+    # let parallel requests exceed the cap), and count only live tokens so a user
+    # holding only expired tokens is not locked out of issuing a fresh one.
+    now = timezone.now()
+    with transaction.atomic():
+        User.objects.select_for_update().get(pk=user.pk)
+        active_count = (
+            APIToken.objects.filter(user=user).filter(Q(expires_at__isnull=True) | Q(expires_at__gt=now)).count()
+        )
+        if active_count >= APIToken.MAX_TOKENS_PER_USER:
+            return Response(
+                {
+                    "error": (
+                        f"Maximum of {APIToken.MAX_TOKENS_PER_USER} active tokens per user. Revoke unused tokens first."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        token = APIToken.objects.create(
+            user=user,
+            key_hash=APIToken.hash_key(raw_key),
+            key_prefix=raw_key[:8],
+            name=name[:100],  # Enforce max_length
+            expires_at=expires_at,
+        )
 
     logger.info(  # nosemgrep: python-logger-credential-disclosure — email masked via _mask_email()
         "[Auth] New API token '%s' (%s…) created for user: %s",
@@ -272,7 +312,7 @@ def obtain_token(request: HttpRequest) -> Response:
             "email": user.email,
             "key_prefix": token.key_prefix,
             "name": token.name,
-            "expires_at": None,
+            "expires_at": token.expires_at.isoformat() if token.expires_at else None,
         }
     )
 

@@ -1,4 +1,5 @@
 import django.db.models.deletion
+import django.utils.timezone
 from django.conf import settings
 from django.db import migrations, models
 
@@ -71,7 +72,7 @@ class Migration(migrations.Migration):
                 ),
                 (
                     "created_at",
-                    models.DateTimeField(auto_now_add=True),
+                    models.DateTimeField(default=django.utils.timezone.now, editable=False),
                 ),
                 (
                     "user",
@@ -92,7 +93,7 @@ class Migration(migrations.Migration):
             model_name="apitoken",
             index=models.Index(
                 fields=["user", "created_at"],
-                name="users_api_t_user_id_b2c3d4_idx",
+                name="users_api_t_user_id_fbd347_idx",
             ),
         ),
     ]
