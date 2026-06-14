@@ -56,6 +56,7 @@ class DomainRegistrationConfig:
     domain_name: str
     tld: Any
     registrar: Any
+    years: int = 1
     whois_privacy: bool = False
     auto_renew: bool = True
 
@@ -363,6 +364,7 @@ class DomainLifecycleService:
             domain_name=domain_name,
             tld=tld,
             registrar=registrar,
+            years=years,
             whois_privacy=whois_privacy,
             auto_renew=auto_renew,
         )
@@ -403,7 +405,19 @@ class DomainLifecycleService:
 
     @staticmethod
     def _execute_domain_registration(config: DomainRegistrationConfig) -> Result[Domain, str]:
-        """Execute the actual domain registration."""
+        """Execute the actual domain registration.
+
+        Two-step so the external registrar call never runs inside a DB transaction:
+        1. Create the local Domain row in ``pending`` state (records intent).
+        2. Submit to the registrar via the gateway. On success, persist the
+           registrar-returned fields and FSM-transition the domain to ``active``.
+           On failure, the domain stays ``pending`` (no failed state exists) so a
+           later retry/worker can re-submit — the gateway is idempotent per domain.
+
+        Returns Ok(domain) in both the active and the still-pending case (the local
+        record exists and the order item must link to it); a pending domain means
+        registration was NOT confirmed at the registrar and must be completed later.
+        """
         try:
             with transaction.atomic():
                 domain = Domain.objects.create(
@@ -411,17 +425,73 @@ class DomainLifecycleService:
                     tld=config.tld,
                     registrar=config.registrar,
                     customer=config.customer,
-                    status="pending",
                     whois_privacy=config.whois_privacy,
                     auto_renew=config.auto_renew,
                 )
-
                 logger.info("Created domain registration: %s for customer %s", config.domain_name, config.customer.id)
-                return Ok(domain)
-
         except Exception as e:
             logger.error("Failed to create domain registration: %s", e)
             return Err(cast(str, _("Failed to create domain registration")))
+
+        # Submit to the registrar OUTSIDE the transaction above — never hold a DB
+        # transaction open across network I/O.
+        DomainLifecycleService._submit_registration_to_registrar(domain, config)
+        return Ok(domain)
+
+    @staticmethod
+    def _submit_registration_to_registrar(domain: Domain, config: DomainRegistrationConfig) -> bool:
+        """Submit a pending domain to its registrar and activate it on success.
+
+        Returns True if the registrar confirmed registration (domain now active),
+        False if it failed (domain left pending for retry). Never raises.
+        """
+        registrant_data = DomainLifecycleService._build_registrant_data(config.customer)
+        success, payload = DomainRegistrarGateway.register_domain(
+            config.registrar, domain.name, config.years, registrant_data
+        )
+
+        if not success:
+            logger.warning(
+                "Registrar did not confirm %s (left pending for retry): %s",
+                domain.name,
+                payload.get("error", "unknown error"),
+            )
+            return False
+
+        try:
+            with transaction.atomic():
+                locked = Domain.objects.select_for_update().get(pk=domain.pk)
+                # Another worker may have already completed this domain.
+                if locked.status != "pending":
+                    return bool(locked.status == "active")
+
+                locked.registrar_domain_id = payload.get("registrar_domain_id", "")
+                if payload.get("expires_at"):
+                    locked.expires_at = payload["expires_at"]
+                if payload.get("nameservers"):
+                    locked.nameservers = payload["nameservers"]
+                if payload.get("epp_code"):
+                    locked.set_encrypted_epp_code(payload["epp_code"])
+                locked.registered_at = timezone.now()
+                locked.activate()  # FSM transition: pending -> active
+                locked.save()
+
+            # Reflect the persisted state on the caller's instance.
+            domain.refresh_from_db()
+            logger.info("Registrar confirmed %s — domain active", domain.name)
+            return True
+        except Exception as e:
+            logger.error("Failed to persist registrar result for %s (left pending): %s", domain.name, e)
+            return False
+
+    @staticmethod
+    def _build_registrant_data(customer: Customer) -> dict[str, Any]:
+        """Assemble registrant contact data for a registrar from the customer."""
+        return {
+            "name": customer.get_display_name(),
+            "email": customer.primary_email,
+            "company": customer.company_name or "",
+        }
 
     @staticmethod
     def process_domain_renewal(domain: Domain, years: int = 1) -> Result[str, str]:
