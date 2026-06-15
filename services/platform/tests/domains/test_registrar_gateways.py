@@ -549,3 +549,47 @@ class CircuitBreakerRecoveryTests(TestCase):
         mock_cache.incr.side_effect = ValueError  # key absent
         self.gateway._record_failure(RegistrarTransientError("gandi", "boom"))
         mock_cache.set.assert_called_once_with("cb:gandi:failures", 1, CIRCUIT_BREAKER_RESET_SECONDS)
+
+
+# ===============================================================================
+# INVALID-RESPONSE + ROBUSTNESS (PR #169 review M2/M4)
+# ===============================================================================
+
+
+class GandiInvalidResponseTests(TestCase):
+    """Missing/invalid expiry and malformed price are handled gracefully."""
+
+    def setUp(self) -> None:
+        self.registrar = _make_registrar("gandi")
+        self.gateway = GandiGateway(self.registrar)
+
+    @patch("apps.domains.gateways.gandi.GandiGateway._api_request")
+    @patch("apps.domains.gateways.base.cache")
+    def test_registration_missing_expires_at_is_invalid_response(
+        self, mock_cache: MagicMock, mock_request: MagicMock
+    ) -> None:
+        mock_cache.get.side_effect = [0, None]
+        # 202 success but NO expires_at → must not fabricate a date.
+        mock_request.return_value = _mock_response(202, {"id": "g-1", "auth_info": "EPP"})
+
+        result = self.gateway.register_domain("example.com", 1, {})
+
+        self.assertTrue(result.is_err())
+        self.assertEqual(result.unwrap_err().code, RegistrarErrorCode.INVALID_RESPONSE)
+
+    @patch("apps.domains.gateways.gandi.GandiGateway._api_request")
+    @patch("apps.domains.gateways.base.cache")
+    def test_malformed_price_does_not_break_availability(
+        self, mock_cache: MagicMock, mock_request: MagicMock
+    ) -> None:
+        mock_cache.get.return_value = 0  # circuit breaker OK
+        mock_request.return_value = _mock_response(
+            200,
+            {"products": [{"status": "available", "prices": [{"price_after_taxes": "not-a-number"}]}]},
+        )
+
+        result = self.gateway.check_availability("example.com")
+
+        self.assertTrue(result.is_ok())
+        self.assertTrue(result.unwrap().available)
+        self.assertIsNone(result.unwrap().price_cents)

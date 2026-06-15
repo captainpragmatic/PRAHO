@@ -148,6 +148,13 @@ class DomainValidationService:
         # Remove leading/trailing whitespace
         domain_name = domain_name.strip().lower()
 
+        # Reject non-ASCII before any other check. str.isalnum() is True for Unicode
+        # letters, so a Cyrillic/Greek homograph would otherwise pass the character
+        # check below and be forwarded verbatim to the registrar. IDNs must be
+        # punycode-encoded (ASCII) by the caller.
+        if not domain_name.isascii():
+            return False, cast(str, _("Domain name must be ASCII (punycode-encode internationalized domains)"))
+
         # Check length
         if len(domain_name) < MIN_DOMAIN_NAME_LENGTH:
             return False, cast(str, _("Domain name too short (minimum 3 characters)"))

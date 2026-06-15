@@ -9,7 +9,7 @@ from django.urls import reverse
 from apps.common.encryption import decrypt_sensitive_data, is_encrypted
 from apps.domains.forms import RegistrarForm
 from apps.domains.models import TLD, Registrar
-from apps.domains.services import DomainLifecycleService
+from apps.domains.services import DomainLifecycleService, DomainValidationService
 
 User = get_user_model()
 
@@ -169,3 +169,18 @@ class RegistrarAdminAuthorizationTests(TestCase):
         self.client.login(email="admin@example.com", password="testpass123")
         resp = self.client.get(reverse("domains:registrar_create"))
         self.assertEqual(resp.status_code, 200)
+
+
+class DomainNameHomographValidationTests(TestCase):
+    """validate_domain_name rejects non-ASCII homographs (PR #169 review M1)."""
+
+    def test_non_ascii_homograph_rejected(self) -> None:
+        # "example.com" with the ASCII 'a' replaced by Cyrillic small a (U+0430).
+        homograph = "ex\u0430mple.com"
+        is_valid, msg = DomainValidationService.validate_domain_name(homograph)
+        self.assertFalse(is_valid)
+        self.assertIn("ASCII", str(msg))
+
+    def test_ascii_domain_accepted(self) -> None:
+        is_valid, _msg = DomainValidationService.validate_domain_name("example.com")
+        self.assertTrue(is_valid)

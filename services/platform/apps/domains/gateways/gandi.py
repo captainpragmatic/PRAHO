@@ -26,7 +26,7 @@ from .base import (
     DomainRenewalResult,
     RegistrarGatewayFactory,
 )
-from .errors import RegistrarAPIError, RegistrarTransientError
+from .errors import RegistrarAPIError, RegistrarErrorCode, RegistrarTransientError
 
 logger = logging.getLogger(__name__)
 
@@ -98,10 +98,19 @@ class GandiGateway(BaseRegistrarGateway):
 
         if response.status_code == HTTP_ACCEPTED:
             data = response.json()
+            expires_at = _parse_gandi_date(data.get("expires_at", ""))
+            if expires_at is None:
+                return Err(
+                    RegistrarAPIError(
+                        f"Gandi registration response missing/invalid expires_at for {domain_name}",
+                        code=RegistrarErrorCode.INVALID_RESPONSE,
+                        registrar_name=self.registrar.name,
+                    )
+                )
             return Ok(
                 DomainRegistrationResult(
                     registrar_domain_id=data.get("id", domain_name),
-                    expires_at=_parse_gandi_date(data.get("expires_at", "")),
+                    expires_at=expires_at,
                     nameservers=nameservers or self.registrar.default_nameservers or [],
                     epp_code=data.get("auth_info", ""),
                 )
@@ -129,11 +138,16 @@ class GandiGateway(BaseRegistrarGateway):
 
         if response.status_code in (HTTP_OK, HTTP_ACCEPTED):
             data = response.json()
-            return Ok(
-                DomainRenewalResult(
-                    new_expires_at=_parse_gandi_date(data.get("expires_at", "")),
+            new_expires_at = _parse_gandi_date(data.get("expires_at", ""))
+            if new_expires_at is None:
+                return Err(
+                    RegistrarAPIError(
+                        f"Gandi renewal response missing/invalid expires_at for {domain_name}",
+                        code=RegistrarErrorCode.INVALID_RESPONSE,
+                        registrar_name=self.registrar.name,
+                    )
                 )
-            )
+            return Ok(DomainRenewalResult(new_expires_at=new_expires_at))
 
         return self._handle_error_response(response, f"renew {domain_name}")
 
@@ -163,7 +177,13 @@ class GandiGateway(BaseRegistrarGateway):
                 if price_data:
                     price_raw = price_data[0].get("price_after_taxes")
                     if price_raw is not None:
-                        price_cents = int(float(price_raw) * 100)
+                        # A malformed price must not raise out of the Result contract;
+                        # availability is the primary signal, so just omit the price.
+                        try:
+                            price_cents = int(float(price_raw) * 100)
+                        except (TypeError, ValueError):
+                            logger.warning("Gandi returned unparseable price %r for %s", price_raw, domain_name)
+                            price_cents = None
 
                 return Ok(
                     DomainAvailabilityResult(
@@ -204,16 +224,19 @@ class GandiGateway(BaseRegistrarGateway):
         }
 
 
-def _parse_gandi_date(date_str: str) -> datetime:
-    """Parse ISO 8601 date from Gandi API response."""
-    from django.utils import timezone  # noqa: PLC0415
+def _parse_gandi_date(date_str: str) -> datetime | None:
+    """Parse ISO 8601 date from Gandi API response.
 
+    Returns None on missing/unparseable input — callers must treat that as an
+    INVALID_RESPONSE rather than fabricating a date (a registration must never
+    record a wrong/already-past expiry).
+    """
     if not date_str:
-        return timezone.now()
+        return None
     try:
         return datetime.fromisoformat(date_str.replace("Z", "+00:00"))
     except ValueError:
-        return timezone.now()
+        return None
 
 
 # Register with factory
