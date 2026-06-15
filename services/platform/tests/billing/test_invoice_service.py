@@ -13,7 +13,7 @@ from datetime import datetime
 from decimal import Decimal
 from unittest.mock import MagicMock, Mock, patch
 
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from apps.billing.invoice_models import Invoice
@@ -580,80 +580,63 @@ class GeneratePlaceholderPdfTest(TestCase):
 # ===============================================================================
 
 
+@override_settings(
+    COMPANY_NAME="Test Company SRL",
+    EFACTURA_COMPANY_CUI="12345678",
+    COMPANY_REGISTRATION_NUMBER="J40/1234/2020",
+    COMPANY_STREET="Test Street 123",
+    COMPANY_CITY="Bucharest",
+    COMPANY_POSTAL_CODE="010101",
+    COMPANY_COUNTRY_CODE="RO",
+)
 class GenerateEFacturaXmlTest(TestCase):
-    """generate_e_factura_xml — returns valid UBL XML string."""
+    """generate_e_factura_xml delegates to the canonical UBL builder (#188)."""
 
-    def test_returns_xml_string(self) -> None:
-        _, invoice = _make_invoice(number="INV-XML-001")
+    def _buildable_invoice(self, number="INV-XML-001", customer_name="XML Customer SRL"):
+        from tests.factories import (  # noqa: PLC0415
+            CurrencyFactory,
+            CustomerFactory,
+            InvoiceFactory,
+            InvoiceLineFactory,
+        )
 
-        result = generate_e_factura_xml(invoice)
+        currency = CurrencyFactory(code="RON")
+        invoice = InvoiceFactory(
+            customer=CustomerFactory(), currency=currency, number=number,
+            bill_to_name=customer_name, bill_to_country="RO", bill_to_tax_id="RO87654321",
+            bill_to_street="Street 1", bill_to_city="City", bill_to_postal_code="010101",
+            status="issued", issued_at=timezone.now(),
+            due_at=timezone.now() + timezone.timedelta(days=30),
+            subtotal_cents=10000, tax_total_cents=1900, total_cents=11900,
+        )
+        InvoiceLineFactory(
+            invoice=invoice, description="Hosting", unit_price_cents=10000, quantity=1,
+            tax_rate=Decimal("0.1900"),
+        )
+        return invoice
 
-        self.assertIsInstance(result, str)
+    def test_delegates_to_ubl_builder(self) -> None:
+        from apps.billing.efactura.xml_builder import UBLInvoiceBuilder  # noqa: PLC0415
+
+        invoice = self._buildable_invoice()
+        self.assertEqual(generate_e_factura_xml(invoice), UBLInvoiceBuilder(invoice).build())
+
+    def test_returns_cius_ro_ubl_string(self) -> None:
+        result = generate_e_factura_xml(self._buildable_invoice(number="INV-XML-002"))
         self.assertIn("<?xml", result)
-
-    def test_contains_invoice_number(self) -> None:
-        _, invoice = _make_invoice(number="INV-XML-002")
-
-        result = generate_e_factura_xml(invoice)
-
         self.assertIn("INV-XML-002", result)
-
-    def test_contains_currency_code(self) -> None:
-        _, invoice = _make_invoice()
-
-        result = generate_e_factura_xml(invoice)
-
-        self.assertIn("RON", result)
-
-    def test_contains_tax_and_total_amounts(self) -> None:
-        # Use a Mock invoice with explicit values to avoid DB validation complexity
-        customer = _make_mock_customer()
-        invoice = Mock()
-        invoice.number = "INV-XML-AMOUNTS"
-        invoice.customer = customer
-        invoice.subtotal_cents = 10000  # 100.00
-        invoice.tax_cents = 2100        # 21.00
-        invoice.total_cents = 12100     # 121.00
-        invoice.created_at = timezone.now()
-        invoice.due_date = None
-
-        result = generate_e_factura_xml(invoice)
-
-        self.assertIn("100.00", result)
-        self.assertIn("21.00", result)
-        self.assertIn("121.00", result)
-
-    def test_contains_company_name_from_settings(self) -> None:
-        _, invoice = _make_invoice()
-
-        with patch("apps.billing.invoice_service.settings") as mock_settings:
-            mock_settings.COMPANY_NAME = "PragmaticHost SRL"
-            mock_settings.COMPANY_VAT_NUMBER = "RO12345678"
-            result = generate_e_factura_xml(invoice)
-
-        self.assertIn("PragmaticHost SRL", result)
-
-    def test_contains_customer_name(self) -> None:
-        _, invoice = _make_invoice(customer_name="XML Customer SRL")
-
-        result = generate_e_factura_xml(invoice)
-
-        self.assertIn("XML Customer SRL", result)
-
-    def test_contains_ubl_namespace(self) -> None:
-        _, invoice = _make_invoice()
-
-        result = generate_e_factura_xml(invoice)
-
+        # CIUS-RO CustomizationID — present in the canonical builder, absent in the old stub
+        self.assertIn("CustomizationID", result)
         self.assertIn("urn:oasis:names:specification:ubl", result)
 
-    def test_exception_is_reraised(self) -> None:
-        invoice = Mock()
-        invoice.number = "INV-FAIL"
-        type(invoice).customer = property(lambda self: (_ for _ in ()).throw(RuntimeError("xml boom")))
+    def test_contains_customer_name(self) -> None:
+        result = generate_e_factura_xml(self._buildable_invoice(customer_name="XML Customer SRL"))
+        self.assertIn("XML Customer SRL", result)
 
-        with self.assertRaises(RuntimeError):
-            generate_e_factura_xml(invoice)
+    def test_exception_is_reraised(self) -> None:
+        # A non-invoice object makes the builder raise; the error must propagate.
+        with self.assertRaises(Exception):
+            generate_e_factura_xml(object())  # type: ignore[arg-type]
 
 
 # ===============================================================================

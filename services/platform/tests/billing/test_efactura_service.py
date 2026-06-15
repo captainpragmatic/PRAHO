@@ -43,6 +43,11 @@ COMPANY_SETTINGS: dict[str, str | bool] = {
     "COMPANY_TAX_ID": "RO12345678",
     "COMPANY_REG_NO": "J40/123/2020",
     "COMPANY_ADDRESS": "Str. Test 1",
+    # Names the canonical UBLInvoiceBuilder reads (the submission path delegates to it, #188)
+    "EFACTURA_COMPANY_CUI": "RO12345678",
+    "COMPANY_REGISTRATION_NUMBER": "J40/123/2020",
+    "COMPANY_STREET": "Str. Test 1",
+    "COMPANY_COUNTRY_CODE": "RO",
     "COMPANY_CITY": "Bucharest",
     "COMPANY_COUNTY": "Bucharest",
     "COMPANY_POSTAL_CODE": "010101",
@@ -321,7 +326,7 @@ class EFacturaValidationTest(TestCase):
 
 @override_settings(**COMPANY_SETTINGS)
 class EFacturaXMLGeneratorTest(TestCase):
-    """Tests for generate_invoice_xml and individual _add_* methods."""
+    """generate_invoice_xml delegates to the canonical UBL builder (#188)."""
 
     def setUp(self) -> None:
         self.generator = EFacturaXMLGenerator()
@@ -329,460 +334,41 @@ class EFacturaXMLGeneratorTest(TestCase):
         self.customer = create_customer("XML Test Co")
         now = timezone.now()
         self.invoice = create_invoice(
-            self.customer,
-            self.currency,
-            number="INV-XML-001",
-            total_cents=12100,
+            self.customer, self.currency, number="INV-XML-001", total_cents=12100,
         )
         self.invoice.subtotal_cents = 10000
         self.invoice.tax_cents = 2100
         self.invoice.bill_to_name = "Client SRL"
         self.invoice.bill_to_tax_id = "RO11111111"
-        self.invoice.bill_to_email = "client@client.ro"
-        self.invoice.bill_to_address1 = "Str. Client 5"
-        self.invoice.bill_to_city = "Cluj-Napoca"
-        self.invoice.bill_to_postal = "400001"
-        self.invoice.bill_to_region = "Cluj"
         self.invoice.bill_to_country = "RO"
         self.invoice.issued_at = now
         self.invoice.due_at = now + timedelta(days=30)
         self.invoice.save()
-        # The efactura_service accesses invoice.notes which is not a model field.
-        # Set it as a transient attribute AFTER save so it persists in memory for the test.
-        self.invoice.notes = ""
         create_invoice_line(
-            self.invoice,
-            description="Hosting Plan A",
-            quantity=1,
-            unit_price_cents=10000,
-            tax_rate=Decimal("0.21"),
+            self.invoice, description="Hosting Plan A", quantity=1,
+            unit_price_cents=10000, tax_rate=Decimal("0.21"),
         )
-
-    # -- generate_invoice_xml ------------------------------------------------
 
     def test_generate_invoice_xml_returns_ok(self) -> None:
         result = self.generator.generate_invoice_xml(self.invoice)
         self.assertTrue(result.is_ok())
 
-    def test_generated_xml_is_parseable(self) -> None:
+    def test_delegates_to_ubl_builder(self) -> None:
+        from apps.billing.efactura.xml_builder import UBLInvoiceBuilder  # noqa: PLC0415
+
         result = self.generator.generate_invoice_xml(self.invoice)
-        xml_str = result.unwrap()
-        root = _parse_xml(xml_str)
-        self.assertIsNotNone(root)
-
-    def test_generate_invoice_xml_invalid_returns_err(self) -> None:
-        self.invoice.number = ""
-        result = self.generator.generate_invoice_xml(self.invoice)
-        self.assertFalse(result.is_ok())
-        self.assertIn("Validation failed", result.error)
-
-    # -- Invoice header -------------------------------------------------------
-
-    def test_header_ubl_version(self) -> None:
-        root = _parse_xml(self.generator.generate_invoice_xml(self.invoice).unwrap())
-        elem = _find_cbc(root, "UBLVersionID")
-        self.assertIsNotNone(elem)
-        self.assertEqual(elem.text, "2.1")
-
-    def test_header_customization_id(self) -> None:
-        root = _parse_xml(self.generator.generate_invoice_xml(self.invoice).unwrap())
-        elem = _find_cbc(root, "CustomizationID")
-        self.assertIsNotNone(elem)
-        self.assertIn("CIUS-RO", elem.text)
-
-    def test_header_invoice_id(self) -> None:
-        root = _parse_xml(self.generator.generate_invoice_xml(self.invoice).unwrap())
-        elem = _find_cbc(root, "ID")
-        self.assertIsNotNone(elem)
-        self.assertEqual(elem.text, "INV-XML-001")
-
-    def test_header_issue_date(self) -> None:
-        root = _parse_xml(self.generator.generate_invoice_xml(self.invoice).unwrap())
-        elem = _find_cbc(root, "IssueDate")
-        self.assertIsNotNone(elem)
-        self.assertEqual(elem.text, self.invoice.issued_at.strftime("%Y-%m-%d"))
-
-    def test_header_due_date_present(self) -> None:
-        root = _parse_xml(self.generator.generate_invoice_xml(self.invoice).unwrap())
-        elem = _find_cbc(root, "DueDate")
-        self.assertIsNotNone(elem)
-
-    def test_header_invoice_type_code(self) -> None:
-        root = _parse_xml(self.generator.generate_invoice_xml(self.invoice).unwrap())
-        elem = _find_cbc(root, "InvoiceTypeCode")
-        self.assertIsNotNone(elem)
-        self.assertEqual(elem.text, "380")
-
-    def test_header_currency_code(self) -> None:
-        root = _parse_xml(self.generator.generate_invoice_xml(self.invoice).unwrap())
-        elem = _find_cbc(root, "DocumentCurrencyCode")
-        self.assertIsNotNone(elem)
-        self.assertEqual(elem.text, "RON")
-
-    def test_header_no_due_date_when_none(self) -> None:
-        self.invoice.due_at = None
-        self.invoice.save()
-        result = self.generator.generate_invoice_xml(self.invoice)
-        # With no due_at we get a warning but still a valid result
-        self.assertTrue(result.is_ok())
-        root = _parse_xml(result.unwrap())
-        # DueDate element should be absent
-        elem = _find_cbc(root, "DueDate")
-        self.assertIsNone(elem)
-
-    def test_header_uses_fallback_date_when_issued_at_none(self) -> None:
-        # issued_at=None is normally an error, but we can test the fallback
-        # by bypassing validation — generate via the private method
-        self.invoice.issued_at = None
-        root = self.generator._create_invoice_root()
-        self.generator._add_invoice_header(root, self.invoice)
-        elem = root.find(f".//{{{CBC}}}IssueDate")
-        self.assertIsNotNone(elem)
-        # Should have used today's date as fallback
-        today = timezone.now().strftime("%Y-%m-%d")
-        self.assertEqual(elem.text, today)
-
-    # -- Supplier party -------------------------------------------------------
-
-    def test_supplier_party_name(self) -> None:
-        root = _parse_xml(self.generator.generate_invoice_xml(self.invoice).unwrap())
-        supplier = root.find(f".//{{{CAC}}}AccountingSupplierParty")
-        self.assertIsNotNone(supplier)
-        name_elem = supplier.find(f".//{{{CBC}}}Name")
-        self.assertIsNotNone(name_elem)
-        self.assertEqual(name_elem.text, "Test SRL")
-
-    def test_supplier_tax_scheme_is_vat(self) -> None:
-        root = _parse_xml(self.generator.generate_invoice_xml(self.invoice).unwrap())
-        supplier = root.find(f".//{{{CAC}}}AccountingSupplierParty")
-        tax_scheme_id = supplier.find(f".//{{{CAC}}}TaxScheme/{{{CBC}}}ID")
-        self.assertIsNotNone(tax_scheme_id)
-        self.assertEqual(tax_scheme_id.text, "VAT")
-
-    def test_supplier_legal_entity_registration_name(self) -> None:
-        root = _parse_xml(self.generator.generate_invoice_xml(self.invoice).unwrap())
-        supplier = root.find(f".//{{{CAC}}}AccountingSupplierParty")
-        reg_name = supplier.find(f".//{{{CAC}}}PartyLegalEntity/{{{CBC}}}RegistrationName")
-        self.assertIsNotNone(reg_name)
-        self.assertEqual(reg_name.text, "Test SRL")
-
-    def test_supplier_legal_entity_company_id(self) -> None:
-        root = _parse_xml(self.generator.generate_invoice_xml(self.invoice).unwrap())
-        supplier = root.find(f".//{{{CAC}}}AccountingSupplierParty")
-        company_id = supplier.find(f".//{{{CAC}}}PartyLegalEntity/{{{CBC}}}CompanyID")
-        self.assertIsNotNone(company_id)
-        self.assertEqual(company_id.text, "J40/123/2020")
-
-    def test_supplier_contact_email(self) -> None:
-        root = _parse_xml(self.generator.generate_invoice_xml(self.invoice).unwrap())
-        supplier = root.find(f".//{{{CAC}}}AccountingSupplierParty")
-        email = supplier.find(f".//{{{CAC}}}Contact/{{{CBC}}}ElectronicMail")
-        self.assertIsNotNone(email)
-        self.assertEqual(email.text, "test@example.com")
-
-    @override_settings(COMPANY_EMAIL="", COMPANY_PHONE="")
-    def test_supplier_contact_absent_when_no_email_phone(self) -> None:
-        root = _parse_xml(self.generator.generate_invoice_xml(self.invoice).unwrap())
-        supplier = root.find(f".//{{{CAC}}}AccountingSupplierParty")
-        contact = supplier.find(f".//{{{CAC}}}Contact")
-        self.assertIsNone(contact)
-
-    @override_settings(COMPANY_TAX_ID="")
-    def test_supplier_no_party_identification_when_no_tax_id(self) -> None:
-        # With no COMPANY_TAX_ID validation will fail; bypass by calling private method
-        root = self.generator._create_invoice_root()
-        self.generator._add_supplier_party(root, self.invoice)
-        party_id = root.find(f".//{{{CAC}}}AccountingSupplierParty//{{{CAC}}}PartyIdentification")
-        self.assertIsNone(party_id)
-
-    # -- Customer party -------------------------------------------------------
-
-    def test_customer_party_name(self) -> None:
-        root = _parse_xml(self.generator.generate_invoice_xml(self.invoice).unwrap())
-        customer = root.find(f".//{{{CAC}}}AccountingCustomerParty")
-        name_elem = customer.find(f".//{{{CBC}}}Name")
-        self.assertIsNotNone(name_elem)
-        self.assertEqual(name_elem.text, "Client SRL")
-
-    def test_customer_ro_scheme_id(self) -> None:
-        root = _parse_xml(self.generator.generate_invoice_xml(self.invoice).unwrap())
-        customer = root.find(f".//{{{CAC}}}AccountingCustomerParty")
-        id_elem = customer.find(f".//{{{CAC}}}PartyIdentification/{{{CBC}}}ID")
-        self.assertIsNotNone(id_elem)
-        self.assertEqual(id_elem.get("schemeID"), "RO:CUI")
-
-    def test_customer_non_ro_scheme_id(self) -> None:
-        self.invoice.bill_to_country = "DE"
-        self.invoice.save()
-        root = _parse_xml(self.generator.generate_invoice_xml(self.invoice).unwrap())
-        customer = root.find(f".//{{{CAC}}}AccountingCustomerParty")
-        id_elem = customer.find(f".//{{{CAC}}}PartyIdentification/{{{CBC}}}ID")
-        self.assertIsNotNone(id_elem)
-        self.assertEqual(id_elem.get("schemeID"), "VAT")
-
-    def test_customer_no_party_identification_without_tax_id(self) -> None:
-        self.invoice.bill_to_tax_id = ""
-        self.invoice.bill_to_country = "DE"  # avoid warning that would break nothing
-        self.invoice.save()
-        root = _parse_xml(self.generator.generate_invoice_xml(self.invoice).unwrap())
-        customer = root.find(f".//{{{CAC}}}AccountingCustomerParty")
-        party_id = customer.find(f".//{{{CAC}}}PartyIdentification")
-        self.assertIsNone(party_id)
-
-    def test_customer_contact_email(self) -> None:
-        root = _parse_xml(self.generator.generate_invoice_xml(self.invoice).unwrap())
-        customer = root.find(f".//{{{CAC}}}AccountingCustomerParty")
-        email = customer.find(f".//{{{CAC}}}Contact/{{{CBC}}}ElectronicMail")
-        self.assertIsNotNone(email)
-        self.assertEqual(email.text, "client@client.ro")
-
-    def test_customer_no_contact_when_no_email(self) -> None:
-        self.invoice.bill_to_email = ""
-        self.invoice.save()
-        root = _parse_xml(self.generator.generate_invoice_xml(self.invoice).unwrap())
-        customer = root.find(f".//{{{CAC}}}AccountingCustomerParty")
-        contact = customer.find(f".//{{{CAC}}}Contact")
-        self.assertIsNone(contact)
-
-    def test_customer_country_fallback_to_ro(self) -> None:
-        self.invoice.bill_to_country = ""
-        self.invoice.bill_to_tax_id = ""
-        self.invoice.save()
-        root = self.generator._create_invoice_root()
-        self.generator._add_customer_party(root, self.invoice)
-        country_code = root.find(f".//{{{CAC}}}AccountingCustomerParty//{{{CAC}}}Country/{{{CBC}}}IdentificationCode")
-        self.assertIsNotNone(country_code)
-        self.assertEqual(country_code.text, "RO")
-
-    def test_customer_no_tax_scheme_without_tax_id(self) -> None:
-        self.invoice.bill_to_tax_id = ""
-        self.invoice.save()
-        root = self.generator._create_invoice_root()
-        self.generator._add_customer_party(root, self.invoice)
-        party_tax = root.find(f".//{{{CAC}}}AccountingCustomerParty//{{{CAC}}}PartyTaxScheme")
-        self.assertIsNone(party_tax)
-
-    # -- Payment means --------------------------------------------------------
-
-    def test_payment_means_code_is_30(self) -> None:
-        root = _parse_xml(self.generator.generate_invoice_xml(self.invoice).unwrap())
-        code = root.find(f".//{{{CAC}}}PaymentMeans/{{{CBC}}}PaymentMeansCode")
-        self.assertIsNotNone(code)
-        self.assertEqual(code.text, "30")
-
-    def test_payment_means_payment_id(self) -> None:
-        root = _parse_xml(self.generator.generate_invoice_xml(self.invoice).unwrap())
-        pid = root.find(f".//{{{CAC}}}PaymentMeans/{{{CBC}}}PaymentID")
-        self.assertIsNotNone(pid)
-        self.assertEqual(pid.text, "INV-XML-001")
-
-    def test_payment_means_iban_present(self) -> None:
-        root = _parse_xml(self.generator.generate_invoice_xml(self.invoice).unwrap())
-        iban = root.find(f".//{{{CAC}}}PayeeFinancialAccount/{{{CBC}}}ID")
-        self.assertIsNotNone(iban)
-        self.assertEqual(iban.text, "RO49AAAA1B31007593840000")
-
-    def test_payment_means_bank_name_present(self) -> None:
-        root = _parse_xml(self.generator.generate_invoice_xml(self.invoice).unwrap())
-        bank_name = root.find(f".//{{{CAC}}}FinancialInstitutionBranch/{{{CBC}}}Name")
-        self.assertIsNotNone(bank_name)
-        self.assertEqual(bank_name.text, "Test Bank")
-
-    @override_settings(COMPANY_BANK_IBAN=None)
-    def test_payment_means_no_financial_account_without_iban(self) -> None:
-        root = self.generator._create_invoice_root()
-        self.generator._add_payment_means(root, self.invoice)
-        fa = root.find(f".//{{{CAC}}}PayeeFinancialAccount")
-        self.assertIsNone(fa)
-
-    @override_settings(COMPANY_BANK_IBAN="RO49AAAA1B31007593840000", COMPANY_BANK_NAME=None)
-    def test_payment_means_no_bank_branch_without_bank_name(self) -> None:
-        root = self.generator._create_invoice_root()
-        self.generator._add_payment_means(root, self.invoice)
-        branch = root.find(f".//{{{CAC}}}FinancialInstitutionBranch")
-        self.assertIsNone(branch)
-
-    # -- Payment terms --------------------------------------------------------
-
-    def test_payment_terms_note_contains_days(self) -> None:
-        # issued_at and due_at are 30 days apart (set in setUp)
-        root = _parse_xml(self.generator.generate_invoice_xml(self.invoice).unwrap())
-        note = root.find(f".//{{{CAC}}}PaymentTerms/{{{CBC}}}Note")
-        self.assertIsNotNone(note)
-        self.assertIn("30", note.text)
-        self.assertIn("zile", note.text)
-
-    def test_payment_terms_absent_without_dates(self) -> None:
-        self.invoice.due_at = None
-        self.invoice.save()
-        root = self.generator._create_invoice_root()
-        self.generator._add_payment_terms(root, self.invoice)
-        terms = root.find(f".//{{{CAC}}}PaymentTerms")
-        self.assertIsNone(terms)
-
-    def test_payment_terms_calculates_days_correctly(self) -> None:
-        now = timezone.now()
-        self.invoice.issued_at = now
-        self.invoice.due_at = now + timedelta(days=14)
-        root = self.generator._create_invoice_root()
-        self.generator._add_payment_terms(root, self.invoice)
-        note = root.find(f".//{{{CAC}}}PaymentTerms/{{{CBC}}}Note")
-        self.assertIsNotNone(note)
-        self.assertIn("14", note.text)
-
-    # -- Tax totals -----------------------------------------------------------
-
-    def test_tax_total_amount(self) -> None:
-        root = _parse_xml(self.generator.generate_invoice_xml(self.invoice).unwrap())
-        tax_amount = root.find(f".//{{{CAC}}}TaxTotal/{{{CBC}}}TaxAmount")
-        self.assertIsNotNone(tax_amount)
-        self.assertEqual(tax_amount.text, "21.00")  # 2100 cents
-        self.assertEqual(tax_amount.get("currencyID"), "RON")
-
-    def test_tax_subtotal_taxable_amount(self) -> None:
-        root = _parse_xml(self.generator.generate_invoice_xml(self.invoice).unwrap())
-        taxable = root.find(f".//{{{CAC}}}TaxSubtotal/{{{CBC}}}TaxableAmount")
-        self.assertIsNotNone(taxable)
-        self.assertEqual(taxable.text, "100.00")  # 10000 cents
-
-    def test_tax_category_id_is_s(self) -> None:
-        root = _parse_xml(self.generator.generate_invoice_xml(self.invoice).unwrap())
-        tax_cat_id = root.find(f".//{{{CAC}}}TaxCategory/{{{CBC}}}ID")
-        self.assertIsNotNone(tax_cat_id)
-        self.assertEqual(tax_cat_id.text, "S")
-
-    def test_tax_rate_calculated_from_invoice(self) -> None:
-        root = _parse_xml(self.generator.generate_invoice_xml(self.invoice).unwrap())
-        percent = root.find(f".//{{{CAC}}}TaxCategory/{{{CBC}}}Percent")
-        self.assertIsNotNone(percent)
-        # 2100 / 10000 * 100 = 21.00
-        self.assertEqual(percent.text, "21.00")
-
-    def test_tax_rate_falls_back_to_21_when_subtotal_zero(self) -> None:
-        self.invoice.subtotal_cents = 0
-        root = self.generator._create_invoice_root()
-        self.generator._add_tax_totals(root, self.invoice)
-        percent = root.find(f".//{{{CAC}}}TaxCategory/{{{CBC}}}Percent")
-        self.assertIsNotNone(percent)
-        self.assertEqual(percent.text, "21.00")
-
-    def test_tax_scheme_is_vat(self) -> None:
-        root = _parse_xml(self.generator.generate_invoice_xml(self.invoice).unwrap())
-        tax_scheme = root.find(f".//{{{CAC}}}TaxTotal//{{{CAC}}}TaxScheme/{{{CBC}}}ID")
-        self.assertIsNotNone(tax_scheme)
-        self.assertEqual(tax_scheme.text, "VAT")
-
-    # -- Monetary totals ------------------------------------------------------
-
-    def test_monetary_totals_line_extension(self) -> None:
-        root = _parse_xml(self.generator.generate_invoice_xml(self.invoice).unwrap())
-        line_ext = root.find(f".//{{{CAC}}}LegalMonetaryTotal/{{{CBC}}}LineExtensionAmount")
-        self.assertIsNotNone(line_ext)
-        self.assertEqual(line_ext.text, "100.00")
-
-    def test_monetary_totals_tax_exclusive(self) -> None:
-        root = _parse_xml(self.generator.generate_invoice_xml(self.invoice).unwrap())
-        tax_excl = root.find(f".//{{{CAC}}}LegalMonetaryTotal/{{{CBC}}}TaxExclusiveAmount")
-        self.assertIsNotNone(tax_excl)
-        self.assertEqual(tax_excl.text, "100.00")
-
-    def test_monetary_totals_tax_inclusive(self) -> None:
-        root = _parse_xml(self.generator.generate_invoice_xml(self.invoice).unwrap())
-        tax_incl = root.find(f".//{{{CAC}}}LegalMonetaryTotal/{{{CBC}}}TaxInclusiveAmount")
-        self.assertIsNotNone(tax_incl)
-        self.assertEqual(tax_incl.text, "121.00")
-
-    def test_monetary_totals_payable(self) -> None:
-        root = _parse_xml(self.generator.generate_invoice_xml(self.invoice).unwrap())
-        payable = root.find(f".//{{{CAC}}}LegalMonetaryTotal/{{{CBC}}}PayableAmount")
-        self.assertIsNotNone(payable)
-        self.assertEqual(payable.text, "121.00")
-
-    def test_monetary_totals_currency_attribute(self) -> None:
-        root = _parse_xml(self.generator.generate_invoice_xml(self.invoice).unwrap())
-        payable = root.find(f".//{{{CAC}}}LegalMonetaryTotal/{{{CBC}}}PayableAmount")
-        self.assertEqual(payable.get("currencyID"), "RON")
-
-    # -- Invoice lines --------------------------------------------------------
-
-    def test_invoice_line_id(self) -> None:
-        root = _parse_xml(self.generator.generate_invoice_xml(self.invoice).unwrap())
-        line = root.find(f".//{{{CAC}}}InvoiceLine")
-        self.assertIsNotNone(line)
-        line_id = line.find(f"{{{CBC}}}ID")
-        self.assertEqual(line_id.text, "1")
-
-    def test_invoice_line_quantity(self) -> None:
-        root = _parse_xml(self.generator.generate_invoice_xml(self.invoice).unwrap())
-        line = root.find(f".//{{{CAC}}}InvoiceLine")
-        qty = line.find(f"{{{CBC}}}InvoicedQuantity")
-        self.assertIsNotNone(qty)
-        self.assertEqual(qty.get("unitCode"), "C62")
-        self.assertEqual(qty.text, "1.00")
-
-    def test_invoice_line_extension_amount(self) -> None:
-        root = _parse_xml(self.generator.generate_invoice_xml(self.invoice).unwrap())
-        line = root.find(f".//{{{CAC}}}InvoiceLine")
-        ext = line.find(f"{{{CBC}}}LineExtensionAmount")
-        self.assertIsNotNone(ext)
-        self.assertEqual(ext.text, "100.00")  # 10000 cents * 1 qty / 100
-
-    def test_invoice_line_description(self) -> None:
-        root = _parse_xml(self.generator.generate_invoice_xml(self.invoice).unwrap())
-        desc = root.find(f".//{{{CAC}}}InvoiceLine//{{{CAC}}}Item/{{{CBC}}}Description")
-        self.assertIsNotNone(desc)
-        self.assertEqual(desc.text, "Hosting Plan A")
-
-    def test_invoice_line_tax_percent(self) -> None:
-        root = _parse_xml(self.generator.generate_invoice_xml(self.invoice).unwrap())
-        percent = root.find(f".//{{{CAC}}}InvoiceLine//{{{CAC}}}ClassifiedTaxCategory/{{{CBC}}}Percent")
-        self.assertIsNotNone(percent)
-        # 0.21 * 100 = 21.00
-        self.assertEqual(percent.text, "21.00")
-
-    def test_invoice_line_price_amount(self) -> None:
-        root = _parse_xml(self.generator.generate_invoice_xml(self.invoice).unwrap())
-        price = root.find(f".//{{{CAC}}}InvoiceLine//{{{CAC}}}Price/{{{CBC}}}PriceAmount")
-        self.assertIsNotNone(price)
-        self.assertEqual(price.text, "100.00")
-
-    def test_multiple_invoice_lines_numbered_sequentially(self) -> None:
-        create_invoice_line(self.invoice, description="Second Service", unit_price_cents=5000)
-        root = _parse_xml(self.generator.generate_invoice_xml(self.invoice).unwrap())
-        lines = root.findall(f".//{{{CAC}}}InvoiceLine")
-        self.assertEqual(len(lines), 2)
-        ids = [line.find(f"{{{CBC}}}ID").text for line in lines]
-        self.assertEqual(ids, ["1", "2"])
-
-    # -- _format_xml (passthrough) --------------------------------------------
-
-    def test_format_xml_passthrough(self) -> None:
-        result = self.generator._format_xml("<Invoice/>")
-        self.assertEqual(result, "<Invoice/>")
-
-    # -- Exception path -------------------------------------------------------
-
-    def test_generate_invoice_xml_catches_unexpected_exception(self) -> None:
-        """Simulate an unexpected error (e.g., currency.code raises)."""
-        # Remove currency to force AttributeError during XML building
-        # We'll patch the invoice to trigger an exception after validation
-        original_add = self.generator._add_invoice_header
-
-        def boom(root, invoice):
-            raise RuntimeError("simulated failure")
-
-        self.generator._add_invoice_header = boom
-        try:
-            result = self.generator.generate_invoice_xml(self.invoice)
-            self.assertFalse(result.is_ok())
-            self.assertIn("XML generation failed", result.error)
-        finally:
-            self.generator._add_invoice_header = original_add
-
-
-# ============================================================================
-# EFacturaSubmissionService tests
-# ============================================================================
+        self.assertEqual(result.unwrap(), UBLInvoiceBuilder(self.invoice).build())
+
+    def test_returns_cius_ro_ubl(self) -> None:
+        xml = self.generator.generate_invoice_xml(self.invoice).unwrap()
+        self.assertIn("<?xml", xml)
+        self.assertIn("INV-XML-001", xml)
+        self.assertIn("CustomizationID", xml)
+
+    def test_incomplete_invoice_returns_err(self) -> None:
+        bad = create_invoice(self.customer, self.currency, number="INV-BAD", total_cents=100)
+        result = self.generator.generate_invoice_xml(bad)  # no lines / bill_to -> validation fails
+        self.assertTrue(result.is_err())
 
 
 @override_settings(**COMPANY_SETTINGS)

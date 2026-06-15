@@ -236,6 +236,36 @@ class TestCreateFromOrder(ProformaLifecycleTestBase):
             "Proforma total should be less than full price — discount must be applied",
         )
 
+    def test_proforma_stores_document_discount(self):
+        """#188: create_from_order stores order.discount_cents on the proforma so the
+        e-Factura can emit a BG-20 document allowance."""
+        from apps.billing.proforma_service import ProformaService  # noqa: PLC0415
+
+        order = self._create_order_with_items()
+        order.discount_cents = 2000
+        order.total_cents = order.total_cents - 2000
+        order.save(update_fields=["discount_cents", "total_cents"])
+        force_status(order, "awaiting_payment")
+
+        proforma = ProformaService.create_from_order(order).unwrap()
+        self.assertEqual(proforma.discount_cents, 2000)
+
+    def test_proforma_emits_setup_fee_line(self):
+        """#188: an order item with a setup fee produces a dedicated proforma setup line
+        so the line sum (BT-106) includes the setup fee."""
+        from apps.billing.proforma_service import ProformaService  # noqa: PLC0415
+
+        order = self._create_order_with_items()
+        item = order.items.first()
+        item.setup_cents = 5000
+        item.save(update_fields=["setup_cents"])  # post_save recalculates order totals
+        force_status(order, "awaiting_payment")
+
+        proforma = ProformaService.create_from_order(order).unwrap()
+        setup_lines = [ln for ln in proforma.lines.all() if "Setup fee" in ln.description]
+        self.assertEqual(len(setup_lines), 1)
+        self.assertEqual(setup_lines[0].unit_price_cents, 5000)
+
     def test_links_proforma_to_order(self):
         """create_from_order sets order.proforma FK."""
         from apps.billing.proforma_service import ProformaService  # noqa: PLC0415
@@ -297,6 +327,25 @@ class TestRecordPaymentAndConvert(ProformaLifecycleTestBase):
         self.assertEqual(proforma.status, "converted")
         self.assertEqual(invoice.status, "paid")
         self.assertGreater(invoice.total_cents, 0)
+
+    def test_conversion_copies_document_discount_to_invoice(self):
+        """#188: proforma->invoice conversion copies discount_cents so the invoice
+        e-Factura emits the document allowance."""
+        from apps.billing.proforma_service import ProformaPaymentService  # noqa: PLC0415
+
+        proforma = self._create_sent_proforma()
+        proforma.discount_cents = 1500
+        proforma.save(update_fields=["discount_cents"])
+
+        result = ProformaPaymentService.record_payment_and_convert(
+            proforma_id=str(proforma.id),
+            amount_cents=proforma.total_cents,
+            payment_method="bank",
+            created_by=self.user,
+        )
+        self.assertTrue(result.is_ok(), f"Expected Ok, got: {result}")
+        invoice = result.unwrap()
+        self.assertEqual(invoice.discount_cents, 1500)
 
     def test_rejects_partial_payment(self):
         """Only full payment accepted (amount must equal proforma total)."""

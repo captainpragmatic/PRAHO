@@ -116,6 +116,9 @@ class Invoice(models.Model):
     subtotal_cents = models.BigIntegerField(default=0)
     tax_cents = models.BigIntegerField(default=0)
     total_cents = models.BigIntegerField(default=0)
+    discount_cents = models.BigIntegerField(
+        default=0, help_text=_("Document-level discount in cents (EN16931 BT-92/BT-107)")
+    )
 
     # Dates
     issued_at = models.DateTimeField(null=True, blank=True)
@@ -188,6 +191,10 @@ class Invoice(models.Model):
                 name="invoice_total_non_negative",
             ),
             models.CheckConstraint(
+                condition=models.Q(discount_cents__gte=0),
+                name="invoice_discount_non_negative",
+            ),
+            models.CheckConstraint(
                 condition=models.Q(
                     status__in=["draft", "issued", "paid", "overdue", "void", "refunded", "partially_refunded"]
                 ),
@@ -204,6 +211,7 @@ class Invoice(models.Model):
             "total_cents",
             "subtotal_cents",
             "tax_cents",
+            "discount_cents",
         }
     )
 
@@ -229,6 +237,7 @@ class Invoice(models.Model):
         validate_financial_amount(self.subtotal_cents, "Subtotal")
         validate_financial_amount(self.tax_cents, "Tax amount")
         validate_financial_amount(self.total_cents, "Total amount")
+        validate_financial_amount(self.discount_cents, "Discount amount")
 
         # Validate JSON fields
         validate_financial_json(self.meta, "Invoice metadata")
@@ -260,12 +269,17 @@ class Invoice(models.Model):
             db_vals = (
                 type(self)
                 .objects.filter(pk=self.pk)
-                .values_list("locked_at", "total_cents", "subtotal_cents", "tax_cents")
+                .values_list("locked_at", "total_cents", "subtotal_cents", "tax_cents", "discount_cents")
                 .first()
             )
             if db_vals and db_vals[0] is not None:
-                _db_locked, db_total, db_subtotal, db_tax = db_vals
-                if self.total_cents != db_total or self.subtotal_cents != db_subtotal or self.tax_cents != db_tax:
+                _db_locked, db_total, db_subtotal, db_tax, db_discount = db_vals
+                if (
+                    self.total_cents != db_total
+                    or self.subtotal_cents != db_subtotal
+                    or self.tax_cents != db_tax
+                    or self.discount_cents != db_discount
+                ):
                     raise ValidationError(_("Cannot modify financial data on a locked invoice"))
 
         # Validate date consistency

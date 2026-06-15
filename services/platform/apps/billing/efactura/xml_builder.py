@@ -293,6 +293,50 @@ class BaseUBLBuilder:
         cents = int(_tax if _tax is not None else getattr(self.invoice, "tax_cents", 0))
         return Decimal(cents) / 100
 
+    def _get_line_gross(self) -> Decimal:
+        """Sum of line gross amounts (BT-106), before any document-level discount.
+
+        InvoiceLine.subtotal_cents is gross (qty x unit_price) and includes any setup-fee
+        lines, so this is the EN16931 document LineExtensionAmount = the sum of line nets.
+        """
+        total = sum((line.subtotal_cents for line in self.invoice.lines.all()), 0)
+        return Decimal(total) / 100
+
+    def _get_document_discount(self) -> Decimal:
+        """Document-level discount (BT-92/BT-107) in major units.
+
+        Derived from the totals invariant (line gross sum minus net subtotal) rather than read
+        from the stored ``discount_cents``, so it reconciles for BOTH invoices created
+        after that field existed (where it equals the stored value) AND legacy invoices
+        created before it (where it bridges the gross lines to the net header), with no
+        backfill of the immutable ledger. ``discount_cents`` remains the authoritative
+        stored record.
+        """
+        subtotal = Decimal(int(getattr(self.invoice, "subtotal_cents", 0) or 0)) / 100
+        return max(Decimal(0), self._get_line_gross() - subtotal)
+
+    def _add_discount_allowance(self) -> None:
+        """Emit the stored document-level discount as a BG-20 AllowanceCharge with the
+        document tax category (reason code 95 = Discount). No-op when discount is zero.
+        """
+        discount = self._get_document_discount()
+        if discount <= 0:
+            return
+        currency = self.invoice.currency.code
+        ac = self._add_cac(self.root, "AllowanceCharge")
+        self._add_cbc(ac, "ChargeIndicator", "false")
+        self._add_cbc(ac, "AllowanceChargeReasonCode", "95")
+        self._add_cbc(ac, "AllowanceChargeReason", "Discount")
+        amount_elem = self._add_cbc(ac, "Amount", self._format_amount(discount))
+        amount_elem.set("currencyID", currency)
+        tax_cat = self._add_cac(ac, "TaxCategory")
+        category = self._get_tax_category()
+        self._add_cbc(tax_cat, "ID", category)
+        rate = Decimal(0) if category != TAX_CATEGORY_STANDARD else self._get_tax_rate()
+        self._add_cbc(tax_cat, "Percent", self._format_percent(rate))
+        scheme = self._add_cac(tax_cat, "TaxScheme")
+        self._add_cbc(scheme, "ID", "VAT")
+
     def _get_tax_exemption_reason(self, category: str) -> str | None:
         """Get EN16931 BT-121 tax exemption reason text for non-standard categories."""
         return TAX_EXEMPTION_REASONS.get(category)
@@ -626,11 +670,10 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
         # Tax subtotal (breakdown by tax category)
         tax_subtotal = self._add_cac(tax_total, "TaxSubtotal")
 
-        # Taxable amount = tax-exclusive base, net of document-level allowances/charges
-        # (BR-CO-17); identical to subtotal when none exist (the live path).
-        subtotal = Decimal(self.invoice.subtotal_cents or 0) / 100
+        # Taxable amount = tax-exclusive base = line gross - allowances + charges (= net
+        # subtotal). Same base as LegalMonetaryTotal so the two reconcile (BR-CO-17).
         allowance_total, charge_total = self._get_document_level_totals()
-        taxable_amount = subtotal - allowance_total + charge_total
+        taxable_amount = self._get_line_gross() - allowance_total + charge_total
         taxable_elem = self._add_cbc(tax_subtotal, "TaxableAmount", self._format_amount(taxable_amount))
         taxable_elem.set("currencyID", self.invoice.currency.code)
 
@@ -685,10 +728,10 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
         return out
 
     def _add_document_allowances_charges(self) -> None:
-        """Add document-level AllowanceCharge elements (BG-20/BG-21).
-
-        Reads validated entries from invoice.meta['allowances']/['charges'].
+        """Add document-level AllowanceCharge elements (BG-20/BG-21): the stored document
+        discount (live) plus any meta allowances/charges (dormant).
         """
+        self._add_discount_allowance()
         currency = self.invoice.currency.code
 
         for allowance in self._iter_validated_meta("allowances"):
@@ -726,8 +769,11 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
             self._add_cbc(scheme, "ID", "VAT")
 
     def _get_document_level_totals(self) -> tuple[Decimal, Decimal]:
-        """Document-level allowance/charge totals (BT-107/BT-108) from validated meta."""
-        allowance_total = sum((a["amount"] for a in self._iter_validated_meta("allowances")), Decimal(0))
+        """Document-level allowance/charge totals (BT-107/BT-108): the stored document
+        discount plus any meta allowances; meta charges."""
+        allowance_total = self._get_document_discount() + sum(
+            (a["amount"] for a in self._iter_validated_meta("allowances")), Decimal(0)
+        )
         charge_total = sum((c["amount"] for c in self._iter_validated_meta("charges")), Decimal(0))
         return allowance_total, charge_total
 
@@ -736,15 +782,15 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
         monetary_total = self._add_cac(self.root, "LegalMonetaryTotal")
         currency = self.invoice.currency.code
 
-        subtotal = Decimal(self.invoice.subtotal_cents or 0) / 100
+        line_gross = self._get_line_gross()
         allowance_total, charge_total = self._get_document_level_totals()
-        tax_exclusive = subtotal - allowance_total + charge_total
+        tax_exclusive = line_gross - allowance_total + charge_total
         tax_inclusive = tax_exclusive + self._get_tax_amount()
 
         # UBL cac:LegalMonetaryTotal sequence: LineExtension, TaxExclusive, TaxInclusive,
         # then AllowanceTotal, ChargeTotal, PayableAmount. TaxInclusive is TaxExclusive plus
         # tax and Payable mirrors TaxInclusive, so the totals reconcile (BR-CO-13/15/16).
-        line_ext = self._add_cbc(monetary_total, "LineExtensionAmount", self._format_amount(subtotal))
+        line_ext = self._add_cbc(monetary_total, "LineExtensionAmount", self._format_amount(line_gross))
         line_ext.set("currencyID", currency)
         tax_excl = self._add_cbc(monetary_total, "TaxExclusiveAmount", self._format_amount(tax_exclusive))
         tax_excl.set("currencyID", currency)
@@ -880,6 +926,7 @@ class UBLCreditNoteBuilder(BaseUBLBuilder):
         self._add_billing_reference()
         self._add_supplier_party()
         self._add_customer_party()
+        self._add_discount_allowance()
         self._add_tax_total()
         self._add_legal_monetary_total()
         self._add_credit_note_lines()
@@ -994,7 +1041,7 @@ class UBLCreditNoteBuilder(BaseUBLBuilder):
 
         tax_subtotal = self._add_cac(tax_total, "TaxSubtotal")
 
-        taxable_amount = Decimal(self.invoice.subtotal_cents or 0) / 100
+        taxable_amount = self._get_line_gross() - self._get_document_discount()
         taxable_elem = self._add_cbc(tax_subtotal, "TaxableAmount", self._format_amount(taxable_amount))
         taxable_elem.set("currencyID", self.invoice.currency.code)
 
@@ -1022,19 +1069,24 @@ class UBLCreditNoteBuilder(BaseUBLBuilder):
         self._add_cbc(tax_scheme, "ID", "VAT")
 
     def _add_legal_monetary_total(self) -> None:
-        """Add LegalMonetaryTotal element (credit notes carry no document allowances)."""
+        """Add LegalMonetaryTotal element (BT-106 = line gross, document discount as BG-20)."""
         monetary_total = self._add_cac(self.root, "LegalMonetaryTotal")
         currency = self.invoice.currency.code
 
-        subtotal = Decimal(self.invoice.subtotal_cents or 0) / 100
-        tax_inclusive = subtotal + self._get_tax_amount()
+        line_gross = self._get_line_gross()
+        discount = self._get_document_discount()
+        tax_exclusive = line_gross - discount
+        tax_inclusive = tax_exclusive + self._get_tax_amount()
 
-        line_ext = self._add_cbc(monetary_total, "LineExtensionAmount", self._format_amount(subtotal))
+        line_ext = self._add_cbc(monetary_total, "LineExtensionAmount", self._format_amount(line_gross))
         line_ext.set("currencyID", currency)
-        tax_excl = self._add_cbc(monetary_total, "TaxExclusiveAmount", self._format_amount(subtotal))
+        tax_excl = self._add_cbc(monetary_total, "TaxExclusiveAmount", self._format_amount(tax_exclusive))
         tax_excl.set("currencyID", currency)
         tax_incl = self._add_cbc(monetary_total, "TaxInclusiveAmount", self._format_amount(tax_inclusive))
         tax_incl.set("currencyID", currency)
+        if discount > 0:
+            allow_elem = self._add_cbc(monetary_total, "AllowanceTotalAmount", self._format_amount(discount))
+            allow_elem.set("currencyID", currency)
         payable = self._add_cbc(monetary_total, "PayableAmount", self._format_amount(tax_inclusive))
         payable.set("currencyID", currency)
 

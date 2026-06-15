@@ -350,6 +350,7 @@ class ProformaConversionService:
                     subtotal_cents=subtotal_cents,
                     tax_cents=tax_cents,
                     total_cents=total_cents,
+                    discount_cents=proforma.discount_cents,
                     due_at=tz.now() + timedelta(days=30),
                     bill_to_name=proforma.bill_to_name or "",
                     bill_to_email=proforma.bill_to_email or "",

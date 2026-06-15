@@ -107,6 +107,9 @@ class ProformaInvoice(models.Model):
     subtotal_cents = models.BigIntegerField(default=0)
     tax_cents = models.BigIntegerField(default=0)
     total_cents = models.BigIntegerField(default=0)
+    discount_cents = models.BigIntegerField(
+        default=0, help_text=_("Document-level discount in cents (EN16931 BT-92/BT-107)")
+    )
 
     # Proforma-specific fields
     STATUS_CHOICES: ClassVar = [
@@ -162,6 +165,10 @@ class ProformaInvoice(models.Model):
             models.CheckConstraint(
                 condition=models.Q(total_cents__gte=0),
                 name="proformainvoice_total_non_negative",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(discount_cents__gte=0),
+                name="proformainvoice_discount_non_negative",
             ),
             models.CheckConstraint(
                 condition=models.Q(status__in=["draft", "sent", "accepted", "expired", "converted"]),

@@ -150,47 +150,14 @@ class EFacturaXMLGenerator:
         Returns:
             Result with XML string or error message
         """
+        from apps.billing.efactura.xml_builder import UBLInvoiceBuilder, XMLBuilderError  # noqa: PLC0415
+
         try:
-            # Validate invoice data
-            validation = self._validate_invoice_for_efactura(invoice)
-            if not validation.is_valid:
-                return Err(f"Validation failed: {', '.join(validation.errors)}")
-
-            # Build XML tree
-            root = self._create_invoice_root()
-
-            # Add invoice header
-            self._add_invoice_header(root, invoice)
-
-            # Add supplier party (seller)
-            self._add_supplier_party(root, invoice)
-
-            # Add customer party (buyer)
-            self._add_customer_party(root, invoice)
-
-            # Add payment means
-            self._add_payment_means(root, invoice)
-
-            # Add payment terms
-            self._add_payment_terms(root, invoice)
-
-            # Add tax totals
-            self._add_tax_totals(root, invoice)
-
-            # Add monetary totals
-            self._add_monetary_totals(root, invoice)
-
-            # Add invoice lines
-            self._add_invoice_lines(root, invoice)
-
-            # Convert to string
-            xml_string = ET.tostring(root, encoding="unicode", xml_declaration=True)
-
-            # Format with proper indentation
-            xml_string = self._format_xml(xml_string)
-
-            return Ok(xml_string)
-
+            # Delegate to the canonical CIUS-RO builder so every submission path emits the
+            # identical, reconciled document (setup fees + document discount as BG-20). #188
+            return Ok(UBLInvoiceBuilder(invoice).build())
+        except XMLBuilderError as e:
+            return Err(f"Validation failed: {e}")
         except Exception as e:
             logger.exception(f"Failed to generate e-Factura XML: {e}")
             return Err(f"XML generation failed: {e}")

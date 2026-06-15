@@ -394,6 +394,64 @@ class UBLInvoiceBuilderTestCase(TestCase):
         self.assertEqual(self._lmt_amount(doc, "AllowanceTotalAmount"), "50.00")
         self.assertEqual(self._lmt_amount(doc, "TaxExclusiveAmount"), "950.00")
 
+    def test_document_discount_emits_allowance_and_reconciles(self):
+        """#188: a stored document-level discount emits a BG-20 AllowanceCharge, and the
+        totals reconcile — BT-106 = Σ line gross, TaxExclusive = TaxableAmount = net,
+        TaxAmount = net*rate, and BT-106 = Σ line BT-131 (BR-CO-10/13/17)."""
+        invoice = InvoiceFactory(
+            customer=CustomerFactory(), currency=self.currency, number="INV-DOCDISC",
+            bill_to_name="Customer", bill_to_country="RO", bill_to_tax_id="RO12345678",
+            bill_to_street="Street 1", bill_to_city="City", bill_to_postal_code="010101",
+            status="issued", issued_at=timezone.now(), due_at=timezone.now() + timezone.timedelta(days=30),
+            subtotal_cents=90000, tax_total_cents=17100, total_cents=107100, discount_cents=10000,
+        )
+        InvoiceLineFactory(
+            invoice=invoice, description="Web Hosting", unit_price_cents=100000,
+            quantity=1, tax_rate=Decimal("0.1900"), tax_category_code="S",
+        )
+        doc = etree.fromstring(UBLInvoiceBuilder(invoice).build().encode())
+
+        allow = doc.find(f".//{{{NAMESPACES['cac']}}}AllowanceCharge")
+        self.assertIsNotNone(allow)
+        self.assertEqual(allow.find(f"{{{NAMESPACES['cbc']}}}ChargeIndicator").text, "false")
+        self.assertEqual(allow.find(f"{{{NAMESPACES['cbc']}}}Amount").text, "100.00")
+
+        self.assertEqual(self._lmt_amount(doc, "LineExtensionAmount"), "1000.00")
+        self.assertEqual(self._lmt_amount(doc, "AllowanceTotalAmount"), "100.00")
+        self.assertEqual(self._lmt_amount(doc, "TaxExclusiveAmount"), "900.00")
+
+        ts = doc.find(f".//{{{NAMESPACES['cac']}}}TaxTotal/{{{NAMESPACES['cac']}}}TaxSubtotal")
+        self.assertEqual(ts.find(f"{{{NAMESPACES['cbc']}}}TaxableAmount").text, "900.00")
+        self.assertEqual(ts.find(f"{{{NAMESPACES['cbc']}}}TaxAmount").text, "171.00")
+
+        lines = doc.findall(f".//{{{NAMESPACES['cac']}}}InvoiceLine")
+        line_sum = sum(
+            (Decimal(ln.find(f"{{{NAMESPACES['cbc']}}}LineExtensionAmount").text) for ln in lines),
+            Decimal(0),
+        )
+        self.assertEqual(line_sum, Decimal("1000.00"))
+
+    def test_legacy_invoice_without_stored_discount_still_reconciles(self):
+        """#188: a legacy invoice (net subtotal, gross lines, discount_cents=0, created
+        before the field existed) still emits a reconciled e-Factura — the discount is
+        derived from Σ(line gross) - subtotal, so no ledger backfill is required."""
+        invoice = InvoiceFactory(
+            customer=CustomerFactory(), currency=self.currency, number="INV-LEGACY-DISC",
+            bill_to_name="Customer", bill_to_country="RO", bill_to_tax_id="RO12345678",
+            bill_to_street="Street 1", bill_to_city="City", bill_to_postal_code="010101",
+            status="issued", issued_at=timezone.now(), due_at=timezone.now() + timezone.timedelta(days=30),
+            subtotal_cents=90000, tax_total_cents=17100, total_cents=107100, discount_cents=0,
+        )
+        InvoiceLineFactory(
+            invoice=invoice, description="Web Hosting", unit_price_cents=100000,
+            quantity=1, tax_rate=Decimal("0.1900"), tax_category_code="S",
+        )
+        doc = etree.fromstring(UBLInvoiceBuilder(invoice).build().encode())
+        # derived discount = 1000 - 900 = 100 → reconciles to net 900 (not inflated to 1000)
+        self.assertEqual(self._lmt_amount(doc, "LineExtensionAmount"), "1000.00")
+        self.assertEqual(self._lmt_amount(doc, "AllowanceTotalAmount"), "100.00")
+        self.assertEqual(self._lmt_amount(doc, "TaxExclusiveAmount"), "900.00")
+
     def test_build_contains_legal_monetary_total(self):
         """Test that LegalMonetaryTotal is present and correct."""
         builder = UBLInvoiceBuilder(self.invoice)
@@ -540,6 +598,40 @@ class UBLCreditNoteBuilderTestCase(TestCase):
             quantity=1,
             tax_rate=Decimal("0.1900"),  # Matches credit note's tax_total_cents=9500
         )
+
+    def test_credit_note_document_discount_emits_allowance_and_reconciles(self):
+        """#188: a discounted credit note emits a BG-20 AllowanceCharge and reconciles —
+        BT-106 = Σ line gross, TaxExclusive = TaxableAmount = net, Σ line = BT-106."""
+        cn = InvoiceFactory(
+            customer=self.customer, currency=self.currency, number="CN-DISC-001",
+            bill_to_name="Customer SRL", bill_to_country="RO", bill_to_tax_id="RO87654321",
+            status="issued", issued_at=timezone.now(),
+            subtotal_cents=90000, tax_total_cents=17100, total_cents=107100, discount_cents=10000,
+        )
+        InvoiceLineFactory(
+            invoice=cn, description="Refund", unit_price_cents=100000, quantity=1,
+            tax_rate=Decimal("0.1900"), tax_category_code="S",
+        )
+        doc = etree.fromstring(UBLCreditNoteBuilder(cn, self.original_invoice).build().encode())
+
+        allow = doc.find(f".//{{{NAMESPACES['cac']}}}AllowanceCharge")
+        self.assertIsNotNone(allow)
+        self.assertEqual(allow.find(f"{{{NAMESPACES['cbc']}}}Amount").text, "100.00")
+
+        lmt = doc.find(f".//{{{NAMESPACES['cac']}}}LegalMonetaryTotal")
+        self.assertEqual(lmt.find(f"{{{NAMESPACES['cbc']}}}LineExtensionAmount").text, "1000.00")
+        self.assertEqual(lmt.find(f"{{{NAMESPACES['cbc']}}}TaxExclusiveAmount").text, "900.00")
+        self.assertEqual(lmt.find(f"{{{NAMESPACES['cbc']}}}AllowanceTotalAmount").text, "100.00")
+
+        ts = doc.find(f".//{{{NAMESPACES['cac']}}}TaxTotal/{{{NAMESPACES['cac']}}}TaxSubtotal")
+        self.assertEqual(ts.find(f"{{{NAMESPACES['cbc']}}}TaxableAmount").text, "900.00")
+
+        lines = doc.findall(f".//{{{NAMESPACES['cac']}}}CreditNoteLine")
+        line_sum = sum(
+            (Decimal(ln.find(f"{{{NAMESPACES['cbc']}}}LineExtensionAmount").text) for ln in lines),
+            Decimal(0),
+        )
+        self.assertEqual(line_sum, Decimal("1000.00"))
 
     def test_build_credit_note_generates_valid_xml(self):
         """Test that credit note build generates valid XML."""

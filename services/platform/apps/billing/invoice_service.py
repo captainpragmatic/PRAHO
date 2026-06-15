@@ -10,7 +10,6 @@ import logging
 from datetime import datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
-from xml.sax.saxutils import escape as xml_escape
 
 from django.conf import settings
 from django.db import transaction
@@ -303,90 +302,17 @@ This is a placeholder PDF. Install weasyprint for proper PDF generation.
 
 
 def generate_e_factura_xml(invoice: Invoice) -> str:
-    """
-    Generate e-Factura XML for Romanian compliance.
+    """Generate e-Factura (CIUS-RO UBL 2.1) XML via the canonical builder.
 
-    Args:
-        invoice: Invoice to generate e-Factura XML for
-
-    Returns:
-        e-Factura compliant XML string
+    Delegates to UBLInvoiceBuilder so the staff download and the ANAF submission path
+    emit the identical, fully-conformant document (#188).
     """
+    from apps.billing.efactura.xml_builder import UBLInvoiceBuilder  # noqa: PLC0415
+
     try:
-        # Build e-Factura XML structure according to Romanian ANAF specifications
-        customer = invoice.customer
-
-        # Calculate totals
-        total_without_vat = Decimal(invoice.subtotal_cents or 0) / 100
-        vat_amount = Decimal(invoice.tax_cents or 0) / 100
-        total_with_vat = Decimal(invoice.total_cents or 0) / 100
-
-        # XML-escape all dynamic values to prevent XML injection
-        invoice_number = xml_escape(str(invoice.number))
-        issue_date = xml_escape(invoice.created_at.strftime("%Y-%m-%d") if invoice.created_at else "")
-        due_date = xml_escape(
-            invoice.due_date.strftime("%Y-%m-%d") if hasattr(invoice, "due_date") and invoice.due_date else ""
-        )
-        company_name = xml_escape(str(getattr(settings, "COMPANY_NAME", "PRAHO Platform")))
-        company_vat = xml_escape(str(getattr(settings, "COMPANY_VAT_NUMBER", "")))
-        customer_name = xml_escape(customer.get_display_name() if customer else "")
-        customer_vat = xml_escape(
-            customer.vat_number if customer and hasattr(customer, "vat_number") and customer.vat_number else ""
-        )
-
-        xml_content = f"""<?xml version="1.0" encoding="UTF-8"?>
-<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
-         xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
-         xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">
-    <cbc:ID>{invoice_number}</cbc:ID>
-    <cbc:IssueDate>{issue_date}</cbc:IssueDate>
-    <cbc:DueDate>{due_date}</cbc:DueDate>
-    <cbc:InvoiceTypeCode>380</cbc:InvoiceTypeCode>
-    <cbc:DocumentCurrencyCode>RON</cbc:DocumentCurrencyCode>
-
-    <cac:AccountingSupplierParty>
-        <cac:Party>
-            <cac:PartyName>
-                <cbc:Name>{company_name}</cbc:Name>
-            </cac:PartyName>
-            <cac:PartyTaxScheme>
-                <cbc:CompanyID>{company_vat}</cbc:CompanyID>
-                <cac:TaxScheme>
-                    <cbc:ID>VAT</cbc:ID>
-                </cac:TaxScheme>
-            </cac:PartyTaxScheme>
-        </cac:Party>
-    </cac:AccountingSupplierParty>
-
-    <cac:AccountingCustomerParty>
-        <cac:Party>
-            <cac:PartyName>
-                <cbc:Name>{customer_name}</cbc:Name>
-            </cac:PartyName>
-            <cac:PartyTaxScheme>
-                <cbc:CompanyID>{customer_vat}</cbc:CompanyID>
-                <cac:TaxScheme>
-                    <cbc:ID>VAT</cbc:ID>
-                </cac:TaxScheme>
-            </cac:PartyTaxScheme>
-        </cac:Party>
-    </cac:AccountingCustomerParty>
-
-    <cac:TaxTotal>
-        <cbc:TaxAmount currencyID="RON">{vat_amount:.2f}</cbc:TaxAmount>
-    </cac:TaxTotal>
-
-    <cac:LegalMonetaryTotal>
-        <cbc:LineExtensionAmount currencyID="RON">{total_without_vat:.2f}</cbc:LineExtensionAmount>
-        <cbc:TaxExclusiveAmount currencyID="RON">{total_without_vat:.2f}</cbc:TaxExclusiveAmount>
-        <cbc:TaxInclusiveAmount currencyID="RON">{total_with_vat:.2f}</cbc:TaxInclusiveAmount>
-        <cbc:PayableAmount currencyID="RON">{total_with_vat:.2f}</cbc:PayableAmount>
-    </cac:LegalMonetaryTotal>
-</Invoice>"""
-
+        xml_content = UBLInvoiceBuilder(invoice).build()
         logger.info(f"🇷🇴 [e-Factura] Generated XML for invoice {invoice.number}")
         return xml_content
-
     except Exception as e:
         logger.error(f"🔥 [e-Factura] Failed to generate XML for invoice {invoice.number}: {e}")
         raise

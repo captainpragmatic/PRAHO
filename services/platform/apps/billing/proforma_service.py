@@ -194,13 +194,18 @@ class ProformaService:
                 bill_to_city=billing_addr.get("city", ""),
                 bill_to_address1=billing_addr.get("address_line1", "") or billing_addr.get("line1", ""),
                 bill_to_tax_id=billing_addr.get("vat_number", "") or billing_addr.get("vat_id", ""),
+                discount_cents=discount_cents,
                 meta={"order_id": str(order.id), "order_number": order.order_number},
             )
 
             # Create proforma lines from order items
             vat_rate_decimal = (vat_result.vat_rate / Decimal("100")).quantize(Decimal("0.0001"))
-            for idx, item in enumerate(order.items.all(), start=1):
+            sort_order = 0
+            for item in order.items.all():
                 billing_period = getattr(item, "billing_period", "") or ""
+                period_start = order.created_at.date()
+                period_end = (order.created_at + _period_delta(billing_period)).date()
+                sort_order += 1
                 line = ProformaLine(
                     proforma=proforma,
                     kind="service",
@@ -212,13 +217,34 @@ class ProformaService:
                     seller_item_id=getattr(item, "product_slug", "")
                     or (getattr(item.product, "slug", "") if getattr(item, "product", None) else ""),
                     unit_code=BILLING_PERIOD_TO_UNIT_CODE.get(billing_period, "C62"),
-                    period_start=order.created_at.date(),
-                    period_end=(order.created_at + _period_delta(billing_period)).date(),
-                    sort_order=idx,
+                    period_start=period_start,
+                    period_end=period_end,
+                    sort_order=sort_order,
                     tax_category_code=_derive_tax_category(vat_result),
                 )
                 line.calculate_totals()
                 line.save()
+
+                # Setup fee as its own line so Σ(line gross) includes it (EN16931 BT-106);
+                # OrderItem.subtotal_cents already counts setup, so the proforma reconciles.
+                setup_cents = int(getattr(item, "setup_cents", 0) or 0)
+                if setup_cents > 0:
+                    sort_order += 1
+                    setup_line = ProformaLine(
+                        proforma=proforma,
+                        kind="service",
+                        description=f"Setup fee - {item.product_name}",
+                        quantity=Decimal("1"),
+                        unit_price_cents=setup_cents,
+                        tax_rate=vat_rate_decimal,
+                        unit_code="C62",
+                        period_start=period_start,
+                        period_end=period_end,
+                        sort_order=sort_order,
+                        tax_category_code=_derive_tax_category(vat_result),
+                    )
+                    setup_line.calculate_totals()
+                    setup_line.save()
 
             # NOTE: Do NOT call proforma.recalculate_totals() here.
             # The correct totals (including discount_cents) were already set at creation.

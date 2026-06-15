@@ -191,6 +191,22 @@ class InvoiceTestCase(TestCase):
         self._refund(invoice, amount_cents=50000, status="pending", ref="REF-REM-3")
         self.assertEqual(invoice.get_remaining_amount(), 0)
 
+    def test_discount_cents_frozen_on_locked_invoice(self):
+        """#188: discount_cents drives the regenerated e-Factura allowance, so it must be
+        frozen once the invoice is locked (issued) — like subtotal/tax/total."""
+        invoice = Invoice.objects.create(
+            customer=self.customer, currency=self.currency, number="INV-DISC-FROZEN",
+            subtotal_cents=90000, tax_cents=17100, total_cents=107100, discount_cents=10000,
+            status="draft",
+        )
+        invoice.issue()  # draft -> issued, sets locked_at
+        invoice.save()
+        invoice.refresh_from_db()
+
+        invoice.discount_cents = 5000
+        with self.assertRaises(ValidationError):
+            invoice.clean()
+
     def test_invoice_mark_as_paid(self):
         """Test marking invoice as paid"""
         invoice = Invoice.objects.create(

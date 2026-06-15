@@ -1001,10 +1001,13 @@ def _process_proforma_line_items(proforma: ProformaInvoice, request_data: dict[s
 
         line_counter += 1
 
-    # Update proforma totals
+    # Update proforma totals. A manual line edit sets explicit prices, so any stored
+    # document-level discount (from the originating order) no longer applies — reset it
+    # so subtotal = Σ(line gross) stays consistent for the e-Factura (#188).
     proforma.subtotal_cents = int(total_subtotal * 100)
     proforma.tax_cents = int(total_tax * 100)
     proforma.total_cents = int((total_subtotal + total_tax) * 100)
+    proforma.discount_cents = 0
 
     return validation_errors
 

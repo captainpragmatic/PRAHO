@@ -18,7 +18,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.messages.middleware import MessageMiddleware
 from django.contrib.sessions.middleware import SessionMiddleware
 from django.http import HttpResponse
-from django.test import Client, RequestFactory, TestCase
+from django.test import Client, RequestFactory, TestCase, override_settings
 from django.utils import timezone
 
 from apps.billing.models import (
@@ -497,6 +497,28 @@ class ProformaEditViewTest(BillingViewsTestBase):
         response = self.client.get(f"/billing/proformas/{proforma.pk}/edit/")
         self.assertEqual(response.status_code, 200)
 
+    def test_proforma_line_edit_resets_document_discount(self):
+        """#188: manually editing proforma lines sets explicit prices, so the stored
+        document discount is reset to 0 — keeping subtotal = Σ(line gross) consistent."""
+        from apps.billing.views import _process_proforma_line_items  # noqa: PLC0415
+
+        proforma = self._create_proforma()
+        proforma.discount_cents = 1000
+        proforma.save(update_fields=["discount_cents"])
+
+        errors = _process_proforma_line_items(
+            proforma,
+            {
+                "line_0_description": "Hosting",
+                "line_0_quantity": "1",
+                "line_0_unit_price": "100.00",
+                "line_0_vat_rate": "19",
+            },
+        )
+        self.assertEqual(errors, [])
+        self.assertEqual(proforma.discount_cents, 0)
+        self.assertEqual(proforma.subtotal_cents, 10000)
+
     def test_proforma_edit_expired(self):
         proforma = self._create_proforma(valid_until=timezone.now() - timedelta(days=1))
         self.client.force_login(self.staff_user)
@@ -763,8 +785,29 @@ class ProcessProformaPaymentViewTest(BillingViewsTestBase):
 class GenerateEFacturaViewTest(BillingViewsTestBase):
     """Tests for generate_e_factura view."""
 
+    @override_settings(
+        COMPANY_NAME="Test Company SRL",
+        EFACTURA_COMPANY_CUI="12345678",
+        COMPANY_STREET="Test Street 123",
+        COMPANY_CITY="Bucharest",
+        COMPANY_POSTAL_CODE="010101",
+        COMPANY_COUNTRY_CODE="RO",
+    )
     def test_generate_efactura_success(self):
-        invoice = self._create_invoice()
+        # A complete, issued invoice generates the canonical CIUS-RO XML. The staff
+        # download now routes through UBLInvoiceBuilder (#188), which requires real data.
+        invoice = self._create_invoice(
+            issued_at=timezone.now(),
+            bill_to_name="Customer SRL",
+            bill_to_country="RO",
+            bill_to_tax_id="RO87654321",
+        )
+        from tests.factories import InvoiceLineFactory  # noqa: PLC0415
+
+        InvoiceLineFactory(
+            invoice=invoice, description="Service", unit_price_cents=8403,
+            quantity=1, tax_rate=Decimal("0.19"),
+        )
         self.client.force_login(self.staff_user)
         response = self.client.get(f"/billing/invoices/{invoice.pk}/e-factura/")
         self.assertEqual(response.status_code, 200)
