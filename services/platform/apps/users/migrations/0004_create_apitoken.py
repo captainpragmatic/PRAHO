@@ -7,7 +7,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("users", "0001_initial"),
+        ("users", "0003_staff_role_check_constraint"),
     ]
 
     operations = [

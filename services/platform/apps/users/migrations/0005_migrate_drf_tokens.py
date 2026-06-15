@@ -39,7 +39,7 @@ def reverse(apps, schema_editor):
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("users", "0002_create_apitoken"),
+        ("users", "0004_create_apitoken"),
         ("authtoken", "0004_alter_tokenproxy_options"),
     ]
 
