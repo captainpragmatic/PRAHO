@@ -18,6 +18,13 @@ from reportlab.pdfgen import canvas
 
 from apps.billing.models import Invoice, ProformaInvoice
 
+# Coordinate-based layout has no text wrapping/clipping, so free-text fields must
+# be clamped to a width that fits their column — otherwise long values overrun the
+# page or overlap neighbouring content.
+_MAX_DESC_CHARS = 40
+_MAX_SUBLINE_CHARS = 60
+_MAX_CLIENT_FIELD_CHARS = 45
+
 
 class RomanianDocumentPDFGenerator:
     """
@@ -59,6 +66,26 @@ class RomanianDocumentPDFGenerator:
         if self.document.currency:
             return self.document.currency.code
         return "RON"
+
+    @staticmethod
+    def _fit(text: object, max_chars: int) -> str:
+        """Clamp free-text to max_chars for the no-wrap coordinate layout, with an ellipsis."""
+        s = str(text)
+        if len(s) <= max_chars:
+            return s
+        return s[: max_chars - 1] + "…"
+
+    @staticmethod
+    def _format_vat_percent(tax_rate: Decimal) -> str:
+        """Format a stored tax rate (e.g. 0.1900) as a percent without truncation: '19', '9.5'.
+
+        ``int(tax_rate * 100)`` silently dropped fractional rates (9.5% rendered as
+        "9%") and collapsed distinct rates into one VAT-breakdown bucket.
+        """
+        pct = Decimal(tax_rate) * 100
+        if pct % 1 == 0:
+            return f"{int(pct)}"
+        return f"{pct.normalize()}"
 
     def _get_company_info(self) -> dict[str, str]:
         """Get company information from settings with Romanian defaults."""
@@ -160,17 +187,17 @@ class RomanianDocumentPDFGenerator:
         current_y = y_pos - step
 
         # Name
-        self.canvas.drawString(x_pos, current_y, self.document.bill_to_name or "")
+        self.canvas.drawString(x_pos, current_y, self._fit(self.document.bill_to_name or "", _MAX_CLIENT_FIELD_CHARS))
         current_y -= step
 
         # Address line 1
         if self.document.bill_to_address1:
-            self.canvas.drawString(x_pos, current_y, self.document.bill_to_address1)
+            self.canvas.drawString(x_pos, current_y, self._fit(self.document.bill_to_address1, _MAX_CLIENT_FIELD_CHARS))
             current_y -= step
 
         # Address line 2
         if self.document.bill_to_address2:
-            self.canvas.drawString(x_pos, current_y, self.document.bill_to_address2)
+            self.canvas.drawString(x_pos, current_y, self._fit(self.document.bill_to_address2, _MAX_CLIENT_FIELD_CHARS))
             current_y -= step
 
         # City, region, postal code
@@ -186,7 +213,7 @@ class RomanianDocumentPDFGenerator:
             city_parts.append(region_postal)
 
         if city_parts:
-            self.canvas.drawString(x_pos, current_y, ", ".join(city_parts))
+            self.canvas.drawString(x_pos, current_y, self._fit(", ".join(city_parts), _MAX_CLIENT_FIELD_CHARS))
             current_y -= step
 
         # Country
@@ -247,12 +274,11 @@ class RomanianDocumentPDFGenerator:
         for line in lines:
             # Main line
             self.canvas.setFont("Helvetica", 9)
-            self.canvas.drawString(2 * cm, current_y, str(line.description)[:40])
+            self.canvas.drawString(2 * cm, current_y, self._fit(line.description, _MAX_DESC_CHARS))
             self.canvas.drawString(9 * cm, current_y, f"{line.quantity:.2f}")
             self.canvas.drawString(11 * cm, current_y, f"{line.unit_price:.2f} {currency}")
 
-            vat_pct = int(line.tax_rate * 100)
-            self.canvas.drawString(13.5 * cm, current_y, f"{vat_pct}%")
+            self.canvas.drawString(13.5 * cm, current_y, f"{self._format_vat_percent(line.tax_rate)}%")
             self.canvas.drawString(15.5 * cm, current_y, f"{line.line_total:.2f} {currency}")
             current_y -= 0.5 * cm
 
@@ -261,7 +287,9 @@ class RomanianDocumentPDFGenerator:
 
             if line.domain_name:
                 self.canvas.drawString(
-                    2.5 * cm, current_y, str(_t("Domeniu: {domain}")).format(domain=line.domain_name)
+                    2.5 * cm,
+                    current_y,
+                    str(_t("Domeniu: {domain}")).format(domain=self._fit(line.domain_name, _MAX_SUBLINE_CHARS)),
                 )
                 current_y -= 0.35 * cm
 
@@ -278,10 +306,19 @@ class RomanianDocumentPDFGenerator:
 
             if line.seller_item_id:
                 self.canvas.drawString(
-                    2.5 * cm, current_y, str(_t("Cod produs: {code}")).format(code=line.seller_item_id)
+                    2.5 * cm,
+                    current_y,
+                    str(_t("Cod produs: {code}")).format(code=self._fit(line.seller_item_id, _MAX_SUBLINE_CHARS)),
                 )
                 current_y -= 0.35 * cm
 
+            # NOTE (review H2): discount_amount_cents is shown for information but is
+            # NOT yet subtracted from subtotal/line_total/total here — the model's
+            # line totals (InvoiceLine.subtotal_cents / calculate_line_totals) ignore
+            # it, while the e-Factura XML builder (PR #178) treats LineExtensionAmount
+            # as net of discount. Reconciling that (PDF + model + XML) is a
+            # cross-cutting fiscal-correctness decision tracked separately; until then
+            # this line is display-only and must not be read as reducing the totals.
             if line.discount_amount_cents > 0:
                 discount_display = Decimal(line.discount_amount_cents) / 100
                 self.canvas.drawString(
@@ -301,12 +338,14 @@ class RomanianDocumentPDFGenerator:
         totals_y = self._table_end_y - 1 * cm
 
         # VAT breakdown by rate
-        vat_groups: dict[int, dict[str, Decimal]] = defaultdict(lambda: {"base": Decimal("0"), "tax": Decimal("0")})
+        # Key by the Decimal tax_rate (not int(rate*100)) so e.g. 9% and 9.5% are
+        # distinct buckets rather than both collapsing to "9".
+        vat_groups: dict[Decimal, dict[str, Decimal]] = defaultdict(lambda: {"base": Decimal("0"), "tax": Decimal("0")})
         has_reverse_charge = False
 
         lines = self.document.lines.all()
         for line in lines:
-            rate_key = int(line.tax_rate * 100)
+            rate_key = Decimal(line.tax_rate)
             vat_groups[rate_key]["base"] += line.subtotal
             tax_for_line = line.line_total - line.subtotal
             vat_groups[rate_key]["tax"] += tax_for_line
@@ -331,7 +370,7 @@ class RomanianDocumentPDFGenerator:
                 12 * cm,
                 totals_y,
                 str(_t("TVA {rate}%: {tax} {currency} (baza: {base} {currency})")).format(
-                    rate=rate,
+                    rate=self._format_vat_percent(rate),
                     tax=f"{group['tax']:.2f}",
                     base=f"{group['base']:.2f}",
                     currency=currency,

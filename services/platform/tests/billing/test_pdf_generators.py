@@ -1086,6 +1086,19 @@ class EN16931PDFComplianceTests(TestCase):
         self.assertIn('TVA 21%', text)
         self.assertIn('TVA 9%', text)
 
+    def test_fractional_vat_rate_not_truncated(self):
+        """A fractional VAT rate (9.5%) must render as 9.5%, not be truncated to 9%."""
+        InvoiceLine.objects.create(
+            invoice=self.invoice, kind='service', description='Fractional VAT service',
+            quantity=1, unit_price_cents=10000, tax_rate=Decimal('0.095'),
+            tax_cents=950, line_total_cents=10950,
+        )
+        calls = self._get_canvas_calls()
+        text = ' '.join(calls)
+        # The breakdown must show the exact rate, and 9.5% must be a distinct bucket
+        # from any 9% line (int(0.095*100) would have collapsed both to "9").
+        self.assertIn('TVA 9.5%', text)
+
     def test_reverse_charge_notation(self):
         """Reverse charge notice must appear when any line has tax_category_code=AE."""
         InvoiceLine.objects.create(

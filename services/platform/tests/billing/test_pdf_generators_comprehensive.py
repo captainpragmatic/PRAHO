@@ -351,9 +351,9 @@ class BillingPDFGeneratorsComprehensiveCoverageTestCase(TestCase):
 
             generator._render_table_data(400.0)
 
-            # Check that description was truncated to 40 characters
+            # Check that description was truncated to 40 chars (39 + ellipsis marker)
             draw_calls = [str(call) for call in mock_draw.call_args_list]
-            truncated_description = 'A' * 40
+            truncated_description = 'A' * 39 + '…'
             self.assertTrue(any(truncated_description in call for call in draw_calls))
 
     def test_base_generator_render_totals_section(self) -> None:
