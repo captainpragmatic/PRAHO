@@ -325,18 +325,29 @@ class Invoice(models.Model):
         return now > due
 
     def get_remaining_amount(self) -> int:
-        """Calculate remaining unpaid amount in cents.
+        """Calculate remaining unpaid amount in cents, net of completed refunds.
 
-        Includes both 'succeeded' and 'partially_refunded' payments because
-        partially-refunded payments still represent collected money.
+        'succeeded', 'partially_refunded' and 'refunded' payments all represent funds
+        that were received; completed refunds are funds returned. Net retained =
+        collected - refunded, and the balance due is the invoice total minus that.
+        Refunds live in a separate Refund model, so a partially-refunded payment keeps
+        its full amount_cents - without this subtraction the balance would understate
+        what is still owed after a partial refund.
         """
-        paid_amount = (
-            self.payments.filter(status__in=["succeeded", "partially_refunded"]).aggregate(
+        from apps.billing.refund_models import Refund  # noqa: PLC0415  -- local import avoids an import cycle
+
+        collected = (
+            self.payments.filter(status__in=["succeeded", "partially_refunded", "refunded"]).aggregate(
                 total=models.Sum("amount_cents")
             )["total"]
             or 0
         )
-        return max(0, self.total_cents - paid_amount)
+        refunded = (
+            Refund.objects.filter(invoice=self, status="completed").aggregate(total=models.Sum("amount_cents"))["total"]
+            or 0
+        )
+        net_collected = max(0, collected - refunded)
+        return max(0, self.total_cents - net_collected)
 
     @transition(field=status, source="draft", target="issued")
     def issue(self) -> None:

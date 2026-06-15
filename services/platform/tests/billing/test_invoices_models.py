@@ -13,10 +13,12 @@ from django.utils import timezone
 from django_fsm import TransitionNotAllowed
 
 from apps.billing.models import Currency, Invoice, InvoiceLine, ProformaInvoice
-from tests.helpers.fsm_helpers import force_status
+from apps.billing.payment_models import Payment
+from apps.billing.refund_models import Refund
 from apps.customers.models import Customer
 from apps.provisioning.models import Service, ServicePlan
 from tests.factories.billing_factories import create_invoice
+from tests.helpers.fsm_helpers import force_status
 
 User = get_user_model()
 
@@ -138,6 +140,56 @@ class InvoiceTestCase(TestCase):
 
         # Initially, full amount remaining (returns cents, not decimal)
         self.assertEqual(invoice.get_remaining_amount(), 10000)
+
+    def _refund(self, invoice, *, amount_cents, status, ref):
+        return Refund.objects.create(
+            customer=self.customer, invoice=invoice, currency=self.currency,
+            amount_cents=amount_cents, original_amount_cents=invoice.total_cents,
+            reference_number=ref, status=status,
+        )
+
+    def test_get_remaining_amount_subtracts_completed_refund(self):
+        """#189: a completed refund reduces net collected, so the balance due reflects
+        money actually retained (partially-refunded payment keeps its full amount_cents)."""
+        invoice = Invoice.objects.create(
+            customer=self.customer, currency=self.currency, number="INV-REF-1",
+            status="issued", total_cents=119000,
+        )
+        Payment.objects.create(
+            customer=self.customer, invoice=invoice, currency=self.currency,
+            amount_cents=119000, status="partially_refunded",
+        )
+        self._refund(invoice, amount_cents=50000, status="completed", ref="REF-REM-1")
+        # paid 1190.00, refunded 500.00 -> net retained 690.00 -> 500.00 still due
+        self.assertEqual(invoice.get_remaining_amount(), 50000)
+
+    def test_get_remaining_amount_full_refund_restores_full_balance(self):
+        """#189 regression guard: a fully-refunded payment leaves the FULL balance due,
+        never more (the naive `total - (collected - refunded)` would inflate above total)."""
+        invoice = Invoice.objects.create(
+            customer=self.customer, currency=self.currency, number="INV-REF-2",
+            status="issued", total_cents=119000,
+        )
+        Payment.objects.create(
+            customer=self.customer, invoice=invoice, currency=self.currency,
+            amount_cents=119000, status="refunded",
+        )
+        self._refund(invoice, amount_cents=119000, status="completed", ref="REF-REM-2")
+        self.assertEqual(invoice.get_remaining_amount(), 119000)
+
+    def test_get_remaining_amount_ignores_non_completed_refund(self):
+        """#189 regression guard: only COMPLETED refunds reduce the balance; a pending /
+        rejected refund (money not actually returned) must not."""
+        invoice = Invoice.objects.create(
+            customer=self.customer, currency=self.currency, number="INV-REF-3",
+            status="issued", total_cents=119000,
+        )
+        Payment.objects.create(
+            customer=self.customer, invoice=invoice, currency=self.currency,
+            amount_cents=119000, status="succeeded",
+        )
+        self._refund(invoice, amount_cents=50000, status="pending", ref="REF-REM-3")
+        self.assertEqual(invoice.get_remaining_amount(), 0)
 
     def test_invoice_mark_as_paid(self):
         """Test marking invoice as paid"""
