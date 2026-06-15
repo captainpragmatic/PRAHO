@@ -756,26 +756,27 @@ class DomainRegistrarGateway:
 
     @staticmethod
     def verify_webhook_signature(registrar: Registrar, payload: str, signature: str) -> bool:
-        import hashlib  # noqa: PLC0415
-        import hmac as hmac_mod  # noqa: PLC0415
+        from .gateways import BaseRegistrarGateway, RegistrarGatewayFactory  # noqa: PLC0415
 
-        from .gateways import RegistrarGatewayFactory  # noqa: PLC0415
-
+        # Only the "no gateway registered" case should fall through to the fallback;
+        # don't swallow errors from the gateway's own verification.
         try:
             gateway = RegistrarGatewayFactory.create_gateway(registrar)
-            return gateway.verify_webhook_signature(payload, signature)
         except ValueError:
-            pass
+            gateway = None
+        if gateway is not None:
+            return gateway.verify_webhook_signature(payload, signature)
 
-        # Fallback: direct HMAC-SHA256 for registrars without a gateway
+        # Fallback: shared HMAC-SHA256 for registrars without a dedicated gateway.
         if not registrar.webhook_secret or not signature:
             return False
         try:
             secret = registrar.get_decrypted_webhook_secret()
         except Exception:
+            # Previously swallowed silently — log so a decryption/key-rotation outage
+            # is visible instead of every webhook quietly failing verification.
+            logger.error("Webhook secret decryption failed for %s (encryption key may have rotated)", registrar.name)
             return False
         if not secret or not secret.strip():
             return False
-        webhook_secret = secret.strip().encode("utf-8")
-        expected = hmac_mod.new(webhook_secret, payload.encode("utf-8"), hashlib.sha256).hexdigest()
-        return hmac_mod.compare_digest(f"sha256={expected}", signature)
+        return BaseRegistrarGateway._verify_hmac_sha256(payload, signature, secret.strip())

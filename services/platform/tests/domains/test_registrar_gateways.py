@@ -13,11 +13,12 @@ from unittest.mock import MagicMock, patch
 
 from django.test import TestCase
 
-from apps.common.types import Ok
+from apps.common.types import Err, Ok
 from apps.domains.gateways import (
     RegistrarGatewayFactory,
 )
 from apps.domains.gateways.base import (
+    _IDEMPOTENCY_IN_PROGRESS,
     CIRCUIT_BREAKER_THRESHOLD,
     DomainAvailabilityResult,
     DomainRegistrationResult,
@@ -410,6 +411,26 @@ class IdempotencyTests(TestCase):
         self.assertTrue(result.is_ok())
         self.assertEqual(result.unwrap().registrar_domain_id, "cached-123")
 
+    @patch("apps.domains.gateways.base.cache")
+    def test_concurrent_in_flight_registration_rejected(self, mock_cache: MagicMock) -> None:
+        """A second concurrent register for the same domain is refused, not duplicated.
+
+        The first request claims the idempotency key with _IDEMPOTENCY_IN_PROGRESS
+        via cache.add(); the second loses that atomic claim (add() returns False) and,
+        finding only the in-progress sentinel (no real result yet), must return a
+        RegistrarConflictError rather than issuing a second chargeable registration.
+        """
+        # get(): circuit-breaker check -> 0 (OK); idempotency read -> the in-progress
+        # sentinel (so the "cached real result" fast-path is skipped); after the lost
+        # add() race, the re-read -> sentinel again (no real result landed yet).
+        mock_cache.get.side_effect = [0, _IDEMPOTENCY_IN_PROGRESS, _IDEMPOTENCY_IN_PROGRESS]
+        mock_cache.add.return_value = False  # slot already claimed by the in-flight request
+
+        result = self.gateway.register_domain("example.com", 1, {})
+
+        self.assertTrue(result.is_err())
+        self.assertIsInstance(result.unwrap_err(), RegistrarConflictError)
+
 
 # ===============================================================================
 # BACKWARD-COMPATIBLE FACADE (services.py DomainRegistrarGateway)
@@ -464,3 +485,67 @@ class DomainRegistrarGatewayFacadeTests(TestCase):
             result = DomainRegistrarGateway.verify_webhook_signature(registrar, "payload", "sig")
 
         self.assertTrue(result)
+
+
+# ===============================================================================
+# IDEMPOTENCY CLAIM + CIRCUIT-BREAKER RECOVERY (PR #169 review H1/H2)
+# ===============================================================================
+
+
+class IdempotencyClaimTests(TestCase):
+    """The idempotency key is claimed atomically before the call (H1)."""
+
+    def setUp(self) -> None:
+        self.registrar = _make_registrar("gandi")
+        self.gateway = GandiGateway(self.registrar)
+        self.registrant = {"first_name": "Ion", "last_name": "Popescu", "email": "ion@example.com"}
+
+    @patch("apps.domains.gateways.base.cache")
+    def test_concurrent_in_progress_call_is_rejected(self, mock_cache: MagicMock) -> None:
+        # breaker OK, idempotency miss, then add() loses the race, then re-read shows in-progress.
+        mock_cache.get.side_effect = [0, None, _IDEMPOTENCY_IN_PROGRESS]
+        mock_cache.add.return_value = False
+
+        with patch.object(self.gateway, "_do_register") as mock_do:
+            result = self.gateway.register_domain("example.com", 1, self.registrant)
+
+        self.assertTrue(result.is_err())
+        self.assertIsInstance(result.unwrap_err(), RegistrarConflictError)
+        # Crucially, the registrar was never called for the duplicate request.
+        mock_do.assert_not_called()
+
+    @patch("apps.domains.gateways.base.cache")
+    def test_claim_is_released_on_failure(self, mock_cache: MagicMock) -> None:
+        mock_cache.get.side_effect = [0, None]
+        mock_cache.add.return_value = True
+
+        with patch.object(self.gateway, "_do_register") as mock_do:
+            mock_do.return_value = Err(RegistrarTransientError("gandi", "boom"))
+            result = self.gateway.register_domain("example.com", 1, self.registrant)
+
+        self.assertTrue(result.is_err())
+        # The in-progress claim must be deleted so a legitimate retry can proceed.
+        mock_cache.delete.assert_any_call("domain_reg:gandi:example.com")
+
+
+class CircuitBreakerRecoveryTests(TestCase):
+    """_record_failure keeps a fixed TTL window so the breaker auto-recovers (H2)."""
+
+    def setUp(self) -> None:
+        self.registrar = _make_registrar("gandi")
+        self.gateway = GandiGateway(self.registrar)
+
+    @patch("apps.domains.gateways.base.cache")
+    def test_subsequent_failure_does_not_reset_ttl(self, mock_cache: MagicMock) -> None:
+        # Counter already exists → incr succeeds; the sliding-window touch() must be gone.
+        mock_cache.incr.return_value = 2
+        self.gateway._record_failure(RegistrarTransientError("gandi", "boom"))
+        mock_cache.touch.assert_not_called()
+
+    @patch("apps.domains.gateways.base.cache")
+    def test_first_failure_seeds_fixed_ttl(self, mock_cache: MagicMock) -> None:
+        from apps.domains.gateways.base import CIRCUIT_BREAKER_RESET_SECONDS  # noqa: PLC0415
+
+        mock_cache.incr.side_effect = ValueError  # key absent
+        self.gateway._record_failure(RegistrarTransientError("gandi", "boom"))
+        mock_cache.set.assert_called_once_with("cb:gandi:failures", 1, CIRCUIT_BREAKER_RESET_SECONDS)

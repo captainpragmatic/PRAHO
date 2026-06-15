@@ -42,6 +42,10 @@ logger = logging.getLogger(__name__)
 CIRCUIT_BREAKER_THRESHOLD = 5  # failures before tripping
 CIRCUIT_BREAKER_RESET_SECONDS = 300  # 5 minutes
 IDEMPOTENCY_TTL_SECONDS = 3600  # 1 hour
+# Sentinel stored under the idempotency key while a registrar call is in flight, so a
+# second concurrent request for the same domain is rejected instead of issuing a
+# duplicate (and chargeable) registration. Replaced with the real result on success.
+_IDEMPOTENCY_IN_PROGRESS = "__in_progress__"
 
 # Retry defaults
 MAX_RETRIES = 3
@@ -159,32 +163,13 @@ class BaseRegistrarGateway(ABC):
         nameservers: list[str] | None = None,
     ) -> Result[DomainRegistrationResult, RegistrarAPIError]:
         """Register a domain, with circuit breaker and idempotency protection."""
-        if err := self._check_circuit_breaker():
-            return err
-
-        # Idempotency: prevent duplicate registrations
-        idempotency_key = f"domain_reg:{self.gateway_name}:{domain_name}"
-        cached = cache.get(idempotency_key)
-        if cached is not None:
-            self.logger.info("Idempotency hit for %s registration", domain_name)
-            return Ok(cached)
-
-        result = self._retry(
-            lambda: self._do_register(domain_name, years, registrant_data, nameservers),
+        return self._execute_idempotent_operation(
+            idempotency_key=f"domain_reg:{self.gateway_name}:{domain_name}",
+            fn=lambda: self._do_register(domain_name, years, registrant_data, nameservers),
             operation=f"register:{domain_name}",
+            audit_event="domain_registration",
+            domain_name=domain_name,
         )
-
-        if result.is_ok():
-            cache.set(idempotency_key, result.unwrap(), IDEMPOTENCY_TTL_SECONDS)
-            self._record_success()
-            self.logger.info("Registered %s via %s", domain_name, self.gateway_name)
-            self._audit_api_call("domain_registration", domain_name, success=True)
-        else:
-            self._record_failure(result.unwrap_err())
-            self.logger.error("Failed to register %s: %s", domain_name, result.unwrap_err())
-            self._audit_api_call("domain_registration", domain_name, success=False, error=str(result.unwrap_err()))
-
-        return result
 
     def renew_domain(
         self,
@@ -193,29 +178,64 @@ class BaseRegistrarGateway(ABC):
         years: int,
     ) -> Result[DomainRenewalResult, RegistrarAPIError]:
         """Renew a domain, with circuit breaker and idempotency protection."""
+        return self._execute_idempotent_operation(
+            idempotency_key=f"domain_renew:{self.gateway_name}:{domain_name}:{years}",
+            fn=lambda: self._do_renew(registrar_domain_id, domain_name, years),
+            operation=f"renew:{domain_name}",
+            audit_event="domain_renewal",
+            domain_name=domain_name,
+            audit_metadata={"years": years},
+        )
+
+    def _execute_idempotent_operation(  # noqa: PLR0913  # cohesive call + audit context for one op
+        self,
+        idempotency_key: str,
+        fn: Any,
+        operation: str,
+        audit_event: str,
+        domain_name: str,
+        audit_metadata: dict[str, Any] | None = None,
+    ) -> Result[Any, RegistrarAPIError]:
+        """Run a state-changing registrar call with circuit-breaker + idempotency.
+
+        Idempotency claims the key atomically *before* the call (cache.add), so a
+        second concurrent request for the same domain is refused instead of issuing
+        a duplicate, chargeable operation — the previous get-then-call had a window
+        where two requests both missed the cache and both called the registrar. The
+        claim is replaced with the result on success and released on failure so a
+        legitimate retry can proceed.
+        """
         if err := self._check_circuit_breaker():
             return err
 
-        idempotency_key = f"domain_renew:{self.gateway_name}:{domain_name}:{years}"
         cached = cache.get(idempotency_key)
-        if cached is not None:
-            self.logger.info("Idempotency hit for %s renewal", domain_name)
+        if cached is not None and cached != _IDEMPOTENCY_IN_PROGRESS:
+            self.logger.info("Idempotency hit for %s", operation)
             return Ok(cached)
 
-        result = self._retry(
-            lambda: self._do_renew(registrar_domain_id, domain_name, years),
-            operation=f"renew:{domain_name}",
-        )
+        # Atomically claim the slot. add() only succeeds if the key is absent, so a
+        # concurrent in-flight request loses the race and is rejected.
+        if not cache.add(idempotency_key, _IDEMPOTENCY_IN_PROGRESS, IDEMPOTENCY_TTL_SECONDS):
+            existing = cache.get(idempotency_key)
+            if existing is not None and existing != _IDEMPOTENCY_IN_PROGRESS:
+                return Ok(existing)
+            self.logger.warning("Concurrent %s already in progress — rejecting duplicate", operation)
+            return Err(RegistrarConflictError(domain_name, self.registrar.name))
+
+        result = self._retry(fn, operation=operation)
 
         if result.is_ok():
             cache.set(idempotency_key, result.unwrap(), IDEMPOTENCY_TTL_SECONDS)
             self._record_success()
-            self.logger.info("Renewed %s via %s", domain_name, self.gateway_name)
-            self._audit_api_call("domain_renewal", domain_name, success=True, metadata={"years": years})
+            self.logger.info("%s succeeded via %s", operation, self.gateway_name)
+            self._audit_api_call(audit_event, domain_name, success=True, metadata=audit_metadata)
         else:
+            cache.delete(idempotency_key)  # release the claim so a legitimate retry can proceed
             self._record_failure(result.unwrap_err())
-            self.logger.error("Failed to renew %s: %s", domain_name, result.unwrap_err())
-            self._audit_api_call("domain_renewal", domain_name, success=False, error=str(result.unwrap_err()))
+            self.logger.error("%s failed: %s", operation, result.unwrap_err())
+            self._audit_api_call(
+                audit_event, domain_name, success=False, error=str(result.unwrap_err()), metadata=audit_metadata
+            )
 
         return result
 
@@ -329,11 +349,14 @@ class BaseRegistrarGateway(ABC):
     def _record_failure(self, error: RegistrarAPIError) -> None:
         key = self._circuit_breaker_key()
         try:
+            # incr preserves the TTL set on the first failure — do NOT touch() here.
+            # Touching on every failure slid the window forward, so under sustained
+            # failures the counter never expired and the breaker never auto-recovered.
             cache.incr(key)
         except ValueError:
+            # First failure in this window: seed the counter with a fixed TTL so the
+            # breaker auto-closes CIRCUIT_BREAKER_RESET_SECONDS after it first opened.
             cache.set(key, 1, CIRCUIT_BREAKER_RESET_SECONDS)
-        else:
-            cache.touch(key, CIRCUIT_BREAKER_RESET_SECONDS)
 
     def _record_success(self) -> None:
         cache.delete(self._circuit_breaker_key())
