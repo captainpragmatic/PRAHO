@@ -150,7 +150,11 @@ class CustomerPaymentMethod(SoftDeleteModel):
     is_default = models.BooleanField(default=False, verbose_name=_("Implicit"))
     is_active = models.BooleanField(default=True, verbose_name=_("Activ"))
 
-    # Bank Transfer Details (AES-256-GCM encrypted at rest)
+    # Bank Transfer Details (AES-256-GCM encrypted at rest).
+    # NOTE: pass require_v2=True to reject v1/plaintext downgrade (review H1), but
+    # only AFTER `manage.py reencrypt_with_aad` has upgraded existing rows to v2 —
+    # it intentionally drops the legacy-plaintext backward-compat read path, so it
+    # is a deliberate maintainer decision (left False here to preserve current behavior).
     bank_details = EncryptedJSONField(blank=True, null=True, verbose_name=_("Detalii bancare"))
 
     # Audit

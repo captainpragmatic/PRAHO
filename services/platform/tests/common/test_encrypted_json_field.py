@@ -1,11 +1,12 @@
 """Tests for EncryptedJSONField — AES-256-GCM transparent encryption at rest."""
 
 import json
+from unittest.mock import patch
 
 from django.db import connection
 from django.test import TestCase, override_settings
 
-from apps.common.encryption import _clear_aesgcm_cache
+from apps.common.encryption import _clear_aesgcm_cache, encrypt_sensitive_data
 from apps.common.fields import _extract_embedded_aad
 from apps.customers.models import Customer, CustomerPaymentMethod
 
@@ -271,3 +272,69 @@ class EncryptedJSONFieldAADTest(TestCase):
         )
         pm.refresh_from_db()
         self.assertEqual(pm.bank_details, details)
+
+
+@override_settings(ENCRYPTION_KEY=TEST_KEY)
+class EncryptedJSONFieldRequireV2Test(TestCase):
+    """require_v2 rejects v1/plaintext downgrade (review H1)."""
+
+    def setUp(self) -> None:
+        _clear_aesgcm_cache()
+        self.customer = Customer.objects.create(
+            name="RequireV2 Customer",
+            customer_type="company",
+            status="active",
+            primary_email="rv2@test.com",
+            primary_phone="+40712345681",
+        )
+        self.field = CustomerPaymentMethod._meta.get_field("bank_details")
+
+    def _write_raw(self, pk: int, raw_json_value: str) -> None:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE customer_payment_methods SET bank_details = %s WHERE id = %s",
+                [raw_json_value, pk],
+            )
+
+    def test_v2_value_is_accepted(self) -> None:
+        details = {"bank_name": "BT", "iban": "RO49BTRL1B31007593840001"}
+        pm = CustomerPaymentMethod.objects.create(
+            customer=self.customer, method_type="bank_transfer", display_name="V2", bank_details=details
+        )
+        with patch.object(self.field, "require_v2", True):
+            pm.refresh_from_db()
+            self.assertEqual(pm.bank_details, details)
+
+    def test_v1_ciphertext_is_rejected(self) -> None:
+        pm = CustomerPaymentMethod.objects.create(
+            customer=self.customer, method_type="bank_transfer", display_name="V1", bank_details=None
+        )
+        # Craft a v1 ciphertext (no AAD) and write it raw, simulating a downgrade.
+        v1_cipher = encrypt_sensitive_data(json.dumps({"iban": "RO00DOWNGRADE"}))
+        self.assertTrue(v1_cipher.startswith("aes:v1:"))
+        self._write_raw(pm.id, json.dumps(v1_cipher))
+
+        with patch.object(self.field, "require_v2", True):
+            pm.refresh_from_db()
+            self.assertIsNone(pm.bank_details)
+
+    def test_plaintext_is_rejected(self) -> None:
+        pm = CustomerPaymentMethod.objects.create(
+            customer=self.customer, method_type="bank_transfer", display_name="Plain", bank_details=None
+        )
+        self._write_raw(pm.id, '{"iban": "RO00PLAINTEXT"}')
+
+        with patch.object(self.field, "require_v2", True):
+            pm.refresh_from_db()
+            self.assertIsNone(pm.bank_details)
+
+    def test_default_still_reads_v1_for_backward_compat(self) -> None:
+        """With require_v2 left False (default), v1 ciphertext is still readable."""
+        pm = CustomerPaymentMethod.objects.create(
+            customer=self.customer, method_type="bank_transfer", display_name="Compat", bank_details=None
+        )
+        v1_cipher = encrypt_sensitive_data(json.dumps({"iban": "RO00COMPAT"}))
+        self._write_raw(pm.id, json.dumps(v1_cipher))
+
+        pm.refresh_from_db()
+        self.assertEqual(pm.bank_details, {"iban": "RO00COMPAT"})

@@ -61,7 +61,20 @@ class EncryptedJSONField(models.JSONField):
 
     Wire format in DB: jsonb string containing ``"aes:v2:<base64>"`` (AAD-bound)
     Python interface: plain dict (identical to standard JSONField)
+
+    ``require_v2``: when True, the field rejects (fail-closed → None + security log)
+    any stored value that is not v2 AAD-bound ciphertext — v1/legacy ciphertext or
+    plaintext. This closes the downgrade bypass where an attacker with DB write
+    access supplies a v1 blob (which carries no AAD binding) to sidestep transplant
+    protection. Set it True only after ``reencrypt_with_aad`` has upgraded existing
+    rows to v2; otherwise unmigrated rows read back as None.
     """
+
+    def __init__(self, *args: Any, require_v2: bool = False, **kwargs: Any) -> None:
+        # require_v2 is read-time behavior only (not stored in the DB), so it is
+        # intentionally omitted from deconstruct() — no schema migration is needed.
+        self.require_v2 = require_v2
+        super().__init__(*args, **kwargs)
 
     def _build_aad(self, model_instance: models.Model) -> bytes:
         """Build AAD context string for this field on this instance."""
@@ -103,6 +116,22 @@ class EncryptedJSONField(models.JSONField):
         result = super().from_db_value(value, expression, connection)
         if result is None:
             return None
+
+        is_v2 = isinstance(result, str) and result.startswith(VERSIONED_V2_PREFIX)
+        if self.require_v2 and not is_v2:
+            # Fail closed: a require_v2 field must only ever yield AAD-bound v2 data.
+            # Anything else — v1/legacy ciphertext or raw plaintext — is either a
+            # downgrade attempt or unmigrated data; do not return it.
+            encrypted = isinstance(result, str) and result.startswith(ENCRYPTED_PREFIX)
+            logger.error(
+                "EncryptedJSONField requires v2 AAD-bound ciphertext but found %s on %s.%s — "
+                "rejecting (run reencrypt_with_aad; possible downgrade attack).",
+                "v1/legacy ciphertext" if encrypted else "a non-encrypted value",
+                self.model._meta.db_table,
+                self.attname,
+            )
+            return None
+
         if isinstance(result, str) and result.startswith(ENCRYPTED_PREFIX):
             try:
                 decrypted = decrypt_sensitive_data(result)
