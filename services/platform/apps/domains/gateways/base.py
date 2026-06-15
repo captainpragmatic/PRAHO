@@ -51,6 +51,10 @@ _IDEMPOTENCY_IN_PROGRESS = "__in_progress__"
 MAX_RETRIES = 3
 BACKOFF_BASE_SECONDS = 0.5
 
+# Registrar JSON responses are small (domain/order records). Cap the body before
+# deserializing so a malicious or misbehaving registrar can't exhaust memory (M5).
+MAX_RESPONSE_SIZE_BYTES = 5 * 1024 * 1024  # 5 MB
+
 # HTTP status codes used in error mapping
 HTTP_OK = 200
 HTTP_CREATED = 201
@@ -293,6 +297,29 @@ class BaseRegistrarGateway(ABC):
         """
         return safe_request(method, url, policy=self._get_outbound_policy(), **kwargs)
 
+    def _safe_json(self, response: requests.Response) -> Any:
+        """Parse a JSON response, rejecting oversized payloads (M5, defense-in-depth).
+
+        ``safe_request`` does not cap body size, so guard before deserializing —
+        a 5 MB JSON body explodes into a far larger Python object graph. Mirrors
+        ``VirtualminGateway._validate_response_size``. Raises an INVALID_RESPONSE
+        ``RegistrarAPIError`` when the declared or actual body exceeds the cap.
+        """
+        content_length = response.headers.get("content-length", "")
+        if content_length.isdigit() and int(content_length) > MAX_RESPONSE_SIZE_BYTES:
+            raise RegistrarAPIError(
+                f"{self.gateway_name} response too large: {content_length} bytes",
+                code=RegistrarErrorCode.INVALID_RESPONSE,
+                registrar_name=self.registrar.name,
+            )
+        if len(response.content) > MAX_RESPONSE_SIZE_BYTES:
+            raise RegistrarAPIError(
+                f"{self.gateway_name} response exceeds size limit ({MAX_RESPONSE_SIZE_BYTES} bytes)",
+                code=RegistrarErrorCode.INVALID_RESPONSE,
+                registrar_name=self.registrar.name,
+            )
+        return response.json()
+
     # -- Audit logging -------------------------------------------------------
 
     def _audit_api_call(
@@ -407,12 +434,20 @@ class BaseRegistrarGateway(ABC):
 
     # -- Shared HTTP error mapping -------------------------------------------
 
-    def _handle_error_response(self, response: requests.Response, operation: str) -> Err[RegistrarAPIError]:
-        """Map HTTP error status codes to typed RegistrarAPIError variants."""
+    def _handle_error_response(
+        self, response: requests.Response, operation: str, domain_name: str = ""
+    ) -> Err[RegistrarAPIError]:
+        """Map HTTP error status codes to typed RegistrarAPIError variants.
+
+        ``operation`` is a human label for the generic message (e.g. "register
+        example.com"); ``domain_name`` is the bare domain used to build the typed
+        not-found/conflict errors so their message reads "Domain 'example.com' ..."
+        rather than leaking the operation label (M3).
+        """
         status = response.status_code
 
         try:
-            data = response.json()
+            data = self._safe_json(response)
             message = data.get("message", data.get("error", response.text[:200]))
         except Exception:
             message = response.text[:200]
@@ -422,10 +457,10 @@ class BaseRegistrarGateway(ABC):
             return Err(RegistrarAuthError(self.registrar.name, detail=detail))
 
         if status == HTTP_NOT_FOUND:
-            return Err(RegistrarNotFoundError(operation, self.registrar.name))
+            return Err(RegistrarNotFoundError(domain_name or operation, self.registrar.name))
 
         if status == HTTP_CONFLICT:
-            return Err(RegistrarConflictError(operation, self.registrar.name))
+            return Err(RegistrarConflictError(domain_name or operation, self.registrar.name))
 
         if status == HTTP_RATE_LIMITED:
             retry_after = response.headers.get("Retry-After")

@@ -98,7 +98,7 @@ class ROTLDGateway(BaseRegistrarGateway):
             )
 
         if response.status_code in (HTTP_OK, HTTP_CREATED, HTTP_ACCEPTED):
-            data = response.json()
+            data = self._safe_json(response)
             domain_data = data.get("domain", data)
             expires_at = _parse_rotld_date(domain_data.get("expire_at", ""))
             if expires_at is None:
@@ -118,7 +118,7 @@ class ROTLDGateway(BaseRegistrarGateway):
                 )
             )
 
-        return self._handle_error_response(response, f"register {domain_name}")
+        return self._handle_error_response(response, f"register {domain_name}", domain_name=domain_name)
 
     def _do_renew(
         self,
@@ -142,7 +142,7 @@ class ROTLDGateway(BaseRegistrarGateway):
             )
 
         if response.status_code in (HTTP_OK, HTTP_ACCEPTED):
-            data = response.json()
+            data = self._safe_json(response)
             domain_data = data.get("domain", data)
             new_expires_at = _parse_rotld_date(domain_data.get("expire_at", ""))
             if new_expires_at is None:
@@ -155,7 +155,7 @@ class ROTLDGateway(BaseRegistrarGateway):
                 )
             return Ok(DomainRenewalResult(new_expires_at=new_expires_at))
 
-        return self._handle_error_response(response, f"renew {domain_name}")
+        return self._handle_error_response(response, f"renew {domain_name}", domain_name=domain_name)
 
     def _do_check_availability(
         self,
@@ -173,7 +173,7 @@ class ROTLDGateway(BaseRegistrarGateway):
             )
 
         if response.status_code == HTTP_OK:
-            data = response.json()
+            data = self._safe_json(response)
             return Ok(
                 DomainAvailabilityResult(
                     domain_name=domain_name,
@@ -183,7 +183,7 @@ class ROTLDGateway(BaseRegistrarGateway):
                 )
             )
 
-        return self._handle_error_response(response, f"check availability for {domain_name}")
+        return self._handle_error_response(response, f"check availability for {domain_name}", domain_name=domain_name)
 
     def _do_verify_webhook(self, payload: str, signature: str, secret: str) -> bool:
         return self._verify_hmac_sha256(payload, signature, secret)

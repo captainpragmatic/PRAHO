@@ -20,10 +20,12 @@ from apps.domains.gateways import (
 from apps.domains.gateways.base import (
     _IDEMPOTENCY_IN_PROGRESS,
     CIRCUIT_BREAKER_THRESHOLD,
+    MAX_RESPONSE_SIZE_BYTES,
     DomainAvailabilityResult,
     DomainRegistrationResult,
 )
 from apps.domains.gateways.errors import (
+    RegistrarAPIError,
     RegistrarAuthError,
     RegistrarConflictError,
     RegistrarErrorCode,
@@ -190,6 +192,21 @@ class GandiGatewayRegisterTests(TestCase):
 
         self.assertTrue(result.is_err())
         self.assertIsInstance(result.unwrap_err(), RegistrarConflictError)
+
+    @patch("apps.domains.gateways.gandi.GandiGateway._api_request")
+    @patch("apps.domains.gateways.base.cache")
+    def test_conflict_error_message_uses_bare_domain_not_operation_label(
+        self, mock_cache: MagicMock, mock_request: MagicMock
+    ) -> None:
+        """M3: typed not-found/conflict errors must carry the domain, not 'register <domain>'."""
+        mock_cache.get.side_effect = [0, None]
+        mock_request.return_value = _mock_response(409, {"message": "Domain already registered"})
+
+        result = self.gateway.register_domain("example.com", 1, self.registrant)
+
+        message = str(result.unwrap_err())
+        self.assertIn("Domain 'example.com'", message)
+        self.assertNotIn("register example.com", message)
 
     @patch("apps.domains.gateways.gandi.GandiGateway._api_request")
     @patch("apps.domains.gateways.base.cache")
@@ -593,3 +610,35 @@ class GandiInvalidResponseTests(TestCase):
         self.assertTrue(result.is_ok())
         self.assertTrue(result.unwrap().available)
         self.assertIsNone(result.unwrap().price_cents)
+
+
+class SafeJsonResponseSizeTests(TestCase):
+    """M5: _safe_json rejects oversized bodies before deserializing."""
+
+    def setUp(self) -> None:
+        self.gateway = GandiGateway(_make_registrar("gandi"))
+
+    def _resp(self, *, content_length: str | None, content: bytes, json_data: dict | None = None) -> MagicMock:
+        resp = MagicMock()
+        resp.headers = {"content-length": content_length} if content_length is not None else {}
+        resp.content = content
+        resp.json.return_value = json_data or {}
+        return resp
+
+    def test_rejects_oversized_via_content_length_header(self) -> None:
+        resp = self._resp(content_length=str(MAX_RESPONSE_SIZE_BYTES + 1), content=b"{}")
+        with self.assertRaises(RegistrarAPIError) as ctx:
+            self.gateway._safe_json(resp)
+        self.assertEqual(ctx.exception.code, RegistrarErrorCode.INVALID_RESPONSE)
+        resp.json.assert_not_called()
+
+    def test_rejects_oversized_body_when_header_absent_or_lying(self) -> None:
+        # No content-length header, but the actual body exceeds the cap.
+        resp = self._resp(content_length=None, content=b"x" * (MAX_RESPONSE_SIZE_BYTES + 1))
+        with self.assertRaises(RegistrarAPIError) as ctx:
+            self.gateway._safe_json(resp)
+        self.assertEqual(ctx.exception.code, RegistrarErrorCode.INVALID_RESPONSE)
+
+    def test_parses_normal_response(self) -> None:
+        resp = self._resp(content_length="12", content=b'{"ok": true}', json_data={"ok": True})
+        self.assertEqual(self.gateway._safe_json(resp), {"ok": True})
