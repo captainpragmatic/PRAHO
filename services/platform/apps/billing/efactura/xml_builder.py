@@ -788,8 +788,7 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
         tax_inclusive = tax_exclusive + self._get_tax_amount()
 
         # UBL cac:LegalMonetaryTotal sequence: LineExtension, TaxExclusive, TaxInclusive,
-        # then AllowanceTotal, ChargeTotal, PayableAmount. TaxInclusive is TaxExclusive plus
-        # tax and Payable mirrors TaxInclusive, so the totals reconcile (BR-CO-13/15/16).
+        # then AllowanceTotal, ChargeTotal, PrepaidAmount, PayableAmount (BR-CO-13/15/16).
         line_ext = self._add_cbc(monetary_total, "LineExtensionAmount", self._format_amount(line_gross))
         line_ext.set("currencyID", currency)
         tax_excl = self._add_cbc(monetary_total, "TaxExclusiveAmount", self._format_amount(tax_exclusive))
@@ -802,7 +801,18 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
         if charge_total > 0:
             charge_elem = self._add_cbc(monetary_total, "ChargeTotalAmount", self._format_amount(charge_total))
             charge_elem.set("currencyID", currency)
-        payable = self._add_cbc(monetary_total, "PayableAmount", self._format_amount(tax_inclusive))
+        # BT-113 PrepaidAmount: payments already collected (refund-aware via #189), so a
+        # partially-paid invoice reports the correct balance due — PayableAmount =
+        # TaxInclusive - Prepaid (BR-CO-16), floored at 0.
+        remaining_cents = self.invoice.get_remaining_amount()
+        prepaid_cents = max(0, (self.invoice.total_cents or 0) - remaining_cents)
+        prepaid = Decimal(prepaid_cents) / 100
+        if prepaid_cents > 0:
+            prepaid_elem = self._add_cbc(monetary_total, "PrepaidAmount", self._format_amount(prepaid))
+            prepaid_elem.set("currencyID", currency)
+        payable = self._add_cbc(
+            monetary_total, "PayableAmount", self._format_amount(max(Decimal(0), tax_inclusive - prepaid))
+        )
         payable.set("currencyID", currency)
 
     def _add_invoice_lines(self) -> None:

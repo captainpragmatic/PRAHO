@@ -452,6 +452,48 @@ class UBLInvoiceBuilderTestCase(TestCase):
         self.assertEqual(self._lmt_amount(doc, "AllowanceTotalAmount"), "100.00")
         self.assertEqual(self._lmt_amount(doc, "TaxExclusiveAmount"), "900.00")
 
+    def test_payable_amount_subtracts_prepaid_payments(self):
+        """#178 (correct via #189): a partially-paid invoice emits PrepaidAmount (BT-113)
+        and a PayableAmount (BT-115) reduced by the net collected payments."""
+        from apps.billing.payment_models import Payment  # noqa: PLC0415
+
+        invoice = InvoiceFactory(
+            customer=CustomerFactory(), currency=self.currency, number="INV-PREPAID",
+            bill_to_name="Customer", bill_to_country="RO", bill_to_tax_id="RO12345678",
+            bill_to_street="Street 1", bill_to_city="City", bill_to_postal_code="010101",
+            status="issued", issued_at=timezone.now(), due_at=timezone.now() + timezone.timedelta(days=30),
+            subtotal_cents=100000, tax_total_cents=19000, total_cents=119000,
+        )
+        InvoiceLineFactory(
+            invoice=invoice, description="Web Hosting", unit_price_cents=100000,
+            quantity=1, tax_rate=Decimal("0.1900"), tax_category_code="S",
+        )
+        Payment.objects.create(
+            customer=invoice.customer, invoice=invoice, currency=self.currency,
+            amount_cents=50000, status="succeeded",
+        )
+        doc = etree.fromstring(UBLInvoiceBuilder(invoice).build().encode())
+        self.assertEqual(self._lmt_amount(doc, "PrepaidAmount"), "500.00")
+        self.assertEqual(self._lmt_amount(doc, "PayableAmount"), "690.00")
+
+    def test_payable_amount_omits_prepaid_when_unpaid(self):
+        """An unpaid invoice emits no PrepaidAmount; PayableAmount is the full TaxInclusive."""
+        invoice = InvoiceFactory(
+            customer=CustomerFactory(), currency=self.currency, number="INV-UNPAID",
+            bill_to_name="Customer", bill_to_country="RO", bill_to_tax_id="RO12345678",
+            bill_to_street="Street 1", bill_to_city="City", bill_to_postal_code="010101",
+            status="issued", issued_at=timezone.now(), due_at=timezone.now() + timezone.timedelta(days=30),
+            subtotal_cents=100000, tax_total_cents=19000, total_cents=119000,
+        )
+        InvoiceLineFactory(
+            invoice=invoice, description="Web Hosting", unit_price_cents=100000,
+            quantity=1, tax_rate=Decimal("0.1900"), tax_category_code="S",
+        )
+        doc = etree.fromstring(UBLInvoiceBuilder(invoice).build().encode())
+        lmt = doc.find(f".//{{{NAMESPACES['cac']}}}LegalMonetaryTotal")
+        self.assertIsNone(lmt.find(f"{{{NAMESPACES['cbc']}}}PrepaidAmount"))
+        self.assertEqual(self._lmt_amount(doc, "PayableAmount"), "1190.00")
+
     def test_build_contains_legal_monetary_total(self):
         """Test that LegalMonetaryTotal is present and correct."""
         builder = UBLInvoiceBuilder(self.invoice)
