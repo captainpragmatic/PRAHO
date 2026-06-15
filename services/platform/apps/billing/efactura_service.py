@@ -506,10 +506,10 @@ class EFacturaXMLGenerator:
             quantity.text = f"{line.quantity:.2f}"
             quantity.set("unitCode", "C62")  # Unit (generic)
 
-            # Line extension amount
+            # Line extension amount (BT-131): net of the line discount so the
+            # sum of line amounts equals the document LineExtensionAmount (BR-CO-10).
             line_ext = ET.SubElement(inv_line, f"{{{cbc}}}LineExtensionAmount")
-            # Calculate line total without tax
-            line_net = line.unit_price_cents * float(line.quantity) / 100
+            line_net = line.subtotal_cents / 100
             line_ext.text = f"{line_net:.2f}"
             line_ext.set("currencyID", currency)
 

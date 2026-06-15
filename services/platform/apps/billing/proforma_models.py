@@ -377,8 +377,14 @@ class ProformaLine(models.Model):
 
     @property
     def subtotal_cents(self) -> int:
-        """Calculate subtotal (quantity x unit_price) in cents"""
-        return int(self.quantity * self.unit_price_cents)
+        """Taxable base in cents: (quantity x unit_price) net of the line discount.
+
+        Mirrors ``InvoiceLine.subtotal_cents`` so a proforma and the invoice it
+        converts to (which copies ``discount_amount_cents``) compute identical
+        taxable base, VAT, and totals. Floored at 0.
+        """
+        gross = int(self.quantity * self.unit_price_cents)
+        return max(0, gross - self.discount_amount_cents)
 
     @property
     def subtotal(self) -> Decimal:
