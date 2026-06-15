@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 from datetime import timedelta
+from decimal import Decimal
 
 # Re-export all services from feature files
 # ===============================================================================
@@ -162,17 +163,18 @@ class InvoiceService:
                     meta={"order_id": str(order.id)},
                 )
 
-                # Create invoice lines from order items
-                vat_rate_percent = vat_result.vat_rate
+                # Create invoice lines from order items.
+                # InvoiceLine.save() recomputes tax_cents/line_total_cents from
+                # subtotal (qty*unit_price) and tax_rate, so only the inputs are set.
+                vat_rate_decimal = (vat_result.vat_rate / Decimal("100")).quantize(Decimal("0.0001"))
                 for item in order.items.all():
-                    InvoiceLine.objects.create(  # type: ignore[misc]
+                    InvoiceLine.objects.create(
                         invoice=invoice,
-                        description=item.name or f"Order item {item.id}",
+                        kind="service",
+                        description=item.product_name or f"Order item {item.id}",
                         quantity=item.quantity,
                         unit_price_cents=item.unit_price_cents,
-                        total_cents=item.total_cents,
-                        tax_rate_percent=vat_rate_percent,
-                        meta={"order_item_id": str(item.id)},
+                        tax_rate=vat_rate_decimal,
                     )
 
                 # Log invoice creation
