@@ -319,9 +319,18 @@ class RomanianDocumentPDFGenerator:
 
         lines = self.document.lines.all()
         for line in lines:
-            # Break to a fresh page (re-drawing the column headers) before a line group
-            # that would collide with the pinned footer.
-            if current_y < self._BOTTOM_MARGIN:
+            # Break to a fresh page (re-drawing the column headers) before a line group that
+            # would collide with the pinned footer. Account for the WHOLE group height — the
+            # main row PLUS its EN16931 sub-lines — so a row whose sub-lines would spill into
+            # the footer breaks before the main row, not after it.
+            group_height = 0.5 * cm
+            if line.domain_name:
+                group_height += 0.35 * cm
+            if line.period_start and line.period_end:
+                group_height += 0.35 * cm
+            if line.seller_item_id:
+                group_height += 0.35 * cm
+            if current_y - group_height < self._BOTTOM_MARGIN:
                 current_y = self._new_page_with_headers()
 
             # Main line

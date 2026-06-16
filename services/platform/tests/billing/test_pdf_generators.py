@@ -1358,6 +1358,40 @@ class EN16931PDFComplianceTests(TestCase):
             'line-item rows must never be drawn into the footer zone',
         )
 
+    def test_sub_line_groups_dont_overflow_footer(self):
+        """A line group whose EN16931 sub-lines (domain/period/SKU) would spill into the footer
+        must break BEFORE the main row — the page-break must account for the whole GROUP height,
+        not just the main row (which the plain-row test above can't catch)."""
+        for i in range(40):
+            InvoiceLine.objects.create(
+                invoice=self.invoice, kind='service', description=f'Service line {i}',
+                quantity=1, unit_price_cents=1000, tax_rate=Decimal('0.19'),
+                domain_name=f'site{i}.ro',
+                period_start=date(2026, 1, 1), period_end=date(2026, 1, 31),
+                seller_item_id=f'SKU-{i}',
+            )
+        generator = RomanianInvoicePDFGenerator(self.invoice)
+        drawn: list[tuple[float, str]] = []
+        original_draw = generator.canvas.drawString
+
+        def capture_draw(x, y, text):
+            drawn.append((y, text))
+            return original_draw(x, y, text)
+
+        generator.canvas.drawString = capture_draw
+        generator._create_pdf_document()
+        # Every table-content draw (main rows AND sub-lines) must stay above the footer margin.
+        table_ys = [
+            y for y, text in drawn
+            if any(k in text for k in ('Service line', 'Domeniu', 'Perioada', 'Cod produs'))
+        ]
+        self.assertTrue(table_ys)
+        self.assertGreaterEqual(
+            min(table_ys),
+            RomanianDocumentPDFGenerator._BOTTOM_MARGIN,
+            'no line-group content (including sub-lines) may be drawn into the footer zone',
+        )
+
     @override_settings(COMPANY_BANK_NAME='', COMPANY_BANK_ACCOUNT='')
     def test_blank_bank_settings_omit_seller_bank_lines(self):
         """L1: with COMPANY_BANK_* blank (the shipped default), the seller section omits
