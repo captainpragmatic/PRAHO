@@ -2,6 +2,7 @@
 # COMPREHENSIVE BILLING PDF GENERATORS TESTS
 # ===============================================================================
 
+from datetime import date
 from decimal import Decimal
 from io import BytesIO
 from unittest.mock import Mock, patch
@@ -19,6 +20,7 @@ from apps.billing.pdf_generators import (
     RomanianDocumentPDFGenerator,
     RomanianInvoicePDFGenerator,
     RomanianProformaPDFGenerator,
+    generate_invoice_pdf,
 )
 from apps.customers.models import Customer
 from tests.helpers.fsm_helpers import force_status
@@ -88,6 +90,10 @@ class BaseRomanianDocumentPDFGeneratorTestCase(TestCase):
         self.assertIsNotNone(company_info['country'])
         self.assertIsNotNone(company_info['cui'])
         self.assertIsNotNone(company_info['email'])
+        self.assertIsNotNone(company_info['registration_number'])
+        self.assertIsNotNone(company_info['bank_name'])
+        self.assertIsNotNone(company_info['bank_account'])
+        self.assertIsNotNone(company_info['phone'])
 
         # Test that values match current project settings (not hard-coded defaults)
         self.assertEqual(company_info['name'], settings.COMPANY_NAME)
@@ -99,7 +105,11 @@ class BaseRomanianDocumentPDFGeneratorTestCase(TestCase):
         COMPANY_CITY='Test City',
         COMPANY_COUNTRY='Test Country',
         COMPANY_CUI='RO87654321',
-        COMPANY_EMAIL='test@company.ro'
+        COMPANY_EMAIL='test@company.ro',
+        COMPANY_REGISTRATION_NUMBER='J40/999/2024',
+        COMPANY_BANK_NAME='Test Bank',
+        COMPANY_BANK_ACCOUNT='RO00TEST0000000000',
+        COMPANY_PHONE='+40 700 000 000'
     )
     def test_get_company_info_from_settings(self):
         """Test _get_company_info with custom settings"""
@@ -112,6 +122,10 @@ class BaseRomanianDocumentPDFGeneratorTestCase(TestCase):
         self.assertEqual(company_info['country'], 'Test Country')
         self.assertEqual(company_info['cui'], 'RO87654321')
         self.assertEqual(company_info['email'], 'test@company.ro')
+        self.assertEqual(company_info['registration_number'], 'J40/999/2024')
+        self.assertEqual(company_info['bank_name'], 'Test Bank')
+        self.assertEqual(company_info['bank_account'], 'RO00TEST0000000000')
+        self.assertEqual(company_info['phone'], '+40 700 000 000')
 
     def test_setup_document_header(self):
         """Test _setup_document_header method"""
@@ -296,7 +310,7 @@ class RomanianInvoicePDFGeneratorTestCase(TestCase):
         generator = RomanianInvoicePDFGenerator(self.invoice)
         disclaimer = generator._get_legal_disclaimer()
 
-        self.assertIn('Romanian legislation', disclaimer)
+        self.assertIn('art. 319', disclaimer)
 
     def test_get_total_label(self):
         """Test _get_total_label method"""
@@ -446,7 +460,7 @@ class RomanianProformaPDFGeneratorTestCase(TestCase):
         generator = RomanianProformaPDFGenerator(self.proforma)
         disclaimer = generator._get_legal_disclaimer()
 
-        self.assertIn('not a fiscal invoice', disclaimer)
+        self.assertIn('nu constituie document fiscal', disclaimer)
 
     def test_render_document_details(self):
         """Test _render_document_details method"""
@@ -967,6 +981,223 @@ class PDFGeneratorEdgeCasesTestCase(TestCase):
         # Test line drawing
         generator.canvas.line(50, 30, 100, 30)
 
+
+class EN16931PDFComplianceTests(TestCase):
+    """Tests for EN16931 and Romanian law compliance in PDF generation."""
+
+    def setUp(self):
+        self.currency_ron, _ = Currency.objects.get_or_create(
+            code='RON', defaults={'symbol': 'lei', 'decimals': 2}
+        )
+        self.currency_eur, _ = Currency.objects.get_or_create(
+            code='EUR', defaults={'symbol': '€', 'decimals': 2}
+        )
+        self.customer = Customer.objects.create(
+            customer_type='company',
+            company_name='EN16931 Test SRL',
+            primary_email='en16931@test.ro',
+            status='active',
+        )
+        self.invoice = Invoice.objects.create(
+            customer=self.customer,
+            currency=self.currency_ron,
+            number='INV-EN16931-001',
+            subtotal_cents=10000,
+            tax_cents=2100,
+            total_cents=12100,
+            status='issued',
+            bill_to_name='Client Test SRL',
+            bill_to_email='client@test.ro',
+            bill_to_tax_id='RO99887766',
+            bill_to_registration_number='J40/555/2023',
+            bill_to_address1='Strada Test 42',
+            bill_to_address2='Etaj 3, Ap. 12',
+            bill_to_city='Cluj-Napoca',
+            bill_to_region='Cluj',
+            bill_to_postal='400001',
+            bill_to_country='RO',
+        )
+
+    def _generate_pdf_bytes(self, invoice=None):
+        """Generate PDF bytes and return them."""
+        return generate_invoice_pdf(invoice or self.invoice)
+
+    def _get_canvas_calls(self, invoice=None):
+        """Generate PDF and capture all drawString calls as a single text blob."""
+        generator = RomanianInvoicePDFGenerator(invoice or self.invoice)
+        calls = []
+        original_draw = generator.canvas.drawString
+        def capture_draw(x, y, text):
+            calls.append(text)
+            return original_draw(x, y, text)
+        generator.canvas.drawString = capture_draw
+        generator._create_pdf_document()
+        return calls
+
+    @override_settings(COMPANY_BANK_NAME='Banca Test', COMPANY_BANK_ACCOUNT='RO49TEST1234567890123')
+    def test_seller_bank_details_rendered(self):
+        """Seller section must show IBAN and bank name when they are configured."""
+        calls = self._get_canvas_calls()
+        text = ' '.join(calls)
+        self.assertIn('IBAN', text)
+        self.assertIn('Banca', text)
+
+    @override_settings(COMPANY_REGISTRATION_NUMBER='J40/9999/2020')
+    def test_seller_registration_number_rendered(self):
+        """Seller section must show Nr. Reg. Com. when it is configured."""
+        calls = self._get_canvas_calls()
+        text = ' '.join(calls)
+        self.assertIn('Nr. Reg. Com.', text)
+
+    def test_client_full_address_rendered(self):
+        """Client section must show full address including address2, city, region, postal."""
+        calls = self._get_canvas_calls()
+        text = ' '.join(calls)
+        self.assertIn('Strada Test 42', text)
+        self.assertIn('Etaj 3, Ap. 12', text)
+        self.assertIn('Cluj-Napoca', text)
+        self.assertIn('400001', text)
+
+    def test_client_registration_number_rendered(self):
+        """Client section must show bill_to_registration_number when set."""
+        calls = self._get_canvas_calls()
+        text = ' '.join(calls)
+        self.assertIn('J40/555/2023', text)
+
+    def test_client_tax_id_rendered(self):
+        """Client section must show CUI/CIF."""
+        calls = self._get_canvas_calls()
+        text = ' '.join(calls)
+        self.assertIn('RO99887766', text)
+
+    def test_vat_breakdown_multiple_rates(self):
+        """Totals section must show VAT breakdown per rate when multiple rates exist.
+
+        The header totals are kept consistent with the lines (gross == net, no discount)
+        so the per-rate breakdown is shown rather than collapsing to a single net bucket.
+        """
+        multi = Invoice.objects.create(
+            customer=self.customer, currency=self.currency_ron,
+            number='INV-MULTIRATE-001',
+            subtotal_cents=15000, tax_cents=2550, total_cents=17550,  # == sum of the two lines
+            status='issued', bill_to_name='Multi Rate Client',
+        )
+        InvoiceLine.objects.create(
+            invoice=multi, kind='service', description='Standard VAT service',
+            quantity=1, unit_price_cents=10000, tax_rate=Decimal('0.21'),
+        )
+        InvoiceLine.objects.create(
+            invoice=multi, kind='service', description='Reduced VAT service',
+            quantity=1, unit_price_cents=5000, tax_rate=Decimal('0.09'),
+        )
+        calls = self._get_canvas_calls(invoice=multi)
+        text = ' '.join(calls)
+        self.assertIn('TVA 21%', text)
+        self.assertIn('TVA 9%', text)
+
+    def test_fractional_vat_rate_not_truncated(self):
+        """A fractional VAT rate (9.5%) must render as 9.5%, not be truncated to 9%."""
+        InvoiceLine.objects.create(
+            invoice=self.invoice, kind='service', description='Fractional VAT service',
+            quantity=1, unit_price_cents=10000, tax_rate=Decimal('0.095'),
+            tax_cents=950, line_total_cents=10950,
+        )
+        calls = self._get_canvas_calls()
+        text = ' '.join(calls)
+        # The breakdown must show the exact rate, and 9.5% must be a distinct bucket
+        # from any 9% line (int(0.095*100) would have collapsed both to "9").
+        self.assertIn('TVA 9.5%', text)
+
+    def test_reverse_charge_notation(self):
+        """Reverse charge notice must appear when any line has tax_category_code=AE."""
+        InvoiceLine.objects.create(
+            invoice=self.invoice, kind='service', description='EU B2B service',
+            quantity=1, unit_price_cents=10000, tax_rate=Decimal('0.00'),
+            tax_cents=0, line_total_cents=10000,
+            tax_category_code='AE',
+        )
+        calls = self._get_canvas_calls()
+        text = ' '.join(calls)
+        self.assertIn('Taxare invers', text)  # Partial match avoids encoding issues
+
+    def test_currency_code_not_hardcoded(self):
+        """Line totals must use the invoice's currency code, not hardcoded RON."""
+        eur_invoice = Invoice.objects.create(
+            customer=self.customer, currency=self.currency_eur,
+            number='INV-EUR-001', subtotal_cents=10000, tax_cents=2100,
+            total_cents=12100, status='issued', bill_to_name='EUR Client',
+        )
+        InvoiceLine.objects.create(
+            invoice=eur_invoice, kind='service', description='EUR service',
+            quantity=1, unit_price_cents=10000, tax_rate=Decimal('0.21'),
+            tax_cents=2100, line_total_cents=12100,
+        )
+        calls = self._get_canvas_calls(invoice=eur_invoice)
+        text = ' '.join(calls)
+        self.assertIn('EUR', text)
+
+    def test_exchange_rate_shown_for_non_ron(self):
+        """Exchange rate must be shown when invoice currency is not RON."""
+        eur_invoice = Invoice.objects.create(
+            customer=self.customer, currency=self.currency_eur,
+            number='INV-EUR-002', subtotal_cents=10000, tax_cents=2100,
+            total_cents=12100, status='issued', bill_to_name='EUR Client',
+            meta={'exchange_rate': '4.9750'},
+        )
+        InvoiceLine.objects.create(
+            invoice=eur_invoice, kind='service', description='EUR service',
+            quantity=1, unit_price_cents=10000, tax_rate=Decimal('0.21'),
+            tax_cents=2100, line_total_cents=12100,
+        )
+        calls = self._get_canvas_calls(invoice=eur_invoice)
+        text = ' '.join(calls)
+        self.assertIn('4.9750', text)
+        self.assertIn('Curs valutar', text)
+
+    def test_line_level_en16931_fields(self):
+        """EN16931 line-level fields (domain, period, SKU) must be rendered."""
+        InvoiceLine.objects.create(
+            invoice=self.invoice, kind='service', description='Hosting Plan',
+            quantity=1, unit_price_cents=10000, tax_rate=Decimal('0.21'),
+            tax_cents=2100, line_total_cents=12100,
+            domain_name='example.ro',
+            period_start=date(2026, 1, 1),
+            period_end=date(2026, 1, 31),
+            seller_item_id='HOST-PRO-001',
+        )
+        calls = self._get_canvas_calls()
+        text = ' '.join(calls)
+        self.assertIn('example.ro', text)
+        self.assertIn('01.01.2026', text)
+        self.assertIn('31.01.2026', text)
+        self.assertIn('HOST-PRO-001', text)
+
+    def test_fiscal_invoice_disclaimer(self):
+        """Invoice PDF must contain proper Romanian fiscal disclaimer."""
+        calls = self._get_canvas_calls()
+        text = ' '.join(calls)
+        self.assertIn('art. 319', text)
+        self.assertIn('227/2015', text)
+
+    def test_proforma_disclaimer(self):
+        """Proforma PDF must state it's not a fiscal document."""
+        proforma = ProformaInvoice.objects.create(
+            customer=self.customer, currency=self.currency_ron,
+            number='PRO-EN16931-001', subtotal_cents=5000, tax_cents=1050,
+            total_cents=6050, status='draft', bill_to_name='Proforma Client',
+            valid_until=timezone.now() + timezone.timedelta(days=30),
+        )
+        generator = RomanianProformaPDFGenerator(proforma)
+        calls = []
+        original_draw = generator.canvas.drawString
+        def capture_draw(x, y, text):
+            calls.append(text)
+            return original_draw(x, y, text)
+        generator.canvas.drawString = capture_draw
+        generator._create_pdf_document()
+        text = ' '.join(calls)
+        self.assertIn('nu constituie document fiscal', text)
+
         self.assertTrue(True)
 
     def test_document_footer_with_unicode_company_name(self):
@@ -978,6 +1209,154 @@ class PDFGeneratorEdgeCasesTestCase(TestCase):
             generator._render_document_footer()
 
             self.assertTrue(True)
+
+    # ---- PR #166 rework: font (H3), document discount (H1/H2), pagination (M1), L1 ----
+
+    def test_romanian_diacritics_use_embedded_unicode_font(self):
+        """H3: the legal disclaimer ('Factură fiscală ...') and any diacritic-bearing text
+        must be drawn with the embedded Unicode TTF (DejaVuSans), not ReportLab's built-in
+        Helvetica/WinAnsi which silently substitutes ă/ș/ț with missing-glyph boxes. CI-safe:
+        pure-Python, no external pdftotext dependency."""
+        # 1) The Unicode font subset must be embedded in the output bytes (catches a full
+        #    revert to Helvetica). NB: ReportLab always keeps a Helvetica default font
+        #    object in the PDF whether used or not, so absence-of-'Helvetica' is not usable.
+        self.assertIn(b'DejaVuSans', self._generate_pdf_bytes())
+
+        # 2) Behavioural proof: every diacritic-bearing string is drawn while a DejaVu font
+        #    is the ACTIVE font (catches a partial revert that leaves the disclaimer on
+        #    Helvetica). We track the active font across setFont/drawString.
+        generator = RomanianInvoicePDFGenerator(self.invoice)
+        drawn: list[tuple[str, str]] = []
+        state = {'font': ''}
+        orig_setfont = generator.canvas.setFont
+        orig_draw = generator.canvas.drawString
+
+        def cap_setfont(name, size, *a, **k):
+            state['font'] = name
+            return orig_setfont(name, size, *a, **k)
+
+        def cap_draw(x, y, text):
+            drawn.append((state['font'], text))
+            return orig_draw(x, y, text)
+
+        generator.canvas.setFont = cap_setfont
+        generator.canvas.drawString = cap_draw
+        generator._create_pdf_document()
+
+        diacritics = set('ăâîșțĂÂÎȘȚ')
+        for font, text in drawn:
+            if diacritics & set(text):
+                self.assertIn('DejaVu', font, f'diacritic text {text!r} drawn with non-Unicode font {font!r}')
+        self.assertTrue(any('Factură' in t for _, t in drawn), 'fiscal disclaimer must be rendered')
+
+    def test_document_discount_rendered_and_reconciles(self):
+        """H1/H2: a document-level discount (Invoice.discount_cents — the value the
+        e-Factura XML emits as a BG-20 allowance) must appear on the PDF, and the totals
+        must reconcile: gross Subtotal - Discount == VAT base, and VAT base + VAT == Total.
+        The dead per-line discount_amount_cents must no longer drive the display."""
+        discounted = Invoice.objects.create(
+            customer=self.customer, currency=self.currency_ron,
+            number='INV-DISC-166',
+            subtotal_cents=9000,   # NET (post-discount) taxable base
+            tax_cents=1710,        # 19% of the net base
+            total_cents=10710,     # net + tax (DB invariant)
+            discount_cents=1000,   # the BG-20 document discount
+            status='issued', bill_to_name='Discount Client',
+        )
+        InvoiceLine.objects.create(
+            invoice=discounted, kind='service', description='Discounted service',
+            quantity=1, unit_price_cents=10000,  # gross line = 100.00
+            tax_rate=Decimal('0.19'),
+        )
+        text = ' '.join(self._get_canvas_calls(invoice=discounted))
+        self.assertIn('100.00', text)                   # gross subtotal (sum of line nets)
+        self.assertRegex(text, r'[Dd]iscount.*10\.00')  # the document discount line
+        self.assertRegex(text, r'baza:\s*90\.00')       # VAT base re-based to NET (gross - discount)
+        self.assertIn('17.10', text)                    # VAT == invoice.tax_amount (single TaxSubtotal)
+        self.assertIn('107.10', text)                   # grand total
+
+    def test_discounted_multi_rate_collapses_deterministically(self):
+        """Defensive: a discounted invoice spanning multiple VAT rates violates the
+        single-category invariant (the e-Factura XML can't represent it either). The PDF
+        must not crash — it collapses to the dominant-rate net bucket, still reconciles to
+        the document total, and LOGS a warning rather than silently mislabelling."""
+        multi = Invoice.objects.create(
+            customer=self.customer, currency=self.currency_ron,
+            number='INV-DISC-MULTI',
+            subtotal_cents=13500, tax_cents=2000, total_cents=15500,  # net + tax (invariant)
+            discount_cents=1500, status='issued', bill_to_name='Disc Multi Client',
+        )
+        InvoiceLine.objects.create(
+            invoice=multi, kind='service', description='Std rate',
+            quantity=1, unit_price_cents=10000, tax_rate=Decimal('0.19'),  # gross 100 (dominant)
+        )
+        InvoiceLine.objects.create(
+            invoice=multi, kind='service', description='Reduced rate',
+            quantity=1, unit_price_cents=5000, tax_rate=Decimal('0.09'),   # gross 50
+        )
+        with self.assertLogs('apps.billing.pdf_generators', level='WARNING'):
+            text = ' '.join(self._get_canvas_calls(invoice=multi))
+        self.assertEqual(text.count('TVA '), 1, 'discounted invoice collapses to one VAT line')
+        self.assertIn('TVA 19%', text)                  # dominant (largest-base) rate, deterministic
+        self.assertRegex(text, r'baza:\s*135\.00')      # net = gross(150) - discount(15)
+        self.assertIn('20.00', text)                    # invoice tax
+        self.assertIn('155.00', text)                   # grand total reconciles
+        self.assertRegex(text, r'[Dd]iscount.*15\.00')
+
+    def test_no_discount_line_when_zero(self):
+        """No 'Discount' line should appear when gross == net (the common case)."""
+        InvoiceLine.objects.create(
+            invoice=self.invoice, kind='service', description='Full price service',
+            quantity=1, unit_price_cents=10000, tax_rate=Decimal('0.21'),  # gross == invoice.subtotal
+        )
+        text = ' '.join(self._get_canvas_calls())
+        self.assertNotRegex(text, r'[Dd]iscount')
+
+    def test_many_lines_paginate_without_footer_collision(self):
+        """M1: a long invoice must break onto additional pages instead of drawing line
+        items off the bottom of the page (over the pinned footer)."""
+        for i in range(60):
+            InvoiceLine.objects.create(
+                invoice=self.invoice, kind='service', description=f'Service line {i}',
+                quantity=1, unit_price_cents=1000, tax_rate=Decimal('0.19'),
+            )
+        generator = RomanianInvoicePDFGenerator(self.invoice)
+        drawn: list[tuple[float, str]] = []
+        page_breaks = {'count': 0}
+        original_draw = generator.canvas.drawString
+        original_showpage = generator.canvas.showPage
+
+        def capture_draw(x, y, text):
+            drawn.append((y, text))
+            return original_draw(x, y, text)
+
+        def capture_showpage(*a, **k):
+            page_breaks['count'] += 1
+            return original_showpage(*a, **k)
+
+        generator.canvas.drawString = capture_draw
+        generator.canvas.showPage = capture_showpage
+        generator._create_pdf_document()
+
+        self.assertGreaterEqual(page_breaks['count'], 1, 'long invoice must break onto >1 page')
+        self.assertGreaterEqual(min(y for y, _ in drawn), 0, 'no content drawn below the page bottom')
+        # The line-item rows themselves must always stay above the footer margin (the footer
+        # text is intentionally drawn below it; only the rows are checked here).
+        row_ys = [y for y, text in drawn if 'Service line' in text]
+        self.assertTrue(row_ys, 'line rows should have been captured')
+        self.assertGreaterEqual(
+            min(row_ys),
+            RomanianDocumentPDFGenerator._BOTTOM_MARGIN,
+            'line-item rows must never be drawn into the footer zone',
+        )
+
+    @override_settings(COMPANY_BANK_NAME='', COMPANY_BANK_ACCOUNT='')
+    def test_blank_bank_settings_omit_seller_bank_lines(self):
+        """L1: with COMPANY_BANK_* blank (the shipped default), the seller section omits
+        IBAN/Banca rather than printing a real-looking placeholder on a fiscal document."""
+        text = ' '.join(self._get_canvas_calls())
+        self.assertNotIn('IBAN', text)
+        self.assertNotIn('Banca', text)
 
 
 class PDFGeneratorMockingTestCase(TestCase):
@@ -1059,7 +1438,11 @@ class PDFGeneratorMockingTestCase(TestCase):
             'city': 'Test City',
             'country': 'Test Country',
             'cui': 'RO12345678',
-            'email': 'test@company.ro'
+            'email': 'test@company.ro',
+            'registration_number': 'J40/1234/2020',
+            'bank_name': 'Test Bank',
+            'bank_account': 'RO00TEST0000000000',
+            'phone': '+40 700 000 000',
         }
 
         generator = RomanianInvoicePDFGenerator(self.invoice)
@@ -1199,12 +1582,8 @@ class PDFGeneratorIntegrationTestCase(TestCase):
 
     def test_concurrent_pdf_generation(self):
         """Test multiple PDF generators working concurrently"""
-        generators = []
+        generators = [RomanianInvoicePDFGenerator(self.invoice) for _i in range(3)]
         responses = []
-
-        # Create multiple generators
-        for _i in range(3):
-            generators.append(RomanianInvoicePDFGenerator(self.invoice))
 
         # Generate PDFs
         for generator in generators:

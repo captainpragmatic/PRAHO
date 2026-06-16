@@ -355,6 +355,7 @@ class ProformaConversionService:
                     bill_to_name=proforma.bill_to_name or "",
                     bill_to_email=proforma.bill_to_email or "",
                     bill_to_tax_id=getattr(proforma, "bill_to_tax_id", "") or "",
+                    bill_to_registration_number=getattr(proforma, "bill_to_registration_number", "") or "",
                     bill_to_address1=getattr(proforma, "bill_to_address1", "") or "",
                     bill_to_address2=getattr(proforma, "bill_to_address2", "") or "",
                     bill_to_city=getattr(proforma, "bill_to_city", "") or "",

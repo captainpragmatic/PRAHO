@@ -347,6 +347,25 @@ class TestRecordPaymentAndConvert(ProformaLifecycleTestBase):
         invoice = result.unwrap()
         self.assertEqual(invoice.discount_cents, 1500)
 
+    def test_conversion_copies_bill_to_registration_number(self):
+        """#166: proforma->invoice conversion must copy bill_to_registration_number so the
+        buyer's Nr. Reg. Com. survives onto the invoice PDF and e-Factura XML."""
+        from apps.billing.proforma_service import ProformaPaymentService  # noqa: PLC0415
+
+        proforma = self._create_sent_proforma()
+        proforma.bill_to_registration_number = "J40/555/2023"
+        proforma.save(update_fields=["bill_to_registration_number"])
+
+        result = ProformaPaymentService.record_payment_and_convert(
+            proforma_id=str(proforma.id),
+            amount_cents=proforma.total_cents,
+            payment_method="bank",
+            created_by=self.user,
+        )
+        self.assertTrue(result.is_ok(), f"Expected Ok, got: {result}")
+        invoice = result.unwrap()
+        self.assertEqual(invoice.bill_to_registration_number, "J40/555/2023")
+
     def test_rejects_partial_payment(self):
         """Only full payment accepted (amount must equal proforma total)."""
         from apps.billing.proforma_service import ProformaPaymentService  # noqa: PLC0415

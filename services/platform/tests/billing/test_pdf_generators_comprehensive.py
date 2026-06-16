@@ -16,6 +16,7 @@ from __future__ import annotations
 from decimal import Decimal
 from unittest.mock import patch
 
+from django.conf import settings
 from django.http import HttpResponse
 from django.test import TestCase
 from django.utils import timezone
@@ -28,6 +29,8 @@ from apps.billing.models import (
     ProformaLine,
 )
 from apps.billing.pdf_generators import (
+    _FONT,
+    _FONT_BOLD,
     RomanianInvoicePDFGenerator,
     RomanianProformaPDFGenerator,
 )
@@ -205,7 +208,6 @@ class BillingPDFGeneratorsComprehensiveCoverageTestCase(TestCase):
         company_info = generator._get_company_info()
 
         # Should use values from settings (which may come from environment or defaults)
-        from django.conf import settings
         expected_name = getattr(settings, 'COMPANY_NAME', 'PRAHO Platform')
         expected_email = getattr(settings, 'COMPANY_EMAIL', 'contact@praho.ro')
 
@@ -310,7 +312,7 @@ class BillingPDFGeneratorsComprehensiveCoverageTestCase(TestCase):
             generator._render_table_headers(400.0)  # Mock table_y position
 
             # Should set font, draw headers, and draw line
-            mock_font.assert_called_with("Helvetica-Bold", 10)
+            mock_font.assert_called_with(_FONT_BOLD, 10)
             mock_draw.assert_called()
             mock_line.assert_called_once()
 
@@ -324,7 +326,7 @@ class BillingPDFGeneratorsComprehensiveCoverageTestCase(TestCase):
             generator._render_table_data(400.0)  # Mock table_y position
 
             # Should set font and draw line item data
-            mock_font.assert_called_with("Helvetica", 9)
+            mock_font.assert_any_call(_FONT, 9)
             mock_draw.assert_called()
 
             # Check that line data is included in draw calls
@@ -351,9 +353,9 @@ class BillingPDFGeneratorsComprehensiveCoverageTestCase(TestCase):
 
             generator._render_table_data(400.0)
 
-            # Check that description was truncated to 40 characters
+            # Check that description was truncated to 40 chars (39 + ellipsis marker)
             draw_calls = [str(call) for call in mock_draw.call_args_list]
-            truncated_description = 'A' * 40
+            truncated_description = 'A' * 39 + '…'
             self.assertTrue(any(truncated_description in call for call in draw_calls))
 
     def test_base_generator_render_totals_section(self) -> None:
@@ -381,7 +383,7 @@ class BillingPDFGeneratorsComprehensiveCoverageTestCase(TestCase):
         label = generator._get_total_label()
 
         self.assertIn('{amount}', label)
-        self.assertIn('RON', label)
+        self.assertIn('{currency}', label)
 
     def test_base_generator_render_status_information_base(self) -> None:
         """Test _render_status_information base implementation (Line 203-205)."""
@@ -401,7 +403,7 @@ class BillingPDFGeneratorsComprehensiveCoverageTestCase(TestCase):
             generator._render_document_footer()
 
             # Should set font and draw footer information
-            mock_font.assert_called_with("Helvetica", 8)
+            mock_font.assert_called_with(_FONT, 8)
             mock_draw.assert_called()
 
     # ===============================================================================
@@ -438,8 +440,8 @@ class BillingPDFGeneratorsComprehensiveCoverageTestCase(TestCase):
 
         disclaimer = generator._get_legal_disclaimer()
 
-        # Should mention fiscal invoice and Romanian legislation
-        self.assertIn('Fiscal', disclaimer)
+        # Should mention Romanian fiscal legislation
+        self.assertIn('art. 319', disclaimer)
 
     def test_invoice_generator_get_total_label(self) -> None:
         """Test RomanianInvoicePDFGenerator _get_total_label (Line 242-243)."""
@@ -504,7 +506,7 @@ class BillingPDFGeneratorsComprehensiveCoverageTestCase(TestCase):
             generator._render_status_information(400.0)
 
             # Should render unpaid warning
-            mock_font.assert_called_with("Helvetica-Bold", 10)
+            mock_font.assert_called_with(_FONT_BOLD, 10)
             mock_draw.assert_called()
 
     def test_invoice_generator_render_status_information_unpaid_no_due_date(self) -> None:
@@ -538,7 +540,7 @@ class BillingPDFGeneratorsComprehensiveCoverageTestCase(TestCase):
             generator._render_status_information(400.0)
 
             # Should render paid confirmation
-            mock_font.assert_called_with("Helvetica-Bold", 10)
+            mock_font.assert_called_with(_FONT_BOLD, 10)
             mock_draw.assert_called()
 
     def test_invoice_generator_render_status_information_paid_no_paid_at(self) -> None:
@@ -588,8 +590,8 @@ class BillingPDFGeneratorsComprehensiveCoverageTestCase(TestCase):
 
         disclaimer = generator._get_legal_disclaimer()
 
-        # Should clarify that proforma is not a fiscal invoice
-        self.assertIn('not a fiscal invoice', disclaimer)
+        # Should clarify that proforma is not a fiscal document
+        self.assertIn('nu constituie document fiscal', disclaimer)
 
     def test_proforma_generator_render_document_details(self) -> None:
         """Test RomanianProformaPDFGenerator _render_document_details (Line 308-322)."""
@@ -675,10 +677,9 @@ class BillingPDFGeneratorsComprehensiveCoverageTestCase(TestCase):
         generator = RomanianInvoicePDFGenerator(self.invoice)
 
         # Mock canvas to raise an exception
-        with patch.object(generator.canvas, 'drawString', side_effect=Exception("Canvas error")):
-            # Should not crash, but may produce invalid PDF
-            with self.assertRaises(Exception):
-                generator.generate_response()
+        with patch.object(generator.canvas, 'drawString', side_effect=Exception("Canvas error")), \
+             self.assertRaises(Exception):
+            generator.generate_response()
 
     def test_pdf_generation_with_empty_line_items(self) -> None:
         """Test PDF generation with no line items."""
