@@ -344,6 +344,36 @@ class RateLimitError(EFacturaClientError):
     """Rate limit exceeded."""
 
 
+def extract_zip_members(content: bytes) -> dict[str, bytes]:
+    """Extract the members of an ANAF ``/descarcare`` ZIP.
+
+    A successful download returns a ZIP containing the original invoice XML plus the Ministry of
+    Finance electronic seal (``semnatura_*.xml``). Returns a ``{filename: bytes}`` map. This only
+    READS the archive — persisting the sealed XML as the legal original (10-year archival) is
+    tracked separately; do not add storage here (#123 plan, Phase 3).
+
+    Raises:
+        zipfile.BadZipFile: if ``content`` is not a valid ZIP.
+    """
+    import io  # noqa: PLC0415
+    import zipfile  # noqa: PLC0415
+
+    with zipfile.ZipFile(io.BytesIO(content)) as zf:
+        return {name: zf.read(name) for name in zf.namelist()}
+
+
+def find_sealed_xml(members: dict[str, bytes]) -> bytes | None:
+    """Return the ANAF-sealed invoice XML from extracted ZIP members, or None.
+
+    Heuristic: the sealed original is the ``.xml`` member that is NOT the ``semnatura_*`` signature.
+    """
+    for name, data in members.items():
+        lower = name.lower()
+        if lower.endswith(".xml") and not lower.startswith("semnatura"):
+            return data
+    return None
+
+
 class EFacturaClient:
     """
     Client for Romanian ANAF e-Factura API.

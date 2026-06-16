@@ -2,11 +2,15 @@
 Tests for ANAF e-Factura API client.
 """
 
+import io
 import json
+import unittest
+import zipfile
 from datetime import timedelta
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+from django.conf import settings
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
@@ -20,6 +24,8 @@ from apps.billing.efactura.client import (
     StatusResponse,
     TokenResponse,
     UploadResponse,
+    extract_zip_members,
+    find_sealed_xml,
 )
 
 _FIXTURES = Path(__file__).parent / "fixtures"
@@ -738,3 +744,59 @@ class AuthenticationFlowTestCase(TestCase):
 
         with self.assertRaises(AuthenticationError):
             self.client._get_access_token()
+
+
+class ExtractZipMembersTestCase(TestCase):
+    """ANAF /descarcare returns a ZIP (original XML + MF electronic seal). We must READ it.
+
+    Persisting the sealed XML as the legal archival original is tracked separately (#123); these
+    tests only verify extraction.
+    """
+
+    @staticmethod
+    def _zip(members: dict[str, bytes]) -> bytes:
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            for name, data in members.items():
+                zf.writestr(name, data)
+        return buf.getvalue()
+
+    def test_extracts_original_and_signature(self):
+        content = self._zip(
+            {
+                "4099267355.xml": b"<Invoice>original</Invoice>",
+                "semnatura_4099267355.xml": b"<Signature>MF seal</Signature>",
+            }
+        )
+        members = extract_zip_members(content)
+        self.assertEqual(set(members), {"4099267355.xml", "semnatura_4099267355.xml"})
+        self.assertIn(b"original", members["4099267355.xml"])
+
+    def test_find_sealed_xml_skips_signature(self):
+        members = {
+            "semnatura_99.xml": b"<Signature/>",
+            "99.xml": b"<Invoice>sealed</Invoice>",
+        }
+        sealed = find_sealed_xml(members)
+        self.assertIsNotNone(sealed)
+        self.assertIn(b"sealed", sealed)
+
+    def test_non_zip_payload_raises(self):
+        with self.assertRaises(zipfile.BadZipFile):
+            extract_zip_members(b"this is not a zip archive")
+
+
+@unittest.skipUnless(
+    getattr(settings, "EFACTURA_LIVE_SMOKE", False),
+    "live ANAF sandbox round-trip — set EFACTURA_LIVE_SMOKE=1 with real EFACTURA_CLIENT_ID/SECRET/COMPANY_CUI",
+)
+class EFacturaLiveSmokeTestCase(TestCase):
+    """The single credential-gated test (#123 Phase 4): a real ANAF SANDBOX round-trip.
+
+    Always skipped in CI (no creds). Once an SPV account + OAuth app exist, set EFACTURA_LIVE_SMOKE=1
+    and implement: OAuth token exchange -> upload -> poll stareMesaj -> download descarcare ZIP ->
+    extract_zip_members. This is the ONLY step that cannot be verified with fixtures + mocked HTTP.
+    """
+
+    def test_oauth_upload_poll_download_roundtrip(self):
+        self.fail("Implement against the live ANAF sandbox once credentials exist (#123 Phase 4).")
