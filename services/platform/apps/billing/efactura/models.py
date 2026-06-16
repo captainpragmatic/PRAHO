@@ -251,6 +251,14 @@ class EFacturaDocument(models.Model):
         constraints = [
             # Ensure only one document per invoice
             models.UniqueConstraint(fields=["invoice"], name="unique_efactura_per_invoice"),
+            # No two documents may share a non-blank ANAF upload index (defense-in-depth
+            # against a duplicate submission after a lost-index race). Blank "" indices
+            # (not-yet-submitted documents) are exempt so many can coexist.
+            models.UniqueConstraint(
+                fields=["anaf_upload_index"],
+                condition=~Q(anaf_upload_index=""),
+                name="unique_efactura_upload_index",
+            ),
             # FSM: valid status values
             models.CheckConstraint(
                 condition=Q(status__in=[s.value for s in EFacturaStatus]),
@@ -318,17 +326,29 @@ class EFacturaDocument(models.Model):
     def mark_processing(self) -> None:
         """Mark document as being processed by ANAF."""
 
-    @transition(field=status, source=EFacturaStatus.PROCESSING.value, target=EFacturaStatus.ACCEPTED.value)
+    @transition(
+        field=status,
+        source=[EFacturaStatus.SUBMITTED.value, EFacturaStatus.PROCESSING.value],
+        target=EFacturaStatus.ACCEPTED.value,
+    )
     def mark_accepted(self, download_id: str, response: dict[str, Any] | None = None) -> None:
-        """Mark document as accepted by ANAF."""
+        """Mark document as accepted by ANAF.
+
+        Source includes SUBMITTED: ANAF can return a terminal `ok`/`nok` on the FIRST status
+        poll, before we ever observe an intermediate `processing` state.
+        """
         self.anaf_download_id = download_id
         self.response_at = timezone.now()
         if response:
             self.anaf_response = response
 
-    @transition(field=status, source=EFacturaStatus.PROCESSING.value, target=EFacturaStatus.REJECTED.value)
+    @transition(
+        field=status,
+        source=[EFacturaStatus.SUBMITTED.value, EFacturaStatus.PROCESSING.value],
+        target=EFacturaStatus.REJECTED.value,
+    )
     def mark_rejected(self, errors: list[dict[str, Any]], response: dict[str, Any] | None = None) -> None:
-        """Mark document as rejected by ANAF."""
+        """Mark document as rejected by ANAF (terminal `nok`, possibly on the first poll)."""
         self.validation_errors = errors
         self.response_at = timezone.now()
         if response:

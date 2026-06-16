@@ -2178,7 +2178,7 @@ def efactura_submit(request: HttpRequest, pk: int) -> HttpResponse:
     if result.success:
         messages.success(request, _("Invoice queued for e-Factura submission."))
     else:
-        messages.error(request, _(f"e-Factura submission failed: {result.message}"))
+        messages.error(request, _(f"e-Factura submission failed: {result.error_message}"))
 
     return redirect("billing:efactura_dashboard")
 
@@ -2204,7 +2204,7 @@ def efactura_retry(request: HttpRequest, pk: str) -> HttpResponse:
     if result.success:
         messages.success(request, _("Retry queued successfully."))
     else:
-        messages.error(request, _(f"Retry failed: {result.message}"))
+        messages.error(request, _(f"Retry failed: {result.error_message}"))
 
     return redirect("billing:efactura_document_detail", pk=pk)
 

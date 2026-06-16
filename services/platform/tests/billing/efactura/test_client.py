@@ -2,9 +2,15 @@
 Tests for ANAF e-Factura API client.
 """
 
+import io
+import json
+import unittest
+import zipfile
 from datetime import timedelta
+from pathlib import Path
 from unittest.mock import Mock, patch
 
+from django.conf import settings
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
@@ -18,7 +24,11 @@ from apps.billing.efactura.client import (
     StatusResponse,
     TokenResponse,
     UploadResponse,
+    extract_zip_members,
+    find_sealed_xml,
 )
+
+_FIXTURES = Path(__file__).parent / "fixtures"
 
 
 class EFacturaEnvironmentTestCase(TestCase):
@@ -181,6 +191,56 @@ class UploadResponseTestCase(TestCase):
         self.assertFalse(result.success)
         self.assertEqual(result.message, "Test error")
         self.assertIn("Test error", result.errors)
+
+    # --- Gap 1: ANAF returns XML (not JSON) on /upload (#123) ---
+
+    @staticmethod
+    def _xml_response(fixture_or_text: str, *, status: int = 200) -> Mock:
+        text = (
+            (_FIXTURES / fixture_or_text).read_text(encoding="utf-8")
+            if fixture_or_text.endswith(".xml")
+            else fixture_or_text
+        )
+        mock_response = Mock()
+        mock_response.status_code = status
+        mock_response.text = text
+        # ANAF returns XML, so .json() would raise — make the mock behave like it.
+        mock_response.json.side_effect = json.JSONDecodeError("not json", text, 0)
+        return mock_response
+
+    def test_parses_anaf_xml_success(self):
+        """ANAF upload returns an XML <header ExecutionStatus='0' index_incarcare='3828'/>.
+
+        RED on master: from_response does response.json() -> JSONDecodeError -> raw_text, then
+        data.get('index_incarcare') is '' -> success=True with an EMPTY index (silent bad state).
+        """
+        result = UploadResponse.from_response(self._xml_response("anaf_upload_ok.xml"))
+        self.assertTrue(result.success)
+        self.assertEqual(result.upload_index, "3828")
+
+    def test_parses_anaf_xml_error(self):
+        """ExecutionStatus='1' + <Errors errorMessage='...'/> must be parsed as a failure."""
+        result = UploadResponse.from_response(self._xml_response("anaf_upload_error.xml"))
+        self.assertFalse(result.success)
+        self.assertTrue(any("nu corespunde" in e for e in result.errors), result.errors)
+
+    def test_xml_success_status_without_index_is_failure(self):
+        """Silent-bad-state guard: ExecutionStatus='0' but NO index_incarcare is NOT a success."""
+        result = UploadResponse.from_response(
+            self._xml_response('<header xmlns="mfp:anaf:dgti:spv:respUploadFisier:v1" ExecutionStatus="0"/>')
+        )
+        self.assertFalse(result.success)
+        self.assertEqual(result.upload_index, "")
+
+    def test_json_fallback_still_parses_legacy_success(self):
+        """Defensive JSON fallback retained for legacy/sandbox shapes."""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.text = '{"index_incarcare": "777", "message": "OK"}'
+        mock_response.json.return_value = {"index_incarcare": "777", "message": "OK"}
+        result = UploadResponse.from_response(mock_response)
+        self.assertTrue(result.success)
+        self.assertEqual(result.upload_index, "777")
 
 
 class StatusResponseTestCase(TestCase):
@@ -366,6 +426,78 @@ class EFacturaClientTestCase(TestCase):
         self.assertEqual(result[0].message_id, "msg-1")
 
     @patch("apps.billing.efactura.client.EFacturaClient._get_access_token")
+    @patch("apps.billing.efactura.client.EFacturaClient._request_with_retry")
+    def test_list_messages_uses_factura_endpoint(self, mock_request, mock_token):
+        """Gap 4 (#123): the message-list endpoint is /listaMesajeFactura, not /listaMesaje (404)."""
+        mock_token.return_value = "test-token"
+        mock_response = Mock()
+        mock_response.text = '{"mesaje": []}'
+        mock_response.json.return_value = {"mesaje": []}
+        mock_request.return_value = mock_response
+
+        self.client.list_messages(days=30)
+
+        url = mock_request.call_args[0][1]  # call args: ("GET", url, ...)
+        self.assertTrue(url.endswith("/listaMesajeFactura"), msg=f"wrong endpoint: {url}")
+
+    @patch("apps.billing.efactura.client.EFacturaClient._get_access_token")
+    @patch("apps.billing.efactura.client.EFacturaClient._request_with_retry")
+    def test_list_messages_paginated_uses_paginatie_endpoint(self, mock_request, mock_token):
+        """Gap 4 (#123): the paginated variant is /listaMesajePaginatieFactura with startTime/endTime/pagina."""
+        mock_token.return_value = "test-token"
+        mock_response = Mock()
+        mock_response.text = '{"mesaje": [], "numar_total_inregistrari": 0}'
+        mock_response.json.return_value = {"mesaje": [], "numar_total_inregistrari": 0}
+        mock_request.return_value = mock_response
+
+        self.client.list_messages_paginated(start_ms=1_700_000_000_000, end_ms=1_700_100_000_000, page=2)
+
+        url = mock_request.call_args[0][1]
+        params = mock_request.call_args.kwargs["params"]
+        self.assertTrue(url.endswith("/listaMesajePaginatieFactura"), msg=f"wrong endpoint: {url}")
+        self.assertEqual(params["startTime"], 1_700_000_000_000)
+        self.assertEqual(params["endTime"], 1_700_100_000_000)
+        self.assertEqual(params["pagina"], 2)
+
+    @patch("apps.billing.efactura.client.EFacturaClient._get_access_token")
+    @patch("apps.billing.efactura.client.EFacturaClient._request_with_retry")
+    def test_upload_b2c_posts_to_b2c_endpoint(self, mock_request, mock_token):
+        """Gap 3 (#123): B2C (consumer) invoices POST to /uploadb2c, not /upload."""
+        mock_token.return_value = "test-token"
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.text = (_FIXTURES / "anaf_upload_ok.xml").read_text(encoding="utf-8")
+        mock_response.json.side_effect = json.JSONDecodeError("not json", "", 0)
+        mock_request.return_value = mock_response
+
+        result = self.client.upload_b2c("<Invoice/>", cif="87654321")
+
+        url = mock_request.call_args[0][1]
+        params = mock_request.call_args.kwargs["params"]
+        self.assertTrue(url.endswith("/uploadb2c"), msg=f"wrong endpoint: {url}")
+        self.assertEqual(params["standard"], "UBL")
+        self.assertEqual(params["cif"], "87654321")
+        self.assertTrue(result.success)
+        self.assertEqual(result.upload_index, "3828")
+
+    @patch("apps.billing.efactura.client.EFacturaClient._get_access_token")
+    @patch("apps.billing.efactura.client.EFacturaClient._request_with_retry")
+    def test_upload_uses_configured_content_type(self, mock_request, mock_token):
+        """Gap 2 (#123): the upload Content-Type is configurable (default is live-verify)."""
+        mock_token.return_value = "test-token"
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.text = (_FIXTURES / "anaf_upload_ok.xml").read_text(encoding="utf-8")
+        mock_response.json.side_effect = json.JSONDecodeError("not json", "", 0)
+        mock_request.return_value = mock_response
+
+        self.client.config.upload_content_type = "text/plain"
+        self.client.upload_invoice("<Invoice/>")
+
+        headers = mock_request.call_args.kwargs["headers"]
+        self.assertEqual(headers["Content-Type"], "text/plain")
+
+    @patch("apps.billing.efactura.client.EFacturaClient._get_access_token")
     def test_upload_no_token(self, mock_token):
         """Test upload when no token available."""
         mock_token.side_effect = AuthenticationError("No token")
@@ -546,6 +678,28 @@ class AuthenticationFlowTestCase(TestCase):
         mock_cache.assert_called_once()
 
     @patch("apps.billing.efactura.client.safe_request")
+    @patch.object(EFacturaClient, "_cache_token")
+    def test_token_request_uses_basic_auth_and_jwt(self, mock_cache, mock_safe_request):
+        """Gap 8 (#123): ANAF token endpoint expects HTTP Basic Auth (client_secret_basic) +
+        token_content_type=jwt in the body; client_secret must NOT be in the form data."""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"access_token": "t", "token_type": "Bearer", "expires_in": 3600}
+        mock_response.raise_for_status = Mock()
+        mock_safe_request.return_value = mock_response
+
+        for call in (
+            lambda: self.client.exchange_code_for_token(code="c", redirect_uri="https://x/cb"),
+            lambda: self.client.refresh_token("refresh-tok"),
+        ):
+            mock_safe_request.reset_mock()
+            call()
+            kwargs = mock_safe_request.call_args.kwargs
+            self.assertTrue(kwargs["headers"].get("Authorization", "").startswith("Basic "), kwargs["headers"])
+            self.assertEqual(kwargs["data"].get("token_content_type"), "jwt")
+            self.assertNotIn("client_secret", kwargs["data"])
+
+    @patch("apps.billing.efactura.client.safe_request")
     def test_exchange_code_failure(self, mock_safe_request):
         """Test auth code exchange failure."""
         import requests
@@ -590,3 +744,59 @@ class AuthenticationFlowTestCase(TestCase):
 
         with self.assertRaises(AuthenticationError):
             self.client._get_access_token()
+
+
+class ExtractZipMembersTestCase(TestCase):
+    """ANAF /descarcare returns a ZIP (original XML + MF electronic seal). We must READ it.
+
+    Persisting the sealed XML as the legal archival original is tracked separately (#123); these
+    tests only verify extraction.
+    """
+
+    @staticmethod
+    def _zip(members: dict[str, bytes]) -> bytes:
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            for name, data in members.items():
+                zf.writestr(name, data)
+        return buf.getvalue()
+
+    def test_extracts_original_and_signature(self):
+        content = self._zip(
+            {
+                "4099267355.xml": b"<Invoice>original</Invoice>",
+                "semnatura_4099267355.xml": b"<Signature>MF seal</Signature>",
+            }
+        )
+        members = extract_zip_members(content)
+        self.assertEqual(set(members), {"4099267355.xml", "semnatura_4099267355.xml"})
+        self.assertIn(b"original", members["4099267355.xml"])
+
+    def test_find_sealed_xml_skips_signature(self):
+        members = {
+            "semnatura_99.xml": b"<Signature/>",
+            "99.xml": b"<Invoice>sealed</Invoice>",
+        }
+        sealed = find_sealed_xml(members)
+        self.assertIsNotNone(sealed)
+        self.assertIn(b"sealed", sealed)
+
+    def test_non_zip_payload_raises(self):
+        with self.assertRaises(zipfile.BadZipFile):
+            extract_zip_members(b"this is not a zip archive")
+
+
+@unittest.skipUnless(
+    getattr(settings, "EFACTURA_LIVE_SMOKE", False),
+    "live ANAF sandbox round-trip — set EFACTURA_LIVE_SMOKE=1 with real EFACTURA_CLIENT_ID/SECRET/COMPANY_CUI",
+)
+class EFacturaLiveSmokeTestCase(TestCase):
+    """The single credential-gated test (#123 Phase 4): a real ANAF SANDBOX round-trip.
+
+    Always skipped in CI (no creds). Once an SPV account + OAuth app exist, set EFACTURA_LIVE_SMOKE=1
+    and implement: OAuth token exchange -> upload -> poll stareMesaj -> download descarcare ZIP ->
+    extract_zip_members. This is the ONLY step that cannot be verified with fixtures + mocked HTTP.
+    """
+
+    def test_oauth_upload_poll_download_roundtrip(self):
+        self.fail("Implement against the live ANAF sandbox once credentials exist (#123 Phase 4).")

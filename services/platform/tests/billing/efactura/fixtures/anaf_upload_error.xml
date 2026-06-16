@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<header xmlns="mfp:anaf:dgti:spv:respUploadFisier:v1" dateResponse="202606170012" ExecutionStatus="1">
+    <Errors errorMessage="Fisierul transmis nu este valid. CIF introdus= 12345678 nu corespunde cu CIF-ul= 87654321 din certificat."/>
+</header>

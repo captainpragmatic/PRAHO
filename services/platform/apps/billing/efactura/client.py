@@ -16,6 +16,7 @@ Reference:
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import time
@@ -75,6 +76,10 @@ class EFacturaConfig:
     timeout: int = 30
     max_retries: int = 3
     retry_delay: float = 1.0
+    # Gap 2/7 (#123): the exact upload Content-Type and document standard are part of the
+    # credential-gated contract. Documented defaults; overridable. LIVE-VERIFY against the sandbox.
+    upload_content_type: str = "application/xml; charset=utf-8"
+    default_standard: str = "UBL"
 
     @classmethod
     def from_settings(cls) -> EFacturaConfig:
@@ -89,6 +94,8 @@ class EFacturaConfig:
             environment=environment,
             timeout=SettingsService.get_integer_setting("billing.efactura_api_timeout_seconds", 30),
             max_retries=SettingsService.get_integer_setting("billing.efactura_api_max_retries", 3),
+            upload_content_type=getattr(settings, "EFACTURA_UPLOAD_CONTENT_TYPE", "application/xml; charset=utf-8"),
+            default_standard=getattr(settings, "EFACTURA_UPLOAD_STANDARD", "UBL"),
         )
 
     @property
@@ -150,34 +157,90 @@ class UploadResponse:
 
     @classmethod
     def from_response(cls, response: requests.Response) -> UploadResponse:
-        """Parse upload response."""
+        """Parse an ANAF upload response.
+
+        ANAF returns an XML ``<header>`` (NOT JSON) for /upload and /uploadb2c:
+        ``ExecutionStatus="0"`` + ``index_incarcare`` on success, ``ExecutionStatus="1"`` with
+        ``<Errors errorMessage="..."/>`` children on failure. We parse the XML first; a JSON
+        fallback is retained defensively for legacy/sandbox shapes. Success REQUIRES a non-empty
+        upload index — a 200 with no index is a failure, not a silent success.
+        """
+        xml_result = cls._parse_anaf_header(response.text or "")
+        if xml_result is not None:
+            return xml_result
+        return cls._parse_json_fallback(response)
+
+    @classmethod
+    def _parse_anaf_header(cls, text: str) -> UploadResponse | None:
+        """Parse the ANAF ``<header>`` XML; return None if the body is not that XML."""
+        stripped = text.strip()
+        if not stripped.startswith("<"):
+            return None
+        from lxml import etree  # noqa: PLC0415  # local import keeps lxml off the hot path
+
+        try:
+            root = etree.fromstring(stripped.encode("utf-8"))
+        except (etree.XMLSyntaxError, ValueError):
+            return None
+        if etree.QName(root).localname != "header":
+            return None
+
+        exec_status = root.get("ExecutionStatus", "")
+        upload_index = root.get("index_incarcare", "")
+        errors = [
+            (el.get("errorMessage") or "").strip()
+            for el in root.iter()
+            if etree.QName(el).localname == "Errors" and el.get("errorMessage")
+        ]
+        raw: dict[str, Any] = {
+            "ExecutionStatus": exec_status,
+            "index_incarcare": upload_index,
+            "errors": errors,
+            "raw_text": text,
+        }
+        # Success ONLY when ANAF accepted for processing (status 0) AND returned an index.
+        if exec_status == "0" and upload_index:
+            return cls(
+                success=True,
+                upload_index=upload_index,
+                message="Upload accepted for processing",
+                raw_response=raw,
+            )
+        if not errors:
+            errors = [f"ANAF upload rejected (ExecutionStatus={exec_status!r}, no index_incarcare)"]
+        return cls(success=False, message=errors[0], errors=errors, raw_response=raw)
+
+    @classmethod
+    def _parse_json_fallback(cls, response: requests.Response) -> UploadResponse:
+        """Defensive JSON parsing for legacy/sandbox responses that are not the ANAF XML header."""
         try:
             data = response.json() if response.text else {}
         except json.JSONDecodeError:
             data = {"raw_text": response.text}
 
-        if response.status_code == HTTPStatus.OK:
+        upload_index = data.get("index_incarcare", "")
+        if response.status_code == HTTPStatus.OK and upload_index:
             return cls(
                 success=True,
-                upload_index=data.get("index_incarcare", ""),
+                upload_index=upload_index,
                 message=data.get("message", "Upload successful"),
                 raw_response=data,
             )
-        else:
-            errors = data.get("errors", [])
-            if isinstance(errors, str):
-                errors = [errors]
-            elif not errors and "message" in data:
-                errors = [data["message"]]
-            elif not errors:
-                errors = [f"HTTP {response.status_code}: {response.text[:200]}"]
 
-            return cls(
-                success=False,
-                message=data.get("message", "Upload failed"),
-                errors=errors,
-                raw_response=data,
-            )
+        errors = data.get("errors", [])
+        if isinstance(errors, str):
+            errors = [errors]
+        elif not errors and "message" in data:
+            errors = [data["message"]]
+        elif not errors:
+            errors = [f"HTTP {response.status_code}: {(response.text or '')[:200]}"]
+
+        return cls(
+            success=False,
+            message=data.get("message", "Upload failed"),
+            errors=errors,
+            raw_response=data,
+        )
 
     @classmethod
     def error(cls, message: str) -> UploadResponse:
@@ -281,6 +344,36 @@ class RateLimitError(EFacturaClientError):
     """Rate limit exceeded."""
 
 
+def extract_zip_members(content: bytes) -> dict[str, bytes]:
+    """Extract the members of an ANAF ``/descarcare`` ZIP.
+
+    A successful download returns a ZIP containing the original invoice XML plus the Ministry of
+    Finance electronic seal (``semnatura_*.xml``). Returns a ``{filename: bytes}`` map. This only
+    READS the archive — persisting the sealed XML as the legal original (10-year archival) is
+    tracked separately; do not add storage here (#123 plan, Phase 3).
+
+    Raises:
+        zipfile.BadZipFile: if ``content`` is not a valid ZIP.
+    """
+    import io  # noqa: PLC0415
+    import zipfile  # noqa: PLC0415
+
+    with zipfile.ZipFile(io.BytesIO(content)) as zf:
+        return {name: zf.read(name) for name in zf.namelist()}
+
+
+def find_sealed_xml(members: dict[str, bytes]) -> bytes | None:
+    """Return the ANAF-sealed invoice XML from extracted ZIP members, or None.
+
+    Heuristic: the sealed original is the ``.xml`` member that is NOT the ``semnatura_*`` signature.
+    """
+    for name, data in members.items():
+        lower = name.lower()
+        if lower.endswith(".xml") and not lower.startswith("semnatura"):
+            return data
+    return None
+
+
 class EFacturaClient:
     """
     Client for Romanian ANAF e-Factura API.
@@ -363,8 +456,8 @@ class EFacturaClient:
             "grant_type": "authorization_code",
             "code": code,
             "redirect_uri": redirect_uri,
-            "client_id": self.config.client_id,
-            "client_secret": self.config.client_secret,
+            # ANAF wants the JWT-format token; client auth is via Basic Auth, NOT a body secret.
+            "token_content_type": "jwt",
         }
 
         try:
@@ -373,7 +466,7 @@ class EFacturaClient:
                 self.config.oauth_token_url,
                 policy=EFACTURA_POLICY,
                 data=data,
-                headers=self._default_headers,
+                headers={**self._default_headers, **self._oauth_client_auth_header()},
             )
             response.raise_for_status()
             token = TokenResponse.from_dict(response.json())
@@ -382,6 +475,16 @@ class EFacturaClient:
         except requests.RequestException as e:
             logger.error(f"Token exchange failed: {e}")
             raise AuthenticationError(f"Failed to exchange code for token: {e}") from e
+
+    def _oauth_client_auth_header(self) -> dict[str, str]:
+        """HTTP Basic Auth header for OAuth client authentication.
+
+        ANAF uses ``client_secret_basic``: client_id + client_secret are base64-encoded in the
+        Authorization header, NOT sent in the form body. (Live-verify against the sandbox — the
+        exact auth method is part of the credential-gated contract, #123 Gap 8.)
+        """
+        raw = f"{self.config.client_id}:{self.config.client_secret}".encode()
+        return {"Authorization": f"Basic {base64.b64encode(raw).decode('ascii')}"}
 
     def refresh_token(self, refresh_token: str) -> TokenResponse:
         """
@@ -399,8 +502,7 @@ class EFacturaClient:
         data = {
             "grant_type": "refresh_token",
             "refresh_token": refresh_token,
-            "client_id": self.config.client_id,
-            "client_secret": self.config.client_secret,
+            "token_content_type": "jwt",
         }
 
         try:
@@ -409,7 +511,7 @@ class EFacturaClient:
                 self.config.oauth_token_url,
                 policy=EFACTURA_POLICY,
                 data=data,
-                headers=self._default_headers,
+                headers={**self._default_headers, **self._oauth_client_auth_header()},
             )
             response.raise_for_status()
             token = TokenResponse.from_dict(response.json())
@@ -499,17 +601,44 @@ class EFacturaClient:
         if autofactura:
             params["autofactura"] = "DA"
 
+        return self._post_upload("/upload", params, xml_content)
+
+    def upload_b2c(
+        self,
+        xml_content: str,
+        *,
+        standard: str = "UBL",
+        cif: str | None = None,
+    ) -> UploadResponse:
+        """Upload a B2C (consumer) invoice via ANAF's ``/uploadb2c`` endpoint.
+
+        B2C e-invoicing has been mandatory since Jan 2025. The document is the same UBL, but the
+        endpoint differs and the buyer is identified by CNP rather than a CUI. The buyer-side XML
+        rules are live-contract sensitive (HIGHER risk) and MUST be confirmed against the ANAF
+        sandbox before go-live; this method's request shape is contract-fixture verified only.
+        """
+        if not self.config.is_valid():
+            return UploadResponse.error("Invalid e-Factura configuration")
+
+        params: dict[str, str] = {
+            "standard": standard,
+            "cif": cif or self.config.company_cui,
+        }
+        return self._post_upload("/uploadb2c", params, xml_content)
+
+    def _post_upload(self, endpoint_path: str, params: dict[str, str], xml_content: str) -> UploadResponse:
+        """Shared POST for the B2B ``/upload`` and B2C ``/uploadb2c`` endpoints."""
         try:
             access_token = self._get_access_token()
 
             response = self._request_with_retry(
                 "POST",
-                f"{self.config.base_url}/upload",
+                f"{self.config.base_url}{endpoint_path}",
                 params=params,
                 data=xml_content.encode("utf-8"),
                 headers={
                     "Authorization": f"Bearer {access_token}",
-                    "Content-Type": "application/xml; charset=utf-8",
+                    "Content-Type": self.config.upload_content_type,
                 },
             )
 
@@ -639,7 +768,8 @@ class EFacturaClient:
 
             response = self._request_with_retry(
                 "GET",
-                f"{self.config.base_url}/listaMesaje",
+                # ANAF endpoint is /listaMesajeFactura (the bare /listaMesaje 404s).
+                f"{self.config.base_url}/listaMesajeFactura",
                 params=params,
                 headers={"Authorization": f"Bearer {access_token}"},
             )
@@ -653,6 +783,49 @@ class EFacturaClient:
         except requests.RequestException as e:
             logger.error(f"e-Factura list messages failed: {e}")
             raise NetworkError(f"Failed to list messages: {e}") from e
+
+    def list_messages_paginated(
+        self,
+        start_ms: int,
+        end_ms: int,
+        page: int = 1,
+        cif: str | None = None,
+        filter_type: str | None = None,
+    ) -> list[MessageInfo]:
+        """List messages over an explicit time window using ANAF's paginated endpoint.
+
+        ANAF's ``/listaMesajePaginatieFactura`` takes ``startTime``/``endTime`` as Unix epoch
+        MILLISECONDS and a 1-based ``pagina``. Use this when the 60-day ``list_messages`` window
+        is too coarse or when more than one page of results is expected.
+        """
+        params: dict[str, Any] = {
+            "startTime": start_ms,
+            "endTime": end_ms,
+            "cif": cif or self.config.company_cui,
+            "pagina": page,
+        }
+        if filter_type:
+            params["filtru"] = filter_type
+
+        try:
+            access_token = self._get_access_token()
+
+            response = self._request_with_retry(
+                "GET",
+                f"{self.config.base_url}/listaMesajePaginatieFactura",
+                params=params,
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+
+            data = response.json() if response.text else {}
+            messages = data.get("mesaje", data.get("messages", []))
+            return [MessageInfo.from_dict(m) for m in messages]
+
+        except AuthenticationError:
+            raise
+        except requests.RequestException as e:
+            logger.error(f"e-Factura paginated list messages failed: {e}")
+            raise NetworkError(f"Failed to list messages (paginated): {e}") from e
 
     def validate_xml(self, xml_content: str, standard: str = "UBL") -> StatusResponse:
         """
