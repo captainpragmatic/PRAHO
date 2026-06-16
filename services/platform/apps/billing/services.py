@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 from datetime import timedelta
+from decimal import Decimal
 
 # Re-export all services from feature files
 # ===============================================================================
@@ -137,9 +138,14 @@ class InvoiceService:
                         # Another process created it - get it with lock
                         sequence = InvoiceSequence.objects.select_for_update().get(scope="default")
 
-                # Use unified VAT scenario engine for consistent customer-aware behavior.
+                # VAT is computed on the NET taxable base (gross line subtotal minus the
+                # document discount), mirroring the proforma conversion path. order.total_cents
+                # is the GROSS tax-INCLUSIVE total — feeding it here re-applied VAT on top of an
+                # already-taxed amount and double-taxed the invoice header.
+                order_discount_cents = int(getattr(order, "discount_cents", 0) or 0)
+                taxable_subtotal_cents = max(0, int(order.subtotal_cents) - order_discount_cents)
                 vat_result = TaxService.calculate_vat_for_document(
-                    subtotal_cents=int(order.total_cents),
+                    subtotal_cents=taxable_subtotal_cents,
                     customer_info=_build_customer_vat_info(order.customer, order_id=str(order.id)),
                 )
 
@@ -151,6 +157,7 @@ class InvoiceService:
                     subtotal_cents=vat_result.subtotal_cents,
                     tax_cents=vat_result.vat_cents,
                     total_cents=vat_result.total_cents,
+                    discount_cents=order_discount_cents,
                     status="draft",
                     # Copy billing address from customer
                     bill_to_name=order.customer.company_name or order.customer.full_name or "",
@@ -162,17 +169,18 @@ class InvoiceService:
                     meta={"order_id": str(order.id)},
                 )
 
-                # Create invoice lines from order items
-                vat_rate_percent = vat_result.vat_rate
+                # Create invoice lines from order items.
+                # InvoiceLine.save() recomputes tax_cents/line_total_cents from the subtotal
+                # (qty*unit_price) and tax_rate, so only the inputs are set here.
+                vat_rate_decimal = (vat_result.vat_rate / Decimal("100")).quantize(Decimal("0.0001"))
                 for item in order.items.all():
-                    InvoiceLine.objects.create(  # type: ignore[misc]
+                    InvoiceLine.objects.create(
                         invoice=invoice,
-                        description=item.name or f"Order item {item.id}",
+                        kind="service",
+                        description=item.product_name or f"Order item {item.id}",
                         quantity=item.quantity,
                         unit_price_cents=item.unit_price_cents,
-                        total_cents=item.total_cents,
-                        tax_rate_percent=vat_rate_percent,
-                        meta={"order_item_id": str(item.id)},
+                        tax_rate=vat_rate_decimal,
                     )
 
                 # Log invoice creation
