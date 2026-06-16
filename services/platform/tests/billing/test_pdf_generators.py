@@ -17,6 +17,7 @@ from reportlab.pdfgen import canvas
 
 from apps.billing.models import Currency, Invoice, InvoiceLine, ProformaInvoice, ProformaLine
 from apps.billing.pdf_generators import (
+    _FONT_DIR,
     RomanianDocumentPDFGenerator,
     RomanianInvoicePDFGenerator,
     RomanianProformaPDFGenerator,
@@ -1253,7 +1254,6 @@ class EN16931PDFComplianceTests(TestCase):
         """Packaging guard: the vendored Unicode TTFs must ship with the app. They are
         registered lazily, so a missing asset would crash PDF generation in production
         (and the deploy must include non-.py assets) — fail loudly here in CI instead."""
-        from apps.billing.pdf_generators import _FONT_DIR
         self.assertTrue((_FONT_DIR / 'DejaVuSans.ttf').exists(), f'missing {_FONT_DIR}/DejaVuSans.ttf')
         self.assertTrue((_FONT_DIR / 'DejaVuSans-Bold.ttf').exists(), f'missing {_FONT_DIR}/DejaVuSans-Bold.ttf')
 
