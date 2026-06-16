@@ -87,6 +87,15 @@ class UBLInvoiceBuilderTestCase(TestCase):
         customization = doc.find(f".//{{{NAMESPACES['cbc']}}}CustomizationID")
         self.assertIsNotNone(customization)
         self.assertEqual(customization.text, CIUS_RO_CUSTOMIZATION_ID)
+        # Default is the ANAF-accepted 1.0.1 BT-24 value (NOT the 1.0.9 Schematron version)
+        self.assertTrue(customization.text.endswith("CIUS-RO:1.0.1"))
+
+    def test_customization_id_is_configurable(self):
+        """#123: the CIUS-RO CustomizationID (BT-24) is overridable via settings, in case
+        ANAF ever changes the accepted identifier."""
+        with override_settings(EFACTURA_CIUS_RO_CUSTOMIZATION_ID="urn:custom:override"):
+            doc = etree.fromstring(UBLInvoiceBuilder(self.invoice).build().encode())
+        self.assertEqual(doc.find(f".//{{{NAMESPACES['cbc']}}}CustomizationID").text, "urn:custom:override")
 
     def test_build_contains_profile_id(self):
         """Test that PEPPOL ProfileID is present."""

@@ -17,6 +17,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, ClassVar, cast
 
+from django.conf import settings
 from lxml import etree
 
 logger = logging.getLogger(__name__)
@@ -221,14 +222,17 @@ class CIUSROValidator:
         elif currency not in self.VALID_CURRENCIES:
             result.add_warning("BR-05-CUR", f"Unusual currency code: {currency}")
 
-        # CIUS-RO: Customization ID must be correct
+        # CIUS-RO: Customization ID must be correct. Kept in sync with the builder via the
+        # same EFACTURA_CIUS_RO_CUSTOMIZATION_ID setting (default 1.0.1 - the BT-24 value,
+        # not the 1.0.8/1.0.9 Schematron-artifacts version).
         customization_id = self._get_text(doc, ".//cbc:CustomizationID")
+        expected_customization = getattr(settings, "EFACTURA_CIUS_RO_CUSTOMIZATION_ID", self.EXPECTED_CUSTOMIZATION_ID)
         if not customization_id:
             result.add_error("BR-RO-001", "CustomizationID is mandatory for CIUS-RO")
-        elif customization_id != self.EXPECTED_CUSTOMIZATION_ID:
+        elif customization_id != expected_customization:
             result.add_warning(
                 "BR-RO-001-VER",
-                f"CustomizationID should be {self.EXPECTED_CUSTOMIZATION_ID}",
+                f"CustomizationID should be {expected_customization}",
             )
 
     def _validate_supplier_party(self, doc: etree._Element, result: ValidationResult) -> None:

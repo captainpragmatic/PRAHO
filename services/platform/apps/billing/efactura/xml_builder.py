@@ -36,7 +36,11 @@ NAMESPACES = {
     "cn": "urn:oasis:names:specification:ubl:schema:xsd:CreditNote-2",
 }
 
-# CIUS-RO Customization ID (version 1.0.1)
+# CIUS-RO CustomizationID (BT-24). Intentionally "1.0.1": this is the ANAF-accepted
+# customization identifier, which is NOT the same as the CIUS-RO validation-artifacts
+# (Schematron) version (currently 1.0.8/1.0.9). Emitting a higher value here is a
+# non-standard BT-24 and is rejected. Override via EFACTURA_CIUS_RO_CUSTOMIZATION_ID only
+# if ANAF changes the accepted identifier; the Schematron version is handled separately.
 CIUS_RO_CUSTOMIZATION_ID = "urn:cen.eu:en16931:2017#compliant#urn:efactura.mfinante.ro:CIUS-RO:1.0.1"
 
 # PEPPOL BIS Billing 3.0 Profile ID
@@ -211,6 +215,10 @@ class BaseUBLBuilder:
             "US": "United States",
         }
         return country_names.get(country_code, country_code)
+
+    def _get_customization_id(self) -> str:
+        """ANAF-accepted CIUS-RO CustomizationID (BT-24); overridable via settings."""
+        return getattr(settings, "EFACTURA_CIUS_RO_CUSTOMIZATION_ID", CIUS_RO_CUSTOMIZATION_ID)
 
     def _cbc(self, tag: str) -> str:
         """Create CommonBasicComponents tag."""
@@ -502,7 +510,7 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
     def _add_document_metadata(self) -> None:
         """Add invoice document metadata."""
         # Mandatory CIUS-RO customization identifier.
-        self._add_cbc(self.root, "CustomizationID", CIUS_RO_CUSTOMIZATION_ID)
+        self._add_cbc(self.root, "CustomizationID", self._get_customization_id())
 
         # ProfileID (PEPPOL BIS) - Mandatory
         self._add_cbc(self.root, "ProfileID", PEPPOL_PROFILE_ID)
@@ -979,7 +987,7 @@ class UBLCreditNoteBuilder(BaseUBLBuilder):
 
     def _add_document_metadata(self) -> None:
         """Add credit note document metadata."""
-        self._add_cbc(self.root, "CustomizationID", CIUS_RO_CUSTOMIZATION_ID)
+        self._add_cbc(self.root, "CustomizationID", self._get_customization_id())
         self._add_cbc(self.root, "ProfileID", PEPPOL_PROFILE_ID)
         self._add_cbc(self.root, "ID", self.invoice.number)
         if self.invoice.issued_at is None:
