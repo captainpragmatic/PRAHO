@@ -203,9 +203,20 @@ class InvoiceTestCase(TestCase):
         invoice.save()
         invoice.refresh_from_db()
 
+        # clean() rejects the change…
         invoice.discount_cents = 5000
         with self.assertRaises(ValidationError):
             invoice.clean()
+
+        # …and so does the real bypass path: save(update_fields=["discount_cents"]).
+        # discount_cents is in _FINANCIAL_FIELDS, so save() does NOT skip clean() for
+        # this update_fields set (the carve-out that lets status/meta-only saves through).
+        with self.assertRaises(ValidationError):
+            invoice.save(update_fields=["discount_cents"])
+
+        # The persisted value must be untouched after both rejected attempts.
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.discount_cents, 10000)
 
     def test_invoice_mark_as_paid(self):
         """Test marking invoice as paid"""
