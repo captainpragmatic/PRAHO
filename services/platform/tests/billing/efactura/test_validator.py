@@ -186,15 +186,48 @@ class CIUSROValidatorTestCase(TestCase):
         self.assertTrue(any(e.code == "BR-S-10" for e in result.errors), [e.code for e in result.errors])
 
     def test_br_cl_16_payment_means_code_must_be_valid(self):
-        """BT-81/BR-CL-16: a payment means code outside UNCL4461 (e.g. card 48, dropped in
-        #177) must be rejected."""
+        """BT-81/BR-CL-16: a payment means code outside UNCL4461 must be rejected."""
+        xml = self._get_minimal_valid_xml().replace(
+            "<cbc:PaymentMeansCode>30</cbc:PaymentMeansCode>",
+            "<cbc:PaymentMeansCode>99</cbc:PaymentMeansCode>",
+        )
+        result = self.validator.validate(xml)
+        self.assertFalse(result.is_valid)
+        self.assertTrue(any(e.code == "BR-CL-16" for e in result.errors), [e.code for e in result.errors])
+
+    def test_payment_means_code_48_is_accepted(self):
+        """Regression: code 48 (bank card) is what the builder emits for Stripe payments and is a
+        valid UNCL4461 code, so the validator MUST accept it. (It previously rejected its own
+        builder's output.)"""
         xml = self._get_minimal_valid_xml().replace(
             "<cbc:PaymentMeansCode>30</cbc:PaymentMeansCode>",
             "<cbc:PaymentMeansCode>48</cbc:PaymentMeansCode>",
         )
         result = self.validator.validate(xml)
+        self.assertFalse(any(e.code == "BR-CL-16" for e in result.errors), [e.code for e in result.errors])
+        self.assertTrue(result.is_valid, [str(e) for e in result.errors])
+
+    def test_br_co_14_sum_document_tax_must_equal_subtotal_sum(self):
+        """The document TaxTotal must equal the sum of the per-category TaxSubtotal amounts."""
+        xml = self._get_minimal_valid_xml().replace(
+            '<cac:TaxTotal>\n        <cbc:TaxAmount currencyID="RON">190.00</cbc:TaxAmount>',
+            '<cac:TaxTotal>\n        <cbc:TaxAmount currencyID="RON">200.00</cbc:TaxAmount>',
+        )
+        result = self.validator.validate(xml)
         self.assertFalse(result.is_valid)
-        self.assertTrue(any(e.code == "BR-CL-16" for e in result.errors), [e.code for e in result.errors])
+        self.assertTrue(any(e.code == "BR-CO-14-SUM" for e in result.errors), [e.code for e in result.errors])
+
+    def test_br_cl_22_rejects_non_codelist_vatex(self):
+        """BR-CL-22: an exemption code that merely starts with VATEX- but isn't in the codelist
+        (e.g. VATEX-NOT-REAL) must be rejected, not accepted."""
+        xml = self._get_minimal_valid_xml().replace(
+            '<cac:TaxCategory>\n                <cbc:ID>S</cbc:ID>\n                <cbc:Percent>19.00</cbc:Percent>',
+            '<cac:TaxCategory>\n                <cbc:ID>AE</cbc:ID>\n                <cbc:Percent>0.00</cbc:Percent>\n'
+            '                <cbc:TaxExemptionReasonCode>VATEX-NOT-REAL</cbc:TaxExemptionReasonCode>',
+        )
+        result = self.validator.validate(xml)
+        self.assertFalse(result.is_valid)
+        self.assertTrue(any(e.code == "BR-CL-22" for e in result.errors), [e.code for e in result.errors])
 
     def test_validate_malformed_xml(self):
         """Test that malformed XML fails validation."""

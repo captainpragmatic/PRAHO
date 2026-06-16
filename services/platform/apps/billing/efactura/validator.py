@@ -121,7 +121,20 @@ class CIUSROValidator:
     VALID_VAT_RATES: ClassVar[set[str]] = {"21.00", "11.00", "0.00"}
 
     # UNCL4461 payment means codes (BT-81) ANAF accepts; anything else is rejected.
-    VALID_PAYMENT_MEANS: ClassVar[set[str]] = {"10", "20", "30", "31", "42", "57", "58", "59", "68", "97"}
+    # NB: 48 (bank card) is emitted by the builder for Stripe payments; 49 (direct debit) and
+    # 54 (credit card) are also valid UNCL4461 codes a conforming invoice may carry.
+    VALID_PAYMENT_MEANS: ClassVar[set[str]] = {
+        "10", "20", "30", "31", "42", "48", "49", "54", "57", "58", "59", "68", "97"
+    }
+
+    # Valid EN16931 VAT exemption reason codes (BT-121 / VATEX codelist). The builder emits
+    # AE/IC/O/G; the rest are the standard EU exemption codes a conforming invoice may use.
+    VALID_VATEX_CODES: ClassVar[set[str]] = {
+        "VATEX-EU-AE", "VATEX-EU-D", "VATEX-EU-F", "VATEX-EU-G", "VATEX-EU-I",
+        "VATEX-EU-IC", "VATEX-EU-J", "VATEX-EU-O",
+        "VATEX-EU-79-C", "VATEX-EU-132", "VATEX-EU-143", "VATEX-EU-148",
+        "VATEX-EU-151", "VATEX-EU-159", "VATEX-EU-309",
+    }
 
     # EN16931 categories that must carry NEITHER an exemption code NOR reason text (BR-S/Z-10).
     _CATEGORIES_NO_EXEMPTION: ClassVar[set[str]] = {"S", "Z"}
@@ -513,6 +526,18 @@ class CIUSROValidator:
         if tax_incl is not None and prepaid > tax_incl:
             result.add_error("BR-CO-16-PREPAID", f"PrepaidAmount {prepaid} exceeds TaxInclusiveAmount {tax_incl}")
 
+        # The document-level TaxTotal must equal the sum of the per-category TaxSubtotal amounts —
+        # otherwise the LegalMonetaryTotal can reconcile against the header tax while the VAT
+        # breakdown sums to a different value (BR-CO-14 family).
+        subtotal_taxes = sum(
+            (self._decimal(st, "cbc:TaxAmount") or Decimal("0"))
+            for st in self._find_all(doc, ".//cac:TaxTotal/cac:TaxSubtotal")
+        )
+        if subtotal_taxes != tax_amount:
+            result.add_error(
+                "BR-CO-14-SUM", f"Document TaxTotal {tax_amount} != sum of TaxSubtotal amounts {subtotal_taxes}"
+            )
+
     def _validate_tax_category_rules(self, doc: etree._Element, result: ValidationResult) -> None:
         """Validate per-category tax rules at the document breakdown level: BR-CO-14 (standard
         tax = base * rate), zero rate for non-standard categories (BR-*-05), the S/Z
@@ -541,9 +566,10 @@ class CIUSROValidator:
             if cat_id in self._CATEGORIES_NO_EXEMPTION and (exempt_code or exempt_reason):
                 result.add_error(f"BR-{cat_id}-10", f"Category {cat_id} must not carry a tax exemption code/reason")
 
-            # BR-CL-22: a tax exemption reason code, when present, must be a VATEX code
-            if exempt_code and not exempt_code.startswith("VATEX-"):
-                result.add_error("BR-CL-22", f"TaxExemptionReasonCode '{exempt_code}' is not a VATEX code")
+            # BR-CL-22: a tax exemption reason code, when present, must be a real VATEX codelist
+            # entry — not merely something that starts with "VATEX-".
+            if exempt_code and exempt_code not in self.VALID_VATEX_CODES:
+                result.add_error("BR-CL-22", f"TaxExemptionReasonCode '{exempt_code}' is not a valid VATEX code")
 
     def _is_valid_date(self, date_str: str) -> bool:
         """Check if string is valid YYYY-MM-DD date."""
