@@ -182,6 +182,19 @@ class InvoiceService:
                         unit_price_cents=item.unit_price_cents,
                         tax_rate=vat_rate_decimal,
                     )
+                    # Setup fee as its own line so Σ(line gross) includes it (EN16931 BT-106) and
+                    # the invoice lines reconcile with the header subtotal (which counts setup via
+                    # OrderItem.subtotal_cents), mirroring the proforma conversion path.
+                    setup_cents = int(getattr(item, "setup_cents", 0) or 0)
+                    if setup_cents > 0:
+                        InvoiceLine.objects.create(
+                            invoice=invoice,
+                            kind="service",
+                            description=f"Setup fee - {item.product_name or item.id}",
+                            quantity=Decimal("1"),
+                            unit_price_cents=setup_cents,
+                            tax_rate=vat_rate_decimal,
+                        )
 
                 # Log invoice creation
                 log_security_event(

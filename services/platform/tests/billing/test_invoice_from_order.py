@@ -105,3 +105,26 @@ class CreateInvoiceFromOrderTests(TestCase):
         self.assertEqual(invoice.discount_cents, 1000)                   # discount carried onto the invoice
         self.assertEqual(invoice.subtotal_cents, 9000)                  # net = gross(10000) - discount(1000)
         self.assertEqual(invoice.subtotal_cents + invoice.tax_cents, invoice.total_cents)
+
+    def test_create_from_order_includes_setup_fee_line(self) -> None:
+        """A setup fee must become its own invoice line so the lines reconcile with the header
+        subtotal (which counts setup via OrderItem.subtotal_cents) — otherwise Σ lines < header
+        breaks BR-CO-10 once the e-Factura builder sums the lines."""
+        order = Order.objects.create(
+            customer=self.customer, currency=self.currency,
+            customer_email=self.customer.primary_email, customer_name=self.customer.name,
+            subtotal_cents=13000, tax_cents=2470, total_cents=15470,  # 2x5000 + 3000 setup
+            billing_address={"company_name": "Order Co", "country": "RO"},
+        )
+        OrderItem.objects.create(
+            order=order, product=self.product, product_name=self.product.name,
+            product_type=self.product.product_type, quantity=2,
+            unit_price_cents=5000, setup_cents=3000, tax_rate=Decimal("0.1900"),
+            tax_cents=2470, line_total_cents=15470,
+        )
+        invoice = InvoiceService().create_from_order(order).unwrap()
+        lines = list(invoice.lines.all())
+        self.assertEqual(len(lines), 2)  # main line + setup-fee line
+        self.assertTrue(any("Setup fee" in line.description for line in lines))
+        # BR-CO-10: Σ line subtotals == the invoice header subtotal (setup included).
+        self.assertEqual(sum(line.subtotal_cents for line in lines), invoice.subtotal_cents)
