@@ -150,34 +150,90 @@ class UploadResponse:
 
     @classmethod
     def from_response(cls, response: requests.Response) -> UploadResponse:
-        """Parse upload response."""
+        """Parse an ANAF upload response.
+
+        ANAF returns an XML ``<header>`` (NOT JSON) for /upload and /uploadb2c:
+        ``ExecutionStatus="0"`` + ``index_incarcare`` on success, ``ExecutionStatus="1"`` with
+        ``<Errors errorMessage="..."/>`` children on failure. We parse the XML first; a JSON
+        fallback is retained defensively for legacy/sandbox shapes. Success REQUIRES a non-empty
+        upload index — a 200 with no index is a failure, not a silent success.
+        """
+        xml_result = cls._parse_anaf_header(response.text or "")
+        if xml_result is not None:
+            return xml_result
+        return cls._parse_json_fallback(response)
+
+    @classmethod
+    def _parse_anaf_header(cls, text: str) -> UploadResponse | None:
+        """Parse the ANAF ``<header>`` XML; return None if the body is not that XML."""
+        stripped = text.strip()
+        if not stripped.startswith("<"):
+            return None
+        from lxml import etree  # noqa: PLC0415  # local import keeps lxml off the hot path
+
+        try:
+            root = etree.fromstring(stripped.encode("utf-8"))
+        except (etree.XMLSyntaxError, ValueError):
+            return None
+        if etree.QName(root).localname != "header":
+            return None
+
+        exec_status = root.get("ExecutionStatus", "")
+        upload_index = root.get("index_incarcare", "")
+        errors = [
+            (el.get("errorMessage") or "").strip()
+            for el in root.iter()
+            if etree.QName(el).localname == "Errors" and el.get("errorMessage")
+        ]
+        raw: dict[str, Any] = {
+            "ExecutionStatus": exec_status,
+            "index_incarcare": upload_index,
+            "errors": errors,
+            "raw_text": text,
+        }
+        # Success ONLY when ANAF accepted for processing (status 0) AND returned an index.
+        if exec_status == "0" and upload_index:
+            return cls(
+                success=True,
+                upload_index=upload_index,
+                message="Upload accepted for processing",
+                raw_response=raw,
+            )
+        if not errors:
+            errors = [f"ANAF upload rejected (ExecutionStatus={exec_status!r}, no index_incarcare)"]
+        return cls(success=False, message=errors[0], errors=errors, raw_response=raw)
+
+    @classmethod
+    def _parse_json_fallback(cls, response: requests.Response) -> UploadResponse:
+        """Defensive JSON parsing for legacy/sandbox responses that are not the ANAF XML header."""
         try:
             data = response.json() if response.text else {}
         except json.JSONDecodeError:
             data = {"raw_text": response.text}
 
-        if response.status_code == HTTPStatus.OK:
+        upload_index = data.get("index_incarcare", "")
+        if response.status_code == HTTPStatus.OK and upload_index:
             return cls(
                 success=True,
-                upload_index=data.get("index_incarcare", ""),
+                upload_index=upload_index,
                 message=data.get("message", "Upload successful"),
                 raw_response=data,
             )
-        else:
-            errors = data.get("errors", [])
-            if isinstance(errors, str):
-                errors = [errors]
-            elif not errors and "message" in data:
-                errors = [data["message"]]
-            elif not errors:
-                errors = [f"HTTP {response.status_code}: {response.text[:200]}"]
 
-            return cls(
-                success=False,
-                message=data.get("message", "Upload failed"),
-                errors=errors,
-                raw_response=data,
-            )
+        errors = data.get("errors", [])
+        if isinstance(errors, str):
+            errors = [errors]
+        elif not errors and "message" in data:
+            errors = [data["message"]]
+        elif not errors:
+            errors = [f"HTTP {response.status_code}: {(response.text or '')[:200]}"]
+
+        return cls(
+            success=False,
+            message=data.get("message", "Upload failed"),
+            errors=errors,
+            raw_response=data,
+        )
 
     @classmethod
     def error(cls, message: str) -> UploadResponse:
@@ -499,12 +555,39 @@ class EFacturaClient:
         if autofactura:
             params["autofactura"] = "DA"
 
+        return self._post_upload("/upload", params, xml_content)
+
+    def upload_b2c(
+        self,
+        xml_content: str,
+        *,
+        standard: str = "UBL",
+        cif: str | None = None,
+    ) -> UploadResponse:
+        """Upload a B2C (consumer) invoice via ANAF's ``/uploadb2c`` endpoint.
+
+        B2C e-invoicing has been mandatory since Jan 2025. The document is the same UBL, but the
+        endpoint differs and the buyer is identified by CNP rather than a CUI. The buyer-side XML
+        rules are live-contract sensitive (HIGHER risk) and MUST be confirmed against the ANAF
+        sandbox before go-live; this method's request shape is contract-fixture verified only.
+        """
+        if not self.config.is_valid():
+            return UploadResponse.error("Invalid e-Factura configuration")
+
+        params: dict[str, str] = {
+            "standard": standard,
+            "cif": cif or self.config.company_cui,
+        }
+        return self._post_upload("/uploadb2c", params, xml_content)
+
+    def _post_upload(self, endpoint_path: str, params: dict[str, str], xml_content: str) -> UploadResponse:
+        """Shared POST for the B2B ``/upload`` and B2C ``/uploadb2c`` endpoints."""
         try:
             access_token = self._get_access_token()
 
             response = self._request_with_retry(
                 "POST",
-                f"{self.config.base_url}/upload",
+                f"{self.config.base_url}{endpoint_path}",
                 params=params,
                 data=xml_content.encode("utf-8"),
                 headers={
@@ -639,7 +722,8 @@ class EFacturaClient:
 
             response = self._request_with_retry(
                 "GET",
-                f"{self.config.base_url}/listaMesaje",
+                # ANAF endpoint is /listaMesajeFactura (the bare /listaMesaje 404s).
+                f"{self.config.base_url}/listaMesajeFactura",
                 params=params,
                 headers={"Authorization": f"Bearer {access_token}"},
             )
@@ -653,6 +737,49 @@ class EFacturaClient:
         except requests.RequestException as e:
             logger.error(f"e-Factura list messages failed: {e}")
             raise NetworkError(f"Failed to list messages: {e}") from e
+
+    def list_messages_paginated(
+        self,
+        start_ms: int,
+        end_ms: int,
+        page: int = 1,
+        cif: str | None = None,
+        filter_type: str | None = None,
+    ) -> list[MessageInfo]:
+        """List messages over an explicit time window using ANAF's paginated endpoint.
+
+        ANAF's ``/listaMesajePaginatieFactura`` takes ``startTime``/``endTime`` as Unix epoch
+        MILLISECONDS and a 1-based ``pagina``. Use this when the 60-day ``list_messages`` window
+        is too coarse or when more than one page of results is expected.
+        """
+        params: dict[str, Any] = {
+            "startTime": start_ms,
+            "endTime": end_ms,
+            "cif": cif or self.config.company_cui,
+            "pagina": page,
+        }
+        if filter_type:
+            params["filtru"] = filter_type
+
+        try:
+            access_token = self._get_access_token()
+
+            response = self._request_with_retry(
+                "GET",
+                f"{self.config.base_url}/listaMesajePaginatieFactura",
+                params=params,
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+
+            data = response.json() if response.text else {}
+            messages = data.get("mesaje", data.get("messages", []))
+            return [MessageInfo.from_dict(m) for m in messages]
+
+        except AuthenticationError:
+            raise
+        except requests.RequestException as e:
+            logger.error(f"e-Factura paginated list messages failed: {e}")
+            raise NetworkError(f"Failed to list messages (paginated): {e}") from e
 
     def validate_xml(self, xml_content: str, standard: str = "UBL") -> StatusResponse:
         """

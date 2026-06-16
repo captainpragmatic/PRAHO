@@ -94,7 +94,7 @@ class EFacturaService:
     # --- Main Workflow Methods ---
 
     @transaction.atomic
-    def submit_invoice(self, invoice: Invoice, validate_first: bool = False) -> SubmissionResult:  # noqa: C901, PLR0911, PLR0912  # Complexity: multi-step business logic
+    def submit_invoice(self, invoice: Invoice, validate_first: bool = False) -> SubmissionResult:  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-step business logic
         """
         Submit an invoice to e-Factura.
 
@@ -162,8 +162,11 @@ class EFacturaService:
                         errors=error_dicts,
                     )
 
-            # Submit to ANAF
-            response = self._client.upload_invoice(xml_content)
+            # Submit to ANAF. Route consumer (B2C) invoices to /uploadb2c; everything else is B2B.
+            if self._is_b2c(invoice):
+                response = self._client.upload_b2c(xml_content)
+            else:
+                response = self._client.upload_invoice(xml_content)
 
             if response.success:
                 document.mark_submitted(response.upload_index)
@@ -410,6 +413,24 @@ class EFacturaService:
     def _is_efactura_enabled(self) -> bool:
         """Check if e-Factura is enabled in settings."""
         return getattr(settings, "EFACTURA_ENABLED", False)
+
+    def _is_b2c(self, invoice: Invoice) -> bool:
+        """Whether this invoice routes to ANAF's B2C (/uploadb2c) endpoint.
+
+        B2C XML buyer-identifier (CNP) rules are live-contract sensitive (#123); confirm against
+        the sandbox before go-live. A detection failure defaults to B2B (the safe common case).
+        """
+        from apps.billing.efactura.b2c import B2CDetector  # noqa: PLC0415  # avoids import cycle
+
+        try:
+            return B2CDetector().is_b2c_required(invoice)
+        except (AttributeError, KeyError, TypeError) as exc:
+            logger.warning(
+                "B2C detection failed for invoice %s (%s); defaulting to B2B upload",
+                getattr(invoice, "number", "?"),
+                exc,
+            )
+            return False
 
     def _requires_efactura(self, invoice: Invoice) -> bool:
         """Check if invoice requires e-Factura submission."""

@@ -726,3 +726,37 @@ class SubmissionLifecycleTests(TestCase):
         doc = EFacturaDocument.objects.get(invoice=invoice)
         self.assertEqual(doc.status, EFacturaStatus.SUBMITTED.value)
         self.assertEqual(doc.anaf_upload_index, "IDX-4")
+
+    def test_submit_routes_b2c_invoice_to_uploadb2c(self):
+        """Gap 3 (#123): a B2C invoice is submitted via upload_b2c(), not upload_invoice()."""
+        invoice = self._ro_invoice("INV-B2C-1")
+        client = Mock(spec=EFacturaClient)
+        client.upload_b2c.return_value = UploadResponse(success=True, upload_index="B2C-1")
+        service = EFacturaService(client=client)
+
+        with patch.object(service, "_generate_xml", return_value="<Invoice/>"), patch.object(
+            service, "_log_audit_event"
+        ), patch.object(service, "_is_b2c", return_value=True):
+            result = service.submit_invoice(invoice)
+
+        self.assertTrue(result.success, msg=result.error_message)
+        client.upload_b2c.assert_called_once()
+        client.upload_invoice.assert_not_called()
+        doc = EFacturaDocument.objects.get(invoice=invoice)
+        self.assertEqual(doc.anaf_upload_index, "B2C-1")
+
+    def test_submit_routes_b2b_invoice_to_upload(self):
+        """A B2B invoice (the default) goes to upload_invoice(), not upload_b2c()."""
+        invoice = self._ro_invoice("INV-B2B-1")
+        client = Mock(spec=EFacturaClient)
+        client.upload_invoice.return_value = UploadResponse(success=True, upload_index="B2B-1")
+        service = EFacturaService(client=client)
+
+        with patch.object(service, "_generate_xml", return_value="<Invoice/>"), patch.object(
+            service, "_log_audit_event"
+        ), patch.object(service, "_is_b2c", return_value=False):
+            result = service.submit_invoice(invoice)
+
+        self.assertTrue(result.success, msg=result.error_message)
+        client.upload_invoice.assert_called_once()
+        client.upload_b2c.assert_not_called()
