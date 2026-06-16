@@ -488,6 +488,17 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
         if not self.invoice.lines.exists():
             errors.append("Invoice must have at least one line item")
 
+        # Single-category invariant: the builder emits ONE TaxSubtotal at one document rate, so the
+        # e-Factura XML cannot faithfully represent an invoice whose lines carry multiple distinct
+        # VAT rates. Reject it here rather than silently emit a VAT breakdown that fails ANAF
+        # arithmetic (the system issues single-rate invoices; a multi-rate one is a bug to surface).
+        distinct_rates = {Decimal(line.tax_rate) for line in self.invoice.lines.all()}
+        if len(distinct_rates) > 1:
+            errors.append(
+                f"Invoice has multiple VAT rates {sorted(distinct_rates)}; the e-Factura builder "
+                "supports a single rate per document (single-category invariant)"
+            )
+
         supplier = self._get_supplier_info()
         if not supplier.name:
             errors.append("Supplier company name not configured (COMPANY_NAME setting)")

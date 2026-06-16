@@ -558,6 +558,24 @@ class UBLInvoiceBuilderTestCase(TestCase):
         self.assertEqual(prepaid, tax_inclusive)              # capped exactly
         self.assertEqual(self._lmt_amount(doc, "PayableAmount"), "0.00")
 
+    def test_multi_rate_invoice_is_rejected(self):
+        """Single-category invariant: an invoice whose lines carry multiple distinct VAT rates must
+        be rejected — the builder emits ONE TaxSubtotal and cannot faithfully represent mixed rates,
+        so a multi-rate document would produce a VAT breakdown that fails ANAF arithmetic."""
+        invoice = InvoiceFactory(
+            customer=CustomerFactory(), currency=self.currency, number="INV-MULTIRATE",
+            bill_to_name="Customer", bill_to_country="RO", bill_to_tax_id="RO12345678",
+            bill_to_street="Street 1", bill_to_city="City", bill_to_postal_code="010101",
+            status="issued", issued_at=timezone.now(), due_at=timezone.now() + timezone.timedelta(days=30),
+            subtotal_cents=15000, tax_total_cents=2550, total_cents=17550,
+        )
+        InvoiceLineFactory(invoice=invoice, description="Standard", unit_price_cents=10000,
+                           quantity=1, tax_rate=Decimal("0.1900"), tax_category_code="S")
+        InvoiceLineFactory(invoice=invoice, description="Reduced", unit_price_cents=5000,
+                           quantity=1, tax_rate=Decimal("0.0900"), tax_category_code="S")
+        with self.assertRaises(XMLBuilderError):
+            UBLInvoiceBuilder(invoice).build()
+
     def test_build_contains_legal_monetary_total(self):
         """Test that LegalMonetaryTotal is present and correct."""
         builder = UBLInvoiceBuilder(self.invoice)
