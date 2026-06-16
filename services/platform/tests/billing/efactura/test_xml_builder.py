@@ -538,6 +538,28 @@ class UBLInvoiceBuilderTestCase(TestCase):
         self.assertIsNotNone(code)
         self.assertEqual(code.text, "30")  # Bank transfer
 
+    def test_payment_means_unmapped_method_falls_back_to_credit_transfer(self):
+        """#177 cleanup: 'card'/'direct_debit' are not valid Payment methods (the system
+        normalizes 'card' to 'stripe' before storage), so they are no longer special-cased
+        in PAYMENT_MEANS_CODES and fall back to credit transfer (30)."""
+        invoice = InvoiceFactory(
+            customer=CustomerFactory(), currency=self.currency, number="INV-PM-CARD",
+            bill_to_name="Customer", bill_to_country="RO", bill_to_tax_id="RO12345678",
+            bill_to_street="Street 1", bill_to_city="City", bill_to_postal_code="010101",
+            status="issued", issued_at=timezone.now(), due_at=timezone.now() + timezone.timedelta(days=30),
+            subtotal_cents=100000, tax_total_cents=19000, total_cents=119000,
+            meta={"payment_method": "card"},
+        )
+        InvoiceLineFactory(
+            invoice=invoice, description="Web Hosting", unit_price_cents=100000,
+            quantity=1, tax_rate=Decimal("0.1900"), tax_category_code="S",
+        )
+        doc = etree.fromstring(UBLInvoiceBuilder(invoice).build().encode())
+        code = doc.find(
+            f".//{{{NAMESPACES['cac']}}}PaymentMeans//{{{NAMESPACES['cbc']}}}PaymentMeansCode"
+        )
+        self.assertEqual(code.text, "30")
+
     def test_validation_error_missing_invoice_number(self):
         """Test that validation fails for missing invoice number."""
         self.invoice.number = ""

@@ -47,13 +47,13 @@ INVOICE_TYPE_COMMERCIAL = "380"  # Commercial invoice
 INVOICE_TYPE_CREDIT_NOTE = "381"  # Credit note
 INVOICE_TYPE_DEBIT_NOTE = "383"  # Debit note
 
-# Payment means codes (UNCL4461)
+# Payment means codes (UNCL4461). Keys are the canonical Payment.payment_method values
+# (Payment.METHOD_CHOICES); inbound aliases like "card" are normalized to these before
+# storage (PAYMENT_METHOD_MAP), so only the stored values need a mapping here.
 PAYMENT_MEANS_CODES: dict[str, str] = {
     "bank": "30",  # Credit transfer
-    "stripe": "48",  # Bank card payment
-    "card": "48",  # Bank card payment
+    "stripe": "48",  # Bank card payment (Stripe)
     "paypal": "68",  # Online payment service
-    "direct_debit": "49",  # Direct debit
     "cash": "10",  # Cash
     "other": "30",  # Default to credit transfer
 }
