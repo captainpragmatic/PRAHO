@@ -16,6 +16,7 @@ Reference:
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import time
@@ -75,6 +76,10 @@ class EFacturaConfig:
     timeout: int = 30
     max_retries: int = 3
     retry_delay: float = 1.0
+    # Gap 2/7 (#123): the exact upload Content-Type and document standard are part of the
+    # credential-gated contract. Documented defaults; overridable. LIVE-VERIFY against the sandbox.
+    upload_content_type: str = "application/xml; charset=utf-8"
+    default_standard: str = "UBL"
 
     @classmethod
     def from_settings(cls) -> EFacturaConfig:
@@ -89,6 +94,8 @@ class EFacturaConfig:
             environment=environment,
             timeout=SettingsService.get_integer_setting("billing.efactura_api_timeout_seconds", 30),
             max_retries=SettingsService.get_integer_setting("billing.efactura_api_max_retries", 3),
+            upload_content_type=getattr(settings, "EFACTURA_UPLOAD_CONTENT_TYPE", "application/xml; charset=utf-8"),
+            default_standard=getattr(settings, "EFACTURA_UPLOAD_STANDARD", "UBL"),
         )
 
     @property
@@ -419,8 +426,8 @@ class EFacturaClient:
             "grant_type": "authorization_code",
             "code": code,
             "redirect_uri": redirect_uri,
-            "client_id": self.config.client_id,
-            "client_secret": self.config.client_secret,
+            # ANAF wants the JWT-format token; client auth is via Basic Auth, NOT a body secret.
+            "token_content_type": "jwt",
         }
 
         try:
@@ -429,7 +436,7 @@ class EFacturaClient:
                 self.config.oauth_token_url,
                 policy=EFACTURA_POLICY,
                 data=data,
-                headers=self._default_headers,
+                headers={**self._default_headers, **self._oauth_client_auth_header()},
             )
             response.raise_for_status()
             token = TokenResponse.from_dict(response.json())
@@ -438,6 +445,16 @@ class EFacturaClient:
         except requests.RequestException as e:
             logger.error(f"Token exchange failed: {e}")
             raise AuthenticationError(f"Failed to exchange code for token: {e}") from e
+
+    def _oauth_client_auth_header(self) -> dict[str, str]:
+        """HTTP Basic Auth header for OAuth client authentication.
+
+        ANAF uses ``client_secret_basic``: client_id + client_secret are base64-encoded in the
+        Authorization header, NOT sent in the form body. (Live-verify against the sandbox — the
+        exact auth method is part of the credential-gated contract, #123 Gap 8.)
+        """
+        raw = f"{self.config.client_id}:{self.config.client_secret}".encode()
+        return {"Authorization": f"Basic {base64.b64encode(raw).decode('ascii')}"}
 
     def refresh_token(self, refresh_token: str) -> TokenResponse:
         """
@@ -455,8 +472,7 @@ class EFacturaClient:
         data = {
             "grant_type": "refresh_token",
             "refresh_token": refresh_token,
-            "client_id": self.config.client_id,
-            "client_secret": self.config.client_secret,
+            "token_content_type": "jwt",
         }
 
         try:
@@ -465,7 +481,7 @@ class EFacturaClient:
                 self.config.oauth_token_url,
                 policy=EFACTURA_POLICY,
                 data=data,
-                headers=self._default_headers,
+                headers={**self._default_headers, **self._oauth_client_auth_header()},
             )
             response.raise_for_status()
             token = TokenResponse.from_dict(response.json())
@@ -592,7 +608,7 @@ class EFacturaClient:
                 data=xml_content.encode("utf-8"),
                 headers={
                     "Authorization": f"Bearer {access_token}",
-                    "Content-Type": "application/xml; charset=utf-8",
+                    "Content-Type": self.config.upload_content_type,
                 },
             )
 

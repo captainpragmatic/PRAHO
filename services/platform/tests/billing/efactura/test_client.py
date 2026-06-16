@@ -475,6 +475,23 @@ class EFacturaClientTestCase(TestCase):
         self.assertEqual(result.upload_index, "3828")
 
     @patch("apps.billing.efactura.client.EFacturaClient._get_access_token")
+    @patch("apps.billing.efactura.client.EFacturaClient._request_with_retry")
+    def test_upload_uses_configured_content_type(self, mock_request, mock_token):
+        """Gap 2 (#123): the upload Content-Type is configurable (default is live-verify)."""
+        mock_token.return_value = "test-token"
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.text = (_FIXTURES / "anaf_upload_ok.xml").read_text(encoding="utf-8")
+        mock_response.json.side_effect = json.JSONDecodeError("not json", "", 0)
+        mock_request.return_value = mock_response
+
+        self.client.config.upload_content_type = "text/plain"
+        self.client.upload_invoice("<Invoice/>")
+
+        headers = mock_request.call_args.kwargs["headers"]
+        self.assertEqual(headers["Content-Type"], "text/plain")
+
+    @patch("apps.billing.efactura.client.EFacturaClient._get_access_token")
     def test_upload_no_token(self, mock_token):
         """Test upload when no token available."""
         mock_token.side_effect = AuthenticationError("No token")
@@ -653,6 +670,28 @@ class AuthenticationFlowTestCase(TestCase):
 
         self.assertEqual(token.access_token, "new-token")
         mock_cache.assert_called_once()
+
+    @patch("apps.billing.efactura.client.safe_request")
+    @patch.object(EFacturaClient, "_cache_token")
+    def test_token_request_uses_basic_auth_and_jwt(self, mock_cache, mock_safe_request):
+        """Gap 8 (#123): ANAF token endpoint expects HTTP Basic Auth (client_secret_basic) +
+        token_content_type=jwt in the body; client_secret must NOT be in the form data."""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"access_token": "t", "token_type": "Bearer", "expires_in": 3600}
+        mock_response.raise_for_status = Mock()
+        mock_safe_request.return_value = mock_response
+
+        for call in (
+            lambda: self.client.exchange_code_for_token(code="c", redirect_uri="https://x/cb"),
+            lambda: self.client.refresh_token("refresh-tok"),
+        ):
+            mock_safe_request.reset_mock()
+            call()
+            kwargs = mock_safe_request.call_args.kwargs
+            self.assertTrue(kwargs["headers"].get("Authorization", "").startswith("Basic "), kwargs["headers"])
+            self.assertEqual(kwargs["data"].get("token_content_type"), "jwt")
+            self.assertNotIn("client_secret", kwargs["data"])
 
     @patch("apps.billing.efactura.client.safe_request")
     def test_exchange_code_failure(self, mock_safe_request):
