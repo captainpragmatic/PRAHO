@@ -121,14 +121,28 @@ class EFacturaService:
         if not self._requires_efactura(invoice):
             return SubmissionResult.error("Invoice does not require e-Factura submission")
 
-        # Check if already submitted
+        # Idempotency: a document already in flight at ANAF (or accepted) must NOT be
+        # re-uploaded — re-POSTing the same fiscal invoice is a compliance hazard. Treat
+        # SUBMITTED / PROCESSING / ACCEPTED as a no-op returning the existing document.
         existing = self._get_existing_document(invoice)
-        if existing and existing.status == EFacturaStatus.ACCEPTED.value:
+        if existing and existing.status in {
+            EFacturaStatus.SUBMITTED.value,
+            EFacturaStatus.PROCESSING.value,
+            EFacturaStatus.ACCEPTED.value,
+        }:
             return SubmissionResult.ok(existing)
 
         try:
             # Create or update document
             document = self._get_or_create_document(invoice)
+
+            # Queue before upload so the post-upload mark_submitted() transition is valid.
+            # FSM: mark_submitted() requires source QUEUED. A freshly created document is DRAFT;
+            # without this, a SUCCESSFUL ANAF upload was followed by TransitionNotAllowed, the
+            # error was swallowed, and the upload_index was lost -> double-send on retry.
+            if document.status in {EFacturaStatus.DRAFT.value, EFacturaStatus.ERROR.value}:
+                document.mark_queued()
+                document.save()
 
             # Generate XML
             xml_content = self._generate_xml(invoice, document)

@@ -12,9 +12,10 @@ from apps.billing.efactura.client import (
     AuthenticationError,
     EFacturaClient,
     NetworkError,
+    StatusResponse,
     UploadResponse,
 )
-from apps.billing.efactura.models import EFacturaDocument, EFacturaStatus
+from apps.billing.efactura.models import EFacturaDocument, EFacturaDocumentType, EFacturaStatus
 from apps.billing.efactura.service import (
     EFacturaService,
     StatusCheckResult,
@@ -595,3 +596,133 @@ class SubmitInvoiceConvenienceFunctionTestCase(TestCase):
 
         mock_service.submit_invoice.assert_called_once_with(invoice)
         self.assertTrue(result.success)
+
+
+@override_settings(
+    EFACTURA_ENABLED=True,
+    EFACTURA_ENVIRONMENT="test",
+    EFACTURA_B2C_ENABLED=False,
+    EFACTURA_MINIMUM_AMOUNT_CENTS=0,
+)
+class SubmissionLifecycleTests(TestCase):
+    """DB-backed FSM trajectory tests for the e-Factura submission lifecycle (Phase 0, #123).
+
+    These use a REAL Invoice + EFacturaDocument (not Mock(spec=...)), so the django-fsm
+    `source` constraints are actually enforced. The prior mock-based tests (e.g.
+    test_submit_success) mocked `mark_submitted`, which hid two TransitionNotAllowed bugs that
+    corrupt local state AFTER a successful ANAF upload — the double-send / lost-index risk.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        from tests.factories import CurrencyFactory, CustomerFactory  # noqa: PLC0415
+
+        cls.currency = CurrencyFactory(code="RON")
+        cls.customer = CustomerFactory()
+
+    def _ro_invoice(self, number: str):
+        from tests.factories import InvoiceFactory  # noqa: PLC0415
+
+        return InvoiceFactory(
+            customer=self.customer,
+            currency=self.currency,
+            number=number,
+            bill_to_country="RO",
+            bill_to_tax_id="RO12345678",
+            status="issued",
+        )
+
+    def _submitted_doc(self, invoice, upload_index: str) -> EFacturaDocument:
+        """Build an EFacturaDocument in SUBMITTED state via the real FSM transitions."""
+        doc = EFacturaDocument.objects.create(
+            invoice=invoice, document_type=EFacturaDocumentType.INVOICE.value
+        )
+        doc.mark_queued()
+        doc.save()
+        doc.mark_submitted(upload_index)
+        doc.save()
+        return doc
+
+    def test_submit_drives_new_doc_to_submitted_and_persists_index(self):
+        """A fresh (draft) document must reach SUBMITTED with the upload_index persisted.
+
+        RED on master: submit creates a `draft` doc, uploads, then mark_submitted() (source
+        QUEUED) raises TransitionNotAllowed -> caught by the generic except -> first submission
+        has existing=None -> nothing persisted -> ANAF has it, we lost the index.
+        """
+        invoice = self._ro_invoice("INV-LC-1")
+        client = Mock(spec=EFacturaClient)
+        client.upload_invoice.return_value = UploadResponse(success=True, upload_index="IDX-1")
+        service = EFacturaService(client=client)
+
+        with patch.object(service, "_generate_xml", return_value="<Invoice/>"), patch.object(
+            service, "_log_audit_event"
+        ):
+            result = service.submit_invoice(invoice)
+
+        self.assertTrue(result.success, msg=f"submit failed: {result.error_message}")
+        doc = EFacturaDocument.objects.get(invoice=invoice)
+        self.assertEqual(doc.status, EFacturaStatus.SUBMITTED.value)
+        self.assertEqual(doc.anaf_upload_index, "IDX-1")
+
+    def test_first_status_poll_can_accept_a_submitted_doc(self):
+        """ANAF can return 'ok' on the FIRST poll while the doc is still SUBMITTED.
+
+        RED on master: mark_accepted source is only PROCESSING, so check_status raises
+        TransitionNotAllowed (uncaught) on a SUBMITTED doc.
+        """
+        from tests.factories import InvoiceFactory  # noqa: PLC0415
+
+        invoice = InvoiceFactory(
+            customer=self.customer, currency=self.currency, number="INV-LC-2",
+            bill_to_country="RO", bill_to_tax_id="RO12345678", status="issued",
+        )
+        doc = self._submitted_doc(invoice, "IDX-2")
+        client = Mock(spec=EFacturaClient)
+        client.get_upload_status.return_value = StatusResponse(status="ok", download_id="DL-2")
+        service = EFacturaService(client=client)
+
+        with patch.object(service, "_log_audit_event"), patch.object(service, "_record_webhook_event"):
+            result = service.check_status(doc)
+
+        self.assertEqual(result.status, "accepted")
+        doc.refresh_from_db()
+        self.assertEqual(doc.status, EFacturaStatus.ACCEPTED.value)
+        self.assertEqual(doc.anaf_download_id, "DL-2")
+
+    def test_first_status_poll_can_reject_a_submitted_doc(self):
+        """ANAF can return 'nok' on the FIRST poll while the doc is still SUBMITTED."""
+        invoice = self._ro_invoice("INV-LC-3")
+        doc = self._submitted_doc(invoice, "IDX-3")
+        client = Mock(spec=EFacturaClient)
+        client.get_upload_status.return_value = StatusResponse(status="nok", download_id="")
+        service = EFacturaService(client=client)
+
+        with patch.object(service, "_log_audit_event"), patch.object(service, "_record_webhook_event"):
+            result = service.check_status(doc)
+
+        self.assertEqual(result.status, "rejected")
+        doc.refresh_from_db()
+        self.assertEqual(doc.status, EFacturaStatus.REJECTED.value)
+
+    def test_resubmitting_an_in_flight_doc_does_not_re_upload(self):
+        """A second submit() on an already-SUBMITTED doc must be an idempotent no-op.
+
+        RED on master: only ACCEPTED short-circuits, so a SUBMITTED doc re-generates XML and
+        calls upload_invoice() again = duplicate fiscal submission.
+        """
+        invoice = self._ro_invoice("INV-LC-4")
+        self._submitted_doc(invoice, "IDX-4")
+        client = Mock(spec=EFacturaClient)
+        service = EFacturaService(client=client)
+
+        with patch.object(service, "_generate_xml", return_value="<Invoice/>"), patch.object(
+            service, "_log_audit_event"
+        ):
+            result = service.submit_invoice(invoice)
+
+        self.assertTrue(result.success)
+        client.upload_invoice.assert_not_called()
+        doc = EFacturaDocument.objects.get(invoice=invoice)
+        self.assertEqual(doc.status, EFacturaStatus.SUBMITTED.value)
+        self.assertEqual(doc.anaf_upload_index, "IDX-4")
