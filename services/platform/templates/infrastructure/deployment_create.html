@@ -174,7 +174,7 @@
 {{ providers_data|json_script:"providers-data" }}
 {{ regions_data|json_script:"regions-data" }}
 {{ sizes_data|json_script:"sizes-data" }}
-<script>
+<script nonce="{{ csp_nonce }}">
 function deploymentForm() {
     return {
         environment: 'prd',

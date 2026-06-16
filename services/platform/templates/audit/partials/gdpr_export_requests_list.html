@@ -161,7 +161,7 @@
 {% endif %}
 
 <!-- JavaScript for Export Detail Toggle -->
-<script>
+<script nonce="{{ csp_nonce }}">
 function toggleExportDetail(button, requestId) {
     const detailDiv = document.getElementById('export-detail-' + requestId);
     const chevron = button.querySelector('.chevron-icon');

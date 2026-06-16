@@ -136,7 +136,7 @@
     {% endif %}
 </div>
 
-<script>
+<script nonce="{{ csp_nonce }}">
 async function refreshCache() {
     try {
         const response = await fetch('{% url "settings:refresh_cache" %}', {

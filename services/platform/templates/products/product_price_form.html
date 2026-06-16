@@ -164,7 +164,7 @@
   </form>
 </div>
 
-<script>
+<script nonce="{{ csp_nonce }}">
 // Price calculator helper for the simplified model
 document.addEventListener('DOMContentLoaded', function() {
     const monthlyInput = document.getElementById('id_monthly_price_cents');

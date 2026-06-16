@@ -134,7 +134,7 @@
   </div>
 </div>
 
-<script>
+<script nonce="{{ csp_nonce }}">
 function checkWebAuthnSupport() {
   if (window.PublicKeyCredential) {
     // WebAuthn is supported

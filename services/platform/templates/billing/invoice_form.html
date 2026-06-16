@@ -284,7 +284,7 @@
   </form>
 </div>
 
-<script>
+<script nonce="{{ csp_nonce }}">
 let lineCounter = 1;
 
 // Enhanced calculation function
@@ -465,7 +465,7 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 </script>
 
-<style>
+<style nonce="{{ csp_nonce }}">
 .sticky {
     position: sticky;
 }

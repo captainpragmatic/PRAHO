@@ -346,7 +346,7 @@
 
 
 <!-- HTMX Loading Styles -->
-<style>
+<style nonce="{{ csp_nonce }}">
 .htmx-request .htmx-indicator {
     display: inline-flex !important;
 }
@@ -511,7 +511,7 @@
 </style>
 
 <!-- {% icon "services" %} Progressive Enhancement Scripts -->
-<script>
+<script nonce="{{ csp_nonce }}">
     //  Mobile touch improvements
     if ('ontouchstart' in window) {
         document.body.classList.add('touch-device');

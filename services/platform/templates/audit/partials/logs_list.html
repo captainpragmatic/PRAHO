@@ -114,7 +114,7 @@
 {% endif %}
 
 <!-- JavaScript for Event Detail Toggle -->
-<script>
+<script nonce="{{ csp_nonce }}">
 function toggleEventDetail(button, eventId) {
     const detailDiv = document.getElementById('event-detail-' + eventId);
     const chevron = button.querySelector('.chevron-icon');

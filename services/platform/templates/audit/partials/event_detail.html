@@ -150,7 +150,7 @@
 </div>
 
 <!-- JavaScript to handle the details -->
-<script>
+<script nonce="{{ csp_nonce }}">
 function closeEventDetail(button) {
     const eventDetailsContainer = button.closest('.event-details');
     if (eventDetailsContainer) {

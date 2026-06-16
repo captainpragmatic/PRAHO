@@ -424,7 +424,7 @@
   </div>
 </div>
 
-<script>
+<script nonce="{{ csp_nonce }}">
 function sendProforma(proformaId) {
     if (confirm('{% trans "Send this proforma to the customer via email?" %}')) {
         fetch(`/app/billing/proformas/${proformaId}/send/`, {

@@ -104,14 +104,14 @@ Modern, standardized enhanced table component with:
   {% include 'components/pagination.html' with page_obj=page_obj extra_params=extra_params htmx_target=htmx_target htmx_url=htmx_url %}
 {% endif %}
 
-<script>
+<script nonce="{{ csp_nonce }}">
 document.querySelectorAll('[data-click-action]').forEach(function(el) {
     el.addEventListener('click', function() { new Function(this.dataset.clickAction)(); });
 });
 </script>
 
 {% if include_js %}
-<script>
+<script nonce="{{ csp_nonce }}">
 // Generic navigation function for clickable rows
 function navigateToUrl(url) {
   window.location.href = url;

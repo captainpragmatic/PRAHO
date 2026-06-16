@@ -359,7 +359,7 @@
   </form>
 </div>
 
-<script>
+<script nonce="{{ csp_nonce }}">
   // Initialize lineCounter based on existing lines
   {% if proforma and lines %}
   let lineCounter = {{ lines|length }};
@@ -591,7 +591,7 @@
 });
 </script>
 
-<style>
+<style nonce="{{ csp_nonce }}">
   .sticky {
     position: sticky;
   }
