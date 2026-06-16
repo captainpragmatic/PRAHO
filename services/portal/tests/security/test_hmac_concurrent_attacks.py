@@ -193,6 +193,12 @@ class HMACConcurrentAttackTestCase(SimpleTestCase):
         total_nonces = nonce_state['unique']
         total_cache_hits = nonce_state['collisions']
 
+        # Load floor: 8 workers x 50 iterations = 400 nonce-bearing requests must actually reach
+        # the mock. Without this, a broken patch (0 observed requests) yields collision_rate=0 and
+        # the test would pass while exercising nothing.
+        observed = total_nonces + total_cache_hits
+        self.assertGreaterEqual(observed, 360, f"nonce path barely exercised: only {observed}/400 requests reached the mock")
+
         # With cryptographically secure nonces, collisions should be extremely rare
         collision_rate = total_cache_hits / (total_nonces + total_cache_hits) if (total_nonces + total_cache_hits) > 0 else 0
 
