@@ -303,10 +303,16 @@ class BoundaryConditionTestCase(TestCase):
         self.assertIsNotNone(result)
 
     def test_deadline_exactly_at_boundary(self):
-        """Test deadline calculation exactly at 5 day mark."""
+        """Test deadline-passed crossing at the actual boundary (OUG 89/2025 working days).
+
+        Pin `now` to one second past the deadline the system itself computes, so the test
+        exercises the boundary regardless of how many weekends/holidays the 5-working-day
+        window spans for today's `now`."""
         settings = EFacturaSettings()
-        issued_at = timezone.now() - timedelta(days=5)
-        self.assertTrue(settings.is_deadline_passed(issued_at))
+        issued_at = timezone.now()
+        deadline = settings.calculate_deadline(issued_at)
+        with patch.object(settings, "get_romania_now", return_value=deadline + timedelta(seconds=1)):
+            self.assertTrue(settings.is_deadline_passed(issued_at))
 
     def test_deadline_one_second_before(self):
         """Test deadline calculation one second before."""

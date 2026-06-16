@@ -409,10 +409,16 @@ class EFacturaDocument(models.Model):
 
     @property
     def submission_deadline(self) -> datetime.datetime | None:
-        """Calculate the submission deadline from invoice issue date."""
+        """Calculate the submission deadline from the invoice issue date.
+
+        OUG 89/2025 (in force since Jan 2026): 5 WORKING days, not calendar days — skipping weekends
+        and Romanian public holidays.
+        """
+        from apps.billing.efactura.working_days import submission_deadline_datetime  # noqa: PLC0415
+
         if self.invoice.issued_at:
             deadline_days = SettingsService.get_integer_setting("billing.efactura_submission_deadline_days", 5)
-            return self.invoice.issued_at + timedelta(days=deadline_days)
+            return submission_deadline_datetime(self.invoice.issued_at, deadline_days)
         return None
 
     @property

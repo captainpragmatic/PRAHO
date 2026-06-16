@@ -305,11 +305,15 @@ class EFacturaSettingsTimezoneTestCase(TestCase):
         self.assertEqual(ro_time.tzinfo, ROMANIA_TIMEZONE)
 
     def test_calculate_deadline(self):
-        """Test deadline calculation."""
+        """Test deadline calculation delegates to the working-day helper (OUG 89/2025)."""
+        from apps.billing.efactura.working_days import submission_deadline_datetime  # noqa: PLC0415
+
         issued_at = timezone.now()
         deadline = self.settings.calculate_deadline(issued_at)
-        expected = issued_at + timedelta(days=5)
-        self.assertEqual(deadline, expected)
+        # Delegation + working-day property: always Mon-Fri, at or after the 5-calendar-day mark.
+        self.assertEqual(deadline, submission_deadline_datetime(issued_at, 5))
+        self.assertLess(deadline.weekday(), 5)
+        self.assertGreaterEqual(deadline.date(), (issued_at + timedelta(days=5)).date())
 
     def test_is_deadline_approaching_false(self):
         """Test deadline not approaching for fresh invoice."""
@@ -317,9 +321,18 @@ class EFacturaSettingsTimezoneTestCase(TestCase):
         self.assertFalse(self.settings.is_deadline_approaching(issued_at))
 
     def test_is_deadline_approaching_true(self):
-        """Test deadline approaching within 24 hours."""
-        issued_at = timezone.now() - timedelta(days=4, hours=1)
-        self.assertTrue(self.settings.is_deadline_approaching(issued_at))
+        """Test deadline approaching within the warning window (24h by default).
+
+        Working-day deadlines (OUG 89/2025) make `issued_at - timedelta(days=4)` unreliable —
+        the actual deadline may be 5-9 calendar days out depending on which weekends/holidays
+        fall in the window. We pin `get_romania_now()` to one minute inside the warning window.
+        """
+        issued_at = timezone.now()
+        deadline = self.settings.calculate_deadline(issued_at)
+        warning_window = timedelta(hours=self.settings.deadline_warning_hours)
+        now_inside_window = deadline - warning_window + timedelta(minutes=1)
+        with patch.object(self.settings, "get_romania_now", return_value=now_inside_window):
+            self.assertTrue(self.settings.is_deadline_approaching(issued_at))
 
     def test_is_deadline_passed_false(self):
         """Test deadline not passed for fresh invoice."""
@@ -327,9 +340,13 @@ class EFacturaSettingsTimezoneTestCase(TestCase):
         self.assertFalse(self.settings.is_deadline_passed(issued_at))
 
     def test_is_deadline_passed_true(self):
-        """Test deadline passed after 5 days."""
-        issued_at = timezone.now() - timedelta(days=6)
-        self.assertTrue(self.settings.is_deadline_passed(issued_at))
+        """Test deadline passed: pin `now` to one second past the actual computed (working-day)
+        deadline so the assertion is independent of how many weekends/holidays the window spans."""
+        issued_at = timezone.now()
+        deadline = self.settings.calculate_deadline(issued_at)
+        now_past_deadline = deadline + timedelta(seconds=1)
+        with patch.object(self.settings, "get_romania_now", return_value=now_past_deadline):
+            self.assertTrue(self.settings.is_deadline_passed(issued_at))
 
 
 class EFacturaSettingsValidationTestCase(TestCase):

@@ -231,7 +231,7 @@ EFACTURA_DEFAULTS: dict[str, Any] = {
     EFacturaSettingKeys.B2C_ENABLED: False,  # Mandatory from Jan 2025
     EFacturaSettingKeys.B2C_MINIMUM_AMOUNT: 0,
     EFacturaSettingKeys.B2B_MINIMUM_AMOUNT: 0,
-    # Submission (5 calendar days per Romanian law)
+    # Submission (5 WORKING days per OUG 89/2025; was 5 calendar days pre-2026)
     EFacturaSettingKeys.SUBMISSION_DEADLINE_DAYS: 5,
     EFacturaSettingKeys.DEADLINE_WARNING_HOURS: 24,
     EFacturaSettingKeys.AUTO_SUBMIT_ENABLED: True,
@@ -605,7 +605,7 @@ class EFacturaSettings:
 
     @property
     def submission_deadline_days(self) -> int:
-        """Get submission deadline in calendar days (default: 5)."""
+        """Get submission deadline in WORKING days (OUG 89/2025; default: 5)."""
         return self._get_int(EFacturaSettingKeys.SUBMISSION_DEADLINE_DAYS, 5)
 
     @property
@@ -743,8 +743,10 @@ class EFacturaSettings:
         return dt.astimezone(ROMANIA_TIMEZONE)
 
     def calculate_deadline(self, issued_at: datetime) -> datetime:
-        """Calculate submission deadline from issue date."""
-        return issued_at + timedelta(days=self.submission_deadline_days)
+        """Calculate the WORKING-day submission deadline (OUG 89/2025) from the issue date."""
+        from apps.billing.efactura.working_days import submission_deadline_datetime  # noqa: PLC0415
+
+        return submission_deadline_datetime(issued_at, self.submission_deadline_days)
 
     def is_deadline_approaching(self, issued_at: datetime) -> bool:
         """Check if submission deadline is approaching."""
