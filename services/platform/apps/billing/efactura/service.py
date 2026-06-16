@@ -365,13 +365,19 @@ class EFacturaService:
 
         deadline_days = SettingsService.get_integer_setting("billing.efactura_submission_deadline_days", 5)
 
-        cutoff = timezone.now() + timedelta(hours=hours)
-        deadline_start = cutoff - timedelta(days=deadline_days)
+        # Coarse pre-filter on issue date: a WORKING-day deadline spans MORE calendar days than the
+        # raw count (weekends + holidays are skipped), so look back generously and let the precise,
+        # working-day-aware is_deadline_approaching check below do the real filtering.
+        # NOTE: `+7` buffer assumes deadline_days <= 5. The worst calendar span for 5 working days
+        # is the Easter cluster (Good Friday + 2 weekends + Easter Monday) = 5 + 4 skipped = 9 days,
+        # plus a 24h warning window comfortably fits in 12 (5+7). If deadline_days is ever raised,
+        # widen this buffer proportionally (rule-of-thumb: deadline_days + max(holiday_cluster_span)).
+        now = timezone.now()
+        lookback = timedelta(days=deadline_days + 7)
 
-        # Find invoices issued within deadline window that don't have accepted e-Factura
         invoices = Invoice.objects.filter(
-            issued_at__gte=deadline_start,
-            issued_at__lte=cutoff - timedelta(days=deadline_days) + timedelta(hours=hours),
+            issued_at__gte=now - lookback,
+            issued_at__lte=now,
             bill_to_country="RO",
             bill_to_tax_id__isnull=False,
             status="issued",

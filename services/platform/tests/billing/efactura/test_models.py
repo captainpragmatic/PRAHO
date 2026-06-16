@@ -3,11 +3,13 @@ Tests for EFacturaDocument model.
 """
 
 from datetime import timedelta
+from unittest.mock import patch
 
 from django.test import TestCase
 from django.utils import timezone
 
 from apps.billing.efactura.models import EFacturaDocument, EFacturaDocumentType, EFacturaStatus
+from apps.billing.efactura.working_days import submission_deadline_datetime
 from tests.helpers.fsm_helpers import force_status
 
 
@@ -190,20 +192,36 @@ class EFacturaDocumentModelTestCase(TestCase):
 
         deadline = document.submission_deadline
         self.assertIsNotNone(deadline)
-        expected = self.invoice.issued_at + timedelta(days=5)
-        self.assertEqual(deadline, expected)
+        # OUG 89/2025: 5 WORKING days, not 5 calendar days. The model delegates to the working-day
+        # calculator; the result always lands on a Romanian working day (Mon-Fri, non-holiday) at or
+        # after the old 5-calendar-day mark.
+        self.assertEqual(deadline, submission_deadline_datetime(self.invoice.issued_at, 5))
+        self.assertLess(deadline.weekday(), 5)
+        self.assertGreaterEqual(deadline.date(), (self.invoice.issued_at + timedelta(days=5)).date())
 
     def test_is_deadline_approaching(self):
-        """Test deadline approaching detection."""
-        self.invoice.issued_at = timezone.now() - timedelta(days=4, hours=12)
-        self.invoice.save()
+        """Test deadline approaching detection within the warning window.
 
+        Working-day deadlines (OUG 89/2025) make a calendar-day offset like `days=4, hours=12`
+        unreliable — the 5-working-day deadline can land 5-9 calendar days out depending on
+        which weekends and Romanian holidays the window spans. Pin model-module `timezone.now`
+        to one minute inside the warning window of the actual computed deadline.
+        """
+        self.invoice.issued_at = timezone.now()
+        self.invoice.save()
         document = EFacturaDocument.objects.create(invoice=self.invoice)
-        self.assertTrue(document.is_deadline_approaching)
+
+        deadline = submission_deadline_datetime(self.invoice.issued_at, 5)
+        # Default warning is 24 h (SettingsService default in is_deadline_approaching).
+        now_inside_window = deadline - timedelta(hours=24) + timedelta(minutes=1)
+        with patch("apps.billing.efactura.models.timezone.now", return_value=now_inside_window):
+            self.assertTrue(document.is_deadline_approaching)
 
     def test_is_deadline_passed(self):
         """Test deadline passed detection."""
-        self.invoice.issued_at = timezone.now() - timedelta(days=6)
+        # 21 calendar days back guarantees 5 working days have elapsed regardless of which
+        # weekends/holidays intervened (working-day deadline, OUG 89/2025).
+        self.invoice.issued_at = timezone.now() - timedelta(days=21)
         self.invoice.save()
 
         document = EFacturaDocument.objects.create(invoice=self.invoice)
