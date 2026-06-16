@@ -12,6 +12,7 @@ from io import BytesIO
 from pathlib import Path
 
 from django.conf import settings
+from django.core.exceptions import ImproperlyConfigured
 from django.http import HttpResponse
 from django.utils.translation import gettext as _t
 from reportlab.lib.pagesizes import A4
@@ -35,17 +36,27 @@ _FONT_DIR = Path(__file__).resolve().parent / "assets" / "fonts"
 
 
 def _register_fonts() -> None:
-    """Register the vendored Unicode fonts once (idempotent across imports/reloads)."""
+    """Register the vendored Unicode fonts once (idempotent). Called lazily from the
+    generator constructor — NOT at import time — so a missing font asset degrades to a clear
+    error when a PDF is actually generated, instead of crashing every import of this module
+    (which would take down all of billing). If packaging a wheel/sdist, the assets/fonts TTFs
+    must be declared in package_data / MANIFEST.in.
+    """
     registered = set(pdfmetrics.getRegisteredFontNames())
-    if _FONT not in registered:
-        pdfmetrics.registerFont(TTFont(_FONT, str(_FONT_DIR / "DejaVuSans.ttf")))
-    if _FONT_BOLD not in registered:
-        pdfmetrics.registerFont(TTFont(_FONT_BOLD, str(_FONT_DIR / "DejaVuSans-Bold.ttf")))
+    if _FONT in registered and _FONT_BOLD in registered:
+        return
+    for name, filename in ((_FONT, "DejaVuSans.ttf"), (_FONT_BOLD, "DejaVuSans-Bold.ttf")):
+        if name in registered:
+            continue
+        path = _FONT_DIR / filename
+        if not path.exists():
+            raise ImproperlyConfigured(
+                f"Vendored PDF font missing: {path}. The billing app's assets/fonts/ TTFs must "
+                f"ship with the deployment (declare them in package_data/MANIFEST.in for a wheel)."
+            )
+        pdfmetrics.registerFont(TTFont(name, str(path)))
     # Map the family so bold resolution is correct for any future flowable use.
     pdfmetrics.registerFontFamily(_FONT, normal=_FONT, bold=_FONT_BOLD, italic=_FONT, boldItalic=_FONT_BOLD)
-
-
-_register_fonts()
 
 # Coordinate-based layout has no text wrapping/clipping, so free-text fields must
 # be clamped to a width that fits their column — otherwise long values overrun the
@@ -68,6 +79,7 @@ class RomanianDocumentPDFGenerator:
     _BOTTOM_MARGIN = 4 * cm
 
     def __init__(self, document: Invoice | ProformaInvoice) -> None:
+        _register_fonts()  # lazy: surface a missing font asset here, not at module import
         self.document = document
         self.buffer = BytesIO()
         self.canvas = canvas.Canvas(self.buffer, pagesize=A4)

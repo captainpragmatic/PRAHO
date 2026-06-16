@@ -1249,6 +1249,14 @@ class EN16931PDFComplianceTests(TestCase):
                 self.assertIn('DejaVu', font, f'diacritic text {text!r} drawn with non-Unicode font {font!r}')
         self.assertTrue(any('Factură' in t for _, t in drawn), 'fiscal disclaimer must be rendered')
 
+    def test_vendored_fonts_present_on_disk(self):
+        """Packaging guard: the vendored Unicode TTFs must ship with the app. They are
+        registered lazily, so a missing asset would crash PDF generation in production
+        (and the deploy must include non-.py assets) — fail loudly here in CI instead."""
+        from apps.billing.pdf_generators import _FONT_DIR
+        self.assertTrue((_FONT_DIR / 'DejaVuSans.ttf').exists(), f'missing {_FONT_DIR}/DejaVuSans.ttf')
+        self.assertTrue((_FONT_DIR / 'DejaVuSans-Bold.ttf').exists(), f'missing {_FONT_DIR}/DejaVuSans-Bold.ttf')
+
     def test_document_discount_rendered_and_reconciles(self):
         """H1/H2: a document-level discount (Invoice.discount_cents — the value the
         e-Factura XML emits as a BG-20 allowance) must appear on the PDF, and the totals
