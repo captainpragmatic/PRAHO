@@ -132,6 +132,70 @@ class CIUSROValidatorTestCase(TestCase):
         self.assertTrue(result.is_valid)
         self.assertEqual(len(result.errors), 0)
 
+    # ---- EN16931 business-rule arithmetic (native partial Schematron subset) ----
+
+    def test_br_co_10_line_sum_must_equal_document_line_extension(self):
+        """BR-CO-10: document LineExtensionAmount must equal the sum of line nets."""
+        xml = self._get_minimal_valid_xml().replace(
+            '<cbc:LineExtensionAmount currencyID="RON">1000.00</cbc:LineExtensionAmount>\n        <cac:Item>',
+            '<cbc:LineExtensionAmount currencyID="RON">900.00</cbc:LineExtensionAmount>\n        <cac:Item>',
+        )
+        result = self.validator.validate(xml)
+        self.assertFalse(result.is_valid)
+        self.assertTrue(any(e.code == "BR-CO-10" for e in result.errors), [e.code for e in result.errors])
+
+    def test_br_co_15_tax_inclusive_must_equal_exclusive_plus_tax(self):
+        """BR-CO-15: TaxInclusiveAmount must equal TaxExclusiveAmount + tax."""
+        xml = self._get_minimal_valid_xml().replace(
+            ">1190.00</cbc:TaxInclusiveAmount>", ">1200.00</cbc:TaxInclusiveAmount>"
+        )
+        result = self.validator.validate(xml)
+        self.assertFalse(result.is_valid)
+        self.assertTrue(any(e.code == "BR-CO-15" for e in result.errors), [e.code for e in result.errors])
+
+    def test_br_co_16_payable_must_equal_inclusive_minus_prepaid(self):
+        """BR-CO-16: PayableAmount must equal TaxInclusiveAmount - PrepaidAmount."""
+        xml = self._get_minimal_valid_xml().replace(
+            ">1190.00</cbc:PayableAmount>", ">1000.00</cbc:PayableAmount>"
+        )
+        result = self.validator.validate(xml)
+        self.assertFalse(result.is_valid)
+        self.assertTrue(any(e.code == "BR-CO-16" for e in result.errors), [e.code for e in result.errors])
+
+    def test_br_co_14_standard_tax_must_equal_base_times_rate(self):
+        """BR-CO-14: standard-rate category tax must equal taxable base * rate."""
+        xml = self._get_minimal_valid_xml().replace(
+            '<cbc:TaxableAmount currencyID="RON">1000.00</cbc:TaxableAmount>\n'
+            '            <cbc:TaxAmount currencyID="RON">190.00</cbc:TaxAmount>',
+            '<cbc:TaxableAmount currencyID="RON">1000.00</cbc:TaxableAmount>\n'
+            '            <cbc:TaxAmount currencyID="RON">150.00</cbc:TaxAmount>',
+        )
+        result = self.validator.validate(xml)
+        self.assertFalse(result.is_valid)
+        self.assertTrue(any(e.code == "BR-CO-14" for e in result.errors), [e.code for e in result.errors])
+
+    def test_br_s_10_standard_category_must_not_carry_exemption(self):
+        """BR-S-10: an S (standard) category must not carry a tax exemption code/reason."""
+        xml = self._get_minimal_valid_xml().replace(
+            "<cac:TaxCategory>\n                <cbc:ID>S</cbc:ID>",
+            "<cac:TaxCategory>\n                <cbc:ID>S</cbc:ID>\n"
+            "                <cbc:TaxExemptionReasonCode>VATEX-EU-AE</cbc:TaxExemptionReasonCode>",
+        )
+        result = self.validator.validate(xml)
+        self.assertFalse(result.is_valid)
+        self.assertTrue(any(e.code == "BR-S-10" for e in result.errors), [e.code for e in result.errors])
+
+    def test_br_cl_16_payment_means_code_must_be_valid(self):
+        """BT-81/BR-CL-16: a payment means code outside UNCL4461 (e.g. card 48, dropped in
+        #177) must be rejected."""
+        xml = self._get_minimal_valid_xml().replace(
+            "<cbc:PaymentMeansCode>30</cbc:PaymentMeansCode>",
+            "<cbc:PaymentMeansCode>48</cbc:PaymentMeansCode>",
+        )
+        result = self.validator.validate(xml)
+        self.assertFalse(result.is_valid)
+        self.assertTrue(any(e.code == "BR-CL-16" for e in result.errors), [e.code for e in result.errors])
+
     def test_validate_malformed_xml(self):
         """Test that malformed XML fails validation."""
         xml = "<Invoice>Not closed properly"

@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass, field
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any, ClassVar, cast
 
 from django.conf import settings
@@ -92,9 +93,13 @@ class CIUSROValidator:
     2. Basic structural validation
     3. CIUS-RO mandatory field validation
     4. Romanian-specific business rules
+    5. EN16931 monetary reconciliation + tax-category business rules
+       (BR-CO-10/13/15/16, BR-CO-14, BR-S/Z-10, BR-*-05, BR-CL-22, BT-81)
 
-    Note: Full schematron validation requires additional artifacts
-    from ANAF which should be downloaded and cached.
+    Note: This is a native PARTIAL validator. It is NOT the full ANAF Schematron — that is
+    distributed as XSLT 2.0 artifacts that require a Saxon (XSLT 2.0) processor, which lxml
+    (XSLT 1.0) cannot execute. The rules implemented here are the subset most likely to catch
+    an ANAF rejection (mandatory fields + the arithmetic the Schematron enforces).
     """
 
     # CIUS-RO version
@@ -114,6 +119,16 @@ class CIUSROValidator:
 
     # Romanian VAT rates (updated Aug 2025)
     VALID_VAT_RATES: ClassVar[set[str]] = {"21.00", "11.00", "0.00"}
+
+    # UNCL4461 payment means codes (BT-81) ANAF accepts; anything else is rejected.
+    VALID_PAYMENT_MEANS: ClassVar[set[str]] = {"10", "20", "30", "31", "42", "57", "58", "59", "68", "97"}
+
+    # EN16931 categories that must carry NEITHER an exemption code NOR reason text (BR-S/Z-10).
+    _CATEGORIES_NO_EXEMPTION: ClassVar[set[str]] = {"S", "Z"}
+    # Non-standard categories whose breakdown rate must be 0 (BR-AE/Z/E/K/O/G-05).
+    _ZERO_RATE_CATEGORIES: ClassVar[set[str]] = {"Z", "E", "AE", "K", "G", "O"}
+    # Allowed rounding tolerance for the multiply-based rule BR-CO-14 (tax = base * rate).
+    _ROUNDING_TOLERANCE: ClassVar[Decimal] = Decimal("0.01")
 
     def __init__(self) -> None:
         """Initialize validator."""
@@ -161,6 +176,12 @@ class CIUSROValidator:
         # Step 8: Romanian-specific rules
         self._validate_romanian_rules(doc, result)
 
+        # Step 9: Monetary reconciliation (BR-CO-10/13/15/16) and tax-category business rules
+        # (BR-CO-14, BR-S/Z-10, BR-*-05, BR-CL-22). These are the arithmetic rules ANAF's
+        # Schematron enforces — the native subset most likely to catch a rejection.
+        self._validate_monetary_reconciliation(doc, result, is_credit_note)
+        self._validate_tax_category_rules(doc, result)
+
         return result
 
     def validate_file(self, file_path: str) -> ValidationResult:
@@ -188,6 +209,16 @@ class CIUSROValidator:
         """Get text content of element."""
         elem = self._find(doc, xpath)
         return elem.text.strip() if elem is not None and elem.text else ""
+
+    def _decimal(self, node: etree._Element, xpath: str) -> Decimal | None:
+        """Parse the text at xpath as a Decimal, or None if absent/non-numeric."""
+        txt = self._get_text(node, xpath)
+        if not txt:
+            return None
+        try:
+            return Decimal(txt)
+        except (InvalidOperation, ValueError):
+            return None
 
     def _validate_document_metadata(
         self, doc: etree._Element, result: ValidationResult, is_credit_note: bool = False
@@ -422,11 +453,97 @@ class CIUSROValidator:
         payment_means = self._find(doc, ".//cac:PaymentMeans")
         if payment_means is None:
             result.add_warning("BR-RO-200", "Payment means is recommended")
+        else:
+            # BT-81: payment means code, when present, must be a valid UNCL4461 code.
+            pm_code = self._get_text(payment_means, "cbc:PaymentMeansCode")
+            if pm_code and pm_code not in self.VALID_PAYMENT_MEANS:
+                result.add_error("BR-CL-16", f"Invalid UNCL4461 payment means code: {pm_code}", "/PaymentMeans")
 
         # BR-RO-300: Due date is recommended
         due_date = self._get_text(doc, ".//cbc:DueDate")
         if not due_date:
             result.add_warning("BR-RO-300", "Due date is recommended")
+
+    def _validate_monetary_reconciliation(
+        self, doc: etree._Element, result: ValidationResult, is_credit_note: bool = False
+    ) -> None:
+        """Validate the EN16931 monetary reconciliation rules (BR-CO-10/13/15/16).
+
+        These are exact sums (no rounding tolerance) — the document totals must add up from
+        the line nets, document allowances/charges, the tax total and any prepayment.
+        """
+        monetary = self._find(doc, ".//cac:LegalMonetaryTotal")
+        if monetary is None:
+            return  # absence already reported as BR-52
+
+        line_ext = self._decimal(monetary, "cbc:LineExtensionAmount")
+        tax_excl = self._decimal(monetary, "cbc:TaxExclusiveAmount")
+        tax_incl = self._decimal(monetary, "cbc:TaxInclusiveAmount")
+        payable = self._decimal(monetary, "cbc:PayableAmount")
+        allowance = self._decimal(monetary, "cbc:AllowanceTotalAmount") or Decimal("0")
+        charge = self._decimal(monetary, "cbc:ChargeTotalAmount") or Decimal("0")
+        prepaid = self._decimal(monetary, "cbc:PrepaidAmount") or Decimal("0")
+        tax_amount = self._decimal(doc, ".//cac:TaxTotal/cbc:TaxAmount") or Decimal("0")
+
+        # BR-CO-10: BT-106 == Σ line BT-131
+        line_tag = "CreditNoteLine" if is_credit_note else "InvoiceLine"
+        line_sum = sum(
+            (self._decimal(ln, "cbc:LineExtensionAmount") or Decimal("0"))
+            for ln in self._find_all(doc, f".//cac:{line_tag}")
+        )
+        if line_ext is not None and line_ext != line_sum:
+            result.add_error(
+                "BR-CO-10", f"Document LineExtensionAmount {line_ext} != sum of line net amounts {line_sum}"
+            )
+
+        # BR-CO-13: TaxExclusive == LineExtension - Allowances + Charges
+        if line_ext is not None and tax_excl is not None and tax_excl != line_ext - allowance + charge:
+            result.add_error(
+                "BR-CO-13",
+                f"TaxExclusiveAmount {tax_excl} != LineExtension {line_ext} - Allowances {allowance} + Charges {charge}",
+            )
+
+        # BR-CO-15: TaxInclusive == TaxExclusive + TaxAmount
+        if tax_excl is not None and tax_incl is not None and tax_incl != tax_excl + tax_amount:
+            result.add_error("BR-CO-15", f"TaxInclusiveAmount {tax_incl} != TaxExclusive {tax_excl} + Tax {tax_amount}")
+
+        # BR-CO-16: PayableAmount == TaxInclusive - Prepaid, and Prepaid must not exceed TaxInclusive
+        if tax_incl is not None and payable is not None and payable != tax_incl - prepaid:
+            result.add_error("BR-CO-16", f"PayableAmount {payable} != TaxInclusive {tax_incl} - Prepaid {prepaid}")
+        if tax_incl is not None and prepaid > tax_incl:
+            result.add_error("BR-CO-16-PREPAID", f"PrepaidAmount {prepaid} exceeds TaxInclusiveAmount {tax_incl}")
+
+    def _validate_tax_category_rules(self, doc: etree._Element, result: ValidationResult) -> None:
+        """Validate per-category tax rules at the document breakdown level: BR-CO-14 (standard
+        tax = base * rate), zero rate for non-standard categories (BR-*-05), the S/Z
+        no-exemption rule (BR-S/Z-10), and VATEX code validity (BR-CL-22)."""
+        for st in self._find_all(doc, ".//cac:TaxTotal/cac:TaxSubtotal"):
+            cat_id = self._get_text(st, "cac:TaxCategory/cbc:ID")
+            taxable = self._decimal(st, "cbc:TaxableAmount")
+            tax = self._decimal(st, "cbc:TaxAmount")
+            percent = self._decimal(st, "cac:TaxCategory/cbc:Percent")
+            exempt_code = self._get_text(st, "cac:TaxCategory/cbc:TaxExemptionReasonCode")
+            exempt_reason = self._get_text(st, "cac:TaxCategory/cbc:TaxExemptionReason")
+
+            # BR-CO-14 / BR-S-08: standard-rate tax == taxable * rate (within 0.01 rounding)
+            if cat_id == "S" and taxable is not None and tax is not None and percent is not None:
+                expected = (taxable * percent / Decimal("100")).quantize(Decimal("0.01"), ROUND_HALF_UP)
+                if abs(tax - expected) > self._ROUNDING_TOLERANCE:
+                    result.add_error(
+                        "BR-CO-14", f"Standard-rate TaxAmount {tax} != taxable {taxable} * {percent}% (expected {expected})"
+                    )
+
+            # BR-*-05: non-standard categories must carry rate 0
+            if cat_id in self._ZERO_RATE_CATEGORIES and percent is not None and percent != 0:
+                result.add_error(f"BR-{cat_id}-05", f"Category {cat_id} must have Percent 0, got {percent}")
+
+            # BR-S-10 / BR-Z-10: S and Z must carry neither an exemption code nor reason text
+            if cat_id in self._CATEGORIES_NO_EXEMPTION and (exempt_code or exempt_reason):
+                result.add_error(f"BR-{cat_id}-10", f"Category {cat_id} must not carry a tax exemption code/reason")
+
+            # BR-CL-22: a tax exemption reason code, when present, must be a VATEX code
+            if exempt_code and not exempt_code.startswith("VATEX-"):
+                result.add_error("BR-CL-22", f"TaxExemptionReasonCode '{exempt_code}' is not a VATEX code")
 
     def _is_valid_date(self, date_str: str) -> bool:
         """Check if string is valid YYYY-MM-DD date."""
