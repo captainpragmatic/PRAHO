@@ -195,7 +195,7 @@
 </div>
 
 <!-- Copy Secret Key JavaScript -->
-<script>
+<script nonce="{{ csp_nonce }}">
 function copySecret() {
   const secretElement = document.getElementById('secret-key');
   const textToCopy = secretElement.textContent;

@@ -135,7 +135,7 @@
     </div>
 </div>
 
-<script>
+<script nonce="{{ csp_nonce }}">
     function cookieConsent() {
         return {
             showBanner: false,
@@ -314,6 +314,6 @@
     }
 </script>
 
-<style>
+<style nonce="{{ csp_nonce }}">
     [x-cloak] { display: none !important; }
 </style>

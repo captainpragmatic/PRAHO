@@ -173,7 +173,7 @@
 </div>
 
 <!-- Auto-refresh totals when cart changes -->
-<script>
+<script nonce="{{ csp_nonce }}">
 document.addEventListener('cartUpdated', function() {
   // Refresh totals when cart is updated
   htmx.ajax('POST', '{% url "orders:calculate_totals" %}', {

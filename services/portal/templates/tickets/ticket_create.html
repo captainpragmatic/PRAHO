@@ -156,7 +156,7 @@
   {% end_section_card %}
 </div>
 
-<script>
+<script nonce="{{ csp_nonce }}">
   // Auto-populate title placeholder based on category
   document.getElementById('category').addEventListener('change', function () {
     const titleField = document.getElementById('title');
