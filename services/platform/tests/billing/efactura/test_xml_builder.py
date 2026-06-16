@@ -503,6 +503,61 @@ class UBLInvoiceBuilderTestCase(TestCase):
         self.assertIsNone(lmt.find(f"{{{NAMESPACES['cbc']}}}PrepaidAmount"))
         self.assertEqual(self._lmt_amount(doc, "PayableAmount"), "1190.00")
 
+    def test_line_extension_reconciles_with_fractional_quantity(self):
+        """BR-CO-10: the document LineExtensionAmount (Σ line.subtotal_cents) and each
+        line's LineExtensionAmount must agree exactly. With a fractional quantity, computing
+        the line amount as unit_price*qty and rounding could differ from the cents-truncated
+        line subtotal by 0.01 — which ANAF rejects. Both must derive from the same value."""
+        invoice = InvoiceFactory(
+            customer=CustomerFactory(), currency=self.currency, number="INV-FRACQTY",
+            bill_to_name="Customer", bill_to_country="RO", bill_to_tax_id="RO12345678",
+            bill_to_street="Street 1", bill_to_city="City", bill_to_postal_code="010101",
+            status="issued", issued_at=timezone.now(), due_at=timezone.now() + timezone.timedelta(days=30),
+            # line.subtotal_cents = int(0.333 * 10005) = 3331 (33.31); header matches it (no discount)
+            subtotal_cents=3331, tax_total_cents=633, total_cents=3964,
+        )
+        InvoiceLineFactory(
+            invoice=invoice, description="Metered service", unit_price_cents=10005,
+            quantity=Decimal("0.333"), tax_rate=Decimal("0.1900"), tax_category_code="S",
+        )
+        doc = etree.fromstring(UBLInvoiceBuilder(invoice).build().encode())
+        lines = doc.findall(f".//{{{NAMESPACES['cac']}}}InvoiceLine")
+        line_sum = sum(
+            (Decimal(ln.find(f"{{{NAMESPACES['cbc']}}}LineExtensionAmount").text) for ln in lines),
+            Decimal(0),
+        )
+        # Σ line BT-131 == document BT-106 (was 33.32 vs 33.31 before the fix).
+        self.assertEqual(line_sum, Decimal(self._lmt_amount(doc, "LineExtensionAmount")))
+        self.assertEqual(line_sum, Decimal("33.31"))
+
+    def test_prepaid_amount_capped_to_tax_inclusive(self):
+        """BR-CO-16: PrepaidAmount must not exceed TaxInclusiveAmount. On a legacy invoice
+        whose stored total_cents diverges above the line-derived tax-inclusive total, a full
+        prepayment derived from total_cents could otherwise emit Prepaid > TaxInclusive."""
+        from unittest.mock import patch  # noqa: PLC0415
+
+        invoice = InvoiceFactory(
+            customer=CustomerFactory(), currency=self.currency, number="INV-PREPAID-CAP",
+            bill_to_name="Customer", bill_to_country="RO", bill_to_tax_id="RO12345678",
+            bill_to_street="Street 1", bill_to_city="City", bill_to_postal_code="010101",
+            status="issued", issued_at=timezone.now(), due_at=timezone.now() + timezone.timedelta(days=30),
+            # Stored header (1190.00) diverges above the single line's gross (500.00).
+            subtotal_cents=100000, tax_total_cents=19000, total_cents=119000,
+        )
+        InvoiceLineFactory(
+            invoice=invoice, description="Web Hosting", unit_price_cents=50000,
+            quantity=1, tax_rate=Decimal("0.1900"), tax_category_code="S",
+        )
+        # Fully paid → prepaid derives from stored total_cents (1190.00), but the XML
+        # tax-inclusive is line-derived (500 net + 190 tax = 690.00).
+        with patch.object(invoice, "get_remaining_amount", return_value=0):
+            doc = etree.fromstring(UBLInvoiceBuilder(invoice).build().encode())
+        prepaid = Decimal(self._lmt_amount(doc, "PrepaidAmount"))
+        tax_inclusive = Decimal(self._lmt_amount(doc, "TaxInclusiveAmount"))
+        self.assertLessEqual(prepaid, tax_inclusive)          # BR-CO-16
+        self.assertEqual(prepaid, tax_inclusive)              # capped exactly
+        self.assertEqual(self._lmt_amount(doc, "PayableAmount"), "0.00")
+
     def test_build_contains_legal_monetary_total(self):
         """Test that LegalMonetaryTotal is present and correct."""
         builder = UBLInvoiceBuilder(self.invoice)

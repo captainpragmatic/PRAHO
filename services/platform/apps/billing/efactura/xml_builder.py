@@ -814,8 +814,11 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
         # TaxInclusive - Prepaid (BR-CO-16), floored at 0.
         remaining_cents = self.invoice.get_remaining_amount()
         prepaid_cents = max(0, (self.invoice.total_cents or 0) - remaining_cents)
-        prepaid = Decimal(prepaid_cents) / 100
-        if prepaid_cents > 0:
+        # Cap to the XML tax-inclusive total: a legacy invoice whose stored total_cents
+        # diverges above the line-derived tax-inclusive total must not emit
+        # PrepaidAmount > TaxInclusiveAmount (BR-CO-16).
+        prepaid = min(Decimal(prepaid_cents) / 100, tax_inclusive)
+        if prepaid > 0:
             prepaid_elem = self._add_cbc(monetary_total, "PrepaidAmount", self._format_amount(prepaid))
             prepaid_elem.set("currencyID", currency)
         payable = self._add_cbc(
@@ -844,9 +847,11 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
         quantity_elem = self._add_cbc(invoice_line, "InvoicedQuantity", self._format_quantity(quantity))
         quantity_elem.set("unitCode", self._get_unit_code(line))
 
-        # Line Extension Amount (quantity * unit price, without tax)
-        unit_price = Decimal(line.unit_price_cents or 0) / 100
-        line_amount = unit_price * Decimal(str(quantity))
+        # Line Extension Amount (BT-131). Use the same cents-based value the document total
+        # sums (line.subtotal_cents = int(qty * unit_price_cents)) so Σ lines == BT-106 exactly.
+        # Computing unit_price * qty and rounding can differ by 0.01 on fractional quantities,
+        # which ANAF rejects (BR-CO-10). The unit price is emitted separately by _add_line_price.
+        line_amount = Decimal(line.subtotal_cents or 0) / 100
         line_ext = self._add_cbc(invoice_line, "LineExtensionAmount", self._format_amount(line_amount))
         line_ext.set("currencyID", self.invoice.currency.code)
 
@@ -1123,8 +1128,10 @@ class UBLCreditNoteBuilder(BaseUBLBuilder):
         quantity_elem = self._add_cbc(cn_line, "CreditedQuantity", self._format_quantity(quantity))
         quantity_elem.set("unitCode", self._get_unit_code(line))
 
+        # BT-131: same cents-based value the document total sums, so Σ lines == BT-106 even
+        # for fractional quantities (BR-CO-10) — see the invoice builder for detail.
         unit_price = Decimal(line.unit_price_cents or 0) / 100
-        line_amount = unit_price * Decimal(str(quantity))
+        line_amount = Decimal(line.subtotal_cents or 0) / 100
         line_ext = self._add_cbc(cn_line, "LineExtensionAmount", self._format_amount(line_amount))
         line_ext.set("currencyID", self.invoice.currency.code)
 
