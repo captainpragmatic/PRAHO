@@ -258,13 +258,22 @@ class TestCreateFromOrder(ProformaLifecycleTestBase):
         order = self._create_order_with_items()
         item = order.items.first()
         item.setup_cents = 5000
-        item.save(update_fields=["setup_cents"])  # post_save recalculates order totals
+        item.save(update_fields=["setup_cents"])
+        order.calculate_totals()  # fold the setup fee into order.subtotal_cents (as the order flow does)
         force_status(order, "awaiting_payment")
 
         proforma = ProformaService.create_from_order(order).unwrap()
         setup_lines = [ln for ln in proforma.lines.all() if "Setup fee" in ln.description]
         self.assertEqual(len(setup_lines), 1)
         self.assertEqual(setup_lines[0].unit_price_cents, 5000)
+
+        # #195: the setup line must actually flow into the totals, not just exist.
+        # With no document discount, the BT-106 invariant collapses to
+        # Σ(line gross) == proforma.subtotal_cents, and the setup fee is included.
+        line_gross_sum = sum(ln.subtotal_cents for ln in proforma.lines.all())
+        self.assertEqual(line_gross_sum, 15000)  # 10000 goods + 5000 setup
+        self.assertEqual(proforma.discount_cents, 0)
+        self.assertEqual(proforma.subtotal_cents, line_gross_sum - proforma.discount_cents)
 
     def test_links_proforma_to_order(self):
         """create_from_order sets order.proforma FK."""

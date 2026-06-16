@@ -385,6 +385,52 @@ class UBLInvoiceBuilderTestCase(TestCase):
         self.assertEqual(self._lmt_amount(doc, "TaxInclusiveAmount"), "1050.00")
         self.assertEqual(self._lmt_amount(doc, "PayableAmount"), "1050.00")
 
+    def test_setup_fee_and_document_discount_reconcile(self):
+        """#195/#188: the live path — a goods line + a setup-fee line + a stored
+        document discount_cents — must reconcile end to end in the XML:
+        BT-106 LineExtensionAmount = Σ(line gross) (incl. setup), AllowanceTotalAmount
+        = discount, TaxExclusive = TaxableAmount = net subtotal, TaxAmount = net*rate,
+        PayableAmount = net + tax (BR-CO-10/13/14/15/16/17). Standard rate (S), RO B2B.
+        """
+        # G=1000.00 goods + S=200.00 setup = 1200.00 gross; D=100.00 discount;
+        # net = 1100.00; tax = 19% of net = 209.00; total = 1309.00.
+        invoice = InvoiceFactory(
+            customer=CustomerFactory(), currency=self.currency, number="INV-SETUP-DISC",
+            bill_to_name="Customer SRL", bill_to_country="RO", bill_to_tax_id="RO87654321",
+            bill_to_street="Street 1", bill_to_city="Cluj", bill_to_postal_code="400001",
+            status="issued", issued_at=timezone.now(), due_at=timezone.now() + timezone.timedelta(days=30),
+            subtotal_cents=110000, tax_total_cents=20900, total_cents=130900, discount_cents=10000,
+        )
+        InvoiceLineFactory(
+            invoice=invoice, kind="service", description="Web Hosting",
+            unit_price_cents=100000, quantity=1, tax_rate=Decimal("0.1900"), tax_category_code="S",
+        )
+        InvoiceLineFactory(
+            invoice=invoice, kind="setup", description="Setup fee — Web Hosting",
+            unit_price_cents=20000, quantity=1, tax_rate=Decimal("0.1900"), tax_category_code="S",
+        )
+
+        doc = etree.fromstring(UBLInvoiceBuilder(invoice).build().encode())
+
+        # BT-106 equals the sum of line gross amounts (incl. the setup line) — BR-CO-10.
+        line_exts = [
+            el.text
+            for el in doc.findall(f".//{{{NAMESPACES['cac']}}}InvoiceLine/{{{NAMESPACES['cbc']}}}LineExtensionAmount")
+        ]
+        self.assertEqual(sorted(line_exts), ["1000.00", "200.00"])
+        self.assertEqual(self._lmt_amount(doc, "LineExtensionAmount"), "1200.00")
+        self.assertEqual(self._lmt_amount(doc, "AllowanceTotalAmount"), "100.00")
+        self.assertEqual(self._lmt_amount(doc, "TaxExclusiveAmount"), "1100.00")
+        self.assertEqual(self._lmt_amount(doc, "TaxInclusiveAmount"), "1309.00")
+        self.assertEqual(self._lmt_amount(doc, "PayableAmount"), "1309.00")
+
+        taxable = doc.find(
+            f".//{{{NAMESPACES['cac']}}}TaxTotal/{{{NAMESPACES['cac']}}}TaxSubtotal/{{{NAMESPACES['cbc']}}}TaxableAmount"
+        )
+        self.assertEqual(taxable.text, "1100.00")
+        tax_amount = doc.find(f".//{{{NAMESPACES['cac']}}}TaxTotal/{{{NAMESPACES['cbc']}}}TaxAmount")
+        self.assertEqual(tax_amount.text, "209.00")
+
     def test_invalid_allowance_amount_is_skipped_not_crash(self):
         """A malformed amount_cents (None / non-numeric) is skipped (logged), not a
         crash; valid sibling entries still emit and total correctly."""
