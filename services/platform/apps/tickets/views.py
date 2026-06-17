@@ -456,7 +456,14 @@ def _handle_ticket_reply_post(request: HttpRequest, ticket: Ticket) -> HttpRespo
     if request.headers.get("HX-Request"):
         # Refresh ticket data and comments
         ticket.refresh_from_db()
-        comments = ticket.comments.all().order_by("created_at")
+        # Defense-in-depth: filter internal notes server-side, mirroring
+        # ticket_detail()/ticket_comments_htmx(). The template gate alone is not
+        # sufficient — without this, internal-note content reaches the rendering
+        # context for non-staff users on the reply HTMX swap.
+        if user.is_staff_user:
+            comments = ticket.comments.all().order_by("created_at")
+        else:
+            comments = ticket.comments.filter(comment_type__in=["customer", "support"]).order_by("created_at")
         can_edit = ticket.status != "closed" or user.is_staff_user
         return render(
             request,
