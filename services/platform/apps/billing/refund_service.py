@@ -17,7 +17,7 @@ from django_fsm import ConcurrentTransition, TransitionNotAllowed
 
 from apps.billing.gateways.base import GATEWAY_PAYMENT_METHODS, PaymentGatewayFactory
 from apps.billing.models import Currency, Invoice, Refund, RefundStatusHistory, log_security_event
-from apps.common.types import Err, Ok, Result
+from apps.common.types import Err, Ok, Result, Retriability
 from apps.orders.models import Order
 
 logger = logging.getLogger(__name__)
@@ -163,7 +163,7 @@ class RefundService:
             return Err("Failed to process refund: Order not found")
         except Exception:
             logger.exception("Order lookup for refund failed for order_id=%s", order_id)
-            return Err("Failed to process refund: database error")
+            return Err("Failed to process refund: database error", retriability=Retriability.RETRIABLE)
 
     @staticmethod
     def _validate_order_refund(order: Any, refund_data: RefundData) -> Result[None, str]:
@@ -320,7 +320,7 @@ class RefundService:
             return Err("Failed to process refund: Invoice not found")
         except Exception:
             logger.exception("Invoice lookup for refund failed for invoice_id=%s", invoice_id)
-            return Err("Failed to process refund: database error")
+            return Err("Failed to process refund: database error", retriability=Retriability.RETRIABLE)
 
     @staticmethod
     def _validate_invoice_refund(invoice: Any, refund_data: RefundData) -> Result[None, str]:
