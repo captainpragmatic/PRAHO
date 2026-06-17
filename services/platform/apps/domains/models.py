@@ -480,6 +480,110 @@ class Domain(ConcurrentTransitionMixin, models.Model):
 
 
 # ===============================================================================
+# DOMAIN OPERATIONS (ASYNC TASK TRACKING)
+# ===============================================================================
+
+
+class DomainOperation(models.Model):
+    """Tracks async domain operations submitted to registrar APIs.
+
+    Mirrors the ProvisioningTask pattern from apps/provisioning.
+    Two-phase: create record + submit to registrar (phase 1),
+    confirm via webhook or polling (phase 2).
+    """
+
+    OPERATION_TYPE_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
+        ("transfer_in", _("Transfer In")),
+        ("transfer_out", _("Transfer Out")),
+        ("nameserver_update", _("Nameserver Update")),
+        ("lock_update", _("Lock Status Update")),
+        ("whois_update", _("WHOIS Privacy Update")),
+        ("domain_info", _("Domain Info Sync")),
+    )
+
+    STATUS_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
+        ("pending", _("Pending")),
+        ("submitted", _("Submitted to Registrar")),
+        ("completed", _("Completed")),
+        ("failed", _("Failed")),
+        ("retrying", _("Retrying")),
+        ("cancelled", _("Cancelled")),
+    )
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    domain = models.ForeignKey(Domain, on_delete=models.CASCADE, related_name="operations")
+    registrar = models.ForeignKey(Registrar, on_delete=models.PROTECT, related_name="domain_operations")
+
+    operation_type = models.CharField(max_length=30, choices=OPERATION_TYPE_CHOICES)
+    state = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
+
+    # Operation parameters (e.g. nameservers list, lock state, epp_code)
+    parameters = models.JSONField(default=dict, blank=True)
+
+    # Execution tracking
+    submitted_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    # Registrar reference (e.g. transfer ID, operation ID)
+    registrar_operation_id = models.CharField(max_length=200, blank=True)
+
+    # Results and errors
+    result = models.JSONField(default=dict, blank=True)
+    error_message = models.TextField(blank=True)
+
+    # Retry logic
+    retry_count = models.PositiveIntegerField(default=0)
+    max_retries = models.PositiveIntegerField(default=3)
+    next_retry_at = models.DateTimeField(null=True, blank=True)
+
+    # Metadata
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "domain_operations"
+        verbose_name = _("Domain Operation")
+        verbose_name_plural = _("Domain Operations")
+        ordering: ClassVar[tuple[str, ...]] = ("-created_at",)
+        indexes: ClassVar[tuple[models.Index, ...]] = (
+            models.Index(fields=["state", "created_at"], name="domainop_state_created_idx"),
+            models.Index(fields=["domain", "operation_type"], name="domainop_domain_type_idx"),
+            models.Index(fields=["state", "next_retry_at"], name="domainop_retry_idx"),
+        )
+
+    def __str__(self) -> str:
+        return f"{self.get_operation_type_display()} {self.domain.name} [{self.state}]"
+
+    @property
+    def can_retry(self) -> bool:
+        return self.state == "failed" and self.retry_count < self.max_retries
+
+    @property
+    def duration_seconds(self) -> int:
+        if self.submitted_at and self.completed_at:
+            return int((self.completed_at - self.submitted_at).total_seconds())
+        return 0
+
+    def mark_submitted(self, registrar_operation_id: str = "") -> None:
+        """Transition to submitted state."""
+        self.state = "submitted"
+        self.submitted_at = timezone.now()
+        self.registrar_operation_id = registrar_operation_id
+
+    def mark_completed(self, result_data: dict[str, Any] | None = None) -> None:
+        """Transition to completed state."""
+        self.state = "completed"
+        self.completed_at = timezone.now()
+        if result_data:
+            self.result = result_data
+
+    def mark_failed(self, error: str) -> None:
+        """Transition to failed state."""
+        self.state = "failed"
+        self.error_message = error
+
+
+# ===============================================================================
 # DOMAIN ORDER ITEMS
 # ===============================================================================
 
