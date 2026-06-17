@@ -298,7 +298,7 @@
 </div>
 
 <!-- JavaScript for dynamic form behavior -->
-<script>
+<script nonce="{{ csp_nonce }}">
 document.addEventListener('DOMContentLoaded', function() {
   const actionRadios = document.querySelectorAll('input[name="action"]');
   const reasonField = document.getElementById('reason');

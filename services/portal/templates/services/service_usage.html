@@ -175,7 +175,7 @@
     {% endif %}
 </div>
 
-<script>
+<script nonce="{{ csp_nonce }}">
 function loadUsageData(period) {
     // Update active button
     document.querySelectorAll('[onclick*="loadUsageData"]').forEach(btn => {

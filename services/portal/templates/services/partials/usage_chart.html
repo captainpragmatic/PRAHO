@@ -208,7 +208,7 @@
 </div>
 
 <!-- Auto-refresh every 5 minutes -->
-<script>
+<script nonce="{{ csp_nonce }}">
 setTimeout(function() {
   // Auto-refresh usage data every 5 minutes
   htmx.ajax('GET', window.location.pathname.replace('/services/', '/services/').replace('/', '/usage/'), {

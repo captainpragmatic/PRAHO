@@ -154,7 +154,7 @@
     {% endif %}
 
     <!-- Custom JS - Simplified like platform -->
-    <script>
+    <script nonce="{{ csp_nonce }}">
         // Global HTMX configuration
         document.body.addEventListener('htmx:afterRequest', function(evt) {
             const indicators = document.querySelectorAll('.htmx-indicator');
