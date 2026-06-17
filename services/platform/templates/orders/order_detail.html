@@ -409,7 +409,7 @@
   </div>
 </div>
 
-<script>
+<script nonce="{{ csp_nonce }}">
 // Simple toast helper used by status change
 function showToast(message, variant) {
   const bg = variant === 'success' ? 'bg-green-600' : (variant === 'warning' ? 'bg-yellow-600' : 'bg-red-600');
@@ -703,7 +703,7 @@ document.addEventListener('DOMContentLoaded', function() {
   </div>
 </div>
 
-<script>
+<script nonce="{{ csp_nonce }}">
 function showRefundModal() {
     document.getElementById('refundModal').classList.remove('hidden');
 }
@@ -856,7 +856,7 @@ document.getElementById('refundForm').addEventListener('submit', function(e) {
   </div>
 </div>
 
-<script>
+<script nonce="{{ csp_nonce }}">
 function showOrderRefundRequestModal() {
     document.getElementById('orderRefundRequestModal').classList.remove('hidden');
 }

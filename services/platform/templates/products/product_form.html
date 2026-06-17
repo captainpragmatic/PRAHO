@@ -237,7 +237,7 @@
   </form>
 </div>
 
-<script>
+<script nonce="{{ csp_nonce }}">
 // Auto-generate slug from name
 document.getElementById('id_name').addEventListener('input', function() {
     const name = this.value;

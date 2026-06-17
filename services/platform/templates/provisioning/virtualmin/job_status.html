@@ -234,7 +234,7 @@
     </div>
 </div>
 
-<script>
+<script nonce="{{ csp_nonce }}">
 // Initial logs load
 document.addEventListener('DOMContentLoaded', function() {
     htmx.ajax('GET', '{% url "provisioning:virtualmin_job_logs" job.id %}', {

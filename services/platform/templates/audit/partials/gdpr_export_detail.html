@@ -216,7 +216,7 @@
     </div>
 </div>
 
-<script>
+<script nonce="{{ csp_nonce }}">
 function showFailForm(requestId) {
     document.getElementById('fail-modal-' + requestId).classList.remove('hidden');
 }
