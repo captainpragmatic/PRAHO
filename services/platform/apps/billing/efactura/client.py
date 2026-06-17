@@ -567,7 +567,7 @@ class EFacturaClient:
         self,
         xml_content: str,
         *,
-        standard: str = "UBL",
+        standard: str | None = None,
         cif: str | None = None,
         extern: bool = False,
         autofactura: bool = False,
@@ -593,7 +593,7 @@ class EFacturaClient:
             return UploadResponse.error("Invalid e-Factura configuration")
 
         params: dict[str, str] = {
-            "standard": standard,
+            "standard": standard or self.config.default_standard,
             "cif": cif or self.config.company_cui,
         }
         if extern:
@@ -607,7 +607,7 @@ class EFacturaClient:
         self,
         xml_content: str,
         *,
-        standard: str = "UBL",
+        standard: str | None = None,
         cif: str | None = None,
     ) -> UploadResponse:
         """Upload a B2C (consumer) invoice via ANAF's ``/uploadb2c`` endpoint.
@@ -621,7 +621,7 @@ class EFacturaClient:
             return UploadResponse.error("Invalid e-Factura configuration")
 
         params: dict[str, str] = {
-            "standard": standard,
+            "standard": standard or self.config.default_standard,
             "cif": cif or self.config.company_cui,
         }
         return self._post_upload("/uploadb2c", params, xml_content)
