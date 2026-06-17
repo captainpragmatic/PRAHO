@@ -9,6 +9,7 @@ from rest_framework.throttling import AnonRateThrottle, SimpleRateThrottle
 
 from apps.api.core import throttling as core_throttling
 from apps.api.core.throttling import AuthThrottle, BurstAPIThrottle, StandardAPIThrottle
+from apps.api.customers.views import customer_users_create
 from apps.api.orders.views import (
     OrderCalculateThrottle,
     OrderCreateThrottle,
@@ -51,6 +52,7 @@ class ThrottleArchitectureGuardrailTests(SimpleTestCase):
         required_scopes = {
             "portal_hmac",
             "portal_hmac_burst",
+            "portal_hmac_create_user",
             "customer",
             "burst",
             "auth",
@@ -81,6 +83,43 @@ class ThrottleArchitectureGuardrailTests(SimpleTestCase):
             "get_throttle_rate_for_endpoint",
         ):
             self.assertFalse(hasattr(rate_limiting, removed_name))
+
+    def test_create_user_view_uses_portal_scoped_throttles_not_burst(self) -> None:
+        """customer_users_create must key throttling on the verified portal id.
+
+        Regression guard: the endpoint runs with authentication_classes([]), so an
+        IP-keyed throttle (BurstAPIThrottle / any UserRateThrottle) is bypassable by
+        distributing requests across IPs. The view must layer the per-portal HMAC
+        throttles plus the strict create-user cap instead.
+        """
+        throttle_classes = customer_users_create.cls.throttle_classes
+        self.assertIn(rate_limiting.PortalHMACCreateUserThrottle, throttle_classes)
+        self.assertIn(rate_limiting.PortalHMACRateThrottle, throttle_classes)
+        self.assertIn(rate_limiting.PortalHMACBurstThrottle, throttle_classes)
+        self.assertNotIn(BurstAPIThrottle, throttle_classes)
+
+    def test_create_user_throttle_is_portal_keyed_and_noops_without_portal_auth(self) -> None:
+        factory = RequestFactory()
+        throttle = rate_limiting.PortalHMACCreateUserThrottle()
+
+        # No portal authentication → throttle must not engage (returns None).
+        unauth = factory.post("/api/users/customers/1/users/", content_type="application/json")
+        self.assertIsNone(throttle.get_cache_key(unauth, view=None))
+
+        # Same portal, different payloads → same key (keyed on portal id, not body).
+        req_a = factory.post("/api/users/customers/1/users/", content_type="application/json")
+        req_b = factory.post("/api/users/customers/99999/users/", content_type="application/json")
+        req_a._portal_authenticated = True  # type: ignore[attr-defined]  # test sets internal HMAC flag
+        req_b._portal_authenticated = True  # type: ignore[attr-defined]  # test sets internal HMAC flag
+        req_a.META["HTTP_X_PORTAL_ID"] = "portal-a"
+        req_b.META["HTTP_X_PORTAL_ID"] = "portal-a"
+        self.assertEqual(throttle.get_cache_key(req_a, view=None), throttle.get_cache_key(req_b, view=None))
+
+        # Different portal → different key (no cross-portal collateral throttling).
+        req_c = factory.post("/api/users/customers/1/users/", content_type="application/json")
+        req_c._portal_authenticated = True  # type: ignore[attr-defined]  # test sets internal HMAC flag
+        req_c.META["HTTP_X_PORTAL_ID"] = "portal-b"
+        self.assertNotEqual(throttle.get_cache_key(req_a, view=None), throttle.get_cache_key(req_c, view=None))
 
     def test_portal_hmac_throttle_key_is_stable_for_same_portal(self) -> None:
         factory = RequestFactory()
