@@ -225,17 +225,22 @@ class CostTrackingServiceTests(TestCase):
     def test_get_monthly_summary(self):
         """Test getting monthly summary"""
         deployment = self.create_deployment()
-        now = timezone.now()
+        # Use deterministic dates to avoid timezone boundary flakiness.
+        # get_monthly_summary uses make_aware(datetime(y, m, last_day, 23, 59, 59))
+        # which applies TIME_ZONE (Europe/Bucharest, UTC+2/+3).  Using timezone.now()
+        # produces UTC timestamps that can fall outside that window near month-end.
+        month_start = timezone.make_aware(datetime(2026, 1, 1))
+        month_mid = timezone.make_aware(datetime(2026, 1, 15, 12, 0, 0))
 
         NodeDeploymentCostRecord.objects.create(
             deployment=deployment,
-            period_start=now.replace(day=1),
-            period_end=now,
+            period_start=month_start,
+            period_end=month_mid,
             cost_eur=Decimal("4.35"),
             compute_cost=Decimal("4.35"),
         )
 
-        summary = self.service.get_monthly_summary(now.year, now.month)
+        summary = self.service.get_monthly_summary(2026, 1)
 
         self.assertIsInstance(summary, CostSummary)
         self.assertEqual(summary.total_eur, Decimal("4.35"))
@@ -243,11 +248,15 @@ class CostTrackingServiceTests(TestCase):
     def test_get_current_month_to_date(self):
         """Test getting MTD costs"""
         deployment = self.create_deployment()
+        # Use make_aware for period_start to match the service's own
+        # make_aware(datetime(y, m, 1)) construction, avoiding UTC vs
+        # Europe/Bucharest mismatches near month boundaries.
         now = timezone.now()
+        month_start = timezone.make_aware(datetime(now.year, now.month, 1))
 
         NodeDeploymentCostRecord.objects.create(
             deployment=deployment,
-            period_start=now.replace(day=1),
+            period_start=month_start,
             period_end=now,
             cost_eur=Decimal("2.50"),
             compute_cost=Decimal("2.50"),
