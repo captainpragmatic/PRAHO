@@ -202,7 +202,7 @@ def can_manage_financial_data(user: User) -> bool:
     if user.is_superuser:
         return True
 
-    if not user.is_staff:
+    if not user.is_staff_user:
         return False
 
     allowed_roles = ["admin", "billing", "manager"]
