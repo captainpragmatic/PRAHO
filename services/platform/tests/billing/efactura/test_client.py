@@ -498,6 +498,23 @@ class EFacturaClientTestCase(TestCase):
         self.assertEqual(headers["Content-Type"], "text/plain")
 
     @patch("apps.billing.efactura.client.EFacturaClient._get_access_token")
+    @patch("apps.billing.efactura.client.EFacturaClient._request_with_retry")
+    def test_upload_uses_configured_standard(self, mock_request, mock_token):
+        """#202 review (P2): EFACTURA_UPLOAD_STANDARD must actually be sent, not hardcoded UBL."""
+        mock_token.return_value = "test-token"
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.text = (_FIXTURES / "anaf_upload_ok.xml").read_text(encoding="utf-8")
+        mock_response.json.side_effect = json.JSONDecodeError("not json", "", 0)
+        mock_request.return_value = mock_response
+
+        self.client.config.default_standard = "FACT1"
+        self.client.upload_invoice("<Invoice/>")
+
+        params = mock_request.call_args.kwargs["params"]
+        self.assertEqual(params["standard"], "FACT1")
+
+    @patch("apps.billing.efactura.client.EFacturaClient._get_access_token")
     def test_upload_no_token(self, mock_token):
         """Test upload when no token available."""
         mock_token.side_effect = AuthenticationError("No token")

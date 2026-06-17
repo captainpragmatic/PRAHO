@@ -727,11 +727,12 @@ class SubmissionLifecycleTests(TestCase):
         self.assertEqual(doc.status, EFacturaStatus.SUBMITTED.value)
         self.assertEqual(doc.anaf_upload_index, "IDX-4")
 
-    def test_submit_routes_b2c_invoice_to_uploadb2c(self):
-        """Gap 3 (#123): a B2C invoice is submitted via upload_b2c(), not upload_invoice()."""
+    def test_b2c_invoice_returns_clear_not_supported_error(self):
+        """#202 review (codex P1): the B2B UBLInvoiceBuilder rejects a no-CUI RO invoice, so a real
+        B2C submission failed in _generate_xml before ever reaching upload_b2c (the routing was only
+        exercised by mocked tests). B2C must now be rejected cleanly BEFORE XML generation."""
         invoice = self._ro_invoice("INV-B2C-1")
         client = Mock(spec=EFacturaClient)
-        client.upload_b2c.return_value = UploadResponse(success=True, upload_index="B2C-1")
         service = EFacturaService(client=client)
 
         with patch.object(service, "_generate_xml", return_value="<Invoice/>"), patch.object(
@@ -739,11 +740,54 @@ class SubmissionLifecycleTests(TestCase):
         ), patch.object(service, "_is_b2c", return_value=True):
             result = service.submit_invoice(invoice)
 
-        self.assertTrue(result.success, msg=result.error_message)
-        client.upload_b2c.assert_called_once()
+        self.assertFalse(result.success)
+        self.assertIn("b2c", result.error_message.lower())
+        client.upload_b2c.assert_not_called()
         client.upload_invoice.assert_not_called()
+
+    def test_fresh_failure_marks_new_document_as_error_not_queued(self):
+        """#202 review (codex P2): a fresh submission that fails AFTER queue-before-upload must mark
+        the NEW document `error` (with backoff), not leave it `queued` where
+        process_pending_submissions hot-retries it forever without incrementing retry_count."""
+        invoice = self._ro_invoice("INV-FAIL-1")
+        client = Mock(spec=EFacturaClient)
+        client.upload_invoice.side_effect = NetworkError("boom")
+        service = EFacturaService(client=client)
+
+        with patch.object(service, "_generate_xml", return_value="<Invoice/>"), patch.object(
+            service, "_log_audit_event"
+        ), patch.object(service, "_is_b2c", return_value=False):
+            result = service.submit_invoice(invoice)
+
+        self.assertFalse(result.success)
         doc = EFacturaDocument.objects.get(invoice=invoice)
-        self.assertEqual(doc.anaf_upload_index, "B2C-1")
+        self.assertEqual(doc.status, EFacturaStatus.ERROR.value)
+        self.assertGreaterEqual(doc.retry_count, 1)
+
+    def test_rejected_document_is_not_resubmitted(self):
+        """#202 review (copilot): submit_invoice on an ANAF-rejected doc must NOT re-POST (duplicate
+        submission) — it returns a clear error directing a corrected resubmission."""
+        invoice = self._ro_invoice("INV-REJ-1")
+        doc = EFacturaDocument.objects.create(
+            invoice=invoice, document_type=EFacturaDocumentType.INVOICE.value
+        )
+        doc.mark_queued()
+        doc.save()
+        doc.mark_submitted("IDX-R")
+        doc.save()
+        doc.mark_rejected([{"message": "bad"}])
+        doc.save()
+        client = Mock(spec=EFacturaClient)
+        service = EFacturaService(client=client)
+
+        with patch.object(service, "_generate_xml", return_value="<Invoice/>"), patch.object(
+            service, "_log_audit_event"
+        ):
+            result = service.submit_invoice(invoice)
+
+        self.assertFalse(result.success)
+        client.upload_invoice.assert_not_called()
+        client.upload_b2c.assert_not_called()
 
     def test_submit_routes_b2b_invoice_to_upload(self):
         """A B2B invoice (the default) goes to upload_invoice(), not upload_b2c()."""

@@ -121,17 +121,31 @@ class EFacturaService:
         if not self._requires_efactura(invoice):
             return SubmissionResult.error("Invoice does not require e-Factura submission")
 
-        # Idempotency: a document already in flight at ANAF (or accepted) must NOT be
-        # re-uploaded — re-POSTing the same fiscal invoice is a compliance hazard. Treat
-        # SUBMITTED / PROCESSING / ACCEPTED as a no-op returning the existing document.
+        # Idempotency / lifecycle decisions BEFORE any work.
         existing = self._get_existing_document(invoice)
         if existing and existing.status in {
             EFacturaStatus.SUBMITTED.value,
             EFacturaStatus.PROCESSING.value,
             EFacturaStatus.ACCEPTED.value,
         }:
+            # Already in flight at ANAF (or accepted) — never re-POST the same fiscal invoice.
             return SubmissionResult.ok(existing)
+        if existing and existing.status == EFacturaStatus.REJECTED.value:
+            # ANAF rejected it; the same document must not be re-uploaded (duplicate POST). The
+            # invoice must be corrected and a NEW e-Factura document created.
+            return SubmissionResult.error(
+                "Invoice was rejected by ANAF; correct it and submit a new e-Factura document"
+            )
 
+        # B2C (consumer) invoices need a CNP-buyer XML the B2B UBLInvoiceBuilder cannot produce
+        # (it rejects RO invoices without a CUI). Reject cleanly BEFORE generating XML instead of
+        # failing confusingly in the builder; upload_b2c() stays ready for the B2C builder (#123).
+        if self._is_b2c(invoice):
+            return SubmissionResult.error(
+                "B2C e-Factura submission is not yet supported (requires the B2C XML builder + live ANAF verification)"
+            )
+
+        document = existing  # so the except blocks can mark the just-created document as error
         try:
             # Create or update document
             document = self._get_or_create_document(invoice)
@@ -162,11 +176,8 @@ class EFacturaService:
                         errors=error_dicts,
                     )
 
-            # Submit to ANAF. Route consumer (B2C) invoices to /uploadb2c; everything else is B2B.
-            if self._is_b2c(invoice):
-                response = self._client.upload_b2c(xml_content)
-            else:
-                response = self._client.upload_invoice(xml_content)
+            # Submit to ANAF (B2B /upload; B2C is rejected earlier until the B2C XML builder exists).
+            response = self._client.upload_invoice(xml_content)
 
             if response.success:
                 document.mark_submitted(response.upload_index)
@@ -182,30 +193,30 @@ class EFacturaService:
 
         except XMLBuilderError as e:
             logger.error(f"XML generation failed for invoice {invoice.number}: {e}")
-            if existing:
-                existing.mark_error(str(e))
-                existing.save()
+            if document:
+                document.mark_error(str(e))
+                document.save()
             return SubmissionResult.error(f"XML generation failed: {e}")
 
         except AuthenticationError as e:
             logger.error(f"Authentication failed for invoice {invoice.number}: {e}")
-            if existing:
-                existing.mark_error(str(e))
-                existing.save()
+            if document:
+                document.mark_error(str(e))
+                document.save()
             return SubmissionResult.error(f"Authentication failed: {e}")
 
         except NetworkError as e:
             logger.error(f"Network error for invoice {invoice.number}: {e}")
-            if existing:
-                existing.mark_error(str(e))
-                existing.save()
+            if document:
+                document.mark_error(str(e))
+                document.save()
             return SubmissionResult.error(f"Network error: {e}")
 
         except Exception as e:
             logger.exception(f"Unexpected error submitting invoice {invoice.number}")
-            if existing:
-                existing.mark_error(str(e))
-                existing.save()
+            if document:
+                document.mark_error(str(e))
+                document.save()
             return SubmissionResult.error(f"Unexpected error: {e}")
 
     def check_status(self, document: EFacturaDocument) -> StatusCheckResult:
