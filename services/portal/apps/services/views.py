@@ -16,13 +16,24 @@ from .services import PlatformAPIError, services_api
 
 logger = logging.getLogger(__name__)
 
-# Tab configuration for service status filtering
+# Tab configuration for service status filtering.
+# Mirrors the platform Service.STATUS_CHOICES (provisioning/service_models.py) so
+# every real status is filterable — previously Provisioning/Failed/Terminated/Expired
+# had no tab and "Cancelled" was a dead tab (no such status). (#101)
 SERVICE_STATUS_TABS = [
     {"value": "", "label": _("All Services"), "border_class": "border-blue-500", "text_class": "text-blue-400"},
     {"value": "active", "label": _("Active"), "border_class": "border-green-500", "text_class": "text-green-400"},
-    {"value": "suspended", "label": _("Suspended"), "border_class": "border-red-500", "text_class": "text-red-400"},
     {"value": "pending", "label": _("Pending"), "border_class": "border-yellow-500", "text_class": "text-yellow-400"},
-    {"value": "cancelled", "label": _("Cancelled"), "border_class": "border-red-500", "text_class": "text-red-400"},
+    {
+        "value": "provisioning",
+        "label": _("Provisioning"),
+        "border_class": "border-blue-500",
+        "text_class": "text-blue-400",
+    },
+    {"value": "suspended", "label": _("Suspended"), "border_class": "border-red-500", "text_class": "text-red-400"},
+    {"value": "failed", "label": _("Failed"), "border_class": "border-red-500", "text_class": "text-red-400"},
+    {"value": "terminated", "label": _("Terminated"), "border_class": "border-gray-500", "text_class": "text-gray-400"},
+    {"value": "expired", "label": _("Expired"), "border_class": "border-orange-500", "text_class": "text-orange-400"},
 ]
 
 
@@ -165,6 +176,7 @@ def service_search_api(request: HttpRequest) -> HttpResponse:
                 "services": services,
                 "paginator_data": paginator_data,
                 "pagination_params": pagination_params,
+                "status_filter": status_filter,
             },
         )
 
@@ -174,6 +186,7 @@ def service_search_api(request: HttpRequest) -> HttpResponse:
             "services": [],
             "paginator_data": PaginatorData(total_count=0, current_page=1, page_size=20),
             "pagination_params": "",
+            "status_filter": status_filter,
             **error_ctx,
         }
         return render(request, "services/partials/services_table.html", context)

@@ -90,18 +90,27 @@
 {% include 'components/pagination.html' with page_obj=paginator_data extra_params=pagination_params %}
 
 {% else %}
-{# Empty State #}
+{# Empty State — status-aware: a filtered tab shows a status-specific message,
+   the unfiltered list keeps the "browse plans to get started" call to action. #}
 <div class="bg-slate-800/50 border border-slate-700 rounded-lg">
   <div class="text-center py-12 px-6">
     <div class="mx-auto h-16 w-16 bg-slate-700 rounded-full flex items-center justify-center mb-4">
       {% icon "server" size="xl" css_class="text-slate-400" %}
     </div>
+    {% if status_filter %}
+    <h3 class="text-lg font-medium text-white mb-2">{% blocktrans with status=status_filter|status_label %}No {{ status }} services{% endblocktrans %}</h3>
+    <p class="text-slate-400 mb-6 max-w-sm mx-auto">
+      {% trans "You have no services with this status." %}
+      <a href="{% url 'services:list' %}" class="text-blue-400 hover:text-blue-300 underline">{% trans "View all services" %}</a>.
+    </p>
+    {% else %}
     <h3 class="text-lg font-medium text-white mb-2">{% trans 'No services found' %}</h3>
     <p class="text-slate-400 mb-6 max-w-sm mx-auto">
       <a href="{% url 'orders:catalog' %}" class="text-blue-400 hover:text-blue-300 underline">{% trans "Browse our hosting plans" %}</a>
       {% trans "to get started, or" %}
       <a href="{% url 'tickets:create' %}" class="text-blue-400 hover:text-blue-300 underline">{% trans "contact our support team" %}</a>.
     </p>
+    {% endif %}
   </div>
 </div>
 {% endif %}
