@@ -391,14 +391,22 @@ class SecurityMiddlewareTest(TestCase):
         self.assertIn('X-XSS-Protection', response)
         self.assertIn('Referrer-Policy', response)
 
-    def test_csp_allows_trusted_cdns(self):
-        """Test that CSP allows trusted CDN domains."""
+    def test_csp_omits_unused_cdns(self):
+        """CSP must not allowlist dead CDN domains (#104 [M7] step 3).
+
+        unpkg.com and cdn.tailwindcss.com are not referenced by any template
+        or static asset (platform ships compiled local Tailwind), so they are
+        removed from the CSP to shrink the script/style allowlist.
+        """
         request = self.request_factory.get('/')
         response = self.middleware(request)
 
         csp_header = response.get('Content-Security-Policy', '')
-        self.assertIn('unpkg.com', csp_header)
-        self.assertIn('cdn.tailwindcss.com', csp_header)
+        self.assertNotIn('unpkg.com', csp_header)
+        self.assertNotIn('cdn.tailwindcss.com', csp_header)
+        # Core directives remain intact.
+        self.assertIn("script-src 'self'", csp_header)
+        self.assertIn("style-src 'self'", csp_header)
 
     def test_security_headers_values(self):
         """Test specific security header values."""
