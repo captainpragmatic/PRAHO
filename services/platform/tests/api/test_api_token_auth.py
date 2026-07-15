@@ -18,6 +18,7 @@ from django.utils import timezone
 from django_q.models import Schedule
 from rest_framework.test import APIClient
 
+from apps.api.users.authentication import HashedTokenAuthentication
 from apps.audit.models import AuditEvent
 from apps.audit.services import AuditService
 from apps.users.models import APIToken
@@ -177,6 +178,28 @@ class HashedTokenAuthenticationTests(TestCase):
         # IsAuthenticated permission blocks it, but the backend itself returns None
         response = self.client.get(self.url)
         self.assertEqual(response.status_code, 401)
+
+    def test_token_info_reports_last_used_at_on_first_use(self) -> None:
+        """The stamping write must be visible in the same request's response."""
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {self.raw_key}")
+        response = self.client.get(self.url)
+        self.assertIsNotNone(response.json()["last_used_at"])
+
+    def test_stale_instance_cannot_overwrite_fresh_db_value(self) -> None:
+        """The throttle condition must be evaluated by the database, not in Python.
+
+        A worker holding a stale in-memory instance (loaded before another
+        request stamped the token) must not clobber the fresher DB value.
+        """
+        fresh = timezone.now() - timedelta(seconds=60)
+        APIToken.objects.filter(pk=self.token.pk).update(last_used_at=fresh)
+        stale_instance = APIToken.objects.get(pk=self.token.pk)
+        stale_instance.last_used_at = timezone.now() - timedelta(minutes=10)
+
+        HashedTokenAuthentication._update_last_used(stale_instance)
+
+        self.token.refresh_from_db()
+        self.assertAlmostEqual(self.token.last_used_at.timestamp(), fresh.timestamp(), delta=2)
 
 
 # ===============================================================================

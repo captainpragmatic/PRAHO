@@ -7,6 +7,7 @@ Closes ADR-0031 Gaps 2 (expiry), 3 (last_used_at), 5 (hashed storage), 8 (Bearer
 import hashlib
 import logging
 
+from django.db.models import Q
 from django.http import HttpRequest
 from django.utils import timezone
 from rest_framework.authentication import BaseAuthentication
@@ -65,7 +66,19 @@ class HashedTokenAuthentication(BaseAuthentication):  # type: ignore[misc]  # DR
 
     @staticmethod
     def _update_last_used(token: APIToken) -> None:
-        """Update ``last_used_at`` only if the stored value is stale (>5 min)."""
+        """Update ``last_used_at`` only if the stored value is stale (>5 min).
+
+        The staleness condition lives in the UPDATE's WHERE clause so that
+        concurrent workers holding stale in-memory instances cannot all pass a
+        Python-side check and clobber a fresher value — the database serializes
+        the row write and only one wins. When this request's write wins, the
+        in-memory instance is synced so token_info reports it on first use.
+        """
         now = timezone.now()
-        if token.last_used_at is None or (now - token.last_used_at) >= APIToken.LAST_USED_UPDATE_INTERVAL:
-            APIToken.objects.filter(pk=token.pk).update(last_used_at=now)
+        threshold = now - APIToken.LAST_USED_UPDATE_INTERVAL
+        updated = APIToken.objects.filter(
+            Q(last_used_at__isnull=True) | Q(last_used_at__lte=threshold),
+            pk=token.pk,
+        ).update(last_used_at=now)
+        if updated:
+            token.last_used_at = now
