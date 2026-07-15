@@ -12,10 +12,13 @@ Covers:
 from datetime import timedelta
 
 from django.contrib.auth import get_user_model
+from django.core.management import call_command
 from django.test import TestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
 
+from apps.audit.models import AuditEvent
+from apps.audit.services import AuditService
 from apps.users.models import APIToken
 
 User = get_user_model()
@@ -486,3 +489,58 @@ class ObtainTokenInputValidationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         token = APIToken.objects.get(user=self.user)
         self.assertIsNotNone(token.expires_at)
+
+
+# ===============================================================================
+# AUDIT TRAIL FOR TOKEN LIFECYCLE (ADR-0016)
+# ===============================================================================
+
+
+class APITokenAuditTests(TestCase):
+    """Token issuance and deletion must reach the immutable audit trail."""
+
+    def setUp(self) -> None:
+        self.client = APIClient()
+        self.password = "StrongPass123!"
+        self.user = User.objects.create_user(email="audit@test.com", password=self.password)
+        self.url = "/api/users/token/"
+
+    def test_obtain_token_emits_created_audit_event(self) -> None:
+        response = self.client.post(self.url, {"email": self.user.email, "password": self.password}, format="json")
+        raw_key = response.json()["token"]
+
+        events = AuditEvent.objects.filter(action="api_token_created")
+        self.assertEqual(events.count(), 1)
+        event = events.get()
+        self.assertEqual(event.new_values["key_prefix"], raw_key[:8])
+        self.assertEqual(event.new_values["user_id"], str(self.user.id))
+
+        # Neither the raw key nor its hash may ever reach the audit trail.
+        haystack = str(event.new_values) + str(event.old_values) + str(event.metadata) + event.description
+        self.assertNotIn(raw_key, haystack)
+        self.assertNotIn(APIToken.hash_key(raw_key), haystack)
+
+    def test_revoke_token_emits_deleted_audit_event(self) -> None:
+        token, raw_key = _create_token(self.user, name="to-revoke")
+
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {raw_key}")
+        response = self.client.delete("/api/users/token/revoke/")
+        self.assertEqual(response.status_code, 200)
+
+        events = AuditEvent.objects.filter(action="api_token_deleted")
+        self.assertEqual(events.count(), 1)
+        self.assertEqual(events.get().old_values["key_prefix"], token.key_prefix)
+
+    def test_purge_command_deletions_are_audited(self) -> None:
+        """Deletions outside the API (cron purge) must also leave audit rows."""
+        _create_token(self.user, name="expired", expires_at=timezone.now() - timedelta(days=1))
+
+        call_command("purge_expired_tokens")
+
+        self.assertEqual(APIToken.objects.count(), 0)
+        self.assertEqual(AuditEvent.objects.filter(action="api_token_deleted").count(), 1)
+
+    def test_api_token_events_categorized_as_authentication(self) -> None:
+        """api_token_* must classify as authentication, not fall through to the api_ integration prefix."""
+        self.assertEqual(AuditService._get_action_category("api_token_created"), "authentication")
+        self.assertEqual(AuditService._get_action_category("api_token_deleted"), "authentication")

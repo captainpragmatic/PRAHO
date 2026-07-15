@@ -751,7 +751,8 @@ class AuditService:
         """Determine audit event category from action type"""
         # Use a mapping approach to reduce branching complexity
         category_mappings = {
-            "authentication": ["login_", "logout_", "session_", "account_", "password_", "2fa_"],
+            # api_token_ must precede the integration api_ prefix — token lifecycle is authentication
+            "authentication": ["login_", "logout_", "session_", "account_", "password_", "2fa_", "api_token_"],
             "account_management": ["profile_updated", "email_changed", "phone_updated", "name_changed"],
             "privacy": ["privacy_", "gdpr_", "marketing_consent_", "cookie_consent_"],
             "authorization": [
@@ -850,6 +851,8 @@ class AuditService:
             "phone_updated",
             "customer_membership_created",
             "api_key_generated",
+            "api_token_created",
+            "api_token_deleted",
             "invoice_paid",
             "payment_succeeded",
             "order_created",
