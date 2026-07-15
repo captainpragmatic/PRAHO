@@ -13,13 +13,17 @@ Covers:
 
 from datetime import datetime, timedelta
 from decimal import Decimal
-from unittest.mock import MagicMock, patch
 
-import pytest
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.utils import timezone
 
+import apps.infrastructure.cost_service as _cost_service_module
+from apps.infrastructure.cost_service import (
+    CostSummary,
+    CostTrackingService,
+    get_cost_tracking_service,
+)
 from apps.infrastructure.models import (
     CloudProvider,
     NodeDeployment,
@@ -27,13 +31,6 @@ from apps.infrastructure.models import (
     NodeRegion,
     NodeSize,
     PanelType,
-)
-import apps.infrastructure.cost_service as _cost_service_module
-from apps.infrastructure.cost_service import (
-    CostSummary,
-    CostTrackingService,
-    DeploymentCostBreakdown,
-    get_cost_tracking_service,
 )
 from apps.infrastructure.ssh_key_manager import SSHKeyManager, SSHKeyPair
 

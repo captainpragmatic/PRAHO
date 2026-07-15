@@ -181,22 +181,26 @@ in `apps/api/users/authentication.py`. No external dependencies were added.
 
 | Capability | Before (DRF authtoken) | After (APIToken) |
 | ---------- | ---------------------- | ---------------- |
-| Tokens per user | 1 (OneToOneField) | Unlimited (ForeignKey) |
+| Tokens per user | 1 (OneToOneField) | Multiple (ForeignKey), capped at 20 active per user |
 | Storage | Plaintext | SHA-256 hashed |
-| Expiry | None | Optional `expires_at` |
-| Usage tracking | None | `last_used_at` (throttled to 5-min intervals) |
-| Token naming | None | `name` + `description` fields |
-| Auth header | `Token` only | `Bearer` and `Token` |
+| Expiry | None | Default 90-day TTL (`API_TOKEN_DEFAULT_TTL_DAYS`); callers may shorten via `ttl_days`, clamped to `API_TOKEN_MAX_TTL_DAYS` (365) — only the server default can select "no expiry" |
+| Usage tracking | None | `last_used_at` (throttled to 5-min intervals, condition evaluated in SQL) |
+| Token naming | None | `name` (API) + `description` (model field, not yet API-exposed) |
+| Auth header | `Token` only | `Bearer` and `Token`; malformed recognized schemes fail closed |
 | Raw key visibility | Always readable | Shown once at creation, never stored |
+| Audit trail | None | `api_token_created` / `api_token_deleted` audit events on every create/delete path (ADR-0016) |
 
 **Operating constraints (still apply):**
 
 1. **Use a dedicated service-account `User`** per script/integration with the minimum
    `staff_role` needed. Never use a personal staff account's token in automation.
-2. **Set `expires_at`** for tokens used in CI/CD or temporary automation.
+2. **Expiry is on by default** (90 days). Pass `ttl_days` to shorten it for CI/CD or
+   temporary automation; callers cannot opt out of expiry.
 3. **Store tokens in secrets management** (environment variables, a vault) — never
    hardcode in scripts or commit to version control.
-4. **Run `purge_expired_tokens`** periodically to clean up expired tokens.
+4. **Expired tokens are purged automatically** — the `user-api-token-purge` Django-Q
+   schedule runs `purge_expired_api_tokens` daily at 3 AM; the `purge_expired_tokens`
+   management command remains for manual runs.
 
 ### Remaining: Gap 7 (web UI for token management)
 
@@ -210,9 +214,9 @@ management is currently API-only. This is tracked separately and is not blocking
 | Standard | Requirement | Status |
 | -------- | ----------- | ------ |
 | RFC 6750 (Bearer Tokens) | `Authorization: Bearer <token>` header | **Compliant** — accepts both `Bearer` and `Token` |
-| RFC 6749 (OAuth 2.0) | Short-lived access tokens, refresh flow | Partial — optional `expires_at`, no refresh flow |
-| RFC 6819 (OAuth Threat Model) | Token binding, expiry, rotation | Partial — expiry supported, rotation via revoke+create |
-| OWASP API Security Top 10 | Broken Auth (API2) — token expiry, rotation | **Compliant** — hashed storage, optional expiry |
+| RFC 6749 (OAuth 2.0) | Short-lived access tokens, refresh flow | Partial — default 90-day TTL, no refresh flow |
+| RFC 6819 (OAuth Threat Model) | Token binding, expiry, rotation | Partial — default expiry, rotation via revoke+create |
+| OWASP API Security Top 10 | Broken Auth (API2) — token expiry, rotation | **Compliant** — hashed storage, default expiry, scheduled purge |
 | General practice | Hash tokens at rest | **Compliant** — SHA-256 hashed |
 | General practice | Per-device token isolation | **Compliant** — multiple tokens per user |
 | General practice | Audit trail (last_used_at) | **Compliant** — `last_used_at` tracked |
@@ -225,11 +229,13 @@ management is currently API-only. This is tracked separately and is not blocking
 
 - SHA-256 hashed storage — DB dump does not expose tokens
 - Multiple tokens per user — per-script revocation without affecting other consumers
-- Optional expiry — leaked tokens can be time-bounded
+- Default expiry — every issued token is time-bounded unless the server explicitly opts out
 - `last_used_at` tracking — stale tokens are detectable
 - Both `Bearer` and `Token` auth headers accepted — RFC 6750 compliant
 - No external dependencies — pure Django/DRF implementation
-- Existing tokens migrated via data migration — no consumer disruption
+- Token issuance input is validated (`name`, `ttl_days`) — malformed requests get 400s,
+  and names cannot inject control characters into security logs
+- Token lifecycle reaches the immutable audit trail (ADR-0016)
 - Account lockout integration preserved from original implementation
 
 ### Negative
@@ -239,10 +245,15 @@ management is currently API-only. This is tracked separately and is not blocking
 - `rest_framework.authtoken` still in INSTALLED_APPS for migration history
 
 ### Migration note
-The `rest_framework.authtoken` app remains in `INSTALLED_APPS` because the data
-migration (`0003_migrate_drf_tokens`) references it. It can be removed after
-confirming all tokens have been migrated and the `authtoken_token` table is empty.
-No portal code is affected (portal does not use token auth).
+The cutover is a **clean break**: no data migration carries DRF `authtoken_token`
+rows into `APIToken`. No environment held live DRF tokens at cutover time, and
+copying them would have re-created the plaintext-at-rest exposure (the raw keys
+would remain in `authtoken_token`) while making the copies unreachable by TTL
+enforcement. Any consumer that did hold a legacy token obtains a fresh one via
+`POST /api/users/token/`. The `rest_framework.authtoken` app remains in
+`INSTALLED_APPS` only so environments that already applied its migrations keep a
+consistent migration history; removing the app and dropping its tables is tracked
+as a follow-up. No portal code is affected (portal does not use token auth).
 
 ---
 
@@ -251,10 +262,10 @@ No portal code is affected (portal does not use token auth).
 | Gap | Description | Status | Closed by |
 | --- | ----------- | ------ | --------- |
 | 1 | `verify_token` broken for token consumers | Closed | `GET /api/users/token/me/` endpoint (prior work) |
-| 2 | No token expiry | Closed | `APIToken.expires_at` field + `HashedTokenAuthentication` expiry check |
-| 3 | No `last_used_at` tracking | Closed | `APIToken.last_used_at` field, updated at 5-min intervals |
-| 4 | One token per user (OneToOneField) | Closed | `APIToken` uses `ForeignKey(User)` — unlimited tokens |
-| 5 | Tokens stored in plaintext | Closed | SHA-256 hashed via `APIToken.key_hash`; raw key shown once |
-| 6 | No token name or description | Closed | `APIToken.name` + `APIToken.description` fields |
+| 2 | No token expiry | Closed | Default 90-day TTL on issuance, `HashedTokenAuthentication` expiry check, daily scheduled purge; startup checks (`security.E062/E063`) keep the TTL settings coherent |
+| 3 | No `last_used_at` tracking | Closed | `APIToken.last_used_at` field, updated at 5-min intervals (SQL-side condition) |
+| 4 | One token per user (OneToOneField) | Closed | `APIToken` uses `ForeignKey(User)` — multiple tokens, capped at 20 active per user |
+| 5 | Tokens stored in plaintext | Closed | SHA-256 hashed via `APIToken.key_hash`; raw key shown once; no plaintext rows carried over (clean-break cutover) |
+| 6 | No token name or description | Closed | `APIToken.name` settable via API; `description` exists on the model (API/UI exposure lands with Gap 7) |
 | 7 | No web UI for token management | **Open** | Not yet implemented |
 | 8 | `Authorization: Token` vs RFC 6750 `Bearer` | Closed | `HashedTokenAuthentication` accepts both schemes |
