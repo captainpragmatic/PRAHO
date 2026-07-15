@@ -411,3 +411,71 @@ class ObtainTokenLimitExpiredTests(TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertIn("Maximum", response.json()["error"])
+
+
+# ===============================================================================
+# INPUT VALIDATION ON obtain_token
+# ===============================================================================
+
+
+class ObtainTokenInputValidationTests(TestCase):
+    """Malformed optional fields must yield 400 — never a 500 or a silent substitute."""
+
+    def setUp(self) -> None:
+        self.client = APIClient()
+        self.password = "StrongPass123!"
+        self.user = User.objects.create_user(email="validate@test.com", password=self.password)
+        self.url = "/api/users/token/"
+
+    def _post(self, **extra: object) -> object:
+        payload: dict[str, object] = {"email": self.user.email, "password": self.password, **extra}
+        return self.client.post(self.url, payload, format="json")
+
+    def test_non_string_name_is_rejected(self) -> None:
+        for bad_name in (123, {"nested": "object"}, ["a", "b"], None, True):
+            with self.subTest(name=bad_name):
+                response = self._post(name=bad_name)
+                self.assertEqual(response.status_code, 400)
+        self.assertEqual(APIToken.objects.filter(user=self.user).count(), 0)
+
+    def test_control_characters_in_name_are_rejected(self) -> None:
+        """A newline in the name could forge log lines (the name is logged verbatim)."""
+        response = self._post(name="ci\n[Auth] Token revoked for: admin")
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(APIToken.objects.filter(user=self.user).count(), 0)
+
+    def test_name_at_max_length_is_accepted(self) -> None:
+        response = self._post(name="x" * 100)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["name"], "x" * 100)
+
+    def test_name_over_max_length_is_rejected(self) -> None:
+        """Over-length names are rejected, not silently truncated."""
+        response = self._post(name="x" * 101)
+        self.assertEqual(response.status_code, 400)
+
+    def test_malformed_ttl_days_is_rejected_not_defaulted(self) -> None:
+        """A typo like '5d' must not silently become a 90-day token."""
+        response = self._post(ttl_days="5d")
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(APIToken.objects.filter(user=self.user).count(), 0)
+
+    def test_zero_and_negative_ttl_days_are_rejected(self) -> None:
+        for bad_ttl in (0, -5):
+            with self.subTest(ttl_days=bad_ttl):
+                response = self._post(ttl_days=bad_ttl)
+                self.assertEqual(response.status_code, 400)
+
+    def test_numeric_overflow_ttl_days_is_rejected(self) -> None:
+        # Raw JSON body: 1e400 parses to float('inf') server-side, and Python's
+        # json.dumps refuses to produce it, so the client helper can't be used.
+        raw = f'{{"email": "{self.user.email}", "password": "{self.password}", "ttl_days": 1e400}}'
+        response = self.client.post(self.url, data=raw, content_type="application/json")
+        self.assertEqual(response.status_code, 400)
+
+    def test_null_ttl_days_gets_default_ttl(self) -> None:
+        """Explicit null is treated as 'not specified' — the server default applies."""
+        response = self._post(ttl_days=None)
+        self.assertEqual(response.status_code, 200)
+        token = APIToken.objects.get(user=self.user)
+        self.assertIsNotNone(token.expires_at)

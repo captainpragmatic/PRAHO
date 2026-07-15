@@ -46,6 +46,7 @@ from .serializers import (
     MFAVerifySerializer,
     PasswordResetConfirmSerializer,
     PasswordResetRequestSerializer,
+    TokenObtainRequestSerializer,
 )
 
 logger = logging.getLogger(__name__)
@@ -67,27 +68,24 @@ def _mask_email(email: str) -> str:
     return f"{masked_local}@{domain}"
 
 
-def _resolve_token_expiry(ttl_days_raw: Any) -> datetime | None:
-    """Resolve an API token's expiry from an optional caller-supplied TTL (ADR-0031).
+def _resolve_token_expiry(ttl_days: int | None) -> datetime | None:
+    """Resolve an API token's expiry from an optional validated TTL (ADR-0031).
 
-    Falls back to ``settings.API_TOKEN_DEFAULT_TTL_DAYS`` when the caller does not
-    specify one. A caller-supplied TTL is clamped to ``[1, API_TOKEN_MAX_TTL_DAYS]``,
-    so callers can shorten but never opt out of expiry — only the server default may
-    select "no expiry" (a non-positive default). Returns None for no expiry.
+    ``ttl_days`` must already be validated (integer >= 1) — obtain_token runs it
+    through ``TokenObtainRequestSerializer``. Falls back to
+    ``settings.API_TOKEN_DEFAULT_TTL_DAYS`` when the caller does not specify one.
+    Both the caller TTL and the default are clamped to ``API_TOKEN_MAX_TTL_DAYS``,
+    so callers can shorten but never opt out of expiry — only the server default
+    may select "no expiry" (a non-positive default). Returns None for no expiry.
     """
     default_ttl = getattr(settings, "API_TOKEN_DEFAULT_TTL_DAYS", 90)
     max_ttl = getattr(settings, "API_TOKEN_MAX_TTL_DAYS", 365)
 
-    ttl_days = default_ttl
-    if ttl_days_raw is not None:
-        try:
-            ttl_days = min(max(int(ttl_days_raw), 1), max_ttl)
-        except (TypeError, ValueError):
-            ttl_days = default_ttl
-
+    if ttl_days is None:
+        ttl_days = default_ttl
     if ttl_days <= 0:
         return None
-    return timezone.now() + timedelta(days=ttl_days)
+    return timezone.now() + timedelta(days=min(ttl_days, max_ttl))
 
 
 @csrf_exempt  # nosemgrep: no-csrf-exempt — HMAC-authenticated inter-service endpoint
@@ -198,29 +196,11 @@ def user_info_api(request: HttpRequest, customer: Customer) -> Response:
     return Response({"success": True, "user": user_data})
 
 
-@api_view(["POST"])
-@permission_classes([AllowAny])
-@throttle_classes([AuthThrottle])
-@public_api_endpoint
-def obtain_token(request: HttpRequest) -> Response:
-    """
-    🔐 Obtain authentication token for API access -- intentionally public.
+def _authenticate_token_request(request: HttpRequest) -> User | Response:
+    """Validate email/password credentials for obtain_token.
 
-    Token auth requires email/password credentials, no HMAC needed.
-    Used by portal service to authenticate with platform API.
-
-    POST /api/users/token/
-    {
-        "email": "user@example.com",
-        "password": "password"
-    }
-
-    Response:
-    {
-        "token": "9944b09199c62bcf9418ad846dd0e4bbdfc6ee4b",
-        "user_id": 123,
-        "email": "user@example.com"
-    }
+    Returns the authenticated user, or the error Response the view should
+    return verbatim. Lockout counters are incremented/reset here.
     """
     email = request.data.get("email")
     password = request.data.get("password")
@@ -266,9 +246,48 @@ def obtain_token(request: HttpRequest) -> Response:
     user.account_locked_until = None
     user.save(update_fields=["failed_login_attempts", "account_locked_until"])
 
+    return user
+
+
+@api_view(["POST"])
+@permission_classes([AllowAny])
+@throttle_classes([AuthThrottle])
+@public_api_endpoint
+def obtain_token(request: HttpRequest) -> Response:
+    """
+    🔐 Obtain authentication token for API access -- intentionally public.
+
+    Token auth requires email/password credentials, no HMAC needed.
+    Used by portal service to authenticate with platform API.
+
+    POST /api/users/token/
+    {
+        "email": "user@example.com",
+        "password": "password"
+    }
+
+    Response:
+    {
+        "token": "9944b09199c62bcf9418ad846dd0e4bbdfc6ee4b",
+        "user_id": 123,
+        "email": "user@example.com"
+    }
+    """
+    user_or_error = _authenticate_token_request(request)
+    if isinstance(user_or_error, Response):
+        return user_or_error
+    user = user_or_error
+
+    params = TokenObtainRequestSerializer(data=request.data)
+    if not params.is_valid():
+        return Response(
+            {"error": "Invalid token parameters.", "details": params.errors},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
     raw_key = APIToken.generate_key()
-    name = request.data.get("name", "default")
-    expires_at = _resolve_token_expiry(request.data.get("ttl_days"))
+    name = params.validated_data["name"]
+    expires_at = _resolve_token_expiry(params.validated_data.get("ttl_days"))
 
     # Enforce the per-user token limit atomically. Lock the user row so concurrent
     # obtain_token calls serialize (TOCTOU-safe — the previous non-atomic count+create
@@ -294,7 +313,7 @@ def obtain_token(request: HttpRequest) -> Response:
             user=user,
             key_hash=APIToken.hash_key(raw_key),
             key_prefix=raw_key[:8],
-            name=name[:100],  # Enforce max_length
+            name=name,  # Length and content enforced by TokenObtainRequestSerializer
             expires_at=expires_at,
         )
 
