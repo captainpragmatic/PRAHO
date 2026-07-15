@@ -9038,6 +9038,10 @@ msgstr "Deschis"
 msgid "Waiting on Customer"
 msgstr "În Așteptarea Clientului"
 
+#: apps/tickets/views.py
+msgid "Waiting"
+msgstr "În așteptare"
+
 #: apps/tickets/models.py:68
 #: templates/tickets/partials/status_and_comments.html:161
 msgid "Fixed"

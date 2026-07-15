@@ -116,6 +116,10 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
     waiting_count = tickets.filter(status="waiting_on_customer").count()
     total_count = tickets.count()
 
+    # The page serves both audiences (@login_required, not staff-only) — keep the
+    # pre-refactor staff/customer branching for copy and skeleton shape.
+    is_staff = cast(User, request.user).is_staff_user
+
     context = {
         "tickets": tickets_page,
         "open_count": open_count,
@@ -127,8 +131,10 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
         # Shared component: header
         "list_icon_bg": "bg-blue-600",
         "list_icon_name": "chat",
-        "list_title": _("Support Tickets"),
-        "list_subtitle": _("Manage customer support requests"),
+        "list_title": _("Support Tickets") if is_staff else _("My Support Tickets"),
+        "list_subtitle": (
+            _("Manage customer support requests") if is_staff else _("Get help with your hosting services")
+        ),
         "list_stats": [
             {"value": str(open_count), "label": _("Open"), "color": "text-amber-400"},
             {"value": str(waiting_count), "label": _("Waiting"), "color": "text-yellow-400"},
@@ -141,7 +147,9 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
         "filter_tabs": TICKET_STATUS_TABS,
         "filter_active_tab": status_filter,
         "filter_search_value": search_query,
-        "filter_search_placeholder": _("Search tickets…"),
+        "filter_search_placeholder": (_("Search by number, title or customer...") if is_staff else _("Search")),
+        # Shared component: skeleton (staff sees the extra Customer column)
+        "skeleton_cols": 5 if is_staff else 4,
     }
 
     return render(request, "tickets/list.html", context)
