@@ -16,7 +16,8 @@ from django.core.management import call_command
 from django.test import TestCase, override_settings
 from django.utils import timezone
 from django_q.models import Schedule
-from rest_framework.test import APIClient
+from rest_framework.exceptions import AuthenticationFailed
+from rest_framework.test import APIClient, APIRequestFactory
 
 from apps.api.users.authentication import HashedTokenAuthentication
 from apps.audit.models import AuditEvent
@@ -609,3 +610,42 @@ class PurgeExpiredTokensTests(TestCase):
         setup_user_security_scheduled_tasks()
         setup_user_security_scheduled_tasks()
         self.assertEqual(Schedule.objects.filter(name="user-api-token-purge").count(), 1)
+
+
+# ===============================================================================
+# AUTHORIZATION HEADER PARSING (fail closed on recognized schemes)
+# ===============================================================================
+
+
+class HeaderParsingTests(TestCase):
+    """A recognized Bearer/Token scheme with malformed syntax must fail closed.
+
+    Returning None for malformed-but-recognized headers would silently hand the
+    request to the next authenticator; DRF's own TokenAuthentication raises.
+    Absent headers and foreign schemes still fall through untouched.
+    """
+
+    def setUp(self) -> None:
+        self.backend = HashedTokenAuthentication()
+        self.factory = APIRequestFactory()
+
+    def _auth(self, header: str) -> object:
+        request = self.factory.get("/api/users/token/me/", HTTP_AUTHORIZATION=header)
+        return self.backend.authenticate(request)
+
+    def test_absent_header_returns_none(self) -> None:
+        request = self.factory.get("/api/users/token/me/")
+        self.assertIsNone(self.backend.authenticate(request))
+
+    def test_unrecognized_scheme_returns_none(self) -> None:
+        self.assertIsNone(self._auth("Basic dXNlcjpwYXNz"))
+
+    def test_recognized_scheme_without_key_fails_closed(self) -> None:
+        for header in ("Bearer", "Token"):
+            with self.subTest(header=header), self.assertRaises(AuthenticationFailed):
+                self._auth(header)
+
+    def test_recognized_scheme_with_extra_parts_fails_closed(self) -> None:
+        for header in ("Bearer abc def", "Token abc def"):
+            with self.subTest(header=header), self.assertRaises(AuthenticationFailed):
+                self._auth(header)

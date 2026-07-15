@@ -37,12 +37,15 @@ class HashedTokenAuthentication(BaseAuthentication):  # type: ignore[misc]  # DR
             return None
 
         parts = auth_header.split()
-        if len(parts) != _EXPECTED_AUTH_PARTS:
-            return None
+        if not parts or parts[0].lower() not in _ACCEPTED_KEYWORDS:
+            return None  # Absent or foreign scheme — let other authenticators decide
 
-        keyword, raw_key = parts
-        if keyword.lower() not in _ACCEPTED_KEYWORDS:
-            return None
+        if len(parts) != _EXPECTED_AUTH_PARTS:
+            # Recognized scheme with malformed syntax: fail closed rather than
+            # silently falling through to the next authenticator (DRF convention).
+            raise AuthenticationFailed("Invalid token header.")
+
+        raw_key = parts[1]
 
         key_hash = hashlib.sha256(raw_key.encode("utf-8")).hexdigest()
 
