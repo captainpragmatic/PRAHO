@@ -29,7 +29,9 @@ DJANGO_APPS: list[str] = [
 
 THIRD_PARTY_APPS: list[str] = [
     "rest_framework",
-    "rest_framework.authtoken",  # Legacy — kept for data migration; custom APIToken in apps.users replaces this
+    # rest_framework.authtoken removed — replaced by the custom APIToken model
+    # (apps.users, ADR-0031). Pre-release clean break: no environment held live
+    # DRF tokens, so its tables are simply never created.
     "corsheaders",  # Defense-in-depth: protects staff sessions from cross-site credential-riding
     "ipware",
     "django_q",  # Async task processing
