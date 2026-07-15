@@ -84,11 +84,54 @@ class Ok[T]:
         raise ValueError(f"Called unwrap_err on Ok: {self.value}")
 
 
+class Retriability(StrEnum):
+    """Tri-state signal for whether an Err might succeed on retry.
+
+    Three states are needed because most ``Err(...)`` producers in the codebase
+    are bare ``except Exception as e: return Err(str(e))`` patterns that cannot
+    distinguish transient from permanent failures at construction time. A
+    ``bool`` collapses ``NOT_RETRIABLE`` and ``UNKNOWN`` into the same value,
+    which causes consumers reading ``retriable == False`` to silently treat
+    "caller did not assert" as "definitely not retriable" — the most dangerous
+    wrong answer for transient infrastructure errors.
+
+    Consumers choose policy per-workflow:
+      - Non-idempotent paths (payments, provisioning) treat ``UNKNOWN`` as
+        "do not retry" — fail closed.
+      - Idempotent reads can treat ``UNKNOWN`` as "retry once with backoff".
+      - ``RETRIABLE`` is always safe to retry; ``NOT_RETRIABLE`` is never.
+    """
+
+    RETRIABLE = "retriable"
+    NOT_RETRIABLE = "not_retriable"
+    UNKNOWN = "unknown"
+
+
 @dataclass(frozen=True)
 class Err[E]:
-    """Error result containing an error value"""
+    """Error result containing an error value.
+
+    ``retriability`` signals whether the operation that produced this error
+    might succeed on retry. Default is ``Retriability.UNKNOWN`` so legacy
+    ``Err("...")`` call sites do not falsely assert permanence — see
+    ``Retriability`` for the three states and consumer policy.
+
+    Use ``is_retriable`` for the conservative "should I retry?" check (only
+    ``RETRIABLE`` returns True; ``UNKNOWN`` and ``NOT_RETRIABLE`` return False).
+    """
 
     error: E
+    retriability: Retriability = Retriability.UNKNOWN
+
+    @property
+    def is_retriable(self) -> bool:
+        """True only when the producer explicitly asserted ``RETRIABLE``.
+
+        ``UNKNOWN`` returns False so non-idempotent consumers (payments,
+        provisioning) fail closed by default. Idempotent consumers that want
+        to retry on UNKNOWN should check ``retriability`` directly.
+        """
+        return self.retriability == Retriability.RETRIABLE
 
     def is_ok(self) -> bool:
         return False
@@ -119,6 +162,20 @@ class Err[E]:
 
 # Result type alias
 Result = Ok[T] | Err[E]
+
+
+def retriability_of(result: Result[Any, Any]) -> Retriability:
+    """Return the retriability of an ``Err`` result, or ``UNKNOWN`` for ``Ok``.
+
+    Convenience for sites that re-wrap an inner ``Err`` into an outer ``Err``
+    and want to propagate the retriability signal without manually narrowing
+    the union type. ``Ok`` returns ``UNKNOWN`` because there is no error to
+    classify; callers in the ``Ok`` branch should not be using this.
+    """
+    if isinstance(result, Err):
+        return result.retriability
+    return Retriability.UNKNOWN
+
 
 # ===============================================================================
 # TYPE VARIABLES
