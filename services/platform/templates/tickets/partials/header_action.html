@@ -1,0 +1,5 @@
+{% load i18n %}
+{% url 'tickets:create' as create_ticket_url %}
+<a href="{{ create_ticket_url }}" class="inline-flex items-center px-3 sm:px-4 py-2 text-sm font-medium rounded-md border border-transparent bg-blue-600 text-white shadow-sm hover:bg-blue-700 min-w-[80px] whitespace-nowrap">
+{% trans "New Ticket" %}
+</a>
