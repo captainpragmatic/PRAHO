@@ -32,16 +32,23 @@ from .subscription_models import Subscription
 logger = logging.getLogger(__name__)
 
 
-# Stripe error class names that indicate a transient failure.
-# Names rather than imports because the stripe module is loaded lazily.
-_RETRIABLE_STRIPE_ERROR_NAMES = frozenset({"RateLimitError", "APIConnectionError", "Timeout", "TryAgain", "APIError"})
-# Stripe error class names that indicate a permanent failure (4xx semantics).
+# Stripe error class names whose failure is provably safe to replay. Only the two
+# cases where Stripe did NOT process the request qualify: RateLimitError (rejected
+# before processing) and APIConnectionError (the request never reached Stripe).
+# Names rather than imports because the stripe module is loaded lazily; every name
+# here must exist in stripe._error (guarded by
+# tests/billing/test_stripe_error_classification.py).
+# Deliberately UNKNOWN, not RETRIABLE: APIError (generic 5xx — the mutation may have
+# committed server-side; blind replay of a non-idempotent POST could double-create).
+_RETRIABLE_STRIPE_ERROR_NAMES = frozenset({"RateLimitError", "APIConnectionError"})
+# Stripe error class names that indicate an unambiguously permanent failure (4xx).
+# Deliberately UNKNOWN, not NOT_RETRIABLE: CardError (Stripe's advice is per-decline —
+# either try_again_later or do_not_try_again — so it can't be classified blind).
 _NOT_RETRIABLE_STRIPE_ERROR_NAMES = frozenset(
     {
         "InvalidRequestError",
         "AuthenticationError",
         "PermissionError",
-        "CardError",
         "IdempotencyError",
         "SignatureVerificationError",
     }

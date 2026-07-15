@@ -29,7 +29,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from apps.common.types import Err, Ok, Result, Retriability
+from apps.common.types import Err, Ok, Result
 
 if TYPE_CHECKING:
     from apps.infrastructure.models import CloudProvider
@@ -332,8 +332,11 @@ def run_provider_command(  # Complexity: multi-step workflow  # noqa: PLR0911  #
         return Ok(cmd_result)
 
     except subprocess.TimeoutExpired:
+        # This runner executes state-changing ops (reboot, resize, power_off); a
+        # timed-out command may have already executed server-side, so replay is not
+        # provably safe — UNKNOWN, not RETRIABLE.
         logger.error(f"[Provider:{provider_type}] {operation} timed out after {timeout}s")
-        return Err(f"Command timed out after {timeout} seconds", retriability=Retriability.RETRIABLE)
+        return Err(f"Command timed out after {timeout} seconds")
 
     except Exception as e:
         logger.exception(f"[Provider:{provider_type}] {operation} failed: {e}")

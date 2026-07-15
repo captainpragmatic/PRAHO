@@ -21,7 +21,7 @@ from django.db import models, transaction
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
-from apps.common.types import Err, Ok, Result, Retriability, retriability_of
+from apps.common.types import Err, Ok, Result, retriability_of
 
 from .security_utils import IdempotencyManager
 from .virtualmin_backup_service import BackupConfig, RestoreConfig
@@ -1025,7 +1025,9 @@ class VirtualminProvisioningService:
             gateway = self._get_gateway(server)
             return gateway.test_connection()
         except Exception as e:
-            return Err(f"Connection test failed: {e}", retriability=Retriability.RETRIABLE)
+            # Gateway setup failures (no server configured, credential decryption)
+            # are not transient — stay at the UNKNOWN default.
+            return Err(f"Connection test failed: {e}")
 
     def sync_account_from_virtualmin(self, account: VirtualminAccount) -> Result[dict[str, Any], str]:
         """

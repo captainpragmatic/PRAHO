@@ -11,7 +11,7 @@ import uuid
 from decimal import Decimal
 from typing import Any, TypedDict
 
-from django.db import DatabaseError, IntegrityError, transaction
+from django.db import DatabaseError, IntegrityError, InterfaceError, OperationalError, transaction
 from django.db.models import Count, Q, Sum
 from django_fsm import ConcurrentTransition, TransitionNotAllowed
 
@@ -161,9 +161,15 @@ class RefundService:
             return Ok(order)
         except Order.DoesNotExist:
             return Err("Failed to process refund: Order not found")
-        except Exception:
-            logger.exception("Order lookup for refund failed for order_id=%s", order_id)
+        except (OperationalError, InterfaceError):
+            # Connection drops and deadlocks are the genuinely transient DB failures.
+            logger.exception("Order lookup for refund hit a transient DB error for order_id=%s", order_id)
             return Err("Failed to process refund: database error", retriability=Retriability.RETRIABLE)
+        except Exception:
+            # Unclassified failures (e.g. a malformed id) repeat on every attempt —
+            # stay at the UNKNOWN default rather than asserting retriability.
+            logger.exception("Order lookup for refund failed for order_id=%s", order_id)
+            return Err("Failed to process refund: database error")
 
     @staticmethod
     def _validate_order_refund(order: Any, refund_data: RefundData) -> Result[None, str]:
@@ -318,9 +324,14 @@ class RefundService:
             return Ok(invoice)
         except Invoice.DoesNotExist:
             return Err("Failed to process refund: Invoice not found")
-        except Exception:
-            logger.exception("Invoice lookup for refund failed for invoice_id=%s", invoice_id)
+        except (OperationalError, InterfaceError):
+            # Connection drops and deadlocks are the genuinely transient DB failures.
+            logger.exception("Invoice lookup for refund hit a transient DB error for invoice_id=%s", invoice_id)
             return Err("Failed to process refund: database error", retriability=Retriability.RETRIABLE)
+        except Exception:
+            # Unclassified failures repeat on every attempt — stay at the UNKNOWN default.
+            logger.exception("Invoice lookup for refund failed for invoice_id=%s", invoice_id)
+            return Err("Failed to process refund: database error")
 
     @staticmethod
     def _validate_invoice_refund(invoice: Any, refund_data: RefundData) -> Result[None, str]:

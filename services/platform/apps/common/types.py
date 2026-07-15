@@ -95,6 +95,14 @@ class Retriability(StrEnum):
     "caller did not assert" as "definitely not retriable" — the most dangerous
     wrong answer for transient infrastructure errors.
 
+    ``RETRIABLE`` asserts more than "the failure was transient": it asserts the
+    request was **provably not applied** and is therefore safe to replay (e.g. a
+    rate-limit rejection before processing, a connection that never reached the
+    server, a read-only lookup). A transient failure of a *non-idempotent
+    mutating* operation — a timed-out reboot, a POST whose response was lost — is
+    ``UNKNOWN``, not ``RETRIABLE``, because the operation may already have taken
+    effect; only registrar/provider idempotency or reconciliation upgrades it.
+
     Consumers choose policy per-workflow:
       - Non-idempotent paths (payments, provisioning) treat ``UNKNOWN`` as
         "do not retry" — fail closed.

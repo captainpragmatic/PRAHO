@@ -28,7 +28,7 @@ from django.utils import timezone
 
 from apps.common.encryption import DecryptionError
 from apps.common.outbound_http import OutboundPolicy, safe_request
-from apps.common.types import Err, Ok, Result, Retriability
+from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 from apps.settings.services import SettingsService
 
 from .virtualmin_models import VirtualminServer
@@ -937,10 +937,13 @@ class VirtualminGateway:
                 )
             else:
                 error = result.unwrap_err()
-                return Err(f"Connection test failed: {error}", retriability=Retriability.RETRIABLE)
+                # Propagate the inner call's signal — a validation error is permanent,
+                # blanket RETRIABLE here would invite a retry loop on it.
+                return Err(f"Connection test failed: {error}", retriability=retriability_of(result))
 
         except Exception as e:
-            return Err(f"Connection test error: {e}", retriability=Retriability.RETRIABLE)
+            # No signal available for unexpected exceptions — stay at the UNKNOWN default.
+            return Err(f"Connection test error: {e}")
 
     def get_server_info(self) -> Result[dict[str, Any], str]:
         """Get server information and statistics"""

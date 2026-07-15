@@ -6,7 +6,7 @@ Covers the retriable signal on Err (issue #121) and core Result behavior.
 
 from django.test import TestCase
 
-from apps.common.types import Err, Ok, Retriability
+from apps.common.types import Err, Ok, Retriability, retriability_of
 
 
 class OkTests(TestCase):
@@ -183,3 +183,25 @@ class ErrPatternMatchTests(TestCase):
                 self.assertEqual(r, Retriability.RETRIABLE)
             case _:  # pragma: no cover
                 self.fail("Err did not match")
+
+
+class RetriabilityOfHelperTests(TestCase):
+    """retriability_of propagates an Err's signal and is inert for Ok."""
+
+    def test_ok_returns_unknown(self) -> None:
+        self.assertEqual(retriability_of(Ok("fine")), Retriability.UNKNOWN)
+
+    def test_err_default_returns_unknown(self) -> None:
+        self.assertEqual(retriability_of(Err("no signal")), Retriability.UNKNOWN)
+
+    def test_err_retriable_propagates(self) -> None:
+        self.assertEqual(
+            retriability_of(Err("transient", retriability=Retriability.RETRIABLE)),
+            Retriability.RETRIABLE,
+        )
+
+    def test_err_not_retriable_propagates(self) -> None:
+        self.assertEqual(
+            retriability_of(Err("permanent", retriability=Retriability.NOT_RETRIABLE)),
+            Retriability.NOT_RETRIABLE,
+        )
