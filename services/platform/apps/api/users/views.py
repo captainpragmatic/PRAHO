@@ -159,6 +159,7 @@ def portal_login_api(request: HttpRequest) -> JsonResponse:
 
 
 @api_view(["GET"])
+@authentication_classes([])  # No DRF authentication - public endpoint
 @permission_classes([AllowAny])
 @public_api_endpoint
 def health_check(request: HttpRequest) -> Response:
@@ -167,6 +168,7 @@ def health_check(request: HttpRequest) -> Response:
 
 
 @api_view(["GET"])
+@authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])  # HMAC auth handled by secure_auth
 @require_customer_authentication
 def user_info_api(request: HttpRequest, customer: Customer) -> Response:
@@ -250,6 +252,7 @@ def _authenticate_token_request(request: HttpRequest) -> User | Response:
 
 
 @api_view(["POST"])
+@authentication_classes([])  # No DRF authentication - credential auth performed in the view
 @permission_classes([AllowAny])
 @throttle_classes([AuthThrottle])
 @public_api_endpoint
@@ -263,14 +266,19 @@ def obtain_token(request: HttpRequest) -> Response:
     POST /api/users/token/
     {
         "email": "user@example.com",
-        "password": "password"
+        "password": "password",
+        "name": "ci-pipeline",   # optional label
+        "ttl_days": 30           # optional, clamped to [1, API_TOKEN_MAX_TTL_DAYS]
     }
 
-    Response:
+    Response (raw token shown once, never retrievable again):
     {
         "token": "<40-char-hex-key>",
         "user_id": 123,
-        "email": "user@example.com"
+        "email": "user@example.com",
+        "key_prefix": "<first-8-chars>",
+        "name": "ci-pipeline",
+        "expires_at": "<iso-8601 or null>"
     }
     """
     user_or_error = _authenticate_token_request(request)
@@ -383,6 +391,7 @@ def token_info(request: HttpRequest) -> Response:
 
 
 @api_view(["GET"])
+@authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])  # HMAC auth handled by secure_auth
 @require_customer_authentication
 def verify_token(request: HttpRequest, customer: Customer) -> Response:
@@ -575,6 +584,7 @@ def _uniform_session_error(headers: dict[str, Any]) -> Response:
 
 
 @api_view(["POST"])
+@authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])  # HMAC auth handled by secure_auth
 @require_customer_authentication
 def mfa_setup_api(request: HttpRequest, customer: Customer) -> Response:
@@ -637,6 +647,7 @@ def mfa_setup_api(request: HttpRequest, customer: Customer) -> Response:
 
 
 @api_view(["POST"])
+@authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])  # HMAC auth handled by secure_auth
 @require_user_authentication
 def mfa_verify_api(request: HttpRequest, user: User) -> Response:
@@ -736,6 +747,7 @@ def mfa_disable_api(request: HttpRequest) -> Response:
 
 
 @api_view(["GET"])
+@authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])  # HMAC auth handled by secure_auth
 @require_customer_authentication
 def mfa_status_api(request: HttpRequest, customer: Customer) -> Response:
@@ -777,6 +789,7 @@ def mfa_status_api(request: HttpRequest, customer: Customer) -> Response:
 
 
 @api_view(["POST"])
+@authentication_classes([])  # No DRF authentication - credential auth performed in the view
 @permission_classes([AllowAny])
 @throttle_classes([AuthThrottle])
 @public_api_endpoint
@@ -822,6 +835,7 @@ def password_reset_request_api(request: HttpRequest) -> Response:
 
 
 @api_view(["POST"])
+@authentication_classes([])  # No DRF authentication - credential auth performed in the view
 @permission_classes([AllowAny])
 @throttle_classes([AuthThrottle])
 @public_api_endpoint
@@ -880,6 +894,7 @@ def password_reset_confirm_api(request: HttpRequest) -> Response:
 
 
 @api_view(["POST"])
+@authentication_classes([])  # No DRF authentication - credential auth performed in the view
 @permission_classes([AllowAny])
 @throttle_classes([AnonRateThrottle])
 @public_api_endpoint

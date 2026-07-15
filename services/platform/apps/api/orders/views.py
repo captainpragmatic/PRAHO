@@ -14,7 +14,7 @@ from django.db import IntegrityError, transaction
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from rest_framework import status
-from rest_framework.decorators import api_view, permission_classes, throttle_classes
+from rest_framework.decorators import api_view, authentication_classes, permission_classes, throttle_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
 from rest_framework.response import Response
@@ -133,6 +133,7 @@ def product_detail(request: Request, slug: str) -> Response:
 
 
 @api_view(["POST"])
+@authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])
 @throttle_classes([OrderCalculateThrottle])
 @require_customer_authentication
@@ -348,6 +349,7 @@ def _resolve_currency(raw_code: object) -> tuple[Currency | None, Response | Non
 
 
 @api_view(["POST"])
+@authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])  # No permissions required (auth handled by secure_auth)
 @throttle_classes([OrderCalculateThrottle])
 @require_customer_authentication
@@ -547,6 +549,7 @@ def preflight_order(  # noqa: PLR0911, PLR0915  # Complexity: multi-step busines
 
 
 @api_view(["POST"])
+@authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])  # No permissions required (auth handled by secure_auth)
 @throttle_classes([OrderCreateThrottle])
 @require_customer_authentication
@@ -819,6 +822,7 @@ def create_order(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-
 
 
 @api_view(["POST"])
+@authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])  # No permissions required (auth handled by secure_auth)
 @throttle_classes([OrderListThrottle])
 @require_customer_authentication
@@ -850,6 +854,7 @@ def order_list(request: Request, customer: Customer) -> Response:
 
 
 @api_view(["POST"])
+@authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])  # No permissions required (auth handled by secure_auth)
 @throttle_classes([OrderListThrottle])
 @require_customer_authentication
@@ -944,6 +949,7 @@ def _provision_confirmed_order_item(item: Any, customer: Any, order: Any) -> dic
 
 
 @api_view(["POST"])
+@authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])
 @throttle_classes([OrderListThrottle])
 @require_customer_authentication

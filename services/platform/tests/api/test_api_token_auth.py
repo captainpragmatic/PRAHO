@@ -10,6 +10,7 @@ Covers:
 """
 
 from datetime import timedelta
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
@@ -18,11 +19,13 @@ from django.utils import timezone
 from django_q.models import Schedule
 from rest_framework.exceptions import AuthenticationFailed
 from rest_framework.test import APIClient, APIRequestFactory
+from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin
 
 from apps.api.users.authentication import HashedTokenAuthentication
 from apps.audit.models import AuditEvent
 from apps.audit.services import AuditService
-from apps.users.models import APIToken
+from apps.customers.models import Customer
+from apps.users.models import APIToken, CustomerMembership
 from apps.users.tasks import purge_expired_api_tokens, setup_user_security_scheduled_tasks
 
 User = get_user_model()
@@ -595,6 +598,18 @@ class PurgeExpiredTokensTests(TestCase):
         remaining = set(APIToken.objects.values_list("pk", flat=True))
         self.assertEqual(remaining, {live.pk, eternal.pk})
 
+    def test_purge_deletes_token_expiring_exactly_now(self) -> None:
+        """Boundary parity with is_expired: now >= expires_at means expired, so purge must take it."""
+        frozen = timezone.now()
+        _create_token(self.user, name="boundary", expires_at=frozen)
+
+        with patch("apps.users.tasks.timezone") as mock_tz:
+            mock_tz.now.return_value = frozen
+            result = purge_expired_api_tokens()
+
+        self.assertEqual(result["purged"], 1)
+        self.assertEqual(APIToken.objects.count(), 0)
+
     def test_management_command_delegates_to_task(self) -> None:
         _create_token(self.user, name="expired", expires_at=timezone.now() - timedelta(days=1))
 
@@ -649,3 +664,64 @@ class HeaderParsingTests(TestCase):
         for header in ("Bearer abc def", "Token abc def"):
             with self.subTest(header=header), self.assertRaises(AuthenticationFailed):
                 self._auth(header)
+
+
+# ===============================================================================
+# STRAY AUTHORIZATION HEADERS ON SELF-AUTHENTICATING ENDPOINTS
+# ===============================================================================
+
+
+class StrayAuthorizationHeaderTests(TestCase):
+    """Endpoints that own their authentication must ignore Authorization headers.
+
+    DRF runs default authenticators before the view body, so without
+    authentication_classes([]) a stray or invalid Bearer/Token header 401s
+    HMAC- and credential-authenticated endpoints before their own auth runs.
+    """
+
+    def setUp(self) -> None:
+        self.client = APIClient()
+        self.password = "StrongPass123!"
+        self.user = User.objects.create_user(email="stray@test.com", password=self.password)
+
+    def test_health_check_ignores_stray_bearer_header(self) -> None:
+        response = self.client.get("/api/users/health/", HTTP_AUTHORIZATION="Bearer stray-garbage")
+        self.assertEqual(response.status_code, 200)
+
+    def test_obtain_token_ignores_stray_bearer_header(self) -> None:
+        """Credential auth must win — a leftover header from a shared HTTP client is not our business."""
+        response = self.client.post(
+            "/api/users/token/",
+            {"email": self.user.email, "password": self.password},
+            format="json",
+            HTTP_AUTHORIZATION="Bearer stray-garbage",
+        )
+        self.assertEqual(response.status_code, 200)
+
+
+@override_settings(PLATFORM_API_SECRET=HMAC_TEST_SECRET, MIDDLEWARE=HMAC_TEST_MIDDLEWARE)
+class StrayAuthorizationHeaderHMACTests(HMACTestMixin, TestCase):
+    """A validly HMAC-signed portal request must not be vetoed by token auth."""
+
+    def setUp(self) -> None:
+        self.client = APIClient()
+        self.user = User.objects.create_user(email="stray-hmac@test.com", password="StrongPass123!")
+
+    def test_hmac_endpoint_ignores_stray_bearer_header(self) -> None:
+        """A validly HMAC-signed portal request must not be vetoed by token auth."""
+        customer = Customer.objects.create(
+            name="Stray Header SRL",
+            company_name="Stray Header SRL",
+            customer_type="company",
+            primary_email="stray-hmac@example.com",
+            status="active",
+        )
+        CustomerMembership.objects.create(customer=customer, user=self.user, role="owner", is_primary=True)
+
+        response = self.portal_post(
+            "/api/orders/",
+            {"customer_id": customer.id, "user_id": self.user.id},
+            HTTP_AUTHORIZATION="Bearer stray-garbage",
+        )
+
+        self.assertEqual(response.status_code, 200, getattr(response, "content", b""))

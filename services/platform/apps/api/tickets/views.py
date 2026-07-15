@@ -173,6 +173,7 @@ def customer_tickets_api(request: HttpRequest, customer: Customer) -> Response:
 
 
 @api_view(["POST"])
+@authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])  # HMAC auth handled by secure_auth
 @require_customer_authentication
 def customer_ticket_detail_api(request: HttpRequest, customer: Customer, ticket_id: int) -> Response:
@@ -263,6 +264,7 @@ def customer_ticket_detail_api(request: HttpRequest, customer: Customer, ticket_
 
 
 @api_view(["POST"])
+@authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])  # HMAC auth handled by secure_auth
 @require_customer_authentication
 def customer_ticket_create_api(request: HttpRequest, customer: Customer) -> Response:
@@ -365,6 +367,7 @@ def customer_ticket_create_api(request: HttpRequest, customer: Customer) -> Resp
 
 
 @api_view(["POST"])
+@authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])  # HMAC auth handled by secure_auth
 @require_customer_authentication
 def customer_ticket_reply_api(request: HttpRequest, customer: Customer, ticket_id: int) -> Response:

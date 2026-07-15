@@ -136,6 +136,7 @@ def customer_services_api(request: HttpRequest, customer: Customer) -> Response:
 
 
 @api_view(["POST"])
+@authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])  # HMAC auth handled by secure_auth
 @require_customer_authentication
 def customer_service_detail_api(request: HttpRequest, customer: Customer, service_id: int) -> Response:
@@ -327,6 +328,7 @@ def available_service_plans_api(request: HttpRequest) -> Response:
 
 
 @api_view(["POST"])
+@authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])  # HMAC auth handled by secure_auth
 @require_customer_authentication
 def update_service_auto_renew_api(request: HttpRequest, customer: Customer, service_id: int) -> Response:
@@ -401,6 +403,7 @@ def update_service_auto_renew_api(request: HttpRequest, customer: Customer, serv
 
 
 @api_view(["POST"])
+@authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])  # HMAC auth handled by secure_auth
 @require_customer_authentication
 def service_usage_stats_api(request: HttpRequest, customer: Customer, service_id: int) -> Response:

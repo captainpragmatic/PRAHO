@@ -202,6 +202,19 @@ in `apps/api/users/authentication.py`. No external dependencies were added.
    schedule runs `purge_expired_api_tokens` daily at 3 AM; the `purge_expired_tokens`
    management command remains for manual runs.
 
+### Global authenticator interaction with HMAC / public endpoints
+
+`HashedTokenAuthentication` is a **default** authenticator (`DEFAULT_AUTHENTICATION_CLASSES`),
+so DRF runs it before the view body on every `@api_view`. Because it fails closed on a
+recognized-but-malformed `Bearer`/`Token` header, an endpoint that performs its own
+authentication (HMAC via `@require_customer_authentication` / `@require_portal_authentication`,
+or credential/public endpoints) would be rejected before its own auth runs if a caller sent
+a stray or invalid `Authorization` header. Every such endpoint therefore declares
+`@authentication_classes([])`, opting out of DRF-level authentication so its dedicated
+mechanism is authoritative. `tests/api/test_api_token_auth.py::StrayAuthorizationHeaderTests`
+locks this in; the CI auth-coverage test (`public_api_endpoint` marker) enforces that every
+API view has an explicit auth posture.
+
 ### Remaining: Gap 7 (web UI for token management)
 
 A staff-facing page at `/app/settings/api-tokens/` is not yet implemented. Token
@@ -242,7 +255,6 @@ management is currently API-only. This is tracked separately and is not blocking
 
 - No web UI for token management (Gap 7 — tracked separately)
 - Raw token shown only once at creation — if lost, must create a new one
-- `rest_framework.authtoken` still in INSTALLED_APPS for migration history
 
 ### Migration note
 The cutover is a **clean break**: no data migration carries DRF `authtoken_token`
@@ -250,10 +262,12 @@ rows into `APIToken`. No environment held live DRF tokens at cutover time, and
 copying them would have re-created the plaintext-at-rest exposure (the raw keys
 would remain in `authtoken_token`) while making the copies unreachable by TTL
 enforcement. Any consumer that did hold a legacy token obtains a fresh one via
-`POST /api/users/token/`. The `rest_framework.authtoken` app remains in
-`INSTALLED_APPS` only so environments that already applied its migrations keep a
-consistent migration history; removing the app and dropping its tables is tracked
-as a follow-up. No portal code is affected (portal does not use token auth).
+`POST /api/users/token/`. Because the platform is pre-release with no such data
+anywhere, `rest_framework.authtoken` was **removed from `INSTALLED_APPS`
+entirely** rather than kept for migration-history consistency — nothing in the
+repo depends on the `authtoken` app or its models, so fresh databases simply
+never create its tables. No portal code is affected (portal does not use token
+auth).
 
 ---
 
