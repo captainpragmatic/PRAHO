@@ -34,6 +34,7 @@ integrations.WebhookEvent       # append-only inbound webhook records
 notifications.EmailLog          # append-only email delivery records
 notifications.UnsubscribeToken  # ephemeral GDPR unsubscribe tokens (short-lived, append-only)
 orders.OrderStatusHistory       # order status change log
+users.APIToken                  # API token lifecycle tracked via auth endpoint logs, not model signals
 users.UserLoginLog              # security audit trail for login attempts
 
 # ── 3. Reference/configuration data (read-mostly, no business state changes) ──
