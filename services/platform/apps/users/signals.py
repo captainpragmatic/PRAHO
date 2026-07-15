@@ -128,6 +128,49 @@ def audit_webauthn_credential_deleted(sender: Any, instance: Any, **kwargs: Any)
     )
 
 
+def _api_token_audit_values(instance: Any) -> dict[str, Any]:
+    """Structured audit payload for an APIToken — never the raw key or its hash."""
+    return {
+        "token_pk": str(instance.pk),
+        "user_id": str(instance.user_id),
+        "key_prefix": instance.key_prefix,
+        "token_name": instance.name,
+        "expires_at": instance.expires_at.isoformat() if instance.expires_at else None,
+    }
+
+
+@receiver(post_save, sender="users.APIToken")
+def audit_api_token_created(sender: Any, instance: Any, created: bool, **kwargs: Any) -> None:
+    """Audit APIToken issuance (ADR-0016).
+
+    Only creation is audited: the sole post-create mutation is the throttled
+    last_used_at write, which uses a queryset update and never fires post_save.
+    The key_prefix identifies the token in the description — the name is
+    caller-supplied free text and belongs only in the structured payload.
+    """
+    if not created:
+        return
+    _log_user_model_event(
+        event_type="api_token_created",
+        instance=instance,
+        description=f"API token ({instance.key_prefix}…) created for user {instance.user_id}",
+        new_values=_api_token_audit_values(instance),
+        metadata={"model": "APIToken"},
+    )
+
+
+@receiver(pre_delete, sender="users.APIToken")
+def audit_api_token_deleted(sender: Any, instance: Any, **kwargs: Any) -> None:
+    """Audit APIToken deletion — API revocation, purge command, admin, or cascade."""
+    _log_user_model_event(
+        event_type="api_token_deleted",
+        instance=instance,
+        description=f"API token ({instance.key_prefix}…) deleted for user {instance.user_id}",
+        old_values=_api_token_audit_values(instance),
+        metadata={"model": "APIToken"},
+    )
+
+
 @receiver(user_logged_in)
 def log_user_login(sender: Any, request: HttpRequest, user: User, **kwargs: Any) -> None:
     """

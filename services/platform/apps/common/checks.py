@@ -566,3 +566,51 @@ def check_csp_nonce_middleware_order(app_configs: Any, **kwargs: Any) -> list[Er
         )
 
     return errors
+
+
+@register(Tags.security)
+def check_api_token_ttl_configuration(app_configs: Any, **kwargs: Any) -> list[Error | DjangoWarning]:
+    """
+    Check that the API token TTL settings form a coherent expiry policy (ADR-0031).
+
+    obtain_token clamps caller-supplied TTLs to API_TOKEN_MAX_TTL_DAYS and falls
+    back to API_TOKEN_DEFAULT_TTL_DAYS, so an incoherent pair silently changes
+    token lifetimes instead of failing. Catch it at startup instead.
+    """
+    findings: list[Error | DjangoWarning] = []
+
+    default_ttl = getattr(settings, "API_TOKEN_DEFAULT_TTL_DAYS", 90)
+    max_ttl = getattr(settings, "API_TOKEN_MAX_TTL_DAYS", 365)
+
+    if max_ttl < 1:
+        findings.append(
+            Error(
+                f"API_TOKEN_MAX_TTL_DAYS is {max_ttl} — it must be >= 1",
+                hint="A non-positive maximum makes every issued token expire immediately (min(ttl, max) <= 0). "
+                "Set API_TOKEN_MAX_TTL_DAYS to a positive value; use API_TOKEN_DEFAULT_TTL_DAYS=0 only to "
+                "disable the default expiry.",
+                id="security.E062",
+            )
+        )
+    elif default_ttl > max_ttl:
+        findings.append(
+            Error(
+                f"API_TOKEN_DEFAULT_TTL_DAYS ({default_ttl}) exceeds API_TOKEN_MAX_TTL_DAYS ({max_ttl})",
+                hint="Tokens issued without an explicit ttl_days would out-live the configured maximum. "
+                "Lower the default or raise the maximum.",
+                id="security.E063",
+            )
+        )
+
+    if default_ttl <= 0 and max_ttl >= 1:
+        findings.append(
+            DjangoWarning(
+                f"API_TOKEN_DEFAULT_TTL_DAYS is {default_ttl} — tokens issued without an explicit "
+                "ttl_days never expire",
+                hint="ADR-0031 recommends a rolling default expiry (90 days). "
+                "Leave this at 0 only if non-expiring tokens are an accepted risk.",
+                id="security.W063",
+            )
+        )
+
+    return findings

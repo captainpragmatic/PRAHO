@@ -29,7 +29,9 @@ DJANGO_APPS: list[str] = [
 
 THIRD_PARTY_APPS: list[str] = [
     "rest_framework",
-    "rest_framework.authtoken",  # 🔐 Token authentication for API access
+    # rest_framework.authtoken removed — replaced by the custom APIToken model
+    # (apps.users, ADR-0031). Pre-release clean break: no environment held live
+    # DRF tokens, so its tables are simply never created.
     "corsheaders",  # Defense-in-depth: protects staff sessions from cross-site credential-riding
     "ipware",
     "django_q",  # Async task processing
@@ -341,8 +343,8 @@ REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
         # Session auth for web UI (HTMX calls from platform)
         "rest_framework.authentication.SessionAuthentication",
-        # Token auth for portal service and external clients
-        "rest_framework.authentication.TokenAuthentication",
+        # Hashed token auth with Bearer/Token support, expiry, and multi-token (ADR-0031)
+        "apps.api.users.authentication.HashedTokenAuthentication",
     ],
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.IsAuthenticated",
@@ -357,6 +359,12 @@ REST_FRAMEWORK = {
     "DEFAULT_THROTTLE_CLASSES": [],
     "DEFAULT_THROTTLE_RATES": {},
 }
+
+# API token expiry (ADR-0031). obtain_token applies this default TTL so issued
+# tokens are not immortal; callers may request a shorter/longer TTL up to the max.
+# Set API_TOKEN_DEFAULT_TTL_DAYS=0 to disable default expiry (not recommended).
+API_TOKEN_DEFAULT_TTL_DAYS = int(os.environ.get("API_TOKEN_DEFAULT_TTL_DAYS", "90"))
+API_TOKEN_MAX_TTL_DAYS = int(os.environ.get("API_TOKEN_MAX_TTL_DAYS", "365"))
 
 # ===============================================================================
 # ROMANIAN BUSINESS CONFIGURATION

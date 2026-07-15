@@ -4,7 +4,7 @@
 
 import io
 import logging
-from typing import Any
+from typing import Any, cast
 
 import pyotp
 import qrcode
@@ -27,6 +27,39 @@ TOTP_TOKEN_LENGTH = 6  # Standard TOTP tokens are 6 digits
 BACKUP_CODE_LENGTH = 8  # Backup codes are 8 digits
 
 logger = logging.getLogger(__name__)
+
+
+# ===============================================================================
+# API TOKEN SERIALIZERS 🔑
+# ===============================================================================
+
+
+class StrictCharField(serializers.CharField):
+    """CharField that rejects non-string input instead of coercing numbers to text."""
+
+    def to_internal_value(self, data: Any) -> str:
+        if not isinstance(data, str):
+            self.fail("invalid")
+        return cast(str, super().to_internal_value(data))
+
+
+class TokenObtainRequestSerializer(serializers.Serializer):
+    """
+    Validates the optional token-shaping fields of obtain_token (ADR-0031).
+
+    email/password are checked by the credential flow before this runs; this
+    guards the fields that reach storage and security logs. The name feeds
+    security log lines verbatim, so control characters are rejected to prevent
+    forged log entries (CWE-117).
+    """
+
+    name = StrictCharField(required=False, default="default", max_length=100)
+    ttl_days = serializers.IntegerField(required=False, allow_null=True, min_value=1)
+
+    def validate_name(self, value: str) -> str:
+        if not value.isprintable():
+            raise serializers.ValidationError(_("Token name must not contain control characters."))
+        return value
 
 
 # ===============================================================================

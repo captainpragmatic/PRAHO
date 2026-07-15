@@ -158,6 +158,7 @@ def customer_invoices_api(request: HttpRequest, customer: Customer) -> Response:
 
 
 @api_view(["POST"])
+@authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])  # HMAC auth handled by secure_auth
 @require_customer_authentication
 def customer_invoice_detail_api(request: HttpRequest, customer: Customer, invoice_number: str) -> Response:
@@ -474,6 +475,7 @@ def customer_proformas_api(request: HttpRequest, customer: Customer) -> Response
 
 
 @api_view(["POST"])
+@authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])  # HMAC auth handled by secure_auth
 @require_customer_authentication
 def customer_proforma_detail_api(request: HttpRequest, customer: Customer, proforma_number: str) -> Response:
@@ -570,6 +572,7 @@ def customer_proforma_detail_api(request: HttpRequest, customer: Customer, profo
 
 
 @api_view(["POST"])
+@authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])  # HMAC auth handled by secure_auth
 @require_customer_authentication
 def invoice_pdf_export(request: HttpRequest, customer: Customer, invoice_number: str) -> Response:
@@ -625,6 +628,7 @@ def invoice_pdf_export(request: HttpRequest, customer: Customer, invoice_number:
 
 
 @api_view(["POST"])
+@authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])  # HMAC auth handled by secure_auth
 @require_customer_authentication
 def proforma_pdf_export(request: HttpRequest, customer: Customer, proforma_number: str) -> Response:

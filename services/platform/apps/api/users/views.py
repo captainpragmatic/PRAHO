@@ -11,13 +11,14 @@ from typing import Any, cast
 
 from django.conf import settings
 from django.contrib.auth import authenticate
+from django.db import transaction
+from django.db.models import Q
 from django.http import HttpRequest, JsonResponse
+from django.utils import timezone
 from django.views.decorators.cache import never_cache
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from rest_framework import status
-from rest_framework.authentication import TokenAuthentication
-from rest_framework.authtoken.models import Token
 from rest_framework.decorators import api_view, authentication_classes, permission_classes, throttle_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
@@ -30,12 +31,13 @@ from apps.api.secure_auth import (
     require_portal_authentication,
     require_user_authentication,
 )
+from apps.api.users.authentication import HashedTokenAuthentication
 from apps.common.constants import HMAC_NTP_SKEW_SECONDS, HMAC_TIMESTAMP_WINDOW_SECONDS
 from apps.common.performance.rate_limiting import PortalHMACBurstThrottle, PortalHMACRateThrottle
 from apps.common.request_ip import get_safe_client_ip
 from apps.customers.models import Customer
 from apps.users.forms import UserRegistrationForm
-from apps.users.models import CustomerMembership, User, UserProfile
+from apps.users.models import APIToken, CustomerMembership, User, UserProfile
 from apps.users.services import SessionSecurityService
 
 from .serializers import (
@@ -44,6 +46,7 @@ from .serializers import (
     MFAVerifySerializer,
     PasswordResetConfirmSerializer,
     PasswordResetRequestSerializer,
+    TokenObtainRequestSerializer,
 )
 
 logger = logging.getLogger(__name__)
@@ -63,6 +66,26 @@ def _mask_email(email: str) -> str:
         local[:_EMAIL_MASK_LOCAL_VISIBLE_CHARS] + "***" if len(local) > _EMAIL_MASK_LOCAL_VISIBLE_CHARS else "***"
     )
     return f"{masked_local}@{domain}"
+
+
+def _resolve_token_expiry(ttl_days: int | None) -> datetime | None:
+    """Resolve an API token's expiry from an optional validated TTL (ADR-0031).
+
+    ``ttl_days`` must already be validated (integer >= 1) — obtain_token runs it
+    through ``TokenObtainRequestSerializer``. Falls back to
+    ``settings.API_TOKEN_DEFAULT_TTL_DAYS`` when the caller does not specify one.
+    Both the caller TTL and the default are clamped to ``API_TOKEN_MAX_TTL_DAYS``,
+    so callers can shorten but never opt out of expiry — only the server default
+    may select "no expiry" (a non-positive default). Returns None for no expiry.
+    """
+    default_ttl = getattr(settings, "API_TOKEN_DEFAULT_TTL_DAYS", 90)
+    max_ttl = getattr(settings, "API_TOKEN_MAX_TTL_DAYS", 365)
+
+    if ttl_days is None:
+        ttl_days = default_ttl
+    if ttl_days <= 0:
+        return None
+    return timezone.now() + timedelta(days=min(ttl_days, max_ttl))
 
 
 @csrf_exempt  # nosemgrep: no-csrf-exempt — HMAC-authenticated inter-service endpoint
@@ -136,6 +159,7 @@ def portal_login_api(request: HttpRequest) -> JsonResponse:
 
 
 @api_view(["GET"])
+@authentication_classes([])  # No DRF authentication - public endpoint
 @permission_classes([AllowAny])
 @public_api_endpoint
 def health_check(request: HttpRequest) -> Response:
@@ -144,6 +168,7 @@ def health_check(request: HttpRequest) -> Response:
 
 
 @api_view(["GET"])
+@authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])  # HMAC auth handled by secure_auth
 @require_customer_authentication
 def user_info_api(request: HttpRequest, customer: Customer) -> Response:
@@ -173,29 +198,11 @@ def user_info_api(request: HttpRequest, customer: Customer) -> Response:
     return Response({"success": True, "user": user_data})
 
 
-@api_view(["POST"])
-@permission_classes([AllowAny])
-@throttle_classes([AuthThrottle])
-@public_api_endpoint
-def obtain_token(request: HttpRequest) -> Response:
-    """
-    🔐 Obtain authentication token for API access -- intentionally public.
+def _authenticate_token_request(request: HttpRequest) -> User | Response:
+    """Validate email/password credentials for obtain_token.
 
-    Token auth requires email/password credentials, no HMAC needed.
-    Used by portal service to authenticate with platform API.
-
-    POST /api/users/token/
-    {
-        "email": "user@example.com",
-        "password": "password"
-    }
-
-    Response:
-    {
-        "token": "9944b09199c62bcf9418ad846dd0e4bbdfc6ee4b",
-        "user_id": 123,
-        "email": "user@example.com"
-    }
+    Returns the authenticated user, or the error Response the view should
+    return verbatim. Lockout counters are incremented/reset here.
     """
     email = request.data.get("email")
     password = request.data.get("password")
@@ -241,67 +248,150 @@ def obtain_token(request: HttpRequest) -> Response:
     user.account_locked_until = None
     user.save(update_fields=["failed_login_attempts", "account_locked_until"])
 
-    # Get or create token
-    token, created = Token.objects.get_or_create(user=user)
+    return user
 
-    if created:
-        logger.info(  # nosemgrep: python-logger-credential-disclosure — email masked via _mask_email()
-            "[Auth] New token created for user: %s", _mask_email(user.email)
+
+@api_view(["POST"])
+@authentication_classes([])  # No DRF authentication - credential auth performed in the view
+@permission_classes([AllowAny])
+@throttle_classes([AuthThrottle])
+@public_api_endpoint
+def obtain_token(request: HttpRequest) -> Response:
+    """
+    🔐 Obtain authentication token for API access -- intentionally public.
+
+    Token auth requires email/password credentials, no HMAC needed.
+    Used by portal service to authenticate with platform API.
+
+    POST /api/users/token/
+    {
+        "email": "user@example.com",
+        "password": "password",
+        "name": "ci-pipeline",   # optional label
+        "ttl_days": 30           # optional, clamped to [1, API_TOKEN_MAX_TTL_DAYS]
+    }
+
+    Response (raw token shown once, never retrievable again):
+    {
+        "token": "<40-char-hex-key>",
+        "user_id": 123,
+        "email": "user@example.com",
+        "key_prefix": "<first-8-chars>",
+        "name": "ci-pipeline",
+        "expires_at": "<iso-8601 or null>"
+    }
+    """
+    user_or_error = _authenticate_token_request(request)
+    if isinstance(user_or_error, Response):
+        return user_or_error
+    user = user_or_error
+
+    params = TokenObtainRequestSerializer(data=request.data)
+    if not params.is_valid():
+        return Response(
+            {"error": "Invalid token parameters.", "details": params.errors},
+            status=status.HTTP_400_BAD_REQUEST,
         )
-    else:
-        logger.info(  # nosemgrep: python-logger-credential-disclosure — email masked via _mask_email()
-            "[Auth] Existing token returned for user: %s", _mask_email(user.email)
+
+    raw_key = APIToken.generate_key()
+    name = params.validated_data["name"]
+    expires_at = _resolve_token_expiry(params.validated_data.get("ttl_days"))
+
+    # Enforce the per-user token limit atomically. Lock the user row so concurrent
+    # obtain_token calls serialize (TOCTOU-safe — the previous non-atomic count+create
+    # let parallel requests exceed the cap), and count only live tokens so a user
+    # holding only expired tokens is not locked out of issuing a fresh one.
+    now = timezone.now()
+    with transaction.atomic():
+        User.objects.select_for_update().get(pk=user.pk)
+        active_count = (
+            APIToken.objects.filter(user=user).filter(Q(expires_at__isnull=True) | Q(expires_at__gt=now)).count()
         )
+        if active_count >= APIToken.MAX_TOKENS_PER_USER:
+            return Response(
+                {
+                    "error": (
+                        f"Maximum of {APIToken.MAX_TOKENS_PER_USER} active tokens per user. Revoke unused tokens first."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        token = APIToken.objects.create(
+            user=user,
+            key_hash=APIToken.hash_key(raw_key),
+            key_prefix=raw_key[:8],
+            name=name,  # Length and content enforced by TokenObtainRequestSerializer
+            expires_at=expires_at,
+        )
+
+    logger.info(  # nosemgrep: python-logger-credential-disclosure — email masked via _mask_email()
+        "[Auth] New API token '%s' (%s…) created for user: %s",
+        token.name,
+        token.key_prefix,
+        _mask_email(user.email),
+    )
 
     return Response(
         {
-            "token": token.key,
+            "token": raw_key,
             "user_id": user.id,
             "email": user.email,
+            "key_prefix": token.key_prefix,
+            "name": token.name,
+            "expires_at": token.expires_at.isoformat() if token.expires_at else None,
         }
     )
 
 
 @api_view(["DELETE"])
-@authentication_classes([TokenAuthentication])
+@authentication_classes([HashedTokenAuthentication])
 @permission_classes([IsAuthenticated])
 def revoke_token(request: HttpRequest) -> Response:
     """🗑️ Revoke the caller's own authentication token."""
-    token = request.auth  # Set by TokenAuthentication — no extra DB query needed
+    token = request.auth  # Set by HashedTokenAuthentication — no extra DB query needed
     user_email = _mask_email(token.user.email)
+    token_label = f"'{token.name}' ({token.key_prefix}\u2026)"
     token.delete()
-    logger.info("[Auth] Token revoked for: %s", user_email)  # nosemgrep: python-logger-credential-disclosure
+    logger.info(  # nosemgrep: python-logger-credential-disclosure
+        "[Auth] Token %s revoked for: %s", token_label, user_email
+    )
     return Response({"message": "Token revoked successfully"})
 
 
 @api_view(["GET"])
-@authentication_classes([TokenAuthentication])
+@authentication_classes([HashedTokenAuthentication])
 @permission_classes([IsAuthenticated])
 def token_info(request: HttpRequest) -> Response:
     """
     Return identity of the authenticated token caller.
 
     GET /api/users/token/me/
-    Authorization: Token <key>
+    Authorization: Bearer <key>   (or Token <key>)
 
     Designed for CLI tools and scripts to confirm their token is valid and
-    see which user it belongs to. Uses TokenAuthentication only — no HMAC
-    or session required.
+    see which user it belongs to. Uses HashedTokenAuthentication only — no
+    HMAC or session required.
     """
     user = cast(User, request.user)
-    token = request.auth
+    token: APIToken = request.auth
     return Response(
         {
             "user_id": user.id,
             "email": user.email,
             "staff_role": user.staff_role,
             "is_active": user.is_active,
-            "token_created": token.created.isoformat(),
+            "token_name": token.name,
+            "key_prefix": token.key_prefix,
+            "created_at": token.created_at.isoformat(),
+            "expires_at": token.expires_at.isoformat() if token.expires_at else None,
+            "last_used_at": token.last_used_at.isoformat() if token.last_used_at else None,
         }
     )
 
 
 @api_view(["GET"])
+@authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])  # HMAC auth handled by secure_auth
 @require_customer_authentication
 def verify_token(request: HttpRequest, customer: Customer) -> Response:
@@ -494,6 +584,7 @@ def _uniform_session_error(headers: dict[str, Any]) -> Response:
 
 
 @api_view(["POST"])
+@authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])  # HMAC auth handled by secure_auth
 @require_customer_authentication
 def mfa_setup_api(request: HttpRequest, customer: Customer) -> Response:
@@ -556,6 +647,7 @@ def mfa_setup_api(request: HttpRequest, customer: Customer) -> Response:
 
 
 @api_view(["POST"])
+@authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])  # HMAC auth handled by secure_auth
 @require_user_authentication
 def mfa_verify_api(request: HttpRequest, user: User) -> Response:
@@ -655,6 +747,7 @@ def mfa_disable_api(request: HttpRequest) -> Response:
 
 
 @api_view(["GET"])
+@authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])  # HMAC auth handled by secure_auth
 @require_customer_authentication
 def mfa_status_api(request: HttpRequest, customer: Customer) -> Response:
@@ -696,6 +789,7 @@ def mfa_status_api(request: HttpRequest, customer: Customer) -> Response:
 
 
 @api_view(["POST"])
+@authentication_classes([])  # No DRF authentication - credential auth performed in the view
 @permission_classes([AllowAny])
 @throttle_classes([AuthThrottle])
 @public_api_endpoint
@@ -741,6 +835,7 @@ def password_reset_request_api(request: HttpRequest) -> Response:
 
 
 @api_view(["POST"])
+@authentication_classes([])  # No DRF authentication - credential auth performed in the view
 @permission_classes([AllowAny])
 @throttle_classes([AuthThrottle])
 @public_api_endpoint
@@ -799,6 +894,7 @@ def password_reset_confirm_api(request: HttpRequest) -> Response:
 
 
 @api_view(["POST"])
+@authentication_classes([])  # No DRF authentication - credential auth performed in the view
 @permission_classes([AllowAny])
 @throttle_classes([AnonRateThrottle])
 @public_api_endpoint

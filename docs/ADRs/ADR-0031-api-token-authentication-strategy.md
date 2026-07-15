@@ -1,7 +1,7 @@
 # ADR-0031: API Token Authentication Strategy
 
-**Status:** Accepted (partial — gaps documented, roadmap defined)
-**Date:** 2026-03-06
+**Status:** Accepted (partial — Gap 7 web UI remaining)
+**Date:** 2026-03-06 (updated 2026-03-31)
 **Authors:** Development Team
 **Related:** ADR-0017 (Portal Auth Fail-Open), ADR-0024 (User Role Clarification)
 **Gap tracking:** [Issue #77 — close ADR-0031 token authentication gaps](https://github.com/captainpragmatic/PRAHO/issues/77)
@@ -171,98 +171,115 @@ exposes a public API that external developers expect to be RFC-compliant.
 
 ## Decision
 
-### Current: Use DRF authtoken for internal automation, with constraints
+### Implemented: Custom `APIToken` model (replaces DRF authtoken)
 
-For scripts and internal tooling today, DRF authtoken is acceptable with these
-operating constraints:
+As of 2026-03-31, DRF's `rest_framework.authtoken.Token` has been replaced by a custom
+`APIToken` model in `apps/users/models.py` with a `HashedTokenAuthentication` backend
+in `apps/api/users/authentication.py`. No external dependencies were added.
+
+**What changed:**
+
+| Capability | Before (DRF authtoken) | After (APIToken) |
+| ---------- | ---------------------- | ---------------- |
+| Tokens per user | 1 (OneToOneField) | Multiple (ForeignKey), capped at 20 active per user |
+| Storage | Plaintext | SHA-256 hashed |
+| Expiry | None | Default 90-day TTL (`API_TOKEN_DEFAULT_TTL_DAYS`); callers may shorten via `ttl_days`, clamped to `API_TOKEN_MAX_TTL_DAYS` (365) — only the server default can select "no expiry" |
+| Usage tracking | None | `last_used_at` (throttled to 5-min intervals, condition evaluated in SQL) |
+| Token naming | None | `name` (API) + `description` (model field, not yet API-exposed) |
+| Auth header | `Token` only | `Bearer` and `Token`; malformed recognized schemes fail closed |
+| Raw key visibility | Always readable | Shown once at creation, never stored |
+| Audit trail | None | `api_token_created` / `api_token_deleted` audit events on every create/delete path (ADR-0016) |
+
+**Operating constraints (still apply):**
 
 1. **Use a dedicated service-account `User`** per script/integration with the minimum
    `staff_role` needed. Never use a personal staff account's token in automation.
-2. **Rotate tokens on a schedule** — even without enforced expiry, manually revoke and
-   reissue tokens quarterly as a hygiene practice.
+2. **Expiry is on by default** (90 days). Pass `ttl_days` to shorten it for CI/CD or
+   temporary automation; callers cannot opt out of expiry.
 3. **Store tokens in secrets management** (environment variables, a vault) — never
    hardcode in scripts or commit to version control.
-4. **One service account per independent consumer** — until Gap 4 is fixed, this is the
-   only way to have isolated revocation.
+4. **Expired tokens are purged automatically** — the `user-api-token-purge` Django-Q
+   schedule runs `purge_expired_api_tokens` daily at 3 AM; the `purge_expired_tokens`
+   management command remains for manual runs.
 
-### Near-term: Fix the two blocking gaps
+### Global authenticator interaction with HMAC / public endpoints
 
-**Gap 1 (`verify_token` broken)** and **Gap 7 (no web UI)** are the most user-facing.
-Fix before any external or self-service token use.
+`HashedTokenAuthentication` is a **default** authenticator (`DEFAULT_AUTHENTICATION_CLASSES`),
+so DRF runs it before the view body on every `@api_view`. Because it fails closed on a
+recognized-but-malformed `Bearer`/`Token` header, an endpoint that performs its own
+authentication (HMAC via `@require_customer_authentication` / `@require_portal_authentication`,
+or credential/public endpoints) would be rejected before its own auth runs if a caller sent
+a stray or invalid `Authorization` header. Every such endpoint therefore declares
+`@authentication_classes([])`, opting out of DRF-level authentication so its dedicated
+mechanism is authoritative. `tests/api/test_api_token_auth.py::StrayAuthorizationHeaderTests`
+locks this in; the CI auth-coverage test (`public_api_endpoint` marker) enforces that every
+API view has an explicit auth posture.
 
-Fix for Gap 1 — add a dedicated endpoint:
+### Remaining: Gap 7 (web UI for token management)
 
-```python
-@api_view(["GET"])
-@authentication_classes([TokenAuthentication])
-@permission_classes([IsAuthenticated])
-def token_info(request: HttpRequest) -> Response:
-    """Return identity of the token caller. Safe for CLI/script use."""
-    user = cast(User, request.user)
-    return Response({
-        "user_id": user.id,
-        "email": _mask_email(user.email),
-        "staff_role": user.staff_role,
-        "token_created": request.auth.created.isoformat(),
-    })
-```
-
-Register at `GET /api/users/token/me/`.
-
-### Long-term: Replace DRF authtoken with a proper multi-token model
-
-When any of these conditions is true, replace DRF authtoken:
-- A user needs more than one active token simultaneously
-- Token expiry needs to be enforced programmatically
-- Tokens need to be manageable via the web UI by end users
-
-**Recommended library:** `django-rest-knox` — drops in as a DRF authentication class,
-stores hashed tokens, supports multiple tokens per user, has configurable expiry and
-`last_used` tracking. Migration path:
-
-1. Install `knox`, add to `INSTALLED_APPS`, run migrations
-2. Replace `TokenAuthentication` with `knox.auth.TokenAuthentication` in
-   `DEFAULT_AUTHENTICATION_CLASSES`
-3. Replace `obtain_token` and `revoke_token` views with knox equivalents
-4. Migrate existing `authtoken_token` rows (one-time: create knox tokens for each
-   active DRF token, notify owners to re-obtain)
+A staff-facing page at `/app/settings/api-tokens/` is not yet implemented. Token
+management is currently API-only. This is tracked separately and is not blocking.
 
 ---
 
 ## RFC and Industry Standard Compliance Assessment
 
-| Standard | Requirement | Current Status |
-|----------|-------------|----------------|
-| RFC 6750 (Bearer Tokens) | `Authorization: Bearer <token>` header | Non-compliant — uses `Token` not `Bearer` |
-| RFC 6749 (OAuth 2.0) | Short-lived access tokens, refresh flow | Not implemented — tokens do not expire |
-| RFC 6819 (OAuth Threat Model) | Token binding, expiry, rotation | Partial — no expiry, no rotation |
-| OWASP API Security Top 10 | Broken Auth (API2) — token expiry, rotation | Gap 2 and Gap 5 are relevant findings |
-| General practice | Hash tokens at rest | Non-compliant — stored plaintext |
-| General practice | Per-device token isolation | Non-compliant — one token per user |
-| General practice | Audit trail (last_used_at) | Non-compliant — no tracking |
-
-**For internal automation only, the current implementation is acceptable.** The gaps
-above become blocking if PRAHO offers a public API, a developer portal, or token-based
-access to external customers.
+| Standard | Requirement | Status |
+| -------- | ----------- | ------ |
+| RFC 6750 (Bearer Tokens) | `Authorization: Bearer <token>` header | **Compliant** — accepts both `Bearer` and `Token` |
+| RFC 6749 (OAuth 2.0) | Short-lived access tokens, refresh flow | Partial — default 90-day TTL, no refresh flow |
+| RFC 6819 (OAuth Threat Model) | Token binding, expiry, rotation | Partial — default expiry, rotation via revoke+create |
+| OWASP API Security Top 10 | Broken Auth (API2) — token expiry, rotation | **Compliant** — hashed storage, default expiry, scheduled purge |
+| General practice | Hash tokens at rest | **Compliant** — SHA-256 hashed |
+| General practice | Per-device token isolation | **Compliant** — multiple tokens per user |
+| General practice | Audit trail (last_used_at) | **Compliant** — `last_used_at` tracked |
 
 ---
 
 ## Consequences
 
-### Positive (current implementation)
-- Works for internal scripts today with zero additional infrastructure
-- Self-revocation prevents cross-user token abuse (#60 fix)
-- Account lockout integration prevents brute-force via token endpoint
-- Simple to reason about — no expiry edge cases, no refresh flow
+### Positive
 
-### Negative (current implementation)
-- No expiry means a leaked token is valid forever unless manually revoked
-- One token per user means you cannot isolate revocation per script
-- `verify_token` endpoint is misleadingly named and broken for its apparent audience
-- No web UI means ops work requires direct API calls or Django shell access
-- Plaintext storage means DB access = token access
+- SHA-256 hashed storage — DB dump does not expose tokens
+- Multiple tokens per user — per-script revocation without affecting other consumers
+- Default expiry — every issued token is time-bounded unless the server explicitly opts out
+- `last_used_at` tracking — stale tokens are detectable
+- Both `Bearer` and `Token` auth headers accepted — RFC 6750 compliant
+- No external dependencies — pure Django/DRF implementation
+- Token issuance input is validated (`name`, `ttl_days`) — malformed requests get 400s,
+  and names cannot inject control characters into security logs
+- Token lifecycle reaches the immutable audit trail (ADR-0016)
+- Account lockout integration preserved from original implementation
+
+### Negative
+
+- No web UI for token management (Gap 7 — tracked separately)
+- Raw token shown only once at creation — if lost, must create a new one
 
 ### Migration note
-If `django-rest-knox` is adopted in future, the `authtoken_token` table can be
-drained and dropped. The `rest_framework.authtoken` app can be removed from
-`INSTALLED_APPS`. No portal code is affected (portal does not use token auth).
+The cutover is a **clean break**: no data migration carries DRF `authtoken_token`
+rows into `APIToken`. No environment held live DRF tokens at cutover time, and
+copying them would have re-created the plaintext-at-rest exposure (the raw keys
+would remain in `authtoken_token`) while making the copies unreachable by TTL
+enforcement. Any consumer that did hold a legacy token obtains a fresh one via
+`POST /api/users/token/`. Because the platform is pre-release with no such data
+anywhere, `rest_framework.authtoken` was **removed from `INSTALLED_APPS`
+entirely** rather than kept for migration-history consistency — nothing in the
+repo depends on the `authtoken` app or its models, so fresh databases simply
+never create its tables. No portal code is affected (portal does not use token
+auth).
+
+---
+
+## Gap Closure Log
+
+| Gap | Description | Status | Closed by |
+| --- | ----------- | ------ | --------- |
+| 1 | `verify_token` broken for token consumers | Closed | `GET /api/users/token/me/` endpoint (prior work) |
+| 2 | No token expiry | Closed | Default 90-day TTL on issuance, `HashedTokenAuthentication` expiry check, daily scheduled purge; startup checks (`security.E062/E063`) keep the TTL settings coherent |
+| 3 | No `last_used_at` tracking | Closed | `APIToken.last_used_at` field, updated at 5-min intervals (SQL-side condition) |
+| 4 | One token per user (OneToOneField) | Closed | `APIToken` uses `ForeignKey(User)` — multiple tokens, capped at 20 active per user |
+| 5 | Tokens stored in plaintext | Closed | SHA-256 hashed via `APIToken.key_hash`; raw key shown once; no plaintext rows carried over (clean-break cutover) |
+| 6 | No token name or description | Closed | `APIToken.name` settable via API; `description` exists on the model (API/UI exposure lands with Gap 7) |
+| 7 | No web UI for token management | **Open** | Not yet implemented |
+| 8 | `Authorization: Token` vs RFC 6750 `Bearer` | Closed | `HashedTokenAuthentication` accepts both schemes |

@@ -1,0 +1,727 @@
+"""
+Tests for the custom APIToken authentication system (ADR-0031 Gaps 2-6, 8).
+
+Covers:
+- APIToken model: generate_key, hash_key, is_expired
+- HashedTokenAuthentication backend: auth flow, expiry, last_used_at throttle, Bearer + Token
+- obtain_token: multi-token creation, name field, raw key returned once
+- revoke_token: only revokes authenticating token, siblings survive
+- token_info: returns new fields (name, key_prefix, expires_at, last_used_at)
+"""
+
+from datetime import timedelta
+from unittest.mock import patch
+
+from django.contrib.auth import get_user_model
+from django.core.management import call_command
+from django.test import TestCase, override_settings
+from django.utils import timezone
+from django_q.models import Schedule
+from rest_framework.exceptions import AuthenticationFailed
+from rest_framework.test import APIClient, APIRequestFactory
+from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin
+
+from apps.api.users.authentication import HashedTokenAuthentication
+from apps.audit.models import AuditEvent
+from apps.audit.services import AuditService
+from apps.customers.models import Customer
+from apps.users.models import APIToken, CustomerMembership
+from apps.users.tasks import purge_expired_api_tokens, setup_user_security_scheduled_tasks
+
+User = get_user_model()
+
+
+def _create_token(user, name="test", **kwargs):
+    """Helper: create an APIToken and return (token_instance, raw_key)."""
+    raw_key = APIToken.generate_key()
+    token = APIToken.objects.create(
+        user=user,
+        key_hash=APIToken.hash_key(raw_key),
+        key_prefix=raw_key[:8],
+        name=name,
+        **kwargs,
+    )
+    return token, raw_key
+
+
+# ===============================================================================
+# MODEL TESTS
+# ===============================================================================
+
+
+class APITokenModelTests(TestCase):
+    """Unit tests for the APIToken model."""
+
+    def test_generate_key_returns_40_hex_chars(self) -> None:
+        key = APIToken.generate_key()
+        self.assertEqual(len(key), 40)
+        # Must be valid hex
+        int(key, 16)
+
+    def test_generate_key_is_unique(self) -> None:
+        keys = {APIToken.generate_key() for _ in range(100)}
+        self.assertEqual(len(keys), 100)
+
+    def test_hash_key_returns_64_hex_chars(self) -> None:
+        h = APIToken.hash_key("abcdef1234567890abcdef1234567890abcdef12")
+        self.assertEqual(len(h), 64)
+        int(h, 16)
+
+    def test_hash_key_is_deterministic(self) -> None:
+        key = "some-token-value"
+        self.assertEqual(APIToken.hash_key(key), APIToken.hash_key(key))
+
+    def test_is_expired_returns_false_when_no_expiry(self) -> None:
+        user = User.objects.create_user(email="exp@test.com", password="StrongPass123!")
+        token, _ = _create_token(user)
+        self.assertFalse(token.is_expired)
+
+    def test_is_expired_returns_false_when_future(self) -> None:
+        user = User.objects.create_user(email="exp2@test.com", password="StrongPass123!")
+        token, _ = _create_token(user, expires_at=timezone.now() + timedelta(hours=1))
+        self.assertFalse(token.is_expired)
+
+    def test_is_expired_returns_true_when_past(self) -> None:
+        user = User.objects.create_user(email="exp3@test.com", password="StrongPass123!")
+        token, _ = _create_token(user, expires_at=timezone.now() - timedelta(seconds=1))
+        self.assertTrue(token.is_expired)
+
+    def test_str_representation(self) -> None:
+        user = User.objects.create_user(email="str@test.com", password="StrongPass123!")
+        token, _ = _create_token(user, name="ci-pipeline")
+        s = str(token)
+        self.assertIn("ci-pipeline", s)
+        self.assertIn(token.key_prefix, s)
+
+
+# ===============================================================================
+# AUTHENTICATION BACKEND TESTS
+# ===============================================================================
+
+
+class HashedTokenAuthenticationTests(TestCase):
+    """Tests for the HashedTokenAuthentication DRF backend."""
+
+    def setUp(self) -> None:
+        self.client = APIClient()
+        self.user = User.objects.create_user(
+            email="auth@test.com", password="StrongPass123!", first_name="Auth", last_name="Test"
+        )
+        self.token, self.raw_key = _create_token(self.user)
+        self.url = "/api/users/token/me/"
+
+    def test_valid_token_authenticates(self) -> None:
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {self.raw_key}")
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, 200)
+
+    def test_bearer_scheme_authenticates(self) -> None:
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.raw_key}")
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, 200)
+
+    def test_invalid_token_returns_401(self) -> None:
+        self.client.credentials(HTTP_AUTHORIZATION="Token invalid_key_that_does_not_exist")
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, 401)
+
+    def test_expired_token_returns_401(self) -> None:
+        _expired_token, expired_key = _create_token(
+            self.user,
+            name="expired",
+            expires_at=timezone.now() - timedelta(hours=1),
+        )
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {expired_key}")
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, 401)
+        self.assertIn("expired", response.json()["detail"].lower())
+
+    def test_inactive_user_returns_401(self) -> None:
+        self.user.is_active = False
+        self.user.save(update_fields=["is_active"])
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {self.raw_key}")
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, 401)
+
+    def test_last_used_at_updated_on_first_use(self) -> None:
+        self.assertIsNone(self.token.last_used_at)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {self.raw_key}")
+        self.client.get(self.url)
+        self.token.refresh_from_db()
+        self.assertIsNotNone(self.token.last_used_at)
+
+    def test_last_used_at_not_updated_within_5_minutes(self) -> None:
+        """Subsequent requests within 5 minutes should not trigger a DB write."""
+        recent = timezone.now() - timedelta(minutes=2)
+        APIToken.objects.filter(pk=self.token.pk).update(last_used_at=recent)
+
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {self.raw_key}")
+        self.client.get(self.url)
+
+        self.token.refresh_from_db()
+        # last_used_at should still be the value we set (within seconds tolerance)
+        self.assertAlmostEqual(
+            self.token.last_used_at.timestamp(),
+            recent.timestamp(),
+            delta=2,
+        )
+
+    def test_last_used_at_updated_after_5_minutes(self) -> None:
+        stale = timezone.now() - timedelta(minutes=10)
+        APIToken.objects.filter(pk=self.token.pk).update(last_used_at=stale)
+
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {self.raw_key}")
+        self.client.get(self.url)
+
+        self.token.refresh_from_db()
+        self.assertGreater(self.token.last_used_at, stale)
+
+    def test_no_auth_header_returns_none(self) -> None:
+        """Requests without Authorization header should fall through (not 401)."""
+        # Without credentials, the endpoint should still return 401 because
+        # IsAuthenticated permission blocks it, but the backend itself returns None
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, 401)
+
+    def test_token_info_reports_last_used_at_on_first_use(self) -> None:
+        """The stamping write must be visible in the same request's response."""
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {self.raw_key}")
+        response = self.client.get(self.url)
+        self.assertIsNotNone(response.json()["last_used_at"])
+
+    def test_stale_instance_cannot_overwrite_fresh_db_value(self) -> None:
+        """The throttle condition must be evaluated by the database, not in Python.
+
+        A worker holding a stale in-memory instance (loaded before another
+        request stamped the token) must not clobber the fresher DB value.
+        """
+        fresh = timezone.now() - timedelta(seconds=60)
+        APIToken.objects.filter(pk=self.token.pk).update(last_used_at=fresh)
+        stale_instance = APIToken.objects.get(pk=self.token.pk)
+        stale_instance.last_used_at = timezone.now() - timedelta(minutes=10)
+
+        HashedTokenAuthentication._update_last_used(stale_instance)
+
+        self.token.refresh_from_db()
+        self.assertAlmostEqual(self.token.last_used_at.timestamp(), fresh.timestamp(), delta=2)
+
+
+# ===============================================================================
+# OBTAIN TOKEN TESTS
+# ===============================================================================
+
+
+class ObtainTokenTests(TestCase):
+    """Tests for POST /api/users/token/ with the new APIToken model."""
+
+    def setUp(self) -> None:
+        self.client = APIClient()
+        self.password = "StrongPass123!"
+        self.user = User.objects.create_user(
+            email="obtain@test.com", password=self.password, first_name="Obtain", last_name="Test"
+        )
+        self.url = "/api/users/token/"
+
+    def test_obtain_returns_raw_key_and_metadata(self) -> None:
+        response = self.client.post(self.url, {"email": self.user.email, "password": self.password}, format="json")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertIn("token", data)
+        self.assertIn("key_prefix", data)
+        self.assertIn("name", data)
+        self.assertEqual(len(data["token"]), 40)
+        self.assertEqual(data["key_prefix"], data["token"][:8])
+
+    def test_obtain_creates_new_token_each_call(self) -> None:
+        """Multi-token: successive calls create distinct tokens (Gap 4)."""
+        resp1 = self.client.post(self.url, {"email": self.user.email, "password": self.password}, format="json")
+        resp2 = self.client.post(self.url, {"email": self.user.email, "password": self.password}, format="json")
+        self.assertNotEqual(resp1.json()["token"], resp2.json()["token"])
+        self.assertEqual(APIToken.objects.filter(user=self.user).count(), 2)
+
+    def test_obtain_accepts_name_field(self) -> None:
+        response = self.client.post(
+            self.url,
+            {"email": self.user.email, "password": self.password, "name": "ci-pipeline"},
+            format="json",
+        )
+        self.assertEqual(response.json()["name"], "ci-pipeline")
+
+    def test_obtain_default_name(self) -> None:
+        response = self.client.post(self.url, {"email": self.user.email, "password": self.password}, format="json")
+        self.assertEqual(response.json()["name"], "default")
+
+    def test_raw_key_authenticates(self) -> None:
+        """The raw key returned by obtain_token must work for authentication."""
+        response = self.client.post(self.url, {"email": self.user.email, "password": self.password}, format="json")
+        raw_key = response.json()["token"]
+
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {raw_key}")
+        info_response = self.client.get("/api/users/token/me/")
+        self.assertEqual(info_response.status_code, 200)
+
+    def test_obtain_rejects_when_at_token_limit(self) -> None:
+        """Per-user token limit prevents token sprawl."""
+        for i in range(APIToken.MAX_TOKENS_PER_USER):
+            _create_token(self.user, name=f"token-{i}")
+
+        response = self.client.post(self.url, {"email": self.user.email, "password": self.password}, format="json")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Maximum", response.json()["error"])
+
+
+# ===============================================================================
+# REVOKE TOKEN TESTS
+# ===============================================================================
+
+
+class RevokeTokenTests(TestCase):
+    """Tests for DELETE /api/users/token/revoke/ with APIToken."""
+
+    def setUp(self) -> None:
+        self.client = APIClient()
+        self.user = User.objects.create_user(
+            email="revoke@test.com", password="StrongPass123!", first_name="Revoke", last_name="Test"
+        )
+        self.url = "/api/users/token/revoke/"
+
+    def test_revoke_deletes_authenticating_token_only(self) -> None:
+        """Revoking token A must not affect token B for the same user."""
+        token_a, key_a = _create_token(self.user, name="token-a")
+        token_b, _key_b = _create_token(self.user, name="token-b")
+
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {key_a}")
+        response = self.client.delete(self.url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(APIToken.objects.filter(pk=token_a.pk).exists())
+        self.assertTrue(APIToken.objects.filter(pk=token_b.pk).exists())
+
+    def test_revoke_requires_auth(self) -> None:
+        response = self.client.delete(self.url)
+        self.assertEqual(response.status_code, 401)
+
+    def test_revoked_token_cannot_be_reused(self) -> None:
+        _, raw_key = _create_token(self.user)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {raw_key}")
+
+        self.client.delete(self.url)
+
+        response = self.client.get("/api/users/token/me/")
+        self.assertEqual(response.status_code, 401)
+
+
+# ===============================================================================
+# TOKEN INFO TESTS
+# ===============================================================================
+
+
+class TokenInfoTests(TestCase):
+    """Tests for GET /api/users/token/me/ with APIToken."""
+
+    def setUp(self) -> None:
+        self.client = APIClient()
+        self.user = User.objects.create_user(
+            email="info@test.com", password="StrongPass123!", first_name="Info", last_name="Test"
+        )
+        self.token, self.raw_key = _create_token(self.user, name="my-script")
+        self.url = "/api/users/token/me/"
+
+    def test_returns_token_metadata(self) -> None:
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {self.raw_key}")
+        response = self.client.get(self.url)
+        data = response.json()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(data["user_id"], self.user.id)
+        self.assertEqual(data["token_name"], "my-script")
+        self.assertEqual(data["key_prefix"], self.token.key_prefix)
+        self.assertIn("created_at", data)
+        self.assertIn("expires_at", data)
+        self.assertIn("last_used_at", data)
+
+    def test_does_not_leak_is_staff(self) -> None:
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {self.raw_key}")
+        response = self.client.get(self.url)
+        self.assertNotIn("is_staff", response.json())
+
+
+# ===============================================================================
+# CREATION TIMESTAMP PRESERVATION (review M1)
+# ===============================================================================
+
+
+class APITokenCreatedAtTests(TestCase):
+    """created_at must be overridable so the DRF migration can preserve history."""
+
+    def test_explicit_created_at_is_preserved(self) -> None:
+        user = User.objects.create_user(email="ts@test.com", password="StrongPass123!")
+        historical = timezone.now() - timedelta(days=400)
+
+        token, _ = _create_token(user, created_at=historical)
+        token.refresh_from_db()
+
+        # auto_now_add would have clobbered this to "now"; default=timezone.now keeps it.
+        self.assertEqual(token.created_at, historical)
+
+
+# ===============================================================================
+# TOKEN EXPIRY ON ISSUANCE (review M2)
+# ===============================================================================
+
+
+class ObtainTokenExpiryTests(TestCase):
+    """obtain_token must apply a default rolling TTL so tokens are not immortal."""
+
+    def setUp(self) -> None:
+        self.client = APIClient()
+        self.password = "StrongPass123!"
+        self.user = User.objects.create_user(email="ttl@test.com", password=self.password)
+        self.url = "/api/users/token/"
+
+    def test_default_ttl_applied_when_not_requested(self) -> None:
+        before = timezone.now()
+        response = self.client.post(self.url, {"email": self.user.email, "password": self.password}, format="json")
+        self.assertEqual(response.status_code, 200)
+
+        self.assertIsNotNone(response.json()["expires_at"])
+        token = APIToken.objects.get(user=self.user)
+        self.assertIsNotNone(token.expires_at)
+        # ~90 days (settings default), allow a small window for clock + request time.
+        expected = before + timedelta(days=90)
+        self.assertAlmostEqual(token.expires_at, expected, delta=timedelta(minutes=5))
+
+    def test_requested_ttl_is_honored_and_clamped(self) -> None:
+        self.client.post(
+            self.url,
+            {"email": self.user.email, "password": self.password, "ttl_days": 7},
+            format="json",
+        )
+        token = APIToken.objects.get(user=self.user)
+        self.assertAlmostEqual(token.expires_at, timezone.now() + timedelta(days=7), delta=timedelta(minutes=5))
+
+    def test_requested_ttl_above_max_is_clamped(self) -> None:
+        self.client.post(
+            self.url,
+            {"email": self.user.email, "password": self.password, "ttl_days": 100000},
+            format="json",
+        )
+        token = APIToken.objects.get(user=self.user)
+        # Clamped to API_TOKEN_MAX_TTL_DAYS (365), not the requested 100000.
+        self.assertAlmostEqual(token.expires_at, timezone.now() + timedelta(days=365), delta=timedelta(minutes=5))
+
+    @override_settings(API_TOKEN_DEFAULT_TTL_DAYS=500, API_TOKEN_MAX_TTL_DAYS=365)
+    def test_default_ttl_is_clamped_to_max(self) -> None:
+        """A misconfigured default must not out-live the configured maximum."""
+        self.client.post(self.url, {"email": self.user.email, "password": self.password}, format="json")
+        token = APIToken.objects.get(user=self.user)
+        self.assertAlmostEqual(token.expires_at, timezone.now() + timedelta(days=365), delta=timedelta(minutes=5))
+
+
+# ===============================================================================
+# TOKEN-LIMIT COUNTS ONLY LIVE TOKENS (review M3)
+# ===============================================================================
+
+
+class ObtainTokenLimitExpiredTests(TestCase):
+    """Expired tokens must not count toward the per-user limit (no rotation lockout)."""
+
+    def setUp(self) -> None:
+        self.client = APIClient()
+        self.password = "StrongPass123!"
+        self.user = User.objects.create_user(email="limit@test.com", password=self.password)
+        self.url = "/api/users/token/"
+
+    def test_expired_tokens_do_not_block_new_token(self) -> None:
+        # Fill the quota entirely with already-expired tokens.
+        for i in range(APIToken.MAX_TOKENS_PER_USER):
+            _create_token(self.user, name=f"old-{i}", expires_at=timezone.now() - timedelta(days=1))
+
+        response = self.client.post(self.url, {"email": self.user.email, "password": self.password}, format="json")
+
+        # Live count is 0, so issuance must succeed rather than report "Maximum".
+        self.assertEqual(response.status_code, 200)
+
+    def test_live_tokens_still_enforce_limit(self) -> None:
+        for i in range(APIToken.MAX_TOKENS_PER_USER):
+            _create_token(self.user, name=f"live-{i}", expires_at=timezone.now() + timedelta(days=30))
+
+        response = self.client.post(self.url, {"email": self.user.email, "password": self.password}, format="json")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Maximum", response.json()["error"])
+
+
+# ===============================================================================
+# INPUT VALIDATION ON obtain_token
+# ===============================================================================
+
+
+class ObtainTokenInputValidationTests(TestCase):
+    """Malformed optional fields must yield 400 — never a 500 or a silent substitute."""
+
+    def setUp(self) -> None:
+        self.client = APIClient()
+        self.password = "StrongPass123!"
+        self.user = User.objects.create_user(email="validate@test.com", password=self.password)
+        self.url = "/api/users/token/"
+
+    def _post(self, **extra: object) -> object:
+        payload: dict[str, object] = {"email": self.user.email, "password": self.password, **extra}
+        return self.client.post(self.url, payload, format="json")
+
+    def test_non_string_name_is_rejected(self) -> None:
+        for bad_name in (123, {"nested": "object"}, ["a", "b"], None, True):
+            with self.subTest(name=bad_name):
+                response = self._post(name=bad_name)
+                self.assertEqual(response.status_code, 400)
+        self.assertEqual(APIToken.objects.filter(user=self.user).count(), 0)
+
+    def test_control_characters_in_name_are_rejected(self) -> None:
+        """A newline in the name could forge log lines (the name is logged verbatim)."""
+        response = self._post(name="ci\n[Auth] Token revoked for: admin")
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(APIToken.objects.filter(user=self.user).count(), 0)
+
+    def test_name_at_max_length_is_accepted(self) -> None:
+        response = self._post(name="x" * 100)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["name"], "x" * 100)
+
+    def test_name_over_max_length_is_rejected(self) -> None:
+        """Over-length names are rejected, not silently truncated."""
+        response = self._post(name="x" * 101)
+        self.assertEqual(response.status_code, 400)
+
+    def test_malformed_ttl_days_is_rejected_not_defaulted(self) -> None:
+        """A typo like '5d' must not silently become a 90-day token."""
+        response = self._post(ttl_days="5d")
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(APIToken.objects.filter(user=self.user).count(), 0)
+
+    def test_zero_and_negative_ttl_days_are_rejected(self) -> None:
+        for bad_ttl in (0, -5):
+            with self.subTest(ttl_days=bad_ttl):
+                response = self._post(ttl_days=bad_ttl)
+                self.assertEqual(response.status_code, 400)
+
+    def test_numeric_overflow_ttl_days_is_rejected(self) -> None:
+        # Raw JSON body: 1e400 parses to float('inf') server-side, and Python's
+        # json.dumps refuses to produce it, so the client helper can't be used.
+        raw = f'{{"email": "{self.user.email}", "password": "{self.password}", "ttl_days": 1e400}}'
+        response = self.client.post(self.url, data=raw, content_type="application/json")
+        self.assertEqual(response.status_code, 400)
+
+    def test_null_ttl_days_gets_default_ttl(self) -> None:
+        """Explicit null is treated as 'not specified' — the server default applies."""
+        response = self._post(ttl_days=None)
+        self.assertEqual(response.status_code, 200)
+        token = APIToken.objects.get(user=self.user)
+        self.assertIsNotNone(token.expires_at)
+
+
+# ===============================================================================
+# AUDIT TRAIL FOR TOKEN LIFECYCLE (ADR-0016)
+# ===============================================================================
+
+
+class APITokenAuditTests(TestCase):
+    """Token issuance and deletion must reach the immutable audit trail."""
+
+    def setUp(self) -> None:
+        self.client = APIClient()
+        self.password = "StrongPass123!"
+        self.user = User.objects.create_user(email="audit@test.com", password=self.password)
+        self.url = "/api/users/token/"
+
+    def test_obtain_token_emits_created_audit_event(self) -> None:
+        response = self.client.post(self.url, {"email": self.user.email, "password": self.password}, format="json")
+        raw_key = response.json()["token"]
+
+        events = AuditEvent.objects.filter(action="api_token_created")
+        self.assertEqual(events.count(), 1)
+        event = events.get()
+        self.assertEqual(event.new_values["key_prefix"], raw_key[:8])
+        self.assertEqual(event.new_values["user_id"], str(self.user.id))
+
+        # Neither the raw key nor its hash may ever reach the audit trail.
+        haystack = str(event.new_values) + str(event.old_values) + str(event.metadata) + event.description
+        self.assertNotIn(raw_key, haystack)
+        self.assertNotIn(APIToken.hash_key(raw_key), haystack)
+
+    def test_revoke_token_emits_deleted_audit_event(self) -> None:
+        token, raw_key = _create_token(self.user, name="to-revoke")
+
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {raw_key}")
+        response = self.client.delete("/api/users/token/revoke/")
+        self.assertEqual(response.status_code, 200)
+
+        events = AuditEvent.objects.filter(action="api_token_deleted")
+        self.assertEqual(events.count(), 1)
+        self.assertEqual(events.get().old_values["key_prefix"], token.key_prefix)
+
+    def test_purge_command_deletions_are_audited(self) -> None:
+        """Deletions outside the API (cron purge) must also leave audit rows."""
+        _create_token(self.user, name="expired", expires_at=timezone.now() - timedelta(days=1))
+
+        call_command("purge_expired_tokens")
+
+        self.assertEqual(APIToken.objects.count(), 0)
+        self.assertEqual(AuditEvent.objects.filter(action="api_token_deleted").count(), 1)
+
+    def test_api_token_events_categorized_as_authentication(self) -> None:
+        """api_token_* must classify as authentication, not fall through to the api_ integration prefix."""
+        self.assertEqual(AuditService._get_action_category("api_token_created"), "authentication")
+        self.assertEqual(AuditService._get_action_category("api_token_deleted"), "authentication")
+
+
+# ===============================================================================
+# EXPIRED-TOKEN PURGE TASK + SCHEDULING (ADR-0020)
+# ===============================================================================
+
+
+class PurgeExpiredTokensTests(TestCase):
+    """The purge task must delete exactly the expired tokens, and be scheduled."""
+
+    def setUp(self) -> None:
+        self.user = User.objects.create_user(email="purge@test.com", password="StrongPass123!")
+
+    def test_purge_deletes_only_expired_tokens(self) -> None:
+        _create_token(self.user, name="expired", expires_at=timezone.now() - timedelta(days=1))
+        live, _ = _create_token(self.user, name="live", expires_at=timezone.now() + timedelta(days=1))
+        eternal, _ = _create_token(self.user, name="no-expiry")
+
+        result = purge_expired_api_tokens()
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["purged"], 1)
+        remaining = set(APIToken.objects.values_list("pk", flat=True))
+        self.assertEqual(remaining, {live.pk, eternal.pk})
+
+    def test_purge_deletes_token_expiring_exactly_now(self) -> None:
+        """Boundary parity with is_expired: now >= expires_at means expired, so purge must take it."""
+        frozen = timezone.now()
+        _create_token(self.user, name="boundary", expires_at=frozen)
+
+        with patch("apps.users.tasks.timezone") as mock_tz:
+            mock_tz.now.return_value = frozen
+            result = purge_expired_api_tokens()
+
+        self.assertEqual(result["purged"], 1)
+        self.assertEqual(APIToken.objects.count(), 0)
+
+    def test_management_command_delegates_to_task(self) -> None:
+        _create_token(self.user, name="expired", expires_at=timezone.now() - timedelta(days=1))
+
+        call_command("purge_expired_tokens")
+
+        self.assertEqual(APIToken.objects.count(), 0)
+
+    def test_setup_registers_purge_schedule(self) -> None:
+        setup_user_security_scheduled_tasks()
+        self.assertTrue(Schedule.objects.filter(name="user-api-token-purge").exists())
+
+    def test_setup_is_idempotent(self) -> None:
+        setup_user_security_scheduled_tasks()
+        setup_user_security_scheduled_tasks()
+        self.assertEqual(Schedule.objects.filter(name="user-api-token-purge").count(), 1)
+
+
+# ===============================================================================
+# AUTHORIZATION HEADER PARSING (fail closed on recognized schemes)
+# ===============================================================================
+
+
+class HeaderParsingTests(TestCase):
+    """A recognized Bearer/Token scheme with malformed syntax must fail closed.
+
+    Returning None for malformed-but-recognized headers would silently hand the
+    request to the next authenticator; DRF's own TokenAuthentication raises.
+    Absent headers and foreign schemes still fall through untouched.
+    """
+
+    def setUp(self) -> None:
+        self.backend = HashedTokenAuthentication()
+        self.factory = APIRequestFactory()
+
+    def _auth(self, header: str) -> object:
+        request = self.factory.get("/api/users/token/me/", HTTP_AUTHORIZATION=header)
+        return self.backend.authenticate(request)
+
+    def test_absent_header_returns_none(self) -> None:
+        request = self.factory.get("/api/users/token/me/")
+        self.assertIsNone(self.backend.authenticate(request))
+
+    def test_unrecognized_scheme_returns_none(self) -> None:
+        self.assertIsNone(self._auth("Basic dXNlcjpwYXNz"))
+
+    def test_recognized_scheme_without_key_fails_closed(self) -> None:
+        for header in ("Bearer", "Token"):
+            with self.subTest(header=header), self.assertRaises(AuthenticationFailed):
+                self._auth(header)
+
+    def test_recognized_scheme_with_extra_parts_fails_closed(self) -> None:
+        for header in ("Bearer abc def", "Token abc def"):
+            with self.subTest(header=header), self.assertRaises(AuthenticationFailed):
+                self._auth(header)
+
+
+# ===============================================================================
+# STRAY AUTHORIZATION HEADERS ON SELF-AUTHENTICATING ENDPOINTS
+# ===============================================================================
+
+
+class StrayAuthorizationHeaderTests(TestCase):
+    """Endpoints that own their authentication must ignore Authorization headers.
+
+    DRF runs default authenticators before the view body, so without
+    authentication_classes([]) a stray or invalid Bearer/Token header 401s
+    HMAC- and credential-authenticated endpoints before their own auth runs.
+    """
+
+    def setUp(self) -> None:
+        self.client = APIClient()
+        self.password = "StrongPass123!"
+        self.user = User.objects.create_user(email="stray@test.com", password=self.password)
+
+    def test_health_check_ignores_stray_bearer_header(self) -> None:
+        response = self.client.get("/api/users/health/", HTTP_AUTHORIZATION="Bearer stray-garbage")
+        self.assertEqual(response.status_code, 200)
+
+    def test_obtain_token_ignores_stray_bearer_header(self) -> None:
+        """Credential auth must win — a leftover header from a shared HTTP client is not our business."""
+        response = self.client.post(
+            "/api/users/token/",
+            {"email": self.user.email, "password": self.password},
+            format="json",
+            HTTP_AUTHORIZATION="Bearer stray-garbage",
+        )
+        self.assertEqual(response.status_code, 200)
+
+
+@override_settings(PLATFORM_API_SECRET=HMAC_TEST_SECRET, MIDDLEWARE=HMAC_TEST_MIDDLEWARE)
+class StrayAuthorizationHeaderHMACTests(HMACTestMixin, TestCase):
+    """A validly HMAC-signed portal request must not be vetoed by token auth."""
+
+    def setUp(self) -> None:
+        self.client = APIClient()
+        self.user = User.objects.create_user(email="stray-hmac@test.com", password="StrongPass123!")
+
+    def test_hmac_endpoint_ignores_stray_bearer_header(self) -> None:
+        """A validly HMAC-signed portal request must not be vetoed by token auth."""
+        customer = Customer.objects.create(
+            name="Stray Header SRL",
+            company_name="Stray Header SRL",
+            customer_type="company",
+            primary_email="stray-hmac@example.com",
+            status="active",
+        )
+        CustomerMembership.objects.create(customer=customer, user=self.user, role="owner", is_primary=True)
+
+        response = self.portal_post(
+            "/api/orders/",
+            {"customer_id": customer.id, "user_id": self.user.id},
+            HTTP_AUTHORIZATION="Bearer stray-garbage",
+        )
+
+        self.assertEqual(response.status_code, 200, getattr(response, "content", b""))
