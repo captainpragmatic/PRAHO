@@ -268,7 +268,7 @@ def obtain_token(request: HttpRequest) -> Response:
 
     Response:
     {
-        "token": "9944b09199c62bcf9418ad846dd0e4bbdfc6ee4b",
+        "token": "<40-char-hex-key>",
         "user_id": 123,
         "email": "user@example.com"
     }
