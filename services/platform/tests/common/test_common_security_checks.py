@@ -5,11 +5,15 @@ Tests the Django system checks that validate security configuration
 to ensure proper IP trust and middleware setup.
 """
 
+import types
+
 from django.core.checks import Error
 from django.core.checks import Warning as DjangoWarning
 from django.test import TestCase, override_settings
 
+from apps.common import checks
 from apps.common.checks import (
+    check_api_token_ttl_configuration,
     check_ip_trust_configuration,
     check_proxy_ssl_configuration,
     check_security_middleware_configuration,
@@ -22,12 +26,10 @@ class TestIPTrustSystemChecks(TestCase):
     def test_missing_trusted_proxy_list_warning(self):
         """Test warning when IPWARE_TRUSTED_PROXY_LIST is not defined."""
         # Create a mock settings object without the attribute
-        import types
         fake_settings = types.SimpleNamespace()
         fake_settings.DEBUG = True  # Set some required attribute
 
         # Temporarily replace settings with our mock
-        from apps.common import checks
         original_settings = checks.settings
         checks.settings = fake_settings
 
@@ -206,3 +208,39 @@ class TestMiddlewareSystemChecks(TestCase):
 
             # Should have no errors or warnings
             self.assertEqual(len(errors), 0)
+
+
+class TestAPITokenTTLChecks(TestCase):
+    """API token TTL settings must form a coherent expiry policy at startup."""
+
+    def test_valid_configuration_produces_no_findings(self):
+        """The shipped defaults (90/365) are a coherent policy."""
+        with override_settings(API_TOKEN_DEFAULT_TTL_DAYS=90, API_TOKEN_MAX_TTL_DAYS=365):
+            self.assertEqual(check_api_token_ttl_configuration(None), [])
+
+    def test_non_positive_max_is_an_error(self):
+        """MAX < 1 would turn every caller-supplied TTL into 'no expiry'."""
+        for bad_max in (0, -30):
+            with self.subTest(max_ttl=bad_max), override_settings(
+                API_TOKEN_DEFAULT_TTL_DAYS=90, API_TOKEN_MAX_TTL_DAYS=bad_max
+            ):
+                errors = check_api_token_ttl_configuration(None)
+                self.assertEqual(len(errors), 1)
+                self.assertIsInstance(errors[0], Error)
+                self.assertEqual(errors[0].id, 'security.E062')
+
+    def test_default_exceeding_max_is_an_error(self):
+        """An omitted TTL must never produce a longer-lived token than the max allows."""
+        with override_settings(API_TOKEN_DEFAULT_TTL_DAYS=730, API_TOKEN_MAX_TTL_DAYS=365):
+            errors = check_api_token_ttl_configuration(None)
+            self.assertEqual(len(errors), 1)
+            self.assertIsInstance(errors[0], Error)
+            self.assertEqual(errors[0].id, 'security.E063')
+
+    def test_zero_default_is_explicit_opt_out_warning(self):
+        """DEFAULT <= 0 is the documented no-expiry opt-out — allowed, but flagged."""
+        with override_settings(API_TOKEN_DEFAULT_TTL_DAYS=0, API_TOKEN_MAX_TTL_DAYS=365):
+            findings = check_api_token_ttl_configuration(None)
+            self.assertEqual(len(findings), 1)
+            self.assertIsInstance(findings[0], DjangoWarning)
+            self.assertEqual(findings[0].id, 'security.W063')

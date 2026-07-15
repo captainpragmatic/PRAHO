@@ -12,7 +12,7 @@ Covers:
 from datetime import timedelta
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
 
@@ -376,6 +376,13 @@ class ObtainTokenExpiryTests(TestCase):
         )
         token = APIToken.objects.get(user=self.user)
         # Clamped to API_TOKEN_MAX_TTL_DAYS (365), not the requested 100000.
+        self.assertAlmostEqual(token.expires_at, timezone.now() + timedelta(days=365), delta=timedelta(minutes=5))
+
+    @override_settings(API_TOKEN_DEFAULT_TTL_DAYS=500, API_TOKEN_MAX_TTL_DAYS=365)
+    def test_default_ttl_is_clamped_to_max(self) -> None:
+        """A misconfigured default must not out-live the configured maximum."""
+        self.client.post(self.url, {"email": self.user.email, "password": self.password}, format="json")
+        token = APIToken.objects.get(user=self.user)
         self.assertAlmostEqual(token.expires_at, timezone.now() + timedelta(days=365), delta=timedelta(minutes=5))
 
 
