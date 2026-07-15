@@ -4,7 +4,6 @@ Custom token authentication backend with SHA-256 hashing, expiry, and Bearer sup
 Closes ADR-0031 Gaps 2 (expiry), 3 (last_used_at), 5 (hashed storage), 8 (Bearer scheme).
 """
 
-import hashlib
 import logging
 
 from django.db.models import Q
@@ -47,7 +46,8 @@ class HashedTokenAuthentication(BaseAuthentication):  # type: ignore[misc]  # DR
 
         raw_key = parts[1]
 
-        key_hash = hashlib.sha256(raw_key.encode("utf-8")).hexdigest()
+        # Use the model's own hashing so issuance and authentication can never diverge.
+        key_hash = APIToken.hash_key(raw_key)
 
         try:
             token = APIToken.objects.select_related("user").get(key_hash=key_hash)

@@ -457,7 +457,9 @@ def purge_expired_api_tokens() -> dict[str, Any]:
     logger.info("🔑 [UserSecurity] Starting expired API token purge")
 
     try:
-        count, _ = APIToken.objects.filter(expires_at__lt=timezone.now()).delete()
+        # __lte, not __lt: matches APIToken.is_expired (now >= expires_at), so a token
+        # expiring exactly at the tick is purged rather than lingering one cycle.
+        count, _ = APIToken.objects.filter(expires_at__lte=timezone.now()).delete()
         logger.info(f"✅ [UserSecurity] Purged {count} expired API token(s)")
         return {"success": True, "purged": count}
     except Exception as e:

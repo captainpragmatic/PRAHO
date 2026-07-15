@@ -569,7 +569,7 @@ def check_csp_nonce_middleware_order(app_configs: Any, **kwargs: Any) -> list[Er
 
 
 @register(Tags.security)
-def check_api_token_ttl_configuration(app_configs: Any, **kwargs: Any) -> list[Any]:
+def check_api_token_ttl_configuration(app_configs: Any, **kwargs: Any) -> list[Error | DjangoWarning]:
     """
     Check that the API token TTL settings form a coherent expiry policy (ADR-0031).
 
@@ -577,7 +577,7 @@ def check_api_token_ttl_configuration(app_configs: Any, **kwargs: Any) -> list[A
     back to API_TOKEN_DEFAULT_TTL_DAYS, so an incoherent pair silently changes
     token lifetimes instead of failing. Catch it at startup instead.
     """
-    findings: list[Any] = []
+    findings: list[Error | DjangoWarning] = []
 
     default_ttl = getattr(settings, "API_TOKEN_DEFAULT_TTL_DAYS", 90)
     max_ttl = getattr(settings, "API_TOKEN_MAX_TTL_DAYS", 365)
@@ -586,8 +586,9 @@ def check_api_token_ttl_configuration(app_configs: Any, **kwargs: Any) -> list[A
         findings.append(
             Error(
                 f"API_TOKEN_MAX_TTL_DAYS is {max_ttl} — it must be >= 1",
-                hint="A non-positive maximum would clamp every caller-supplied TTL into 'no expiry'. "
-                "Use API_TOKEN_DEFAULT_TTL_DAYS=0 if you intend to disable default expiry.",
+                hint="A non-positive maximum makes every issued token expire immediately (min(ttl, max) <= 0). "
+                "Set API_TOKEN_MAX_TTL_DAYS to a positive value; use API_TOKEN_DEFAULT_TTL_DAYS=0 only to "
+                "disable the default expiry.",
                 id="security.E062",
             )
         )
