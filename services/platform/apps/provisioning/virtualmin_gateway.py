@@ -28,7 +28,7 @@ from django.utils import timezone
 
 from apps.common.encryption import DecryptionError
 from apps.common.outbound_http import OutboundPolicy, safe_request
-from apps.common.types import Err, Ok, Result
+from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 from apps.settings.services import SettingsService
 
 from .virtualmin_models import VirtualminServer
@@ -748,7 +748,10 @@ class VirtualminGateway:
 
         # Rate limiting check
         if not self._check_rate_limit(program):
-            return Err(VirtualminRateLimitedError(f"Rate limit exceeded for {program}", self.server.hostname, program))
+            return Err(
+                VirtualminRateLimitedError(f"Rate limit exceeded for {program}", self.server.hostname, program),
+                retriability=Retriability.RETRIABLE,
+            )
 
         # Prepare request parameters
         api_params = {"program": program, **params}
@@ -809,7 +812,10 @@ class VirtualminGateway:
 
         logger.error(f"❌ [Virtualmin] {program} failed after {execution_time:.2f}s: {error_msg}")
 
-        return Err(VirtualminTransientError(error_msg, self.server.hostname, program))
+        return Err(
+            VirtualminTransientError(error_msg, self.server.hostname, program),
+            retriability=Retriability.RETRIABLE,
+        )
 
     def _make_request(self, params: dict[str, Any], attempt: int) -> requests.Response:
         """
@@ -931,9 +937,12 @@ class VirtualminGateway:
                 )
             else:
                 error = result.unwrap_err()
-                return Err(f"Connection test failed: {error}")
+                # Propagate the inner call's signal — a validation error is permanent,
+                # blanket RETRIABLE here would invite a retry loop on it.
+                return Err(f"Connection test failed: {error}", retriability=retriability_of(result))
 
         except Exception as e:
+            # No signal available for unexpected exceptions — stay at the UNKNOWN default.
             return Err(f"Connection test error: {e}")
 
     def get_server_info(self) -> Result[dict[str, Any], str]:

@@ -21,7 +21,7 @@ from django.db import models, transaction
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
-from apps.common.types import Err, Ok, Result
+from apps.common.types import Err, Ok, Result, retriability_of
 
 from .security_utils import IdempotencyManager
 from .virtualmin_backup_service import BackupConfig, RestoreConfig
@@ -313,7 +313,7 @@ class VirtualminProvisioningService:
                 error = result.unwrap_err()
                 error_msg = str(error)
                 job.mark_failed(error_msg)
-                return Err(error_msg)
+                return Err(error_msg, retriability=retriability_of(result))
 
         except Exception as e:
             logger.exception(f"Error executing domain creation: {e}")
@@ -629,7 +629,7 @@ class VirtualminProvisioningService:
                     error_msg = str(error)
                     job.mark_failed(error_msg)
                     IdempotencyManager.clear(idempotency_key)
-                    return Err(error_msg)
+                    return Err(error_msg, retriability=retriability_of(result))
 
             except Exception:
                 IdempotencyManager.clear(idempotency_key)
@@ -752,7 +752,7 @@ class VirtualminProvisioningService:
                     error_msg = str(error)
                     job.mark_failed(error_msg)
                     IdempotencyManager.clear(idempotency_key)
-                    return Err(error_msg)
+                    return Err(error_msg, retriability=retriability_of(result))
 
             except Exception:
                 IdempotencyManager.clear(idempotency_key)
@@ -910,7 +910,7 @@ class VirtualminProvisioningService:
                     error_msg = str(error)
                     job.mark_failed(error_msg)
                     IdempotencyManager.clear(idempotency_key)
-                    return Err(error_msg)
+                    return Err(error_msg, retriability=retriability_of(result))
 
             except Exception:
                 IdempotencyManager.clear(idempotency_key)
@@ -1025,6 +1025,8 @@ class VirtualminProvisioningService:
             gateway = self._get_gateway(server)
             return gateway.test_connection()
         except Exception as e:
+            # Gateway setup failures (no server configured, credential decryption)
+            # are not transient — stay at the UNKNOWN default.
             return Err(f"Connection test failed: {e}")
 
     def sync_account_from_virtualmin(self, account: VirtualminAccount) -> Result[dict[str, Any], str]:
@@ -1195,7 +1197,7 @@ class VirtualminServerManagementService:
                 server.save(update_fields=["last_health_check", "health_check_error", "status", "updated_at"])
 
                 logger.warning(f"⚠️ [ServerManagement] Health check failed for {server.hostname}: {error_msg}")
-                return Err(error_msg)
+                return Err(error_msg, retriability=retriability_of(result))
 
         except Exception as e:
             logger.exception(f"Error in health check for {server.hostname}: {e}")
