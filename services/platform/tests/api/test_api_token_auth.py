@@ -15,11 +15,13 @@ from django.contrib.auth import get_user_model
 from django.core.management import call_command
 from django.test import TestCase, override_settings
 from django.utils import timezone
+from django_q.models import Schedule
 from rest_framework.test import APIClient
 
 from apps.audit.models import AuditEvent
 from apps.audit.services import AuditService
 from apps.users.models import APIToken
+from apps.users.tasks import purge_expired_api_tokens, setup_user_security_scheduled_tasks
 
 User = get_user_model()
 
@@ -544,3 +546,43 @@ class APITokenAuditTests(TestCase):
         """api_token_* must classify as authentication, not fall through to the api_ integration prefix."""
         self.assertEqual(AuditService._get_action_category("api_token_created"), "authentication")
         self.assertEqual(AuditService._get_action_category("api_token_deleted"), "authentication")
+
+
+# ===============================================================================
+# EXPIRED-TOKEN PURGE TASK + SCHEDULING (ADR-0020)
+# ===============================================================================
+
+
+class PurgeExpiredTokensTests(TestCase):
+    """The purge task must delete exactly the expired tokens, and be scheduled."""
+
+    def setUp(self) -> None:
+        self.user = User.objects.create_user(email="purge@test.com", password="StrongPass123!")
+
+    def test_purge_deletes_only_expired_tokens(self) -> None:
+        _create_token(self.user, name="expired", expires_at=timezone.now() - timedelta(days=1))
+        live, _ = _create_token(self.user, name="live", expires_at=timezone.now() + timedelta(days=1))
+        eternal, _ = _create_token(self.user, name="no-expiry")
+
+        result = purge_expired_api_tokens()
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["purged"], 1)
+        remaining = set(APIToken.objects.values_list("pk", flat=True))
+        self.assertEqual(remaining, {live.pk, eternal.pk})
+
+    def test_management_command_delegates_to_task(self) -> None:
+        _create_token(self.user, name="expired", expires_at=timezone.now() - timedelta(days=1))
+
+        call_command("purge_expired_tokens")
+
+        self.assertEqual(APIToken.objects.count(), 0)
+
+    def test_setup_registers_purge_schedule(self) -> None:
+        setup_user_security_scheduled_tasks()
+        self.assertTrue(Schedule.objects.filter(name="user-api-token-purge").exists())
+
+    def test_setup_is_idempotent(self) -> None:
+        setup_user_security_scheduled_tasks()
+        setup_user_security_scheduled_tasks()
+        self.assertEqual(Schedule.objects.filter(name="user-api-token-purge").count(), 1)

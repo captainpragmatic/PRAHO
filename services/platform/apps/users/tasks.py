@@ -23,7 +23,7 @@ from apps.audit.models import AuditEvent
 from apps.audit.services import AuditService
 from apps.settings.services import SettingsService
 from apps.users.mfa import WebAuthnCredential
-from apps.users.models import User, UserLoginLog
+from apps.users.models import APIToken, User, UserLoginLog
 
 logger = logging.getLogger(__name__)
 
@@ -444,6 +444,27 @@ def cleanup_expired_password_reset_tokens() -> dict[str, Any]:
         return {"success": False, "error": str(e), "results": results}
 
 
+def purge_expired_api_tokens() -> dict[str, Any]:
+    """
+    Delete API tokens whose expires_at is in the past (ADR-0031).
+
+    Uses queryset delete(), which still fires pre_delete per row so every
+    purged token leaves an api_token_deleted audit event (ADR-0016).
+
+    Returns:
+        Dictionary with purge results
+    """
+    logger.info("🔑 [UserSecurity] Starting expired API token purge")
+
+    try:
+        count, _ = APIToken.objects.filter(expires_at__lt=timezone.now()).delete()
+        logger.info(f"✅ [UserSecurity] Purged {count} expired API token(s)")
+        return {"success": True, "purged": count}
+    except Exception as e:
+        logger.exception(f"💥 [UserSecurity] Error purging expired API tokens: {e}")
+        return {"success": False, "error": str(e)}
+
+
 # ===============================================================================
 # TASK QUEUE WRAPPER FUNCTIONS
 # ===============================================================================
@@ -490,6 +511,7 @@ def setup_user_security_scheduled_tasks() -> dict[str, str]:
                 "user-login-tracking-rotation",
                 "user-suspicious-pattern-audit",
                 "user-password-reset-cleanup",
+                "user-api-token-purge",
             ]
         ).values_list("name", flat=True)
     )
@@ -548,6 +570,20 @@ def setup_user_security_scheduled_tasks() -> dict[str, str]:
         tasks_created["password_reset_cleanup"] = (
             "already_exists"  # Not a real secret: password field name in query  # noqa: S105  # Not a real secret: config key name
         )
+
+    # Expired API token purge daily at 3 AM (ADR-0031 expiry is enforced at
+    # authentication time; the purge keeps the table and the per-user quota scan lean)
+    if "user-api-token-purge" not in existing_tasks:
+        schedule(
+            "apps.users.tasks.purge_expired_api_tokens",
+            schedule_type=Schedule.CRON,
+            cron="0 3 * * *",  # 3 AM daily
+            name="user-api-token-purge",
+            cluster="praho-cluster",
+        )
+        tasks_created["api_token_purge"] = "created"  # noqa: S105  # Not a secret: schedule status flag
+    else:
+        tasks_created["api_token_purge"] = "already_exists"  # noqa: S105  # Not a secret: schedule status flag
 
     logger.info(f"✅ [UserSecurity] Scheduled tasks setup: {tasks_created}")
     return tasks_created
