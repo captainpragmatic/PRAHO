@@ -91,6 +91,45 @@ class ServiceSearchStatusEmptyStateTests(TestCase):
         self.assertEqual(mock_get.call_args.kwargs.get("status"), "expired")
 
     @patch("apps.services.views.services_api.get_customer_services")
+    def test_search_no_match_shows_search_empty_not_status_empty(self, mock_get: object) -> None:
+        """A status tab WITH services + a search term matching none of them must
+        say the search returned nothing — not that the status tab is empty.
+
+        Regression: with status_filter set, an empty *search* result rendered the
+        status-tab-empty heading ('No <Status> services'), which is misleading —
+        the tab does have services, the query just matched none.
+        """
+        # API returns a real service for the "active" tab; the search term below
+        # matches none of its fields, so _filter_services_by_query empties the list.
+        mock_get.return_value = {
+            "results": [{"service_name": "Web Hosting", "status": "active", "domain": "example.com"}],
+            "count": 1,
+        }
+
+        resp = self.client.get(
+            reverse("services:search_api"),
+            {"status": "active", "q": "zzz-no-such-service"},
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        body = resp.content.decode()
+        self.assertNotIn("No Active services", body)
+        self.assertIn("No services match", body)
+        self.assertIn("zzz-no-such-service", body)
+
+    @patch("apps.services.views.services_api.get_customer_services")
+    def test_search_empty_state_escapes_query(self, mock_get: object) -> None:
+        """The echoed search term is user input — it must be autoescaped."""
+        mock_get.return_value = {"results": [], "count": 0}
+
+        resp = self.client.get(reverse("services:search_api"), {"q": "<script>alert(2)</script>"})
+
+        self.assertEqual(resp.status_code, 200)
+        body = resp.content.decode()
+        self.assertIn("No services match", body)
+        self.assertNotIn("<script>alert(2)</script>", body)
+
+    @patch("apps.services.views.services_api.get_customer_services")
     def test_unknown_status_is_not_reflected_in_search_partial(self, mock_get: object) -> None:
         """?status= is attacker-influenced; unknown values must not be echoed.
 

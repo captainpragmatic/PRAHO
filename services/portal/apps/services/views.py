@@ -190,6 +190,7 @@ def service_search_api(request: HttpRequest) -> HttpResponse:
                 "paginator_data": paginator_data,
                 "pagination_params": pagination_params,
                 "status_filter": status_filter,
+                "search_query": search_query,
             },
         )
 
@@ -200,6 +201,7 @@ def service_search_api(request: HttpRequest) -> HttpResponse:
             "paginator_data": PaginatorData(total_count=0, current_page=1, page_size=20),
             "pagination_params": "",
             "status_filter": status_filter,
+            "search_query": search_query,
             **error_ctx,
         }
         return render(request, "services/partials/services_table.html", context)
