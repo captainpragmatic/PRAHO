@@ -4,6 +4,7 @@ Shared utilities, types, and middleware.
 """
 
 import logging
+import os
 import socket
 from collections.abc import Sequence
 from typing import Any
@@ -25,6 +26,32 @@ class CommonConfig(AppConfig):
     def ready(self) -> None:
         _validate_internal_service_domains()
         _validate_throttle_rates_at_startup()
+        _validate_encryption_keyring_at_startup()
+
+
+def _validate_encryption_keyring_at_startup() -> None:
+    """Fail the deploy if the configured AES-256-GCM keyring has any malformed key.
+
+    ``get_encryption_keys()`` strict-decodes every key in the ring. Without this eager
+    check a typo in ``DJANGO_ENCRYPTION_KEY_PREVIOUS`` would pass health checks (which
+    only exercise the current key) and then break EVERY decryption at request time —
+    where ``EncryptedJSONField`` masks it as a silent ``None`` read. Validating at
+    startup turns that latent, silent production failure into a loud, blocked deploy.
+    """
+    from apps.common.encryption import get_encryption_keys  # local import avoids an app-load import cycle
+
+    # Only validate when encryption is actually configured — leave unconfigured
+    # dev/bootstrap environments (no key at all) untouched.
+    configured = (
+        getattr(settings, "ENCRYPTION_KEYS", None)
+        or getattr(settings, "ENCRYPTION_KEY", None)
+        or os.environ.get("DJANGO_ENCRYPTION_KEY")
+    )
+    if not configured:
+        return
+
+    # Raises ImproperlyConfigured on any malformed current or previous key.
+    get_encryption_keys()
 
 
 def _validate_internal_service_domains() -> None:

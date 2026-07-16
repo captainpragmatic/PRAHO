@@ -13,6 +13,7 @@ from apps.common.encryption import (
     VERSIONED_V1_PREFIX,
     VERSIONED_V2_PREFIX,
     DecryptionError,
+    EncryptionError,
     _clear_aesgcm_cache,
     decrypt_if_needed,
     decrypt_sensitive_data,
@@ -369,3 +370,89 @@ class TestBackupCodes(SimpleTestCase):
         hashed = hash_backup_code(code)
         self.assertTrue(verify_backup_code(code, hashed))
         self.assertFalse(verify_backup_code("87654321", hashed))
+
+
+# ===============================================================================
+# AAD LENGTH GUARD (F1) — reject > uint16 AAD before doing any AES-GCM work
+# ===============================================================================
+
+
+@override_settings(ENCRYPTION_KEY=TEST_KEY)
+class TestAADLengthGuard(SimpleTestCase):
+    """The v2 wire format encodes AAD length as a 2-byte uint16; guard the boundary."""
+
+    def setUp(self) -> None:
+        _clear_aesgcm_cache()
+
+    def test_aad_over_uint16_max_raises_encryption_error(self) -> None:
+        """AAD > 65535 bytes must raise a clear EncryptionError, not a wrapped struct error."""
+        with self.assertRaises(EncryptionError) as ctx:
+            encrypt_sensitive_data("secret", aad=b"A" * 65536)
+        # The message must name the offending length so the failure is actionable.
+        self.assertIn("65536", str(ctx.exception))
+
+    def test_aad_at_uint16_max_boundary_succeeds(self) -> None:
+        """Exactly 65535 bytes of AAD is still valid (boundary just below the guard)."""
+        encrypted = encrypt_sensitive_data("secret", aad=b"A" * 65535)
+        self.assertTrue(encrypted.startswith(VERSIONED_V2_PREFIX))
+        self.assertEqual(decrypt_sensitive_data(encrypted), "secret")
+
+
+# ===============================================================================
+# KEYRING STRICT VALIDATION (F2) — no silent partial keyring, fail loud/early
+# ===============================================================================
+
+
+class TestKeyringStrictValidation(SimpleTestCase):
+    """A malformed key anywhere in the ring must fail loudly, not be silently dropped."""
+
+    def setUp(self) -> None:
+        _clear_aesgcm_cache()
+
+    @override_settings(ENCRYPTION_KEYS=[TEST_KEY, "not-valid-base64-@@@@"])
+    def test_malformed_previous_key_raises_not_skipped(self) -> None:
+        """A bad previous key must raise — silently skipping it would hide unreadable old data."""
+        with self.assertRaises(ImproperlyConfigured):
+            get_encryption_keys()
+
+    @override_settings(ENCRYPTION_KEYS=(TEST_KEY, ALT_KEY))
+    def test_tuple_encryption_keys_is_honored(self) -> None:
+        """ENCRYPTION_KEYS given as a tuple must be used, not silently ignored (dropping previous keys)."""
+        keys = get_encryption_keys()
+        self.assertEqual(len(keys), 2)
+
+    @override_settings(ENCRYPTION_KEYS=None, ENCRYPTION_KEY=TEST_KEY + "!!!!")
+    def test_key_with_junk_chars_rejected_by_strict_base64(self) -> None:
+        """Lenient base64 silently drops junk chars (decoding to a valid 32 bytes); strict must reject."""
+        with self.assertRaises(ImproperlyConfigured):
+            get_encryption_keys()
+
+    @override_settings(ENCRYPTION_KEYS=[TEST_KEY, ALT_KEY])
+    def test_valid_ring_still_rotates(self) -> None:
+        """Strict validation must not break a valid [current, previous] rotation ring."""
+        _clear_aesgcm_cache()
+        # Encrypt under ALT (previous) key, decrypt via the full ring.
+        alt_bytes = base64.urlsafe_b64decode(ALT_KEY)
+        aesgcm = AESGCM(alt_bytes)
+        nonce = os.urandom(12)
+        ct = aesgcm.encrypt(nonce, b"rotated-data", None)
+        wire = VERSIONED_V1_PREFIX + base64.urlsafe_b64encode(nonce + ct).decode("ascii")
+        self.assertEqual(decrypt_sensitive_data(wire), "rotated-data")
+
+
+class TestKeyringStartupValidation(SimpleTestCase):
+    """CommonConfig.ready() must fail the deploy on a malformed keyring, not defer to request time."""
+
+    @override_settings(ENCRYPTION_KEYS=[TEST_KEY, "@@@not-base64@@@"])
+    def test_startup_validator_raises_on_malformed_previous(self) -> None:
+        from apps.common.apps import _validate_encryption_keyring_at_startup  # noqa: PLC0415
+
+        with self.assertRaises(ImproperlyConfigured):
+            _validate_encryption_keyring_at_startup()
+
+    @override_settings(ENCRYPTION_KEYS=[TEST_KEY, ALT_KEY])
+    def test_startup_validator_passes_on_valid_ring(self) -> None:
+        from apps.common.apps import _validate_encryption_keyring_at_startup  # noqa: PLC0415
+
+        # Must not raise.
+        _validate_encryption_keyring_at_startup()

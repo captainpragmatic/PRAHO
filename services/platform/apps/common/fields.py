@@ -13,7 +13,6 @@ import base64
 import json
 import logging
 import struct
-import threading
 from typing import Any
 
 from django.db import models
@@ -44,10 +43,6 @@ def _extract_embedded_aad(encrypted_str: str) -> bytes | None:
         return None
 
 
-# Thread-local storage for passing AAD from pre_save to get_prep_value
-_aad_context = threading.local()
-
-
 class EncryptedJSONField(models.JSONField):
     """JSONField with transparent AES-256-GCM encryption at rest.
 
@@ -55,9 +50,16 @@ class EncryptedJSONField(models.JSONField):
     Legacy unencrypted data (plain JSON objects) is handled transparently —
     returned as-is on read and encrypted on next save.
 
-    AAD binding: encrypts with ``aad=b"{db_table}:{field_name}:{pk}"`` so that
-    ciphertext is context-bound. Swapping encrypted values between tables
-    will fail GCM authentication on read.
+    AAD binding: encrypts with ``aad=b"{db_table}:{field_name}:{pk}"``. The
+    ``{db_table}:{field_name}`` component is verified on read, so ciphertext
+    transplanted between a DIFFERENT table or field fails on read.
+
+    Scope limits (do not over-read the protection):
+      * Same-table/same-field row→row transplant is NOT currently prevented — the
+        pk component is not verified on read, and it is empty at INSERT for
+        autoincrement pks. Tracked in issue #205.
+      * ``require_v2=False`` (the default) is a COMPATIBILITY mode: it still reads
+        v1/legacy/plaintext and therefore does NOT enforce downgrade protection.
 
     Wire format in DB: jsonb string containing ``"aes:v2:<base64>"`` (AAD-bound)
     Python interface: plain dict (identical to standard JSONField)
@@ -84,26 +86,41 @@ class EncryptedJSONField(models.JSONField):
         return f"{table}:{field}:{pk}".encode()
 
     def pre_save(self, model_instance: models.Model, add: bool) -> Any:
-        """Stash AAD context for get_prep_value to use during this save."""
+        """Encrypt the value with this field's AAD context and return the wire string.
+
+        Encrypting here (rather than stashing AAD in shared state for get_prep_value)
+        keeps each field's AAD bound to its own value — Django calls every field's
+        pre_save before preparing any value, so a shared slot would let one encrypted
+        field clobber another's context. The in-memory instance keeps the plaintext
+        dict; only the DB write receives the ciphertext.
+        """
         value = getattr(model_instance, self.attname)
-        if value is not None and not (isinstance(value, str) and value.startswith(ENCRYPTED_PREFIX)):
-            _aad_context.aad = self._build_aad(model_instance)
-        else:
-            _aad_context.aad = None
-        return super().pre_save(model_instance, add)
+        if value is None:
+            return None
+        if isinstance(value, str) and value.startswith(ENCRYPTED_PREFIX):
+            # Already a wire string (e.g. a migration writing a pre-built value).
+            return value
+        aad = self._build_aad(model_instance)
+        json_str = json.dumps(value, cls=self.encoder)
+        return encrypt_sensitive_data(json_str, aad=aad)
 
     def get_prep_value(self, value: Any) -> Any:
-        """Encrypt dict → JSON string → AES-256-GCM → store as JSON string in DB."""
+        """Prepare an already-encrypted wire string for the DB adapter.
+
+        Normal saves flow through pre_save, which returns the encrypted string.
+        A raw dict reaching here means a write path that bypassed pre_save —
+        ``QuerySet.update()``, ``bulk_update()``, or a raw/fixture save — which
+        cannot bind AAD context. Fail loudly rather than silently persist an
+        unbound (v1) ciphertext.
+        """
         if value is None:
             return None
         if isinstance(value, str) and value.startswith(ENCRYPTED_PREFIX):
             return super().get_prep_value(value)
-        json_str = json.dumps(value, cls=self.encoder)
-        aad = getattr(_aad_context, "aad", None)
-        encrypted = encrypt_sensitive_data(json_str, aad=aad)
-        # Clear after use
-        _aad_context.aad = None
-        return super().get_prep_value(encrypted)
+        raise TypeError(
+            f"{type(self).__name__} cannot be written via QuerySet.update()/bulk_update()/raw save; "
+            "use Model.save() so the value is encrypted with AAD context."
+        )
 
     def from_db_value(self, value: Any, expression: Any, connection: Any) -> Any:
         """Decrypt on read; handle legacy unencrypted data transparently.
@@ -169,4 +186,10 @@ class EncryptedJSONField(models.JSONField):
         """Return deconstruction for migrations."""
         name, path, args, kwargs = super().deconstruct()
         path = "apps.common.fields.EncryptedJSONField"
+        # Preserve the security-relevant require_v2 flag so Field.clone() and historical
+        # migration models don't silently revert to the default (unenforced) behavior.
+        # It's read-time-only (no DB column), so a non-default value yields a state-only
+        # migration; the default False stays omitted, so no migration is generated today.
+        if self.require_v2:
+            kwargs["require_v2"] = True
         return name, path, list(args), kwargs

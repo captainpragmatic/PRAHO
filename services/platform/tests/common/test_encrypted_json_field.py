@@ -1,13 +1,19 @@
 """Tests for EncryptedJSONField — AES-256-GCM transparent encryption at rest."""
 
 import json
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.db import connection
-from django.test import TestCase, override_settings
+from django.test import SimpleTestCase, TestCase, override_settings
 
-from apps.common.encryption import _clear_aesgcm_cache, encrypt_sensitive_data
-from apps.common.fields import _extract_embedded_aad
+from apps.common.encryption import (
+    VERSIONED_V2_PREFIX,
+    _clear_aesgcm_cache,
+    decrypt_sensitive_data,
+    encrypt_sensitive_data,
+)
+from apps.common.fields import EncryptedJSONField, _extract_embedded_aad
 from apps.customers.models import Customer, CustomerPaymentMethod
 
 # Valid AES-256 test key (matches config/settings/test.py)
@@ -338,3 +344,119 @@ class EncryptedJSONFieldRequireV2Test(TestCase):
 
         pm.refresh_from_db()
         self.assertEqual(pm.bank_details, {"iban": "RO00COMPAT"})
+
+
+# ===============================================================================
+# F3 — AAD isolation: per-field binding, no shared/thread-local state
+# ===============================================================================
+
+
+@override_settings(ENCRYPTION_KEY=TEST_KEY)
+class EncryptedJSONFieldAADIsolationTest(SimpleTestCase):
+    """Each field binds AAD to its OWN table:field with no cross-field contamination."""
+
+    def test_pre_save_binds_each_field_to_its_own_aad(self) -> None:
+        """Two encrypted fields on one instance must each embed their own table:field AAD.
+
+        Regression for the old shared thread-local: field B's pre_save overwrote field A's
+        stashed AAD, so A was encrypted under B's context (and B lost its binding). With
+        per-field encryption in pre_save there is no shared state to corrupt.
+        """
+
+        inst = SimpleNamespace(
+            _meta=SimpleNamespace(db_table="iso_table"),
+            pk=7,
+            field_a={"secret": "a-value"},
+            field_b={"secret": "b-value"},
+        )
+
+        fa = EncryptedJSONField()
+        fa.set_attributes_from_name("field_a")
+        fb = EncryptedJSONField()
+        fb.set_attributes_from_name("field_b")
+        # Django calls ALL fields' pre_save first, THEN prepares values — replicate that order
+        # so a shared slot would be observably clobbered.
+        prepped_a = fa.pre_save(inst, add=True)
+        prepped_b = fb.pre_save(inst, add=True)
+
+        self.assertTrue(prepped_a.startswith(VERSIONED_V2_PREFIX))
+        self.assertTrue(prepped_b.startswith(VERSIONED_V2_PREFIX))
+
+        aad_a = _extract_embedded_aad(prepped_a)
+        aad_b = _extract_embedded_aad(prepped_b)
+        assert aad_a is not None and aad_b is not None
+        self.assertTrue(aad_a.startswith(b"iso_table:field_a:"))
+        self.assertTrue(aad_b.startswith(b"iso_table:field_b:"))
+        # Each decrypts to its OWN value — proves no cross-field corruption.
+        self.assertEqual(json.loads(decrypt_sensitive_data(prepped_a)), {"secret": "a-value"})
+        self.assertEqual(json.loads(decrypt_sensitive_data(prepped_b)), {"secret": "b-value"})
+
+
+@override_settings(ENCRYPTION_KEY=TEST_KEY)
+class EncryptedJSONFieldWritePathTest(TestCase):
+    """Write paths that bypass pre_save cannot bind AAD — fail loud instead of silent v1."""
+
+    def setUp(self) -> None:
+        _clear_aesgcm_cache()
+        self.customer = Customer.objects.create(
+            name="WritePath Customer",
+            customer_type="company",
+            status="active",
+            primary_email="wp@test.com",
+            primary_phone="+40712345682",
+        )
+
+    def test_queryset_update_with_dict_raises(self) -> None:
+        """.update(field=dict) bypasses pre_save (no AAD) — must raise, not silently write v1."""
+        pm = CustomerPaymentMethod.objects.create(
+            customer=self.customer, method_type="bank_transfer", display_name="U", bank_details={}
+        )
+        with self.assertRaises(TypeError):
+            CustomerPaymentMethod.objects.filter(pk=pm.pk).update(bank_details={"bank_name": "BT"})
+
+    def test_bulk_create_roundtrips_encrypted_v2(self) -> None:
+        """bulk_create DOES run pre_save, so values are encrypted (v2) and round-trip."""
+        ibans = ["RO49AAAA1B31007593840000", "RO49BBBB1B31007593840000"]
+        objs = [
+            CustomerPaymentMethod(
+                customer=self.customer,
+                method_type="bank_transfer",
+                display_name=f"B{i}",
+                bank_details={"bank_name": "BT", "iban": ibans[i]},
+            )
+            for i in range(2)
+        ]
+        CustomerPaymentMethod.objects.bulk_create(objs)
+        rows = list(
+            CustomerPaymentMethod.objects.filter(customer=self.customer, display_name__startswith="B").order_by(
+                "display_name"
+            )
+        )
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0].bank_details["iban"], ibans[0])
+        self.assertEqual(rows[1].bank_details["iban"], ibans[1])
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT bank_details FROM customer_payment_methods WHERE id = %s", [rows[0].id])
+            raw = cursor.fetchone()[0]
+        raw_str = raw if isinstance(raw, str) else str(raw)
+        self.assertIn("aes:v2:", raw_str)
+
+
+# ===============================================================================
+# F5 — deconstruct() preserves the security-relevant require_v2 flag
+# ===============================================================================
+
+
+class EncryptedJSONFieldDeconstructTest(SimpleTestCase):
+    """require_v2 is a security option; Field.clone()/historical models must not lose it."""
+
+    def test_deconstruct_preserves_require_v2_when_true(self) -> None:
+        field = EncryptedJSONField(require_v2=True)
+        _name, path, _args, kwargs = field.deconstruct()
+        self.assertEqual(path, "apps.common.fields.EncryptedJSONField")
+        self.assertTrue(kwargs.get("require_v2"))
+
+    def test_deconstruct_omits_require_v2_when_default(self) -> None:
+        field = EncryptedJSONField()
+        _name, _path, _args, kwargs = field.deconstruct()
+        self.assertNotIn("require_v2", kwargs)

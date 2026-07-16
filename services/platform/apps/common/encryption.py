@@ -33,6 +33,7 @@ VERSIONED_V2_PREFIX = "aes:v2:"
 AES_KEY_SIZE = 32  # 256 bits
 NONCE_SIZE = 12  # 96 bits (GCM standard)
 AAD_LEN_SIZE = 2  # uint16 for AAD length
+MAX_AAD_LEN = 65535  # AAD length is encoded as uint16 (struct "!H") in the v2 wire format
 
 # --- Exceptions ---
 
@@ -65,11 +66,19 @@ def _clear_aesgcm_cache() -> None:
 
 
 def _decode_key(key_b64: str | bytes) -> bytes:
-    """Decode and validate a single base64 encryption key."""
+    """Decode and strictly validate a single base64 encryption key.
+
+    ``base64.urlsafe_b64decode`` is lenient — it silently DISCARDS non-alphabet
+    characters, so a typo'd key (e.g. trailing junk) can decode to the wrong bytes
+    without error. We decode with ``validate=True`` so a malformed key raises here,
+    at configuration time, rather than surfacing later as an opaque decryption failure.
+    """
     try:
         if isinstance(key_b64, bytes):
             key_b64 = key_b64.decode("ascii")
-        key_bytes = base64.urlsafe_b64decode(key_b64)
+        # Translate the URL-safe alphabet to standard so we can use strict validation.
+        std_b64 = key_b64.replace("-", "+").replace("_", "/")
+        key_bytes = base64.b64decode(std_b64, validate=True)
     except Exception as e:
         raise ImproperlyConfigured(f"Encryption key is not valid base64: {e}") from e
 
@@ -86,9 +95,10 @@ def get_encryption_keys() -> list[bytes]:
     ``settings.ENCRYPTION_KEY`` / ``DJANGO_ENCRYPTION_KEY`` env var.
     First key is used for new encryptions; all keys are tried for decryption.
     """
-    # Try ENCRYPTION_KEYS list first
+    # Try ENCRYPTION_KEYS ordered ring first. Accept list OR tuple — a tuple is idiomatic
+    # in Django settings and must not be silently ignored (which would drop previous keys).
     keys_setting = getattr(settings, "ENCRYPTION_KEYS", None)
-    if keys_setting and isinstance(keys_setting, list):
+    if keys_setting and isinstance(keys_setting, (list, tuple)):
         keys_b64 = [k for k in keys_setting if k]
         if keys_b64:
             return [_decode_key(k) for k in keys_b64]
@@ -128,6 +138,12 @@ def encrypt_sensitive_data(data: str, *, aad: bytes | None = None) -> str:
     """
     if not data:
         return ""
+
+    # Guard the v2 wire format's uint16 AAD-length field BEFORE doing any AES-GCM work,
+    # so an over-long AAD fails deterministically with an actionable message rather than
+    # a struct.pack error wrapped into an opaque EncryptionError after encryption ran.
+    if aad is not None and len(aad) > MAX_AAD_LEN:
+        raise EncryptionError(f"AAD too long for v2 wire format: {len(aad)} bytes exceeds {MAX_AAD_LEN}")
 
     try:
         key = get_encryption_key()
