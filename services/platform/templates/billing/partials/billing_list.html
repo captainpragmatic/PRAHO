@@ -142,7 +142,7 @@ This template includes both the table content and header count update.
   {% endif %}
 </div>
 
-<script>
+<script nonce="{{ csp_nonce }}">
 function navigateToDocument(type, id) {
   if (type === 'proforma') {
     window.location.href = "{% url 'billing:proforma_detail' 0 %}".replace('/0/', '/' + id + '/');

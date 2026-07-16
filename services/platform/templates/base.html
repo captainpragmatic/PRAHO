@@ -28,7 +28,7 @@
   <script defer src="{% static 'js/components/modal.js' %}"></script>
   <script defer src="{% static 'js/components/toast.js' %}"></script>
 
-  <style>
+  <style nonce="{{ csp_nonce }}">
     /* Romanian Hosting Brand Colors */
     :root {
       --brand-h: 220;
@@ -194,7 +194,7 @@
     </div>
 
     <!-- Toast animations and auto-dismiss -->
-    <script>
+    <script nonce="{{ csp_nonce }}">
         document.addEventListener('DOMContentLoaded', function() {
             const toasts = document.querySelectorAll('[id^="toast-"]');
 
@@ -295,7 +295,7 @@
   </div>
 
   <!-- Scripts -->
-  <script>
+  <script nonce="{{ csp_nonce }}">
     // Romanian number formatting
     function formatRomanianCurrency(amount) {
       return new Intl.NumberFormat('ro-RO', {

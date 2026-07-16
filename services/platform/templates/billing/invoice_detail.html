@@ -389,7 +389,7 @@
   </div>
 </div>
 
-<script>
+<script nonce="{{ csp_nonce }}">
 function showInvoiceRefundModal() {
     document.getElementById('invoiceRefundModal').classList.remove('hidden');
 }
@@ -542,7 +542,7 @@ document.getElementById('invoiceRefundForm').addEventListener('submit', function
   </div>
 </div>
 
-<script>
+<script nonce="{{ csp_nonce }}">
 function showInvoiceRefundRequestModal() {
     document.getElementById('invoiceRefundRequestModal').classList.remove('hidden');
 }

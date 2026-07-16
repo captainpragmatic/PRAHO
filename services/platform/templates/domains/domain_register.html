@@ -216,7 +216,7 @@
 {% endblock %}
 
 {% block extra_js %}
-<script>
+<script nonce="{{ csp_nonce }}">
 document.addEventListener('DOMContentLoaded', function() {
     const searchForm = document.getElementById('domain-search-form');
     const searchInput = document.getElementById('domain-search');

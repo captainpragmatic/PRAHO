@@ -230,7 +230,7 @@ Professional interface for staff to manage all user GDPR requests
 </div>
 
 <!-- Initialize HTMX -->
-<script>
+<script nonce="{{ csp_nonce }}">
 document.addEventListener('DOMContentLoaded', function() {
     // Load initial results by triggering the HTMX request
     const gdprFilters = document.getElementById('gdpr-filters');
