@@ -86,6 +86,7 @@ def _validate_throttle_rates_at_startup() -> None:
     # Global defaults + known per-view throttle classes must all have valid scopes.
     scoped_class_paths: list[str | type[Any]] = [
         *default_classes,
+        "apps.common.performance.rate_limiting.PortalHMACCreateUserThrottle",
         "apps.api.core.throttling.StandardAPIThrottle",
         "apps.api.core.throttling.BurstAPIThrottle",
         "apps.api.core.throttling.AuthThrottle",

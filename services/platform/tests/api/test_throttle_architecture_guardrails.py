@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import inspect
+from copy import deepcopy
 
 from django.conf import settings
-from django.test import RequestFactory, SimpleTestCase
+from django.core.exceptions import ImproperlyConfigured
+from django.test import RequestFactory, SimpleTestCase, override_settings
 from django.utils.module_loading import import_string
 from rest_framework.throttling import AnonRateThrottle, SimpleRateThrottle
 
@@ -17,6 +19,7 @@ from apps.api.orders.views import (
     ProductCatalogThrottle,
 )
 from apps.api.users import views as users_views
+from apps.common.apps import _validate_throttle_rates_at_startup
 from apps.common.performance import rate_limiting
 
 
@@ -41,6 +44,7 @@ class ThrottleArchitectureGuardrailTests(SimpleTestCase):
             OrderListThrottle,
             ProductCatalogThrottle,
             AnonRateThrottle,
+            rate_limiting.PortalHMACCreateUserThrottle,
         ]
         for throttle_cls in classes:
             scope = getattr(throttle_cls, "scope", None)
@@ -120,6 +124,28 @@ class ThrottleArchitectureGuardrailTests(SimpleTestCase):
         req_c._portal_authenticated = True  # type: ignore[attr-defined]  # test sets internal HMAC flag
         req_c.META["HTTP_X_PORTAL_ID"] = "portal-b"
         self.assertNotEqual(throttle.get_cache_key(req_a, view=None), throttle.get_cache_key(req_c, view=None))
+
+    def test_create_user_throttle_parses_env_configurable_shorthand_rates(self) -> None:
+        """THROTTLE_RATE_PORTAL_CREATE_USER must accept shorthand windows (e.g. 30/10s).
+
+        Startup validation (parse_rate_string) accepts shorthand rates, so the
+        throttle class must parse them too — otherwise an env value that passes
+        the fail-fast startup check would 500 on the first request instead.
+        """
+        throttle = rate_limiting.PortalHMACCreateUserThrottle()
+        self.assertEqual(throttle.parse_rate("30/10s"), (30, 10))
+
+    def test_startup_validation_covers_create_user_throttle_scope(self) -> None:
+        """Dropping the create-user rate must fail at startup, not at request time.
+
+        PortalHMACCreateUserThrottle is a per-view throttle, so it is not covered
+        by DEFAULT_THROTTLE_CLASSES validation — it must be explicitly registered
+        in the startup validation list like the other per-view throttles.
+        """
+        rest_framework = deepcopy(settings.REST_FRAMEWORK)
+        del rest_framework["DEFAULT_THROTTLE_RATES"]["portal_hmac_create_user"]
+        with override_settings(REST_FRAMEWORK=rest_framework), self.assertRaises(ImproperlyConfigured):
+            _validate_throttle_rates_at_startup()
 
     def test_portal_hmac_throttle_key_is_stable_for_same_portal(self) -> None:
         factory = RequestFactory()

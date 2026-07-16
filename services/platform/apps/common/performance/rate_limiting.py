@@ -52,6 +52,7 @@ _RATE_UNIT_SECONDS: dict[str, int] = {
 _KNOWN_THROTTLE_CLASS_SCOPES: dict[str, str] = {
     "apps.common.performance.rate_limiting.PortalHMACRateThrottle": "portal_hmac",
     "apps.common.performance.rate_limiting.PortalHMACBurstThrottle": "portal_hmac_burst",
+    "apps.common.performance.rate_limiting.PortalHMACCreateUserThrottle": "portal_hmac_create_user",
     "apps.common.performance.rate_limiting.CustomerRateThrottle": "customer",
     "apps.common.performance.rate_limiting.BurstRateThrottle": "burst",
     "apps.api.core.throttling.StandardAPIThrottle": "sustained",
@@ -195,7 +196,7 @@ class PortalHMACBurstThrottle(_CustomTimeRateMixin, SimpleRateThrottle):  # type
         return self.cache_format % {"scope": self.scope, "ident": ident}
 
 
-class PortalHMACCreateUserThrottle(SimpleRateThrottle):  # type: ignore[misc]  # DRF throttle base uses dynamic attrs
+class PortalHMACCreateUserThrottle(_CustomTimeRateMixin, SimpleRateThrottle):  # type: ignore[misc]  # DRF throttle base uses dynamic attrs
     """Strict per-portal throttle for the HMAC user-creation mutation.
 
     Layered on top of the global PortalHMAC*Throttle limits to bound account
