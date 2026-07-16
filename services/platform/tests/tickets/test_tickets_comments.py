@@ -256,6 +256,10 @@ class TicketInternalCommentsSecurityTest(TestCase):
         self.assertContains(response, 'Support comment - visible to all')
         # ...but the internal note is not in the rendered swap.
         self.assertNotContains(response, 'Internal staff note - CONFIDENTIAL')
+        # Lock in the server-side filter: the internal note must not even reach
+        # the rendering context. The template gate alone hides the content, so a
+        # body-only assertion would still pass if the queryset filter regressed.
+        self.assertNotIn(self.internal_comment, list(response.context['comments']))
 
     def test_reply_htmx_response_includes_internal_notes_for_staff(self):
         """Staff posting a reply via HX-Request still see internal notes."""
@@ -267,6 +271,58 @@ class TicketInternalCommentsSecurityTest(TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'Internal staff note - CONFIDENTIAL')
+        self.assertIn(self.internal_comment, list(response.context['comments']))
+
+    def test_detail_page_shows_empty_state_when_only_internal_notes_exist(self):
+        """The detail page must render the filtered queryset, not ticket.comments.all.
+
+        Regression: detail.html included the comments partial with
+        comments=ticket.comments.all, discarding the server-side filter from
+        ticket_detail(). For a ticket whose only comment is an internal note,
+        a customer must get the empty state instead of a loop over hidden rows.
+        """
+        internal_only_ticket = Ticket.objects.create(
+            customer=self.customer,
+            title='Internal-only Ticket',
+            description='Ticket with only an internal note',
+            priority='normal',
+            status='open',
+            created_by=self.customer_user,
+        )
+        TicketComment.objects.create(
+            ticket=internal_only_ticket,
+            content='Internal-only staff note - CONFIDENTIAL',
+            comment_type='internal',
+            author=self.staff_user,
+            author_name=self.staff_user.get_full_name(),
+            author_email=self.staff_user.email,
+            is_public=False,
+        )
+
+        self.client.login(email='customer@example.com', password='testpass123')
+        response = self.client.get(reverse('tickets:detail', kwargs={'pk': internal_only_ticket.pk}))
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, 'Internal-only staff note - CONFIDENTIAL')
+        self.assertContains(response, 'No replies yet. Be the first to respond!')
+
+    def test_conversation_count_excludes_hidden_comments_for_customer(self):
+        """The conversation header count must not disclose hidden internal notes.
+
+        A customer seeing "(3 replies)" with only 2 rendered comments leaks the
+        existence of internal notes. The count must come from the filtered
+        queryset, not ticket.comments.count.
+        """
+        self.client.login(email='customer@example.com', password='testpass123')
+        response = self.client.get(reverse('tickets:detail', kwargs={'pk': self.ticket.pk}))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, '(2 replies)')
+        self.assertNotContains(response, '(3 replies)')
+
+        # Staff still see the full count including the internal note.
+        self.client.login(email='admin@example.com', password='testpass123')
+        response = self.client.get(reverse('tickets:detail', kwargs={'pk': self.ticket.pk}))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, '(3 replies)')
 
     def test_comment_filtering_in_views(self):
         """Test that view-level comment filtering works correctly"""
