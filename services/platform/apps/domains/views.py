@@ -26,6 +26,7 @@ from .forms import RegistrarForm, TLDForm
 from .models import TLD, Domain, DomainOrderItem, Registrar
 from .services import (
     DomainLifecycleService,
+    DomainRegistrarGateway,
     DomainRepository,
     DomainValidationService,
     RegistrarService,
@@ -372,7 +373,7 @@ def domain_register(  # Complexity: multi-step workflow  # noqa: PLR0912  # Comp
                     messages.error(request, _("❌ You do not have permission for this customer"))
                 else:
                     # Validate domain and create registration
-                    success, result = DomainLifecycleService.create_domain_registration(
+                    result = DomainLifecycleService.create_domain_registration(
                         customer=customer,
                         domain_name=domain_name,
                         years=years,
@@ -380,14 +381,12 @@ def domain_register(  # Complexity: multi-step workflow  # noqa: PLR0912  # Comp
                         auto_renew=auto_renew,
                     )
 
-                    if success:
+                    if result.is_ok():
                         messages.success(request, _(f"✅ Domain {domain_name} registered successfully!"))
-                        # result is a Domain object when success is True
-                        domain = cast(Domain, result)
+                        domain = result.unwrap()
                         return redirect("domains:detail", domain_id=domain.id)
                     else:
-                        # result is a string error message when success is False
-                        messages.error(request, _(f"❌ Registration failed: {result}"))
+                        messages.error(request, _(f"❌ Registration failed: {result.unwrap_err()}"))
 
             except Customer.DoesNotExist:
                 messages.error(request, _("Invalid customer selected"))
@@ -417,7 +416,7 @@ def domain_register(  # Complexity: multi-step workflow  # noqa: PLR0912  # Comp
 
 @login_required
 @require_http_methods(["POST"])
-def check_availability(request: HttpRequest) -> JsonResponse:
+def check_availability(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911  # sequential input/availability guards
     """🔍 AJAX endpoint to check domain availability"""
     domain_name = request.POST.get("domain_name", "").strip().lower()
 
@@ -445,13 +444,21 @@ def check_availability(request: HttpRequest) -> JsonResponse:
             }
         )
 
-    # Get registrar and check availability (placeholder implementation)
+    # Get registrar and check availability at the registrar.
     registrar = RegistrarService.select_best_registrar_for_tld(tld)
     if not registrar:
         return JsonResponse({"success": False, "error": _("No available registrar for this TLD")})
 
-    # For now, assume available if not in our database
-    # TODO: Implement actual registrar API availability check
+    # Ask the registrar. Fail closed: if we cannot confirm availability, never claim
+    # the domain is available — a domain registered elsewhere but absent locally would
+    # otherwise be reported free (W1).
+    check_ok, is_available = DomainRegistrarGateway.check_domain_availability(registrar, domain_name)
+    if not check_ok:
+        return JsonResponse({"success": False, "error": _("Could not verify domain availability. Please try again.")})
+    if not is_available:
+        return JsonResponse(
+            {"success": True, "available": False, "message": _("Domain is not available"), "domain_name": domain_name}
+        )
 
     # Calculate pricing
     pricing_1yr = TLDService.calculate_domain_cost(tld, 1, False)
@@ -494,13 +501,13 @@ def domain_renew(request: HttpRequest, domain_id: str) -> HttpResponse:
     if request.method == "POST":
         years = int(request.POST.get("years", 1))
 
-        success, message = DomainLifecycleService.process_domain_renewal(domain=domain, years=years)
+        renewal_result = DomainLifecycleService.process_domain_renewal(domain=domain, years=years)
 
-        if success:
+        if renewal_result.is_ok():
             messages.success(request, _(f"✅ Domain renewed for {years} year(s)!"))
             return redirect("domains:detail", domain_id=domain_id)
         else:
-            messages.error(request, _(f"❌ Renewal failed: {message}"))
+            messages.error(request, _(f"❌ Renewal failed: {renewal_result.unwrap_err()}"))
 
     # Calculate renewal costs
     renewal_costs = []

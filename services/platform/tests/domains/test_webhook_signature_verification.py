@@ -10,6 +10,7 @@ import hashlib
 import hmac
 import json
 from typing import Any
+from unittest.mock import patch
 
 from django.test import TestCase
 
@@ -98,6 +99,18 @@ class WebhookSignatureVerificationTests(TestCase):
             self.registrar, self.payload, "sha256=anything"
         )
         self.assertFalse(result)
+
+    def test_decryption_failure_is_logged(self) -> None:
+        """A decryption failure must be logged, not silently swallowed (review H3)."""
+        with (
+            patch.object(type(self.registrar), "get_decrypted_webhook_secret", side_effect=Exception("boom")),
+            self.assertLogs("apps.domains.services", level="ERROR") as cm,
+        ):
+            result = DomainRegistrarGateway.verify_webhook_signature(
+                self.registrar, self.payload, "sha256=anything"
+            )
+        self.assertFalse(result)
+        self.assertTrue(any("decryption failed" in line.lower() for line in cm.output))
 
     def test_empty_decrypted_secret_rejected(self) -> None:
         """Unencrypted empty/whitespace value stored in DB should be rejected."""

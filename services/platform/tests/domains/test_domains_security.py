@@ -1,16 +1,18 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import Client, TestCase
 from django.urls import reverse
 
 from apps.common.encryption import decrypt_sensitive_data, is_encrypted
+from apps.customers.models import Customer, CustomerAddress, CustomerTaxProfile
 from apps.domains.forms import RegistrarForm
-from apps.domains.models import Registrar, TLD, Domain
-from apps.domains.services import DomainLifecycleService
-
+from apps.domains.models import TLD, Registrar, TLDRegistrarAssignment
+from apps.domains.services import DomainLifecycleService, DomainValidationService
 
 User = get_user_model()
 
@@ -105,7 +107,6 @@ class DomainRegistrationRaceConditionTests(TestCase):
             status="active",
         )
         # Associate registrar as primary for the TLD
-        from apps.domains.models import TLDRegistrarAssignment
         TLDRegistrarAssignment.objects.create(
             tld=self.tld,
             registrar=self.registrar,
@@ -114,40 +115,58 @@ class DomainRegistrationRaceConditionTests(TestCase):
             priority=1,
         )
 
-        # Minimal user/customer – import lazily to avoid cross-app heavy setup
-        from apps.customers.models import Customer
-
         self.customer = Customer.objects.create(
             name="John Doe",
             primary_email="cust@example.com",
+            primary_phone="+40712345678",
             company_name="ACME",
             customer_type="individual",
         )
+        CustomerAddress.objects.create(
+            customer=self.customer, address_line1="Str. Test 1", city="Bucuresti", county="Bucuresti",
+            postal_code="010101", country="România", is_primary=True, is_current=True,
+        )
+        CustomerTaxProfile.objects.create(customer=self.customer, cnp="1900101123456")
 
     def test_duplicate_registration_returns_already_registered(self) -> None:
-        ok, res = DomainLifecycleService.create_domain_registration(
-            customer=self.customer,
-            domain_name="example.com",
-            years=1,
+        # First registration must be registrar-confirmed to leave an active row —
+        # the uniqueness precondition then blocks the duplicate.
+        confirmed_payload = (
+            True,
+            {
+                "registrar_domain_id": "REG-1",
+                "expires_at": datetime(2027, 1, 1, tzinfo=UTC),
+                "nameservers": [],
+                "epp_code": "",
+            },
         )
-        self.assertTrue(ok, res)
+        with patch(
+            "apps.domains.services.DomainRegistrarGateway.register_domain",
+            return_value=confirmed_payload,
+        ):
+            result = DomainLifecycleService.create_domain_registration(
+                customer=self.customer,
+                domain_name="example.com",
+                years=1,
+            )
+        self.assertTrue(result.is_ok(), result)
 
-        ok2, res2 = DomainLifecycleService.create_domain_registration(
+        result2 = DomainLifecycleService.create_domain_registration(
             customer=self.customer,
             domain_name="example.com",
             years=1,
         )
-        self.assertFalse(ok2)
-        self.assertIn("already registered", str(res2).lower())
+        self.assertTrue(result2.is_err())
+        self.assertIn("already registered", str(result2.unwrap_err()).lower())
 
     def test_years_out_of_range_rejected(self) -> None:
-        ok, res = DomainLifecycleService.create_domain_registration(
+        result = DomainLifecycleService.create_domain_registration(
             customer=self.customer,
             domain_name="too.com",
             years=20,
         )
-        self.assertFalse(ok)
-        self.assertIn("period", str(res).lower())
+        self.assertTrue(result.is_err())
+        self.assertIn("period", str(result.unwrap_err()).lower())
 
 
 class RegistrarAdminAuthorizationTests(TestCase):
@@ -170,3 +189,18 @@ class RegistrarAdminAuthorizationTests(TestCase):
         self.client.login(email="admin@example.com", password="testpass123")
         resp = self.client.get(reverse("domains:registrar_create"))
         self.assertEqual(resp.status_code, 200)
+
+
+class DomainNameHomographValidationTests(TestCase):
+    """validate_domain_name rejects non-ASCII homographs (PR #169 review M1)."""
+
+    def test_non_ascii_homograph_rejected(self) -> None:
+        # "example.com" with the ASCII 'a' replaced by Cyrillic small a (U+0430).
+        homograph = "ex\u0430mple.com"
+        is_valid, msg = DomainValidationService.validate_domain_name(homograph)
+        self.assertFalse(is_valid)
+        self.assertIn("ASCII", str(msg))
+
+    def test_ascii_domain_accepted(self) -> None:
+        is_valid, _msg = DomainValidationService.validate_domain_name("example.com")
+        self.assertTrue(is_valid)

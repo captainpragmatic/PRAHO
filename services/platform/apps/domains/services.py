@@ -15,8 +15,6 @@ Provides business logic for domain operations including:
 
 from __future__ import annotations
 
-import hashlib
-import hmac
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -27,7 +25,7 @@ from django.db.models import Q, QuerySet
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
-from apps.common.encryption import DecryptionError
+from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 from apps.settings.services import SettingsService
 
 from .models import TLD, Domain, DomainOrderItem, Registrar
@@ -58,8 +56,30 @@ class DomainRegistrationConfig:
     domain_name: str
     tld: Any
     registrar: Any
+    registrant_data: dict[str, Any]
+    years: int = 1
     whois_privacy: bool = False
     auto_renew: bool = True
+
+
+# Minimal country-name → ISO 3166-1 alpha-2 mapping for the registrant address.
+# The platform is Romania-first; unrecognized already-2-letter codes pass through.
+_COUNTRY_NAME_TO_CODE = {
+    "românia": "RO",
+    "romania": "RO",
+    "moldova": "MD",
+    "republica moldova": "MD",
+}
+
+
+def _country_to_iso_code(country: str) -> str:
+    """Best-effort ISO alpha-2 code from a free-text country field."""
+    normalized = country.strip().lower()
+    if normalized in _COUNTRY_NAME_TO_CODE:
+        return _COUNTRY_NAME_TO_CODE[normalized]
+    if len(country.strip()) == 2:  # noqa: PLR2004  # already an alpha-2 code
+        return country.strip().upper()
+    return ""
 
 
 # ===============================================================================
@@ -148,6 +168,13 @@ class DomainValidationService:
 
         # Remove leading/trailing whitespace
         domain_name = domain_name.strip().lower()
+
+        # Reject non-ASCII before any other check. str.isalnum() is True for Unicode
+        # letters, so a Cyrillic/Greek homograph would otherwise pass the character
+        # check below and be forwarded verbatim to the registrar. IDNs must be
+        # punycode-encoded (ASCII) by the caller.
+        if not domain_name.isascii():
+            return False, cast(str, _("Domain name must be ASCII (punycode-encode internationalized domains)"))
 
         # Check length
         if len(domain_name) < MIN_DOMAIN_NAME_LENGTH:
@@ -342,27 +369,37 @@ class DomainLifecycleService:
     @staticmethod
     def create_domain_registration(
         customer: Customer, domain_name: str, years: int = 1, whois_privacy: bool = False, auto_renew: bool = True
-    ) -> tuple[bool, Domain | str]:
-        """🆕 Create new domain registration"""
+    ) -> Result[Domain, str]:
+        """Create new domain registration.
 
+        Returns Ok(Domain) on success, Err(message) on failure.
+        """
         # Run all validation checks
         validation_result = DomainLifecycleService._validate_registration_preconditions(domain_name, years)
         if validation_result is not None:
-            return False, validation_result
+            return Err(validation_result)
 
         # Get validated components
-        components_result = DomainLifecycleService._get_registration_components(domain_name)
-        if isinstance(components_result, str):
-            return False, components_result
+        components = DomainLifecycleService._get_registration_components(domain_name)
+        if components.is_err():
+            return Err(components.unwrap_err())
 
-        tld, registrar = components_result
+        tld, registrar = components.unwrap()
 
-        # Execute registration
+        # Build + validate registrant data BEFORE creating any row, so a customer
+        # missing required contact/tax data is rejected without leaving an orphan
+        # pending domain and without a blank-data call to the registrar.
+        registrant_result = DomainLifecycleService._build_registrant_data(customer)
+        if registrant_result.is_err():
+            return Err(registrant_result.unwrap_err())
+
         config = DomainRegistrationConfig(
             customer=customer,
             domain_name=domain_name,
             tld=tld,
             registrar=registrar,
+            registrant_data=registrant_result.unwrap(),
+            years=years,
             whois_privacy=whois_privacy,
             auto_renew=auto_renew,
         )
@@ -370,13 +407,11 @@ class DomainLifecycleService:
 
     @staticmethod
     def _validate_registration_preconditions(domain_name: str, years: int) -> str | None:
-        """Validate all preconditions for domain registration"""
-        # Validate domain name format
+        """Validate all preconditions for domain registration."""
         is_valid, error_msg = DomainValidationService.validate_domain_name(domain_name)
         if not is_valid:
             return error_msg
 
-        # Validate registration period
         if years < MIN_REGISTRATION_YEARS or years > MAX_REGISTRATION_YEARS:
             return str(
                 _("Registration period must be between {min} and {max} years").format(
@@ -384,31 +419,44 @@ class DomainLifecycleService:
                 )
             )
 
-        # Check if domain already exists
         if Domain.objects.filter(name=domain_name.lower()).exists():
             return cast(str, _("Domain is already registered in the system"))
 
         return None
 
     @staticmethod
-    def _get_registration_components(domain_name: str) -> tuple[Any, Any] | str:
-        """Get TLD and registrar for domain registration"""
-        # Extract and validate TLD
+    def _get_registration_components(domain_name: str) -> Result[tuple[Any, Any], str]:
+        """Get TLD and registrar for domain registration."""
         tld_extension = DomainValidationService.extract_tld_from_domain(domain_name)
         tld = TLDService.get_tld_pricing(tld_extension)
         if not tld:
-            return cast(str, _(f"TLD '.{tld_extension}' is not supported"))
+            return Err(cast(str, _(f"TLD '.{tld_extension}' is not supported")))
 
-        # Select registrar
         registrar = RegistrarService.select_best_registrar_for_tld(tld)
         if not registrar:
-            return cast(str, _("No available registrar for this TLD"))
+            return Err(cast(str, _("No available registrar for this TLD")))
 
-        return tld, registrar
+        return Ok((tld, registrar))
 
     @staticmethod
-    def _execute_domain_registration(config: DomainRegistrationConfig) -> tuple[bool, Domain | str]:
-        """Execute the actual domain registration"""
+    def _execute_domain_registration(config: DomainRegistrationConfig) -> Result[Domain, str]:
+        """Execute the actual domain registration.
+
+        Two-step so the external registrar call never runs inside a DB transaction:
+        1. Create the local Domain row in ``pending`` state (records intent).
+        2. Submit to the registrar via the gateway. On success, persist the
+           registrar-returned fields and FSM-transition the domain to ``active``.
+           On failure, the domain stays ``pending`` (no failed state exists) so a
+           later retry/worker can re-submit — the gateway is idempotent per domain.
+
+        Returns Ok(domain) ONLY when the registrar confirms and the domain is
+        active. On a definite rejection the pending row is removed and Err is
+        returned so the caller can cleanly retry. On an UNKNOWN outcome (network
+        error / 5xx — the registrar may already hold the registration) the row is
+        kept pending and Err is returned so the caller never reports success and
+        never orphans a possibly-real registration. Durable reconciliation of
+        pending rows is tracked separately (issue #237).
+        """
         try:
             with transaction.atomic():
                 domain = Domain.objects.create(
@@ -416,60 +464,205 @@ class DomainLifecycleService:
                     tld=config.tld,
                     registrar=config.registrar,
                     customer=config.customer,
-                    status="pending",
                     whois_privacy=config.whois_privacy,
                     auto_renew=config.auto_renew,
                 )
-
-                logger.info(
-                    f"🆕 [Domain] Created domain registration record: {config.domain_name} for customer {config.customer.id}"
-                )
-                return True, domain
-
+                logger.info("Created domain registration: %s for customer %s", config.domain_name, config.customer.id)
         except Exception as e:
-            logger.error(f"🔥 [Domain] Failed to create domain registration: {e}")
-            return False, cast(str, _("Failed to create domain registration"))
+            logger.error("Failed to create domain registration: %s", e)
+            return Err(cast(str, _("Failed to create domain registration")))
+
+        # Submit to the registrar OUTSIDE the transaction above — never hold a DB
+        # transaction open across network I/O.
+        outcome, message = DomainLifecycleService._submit_registration_to_registrar(domain, config)
+
+        if outcome == "confirmed":
+            domain.refresh_from_db()
+            return Ok(domain)
+        if outcome == "pending_unknown":
+            return Err(
+                cast(
+                    str,
+                    _(
+                        "Registration was submitted but the registrar did not confirm it. "
+                        "It is pending verification — do not resubmit."
+                    ),
+                )
+            )
+        # Definite rejection: the pending row has been removed, retry is safe.
+        return Err(cast(str, _("Registrar rejected the registration: {error}")).format(error=message))
 
     @staticmethod
-    def process_domain_renewal(domain: Domain, years: int = 1) -> tuple[bool, str]:
-        """🔄 Process domain renewal"""
-        if domain.status != "active":
-            return False, cast(str, _("Domain must be active to renew"))
+    def _submit_registration_to_registrar(domain: Domain, config: DomainRegistrationConfig) -> tuple[str, str]:
+        """Submit a pending domain to its registrar and resolve its final state.
 
-        if not domain.expires_at:
-            return False, cast(str, _("Domain expiration date is not set"))
+        Returns one of:
+        - ("confirmed", "")      registrar confirmed; the domain is now active.
+        - ("rejected", message)  definite failure (conflict/auth/validation); the
+                                 pending row is DELETED so a retry isn't deadlocked
+                                 by the uniqueness precondition.
+        - ("pending_unknown", message)  network/5xx (UNKNOWN) or a post-confirm
+                                 persistence failure; the row is KEPT pending
+                                 because the registrar may hold the registration.
+        Never raises.
+        """
+        success, payload = DomainRegistrarGateway.register_domain(
+            config.registrar, domain.name, config.years, config.registrant_data
+        )
+
+        if not success:
+            error = str(payload.get("error", "unknown error"))
+            if payload.get("retriability") == Retriability.UNKNOWN.value:
+                logger.warning(
+                    "Registrar outcome UNKNOWN for %s (kept pending, do not resubmit): %s", domain.name, error
+                )
+                return "pending_unknown", error
+            # Definite rejection — remove the row so the customer can re-register.
+            logger.warning("Registrar rejected %s (row removed for clean retry): %s", domain.name, error)
+            domain.delete()
+            return "rejected", error
 
         try:
             with transaction.atomic():
-                # Calculate new expiration date
-                new_expiration = domain.expires_at + timedelta(days=365 * years)
+                locked = Domain.objects.select_for_update().get(pk=domain.pk)
+                # Another worker may have already completed this domain.
+                if locked.status != "pending":
+                    return ("confirmed", "") if locked.status == "active" else ("pending_unknown", "")
 
-                # Update domain
-                domain.expires_at = new_expiration
-                domain.renewal_notices_sent = 0  # Reset renewal notices
-                domain.save(update_fields=["expires_at", "renewal_notices_sent", "updated_at"])
+                locked.registrar_domain_id = payload.get("registrar_domain_id", "")
+                if payload.get("expires_at"):
+                    locked.expires_at = payload["expires_at"]
+                if payload.get("nameservers"):
+                    locked.nameservers = payload["nameservers"]
+                if payload.get("epp_code"):
+                    locked.set_encrypted_epp_code(payload["epp_code"])
+                locked.registered_at = timezone.now()
+                locked.activate()  # FSM transition: pending -> active
+                locked.save()
 
-                logger.info(f"🔄 [Domain] Renewed domain {domain.name} for {years} years, expires: {new_expiration}")
-
-                return True, cast(str, _("Domain renewed successfully"))
-
+            logger.info("Registrar confirmed %s — domain active", domain.name)
+            return "confirmed", ""
         except Exception as e:
-            logger.error(f"🔥 [Domain] Failed to renew domain {domain.name}: {e}")
-            return False, cast(str, _("Failed to renew domain"))
+            # The registrar confirmed but we failed to record it — the domain IS
+            # registered, so keep the row pending (never delete/orphan) for reconciliation.
+            logger.error("Failed to persist registrar result for %s (kept pending): %s", domain.name, e)
+            return "pending_unknown", str(e)
 
     @staticmethod
-    def update_domain_expiration(domain: Domain, new_expiration: datetime) -> bool:
-        """📅 Update domain expiration date (from registrar sync)"""
+    def _build_registrant_data(customer: Customer) -> Result[dict[str, Any], str]:
+        """Assemble registrar-ready registrant data from the customer, address, and tax profile.
+
+        Produces exactly the keys the Gandi/ROTLD mappers read (first_name, last_name,
+        email, phone, address, city, postal_code, country_code, entity_type,
+        company_name, cui, cnp) and validates that every registrar-required field is
+        present. Returns Err(message) listing any missing fields so registration is
+        rejected in PRAHO instead of sending blank contact data to the registrar.
+        """
+        entity_type = "company" if customer.customer_type == "company" else "individual"
+        address = customer.get_billing_address()
+        tax = customer.get_tax_profile()
+
+        name_parts = (customer.name or "").strip().split(None, 1)
+        first_name = name_parts[0] if name_parts else ""
+        last_name = name_parts[1] if len(name_parts) > 1 else ""
+
+        data: dict[str, Any] = {
+            "first_name": first_name,
+            "last_name": last_name,
+            "email": customer.primary_email or "",
+            "phone": customer.primary_phone or "",
+            "address": address.address_line1 if address else "",
+            "city": address.city if address else "",
+            "postal_code": address.postal_code if address else "",
+            "country_code": _country_to_iso_code(address.country) if address else "",
+            "entity_type": entity_type,
+            "company_name": customer.company_name or "",
+            "cui": tax.cui if tax else "",
+            "cnp": tax.cnp if tax else "",
+        }
+
+        # Required for every registrant, plus entity-specific identity fields.
+        required = ["first_name", "email", "phone", "address", "city", "postal_code", "country_code"]
+        required.append("company_name" if entity_type == "company" else "last_name")
+        required.append("cui" if entity_type == "company" else "cnp")  # ROTLD regulatory requirement
+
+        missing = [field for field in required if not data[field]]
+        if missing:
+            return Err(
+                cast(str, _("Cannot register: customer is missing required registrant data: {fields}")).format(
+                    fields=", ".join(missing)
+                )
+            )
+        return Ok(data)
+
+    @staticmethod
+    def _validate_renewal_preconditions(domain: Domain) -> str | None:
+        """Return an error message if the domain cannot be renewed, else None."""
+        if domain.status != "active":
+            return cast(str, _("Domain must be active to renew"))
+        if not domain.expires_at:
+            return cast(str, _("Domain expiration date is not set"))
+        if not domain.registrar_domain_id:
+            # No registrar record to renew against — a local-only extension would be
+            # a lie about the registrar's expiry.
+            return cast(str, _("Domain has no registrar record; cannot renew"))
+        return None
+
+    @staticmethod
+    def process_domain_renewal(domain: Domain, years: int = 1) -> Result[str, str]:
+        """Process domain renewal by renewing at the registrar first.
+
+        The registrar is the source of truth for the new expiry — the local row is
+        updated ONLY after the registrar confirms, using the registrar-returned
+        date (never local ``365 * years`` math). On any registrar failure the local
+        expiry is left untouched (failing toward "not renewed" is the safe
+        direction; a later registrar-sync can correct it upward).
+
+        Returns Ok(success_message) on confirmed renewal, Err(error_message) otherwise.
+        """
+        precondition_error = DomainLifecycleService._validate_renewal_preconditions(domain)
+        if precondition_error is not None:
+            return Err(precondition_error)
+
+        success, payload = DomainRegistrarGateway.renew_domain(domain.registrar, domain, years)
+        if not success:
+            logger.warning("Registrar did not confirm renewal of %s: %s", domain.name, payload.get("error"))
+            return Err(
+                cast(str, _("Registrar did not confirm the renewal: {error}")).format(
+                    error=payload.get("error", "unknown error")
+                )
+            )
+
+        new_expiration = payload.get("new_expires_at")
+        if not new_expiration:
+            return Err(cast(str, _("Registrar renewal succeeded but returned no new expiry date")))
+
+        try:
+            with transaction.atomic():
+                domain.expires_at = new_expiration
+                domain.renewal_notices_sent = 0
+                domain.save(update_fields=["expires_at", "renewal_notices_sent", "updated_at"])
+
+            logger.info("Renewed domain %s for %d years at registrar, expires: %s", domain.name, years, new_expiration)
+            return Ok(cast(str, _("Domain renewed successfully")))
+
+        except Exception as e:
+            logger.error("Failed to persist renewal for %s: %s", domain.name, e)
+            return Err(cast(str, _("Failed to record the renewal")))
+
+    @staticmethod
+    def update_domain_expiration(domain: Domain, new_expiration: datetime) -> Result[bool, str]:
+        """Update domain expiration date (from registrar sync)."""
         try:
             domain.expires_at = new_expiration
             domain.save(update_fields=["expires_at", "updated_at"])
 
-            logger.info(f"📅 [Domain] Updated expiration for {domain.name}: {new_expiration}")
-            return True
+            logger.info("Updated expiration for %s: %s", domain.name, new_expiration)
+            return Ok(True)
 
         except Exception as e:
-            logger.error(f"🔥 [Domain] Failed to update expiration for {domain.name}: {e}")
-            return False
+            logger.error("Failed to update expiration for %s: %s", domain.name, e)
+            return Err(cast(str, _("Failed to update domain expiration")))
 
 
 # ===============================================================================
@@ -596,7 +789,7 @@ class DomainOrderService:
 
         for item in domain_items:
             if item.action == "register":
-                success, result = DomainLifecycleService.create_domain_registration(
+                result = DomainLifecycleService.create_domain_registration(
                     customer=order.customer,
                     domain_name=item.domain_name,
                     years=item.years,
@@ -604,23 +797,23 @@ class DomainOrderService:
                     auto_renew=item.auto_renew,
                 )
 
-                if success and isinstance(result, Domain):
-                    item.domain = result
+                if result.is_ok():
+                    domain = result.unwrap()
+                    item.domain = domain
                     item.save(update_fields=["domain"])
-                    processed_domains.append(result)
-
-                    logger.info(f"✅ [Domain] Processed registration: {item.domain_name}")
+                    processed_domains.append(domain)
+                    logger.info("Processed registration: %s", item.domain_name)
                 else:
-                    logger.error(f"🔥 [Domain] Failed to process registration: {item.domain_name}")
+                    logger.error("Failed to process registration %s: %s", item.domain_name, result.unwrap_err())
 
             elif item.action == "renew" and item.domain:
-                success, _msg = DomainLifecycleService.process_domain_renewal(domain=item.domain, years=item.years)
+                renewal_result = DomainLifecycleService.process_domain_renewal(domain=item.domain, years=item.years)
 
-                if success:
+                if renewal_result.is_ok():
                     processed_domains.append(item.domain)
-                    logger.info(f"✅ [Domain] Processed renewal: {item.domain_name}")
+                    logger.info("Processed renewal: %s", item.domain_name)
                 else:
-                    logger.error(f"🔥 [Domain] Failed to process renewal: {item.domain_name}")
+                    logger.error("Failed to process renewal %s: %s", item.domain_name, renewal_result.unwrap_err())
 
         return processed_domains
 
@@ -631,75 +824,93 @@ class DomainOrderService:
 
 
 class DomainRegistrarGateway:
-    """
-    🌐 External registrar API integration gateway
+    """Backward-compatible facade that delegates to the gateway layer.
 
-    Provides abstraction layer for different registrar APIs (Namecheap, GoDaddy, ROTLD).
-    This is a placeholder implementation for future registrar integrations.
+    The real implementations live in apps.domains.gateways (Gandi, ROTLD, etc.).
+    This class preserves the existing tuple-based return types so callers
+    (webhooks.py, DomainOrderService) don't need to change yet.
     """
 
     @staticmethod
     def register_domain(
         registrar: Registrar, domain_name: str, years: int, customer_data: dict[str, Any]
     ) -> tuple[bool, dict[str, Any]]:
-        """🆕 Register domain with external registrar"""
-        logger.info(f"🌐 [Gateway] Would register {domain_name} via {registrar.name}")
+        from .gateways import RegistrarGatewayFactory  # noqa: PLC0415
 
-        # TODO: Implement actual registrar API calls
-        # This is a placeholder implementation
-        return True, {
-            "registrar_domain_id": f"DOM_{domain_name}_{timezone.now().timestamp()}",
-            "expires_at": timezone.now() + timedelta(days=365 * years),
-            "nameservers": registrar.default_nameservers or [],
-            "epp_code": f"EPP_{domain_name[:10].upper()}",
-        }
+        try:
+            gateway = RegistrarGatewayFactory.create_gateway(registrar)
+        except ValueError:
+            logger.error("No gateway registered for %s — cannot register %s", registrar.name, domain_name)
+            return False, {"error": f"No gateway for registrar {registrar.name}"}
+
+        result = gateway.register_domain(domain_name, years, customer_data)
+        if result.is_ok():
+            reg = result.unwrap()
+            return True, {
+                "registrar_domain_id": reg.registrar_domain_id,
+                "expires_at": reg.expires_at,
+                "nameservers": reg.nameservers,
+                "epp_code": reg.epp_code,
+            }
+        # Carry the retriability so the lifecycle can tell a definite rejection
+        # (safe to delete the pending row) from an UNKNOWN outcome (may have
+        # registered server-side — must keep the row, never resubmit blindly).
+        return False, {"error": str(result.unwrap_err()), "retriability": retriability_of(result).value}
 
     @staticmethod
     def renew_domain(registrar: Registrar, domain: Domain, years: int) -> tuple[bool, dict[str, Any]]:
-        """🔄 Renew domain with external registrar"""
-        logger.info(f"🌐 [Gateway] Would renew {domain.name} via {registrar.name}")
+        from .gateways import RegistrarGatewayFactory  # noqa: PLC0415
 
-        # TODO: Implement actual registrar API calls
-        return True, {
-            "new_expires_at": (domain.expires_at or timezone.now()) + timedelta(days=365 * years),
-        }
+        try:
+            gateway = RegistrarGatewayFactory.create_gateway(registrar)
+        except ValueError:
+            logger.error("No gateway registered for %s — cannot renew %s", registrar.name, domain.name)
+            return False, {"error": f"No gateway for registrar {registrar.name}"}
+
+        result = gateway.renew_domain(domain.registrar_domain_id, domain.name, years)
+        if result.is_ok():
+            renewal = result.unwrap()
+            return True, {"new_expires_at": renewal.new_expires_at}
+        return False, {"error": str(result.unwrap_err())}
 
     @staticmethod
-    def check_domain_availability(registrar: Registrar, domain_name: str) -> tuple[bool, bool]:  # (success, available)
-        """🔍 Check domain availability with registrar"""
-        logger.info(f"🌐 [Gateway] Would check availability for {domain_name} via {registrar.name}")
+    def check_domain_availability(registrar: Registrar, domain_name: str) -> tuple[bool, bool]:
+        from .gateways import RegistrarGatewayFactory  # noqa: PLC0415
 
-        # TODO: Implement actual availability check
-        # For now, assume domain is available if not in our database
-        is_available = not Domain.objects.filter(name=domain_name.lower()).exists()
+        try:
+            gateway = RegistrarGatewayFactory.create_gateway(registrar)
+        except ValueError:
+            logger.error("No gateway registered for %s — cannot check %s", registrar.name, domain_name)
+            return False, False
 
-        return True, is_available
+        result = gateway.check_availability(domain_name)
+        if result.is_ok():
+            return True, result.unwrap().available
+        return False, False
 
     @staticmethod
     def verify_webhook_signature(registrar: Registrar, payload: str, signature: str) -> bool:
-        """🔐 Verify webhook signature using registrar's HMAC-SHA256 webhook secret.
+        from .gateways import BaseRegistrarGateway, RegistrarGatewayFactory  # noqa: PLC0415
 
-        Fail-closed: returns False on any error (missing secret, missing signature,
-        decryption failure, empty secret, mismatch, or unexpected exception).
-        Uses timing-safe comparison to prevent side-channel attacks.
-        """
-        if not registrar.webhook_secret or not signature:
-            logger.warning(f"⚠️ [Gateway] Missing webhook secret or signature for {registrar.name}")
-            return False
-
+        # Only the "no gateway registered" case should fall through to the fallback;
+        # don't swallow errors from the gateway's own verification.
         try:
-            decrypted = registrar.get_decrypted_webhook_secret()
-        except DecryptionError:
-            logger.error(
-                f"🔥 [Gateway] Webhook secret decryption failed for {registrar.name} — encryption key may have rotated"
-            )
+            gateway = RegistrarGatewayFactory.create_gateway(registrar)
+        except ValueError:
+            gateway = None
+        if gateway is not None:
+            return gateway.verify_webhook_signature(payload, signature)
+
+        # Fallback: shared HMAC-SHA256 for registrars without a dedicated gateway.
+        if not registrar.webhook_secret or not signature:
             return False
-
-        if not decrypted or not decrypted.strip():
-            logger.error(f"🔥 [Gateway] Webhook secret for {registrar.name} decrypted to empty value")
+        try:
+            secret = registrar.get_decrypted_webhook_secret()
+        except Exception:
+            # Previously swallowed silently — log so a decryption/key-rotation outage
+            # is visible instead of every webhook quietly failing verification.
+            logger.error("Webhook secret decryption failed for %s (encryption key may have rotated)", registrar.name)
             return False
-
-        webhook_secret = decrypted.strip().encode("utf-8")
-
-        expected = hmac.new(webhook_secret, payload.encode("utf-8"), hashlib.sha256).hexdigest()
-        return hmac.compare_digest(f"sha256={expected}", signature)
+        if not secret or not secret.strip():
+            return False
+        return BaseRegistrarGateway._verify_hmac_sha256(payload, signature, secret.strip())
