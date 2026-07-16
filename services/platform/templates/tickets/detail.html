@@ -10,7 +10,8 @@
 
     <!-- Dynamic content that updates after replies -->
     <div id="ticket-status-and-comments">
-        {% include 'tickets/partials/status_and_comments.html' with can_edit=can_edit comments=ticket.comments.all %}
+        {# comments comes from ticket_detail() already filtered by staff permissions — never re-derive it from ticket.comments here #}
+        {% include 'tickets/partials/status_and_comments.html' with can_edit=can_edit comments=comments %}
     </div>
     <!-- End dynamic content -->
 

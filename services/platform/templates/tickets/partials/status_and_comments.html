@@ -87,7 +87,7 @@
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-3.582 8-8 8a8.955 8.955 0 01-1.946-.228A18.89 18.89 0 0111 22l-1-1 1-1c.636-.636 1-1.5 1-2.4 0-1.778 1.44-3.22 3.22-3.22M21 12c0-4.418-3.582-8-8-8s-8 3.582-8 8"></path>
             </svg>
             {% trans 'Conversation' %}
-            <span class="ml-2 text-sm font-normal text-slate-400">({{ ticket.comments.count }} {% trans 'replies' %})</span>
+            <span class="ml-2 text-sm font-normal text-slate-400">({{ comments|length }} {% trans 'replies' %})</span>
         </h3>
     </div>
 
