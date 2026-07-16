@@ -79,7 +79,7 @@
 
 {# JavaScript for password toggle #}
 {% if icon_right == "password-toggle" %}
-<script>
+<script nonce="{{ csp_nonce }}">
   function togglePassword(inputId) {
     const input = document.getElementById(inputId);
     const type = input.getAttribute('type') === 'password' ? 'text' : 'password';

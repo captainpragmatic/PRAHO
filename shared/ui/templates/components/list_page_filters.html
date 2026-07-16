@@ -108,7 +108,7 @@ Optional:
 </div>
 
 {% if filter_tabs %}
-<script>
+<script nonce="{{ csp_nonce }}">
 function switchTab(el) {
   var borderClass = el.dataset.tabBorder;
   var textClass = el.dataset.tabText;
