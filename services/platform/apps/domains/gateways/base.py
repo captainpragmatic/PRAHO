@@ -264,7 +264,23 @@ class BaseRegistrarGateway(ABC):
             self.logger.warning("Concurrent %s already in progress — rejecting duplicate", operation)
             return Err(RegistrarConflictError(domain_name, self.registrar.name))
 
-        result = self._retry(fn, operation=operation)
+        # Exception-safety: _retry(fn) can raise (e.g. _safe_json → RegistrarAPIError on
+        # an oversized body). Convert any escape to an Err so the claim-release path below
+        # always runs — otherwise the in-progress claim would strand the key for the full
+        # TTL and block every legitimate retry.
+        try:
+            result = self._retry(fn, operation=operation)
+        except RegistrarAPIError as exc:
+            result = Err(exc)
+        except Exception as exc:
+            result = Err(
+                RegistrarAPIError(
+                    f"Unexpected error during {operation}",
+                    code=RegistrarErrorCode.INTERNAL_ERROR,
+                    registrar_name=self.registrar.name,
+                    detail=str(exc),
+                )
+            )
 
         if result.is_ok():
             # Cache a secret-free copy: the EPP/auth code is a transfer credential and
@@ -277,10 +293,13 @@ class BaseRegistrarGateway(ABC):
             self._audit_api_call(audit_event, domain_name, success=True, metadata=audit_metadata)
         else:
             cache.delete(idempotency_key)  # release the claim so a legitimate retry can proceed
-            self._record_failure(result.unwrap_err())
-            self.logger.error("%s failed: %s", operation, result.unwrap_err())
+            error = result.unwrap_err()
+            self._record_failure(error)
+            # Log/audit the machine-readable code, never the raw registrar body — it can
+            # echo registrant PII (CNP, address) supplied in the request (W4).
+            self.logger.error("%s failed with %s", operation, error.code.value)
             self._audit_api_call(
-                audit_event, domain_name, success=False, error=str(result.unwrap_err()), metadata=audit_metadata
+                audit_event, domain_name, success=False, error=error.code.value, metadata=audit_metadata
             )
 
         return result
@@ -418,15 +437,24 @@ class BaseRegistrarGateway(ABC):
         return None
 
     def _record_failure(self, error: RegistrarAPIError) -> None:
+        # Only systemic failures (transport/rate-limit/5xx) indicate a registrar-wide
+        # outage worth tripping the breaker. A domain conflict, auth error, or invalid
+        # registrant is request-specific and must NOT count — otherwise a burst of bad
+        # requests would open the breaker for healthy traffic (W3).
+        if not isinstance(error, RegistrarTransientError | RegistrarRateLimitError):
+            return
+
         key = self._circuit_breaker_key()
+        # Atomic first-failure seed: add() only succeeds if the key is absent, so two
+        # concurrent first failures can't both reset the counter to 1 (W3). incr on an
+        # existing key preserves the TTL set here, so the window doesn't slide and the
+        # breaker auto-closes CIRCUIT_BREAKER_RESET_SECONDS after it first opened.
+        if cache.add(key, 1, CIRCUIT_BREAKER_RESET_SECONDS):
+            return
         try:
-            # incr preserves the TTL set on the first failure — do NOT touch() here.
-            # Touching on every failure slid the window forward, so under sustained
-            # failures the counter never expired and the breaker never auto-recovered.
             cache.incr(key)
         except ValueError:
-            # First failure in this window: seed the counter with a fixed TTL so the
-            # breaker auto-closes CIRCUIT_BREAKER_RESET_SECONDS after it first opened.
+            # The key expired between add() and incr() — reseed.
             cache.set(key, 1, CIRCUIT_BREAKER_RESET_SECONDS)
 
     def _record_success(self) -> None:

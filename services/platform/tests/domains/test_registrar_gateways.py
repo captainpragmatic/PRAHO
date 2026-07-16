@@ -560,18 +560,23 @@ class CircuitBreakerRecoveryTests(TestCase):
 
     @patch("apps.domains.gateways.base.cache")
     def test_subsequent_failure_does_not_reset_ttl(self, mock_cache: MagicMock) -> None:
-        # Counter already exists → incr succeeds; the sliding-window touch() must be gone.
+        # Counter already exists → add() fails, incr() bumps it; the sliding-window
+        # touch() must be gone and set() must not reseed the TTL.
+        mock_cache.add.return_value = False
         mock_cache.incr.return_value = 2
         self.gateway._record_failure(RegistrarTransientError("gandi", "boom"))
         mock_cache.touch.assert_not_called()
+        mock_cache.set.assert_not_called()
 
     @patch("apps.domains.gateways.base.cache")
-    def test_first_failure_seeds_fixed_ttl(self, mock_cache: MagicMock) -> None:
+    def test_first_failure_seeds_fixed_ttl_atomically(self, mock_cache: MagicMock) -> None:
         from apps.domains.gateways.base import CIRCUIT_BREAKER_RESET_SECONDS  # noqa: PLC0415
 
-        mock_cache.incr.side_effect = ValueError  # key absent
+        # add() atomically seeds the counter + TTL on the first failure (no incr/set race).
+        mock_cache.add.return_value = True
         self.gateway._record_failure(RegistrarTransientError("gandi", "boom"))
-        mock_cache.set.assert_called_once_with("cb:gandi:failures", 1, CIRCUIT_BREAKER_RESET_SECONDS)
+        mock_cache.add.assert_called_once_with("cb:gandi:failures", 1, CIRCUIT_BREAKER_RESET_SECONDS)
+        mock_cache.incr.assert_not_called()
 
 
 # ===============================================================================
@@ -774,3 +779,64 @@ class UnverifiedAdapterGuardTests(TestCase):
         mock_request.return_value = _mock_response(200, {"products": [{"status": "available", "prices": [{}]}]})
         result = self.gateway.check_availability("example.com")
         self.assertTrue(result.is_ok(), result)
+
+
+@override_settings(REGISTRAR_ADAPTERS_VERIFIED=True)
+class GatewayHardeningTests(TestCase):
+    """W2/W3/W4: exception-safe idempotency claim, breaker counts only systemic
+    failures, and audit never records raw registrar PII."""
+
+    def setUp(self) -> None:
+        self.registrar = _make_registrar("gandi")
+        self.gateway = GandiGateway(self.registrar)
+        self.registrant = {
+            "first_name": "Ion", "last_name": "Pop", "email": "ion@example.ro",
+            "phone": "+40712345678", "address": "Str. Test 1", "city": "Bucuresti",
+            "postal_code": "010101", "country_code": "RO", "entity_type": "individual",
+        }
+
+    @patch("apps.domains.gateways.gandi.GandiGateway._do_register")
+    @patch("apps.domains.gateways.base.cache")
+    def test_idempotency_claim_released_when_operation_raises(self, mock_cache: MagicMock, mock_do: MagicMock) -> None:
+        """An unexpected exception (e.g. oversized-response RegistrarAPIError) must still
+        release the in-progress claim so a later retry isn't permanently blocked."""
+        mock_cache.get.side_effect = [0, None]
+        mock_cache.add.return_value = True
+        mock_do.side_effect = RegistrarAPIError("boom", code=RegistrarErrorCode.INVALID_RESPONSE)
+
+        result = self.gateway.register_domain("example.com", 1, self.registrant)
+
+        self.assertTrue(result.is_err())
+        mock_cache.delete.assert_called_once()  # claim released
+
+    @patch("apps.domains.gateways.base.cache")
+    def test_breaker_ignores_non_systemic_errors(self, mock_cache: MagicMock) -> None:
+        """A domain conflict / auth error is not a registrar-wide outage — it must
+        not count toward tripping the circuit breaker; a transient one does."""
+        self.gateway._record_failure(RegistrarConflictError("example.com", self.registrar.name))
+        mock_cache.add.assert_not_called()
+        mock_cache.incr.assert_not_called()
+
+        mock_cache.add.return_value = True
+        self.gateway._record_failure(RegistrarTransientError(self.registrar.name, "5xx"))
+        mock_cache.add.assert_called_once()
+
+    @patch("apps.domains.gateways.gandi.GandiGateway._do_register")
+    @patch("apps.domains.gateways.base.cache")
+    def test_audit_records_error_code_not_raw_registrar_body(self, mock_cache: MagicMock, mock_do: MagicMock) -> None:
+        """A registrar error echoing registrant PII must not reach the audit trail."""
+        mock_cache.get.side_effect = [0, None]
+        mock_cache.add.return_value = True
+        mock_do.return_value = Err(
+            RegistrarAPIError(
+                "invalid registrant: CNP 1900101123456 rejected",
+                code=RegistrarErrorCode.INVALID_REGISTRANT_DATA,
+            )
+        )
+        with patch("apps.audit.services.AuditService.log_simple_event") as mock_audit:
+            self.gateway.register_domain("example.com", 1, self.registrant)
+
+        self.assertTrue(mock_audit.called)
+        recorded = repr(mock_audit.call_args)
+        self.assertNotIn("1900101123456", recorded)
+        self.assertIn("invalid_registrant_data", recorded)
