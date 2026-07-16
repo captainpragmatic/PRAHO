@@ -494,7 +494,15 @@ class BaseRegistrarGateway(ABC):
         domain_name: str,
         epp_code: str,
     ) -> Result[DomainTransferResult, RegistrarAPIError]:
-        """Initiate domain transfer with circuit breaker and idempotency."""
+        """Initiate domain transfer with circuit breaker and atomic idempotency.
+
+        The idempotency slot is claimed atomically (cache.add) BEFORE the registrar
+        call, so two concurrent transfer requests for the same domain can't both submit
+        a chargeable transfer — the loser of the add() race is rejected. The claim is
+        replaced with the result on success and released on failure so a legitimate
+        retry can proceed. (A bare get-then-call had a window where both requests missed
+        the cache and both posted.)
+        """
         if guard := self._verified_adapter_guard():
             return guard
         if err := self._check_circuit_breaker():
@@ -502,9 +510,19 @@ class BaseRegistrarGateway(ABC):
 
         idempotency_key = f"domain_transfer:{self.gateway_name}:{domain_name}"
         cached = cache.get(idempotency_key)
-        if cached is not None:
+        if cached is not None and cached != _IDEMPOTENCY_IN_PROGRESS:
             self.logger.info("Idempotency hit for %s transfer", domain_name)
             return Ok(cached)
+
+        # Atomically claim the slot before posting. add() only succeeds if the key is
+        # absent, so a concurrent in-flight request loses the race and is rejected
+        # instead of issuing a duplicate, chargeable transfer.
+        if not cache.add(idempotency_key, _IDEMPOTENCY_IN_PROGRESS, IDEMPOTENCY_TTL_SECONDS):
+            existing = cache.get(idempotency_key)
+            if existing is not None and existing != _IDEMPOTENCY_IN_PROGRESS:
+                return Ok(existing)
+            self.logger.warning("Concurrent %s transfer already in progress — rejecting duplicate", domain_name)
+            return Err(RegistrarConflictError(domain_name, self.registrar.name))
 
         result = self._run_phase2_op(
             lambda: self._do_initiate_transfer(domain_name, epp_code),
@@ -517,6 +535,7 @@ class BaseRegistrarGateway(ABC):
             self._record_success()
             self._audit_api_call("domain_transfer", domain_name, success=True)
         else:
+            cache.delete(idempotency_key)  # release the claim so a legitimate retry can proceed
             error = result.unwrap_err()
             self._record_failure(error)
             self._audit_api_call("domain_transfer", domain_name, success=False, error=error.code.value)
@@ -606,10 +625,25 @@ class BaseRegistrarGateway(ABC):
         if err := self._check_circuit_breaker():
             return err
 
-        result = self._retry(
-            lambda: self._do_check_availability_bulk(domain_names),
-            operation=f"bulk_check:{len(domain_names)}_domains",
-        )
+        # Exception-safety: _retry can raise (RegistrarAPIError / malformed body) out of
+        # the bulk lambda; convert to an Err so a registrar outage fails closed instead of
+        # surfacing as an unhandled 500 (mirrors check_availability).
+        try:
+            result = self._retry(
+                lambda: self._do_check_availability_bulk(domain_names),
+                operation=f"bulk_check:{len(domain_names)}_domains",
+            )
+        except RegistrarAPIError as exc:
+            result = Err(exc)
+        except Exception as exc:
+            result = Err(
+                RegistrarAPIError(
+                    f"Unexpected error during bulk availability check ({len(domain_names)} domains)",
+                    code=RegistrarErrorCode.INTERNAL_ERROR,
+                    registrar_name=self.registrar.name,
+                    detail=str(exc),
+                )
+            )
 
         if result.is_ok():
             self._record_success()

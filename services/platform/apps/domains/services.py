@@ -706,8 +706,10 @@ class DomainLifecycleService:
             logger.error("Failed to create transfer records for %s: %s", domain_name, e)
             return Err(cast(str, _("Failed to initiate transfer")))
 
-        # Phase 2: submit to registrar (outside the transaction above).
-        result = gateway.initiate_transfer(domain_name, epp_code)
+        # Phase 2: submit to registrar (outside the transaction above). Use the stored
+        # (lowercased) domain.name so the gateway idempotency key matches on any retry —
+        # passing the raw domain_name would key "Example.com" separately from "example.com".
+        result = gateway.initiate_transfer(domain.name, epp_code)
         if result.is_ok():
             transfer = result.unwrap()
             op.mark_submitted(registrar_operation_id=transfer.transfer_id)

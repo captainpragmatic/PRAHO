@@ -17,8 +17,10 @@ from django_fsm import TransitionNotAllowed
 from apps.common.types import Err, Ok, Retriability
 from apps.customers.models import Customer
 from apps.domains.gateways.base import (
+    _IDEMPOTENCY_IN_PROGRESS,
     DomainAvailabilityResult,
     DomainInfoResult,
+    DomainTransferResult,
 )
 from apps.domains.gateways.errors import RegistrarAPIError, RegistrarErrorCode, RegistrarTransientError
 from apps.domains.gateways.gandi import GandiGateway
@@ -163,6 +165,71 @@ class GandiTransferTests(TestCase):
         result = self.gateway.initiate_transfer("example.com", "BAD-EPP")
 
         self.assertTrue(result.is_err())
+
+
+@override_settings(REGISTRAR_ADAPTERS_VERIFIED=True)
+class TransferIdempotencyClaimTests(TestCase):
+    """initiate_transfer must claim the idempotency slot atomically BEFORE posting,
+    so two concurrent requests can't both submit a chargeable transfer (Codex P1)."""
+
+    def setUp(self) -> None:
+        self.registrar = _make_registrar("gandi")
+        self.gateway = GandiGateway(self.registrar)
+
+    @patch("apps.domains.gateways.gandi.GandiGateway._do_initiate_transfer")
+    @patch("apps.domains.gateways.base.cache")
+    def test_transfer_claims_slot_with_sentinel_before_posting(
+        self, mock_cache: MagicMock, mock_do: MagicMock
+    ) -> None:
+        # circuit breaker closed (0), idempotency slot free (None), claim wins.
+        mock_cache.get.side_effect = [0, None]
+        mock_cache.add.return_value = True
+        mock_do.return_value = Ok(DomainTransferResult(transfer_id="t-1", status="pending"))
+
+        result = self.gateway.initiate_transfer("example.com", "EPP")
+
+        self.assertTrue(result.is_ok(), result)
+        # The atomic claim (cache.add of the in-progress sentinel) must have happened —
+        # the naive get-then-set path never calls add().
+        self.assertTrue(mock_cache.add.called)
+        self.assertEqual(mock_cache.add.call_args.args[1], _IDEMPOTENCY_IN_PROGRESS)
+
+    @patch("apps.domains.gateways.gandi.GandiGateway._do_initiate_transfer")
+    @patch("apps.domains.gateways.base.cache")
+    def test_concurrent_transfer_loses_claim_and_does_not_post(
+        self, mock_cache: MagicMock, mock_do: MagicMock
+    ) -> None:
+        # slot free on first look, but the atomic add loses the race (another request
+        # already claimed it) and the recheck finds no completed result yet.
+        mock_cache.get.side_effect = [0, None, None]
+        mock_cache.add.return_value = False  # claim lost
+
+        result = self.gateway.initiate_transfer("example.com", "EPP")
+
+        self.assertTrue(result.is_err(), result)
+        # The chargeable registrar call must NOT be made when the claim is lost.
+        mock_do.assert_not_called()
+
+
+class BulkAvailabilityExceptionSafetyTests(TestCase):
+    """check_availability_bulk must convert a raised registrar error into an Err,
+    not let it propagate as a 500 (Copilot base.py finding)."""
+
+    def setUp(self) -> None:
+        self.registrar = _make_registrar("gandi")
+        self.gateway = GandiGateway(self.registrar)
+
+    @patch("apps.domains.gateways.gandi.GandiGateway._do_check_availability_bulk")
+    @patch("apps.domains.gateways.base.cache")
+    def test_raised_registrar_error_becomes_err(self, mock_cache: MagicMock, mock_bulk: MagicMock) -> None:
+        mock_cache.get.return_value = 0  # circuit breaker closed
+        mock_bulk.side_effect = RegistrarAPIError(
+            "boom", code=RegistrarErrorCode.INTERNAL_ERROR, registrar_name="gandi"
+        )
+
+        result = self.gateway.check_availability_bulk(["a.com", "b.com"])
+
+        self.assertTrue(result.is_err(), result)  # outage != unhandled 500
 
 
 class GandiDomainInfoTests(TestCase):
@@ -468,6 +535,24 @@ class LifecycleServicePhase2FailureContractTests(TestCase):
 
         self.assertTrue(result.is_err(), result)
         self.assertFalse(self.Domain.objects.filter(name="transfer2.com").exists())
+
+    def test_transfer_passes_lowercased_domain_to_gateway(self) -> None:
+        """The DB row stores domain.name lowercased; the gateway call must use the SAME
+        casing, or the gateway idempotency key (keyed on the passed name) won't match a
+        retry and a duplicate chargeable transfer can slip through (Copilot finding)."""
+        captured: dict[str, str] = {}
+
+        def _capture(name: str, epp: str) -> Ok[DomainTransferResult]:
+            captured["name"] = name
+            return Ok(DomainTransferResult(transfer_id="t-1", status="pending"))
+
+        gw = MagicMock()
+        gw.initiate_transfer.side_effect = _capture
+        with patch("apps.domains.gateways.RegistrarGatewayFactory.create_gateway", return_value=gw):
+            result = DomainLifecycleService.initiate_transfer("Example.COM", "EPP", self.customer, self.registrar)
+
+        self.assertTrue(result.is_ok(), result)
+        self.assertEqual(captured["name"], "example.com")
 
     def test_transfer_unknown_keeps_pending_row(self) -> None:
         with self._mock_gateway(initiate_transfer=self._err(RegistrarErrorCode.NETWORK_ERROR, Retriability.UNKNOWN)):
