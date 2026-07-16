@@ -751,12 +751,31 @@ def _handle_marketing_consent_change(customer: Customer, old_consent: bool, new_
     """
     consent_action = "granted" if new_consent else "withdrawn"
 
+    # Source attribution: callers (EmailPreferenceService.update_preferences,
+    # process_unsubscribe, admin actions) set instance._consent_source before
+    # save() so the signal records WHERE the change originated. Falls back to
+    # "system" for direct Customer.save() callers (data imports, fixtures,
+    # ad-hoc shell commands). GDPR Art. 7 requires this attribution; collapsing
+    # the prior service-layer log_simple_event call into the signal keeps a
+    # single audit record per consent flip.
+    source = getattr(customer, "_consent_source", "system")
+    category = getattr(customer, "_consent_category", None)
+
+    evidence: dict[str, Any] = {
+        "customer_id": str(customer.id),
+        "old_consent": old_consent,
+        "new_consent": new_consent,
+        "source": source,
+    }
+    if category is not None:
+        evidence["category"] = category
+
     compliance_request = ComplianceEventRequest(
         compliance_type="marketing_consent",
         reference_id=f"customer_{customer.id}",
-        description=f"Marketing consent {consent_action}",
+        description=f"Marketing consent {consent_action} via {source}",
         status="success",
-        evidence={"customer_id": str(customer.id), "old_consent": old_consent, "new_consent": new_consent},
+        evidence=evidence,
     )
 
     try:
