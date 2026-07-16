@@ -542,7 +542,7 @@ class LifecycleServicePhase2FailureContractTests(TestCase):
         retry and a duplicate chargeable transfer can slip through (Copilot finding)."""
         captured: dict[str, str] = {}
 
-        def _capture(name: str, epp: str) -> Ok:
+        def _capture(name: str, epp: str) -> Ok[DomainTransferResult]:
             captured["name"] = name
             return Ok(DomainTransferResult(transfer_id="t-1", status="pending"))
 
