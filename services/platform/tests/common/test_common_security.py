@@ -5,16 +5,15 @@ Tests HTTPS enforcement, secure cookies, HSTS configuration,
 and production security settings to ensure robust transport security.
 """
 
-from django.conf import settings
-from django.core.checks import Error, Warning as DjangoWarning
+from django.core.checks import Error
+from django.http import HttpResponse
 from django.test import TestCase, override_settings
 from django.test.client import RequestFactory
-from django.http import HttpResponse
 
 from apps.common.checks import (
     check_https_security_configuration,
-    check_session_security_configuration,
     check_security_middleware_configuration,
+    check_session_security_configuration,
 )
 from apps.common.middleware import SecurityHeadersMiddleware
 
@@ -405,8 +404,11 @@ class SecurityMiddlewareTest(TestCase):
         self.assertNotIn('unpkg.com', csp_header)
         self.assertNotIn('cdn.tailwindcss.com', csp_header)
         # Core directives remain intact.
-        self.assertIn("script-src 'self'", csp_header)
-        self.assertIn("style-src 'self'", csp_header)
+        self.assertIn("script-src 'self' 'unsafe-inline'", csp_header)
+        self.assertIn("style-src 'self' 'unsafe-inline'", csp_header)
+        # Still-needed external sources must survive the CDN cleanup.
+        self.assertIn('fonts.googleapis.com', csp_header)
+        self.assertIn('fonts.gstatic.com', csp_header)
 
     def test_security_headers_values(self):
         """Test specific security header values."""
