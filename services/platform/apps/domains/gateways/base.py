@@ -12,7 +12,7 @@ import hmac
 import logging
 import time
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, ClassVar
 
@@ -46,6 +46,19 @@ IDEMPOTENCY_TTL_SECONDS = 3600  # 1 hour
 # second concurrent request for the same domain is rejected instead of issuing a
 # duplicate (and chargeable) registration. Replaced with the real result on success.
 _IDEMPOTENCY_IN_PROGRESS = "__in_progress__"
+
+
+def _redact_secrets(result: Any) -> Any:
+    """Return a copy of a gateway result with any secret-bearing field cleared.
+
+    Used before writing a result to the plaintext idempotency cache — the EPP/auth
+    transfer code must never be persisted there (it is stored encrypted on the
+    Domain row instead).
+    """
+    if isinstance(result, DomainRegistrationResult) and result.epp_code:
+        return replace(result, epp_code="")
+    return result
+
 
 # Retry defaults
 MAX_RETRIES = 3
@@ -229,7 +242,11 @@ class BaseRegistrarGateway(ABC):
         result = self._retry(fn, operation=operation)
 
         if result.is_ok():
-            cache.set(idempotency_key, result.unwrap(), IDEMPOTENCY_TTL_SECONDS)
+            # Cache a secret-free copy: the EPP/auth code is a transfer credential and
+            # the idempotency cache is plaintext (DatabaseCache/Redis). The immediate
+            # caller still receives the full result (with the EPP) to store encrypted;
+            # only the replay copy is redacted.
+            cache.set(idempotency_key, _redact_secrets(result.unwrap()), IDEMPOTENCY_TTL_SECONDS)
             self._record_success()
             self.logger.info("%s succeeded via %s", operation, self.gateway_name)
             self._audit_api_call(audit_event, domain_name, success=True, metadata=audit_metadata)

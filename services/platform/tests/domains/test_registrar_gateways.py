@@ -687,3 +687,44 @@ class RetryHonorsRetriabilityTests(TestCase):
         self.assertTrue(result.is_err())
         # Idempotent read — retried up to MAX_RETRIES.
         self.assertEqual(mock_request.call_count, 3)
+
+
+class IdempotencyCacheSecretRedactionTests(TestCase):
+    """The idempotency cache must never persist the EPP/auth transfer credential.
+
+    DatabaseCache/Redis serialize the cached value in plaintext; the EPP code is a
+    transfer secret (encrypted at rest in the Domain row), so it must be stripped
+    from the cached DomainRegistrationResult while the immediate caller still gets
+    the full result to persist.
+    """
+
+    def setUp(self) -> None:
+        self.registrar = _make_registrar("gandi")
+        self.gateway = GandiGateway(self.registrar)
+        self.registrant = {
+            "first_name": "Ion", "last_name": "Pop", "email": "ion@example.ro",
+            "phone": "+40712345678", "address": "Str. Test 1", "city": "Bucuresti",
+            "postal_code": "010101", "country_code": "RO", "entity_type": "individual",
+        }
+
+    @patch("apps.domains.gateways.gandi.GandiGateway._do_register")
+    @patch("apps.domains.gateways.base.cache")
+    def test_epp_code_is_not_written_to_cache(self, mock_cache: MagicMock, mock_do_register: MagicMock) -> None:
+        mock_cache.get.side_effect = [0, None]  # breaker OK, idempotency miss
+        mock_cache.add.return_value = True
+        mock_do_register.return_value = Ok(
+            DomainRegistrationResult(
+                registrar_domain_id="REG-1",
+                expires_at=datetime(2027, 1, 1, tzinfo=UTC),
+                nameservers=[],
+                epp_code="TOP-SECRET-EPP",
+            )
+        )
+
+        result = self.gateway.register_domain("example.com", 1, self.registrant)
+
+        # Immediate caller still receives the real EPP to persist encrypted.
+        self.assertEqual(result.unwrap().epp_code, "TOP-SECRET-EPP")
+        # But nothing containing the secret was ever written to the cache.
+        for call in mock_cache.set.call_args_list:
+            self.assertNotIn("TOP-SECRET-EPP", repr(call))
