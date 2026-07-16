@@ -13,7 +13,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from unittest.mock import patch
 
-from django.test import TestCase
+from django.test import TestCase, override_settings
 
 from apps.customers.models import Customer, CustomerAddress, CustomerTaxProfile
 from apps.domains.gateways import RegistrarGatewayFactory
@@ -295,3 +295,37 @@ class RegistrantDataBuildingTests(TestCase):
         result = DomainLifecycleService.create_domain_registration(customer=bare, domain_name="bare.net", years=1)
         self.assertTrue(result.is_err(), result)
         self.assertFalse(Domain.objects.filter(name="bare.net").exists())
+
+
+@override_settings(REGISTRAR_ADAPTERS_VERIFIED=False)
+class UnverifiedAdapterRegistrationTests(TestCase):
+    """P1 (PR #256 review): with adapters unverified, registration must fail cleanly —
+    return Err AND delete the pending row so the domain isn't deadlocked from retry."""
+
+    def setUp(self) -> None:
+        self.tld = TLD.objects.create(
+            extension="com", description=".com", registration_price_cents=1000, renewal_price_cents=1000,
+            transfer_price_cents=1000, registrar_cost_cents=500, min_registration_period=1, max_registration_period=10,
+        )
+        # name="gandi" so the factory returns a REAL GandiGateway and the request
+        # reaches its unverified-adapter guard (not the no-gateway path).
+        self.registrar = Registrar.objects.create(
+            name="gandi", display_name="Gandi", api_username="",
+            website_url="https://gandi.net", api_endpoint="https://api.gandi.net/v5", status="active",
+        )
+        TLDRegistrarAssignment.objects.create(tld=self.tld, registrar=self.registrar, is_primary=True, is_active=True, priority=1)
+        self.customer = Customer.objects.create(
+            name="John Doe", primary_email="cust@example.com", primary_phone="+40712345678",
+            company_name="ACME", customer_type="individual",
+        )
+        _give_registrant_data(self.customer, cnp="1900101123456")
+
+    def test_unverified_registration_returns_err_and_deletes_row(self) -> None:
+        # No gateway mock — the real GandiGateway guard fires because the adapter is
+        # unverified. The NOT_CONFIGURED guard is NOT_RETRIABLE → definite rejection.
+        result = DomainLifecycleService.create_domain_registration(
+            customer=self.customer, domain_name="example.com", years=1,
+        )
+        self.assertTrue(result.is_err(), result)
+        # The pending row must be gone so the domain can be registered once verified.
+        self.assertFalse(Domain.objects.filter(name="example.com").exists())

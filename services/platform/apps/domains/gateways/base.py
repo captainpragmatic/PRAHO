@@ -226,7 +226,11 @@ class BaseRegistrarGateway(ABC):
                 "refusing chargeable operation (set REGISTRAR_ADAPTERS_VERIFIED=true once validated)",
                 code=RegistrarErrorCode.NOT_CONFIGURED,
                 registrar_name=self.registrar.name,
-            )
+            ),
+            # Definite refusal, not a transient state: the registration lifecycle must
+            # delete the pending row so the domain can be registered once verified,
+            # rather than stranding it as pending_unknown forever.
+            retriability=Retriability.NOT_RETRIABLE,
         )
 
     def _execute_idempotent_operation(  # noqa: PLR0913  # cohesive call + audit context for one op
@@ -312,19 +316,33 @@ class BaseRegistrarGateway(ABC):
         if err := self._check_circuit_breaker():
             return err
 
-        result = self._retry(
-            lambda: self._do_check_availability(domain_name),
-            operation=f"check:{domain_name}",
-            retry_on_unknown=True,  # availability is a safe read — replaying it is harmless
-        )
+        # Exception-safety: _safe_json (oversized/malformed body) or credential
+        # decryption can raise out of the availability lambda. Convert to an Err so the
+        # AJAX endpoint fails closed ("could not verify") instead of returning a 500.
+        try:
+            result = self._retry(
+                lambda: self._do_check_availability(domain_name),
+                operation=f"check:{domain_name}",
+                retry_on_unknown=True,  # availability is a safe read — replaying it is harmless
+            )
+        except RegistrarAPIError as exc:
+            result = Err(exc)
+        except Exception as exc:
+            result = Err(
+                RegistrarAPIError(
+                    f"Unexpected error during availability check for {domain_name}",
+                    code=RegistrarErrorCode.INTERNAL_ERROR,
+                    registrar_name=self.registrar.name,
+                    detail=str(exc),
+                )
+            )
 
         if result.is_ok():
             self._record_success()
         else:
-            self._record_failure(result.unwrap_err())
-            self._audit_api_call(
-                "domain_availability_check", domain_name, success=False, error=str(result.unwrap_err())
-            )
+            error = result.unwrap_err()
+            self._record_failure(error)
+            self._audit_api_call("domain_availability_check", domain_name, success=False, error=error.code.value)
 
         return result
 
@@ -533,20 +551,32 @@ class BaseRegistrarGateway(ABC):
         except Exception:
             message = response.text[:200]
 
+        # 4xx auth/not-found/conflict are definite rejections: tag NOT_RETRIABLE so the
+        # registration lifecycle deletes the pending row rather than stranding it as
+        # pending_unknown (which the uniqueness precondition would then block forever).
         if status in (HTTP_UNAUTHORIZED, HTTP_FORBIDDEN):
             detail = message if status == HTTP_UNAUTHORIZED else f"Forbidden: {message}"
-            return Err(RegistrarAuthError(self.registrar.name, detail=detail))
+            return Err(RegistrarAuthError(self.registrar.name, detail=detail), retriability=Retriability.NOT_RETRIABLE)
 
         if status == HTTP_NOT_FOUND:
-            return Err(RegistrarNotFoundError(domain_name or operation, self.registrar.name))
+            return Err(
+                RegistrarNotFoundError(domain_name or operation, self.registrar.name),
+                retriability=Retriability.NOT_RETRIABLE,
+            )
 
         if status == HTTP_CONFLICT:
-            return Err(RegistrarConflictError(domain_name or operation, self.registrar.name))
+            return Err(
+                RegistrarConflictError(domain_name or operation, self.registrar.name),
+                retriability=Retriability.NOT_RETRIABLE,
+            )
 
         if status == HTTP_RATE_LIMITED:
-            retry_after = response.headers.get("Retry-After")
+            # Retry-After may be an integer (seconds) or an HTTP-date; only the integer
+            # form is usable and a non-integer must not raise out of error mapping.
+            retry_after_raw = response.headers.get("Retry-After")
+            retry_after = int(retry_after_raw) if retry_after_raw and retry_after_raw.isdigit() else None
             return Err(
-                RegistrarRateLimitError(self.registrar.name, int(retry_after) if retry_after else None),
+                RegistrarRateLimitError(self.registrar.name, retry_after),
                 # 429 means the registrar rejected the request before processing it — safe to replay.
                 retriability=Retriability.RETRIABLE,
             )
