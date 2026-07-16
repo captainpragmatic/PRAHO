@@ -17,6 +17,7 @@ from django.conf import settings
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.http import HttpRequest, HttpResponse, JsonResponse
+from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 # Type variable for function decorators
@@ -115,14 +116,30 @@ def get_romanian_now() -> datetime:
     return datetime.now(ZoneInfo("Europe/Bucharest"))
 
 
+def _to_romanian_local(dt: datetime) -> datetime:
+    """Convert an aware datetime to the Romanian wall clock; pass naive datetimes through.
+
+    With USE_TZ=True the ORM hands back aware datetimes in UTC, so formatting one directly
+    renders the UTC wall clock — the PREVIOUS day for anything between 00:00 and 02:00/03:00
+    Romanian time. Customer-facing dates (invoice PDFs, notification emails) must show the
+    Romanian day, matching the date filed with ANAF (see #286, #220).
+
+    Naive datetimes carry no timezone to convert from, so they are returned unchanged rather
+    than assumed to be UTC: callers holding an already-local wall clock keep working.
+    """
+    if timezone.is_aware(dt):
+        return timezone.localtime(dt)
+    return dt
+
+
 def format_romanian_date(dt: datetime) -> str:
     """Format date in Romanian style: DD.MM.YYYY"""
-    return dt.strftime("%d.%m.%Y")
+    return _to_romanian_local(dt).strftime("%d.%m.%Y")
 
 
 def format_romanian_datetime(dt: datetime) -> str:
     """Format datetime in Romanian style: DD.MM.YYYY HH:MM"""
-    return dt.strftime("%d.%m.%Y %H:%M")
+    return _to_romanian_local(dt).strftime("%d.%m.%Y %H:%M")
 
 
 # ===============================================================================

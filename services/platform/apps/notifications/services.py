@@ -994,10 +994,12 @@ class EmailService:
         context = {
             "customer_name": customer.get_display_name(),
             "invoice_number": invoice.number,
-            "invoice_date": invoice.created_at.strftime("%Y-%m-%d"),
+            # Dates shown to the customer must be the Romanian calendar day, matching the PDF
+            # and the date filed with ANAF — not the UTC day (#286).
+            "invoice_date": timezone.localtime(invoice.created_at).strftime("%Y-%m-%d"),
             "total_amount": str(invoice.total),
             "currency": invoice.currency.code if invoice.currency else "RON",
-            "due_date": invoice.due_at.strftime("%Y-%m-%d") if invoice.due_at else "N/A",
+            "due_date": timezone.localtime(invoice.due_at).strftime("%Y-%m-%d") if invoice.due_at else "N/A",
             "invoice_url": f"{settings.COMPANY_WEBSITE}/billing/invoices/{invoice.id}/",
         }
 
@@ -1021,9 +1023,9 @@ class EmailService:
             "invoice_number": invoice.number,
             "total_amount": str(invoice.total),
             "currency": invoice.currency.code if invoice.currency else "RON",
-            "paid_date": invoice.paid_at.strftime("%Y-%m-%d")
+            "paid_date": timezone.localtime(invoice.paid_at).strftime("%Y-%m-%d")
             if invoice.paid_at
-            else timezone.now().strftime("%Y-%m-%d"),
+            else timezone.localtime(timezone.now()).strftime("%Y-%m-%d"),
             "invoice_url": f"{settings.COMPANY_WEBSITE}/billing/invoices/{invoice.id}/",
         }
 
@@ -1051,7 +1053,7 @@ class EmailService:
             "invoice_number": invoice.number,
             "total_amount": str(invoice.total),
             "currency": invoice.currency.code if invoice.currency else "RON",
-            "due_date": invoice.due_at.strftime("%Y-%m-%d") if invoice.due_at else "N/A",
+            "due_date": timezone.localtime(invoice.due_at).strftime("%Y-%m-%d") if invoice.due_at else "N/A",
             "days_until_due": max(0, days_until_due),
             "payment_url": f"{settings.COMPANY_WEBSITE}/billing/pay/{invoice.id}/",
         }
