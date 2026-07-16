@@ -190,20 +190,30 @@ class TestMiniCartJustAdded(SimpleTestCase):
 
 
 # ---------------------------------------------------------------------------
-# ENH-1: cart_updated template contains "View Cart" link
+# ENH-1: View Cart affordance after add-to-cart
 # ---------------------------------------------------------------------------
 
 
 @override_settings(**_CACHE_SETTINGS)
 class TestCartUpdatedToastViewCartLink(SimpleTestCase):
-    """ENH-1-toast: cart_updated response includes a View Cart link to orders:cart_review."""
+    """ENH-1 + #102: after add-to-cart the View-Cart affordance is reachable via the
+    auto-opening mini-cart dropdown (the inline toast 'View Cart' link was removed when
+    the success notice was consolidated into showToast; the dropdown's cart link is the
+    canonical affordance now).
+
+    The auto-open must be server-rendered state (``miniCartOpen: true``), NOT the
+    ``cartAdded``/``cart-added`` window event: HX-Trigger events are dispatched before
+    the outerHTML swap, so the only listener that could catch them sits on the widget
+    that the swap is about to replace — the swapped-in widget would initialise closed.
+    """
 
     def setUp(self) -> None:
         self.client = Client()
         _auth_client_with_product_mocked(self.client)
 
-    def test_cart_updated_response_contains_view_cart_link(self) -> None:
-        """The cart_updated HTMX response contains a link to cart review page."""
+    def test_cart_updated_response_wires_auto_opening_mini_cart(self) -> None:
+        """The cart_updated response renders the mini-cart dropdown open (it holds the
+        cart-review/checkout links), and the dropdown loads its content on swap."""
         with (
             patch("apps.orders.views.PlatformAPIClient") as mock_cls,
             patch("apps.orders.services.PlatformAPIClient") as svc_mock_cls,
@@ -221,5 +231,50 @@ class TestCartUpdatedToastViewCartLink(SimpleTestCase):
 
         self.assertEqual(response.status_code, 200)
         content = response.content.decode()
-        # View Cart link must be present in toast
-        self.assertIn("/order/cart/", content)
+        # The mini-cart dropdown (which contains the View Cart / Checkout links) is
+        # rendered OPEN by the server and loads its content after the add.
+        self.assertIn('id="mini-cart"', content)
+        self.assertIn("mini-cart/", content)  # hx-get to mini_cart_content
+        self.assertIn('x-data="{ miniCartOpen: true }"', content)
+
+
+# ---------------------------------------------------------------------------
+# #102: Toast system consolidation — add-to-cart uses the unified showToast()
+# ---------------------------------------------------------------------------
+
+
+@override_settings(**_CACHE_SETTINGS)
+class TestCartToastConsolidation(SimpleTestCase):
+    """#102: the add-to-cart success notice routes through the single showToast()
+    system instead of the old bespoke inline Alpine '#cart-success-message' box,
+    so exactly one toast renders (in the shared #toast-container)."""
+
+    def setUp(self) -> None:
+        self.client = Client()
+        _auth_client_with_product_mocked(self.client)
+
+    def _post_add(self, slug: str = "shared-hosting-basic") -> object:
+        with (
+            patch("apps.orders.views.PlatformAPIClient") as mock_cls,
+            patch("apps.orders.services.PlatformAPIClient") as svc_mock_cls,
+        ):
+            mock_instance = MagicMock()
+            mock_instance.get.return_value = _make_product_data(slug=slug)
+            mock_cls.return_value = mock_instance
+            svc_mock_cls.return_value = mock_instance
+            return self.client.post(
+                "/order/cart/add/",
+                {"product_slug": slug, "quantity": "1", "billing_period": "monthly"},
+                HTTP_X_FORWARDED_FOR="127.0.0.1",
+            )
+
+    def test_no_inline_cart_success_message_block(self) -> None:
+        """The old top-right inline Alpine toast block must be gone (it duplicated the toast)."""
+        body = self._post_add().content.decode()
+        self.assertNotIn("cart-success-message", body)
+        self.assertNotIn("fixed top-4 right-4", body)
+
+    def test_success_routes_through_show_toast(self) -> None:
+        """Success is surfaced via the unified showToast('success', …) call."""
+        body = self._post_add().content.decode()
+        self.assertIn("showToast('success'", body)

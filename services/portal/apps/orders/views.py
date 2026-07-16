@@ -651,7 +651,9 @@ def add_to_cart(request: HttpRequest) -> HttpResponse:  # noqa: PLR0911
         # Return updated cart widget
         cart_items = cart.get_items()
         if cart_items:
-            # Item was successfully added — fire cartAdded event so Alpine auto-opens mini-cart
+            # Item was successfully added — cart_updated.html renders the mini-cart open
+            # (server-rendered state; the cartAdded HX-Trigger below fires pre-swap and
+            # cannot open the swapped-in widget, it only informs page-level listeners)
             just_added_slug = product_slug
             # Find the item by slug rather than using cart_items[-1], which is wrong when
             # add_item() updates an existing item in-place instead of appending.
