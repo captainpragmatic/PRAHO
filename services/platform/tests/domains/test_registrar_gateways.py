@@ -772,6 +772,27 @@ class UnverifiedAdapterGuardTests(TestCase):
         self.assertEqual(result.unwrap_err().code, RegistrarErrorCode.NOT_CONFIGURED)
         mock_request.assert_not_called()
 
+    @patch("apps.domains.gateways.gandi.GandiGateway._api_request")
+    def test_transfer_refused_when_unverified(self, mock_request: MagicMock) -> None:
+        result = self.gateway.initiate_transfer("example.com", "EPP-CODE")
+        self.assertTrue(result.is_err())
+        self.assertEqual(result.unwrap_err().code, RegistrarErrorCode.NOT_CONFIGURED)
+        mock_request.assert_not_called()
+
+    @patch("apps.domains.gateways.gandi.GandiGateway._api_request")
+    def test_nameserver_update_refused_when_unverified(self, mock_request: MagicMock) -> None:
+        result = self.gateway.update_nameservers("example.com", ["ns1.x.com", "ns2.x.com"])
+        self.assertTrue(result.is_err())
+        self.assertEqual(result.unwrap_err().code, RegistrarErrorCode.NOT_CONFIGURED)
+        mock_request.assert_not_called()
+
+    @patch("apps.domains.gateways.gandi.GandiGateway._api_request")
+    def test_set_lock_refused_when_unverified(self, mock_request: MagicMock) -> None:
+        result = self.gateway.set_lock("example.com", locked=True)
+        self.assertTrue(result.is_err())
+        self.assertEqual(result.unwrap_err().code, RegistrarErrorCode.NOT_CONFIGURED)
+        mock_request.assert_not_called()
+
     @patch("apps.domains.gateways.base.cache")
     @patch("apps.domains.gateways.gandi.GandiGateway._api_request")
     def test_availability_allowed_when_unverified(self, mock_request: MagicMock, mock_cache: MagicMock) -> None:

@@ -480,6 +480,142 @@ class Domain(ConcurrentTransitionMixin, models.Model):
 
 
 # ===============================================================================
+# DOMAIN OPERATIONS (ASYNC TASK TRACKING)
+# ===============================================================================
+
+
+class DomainOperation(ConcurrentTransitionMixin, models.Model):
+    """Tracks async domain operations submitted to registrar APIs.
+
+    Mirrors the ProvisioningTask pattern from apps/provisioning.
+    Two-phase: create record + submit to registrar (phase 1),
+    confirm via webhook or polling (phase 2).
+
+    ``state`` is a protected FSMField (ADR-0034): transitions go through the
+    @transition-decorated mark_* methods, never direct assignment.
+    """
+
+    OPERATION_TYPE_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
+        ("transfer_in", _("Transfer In")),
+        ("transfer_out", _("Transfer Out")),
+        ("nameserver_update", _("Nameserver Update")),
+        ("lock_update", _("Lock Status Update")),
+        ("whois_update", _("WHOIS Privacy Update")),
+        ("domain_info", _("Domain Info Sync")),
+    )
+
+    STATUS_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
+        ("pending", _("Pending")),
+        ("submitted", _("Submitted to Registrar")),
+        ("completed", _("Completed")),
+        ("failed", _("Failed")),
+        ("retrying", _("Retrying")),
+        ("cancelled", _("Cancelled")),
+    )
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    domain = models.ForeignKey(Domain, on_delete=models.CASCADE, related_name="operations")
+    registrar = models.ForeignKey(Registrar, on_delete=models.PROTECT, related_name="domain_operations")
+
+    operation_type = models.CharField(max_length=30, choices=OPERATION_TYPE_CHOICES)
+    state = FSMField(max_length=20, choices=STATUS_CHOICES, default="pending", protected=True)
+
+    # Operation parameters (e.g. nameservers list, lock state, epp_code)
+    parameters = models.JSONField(default=dict, blank=True)
+
+    # Execution tracking
+    submitted_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    # Registrar reference (e.g. transfer ID, operation ID)
+    registrar_operation_id = models.CharField(max_length=200, blank=True)
+
+    # Results and errors
+    result = models.JSONField(default=dict, blank=True)
+    error_message = models.TextField(blank=True)
+
+    # Retry logic
+    retry_count = models.PositiveIntegerField(default=0)
+    max_retries = models.PositiveIntegerField(default=3)
+    next_retry_at = models.DateTimeField(null=True, blank=True)
+
+    # Metadata
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "domain_operations"
+        verbose_name = _("Domain Operation")
+        verbose_name_plural = _("Domain Operations")
+        ordering: ClassVar[tuple[str, ...]] = ("-created_at",)
+        indexes: ClassVar[tuple[models.Index, ...]] = (
+            models.Index(fields=["state", "created_at"], name="domainop_state_created_idx"),
+            models.Index(fields=["domain", "operation_type"], name="domainop_domain_type_idx"),
+            models.Index(fields=["state", "next_retry_at"], name="domainop_retry_idx"),
+        )
+
+    def __str__(self) -> str:
+        return f"{self.get_operation_type_display()} {self.domain.name} [{self.state}]"
+
+    @property
+    def can_retry(self) -> bool:
+        return self.state == "failed" and self.retry_count < self.max_retries
+
+    @property
+    def duration_seconds(self) -> int:
+        if self.submitted_at and self.completed_at:
+            return int((self.completed_at - self.submitted_at).total_seconds())
+        return 0
+
+    def refresh_from_db(
+        self,
+        using: str | None = None,
+        fields: Iterable[str] | None = None,
+        from_queryset: models.QuerySet[DomainOperation] | None = None,
+    ) -> None:
+        """Override to allow refresh_from_db to work with FSMField(protected=True).
+
+        See Domain.refresh_from_db for the full explanation.
+        """
+        fsm_fields = ["state"]
+        if fields is not None:
+            fields_set = set(fields)
+            fsm_fields = [f for f in fsm_fields if f in fields_set]
+        saved = {f: self.__dict__.pop(f) for f in fsm_fields if f in self.__dict__}
+        try:
+            super().refresh_from_db(using=using, fields=fields, from_queryset=from_queryset)
+        except Exception:
+            self.__dict__.update(saved)
+            raise
+
+    @transition(field=state, source="pending", target="submitted")
+    def mark_submitted(self, registrar_operation_id: str = "") -> None:
+        """Transition to submitted state (Phase 1: registrar accepted the request)."""
+        self.submitted_at = timezone.now()
+        self.registrar_operation_id = registrar_operation_id
+
+    @transition(field=state, source=["pending", "submitted"], target="completed")
+    def mark_completed(self, result_data: dict[str, Any] | None = None) -> None:
+        """Transition to completed state.
+
+        ``pending`` is a valid source: synchronous ops (nameserver/lock/info-sync)
+        create the row and complete it in one call without a separate submit step.
+        """
+        self.completed_at = timezone.now()
+        if result_data:
+            self.result = result_data
+
+    @transition(field=state, source=["pending", "submitted"], target="failed")
+    def mark_failed(self, error: str) -> None:
+        """Transition to failed state.
+
+        ``pending`` is a valid source: a synchronous op that fails before any
+        submit step transitions straight from ``pending`` to ``failed``.
+        """
+        self.error_message = error
+
+
+# ===============================================================================
 # DOMAIN ORDER ITEMS
 # ===============================================================================
 

@@ -74,8 +74,10 @@ HTTP_CREATED = 201
 HTTP_ACCEPTED = 202
 HTTP_UNAUTHORIZED = 401
 HTTP_FORBIDDEN = 403
+HTTP_BAD_REQUEST = 400
 HTTP_NOT_FOUND = 404
 HTTP_CONFLICT = 409
+HTTP_UNPROCESSABLE = 422
 HTTP_RATE_LIMITED = 429
 HTTP_SERVER_ERROR = 500
 
@@ -110,6 +112,47 @@ class DomainAvailabilityResult:
     available: bool
     premium: bool = False
     price_cents: int | None = None
+    checked: bool = True  # False when the registrar check FAILED — 'available' is then not meaningful
+
+
+# -- Phase 2 result types ---------------------------------------------------
+
+
+@dataclass(frozen=True)
+class DomainTransferResult:
+    """Result from initiating a domain transfer."""
+
+    transfer_id: str
+    status: str  # e.g. "pending", "approved", "rejected"
+    expected_completion: datetime | None = None
+
+
+@dataclass(frozen=True)
+class DomainInfoResult:
+    """Current domain state at the registrar."""
+
+    registrar_domain_id: str
+    domain_name: str
+    status: str
+    expires_at: datetime | None
+    nameservers: list[str]
+    locked: bool = False
+    whois_privacy: bool = False
+    epp_code: str = ""
+
+
+@dataclass(frozen=True)
+class NameserverUpdateResult:
+    """Result from a nameserver update operation."""
+
+    nameservers: list[str]
+
+
+@dataclass(frozen=True)
+class DomainLockResult:
+    """Result from a lock/unlock operation."""
+
+    locked: bool
 
 
 # ===============================================================================
@@ -169,6 +212,56 @@ class BaseRegistrarGateway(ABC):
     @abstractmethod
     def _do_verify_webhook(self, payload: str, signature: str, secret: str) -> bool:
         """Registrar-specific webhook signature verification."""
+
+    # -- Phase 2 optional interface (override to enable) ---------------------
+
+    def _do_initiate_transfer(
+        self,
+        domain_name: str,
+        epp_code: str,
+    ) -> Result[DomainTransferResult, RegistrarAPIError]:
+        """Registrar-specific transfer initiation. Override to enable."""
+        raise NotImplementedError(f"{self.gateway_name} does not support transfers")
+
+    def _do_get_domain_info(
+        self,
+        domain_name: str,
+    ) -> Result[DomainInfoResult, RegistrarAPIError]:
+        """Registrar-specific domain info retrieval. Override to enable."""
+        raise NotImplementedError(f"{self.gateway_name} does not support domain info")
+
+    def _do_update_nameservers(
+        self,
+        domain_name: str,
+        nameservers: list[str],
+    ) -> Result[NameserverUpdateResult, RegistrarAPIError]:
+        """Registrar-specific nameserver update. Override to enable."""
+        raise NotImplementedError(f"{self.gateway_name} does not support nameserver updates")
+
+    def _do_set_lock(
+        self,
+        domain_name: str,
+        locked: bool,
+    ) -> Result[DomainLockResult, RegistrarAPIError]:
+        """Registrar-specific lock/unlock. Override to enable."""
+        raise NotImplementedError(f"{self.gateway_name} does not support lock/unlock")
+
+    def _do_check_availability_bulk(
+        self,
+        domain_names: list[str],
+    ) -> Result[list[DomainAvailabilityResult], RegistrarAPIError]:
+        """Bulk availability check. Override for registrar-native batch API."""
+        # Default: sequential fallback
+        results: list[DomainAvailabilityResult] = []
+        for name in domain_names:
+            r = self._do_check_availability(name)
+            if r.is_ok():
+                results.append(r.unwrap())
+            else:
+                # A failed check is NOT "taken": mark checked=False so callers can tell a
+                # registrar outage from a genuinely-registered domain (M9).
+                results.append(DomainAvailabilityResult(domain_name=name, available=False, checked=False))
+        return Ok(results)
 
     # -- Public interface (with circuit breaker + idempotency) ----------------
 
@@ -232,6 +325,37 @@ class BaseRegistrarGateway(ABC):
             # rather than stranding it as pending_unknown forever.
             retriability=Retriability.NOT_RETRIABLE,
         )
+
+    def _run_phase2_op(self, fn: Any, operation: str, unsupported: str) -> Result[Any, RegistrarAPIError]:
+        """Run a Phase 2 gateway op through _retry, converting every escape into a graceful Err.
+
+        The Phase 2 public methods are the fail-closed boundary: a gateway that raises
+        NotImplementedError (adapter doesn't support the op), a RegistrarAPIError, or an
+        unexpected exception (e.g. a malformed 200 body in response.json()) must NOT
+        propagate to the service layer as an unhandled crash. NotImplementedError is a
+        permanent NOT_RETRIABLE refusal; other escapes stay UNKNOWN (a mutation may have
+        applied).
+        """
+        try:
+            return self._retry(fn, operation=operation)
+        except NotImplementedError:
+            return Err(
+                RegistrarAPIError(
+                    unsupported, code=RegistrarErrorCode.INTERNAL_ERROR, registrar_name=self.registrar.name
+                ),
+                retriability=Retriability.NOT_RETRIABLE,
+            )
+        except RegistrarAPIError as exc:
+            return Err(exc)
+        except Exception as exc:
+            return Err(
+                RegistrarAPIError(
+                    f"Unexpected error during {operation}",
+                    code=RegistrarErrorCode.INTERNAL_ERROR,
+                    registrar_name=self.registrar.name,
+                    detail=str(exc),
+                )
+            )
 
     def _execute_idempotent_operation(  # noqa: PLR0913  # cohesive call + audit context for one op
         self,
@@ -362,6 +486,137 @@ class BaseRegistrarGateway(ABC):
             return False
 
         return self._do_verify_webhook(payload, signature, secret.strip())
+
+    # -- Phase 2 public interface --------------------------------------------
+
+    def initiate_transfer(
+        self,
+        domain_name: str,
+        epp_code: str,
+    ) -> Result[DomainTransferResult, RegistrarAPIError]:
+        """Initiate domain transfer with circuit breaker and idempotency."""
+        if guard := self._verified_adapter_guard():
+            return guard
+        if err := self._check_circuit_breaker():
+            return err
+
+        idempotency_key = f"domain_transfer:{self.gateway_name}:{domain_name}"
+        cached = cache.get(idempotency_key)
+        if cached is not None:
+            self.logger.info("Idempotency hit for %s transfer", domain_name)
+            return Ok(cached)
+
+        result = self._run_phase2_op(
+            lambda: self._do_initiate_transfer(domain_name, epp_code),
+            operation=f"transfer:{domain_name}",
+            unsupported=f"{self.gateway_name} does not support transfers",
+        )
+
+        if result.is_ok():
+            cache.set(idempotency_key, _redact_secrets(result.unwrap()), IDEMPOTENCY_TTL_SECONDS)
+            self._record_success()
+            self._audit_api_call("domain_transfer", domain_name, success=True)
+        else:
+            error = result.unwrap_err()
+            self._record_failure(error)
+            self._audit_api_call("domain_transfer", domain_name, success=False, error=error.code.value)
+
+        return result
+
+    def get_domain_info(
+        self,
+        domain_name: str,
+    ) -> Result[DomainInfoResult, RegistrarAPIError]:
+        """Get current domain state from the registrar (read-only — no verification guard)."""
+        if err := self._check_circuit_breaker():
+            return err
+
+        result = self._run_phase2_op(
+            lambda: self._do_get_domain_info(domain_name),
+            operation=f"info:{domain_name}",
+            unsupported=f"{self.gateway_name} does not support domain info",
+        )
+
+        if result.is_ok():
+            self._record_success()
+        else:
+            self._record_failure(result.unwrap_err())
+
+        return result
+
+    def update_nameservers(
+        self,
+        domain_name: str,
+        nameservers: list[str],
+    ) -> Result[NameserverUpdateResult, RegistrarAPIError]:
+        """Update domain nameservers at the registrar."""
+        if guard := self._verified_adapter_guard():
+            return guard
+        if err := self._check_circuit_breaker():
+            return err
+
+        result = self._run_phase2_op(
+            lambda: self._do_update_nameservers(domain_name, nameservers),
+            operation=f"ns_update:{domain_name}",
+            unsupported=f"{self.gateway_name} does not support nameserver updates",
+        )
+
+        if result.is_ok():
+            self._record_success()
+            self._audit_api_call("nameserver_update", domain_name, success=True, metadata={"nameservers": nameservers})
+        else:
+            error = result.unwrap_err()
+            self._record_failure(error)
+            self._audit_api_call("nameserver_update", domain_name, success=False, error=error.code.value)
+
+        return result
+
+    def set_lock(
+        self,
+        domain_name: str,
+        locked: bool,
+    ) -> Result[DomainLockResult, RegistrarAPIError]:
+        """Lock or unlock a domain at the registrar."""
+        if guard := self._verified_adapter_guard():
+            return guard
+        if err := self._check_circuit_breaker():
+            return err
+
+        result = self._run_phase2_op(
+            lambda: self._do_set_lock(domain_name, locked),
+            operation=f"lock:{domain_name}",
+            unsupported=f"{self.gateway_name} does not support lock/unlock",
+        )
+
+        if result.is_ok():
+            self._record_success()
+            self._audit_api_call("domain_lock", domain_name, success=True, metadata={"locked": locked})
+        else:
+            error = result.unwrap_err()
+            self._record_failure(error)
+            self._audit_api_call("domain_lock", domain_name, success=False, error=error.code.value)
+
+        return result
+
+    def check_availability_bulk(
+        self,
+        domain_names: list[str],
+    ) -> Result[list[DomainAvailabilityResult], RegistrarAPIError]:
+        """Check availability of multiple domains in one call."""
+        if err := self._check_circuit_breaker():
+            return err
+
+        result = self._retry(
+            lambda: self._do_check_availability_bulk(domain_names),
+            operation=f"bulk_check:{len(domain_names)}_domains",
+        )
+
+        if result.is_ok():
+            self._record_success()
+        else:
+            self._record_failure(result.unwrap_err())
+
+        return result
 
     # -- HTTP helper for subclasses ------------------------------------------
 
@@ -551,50 +806,58 @@ class BaseRegistrarGateway(ABC):
         except Exception:
             message = response.text[:200]
 
-        # 4xx auth/not-found/conflict are definite rejections: tag NOT_RETRIABLE so the
-        # registration lifecycle deletes the pending row rather than stranding it as
-        # pending_unknown (which the uniqueness precondition would then block forever).
+        # Single-exit mapping of HTTP status → (typed error, retriability). The retriability
+        # tag is load-bearing: NOT_RETRIABLE lets the registration/transfer lifecycle delete the
+        # pending row instead of stranding it as pending_unknown, which the domain-name uniqueness
+        # precondition would then block forever (the #260 class).
+        error: RegistrarAPIError
+        retriability: Retriability
         if status in (HTTP_UNAUTHORIZED, HTTP_FORBIDDEN):
+            # 401/403 are definite rejections (bad/insufficient credentials).
             detail = message if status == HTTP_UNAUTHORIZED else f"Forbidden: {message}"
-            return Err(RegistrarAuthError(self.registrar.name, detail=detail), retriability=Retriability.NOT_RETRIABLE)
-
-        if status == HTTP_NOT_FOUND:
-            return Err(
-                RegistrarNotFoundError(domain_name or operation, self.registrar.name),
-                retriability=Retriability.NOT_RETRIABLE,
-            )
-
-        if status == HTTP_CONFLICT:
-            return Err(
-                RegistrarConflictError(domain_name or operation, self.registrar.name),
-                retriability=Retriability.NOT_RETRIABLE,
-            )
-
-        if status == HTTP_RATE_LIMITED:
+            error = RegistrarAuthError(self.registrar.name, detail=detail)
+            retriability = Retriability.NOT_RETRIABLE
+        elif status == HTTP_NOT_FOUND:
+            error = RegistrarNotFoundError(domain_name or operation, self.registrar.name)
+            retriability = Retriability.NOT_RETRIABLE
+        elif status == HTTP_CONFLICT:
+            error = RegistrarConflictError(domain_name or operation, self.registrar.name)
+            retriability = Retriability.NOT_RETRIABLE
+        elif status == HTTP_RATE_LIMITED:
             # Retry-After may be an integer (seconds) or an HTTP-date; only the integer
             # form is usable and a non-integer must not raise out of error mapping.
             retry_after_raw = response.headers.get("Retry-After")
             retry_after = int(retry_after_raw) if retry_after_raw and retry_after_raw.isdigit() else None
-            return Err(
-                RegistrarRateLimitError(self.registrar.name, retry_after),
-                # 429 means the registrar rejected the request before processing it — safe to replay.
-                retriability=Retriability.RETRIABLE,
-            )
-
-        if status >= HTTP_SERVER_ERROR:
+            error = RegistrarRateLimitError(self.registrar.name, retry_after)
+            # 429 means the registrar rejected the request before processing it — safe to replay.
+            retriability = Retriability.RETRIABLE
+        elif status >= HTTP_SERVER_ERROR:
             # A 5xx on a mutating call (register/renew) may have committed server-side;
-            # this generic handler can't prove non-application, so leave it UNKNOWN (the default).
-            return Err(
-                RegistrarTransientError(self.registrar.name, f"{self.gateway_name} server error ({status}): {message}"),
+            # this generic handler can't prove non-application, so leave it UNKNOWN.
+            error = RegistrarTransientError(
+                self.registrar.name, f"{self.gateway_name} server error ({status}): {message}"
             )
-
-        return Err(
-            RegistrarAPIError(
+            retriability = Retriability.UNKNOWN
+        elif status in (HTTP_BAD_REQUEST, HTTP_UNPROCESSABLE):
+            # 400/422 are definite client-side rejections (bad EPP code, invalid registrant,
+            # malformed request) — the registrar did NOT apply the operation. NOT_RETRIABLE so
+            # the lifecycle deletes the pending row and a corrected retry can proceed.
+            error = RegistrarAPIError(
+                f"{self.gateway_name} rejected {operation}: {status} {message}",
+                code=RegistrarErrorCode.INVALID_REGISTRANT_DATA,
+                registrar_name=self.registrar.name,
+            )
+            retriability = Retriability.NOT_RETRIABLE
+        else:
+            # Unmapped status — can't prove non-application, leave UNKNOWN.
+            error = RegistrarAPIError(
                 f"{self.gateway_name} API error for {operation}: {status} {message}",
                 code=RegistrarErrorCode.INTERNAL_ERROR,
                 registrar_name=self.registrar.name,
             )
-        )
+            retriability = Retriability.UNKNOWN
+
+        return Err(error, retriability=retriability)
 
 
 # ===============================================================================

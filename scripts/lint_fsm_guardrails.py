@@ -39,7 +39,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 # FSM-protected status field names across all models
-FSM_STATUS_FIELDS = frozenset({"status", "provisioning_status"})
+FSM_STATUS_FIELDS = frozenset({"status", "provisioning_status", "state"})
 
 # Apps that contain FSM-protected models.
 # Only files under these app directories are scanned for checks 1-3.
