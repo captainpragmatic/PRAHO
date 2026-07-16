@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import Client, TestCase
 from django.urls import reverse
 
 from apps.common.encryption import decrypt_sensitive_data, is_encrypted
+from apps.customers.models import Customer
 from apps.domains.forms import RegistrarForm
-from apps.domains.models import TLD, Registrar
+from apps.domains.models import TLD, Registrar, TLDRegistrarAssignment
 from apps.domains.services import DomainLifecycleService, DomainValidationService
 
 User = get_user_model()
@@ -104,7 +107,6 @@ class DomainRegistrationRaceConditionTests(TestCase):
             status="active",
         )
         # Associate registrar as primary for the TLD
-        from apps.domains.models import TLDRegistrarAssignment
         TLDRegistrarAssignment.objects.create(
             tld=self.tld,
             registrar=self.registrar,
@@ -112,9 +114,6 @@ class DomainRegistrationRaceConditionTests(TestCase):
             is_active=True,
             priority=1,
         )
-
-        # Minimal user/customer – import lazily to avoid cross-app heavy setup
-        from apps.customers.models import Customer
 
         self.customer = Customer.objects.create(
             name="John Doe",
@@ -124,11 +123,26 @@ class DomainRegistrationRaceConditionTests(TestCase):
         )
 
     def test_duplicate_registration_returns_already_registered(self) -> None:
-        result = DomainLifecycleService.create_domain_registration(
-            customer=self.customer,
-            domain_name="example.com",
-            years=1,
+        # First registration must be registrar-confirmed to leave an active row —
+        # the uniqueness precondition then blocks the duplicate.
+        confirmed_payload = (
+            True,
+            {
+                "registrar_domain_id": "REG-1",
+                "expires_at": datetime(2027, 1, 1, tzinfo=UTC),
+                "nameservers": [],
+                "epp_code": "",
+            },
         )
+        with patch(
+            "apps.domains.services.DomainRegistrarGateway.register_domain",
+            return_value=confirmed_payload,
+        ):
+            result = DomainLifecycleService.create_domain_registration(
+                customer=self.customer,
+                domain_name="example.com",
+                years=1,
+            )
         self.assertTrue(result.is_ok(), result)
 
         result2 = DomainLifecycleService.create_domain_registration(

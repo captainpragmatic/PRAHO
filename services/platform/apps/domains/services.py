@@ -25,7 +25,7 @@ from django.db.models import Q, QuerySet
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
-from apps.common.types import Err, Ok, Result
+from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 from apps.settings.services import SettingsService
 
 from .models import TLD, Domain, DomainOrderItem, Registrar
@@ -421,9 +421,13 @@ class DomainLifecycleService:
            On failure, the domain stays ``pending`` (no failed state exists) so a
            later retry/worker can re-submit — the gateway is idempotent per domain.
 
-        Returns Ok(domain) in both the active and the still-pending case (the local
-        record exists and the order item must link to it); a pending domain means
-        registration was NOT confirmed at the registrar and must be completed later.
+        Returns Ok(domain) ONLY when the registrar confirms and the domain is
+        active. On a definite rejection the pending row is removed and Err is
+        returned so the caller can cleanly retry. On an UNKNOWN outcome (network
+        error / 5xx — the registrar may already hold the registration) the row is
+        kept pending and Err is returned so the caller never reports success and
+        never orphans a possibly-real registration. Durable reconciliation of
+        pending rows is tracked separately (issue #237).
         """
         try:
             with transaction.atomic():
@@ -442,15 +446,37 @@ class DomainLifecycleService:
 
         # Submit to the registrar OUTSIDE the transaction above — never hold a DB
         # transaction open across network I/O.
-        DomainLifecycleService._submit_registration_to_registrar(domain, config)
-        return Ok(domain)
+        outcome, message = DomainLifecycleService._submit_registration_to_registrar(domain, config)
+
+        if outcome == "confirmed":
+            domain.refresh_from_db()
+            return Ok(domain)
+        if outcome == "pending_unknown":
+            return Err(
+                cast(
+                    str,
+                    _(
+                        "Registration was submitted but the registrar did not confirm it. "
+                        "It is pending verification — do not resubmit."
+                    ),
+                )
+            )
+        # Definite rejection: the pending row has been removed, retry is safe.
+        return Err(cast(str, _("Registrar rejected the registration: {error}")).format(error=message))
 
     @staticmethod
-    def _submit_registration_to_registrar(domain: Domain, config: DomainRegistrationConfig) -> bool:
-        """Submit a pending domain to its registrar and activate it on success.
+    def _submit_registration_to_registrar(domain: Domain, config: DomainRegistrationConfig) -> tuple[str, str]:
+        """Submit a pending domain to its registrar and resolve its final state.
 
-        Returns True if the registrar confirmed registration (domain now active),
-        False if it failed (domain left pending for retry). Never raises.
+        Returns one of:
+        - ("confirmed", "")      registrar confirmed; the domain is now active.
+        - ("rejected", message)  definite failure (conflict/auth/validation); the
+                                 pending row is DELETED so a retry isn't deadlocked
+                                 by the uniqueness precondition.
+        - ("pending_unknown", message)  network/5xx (UNKNOWN) or a post-confirm
+                                 persistence failure; the row is KEPT pending
+                                 because the registrar may hold the registration.
+        Never raises.
         """
         registrant_data = DomainLifecycleService._build_registrant_data(config.customer)
         success, payload = DomainRegistrarGateway.register_domain(
@@ -458,19 +484,23 @@ class DomainLifecycleService:
         )
 
         if not success:
-            logger.warning(
-                "Registrar did not confirm %s (left pending for retry): %s",
-                domain.name,
-                payload.get("error", "unknown error"),
-            )
-            return False
+            error = str(payload.get("error", "unknown error"))
+            if payload.get("retriability") == Retriability.UNKNOWN.value:
+                logger.warning(
+                    "Registrar outcome UNKNOWN for %s (kept pending, do not resubmit): %s", domain.name, error
+                )
+                return "pending_unknown", error
+            # Definite rejection — remove the row so the customer can re-register.
+            logger.warning("Registrar rejected %s (row removed for clean retry): %s", domain.name, error)
+            domain.delete()
+            return "rejected", error
 
         try:
             with transaction.atomic():
                 locked = Domain.objects.select_for_update().get(pk=domain.pk)
                 # Another worker may have already completed this domain.
                 if locked.status != "pending":
-                    return bool(locked.status == "active")
+                    return ("confirmed", "") if locked.status == "active" else ("pending_unknown", "")
 
                 locked.registrar_domain_id = payload.get("registrar_domain_id", "")
                 if payload.get("expires_at"):
@@ -483,13 +513,13 @@ class DomainLifecycleService:
                 locked.activate()  # FSM transition: pending -> active
                 locked.save()
 
-            # Reflect the persisted state on the caller's instance.
-            domain.refresh_from_db()
             logger.info("Registrar confirmed %s — domain active", domain.name)
-            return True
+            return "confirmed", ""
         except Exception as e:
-            logger.error("Failed to persist registrar result for %s (left pending): %s", domain.name, e)
-            return False
+            # The registrar confirmed but we failed to record it — the domain IS
+            # registered, so keep the row pending (never delete/orphan) for reconciliation.
+            logger.error("Failed to persist registrar result for %s (kept pending): %s", domain.name, e)
+            return "pending_unknown", str(e)
 
     @staticmethod
     def _build_registrant_data(customer: Customer) -> dict[str, Any]:
@@ -501,30 +531,59 @@ class DomainLifecycleService:
         }
 
     @staticmethod
-    def process_domain_renewal(domain: Domain, years: int = 1) -> Result[str, str]:
-        """Process domain renewal.
-
-        Returns Ok(success_message) on success, Err(error_message) on failure.
-        """
+    def _validate_renewal_preconditions(domain: Domain) -> str | None:
+        """Return an error message if the domain cannot be renewed, else None."""
         if domain.status != "active":
-            return Err(cast(str, _("Domain must be active to renew")))
-
+            return cast(str, _("Domain must be active to renew"))
         if not domain.expires_at:
-            return Err(cast(str, _("Domain expiration date is not set")))
+            return cast(str, _("Domain expiration date is not set"))
+        if not domain.registrar_domain_id:
+            # No registrar record to renew against — a local-only extension would be
+            # a lie about the registrar's expiry.
+            return cast(str, _("Domain has no registrar record; cannot renew"))
+        return None
+
+    @staticmethod
+    def process_domain_renewal(domain: Domain, years: int = 1) -> Result[str, str]:
+        """Process domain renewal by renewing at the registrar first.
+
+        The registrar is the source of truth for the new expiry — the local row is
+        updated ONLY after the registrar confirms, using the registrar-returned
+        date (never local ``365 * years`` math). On any registrar failure the local
+        expiry is left untouched (failing toward "not renewed" is the safe
+        direction; a later registrar-sync can correct it upward).
+
+        Returns Ok(success_message) on confirmed renewal, Err(error_message) otherwise.
+        """
+        precondition_error = DomainLifecycleService._validate_renewal_preconditions(domain)
+        if precondition_error is not None:
+            return Err(precondition_error)
+
+        success, payload = DomainRegistrarGateway.renew_domain(domain.registrar, domain, years)
+        if not success:
+            logger.warning("Registrar did not confirm renewal of %s: %s", domain.name, payload.get("error"))
+            return Err(
+                cast(str, _("Registrar did not confirm the renewal: {error}")).format(
+                    error=payload.get("error", "unknown error")
+                )
+            )
+
+        new_expiration = payload.get("new_expires_at")
+        if not new_expiration:
+            return Err(cast(str, _("Registrar renewal succeeded but returned no new expiry date")))
 
         try:
             with transaction.atomic():
-                new_expiration = domain.expires_at + timedelta(days=365 * years)
                 domain.expires_at = new_expiration
                 domain.renewal_notices_sent = 0
                 domain.save(update_fields=["expires_at", "renewal_notices_sent", "updated_at"])
 
-                logger.info("Renewed domain %s for %d years, expires: %s", domain.name, years, new_expiration)
-                return Ok(cast(str, _("Domain renewed successfully")))
+            logger.info("Renewed domain %s for %d years at registrar, expires: %s", domain.name, years, new_expiration)
+            return Ok(cast(str, _("Domain renewed successfully")))
 
         except Exception as e:
-            logger.error("Failed to renew domain %s: %s", domain.name, e)
-            return Err(cast(str, _("Failed to renew domain")))
+            logger.error("Failed to persist renewal for %s: %s", domain.name, e)
+            return Err(cast(str, _("Failed to record the renewal")))
 
     @staticmethod
     def update_domain_expiration(domain: Domain, new_expiration: datetime) -> Result[bool, str]:
@@ -728,7 +787,10 @@ class DomainRegistrarGateway:
                 "nameservers": reg.nameservers,
                 "epp_code": reg.epp_code,
             }
-        return False, {"error": str(result.unwrap_err())}
+        # Carry the retriability so the lifecycle can tell a definite rejection
+        # (safe to delete the pending row) from an UNKNOWN outcome (may have
+        # registered server-side — must keep the row, never resubmit blindly).
+        return False, {"error": str(result.unwrap_err()), "retriability": retriability_of(result).value}
 
     @staticmethod
     def renew_domain(registrar: Registrar, domain: Domain, years: int) -> tuple[bool, dict[str, Any]]:
