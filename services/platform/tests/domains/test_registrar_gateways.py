@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import requests
 from django.test import TestCase
 
 from apps.common.types import Err, Ok
@@ -642,3 +643,47 @@ class SafeJsonResponseSizeTests(TestCase):
     def test_parses_normal_response(self) -> None:
         resp = self._resp(content_length="12", content=b'{"ok": true}', json_data={"ok": True})
         self.assertEqual(self.gateway._safe_json(resp), {"ok": True})
+
+
+class RetryHonorsRetriabilityTests(TestCase):
+    """_retry must key off the Err's Retriability tag, not the error class.
+
+    A registration/renewal POST network error is tagged UNKNOWN (the POST may
+    have reached the registrar), so it must NOT be auto-replayed — replay could
+    double-register/double-charge. An availability GET is a safe read, so its
+    network error IS retried.
+    """
+
+    def setUp(self) -> None:
+        self.registrar = _make_registrar("gandi")
+        self.gateway = GandiGateway(self.registrar)
+        self.registrant = {
+            "first_name": "Ion", "last_name": "Pop", "email": "ion@example.ro",
+            "phone": "+40712345678", "address": "Str. Test 1", "city": "Bucuresti",
+            "postal_code": "010101", "country_code": "RO", "entity_type": "individual",
+        }
+
+    @patch("apps.domains.gateways.gandi.GandiGateway._api_request")
+    @patch("apps.domains.gateways.base.cache")
+    def test_registration_network_error_is_not_retried(self, mock_cache: MagicMock, mock_request: MagicMock) -> None:
+        mock_cache.get.side_effect = [0, None]
+        mock_cache.add.return_value = True
+        mock_request.side_effect = requests.RequestException("connection reset")
+
+        result = self.gateway.register_domain("example.com", 1, self.registrant)
+
+        self.assertTrue(result.is_err())
+        # UNKNOWN outcome — the POST may have landed, so exactly one attempt, no replay.
+        self.assertEqual(mock_request.call_count, 1)
+
+    @patch("apps.domains.gateways.gandi.GandiGateway._api_request")
+    @patch("apps.domains.gateways.base.cache")
+    def test_availability_network_error_is_retried(self, mock_cache: MagicMock, mock_request: MagicMock) -> None:
+        mock_cache.get.return_value = 0  # circuit breaker OK
+        mock_request.side_effect = requests.RequestException("connection reset")
+
+        result = self.gateway.check_availability("example.com")
+
+        self.assertTrue(result.is_err())
+        # Idempotent read — retried up to MAX_RETRIES.
+        self.assertEqual(mock_request.call_count, 3)

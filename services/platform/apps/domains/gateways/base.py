@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 from django.core.cache import cache
 
 from apps.common.outbound_http import OutboundPolicy, safe_request
-from apps.common.types import Err, Ok, Result, Retriability
+from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 
 from .errors import (
     RegistrarAPIError,
@@ -254,6 +254,7 @@ class BaseRegistrarGateway(ABC):
         result = self._retry(
             lambda: self._do_check_availability(domain_name),
             operation=f"check:{domain_name}",
+            retry_on_unknown=True,  # availability is a safe read — replaying it is harmless
         )
 
         if result.is_ok():
@@ -396,6 +397,8 @@ class BaseRegistrarGateway(ABC):
         fn: Any,
         operation: str,
         max_retries: int = MAX_RETRIES,
+        *,
+        retry_on_unknown: bool = False,
     ) -> Result[Any, RegistrarAPIError]:
         last_result: Result[Any, RegistrarAPIError] = Err(
             RegistrarAPIError("No attempts made", code=RegistrarErrorCode.INTERNAL_ERROR)
@@ -407,8 +410,15 @@ class BaseRegistrarGateway(ABC):
             if last_result.is_ok():
                 return last_result
 
+            # Honor the Retriability tag, NOT the error class: a mutating POST tagged
+            # UNKNOWN (may have reached the registrar) must not be auto-replayed —
+            # doing so risks a duplicate registration/renewal charge. Only RETRIABLE
+            # (and, for idempotent reads, UNKNOWN) is safe to retry.
             error = last_result.unwrap_err()
-            is_retryable = isinstance(error, RegistrarTransientError | RegistrarRateLimitError)
+            retriability = retriability_of(last_result)
+            is_retryable = retriability == Retriability.RETRIABLE or (
+                retry_on_unknown and retriability == Retriability.UNKNOWN
+            )
             if not is_retryable or attempt == max_retries - 1:
                 break
 
