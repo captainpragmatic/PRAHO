@@ -288,7 +288,7 @@
 </div>
 
 <!-- Service Actions JavaScript -->
-<script>
+<script nonce="{{ csp_nonce }}">
 function confirmSuspend(serviceId, serviceName) {
   if (confirm('{% trans "Suspend service?" %} ' + serviceName)) {
     window.location.href = '/app/provisioning/services/' + serviceId + '/suspend/';

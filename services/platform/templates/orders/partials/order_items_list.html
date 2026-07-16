@@ -305,7 +305,7 @@ Edit mode uses inline expandable forms for better context preservation
 {% endcomment %}
 
 {% if request.resolver_match.url_name == 'order_edit' and can_edit %}
-<script>
+<script nonce="{{ csp_nonce }}">
 // ===============================================================================
 // EXPANDABLE ROW PATTERN FOR ORDER ITEMS - PRAHO Platform
 // ===============================================================================

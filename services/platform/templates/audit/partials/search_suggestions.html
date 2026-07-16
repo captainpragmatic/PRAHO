@@ -48,7 +48,7 @@
     {% endif %}
 </div>
 
-<script>
+<script nonce="{{ csp_nonce }}">
 document.addEventListener('DOMContentLoaded', function() {
     // Handle suggestion item clicks
     const suggestionItems = document.querySelectorAll('.suggestion-item');

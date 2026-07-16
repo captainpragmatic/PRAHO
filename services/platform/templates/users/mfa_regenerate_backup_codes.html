@@ -174,7 +174,7 @@
 </div>
 
 <!-- JavaScript for Enhanced UX -->
-<script>
+<script nonce="{{ csp_nonce }}">
 function confirmRegenerate() {
   const checkbox = document.getElementById('checkbox-confirm_regenerate');
   if (!checkbox.checked) {

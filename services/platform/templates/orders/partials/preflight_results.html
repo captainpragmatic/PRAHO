@@ -38,7 +38,7 @@
   {% endif %}
 </div>
 
-<script>
+<script nonce="{{ csp_nonce }}">
   // Toggle Pending option/button availability based on validation result
   (function(){
     const ok = {{ preflight_ok|yesno:"true,false" }};
