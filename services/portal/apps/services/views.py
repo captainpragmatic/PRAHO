@@ -16,14 +16,38 @@ from .services import PlatformAPIError, services_api
 
 logger = logging.getLogger(__name__)
 
-# Tab configuration for service status filtering
+# Tab configuration for service status filtering.
+# Mirrors the platform Service.STATUS_CHOICES (provisioning/service_models.py) so
+# every real status is filterable — previously Provisioning/Failed/Terminated/Expired
+# had no tab and "Cancelled" was a dead tab (no such status). (#101)
 SERVICE_STATUS_TABS = [
     {"value": "", "label": _("All Services"), "border_class": "border-blue-500", "text_class": "text-blue-400"},
     {"value": "active", "label": _("Active"), "border_class": "border-green-500", "text_class": "text-green-400"},
-    {"value": "suspended", "label": _("Suspended"), "border_class": "border-red-500", "text_class": "text-red-400"},
     {"value": "pending", "label": _("Pending"), "border_class": "border-yellow-500", "text_class": "text-yellow-400"},
-    {"value": "cancelled", "label": _("Cancelled"), "border_class": "border-red-500", "text_class": "text-red-400"},
+    {
+        "value": "provisioning",
+        "label": _("Provisioning"),
+        "border_class": "border-blue-500",
+        "text_class": "text-blue-400",
+    },
+    {"value": "suspended", "label": _("Suspended"), "border_class": "border-red-500", "text_class": "text-red-400"},
+    {"value": "failed", "label": _("Failed"), "border_class": "border-red-500", "text_class": "text-red-400"},
+    {"value": "terminated", "label": _("Terminated"), "border_class": "border-gray-500", "text_class": "text-gray-400"},
+    {"value": "expired", "label": _("Expired"), "border_class": "border-orange-500", "text_class": "text-orange-400"},
 ]
+
+# Allowlist for the ?status= query param ("" = All tab).
+_VALID_STATUS_FILTERS = {tab["value"] for tab in SERVICE_STATUS_TABS}
+
+
+def _validated_status_filter(raw: str) -> str:
+    """Allowlist ?status= against the known tabs.
+
+    The value is attacker-influenced (query string) and gets echoed into the
+    empty-state message and forwarded to the platform API — unknown values
+    fall back to the All tab instead of being reflected.
+    """
+    return raw if raw in _VALID_STATUS_FILTERS else ""
 
 
 def _filter_services_by_query(services: list[dict], query: str) -> list[dict]:
@@ -79,7 +103,7 @@ def service_list(request: HttpRequest) -> HttpResponse:
     if not customer_id or not user_id:
         return redirect("/login/")
 
-    status_filter = request.GET.get("status", "")
+    status_filter = _validated_status_filter(request.GET.get("status", ""))
     search_query = request.GET.get("q", "").strip()
     try:
         page = int(request.GET.get("page", 1))
@@ -141,7 +165,7 @@ def service_search_api(request: HttpRequest) -> HttpResponse:
         return redirect("/login/")
 
     search_query = request.GET.get("q", "").strip()
-    status_filter = request.GET.get("status", "")
+    status_filter = _validated_status_filter(request.GET.get("status", ""))
 
     try:
         response = services_api.get_customer_services(
@@ -165,6 +189,8 @@ def service_search_api(request: HttpRequest) -> HttpResponse:
                 "services": services,
                 "paginator_data": paginator_data,
                 "pagination_params": pagination_params,
+                "status_filter": status_filter,
+                "search_query": search_query,
             },
         )
 
@@ -174,6 +200,8 @@ def service_search_api(request: HttpRequest) -> HttpResponse:
             "services": [],
             "paginator_data": PaginatorData(total_count=0, current_page=1, page_size=20),
             "pagination_params": "",
+            "status_filter": status_filter,
+            "search_query": search_query,
             **error_ctx,
         }
         return render(request, "services/partials/services_table.html", context)
