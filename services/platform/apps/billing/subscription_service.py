@@ -492,7 +492,7 @@ class SubscriptionService:
             tax_cents=tax_cents,
             total_cents=total_cents,
             due_at=timezone.now() + timedelta(days=7),
-            bill_to_name=subscription.customer.company_name or subscription.customer.full_name or "",  # type: ignore[attr-defined]
+            bill_to_name=subscription.customer.get_display_name(),
             bill_to_email=subscription.customer.primary_email or "",
             bill_to_country="RO",
             meta={
@@ -899,7 +899,7 @@ class RecurringBillingService:
                 tax_cents=tax_cents,
                 total_cents=total_cents,
                 due_at=timezone.now() + timedelta(days=14),
-                bill_to_name=subscription.customer.company_name or subscription.customer.full_name or "",  # type: ignore[attr-defined]
+                bill_to_name=subscription.customer.get_display_name(),
                 bill_to_email=subscription.customer.primary_email or "",
                 bill_to_country="RO",
                 meta={

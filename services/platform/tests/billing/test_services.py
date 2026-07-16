@@ -24,6 +24,7 @@ from django.utils import timezone
 
 from apps.billing.models import Currency, Invoice, Payment, Refund
 from apps.billing.services import (
+    InvoiceService,
     RefundData,
     RefundEligibility,
     RefundQueryService,
@@ -905,3 +906,79 @@ class RefundQueryServiceComprehensiveCoverageTestCase(TestCase):
         self.assertTrue(result.is_ok())
         stats = result.value
         self.assertIn('total_refunds', stats)
+
+
+class InvoiceServiceCreateFromOrderBillToNameTestCase(TestCase):
+    """#211: create_from_order must name the customer for every customer type.
+
+    bill_to_name read `customer.full_name`, which does not exist on Customer. Company customers
+    short-circuited on `company_name` and never evaluated it, hiding the bug; every other type
+    (individual/pfa/ngo) has an empty company_name, so the `or` evaluated full_name and raised
+    AttributeError — caught by the broad `except Exception` and returned as an Err, so no invoice
+    was produced at all.
+    """
+
+    def setUp(self):
+        self.currency, _ = Currency.objects.get_or_create(
+            code='RON', defaults={'name': 'Romanian Leu', 'symbol': 'lei', 'is_active': True}
+        )
+
+    def _order_for(self, customer):
+        from apps.orders.models import Order
+
+        return Order.objects.create(
+            order_number=f'ORD-{uuid.uuid4().hex[:8].upper()}',
+            customer=customer,
+            currency=self.currency,
+            status='draft',
+            subtotal_cents=10000,
+            tax_cents=1900,
+            total_cents=11900,
+        )
+
+    def test_create_from_order_names_an_individual_customer(self):
+        """An individual has no company_name, so the invoice is named from Customer.name."""
+        customer = Customer.objects.create(
+            name='Ion Popescu',
+            customer_type='individual',
+            company_name='',
+            primary_email='ion@example.ro',
+            status='active',
+        )
+
+        result = InvoiceService().create_from_order(self._order_for(customer))
+
+        self.assertTrue(result.is_ok(), f'invoice creation failed: {result}')
+        self.assertEqual(result.value.bill_to_name, 'Ion Popescu')
+
+    def test_create_from_order_prefers_company_name_for_companies(self):
+        """Non-regression: a company is still billed under its company_name, not its name."""
+        customer = Customer.objects.create(
+            name='Internal Shortname',
+            customer_type='company',
+            company_name='Test Company SRL',
+            primary_email='billing@testcompany.ro',
+            status='active',
+        )
+
+        result = InvoiceService().create_from_order(self._order_for(customer))
+
+        self.assertTrue(result.is_ok(), f'invoice creation failed: {result}')
+        self.assertEqual(result.value.bill_to_name, 'Test Company SRL')
+
+    def test_create_from_order_names_pfa_and_ngo_customers(self):
+        """pfa/ngo also leave company_name empty and hit the same path as individuals."""
+        for customer_type, name in (('pfa', 'Popescu Ion PFA'), ('ngo', 'Asociatia Test')):
+            with self.subTest(customer_type=customer_type):
+                customer = Customer.objects.create(
+                    name=name,
+                    customer_type=customer_type,
+                    company_name='',
+                    primary_email=f'{customer_type}@example.ro',
+                    status='active',
+                )
+
+                result = InvoiceService().create_from_order(self._order_for(customer))
+
+                self.assertTrue(result.is_ok(), f'invoice creation failed: {result}')
+                self.assertEqual(result.value.bill_to_name, name)

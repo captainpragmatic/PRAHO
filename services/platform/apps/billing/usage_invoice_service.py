@@ -309,7 +309,7 @@ class UsageInvoiceService:
     def _get_customer_billing_address(self, customer: Any) -> dict[str, str]:
         """Get customer's billing address."""
         address = {
-            "name": customer.company_name or customer.full_name or "",
+            "name": customer.get_display_name(),
             "tax_id": "",
             "email": customer.primary_email or "",
             "address1": "",

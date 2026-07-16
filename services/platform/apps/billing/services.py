@@ -160,7 +160,7 @@ class InvoiceService:
                     discount_cents=order_discount_cents,
                     status="draft",
                     # Copy billing address from customer
-                    bill_to_name=order.customer.company_name or order.customer.full_name or "",
+                    bill_to_name=order.customer.get_display_name(),
                     bill_to_tax_id=getattr(order.customer, "cui", "") or "",
                     bill_to_email=order.customer.primary_email or "",
                     bill_to_address1=getattr(order.customer, "address", "") or "",
