@@ -372,16 +372,19 @@ class UpdatePreferencesTests(TestCase):
         from apps.audit.models import ComplianceLog  # noqa: PLC0415
 
         customer = self._make_customer(marketing=False)
-        before = ComplianceLog.objects.filter(compliance_type="marketing_consent").count()
 
         EmailPreferenceService.update_preferences(customer, {"marketing": True})
 
-        new_records = ComplianceLog.objects.filter(compliance_type="marketing_consent").order_by("-id")
-        self.assertEqual(new_records.count() - before, 1)
-        latest = new_records.first()
-        self.assertEqual(latest.evidence["source"], "preference_center")
-        self.assertEqual(latest.evidence["customer_id"], str(customer.id))
-        self.assertTrue(latest.evidence["new_consent"])
+        # Scope to THIS customer's canonical record via reference_id — deterministic, with no
+        # dependence on UUID ordering or on other tests' marketing_consent rows.
+        records = ComplianceLog.objects.filter(
+            compliance_type="marketing_consent", reference_id=f"customer_{customer.id}"
+        )
+        self.assertEqual(records.count(), 1)  # exactly one ComplianceLog per consent flip
+        record = records.get()
+        self.assertEqual(record.evidence["source"], "preference_center")
+        self.assertEqual(record.evidence["customer_id"], str(customer.id))
+        self.assertTrue(record.evidence["new_consent"])
 
     def test_update_preferences_signal_audit_failure_does_not_block_consent_change(self) -> None:
         """GDPR Art. 7(3): signal-side audit errors must not block consent.
@@ -400,3 +403,48 @@ class UpdatePreferencesTests(TestCase):
 
         customer.refresh_from_db()
         self.assertTrue(customer.marketing_consent)
+
+    def test_transient_source_is_consumed_and_not_reused_on_next_flip(self) -> None:
+        """The signal consumes _consent_source, so a later flip on the same instance without a
+        source falls back to "system" instead of inheriting the stale one (issue #182 review)."""
+        from apps.audit.models import ComplianceLog  # noqa: PLC0415
+
+        customer = self._make_customer(marketing=False)
+
+        # First flip with an explicit source.
+        customer._consent_source = "unsubscribe_link"  # type: ignore[attr-defined]
+        customer.marketing_consent = True
+        customer.save(update_fields=["marketing_consent"])
+        self.assertNotIn("_consent_source", customer.__dict__)  # consumed by the signal
+
+        # Second flip on the SAME instance without setting a source.
+        customer.marketing_consent = False
+        customer.save(update_fields=["marketing_consent"])
+
+        records = ComplianceLog.objects.filter(
+            compliance_type="marketing_consent", reference_id=f"customer_{customer.id}"
+        ).order_by("timestamp")
+        self.assertEqual(records.count(), 2)
+        self.assertEqual(records[0].evidence["source"], "unsubscribe_link")
+        self.assertEqual(records[1].evidence["source"], "system")  # not the stale source
+
+    def test_generic_audit_failure_does_not_skip_marketing_compliance_log(self) -> None:
+        """A failure in the earlier generic customer-audit write must not skip the canonical
+        marketing ComplianceLog write later in the same receiver (issue #182 review)."""
+        from apps.audit.models import ComplianceLog  # noqa: PLC0415
+
+        customer = self._make_customer(marketing=False)
+
+        with patch(
+            "apps.audit.services.CustomersAuditService.log_customer_event",
+            side_effect=Exception("generic audit down"),
+        ):
+            customer._consent_source = "preference_center"  # type: ignore[attr-defined]
+            customer.marketing_consent = True
+            customer.save(update_fields=["marketing_consent"])
+
+        records = ComplianceLog.objects.filter(
+            compliance_type="marketing_consent", reference_id=f"customer_{customer.id}"
+        )
+        self.assertEqual(records.count(), 1)
+        self.assertEqual(records.get().evidence["source"], "preference_center")

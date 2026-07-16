@@ -407,6 +407,42 @@ class TestComplianceReportServiceGenerateReport(TestCase):
             self.assertIn("Authentication Summary", titles)
             self.assertIn("Security Events", titles)
 
+    def test_gdpr_report_counts_marketing_consent_from_both_sources(self) -> None:
+        """Issue #182: Customer marketing consent is now a ComplianceLog record, not an
+        AuditEvent. The GDPR report must count those canonical ComplianceLog records in
+        addition to the AuditEvent privacy consent events (User/gdpr/cookie), without
+        double-counting either source.
+        """
+        from apps.audit.models import ComplianceLog  # noqa: PLC0415
+
+        # User-path consent still writes an AuditEvent (privacy category) — must still count.
+        self._create_event(action="marketing_consent_granted", category="privacy", severity="info")
+        # Customer-path consent writes the canonical ComplianceLog (issue #182).
+        ComplianceLog.objects.create(
+            compliance_type="marketing_consent",
+            reference_id="customer_a",
+            status="success",
+            description="Marketing consent granted via preference_center",
+            evidence={"new_consent": True, "old_consent": False},
+        )
+        ComplianceLog.objects.create(
+            compliance_type="marketing_consent",
+            reference_id="customer_b",
+            status="success",
+            description="Marketing consent withdrawn via unsubscribe_link",
+            evidence={"new_consent": False, "old_consent": True},
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            svc = self._service(tmpdir)
+            start, end = make_period()
+            report = svc.generate_report(ReportType.GDPR_COMPLIANCE, start, end)
+
+        gdpr = next(s for s in report.sections if s.title == "GDPR Compliance")
+        # 1 AuditEvent granted + 1 ComplianceLog granted; 1 ComplianceLog withdrawn.
+        self.assertEqual(gdpr.metrics["consent_granted"], 2)
+        self.assertEqual(gdpr.metrics["consent_withdrawn"], 1)
+
     def test_generate_access_review(self) -> None:
         self._create_event(action="role_assigned", category="authorization", severity="info")
         self._create_event(action="permission_granted", category="authorization", severity="info")

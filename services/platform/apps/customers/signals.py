@@ -82,15 +82,22 @@ def handle_customer_created_or_updated(
 
             event_type = "customer_created" if created else "customer_updated"
 
-            CustomersAuditService.log_customer_event(
-                event_type=event_type,
-                customer=instance,
-                user=getattr(instance, "_audit_user", None),
-                context=AuditContext(actor_type="system"),
-                old_values=old_values,
-                new_values=new_values,
-                description=f"Customer {instance.get_display_name()} {'created' if created else 'updated'}",
-            )
+            # Best-effort + savepoint-isolated: a failure in this generic audit write must
+            # neither poison the surrounding transaction nor skip the consent-change handlers
+            # below (the canonical audit path for marketing/GDPR consent — issue #182).
+            try:
+                with transaction.atomic():
+                    CustomersAuditService.log_customer_event(
+                        event_type=event_type,
+                        customer=instance,
+                        user=getattr(instance, "_audit_user", None),
+                        context=AuditContext(actor_type="system"),
+                        old_values=old_values,
+                        new_values=new_values,
+                        description=f"Customer {instance.get_display_name()} {'created' if created else 'updated'}",
+                    )
+            except Exception:
+                logger.exception("🔥 [Customer Signal] Generic customer audit write failed")
 
         if created:
             # New customer created
@@ -119,6 +126,11 @@ def handle_customer_created_or_updated(
 
     except Exception as e:
         logger.exception(f"🔥 [Customer Signal] Failed to handle customer save: {e}")
+    finally:
+        # Clear the captured originals so a later meta-only save on the SAME instance
+        # (which skips the pre_save refresh) cannot re-detect and duplicate a prior
+        # consent change.
+        instance.__dict__.pop("_original_customer_values", None)
 
 
 @receiver(pre_save, sender=Customer)
@@ -751,15 +763,19 @@ def _handle_marketing_consent_change(customer: Customer, old_consent: bool, new_
     """
     consent_action = "granted" if new_consent else "withdrawn"
 
-    # Source attribution: callers (EmailPreferenceService.update_preferences,
-    # process_unsubscribe, admin actions) set instance._consent_source before
-    # save() so the signal records WHERE the change originated. Falls back to
-    # "system" for direct Customer.save() callers (data imports, fixtures,
-    # ad-hoc shell commands). GDPR Art. 7 requires this attribution; collapsing
-    # the prior service-layer log_simple_event call into the signal keeps a
-    # single audit record per consent flip.
-    source = getattr(customer, "_consent_source", "system")
+    # Source attribution: the service callers (EmailPreferenceService.update_preferences
+    # and process_unsubscribe) set instance._consent_source before save() so the signal
+    # records WHERE the change originated. Falls back to "system" for any other path that
+    # does not set it — direct Customer.save(), data imports, fixtures, admin, ad-hoc shell.
+    # GDPR Art. 7 requires this attribution; collapsing the prior service-layer
+    # log_simple_event call into the signal keeps a single audit record per consent flip.
+    # `or "system"` normalizes a present-but-falsy value so we never record "via None".
+    source = getattr(customer, "_consent_source", None) or "system"
     category = getattr(customer, "_consent_category", None)
+    # Consume the transient attribution so a later save of the SAME instance cannot inherit
+    # a stale source/category and mis-attribute a subsequent consent change.
+    customer.__dict__.pop("_consent_source", None)
+    customer.__dict__.pop("_consent_category", None)
 
     evidence: dict[str, Any] = {
         "customer_id": str(customer.id),
