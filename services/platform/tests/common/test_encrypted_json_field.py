@@ -1,8 +1,19 @@
 """Tests for EncryptedJSONField — AES-256-GCM transparent encryption at rest."""
 
-from django.db import connection
-from django.test import TestCase, override_settings
+import json
+from types import SimpleNamespace
+from unittest.mock import patch
 
+from django.db import connection
+from django.test import SimpleTestCase, TestCase, override_settings
+
+from apps.common.encryption import (
+    VERSIONED_V2_PREFIX,
+    _clear_aesgcm_cache,
+    decrypt_sensitive_data,
+    encrypt_sensitive_data,
+)
+from apps.common.fields import EncryptedJSONField, _extract_embedded_aad
 from apps.customers.models import Customer, CustomerPaymentMethod
 
 # Valid AES-256 test key (matches config/settings/test.py)
@@ -171,3 +182,293 @@ class EncryptedJSONFieldLegacyDataTest(TestCase):
         raw_str = raw_value if isinstance(raw_value, str) else str(raw_value)
         self.assertIn("aes:", raw_str)
         self.assertNotIn("RESAVE", raw_str)
+
+
+@override_settings(ENCRYPTION_KEY=TEST_KEY)
+class EncryptedJSONFieldAADTest(TestCase):
+    """AAD context binding prevents ciphertext transplant attacks."""
+
+    def setUp(self) -> None:
+        _clear_aesgcm_cache()
+        self.customer = Customer.objects.create(
+            name="AAD Test Customer",
+            customer_type="company",
+            status="active",
+            primary_email="aad@test.com",
+            primary_phone="+40712345680",
+        )
+
+    def test_new_encryption_uses_v2_format(self) -> None:
+        """Newly saved bank_details should use v2 AAD-bound format."""
+        pm = CustomerPaymentMethod.objects.create(
+            customer=self.customer,
+            method_type="bank_transfer",
+            display_name="AAD Bank",
+            bank_details={"iban": "RO49AAAA1B31007593840000"},
+        )
+
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT bank_details FROM customer_payment_methods WHERE id = %s",
+                [pm.id],
+            )
+            raw_value = cursor.fetchone()[0]
+
+        raw_str = raw_value if isinstance(raw_value, str) else str(raw_value)
+        self.assertIn("aes:v2:", raw_str)
+
+    def test_aad_embedded_includes_table_and_field(self) -> None:
+        """Embedded AAD must include table name and field name for context binding."""
+        pm = CustomerPaymentMethod.objects.create(
+            customer=self.customer,
+            method_type="bank_transfer",
+            display_name="AAD Context",
+            bank_details={"iban": "RO49AAAA1111111111111111"},
+        )
+
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT bank_details FROM customer_payment_methods WHERE id = %s",
+                [pm.id],
+            )
+            raw = cursor.fetchone()[0]
+
+        raw_str = raw if isinstance(raw, str) else str(raw)
+        encrypted_str = json.loads(raw_str) if raw_str.startswith('"') else raw_str
+        aad = _extract_embedded_aad(encrypted_str)
+        self.assertIsNotNone(aad)
+        aad_str = aad.decode() if aad else ""
+        # AAD contains table:field: (pk may be empty on INSERT for auto-increment)
+        self.assertIn("customer_payment_methods", aad_str)
+        self.assertIn("bank_details", aad_str)
+
+    def test_resaved_aad_includes_pk(self) -> None:
+        """After re-save, AAD includes the pk for full context binding."""
+        pm = CustomerPaymentMethod.objects.create(
+            customer=self.customer,
+            method_type="bank_transfer",
+            display_name="Resave AAD",
+            bank_details={"iban": "RO49AAAA1111111111111111"},
+        )
+        # Re-save: now pk is known
+        pm.save()
+
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT bank_details FROM customer_payment_methods WHERE id = %s",
+                [pm.id],
+            )
+            raw = cursor.fetchone()[0]
+
+        raw_str = raw if isinstance(raw, str) else str(raw)
+        encrypted_str = json.loads(raw_str) if raw_str.startswith('"') else raw_str
+        aad = _extract_embedded_aad(encrypted_str)
+        self.assertIsNotNone(aad)
+        aad_str = aad.decode() if aad else ""
+        self.assertIn(str(pm.id), aad_str)
+
+    def test_roundtrip_with_aad(self) -> None:
+        """Normal save/load cycle works with AAD binding."""
+        details = {"bank_name": "BRD", "iban": "RO49BRDE445SV97356100000"}
+        pm = CustomerPaymentMethod.objects.create(
+            customer=self.customer,
+            method_type="bank_transfer",
+            display_name="AAD Roundtrip",
+            bank_details=details,
+        )
+        pm.refresh_from_db()
+        self.assertEqual(pm.bank_details, details)
+
+
+@override_settings(ENCRYPTION_KEY=TEST_KEY)
+class EncryptedJSONFieldRequireV2Test(TestCase):
+    """require_v2 rejects v1/plaintext downgrade (review H1)."""
+
+    def setUp(self) -> None:
+        _clear_aesgcm_cache()
+        self.customer = Customer.objects.create(
+            name="RequireV2 Customer",
+            customer_type="company",
+            status="active",
+            primary_email="rv2@test.com",
+            primary_phone="+40712345681",
+        )
+        self.field = CustomerPaymentMethod._meta.get_field("bank_details")
+
+    def _write_raw(self, pk: int, raw_json_value: str) -> None:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE customer_payment_methods SET bank_details = %s WHERE id = %s",
+                [raw_json_value, pk],
+            )
+
+    def test_v2_value_is_accepted(self) -> None:
+        details = {"bank_name": "BT", "iban": "RO49BTRL1B31007593840001"}
+        pm = CustomerPaymentMethod.objects.create(
+            customer=self.customer, method_type="bank_transfer", display_name="V2", bank_details=details
+        )
+        with patch.object(self.field, "require_v2", True):
+            pm.refresh_from_db()
+            self.assertEqual(pm.bank_details, details)
+
+    def test_v1_ciphertext_is_rejected(self) -> None:
+        pm = CustomerPaymentMethod.objects.create(
+            customer=self.customer, method_type="bank_transfer", display_name="V1", bank_details=None
+        )
+        # Craft a v1 ciphertext (no AAD) and write it raw, simulating a downgrade.
+        v1_cipher = encrypt_sensitive_data(json.dumps({"iban": "RO00DOWNGRADE"}))
+        self.assertTrue(v1_cipher.startswith("aes:v1:"))
+        self._write_raw(pm.id, json.dumps(v1_cipher))
+
+        with patch.object(self.field, "require_v2", True):
+            pm.refresh_from_db()
+            self.assertIsNone(pm.bank_details)
+
+    def test_plaintext_is_rejected(self) -> None:
+        pm = CustomerPaymentMethod.objects.create(
+            customer=self.customer, method_type="bank_transfer", display_name="Plain", bank_details=None
+        )
+        self._write_raw(pm.id, '{"iban": "RO00PLAINTEXT"}')
+
+        with patch.object(self.field, "require_v2", True):
+            pm.refresh_from_db()
+            self.assertIsNone(pm.bank_details)
+
+    def test_default_still_reads_v1_for_backward_compat(self) -> None:
+        """With require_v2 left False (default), v1 ciphertext is still readable."""
+        pm = CustomerPaymentMethod.objects.create(
+            customer=self.customer, method_type="bank_transfer", display_name="Compat", bank_details=None
+        )
+        v1_cipher = encrypt_sensitive_data(json.dumps({"iban": "RO00COMPAT"}))
+        self._write_raw(pm.id, json.dumps(v1_cipher))
+
+        pm.refresh_from_db()
+        self.assertEqual(pm.bank_details, {"iban": "RO00COMPAT"})
+
+
+# ===============================================================================
+# F3 — AAD isolation: per-field binding, no shared/thread-local state
+# ===============================================================================
+
+
+@override_settings(ENCRYPTION_KEY=TEST_KEY)
+class EncryptedJSONFieldAADIsolationTest(SimpleTestCase):
+    """Each field binds AAD to its OWN table:field with no cross-field contamination."""
+
+    def test_pre_save_binds_each_field_to_its_own_aad(self) -> None:
+        """Two encrypted fields on one instance must each embed their own table:field AAD.
+
+        Regression for the old shared thread-local: field B's pre_save overwrote field A's
+        stashed AAD, so A was encrypted under B's context (and B lost its binding). With
+        per-field encryption in pre_save there is no shared state to corrupt.
+        """
+
+        inst = SimpleNamespace(
+            _meta=SimpleNamespace(db_table="iso_table"),
+            pk=7,
+            field_a={"secret": "a-value"},
+            field_b={"secret": "b-value"},
+        )
+
+        fa = EncryptedJSONField()
+        fa.set_attributes_from_name("field_a")
+        fb = EncryptedJSONField()
+        fb.set_attributes_from_name("field_b")
+        # Django calls ALL fields' pre_save first, THEN prepares values — replicate that order
+        # so a shared slot would be observably clobbered.
+        prepped_a = fa.pre_save(inst, add=True)
+        prepped_b = fb.pre_save(inst, add=True)
+
+        self.assertTrue(prepped_a.startswith(VERSIONED_V2_PREFIX))
+        self.assertTrue(prepped_b.startswith(VERSIONED_V2_PREFIX))
+
+        aad_a = _extract_embedded_aad(prepped_a)
+        aad_b = _extract_embedded_aad(prepped_b)
+        assert aad_a is not None and aad_b is not None
+        self.assertTrue(aad_a.startswith(b"iso_table:field_a:"))
+        self.assertTrue(aad_b.startswith(b"iso_table:field_b:"))
+        # Each decrypts to its OWN value — proves no cross-field corruption.
+        self.assertEqual(json.loads(decrypt_sensitive_data(prepped_a)), {"secret": "a-value"})
+        self.assertEqual(json.loads(decrypt_sensitive_data(prepped_b)), {"secret": "b-value"})
+
+
+@override_settings(ENCRYPTION_KEY=TEST_KEY)
+class EncryptedJSONFieldWritePathTest(TestCase):
+    """Write paths that bypass pre_save cannot bind AAD — fail loud instead of silent v1."""
+
+    def setUp(self) -> None:
+        _clear_aesgcm_cache()
+        self.customer = Customer.objects.create(
+            name="WritePath Customer",
+            customer_type="company",
+            status="active",
+            primary_email="wp@test.com",
+            primary_phone="+40712345682",
+        )
+
+    def test_queryset_update_stores_unbound_v1_and_warns(self) -> None:
+        """.update(field=dict) bypasses pre_save — stores unbound v1 WITH a warning (not silent, not raised).
+
+        Raising here would break dumpdata→loaddata (which also bypasses pre_save); silently
+        writing v1 was the original defect. The middle ground: encrypt v1 and log loudly.
+        """
+        pm = CustomerPaymentMethod.objects.create(
+            customer=self.customer, method_type="bank_transfer", display_name="U", bank_details={}
+        )
+        with self.assertLogs("apps.common.fields", level="WARNING") as logs:
+            CustomerPaymentMethod.objects.filter(pk=pm.pk).update(bank_details={"bank_name": "BT"})
+        self.assertTrue(any("without AAD context" in line for line in logs.output))
+
+        pm.refresh_from_db()
+        self.assertEqual(pm.bank_details, {"bank_name": "BT"})  # readable (require_v2 default False)
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT bank_details FROM customer_payment_methods WHERE id = %s", [pm.id])
+            raw = cursor.fetchone()[0]
+        self.assertIn("aes:v1:", str(raw))  # stored unbound (v1), no AAD
+
+    def test_bulk_create_roundtrips_encrypted_v2(self) -> None:
+        """bulk_create DOES run pre_save, so values are encrypted (v2) and round-trip."""
+        ibans = ["RO49AAAA1B31007593840000", "RO49BBBB1B31007593840000"]
+        objs = [
+            CustomerPaymentMethod(
+                customer=self.customer,
+                method_type="bank_transfer",
+                display_name=f"B{i}",
+                bank_details={"bank_name": "BT", "iban": ibans[i]},
+            )
+            for i in range(2)
+        ]
+        CustomerPaymentMethod.objects.bulk_create(objs)
+        rows = list(
+            CustomerPaymentMethod.objects.filter(customer=self.customer, display_name__startswith="B").order_by(
+                "display_name"
+            )
+        )
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0].bank_details["iban"], ibans[0])
+        self.assertEqual(rows[1].bank_details["iban"], ibans[1])
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT bank_details FROM customer_payment_methods WHERE id = %s", [rows[0].id])
+            raw = cursor.fetchone()[0]
+        raw_str = raw if isinstance(raw, str) else str(raw)
+        self.assertIn("aes:v2:", raw_str)
+
+
+# ===============================================================================
+# F5 — deconstruct() preserves the security-relevant require_v2 flag
+# ===============================================================================
+
+
+class EncryptedJSONFieldDeconstructTest(SimpleTestCase):
+    """require_v2 is a security option; Field.clone()/historical models must not lose it."""
+
+    def test_deconstruct_preserves_require_v2_when_true(self) -> None:
+        field = EncryptedJSONField(require_v2=True)
+        _name, path, _args, kwargs = field.deconstruct()
+        self.assertEqual(path, "apps.common.fields.EncryptedJSONField")
+        self.assertTrue(kwargs.get("require_v2"))
+
+    def test_deconstruct_omits_require_v2_when_default(self) -> None:
+        field = EncryptedJSONField()
+        _name, _path, _args, kwargs = field.deconstruct()
+        self.assertNotIn("require_v2", kwargs)
