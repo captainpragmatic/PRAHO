@@ -41,7 +41,7 @@
 </div>
 
 <!-- Enhanced JavaScript for HTMX replies -->
-<script>
+<script nonce="{{ csp_nonce }}">
 document.addEventListener('DOMContentLoaded', function() {
     const textarea = document.querySelector('textarea[name="message"]');
     const charCounter = document.getElementById('char-counter');

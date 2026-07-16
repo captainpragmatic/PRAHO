@@ -132,7 +132,7 @@
 </div>
 
 <!-- JavaScript for copying and printing -->
-<script>
+<script nonce="{{ csp_nonce }}">
 function copyCode(code) {
   navigator.clipboard.writeText(code).then(function() {
     // Could add visual feedback here
@@ -163,7 +163,7 @@ function printCodes() {
     <html>
       <head>
         <title>{% trans "MFA Backup Codes" %}</title>
-        <style>
+        <style nonce="{{ csp_nonce }}">
           body { font-family: monospace; margin: 20px; }
           h1 { color: #333; }
           .code {
