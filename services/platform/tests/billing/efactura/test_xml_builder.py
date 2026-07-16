@@ -3,6 +3,7 @@ Tests for UBL 2.1 XML Builder with CIUS-RO compliance.
 """
 
 
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 from django.test import TestCase, override_settings
@@ -118,15 +119,111 @@ class UBLInvoiceBuilderTestCase(TestCase):
         self.assertEqual(invoice_id.text, self.invoice.number)
 
     def test_build_contains_issue_date(self):
-        """Test that IssueDate is formatted correctly."""
-        builder = UBLInvoiceBuilder(self.invoice)
-        xml = builder.build()
-        doc = etree.fromstring(xml.encode())
+        """IssueDate (BT-2) is emitted as YYYY-MM-DD in the Romanian calendar (#220).
+
+        The expectation is a literal rather than re-derived from issued_at: deriving it would
+        mirror whatever the builder does and assert nothing. 09:00 UTC is 12:00 in Romania, so
+        this instant does not roll the day — the cross-midnight cases are covered separately.
+        """
+        invoice = InvoiceFactory(
+            customer=self.customer, currency=self.currency, number="INV-2026-FMT",
+            bill_to_name="Customer SRL", bill_to_country="RO", bill_to_tax_id="RO87654321",
+            status="issued",
+            issued_at=datetime(2026, 6, 10, 9, 0, tzinfo=UTC),
+            due_at=datetime(2026, 7, 10, 9, 0, tzinfo=UTC),
+            subtotal_cents=100000, tax_total_cents=19000, total_cents=119000,
+        )
+        InvoiceLineFactory(
+            invoice=invoice, description="Web Hosting Service", unit_price_cents=100000,
+            quantity=1, tax_rate=Decimal("0.1900"),
+        )
+        doc = etree.fromstring(UBLInvoiceBuilder(invoice).build().encode())
 
         issue_date = doc.find(f".//{{{NAMESPACES['cbc']}}}IssueDate")
         self.assertIsNotNone(issue_date)
-        expected = self.invoice.issued_at.strftime("%Y-%m-%d")
-        self.assertEqual(issue_date.text, expected)
+        self.assertEqual(issue_date.text, "2026-06-10")
+
+    def _ro_midnight_invoice(self):
+        """Invoice issued 2026-01-15 22:30 UTC = 2026-01-16 00:30 in Romania (EET, UTC+2).
+
+        due_at 2026-02-14 22:30 UTC = 2026-02-15 00:30 RO. Both instants sit in the window
+        where the UTC calendar date is the PREVIOUS Romanian day — the #220 failure mode.
+        """
+        invoice = InvoiceFactory(
+            customer=self.customer, currency=self.currency, number="INV-2026-TZ1",
+            bill_to_name="Customer SRL", bill_to_country="RO", bill_to_tax_id="RO87654321",
+            status="issued",
+            issued_at=datetime(2026, 1, 15, 22, 30, tzinfo=UTC),
+            due_at=datetime(2026, 2, 14, 22, 30, tzinfo=UTC),
+            subtotal_cents=100000, tax_total_cents=19000, total_cents=119000,
+        )
+        InvoiceLineFactory(
+            invoice=invoice, description="Web Hosting Service", unit_price_cents=100000,
+            quantity=1, tax_rate=Decimal("0.1900"),
+        )
+        return invoice
+
+    def test_issue_date_uses_romanian_local_date_across_utc_midnight(self):
+        """#220: BT-2 IssueDate is a Romanian legal calendar date. An invoice issued at
+        2026-01-15 22:30 UTC is already 2026-01-16 in Romania and MUST be stamped as such —
+        the raw .date() of the UTC instant would wrongly file 2026-01-15 with ANAF."""
+        doc = etree.fromstring(UBLInvoiceBuilder(self._ro_midnight_invoice()).build().encode())
+
+        issue_date = doc.find(f".//{{{NAMESPACES['cbc']}}}IssueDate")
+        self.assertEqual(issue_date.text, "2026-01-16")
+
+    def test_due_date_and_payment_due_date_use_romanian_local_date(self):
+        """#220: BT-9 DueDate and PaymentMeans/PaymentDueDate both roll to the Romanian day."""
+        doc = etree.fromstring(UBLInvoiceBuilder(self._ro_midnight_invoice()).build().encode())
+
+        due_date = doc.find(f".//{{{NAMESPACES['cbc']}}}DueDate")
+        self.assertEqual(due_date.text, "2026-02-15")
+
+        payment_means = doc.find(f".//{{{NAMESPACES['cac']}}}PaymentMeans")
+        payment_due = payment_means.find(f"{{{NAMESPACES['cbc']}}}PaymentDueDate")
+        self.assertEqual(payment_due.text, "2026-02-15")
+
+    def test_payment_terms_note_net_days_matches_romanian_dates(self):
+        """#220: the Net N and the printed due date in the BT-20 note share ONE calendar.
+
+        2026-01-16 to 2026-02-15 RO-local is exactly 30 days. Deriving N from the raw aware
+        datetimes instead would contradict the dates printed alongside it in the same string.
+        """
+        doc = etree.fromstring(UBLInvoiceBuilder(self._ro_midnight_invoice()).build().encode())
+
+        note = doc.find(f".//{{{NAMESPACES['cac']}}}PaymentTerms/{{{NAMESPACES['cbc']}}}Note")
+        self.assertEqual(note.text, "Net 30 days, due 2026-02-15")
+
+    def test_line_period_dates_are_untouched_datefields(self):
+        """#220 non-regression: period_start/period_end are DateField (plain dates), not
+        datetimes. They carry no timezone and must NOT be converted — .astimezone() on a date
+        raises AttributeError. They are emitted verbatim."""
+        invoice = InvoiceFactory(
+            customer=self.customer, currency=self.currency, number="INV-2026-PERIOD",
+            bill_to_name="Customer SRL", bill_to_country="RO", bill_to_tax_id="RO87654321",
+            status="issued",
+            issued_at=datetime(2026, 1, 15, 22, 30, tzinfo=UTC),
+            due_at=datetime(2026, 2, 14, 22, 30, tzinfo=UTC),
+            subtotal_cents=100000, tax_total_cents=19000, total_cents=119000,
+        )
+        InvoiceLineFactory(
+            invoice=invoice, description="Web Hosting Service", unit_price_cents=100000,
+            quantity=1, tax_rate=Decimal("0.1900"),
+            period_start=date(2026, 1, 1), period_end=date(2026, 1, 31),
+        )
+        doc = etree.fromstring(UBLInvoiceBuilder(invoice).build().encode())
+
+        period = doc.find(f".//{{{NAMESPACES['cac']}}}InvoicePeriod")
+        self.assertEqual(period.find(f"{{{NAMESPACES['cbc']}}}StartDate").text, "2026-01-01")
+        self.assertEqual(period.find(f"{{{NAMESPACES['cbc']}}}EndDate").text, "2026-01-31")
+
+    def test_format_date_rejects_datetime(self):
+        """#220: datetime subclasses date, so _format_date(aware_dt) type-checks cleanly but
+        silently formats the UTC wall clock. MyPy cannot catch this — guard it at runtime."""
+        builder = UBLInvoiceBuilder(self.invoice)
+
+        with self.assertRaises(TypeError):
+            builder._format_date(datetime(2026, 1, 15, 22, 30, tzinfo=UTC))
 
     def test_build_contains_supplier_party(self):
         """Test that AccountingSupplierParty is present."""
@@ -790,6 +887,43 @@ class UBLCreditNoteBuilderTestCase(TestCase):
             quantity=1,
             tax_rate=Decimal("0.1900"),  # Matches credit note's tax_total_cents=9500
         )
+
+    def test_credit_note_issue_dates_use_romanian_local_date(self):
+        """#220: both the credit note's own BT-2 and the BillingReference IssueDate of the
+        referenced original invoice must be Romanian calendar dates.
+
+        The original is issued 2025-12-31 22:30 UTC = 2026-01-01 00:30 RO — the year-boundary
+        worst case, where the UTC bug corrupts the fiscal YEAR of the reference, not just the day.
+        """
+        original = InvoiceFactory(
+            customer=self.customer, currency=self.currency, number="INV-2025-YEAREND",
+            bill_to_name="Customer SRL", bill_to_country="RO", bill_to_tax_id="RO87654321",
+            status="paid",
+            issued_at=datetime(2025, 12, 31, 22, 30, tzinfo=UTC),
+        )
+        cn = InvoiceFactory(
+            customer=self.customer, currency=self.currency, number="CN-2026-TZ1",
+            bill_to_name="Customer SRL", bill_to_country="RO", bill_to_tax_id="RO87654321",
+            status="issued",
+            issued_at=datetime(2026, 1, 15, 22, 30, tzinfo=UTC),
+            subtotal_cents=50000, tax_total_cents=9500, total_cents=59500,
+        )
+        InvoiceLineFactory(
+            invoice=cn, description="Partial Refund", unit_price_cents=50000, quantity=1,
+            tax_rate=Decimal("0.1900"),
+        )
+        doc = etree.fromstring(UBLCreditNoteBuilder(cn, original).build().encode())
+
+        # Document-level BT-2 of the credit note itself.
+        self.assertEqual(doc.find(f".//{{{NAMESPACES['cbc']}}}IssueDate").text, "2026-01-16")
+
+        # The referenced original's date, scoped via BillingReference — a bare .//IssueDate
+        # would match the document-level one above, which is emitted first.
+        ref = doc.find(
+            f".//{{{NAMESPACES['cac']}}}BillingReference"
+            f"/{{{NAMESPACES['cac']}}}InvoiceDocumentReference"
+        )
+        self.assertEqual(ref.find(f"{{{NAMESPACES['cbc']}}}IssueDate").text, "2026-01-01")
 
     def test_credit_note_document_discount_emits_allowance_and_reconciles(self):
         """#188: a discounted credit note emits a BG-20 AllowanceCharge and reconciles —
