@@ -14,7 +14,7 @@ from unittest.mock import MagicMock, patch
 import requests
 from django.test import TestCase, override_settings
 
-from apps.common.types import Err, Ok
+from apps.common.types import Err, Ok, Retriability
 from apps.domains.gateways import (
     RegistrarGatewayFactory,
 )
@@ -840,3 +840,65 @@ class GatewayHardeningTests(TestCase):
         recorded = repr(mock_audit.call_args)
         self.assertNotIn("1900101123456", recorded)
         self.assertIn("invalid_registrant_data", recorded)
+
+
+@override_settings(REGISTRAR_ADAPTERS_VERIFIED=True)
+class DefiniteRejectionRetriabilityTests(TestCase):
+    """Definite registrar rejections (404/409/401) and the unverified-adapter guard
+    must carry NOT_RETRIABLE so the lifecycle deletes the pending row (PR #256 review)."""
+
+    def setUp(self) -> None:
+        self.registrar = _make_registrar("gandi")
+        self.gateway = GandiGateway(self.registrar)
+
+    def _err_for(self, status: int, headers: dict | None = None):
+        resp = _mock_response(status, {"message": "nope"})
+        resp.headers = headers or {}
+        return self.gateway._handle_error_response(resp, "register example.com", domain_name="example.com")
+
+    def test_conflict_is_not_retriable(self) -> None:
+        self.assertEqual(self._err_for(409).retriability, Retriability.NOT_RETRIABLE)
+
+    def test_not_found_is_not_retriable(self) -> None:
+        self.assertEqual(self._err_for(404).retriability, Retriability.NOT_RETRIABLE)
+
+    def test_auth_error_is_not_retriable(self) -> None:
+        self.assertEqual(self._err_for(401).retriability, Retriability.NOT_RETRIABLE)
+
+    def test_rate_limit_stays_retriable(self) -> None:
+        self.assertEqual(self._err_for(429, {"Retry-After": "30"}).retriability, Retriability.RETRIABLE)
+
+    def test_http_date_retry_after_does_not_raise(self) -> None:
+        # A non-integer Retry-After (HTTP-date) must not blow up error mapping.
+        err = self._err_for(429, {"Retry-After": "Wed, 21 Oct 2026 07:28:00 GMT"})
+        self.assertEqual(err.retriability, Retriability.RETRIABLE)
+
+
+@override_settings(REGISTRAR_ADAPTERS_VERIFIED=False)
+class UnverifiedGuardNotRetriableTests(TestCase):
+    """The unverified-adapter guard must be a definite rejection, or every registration
+    creates a pending row that can never be retried (Codex P1)."""
+
+    def setUp(self) -> None:
+        self.gateway = GandiGateway(_make_registrar("gandi"))
+
+    def test_guard_error_is_not_retriable(self) -> None:
+        result = self.gateway.register_domain("example.com", 1, {"first_name": "a"})
+        self.assertTrue(result.is_err())
+        self.assertEqual(result.retriability, Retriability.NOT_RETRIABLE)
+
+
+@override_settings(REGISTRAR_ADAPTERS_VERIFIED=True)
+class AvailabilityExceptionSafetyTests(TestCase):
+    """A malformed/oversized availability response must fail closed (Err), not 500 (Codex P2)."""
+
+    def setUp(self) -> None:
+        self.gateway = GandiGateway(_make_registrar("gandi"))
+
+    @patch("apps.domains.gateways.gandi.GandiGateway._do_check_availability")
+    @patch("apps.domains.gateways.base.cache")
+    def test_availability_exception_becomes_err(self, mock_cache: MagicMock, mock_do: MagicMock) -> None:
+        mock_cache.get.return_value = 0
+        mock_do.side_effect = RegistrarAPIError("oversized", code=RegistrarErrorCode.INVALID_RESPONSE)
+        result = self.gateway.check_availability("example.com")
+        self.assertTrue(result.is_err())
