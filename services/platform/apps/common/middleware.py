@@ -121,9 +121,9 @@ class SecurityHeadersMiddleware:
         if not response.get("Content-Security-Policy"):
             csp = (
                 "default-src 'self'; "
-                "style-src 'self' 'unsafe-inline' fonts.googleapis.com cdn.tailwindcss.com; "
+                "style-src 'self' 'unsafe-inline' fonts.googleapis.com; "
                 "font-src 'self' fonts.gstatic.com; "
-                "script-src 'self' 'unsafe-inline' unpkg.com cdn.tailwindcss.com; "
+                "script-src 'self' 'unsafe-inline'; "
                 "img-src 'self' data: https:; "
                 "connect-src 'self'; "
                 "object-src 'none'; "
