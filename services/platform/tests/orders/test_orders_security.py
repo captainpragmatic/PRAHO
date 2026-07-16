@@ -9,6 +9,7 @@ Tests the critical security fixes implemented for:
 """
 
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import AnonymousUser
 from django.core.cache import cache
 from django.test import TestCase
 from django.test.client import Client
@@ -461,6 +462,15 @@ class AccessControlSecurityTests(OrderSecurityTestCase):
 
         self.assertFalse(can_manage_financial_data(user_invalid_role))
 
+    def test_can_manage_financial_data_anonymous_user_returns_false(self) -> None:
+        """AnonymousUser has no is_staff_user attribute — must fail safely to False, not raise.
+
+        Regression guard: is_staff_user is a property on the custom User model; the Django
+        AnonymousUser lacks it, so a direct access would raise AttributeError (a 500) where
+        the previous is_staff check returned False. The check must stay getattr-guarded.
+        """
+        self.assertFalse(can_manage_financial_data(AnonymousUser()))
+
 
 class SecurityLoggingTests(OrderSecurityTestCase):
     """
@@ -589,7 +599,7 @@ class SecurityRegressionTests(OrderSecurityTestCase):
             (True, False, ""): False,  # Staff with no role
             (True, False, None): False,  # Staff with None role
             (False, True, ""): True,  # Superuser overrides everything
-            (False, False, "admin"): False,  # Non-staff with admin role should be False
+            (False, False, "admin"): True,  # staff_role="admin" is staff via is_staff_user
         }
 
         for (is_staff, is_superuser, staff_role), expected in permission_matrix.items():

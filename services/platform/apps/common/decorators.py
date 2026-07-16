@@ -202,7 +202,9 @@ def can_manage_financial_data(user: User) -> bool:
     if user.is_superuser:
         return True
 
-    if not user.is_staff:
+    # getattr guard: is_staff_user is a property on the custom User model that AnonymousUser
+    # lacks; a direct access would raise AttributeError where the old is_staff returned False.
+    if not getattr(user, "is_staff_user", False):
         return False
 
     allowed_roles = ["admin", "billing", "manager"]
