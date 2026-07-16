@@ -484,12 +484,15 @@ class Domain(ConcurrentTransitionMixin, models.Model):
 # ===============================================================================
 
 
-class DomainOperation(models.Model):
+class DomainOperation(ConcurrentTransitionMixin, models.Model):
     """Tracks async domain operations submitted to registrar APIs.
 
     Mirrors the ProvisioningTask pattern from apps/provisioning.
     Two-phase: create record + submit to registrar (phase 1),
     confirm via webhook or polling (phase 2).
+
+    ``state`` is a protected FSMField (ADR-0034): transitions go through the
+    @transition-decorated mark_* methods, never direct assignment.
     """
 
     OPERATION_TYPE_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
@@ -515,7 +518,7 @@ class DomainOperation(models.Model):
     registrar = models.ForeignKey(Registrar, on_delete=models.PROTECT, related_name="domain_operations")
 
     operation_type = models.CharField(max_length=30, choices=OPERATION_TYPE_CHOICES)
-    state = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
+    state = FSMField(max_length=20, choices=STATUS_CHOICES, default="pending", protected=True)
 
     # Operation parameters (e.g. nameservers list, lock state, epp_code)
     parameters = models.JSONField(default=dict, blank=True)
@@ -564,22 +567,51 @@ class DomainOperation(models.Model):
             return int((self.completed_at - self.submitted_at).total_seconds())
         return 0
 
+    def refresh_from_db(
+        self,
+        using: str | None = None,
+        fields: Iterable[str] | None = None,
+        from_queryset: models.QuerySet[DomainOperation] | None = None,
+    ) -> None:
+        """Override to allow refresh_from_db to work with FSMField(protected=True).
+
+        See Domain.refresh_from_db for the full explanation.
+        """
+        fsm_fields = ["state"]
+        if fields is not None:
+            fields_set = set(fields)
+            fsm_fields = [f for f in fsm_fields if f in fields_set]
+        saved = {f: self.__dict__.pop(f) for f in fsm_fields if f in self.__dict__}
+        try:
+            super().refresh_from_db(using=using, fields=fields, from_queryset=from_queryset)
+        except Exception:
+            self.__dict__.update(saved)
+            raise
+
+    @transition(field=state, source="pending", target="submitted")
     def mark_submitted(self, registrar_operation_id: str = "") -> None:
-        """Transition to submitted state."""
-        self.state = "submitted"
+        """Transition to submitted state (Phase 1: registrar accepted the request)."""
         self.submitted_at = timezone.now()
         self.registrar_operation_id = registrar_operation_id
 
+    @transition(field=state, source=["pending", "submitted"], target="completed")
     def mark_completed(self, result_data: dict[str, Any] | None = None) -> None:
-        """Transition to completed state."""
-        self.state = "completed"
+        """Transition to completed state.
+
+        ``pending`` is a valid source: synchronous ops (nameserver/lock/info-sync)
+        create the row and complete it in one call without a separate submit step.
+        """
         self.completed_at = timezone.now()
         if result_data:
             self.result = result_data
 
+    @transition(field=state, source=["pending", "submitted"], target="failed")
     def mark_failed(self, error: str) -> None:
-        """Transition to failed state."""
-        self.state = "failed"
+        """Transition to failed state.
+
+        ``pending`` is a valid source: a synchronous op that fails before any
+        submit step transitions straight from ``pending`` to ``failed``.
+        """
         self.error_message = error
 
 

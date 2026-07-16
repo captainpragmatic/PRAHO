@@ -706,19 +706,30 @@ class DomainLifecycleService:
             logger.error("Failed to create transfer records for %s: %s", domain_name, e)
             return Err(cast(str, _("Failed to initiate transfer")))
 
-        # Phase 2: submit to registrar
+        # Phase 2: submit to registrar (outside the transaction above).
         result = gateway.initiate_transfer(domain_name, epp_code)
         if result.is_ok():
             transfer = result.unwrap()
             op.mark_submitted(registrar_operation_id=transfer.transfer_id)
             op.save(update_fields=["state", "registrar_operation_id", "submitted_at", "updated_at"])
             logger.info("Transfer initiated for %s: %s", domain_name, transfer.transfer_id)
-        else:
-            op.mark_failed(str(result.unwrap_err()))
-            op.save(update_fields=["state", "error_message", "updated_at"])
-            logger.error("Transfer submission failed for %s: %s", domain_name, result.unwrap_err())
+            return Ok(op)
 
-        return Ok(op)
+        # Failure: partition by retriability, mirroring _submit_registration_to_registrar.
+        # Keep the pending Domain row ONLY on UNKNOWN (the transfer may have started at the
+        # registrar); on a definite rejection OR a breaker-open RETRIABLE, delete the row so
+        # the unique domain name isn't permanently stranded (the #260 deadlock class).
+        error = result.unwrap_err()
+        if retriability_of(result) == Retriability.UNKNOWN:
+            op.mark_failed(error.code.value)
+            op.save(update_fields=["state", "error_message", "updated_at"])
+            logger.warning(
+                "Transfer outcome UNKNOWN for %s (kept pending, do not resubmit): %s", domain_name, error.code.value
+            )
+            return Err(cast(str, _("Transfer was submitted but the registrar did not confirm it — do not resubmit.")))
+        logger.warning("Transfer rejected for %s (records removed for clean retry): %s", domain_name, error.code.value)
+        domain.delete()  # cascades to the DomainOperation row
+        return Err(cast(str, _("Registrar rejected the transfer: {error}")).format(error=error.code.value))
 
     @staticmethod
     def update_nameservers(domain: Domain, nameservers: list[str]) -> Result[DomainOperation, str]:
@@ -743,11 +754,12 @@ class DomainLifecycleService:
             domain.save(update_fields=["nameservers", "updated_at"])
             op.mark_completed()
             op.save(update_fields=["state", "completed_at", "updated_at"])
-        else:
-            op.mark_failed(str(result.unwrap_err()))
-            op.save(update_fields=["state", "error_message", "updated_at"])
+            return Ok(op)
 
-        return Ok(op)
+        error = result.unwrap_err()
+        op.mark_failed(error.code.value)
+        op.save(update_fields=["state", "error_message", "updated_at"])
+        return Err(cast(str, _("Nameserver update failed: {error}")).format(error=error.code.value))
 
     @staticmethod
     def set_domain_lock(domain: Domain, locked: bool) -> Result[DomainOperation, str]:
@@ -772,15 +784,23 @@ class DomainLifecycleService:
             domain.save(update_fields=["locked", "updated_at"])
             op.mark_completed()
             op.save(update_fields=["state", "completed_at", "updated_at"])
-        else:
-            op.mark_failed(str(result.unwrap_err()))
-            op.save(update_fields=["state", "error_message", "updated_at"])
+            return Ok(op)
 
-        return Ok(op)
+        error = result.unwrap_err()
+        op.mark_failed(error.code.value)
+        op.save(update_fields=["state", "error_message", "updated_at"])
+        return Err(cast(str, _("Lock update failed: {error}")).format(error=error.code.value))
 
     @staticmethod
-    def sync_domain_info(domain: Domain) -> Result[DomainOperation, str]:
-        """Pull current domain state from registrar and update local record."""
+    def sync_domain_info(domain: Domain, persist: bool = True) -> Result[DomainOperation, str]:
+        """Pull current domain state from the registrar and reconcile the local record.
+
+        Returns Ok(op) with op.result['changed_fields'] describing the drift (empty when
+        the local record already matches the registrar). Ok is returned ONLY when the
+        registrar responded; a registrar failure returns Err. When persist is False
+        (dry-run) nothing is written: the returned DomainOperation is unsaved and no
+        Domain fields change.
+        """
         from .gateways import RegistrarGatewayFactory  # noqa: PLC0415
 
         try:
@@ -788,44 +808,51 @@ class DomainLifecycleService:
         except ValueError:
             return Err(f"No gateway for registrar {domain.registrar.name}")
 
-        op = DomainOperation.objects.create(
-            domain=domain,
-            registrar=domain.registrar,
-            operation_type="domain_info",
-        )
-
         result = gateway.get_domain_info(domain.name)
-        if result.is_ok():
-            info = result.unwrap()
-            domain.nameservers = info.nameservers
-            domain.locked = info.locked
-            domain.whois_privacy = info.whois_privacy
-            if info.expires_at:
-                domain.expires_at = info.expires_at
-            if info.registrar_domain_id:
-                domain.registrar_domain_id = info.registrar_domain_id
-            domain.save(
-                update_fields=[
-                    "nameservers",
-                    "locked",
-                    "whois_privacy",
-                    "expires_at",
-                    "registrar_domain_id",
-                    "updated_at",
-                ]
-            )
-            op.mark_completed(
-                result_data={
-                    "nameservers": info.nameservers,
-                    "locked": info.locked,
-                    "expires_at": str(info.expires_at) if info.expires_at else None,
-                }
-            )
-            op.save(update_fields=["state", "completed_at", "result", "updated_at"])
-        else:
-            op.mark_failed(str(result.unwrap_err()))
-            op.save(update_fields=["state", "error_message", "updated_at"])
+        if result.is_err():
+            error = result.unwrap_err()
+            if persist:
+                op = DomainOperation.objects.create(
+                    domain=domain, registrar=domain.registrar, operation_type="domain_info"
+                )
+                op.mark_failed(error.code.value)
+                op.save(update_fields=["state", "error_message", "updated_at"])
+            return Err(cast(str, _("Failed to sync {name}: {error}")).format(name=domain.name, error=error.code.value))
 
+        info = result.unwrap()
+
+        # Real drift detection: compare the registrar's values against the LOCAL record
+        # BEFORE applying any change (the old truthiness check reported drift every run).
+        changed: dict[str, Any] = {}
+        if list(domain.nameservers or []) != list(info.nameservers or []):
+            changed["nameservers"] = {"from": list(domain.nameservers or []), "to": list(info.nameservers or [])}
+        if domain.locked != info.locked:
+            changed["locked"] = {"from": domain.locked, "to": info.locked}
+        if info.expires_at and domain.expires_at != info.expires_at:
+            changed["expires_at"] = {"from": str(domain.expires_at), "to": str(info.expires_at)}
+        if info.registrar_domain_id and domain.registrar_domain_id != info.registrar_domain_id:
+            changed["registrar_domain_id"] = {"from": domain.registrar_domain_id, "to": info.registrar_domain_id}
+        result_data = {"changed_fields": changed, "drift_detected": bool(changed)}
+
+        if not persist:
+            # Dry-run: report drift without touching the DB (unsaved op, no domain.save).
+            op = DomainOperation(domain=domain, registrar=domain.registrar, operation_type="domain_info")
+            op.result = result_data
+            return Ok(op)
+
+        domain.nameservers = info.nameservers
+        domain.locked = info.locked
+        domain.whois_privacy = info.whois_privacy
+        if info.expires_at:
+            domain.expires_at = info.expires_at
+        if info.registrar_domain_id:
+            domain.registrar_domain_id = info.registrar_domain_id
+        domain.save(
+            update_fields=["nameservers", "locked", "whois_privacy", "expires_at", "registrar_domain_id", "updated_at"]
+        )
+        op = DomainOperation.objects.create(domain=domain, registrar=domain.registrar, operation_type="domain_info")
+        op.mark_completed(result_data=result_data)
+        op.save(update_fields=["state", "completed_at", "result", "updated_at"])
         return Ok(op)
 
 

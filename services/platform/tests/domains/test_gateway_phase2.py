@@ -11,17 +11,20 @@ from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import MagicMock, patch
 
-from django.test import TestCase
+from django.test import TestCase, override_settings
+from django_fsm import TransitionNotAllowed
 
-from apps.common.types import Err, Ok
+from apps.common.types import Err, Ok, Retriability
+from apps.customers.models import Customer
 from apps.domains.gateways.base import (
     DomainAvailabilityResult,
     DomainInfoResult,
 )
-from apps.domains.gateways.errors import RegistrarTransientError
+from apps.domains.gateways.errors import RegistrarAPIError, RegistrarErrorCode, RegistrarTransientError
 from apps.domains.gateways.gandi import GandiGateway
 from apps.domains.gateways.rotld import ROTLDGateway
-from apps.domains.models import DomainOperation, Registrar
+from apps.domains.models import TLD, Domain, DomainOperation, Registrar
+from apps.domains.services import DomainLifecycleService
 
 
 def _make_registrar(name: str = "gandi", **kwargs: Any) -> Registrar:
@@ -82,12 +85,49 @@ class DomainOperationModelTests(TestCase):
         op = DomainOperation(submitted_at=datetime(2027, 1, 1, tzinfo=UTC))
         self.assertEqual(op.duration_seconds, 0)
 
+    # --- FSM guardrails (ADR-0034) -------------------------------------------
+
+    def test_state_is_protected_against_direct_assignment(self) -> None:
+        """state is a protected FSMField: reassignment after construction raises.
+
+        This is the guardrail that forces all state changes through the
+        @transition-decorated mark_* methods. Without protected=True the FSM
+        is decorative.
+        """
+        op = DomainOperation()  # defaults to "pending"
+        with self.assertRaises(AttributeError):
+            op.state = "completed"
+
+    def test_mark_completed_allowed_directly_from_pending(self) -> None:
+        """Synchronous ops (nameserver/lock/info-sync) complete straight from
+        pending — the source list MUST include 'pending', not only 'submitted'."""
+        op = DomainOperation()
+        op.mark_completed(result_data={"drift_detected": False})
+        self.assertEqual(op.state, "completed")
+        self.assertIsNotNone(op.completed_at)
+
+    def test_mark_failed_allowed_directly_from_pending(self) -> None:
+        """A synchronous op that fails before any submit step goes pending→failed."""
+        op = DomainOperation()
+        op.mark_failed("registrar rejected")
+        self.assertEqual(op.state, "failed")
+        self.assertEqual(op.error_message, "registrar rejected")
+
+    def test_completed_op_cannot_be_resubmitted(self) -> None:
+        """A terminal 'completed' op has no path back to 'submitted' — the FSM
+        rejects the transition rather than silently mutating state."""
+        op = DomainOperation()
+        op.mark_completed()
+        with self.assertRaises(TransitionNotAllowed):
+            op.mark_submitted()
+
 
 # ===============================================================================
 # GANDI PHASE 2 GATEWAY
 # ===============================================================================
 
 
+@override_settings(REGISTRAR_ADAPTERS_VERIFIED=True)
 class GandiTransferTests(TestCase):
     """Gandi domain transfer operations."""
 
@@ -158,6 +198,7 @@ class GandiDomainInfoTests(TestCase):
         self.assertTrue(info.whois_privacy)
 
 
+@override_settings(REGISTRAR_ADAPTERS_VERIFIED=True)
 class GandiNameserverTests(TestCase):
     """Gandi nameserver update operations."""
 
@@ -177,6 +218,7 @@ class GandiNameserverTests(TestCase):
         self.assertEqual(result.unwrap().nameservers, ["ns1.new.com", "ns2.new.com"])
 
 
+@override_settings(REGISTRAR_ADAPTERS_VERIFIED=True)
 class GandiLockTests(TestCase):
     """Gandi domain lock operations."""
 
@@ -201,6 +243,7 @@ class GandiLockTests(TestCase):
 # ===============================================================================
 
 
+@override_settings(REGISTRAR_ADAPTERS_VERIFIED=True)
 class ROTLDTransferTests(TestCase):
     """ROTLD domain transfer operations."""
 
@@ -317,8 +360,6 @@ class LifecycleServicePhase2Tests(TestCase):
     """DomainLifecycleService Phase 2 operations with mocked gateways."""
 
     def test_sync_domain_info_updates_local_record(self) -> None:
-        from apps.domains.services import DomainLifecycleService  # noqa: PLC0415
-
         # Create test data
         registrar = Registrar.objects.create(
             name="gandi",
@@ -327,9 +368,6 @@ class LifecycleServicePhase2Tests(TestCase):
             api_endpoint="https://api.gandi.net/v5",
             status="active",
         )
-        from apps.customers.models import Customer  # noqa: PLC0415
-        from apps.domains.models import TLD  # noqa: PLC0415
-
         tld = TLD.objects.create(
             extension="com",
             description="Commercial",
@@ -343,8 +381,6 @@ class LifecycleServicePhase2Tests(TestCase):
             company_name="Test Co",
             customer_type="individual",
         )
-        from apps.domains.models import Domain  # noqa: PLC0415
-
         domain = Domain.objects.create(
             name="example.com",
             tld=tld,
@@ -381,3 +417,101 @@ class LifecycleServicePhase2Tests(TestCase):
         self.assertTrue(domain.locked)
         self.assertTrue(domain.whois_privacy)
         self.assertEqual(domain.registrar_domain_id, "gandi-999")
+
+
+class LifecycleServicePhase2FailureContractTests(TestCase):
+    """Phase 2 service methods must return Err on registrar failure (not Ok), and
+    initiate_transfer must not strand the unique Domain name on a definite rejection."""
+
+    def setUp(self) -> None:
+        self.registrar = Registrar.objects.create(
+            name="gandi", display_name="Gandi", website_url="https://gandi.net",
+            api_endpoint="https://api.gandi.net/v5", status="active",
+        )
+        self.tld = TLD.objects.create(
+            extension="com", description="Commercial",
+            registration_price_cents=1200, renewal_price_cents=1200, transfer_price_cents=1200,
+        )
+        self.customer = Customer.objects.create(
+            name="Test Customer", primary_email="test@example.com",
+            company_name="Test Co", customer_type="individual",
+        )
+        self.domain = Domain.objects.create(
+            name="active.com", tld=self.tld, registrar=self.registrar, customer=self.customer,
+            status="active", nameservers=["ns1.old.com"], locked=False,
+        )
+        self.Domain = Domain
+
+    def _mock_gateway(self, **methods: Any):
+        gw = MagicMock()
+        for name, ret in methods.items():
+            getattr(gw, name).return_value = ret
+        return patch("apps.domains.gateways.RegistrarGatewayFactory.create_gateway", return_value=gw)
+
+    @staticmethod
+    def _err(code: RegistrarErrorCode, retriability: Retriability) -> Err:
+        return Err(RegistrarAPIError("boom", code=code, registrar_name="gandi"), retriability=retriability)
+
+    def test_transfer_definite_rejection_deletes_row(self) -> None:
+        with self._mock_gateway(initiate_transfer=self._err(RegistrarErrorCode.INVALID_REGISTRANT_DATA, Retriability.NOT_RETRIABLE)):
+            result = DomainLifecycleService.initiate_transfer("transfer.com", "BAD-EPP", self.customer, self.registrar)
+
+        self.assertTrue(result.is_err(), result)
+        # Row removed so the customer can retry with a corrected EPP (no #260 deadlock).
+        self.assertFalse(self.Domain.objects.filter(name="transfer.com").exists())
+
+    def test_transfer_retriable_breaker_open_deletes_row(self) -> None:
+        """An open circuit breaker returns RETRIABLE — the row must still be deleted, else
+        a manual retry hits the unique-name deadlock."""
+        with self._mock_gateway(initiate_transfer=self._err(RegistrarErrorCode.INTERNAL_ERROR, Retriability.RETRIABLE)):
+            result = DomainLifecycleService.initiate_transfer("transfer2.com", "EPP", self.customer, self.registrar)
+
+        self.assertTrue(result.is_err(), result)
+        self.assertFalse(self.Domain.objects.filter(name="transfer2.com").exists())
+
+    def test_transfer_unknown_keeps_pending_row(self) -> None:
+        with self._mock_gateway(initiate_transfer=self._err(RegistrarErrorCode.NETWORK_ERROR, Retriability.UNKNOWN)):
+            result = DomainLifecycleService.initiate_transfer("transfer3.com", "EPP", self.customer, self.registrar)
+
+        self.assertTrue(result.is_err(), result)
+        # UNKNOWN — the transfer may have started; keep the row for reconciliation.
+        self.assertTrue(self.Domain.objects.filter(name="transfer3.com").exists())
+
+    def test_update_nameservers_failure_returns_err(self) -> None:
+        with self._mock_gateway(update_nameservers=self._err(RegistrarErrorCode.INTERNAL_ERROR, Retriability.UNKNOWN)):
+            result = DomainLifecycleService.update_nameservers(self.domain, ["ns1.new.com"])
+
+        self.assertTrue(result.is_err(), result)
+        self.domain.refresh_from_db()
+        self.assertEqual(self.domain.nameservers, ["ns1.old.com"])  # unchanged on failure
+
+    def test_set_lock_failure_returns_err(self) -> None:
+        with self._mock_gateway(set_lock=self._err(RegistrarErrorCode.INTERNAL_ERROR, Retriability.UNKNOWN)):
+            result = DomainLifecycleService.set_domain_lock(self.domain, locked=True)
+
+        self.assertTrue(result.is_err(), result)
+        self.domain.refresh_from_db()
+        self.assertFalse(self.domain.locked)
+
+    def test_sync_failure_returns_err(self) -> None:
+        with self._mock_gateway(get_domain_info=self._err(RegistrarErrorCode.NETWORK_ERROR, Retriability.RETRIABLE)):
+            result = DomainLifecycleService.sync_domain_info(self.domain)
+
+        self.assertTrue(result.is_err(), result)
+
+    def test_sync_dry_run_does_not_persist_but_reports_drift(self) -> None:
+        info = DomainInfoResult(
+            registrar_domain_id="g-1", domain_name="active.com", status="active",
+            expires_at=datetime(2028, 1, 1, tzinfo=UTC), nameservers=["ns1.new.com"], locked=True, whois_privacy=False,
+        )
+        with self._mock_gateway(get_domain_info=Ok(info)):
+            result = DomainLifecycleService.sync_domain_info(self.domain, persist=False)
+
+        self.assertTrue(result.is_ok(), result)
+        op = result.unwrap()
+        self.assertTrue(op.result["drift_detected"])
+        self.assertIn("nameservers", op.result["changed_fields"])
+        # Nothing persisted.
+        self.assertEqual(DomainOperation.objects.count(), 0)
+        self.domain.refresh_from_db()
+        self.assertEqual(self.domain.nameservers, ["ns1.old.com"])

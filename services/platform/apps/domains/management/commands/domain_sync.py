@@ -47,23 +47,23 @@ class Command(BaseCommand):
         drifted = 0
 
         for domain in domains.select_related("registrar"):
-            if dry_run:
-                self.stdout.write(f"  Would sync: {domain.name} ({domain.registrar.name})")
-                synced += 1
+            # Always query the registrar (even in dry-run) so drift is real; persist=False
+            # for dry-run makes it read-only.
+            result = DomainLifecycleService.sync_domain_info(domain, persist=not dry_run)
+            if result.is_err():
+                failed += 1
+                self.stdout.write(self.style.ERROR(f"  Failed: {domain.name} — {result.unwrap_err()}"))
                 continue
 
-            result = DomainLifecycleService.sync_domain_info(domain)
-            if result.is_ok():
-                op = result.unwrap()
-                if op.result:
-                    drifted += 1
-                    self.stdout.write(self.style.WARNING(f"  Synced (drift detected): {domain.name}"))
-                else:
-                    self.stdout.write(self.style.SUCCESS(f"  Synced: {domain.name}"))
-                synced += 1
+            synced += 1
+            op = result.unwrap()
+            if op.result and op.result.get("drift_detected"):
+                drifted += 1
+                changes = ", ".join(op.result.get("changed_fields", {}))
+                verb = "Would update" if dry_run else "Synced (drift)"
+                self.stdout.write(self.style.WARNING(f"  {verb}: {domain.name} — {changes}"))
             else:
-                self.stdout.write(self.style.ERROR(f"  Failed: {domain.name} — {result.unwrap_err()}"))
-                failed += 1
+                self.stdout.write(self.style.SUCCESS(f"  {'In sync' if dry_run else 'Synced'}: {domain.name}"))
 
         self.stdout.write("")
         self.stdout.write(f"Results: {synced} synced, {drifted} with drift, {failed} failed")
@@ -72,7 +72,8 @@ class Command(BaseCommand):
         qs = Domain.objects.filter(status="active")
 
         if domain_name:
-            qs = Domain.objects.filter(name=domain_name.lower())
+            # Narrow the existing queryset — must NOT drop the status='active' filter.
+            qs = qs.filter(name=domain_name.lower())
 
         if registrar_name:
             qs = qs.filter(registrar__name=registrar_name)

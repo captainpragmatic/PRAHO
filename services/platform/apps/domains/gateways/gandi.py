@@ -237,9 +237,8 @@ class GandiGateway(BaseRegistrarGateway):
         try:
             response = self._api_request("POST", url, json=body, headers=self._auth_headers())
         except requests.RequestException as exc:
-            return Err(
-                RegistrarTransientError(self.registrar.name, f"Network error during transfer: {exc}"), retriable=True
-            )
+            # Transfer POST may have reached the registrar — not provably unapplied (UNKNOWN default).
+            return Err(RegistrarTransientError(self.registrar.name, f"Network error during transfer: {exc}"))
 
         if response.status_code in (HTTP_OK, HTTP_ACCEPTED):
             data = response.json()
@@ -258,7 +257,11 @@ class GandiGateway(BaseRegistrarGateway):
         try:
             response = self._api_request("GET", url, headers=self._auth_headers())
         except requests.RequestException as exc:
-            return Err(RegistrarTransientError(self.registrar.name, f"Network error: {exc}"), retriable=True)
+            # get_domain_info is a read — safe to replay.
+            return Err(
+                RegistrarTransientError(self.registrar.name, f"Network error: {exc}"),
+                retriability=Retriability.RETRIABLE,
+            )
 
         if response.status_code == HTTP_OK:
             data = response.json()
@@ -286,7 +289,8 @@ class GandiGateway(BaseRegistrarGateway):
         try:
             response = self._api_request("PUT", url, json=nameservers, headers=self._auth_headers())
         except requests.RequestException as exc:
-            return Err(RegistrarTransientError(self.registrar.name, f"Network error: {exc}"), retriable=True)
+            # Nameserver update is a mutation — may have applied; UNKNOWN default.
+            return Err(RegistrarTransientError(self.registrar.name, f"Network error: {exc}"))
 
         if response.status_code in (HTTP_OK, HTTP_ACCEPTED):
             return Ok(NameserverUpdateResult(nameservers=nameservers))
@@ -300,7 +304,8 @@ class GandiGateway(BaseRegistrarGateway):
         try:
             response = self._api_request("PATCH", url, json=body, headers=self._auth_headers())
         except requests.RequestException as exc:
-            return Err(RegistrarTransientError(self.registrar.name, f"Network error: {exc}"), retriable=True)
+            # Lock toggle is a mutation — may have applied; UNKNOWN default.
+            return Err(RegistrarTransientError(self.registrar.name, f"Network error: {exc}"))
 
         if response.status_code in (HTTP_OK, HTTP_ACCEPTED):
             return Ok(DomainLockResult(locked=locked))
