@@ -82,15 +82,26 @@ def handle_customer_created_or_updated(
 
             event_type = "customer_created" if created else "customer_updated"
 
-            CustomersAuditService.log_customer_event(
-                event_type=event_type,
-                customer=instance,
-                user=getattr(instance, "_audit_user", None),
-                context=AuditContext(actor_type="system"),
-                old_values=old_values,
-                new_values=new_values,
-                description=f"Customer {instance.get_display_name()} {'created' if created else 'updated'}",
-            )
+            # Best-effort + savepoint-isolated: a failure in this generic audit write must
+            # neither poison the surrounding transaction nor skip the consent-change handlers
+            # below (the canonical audit path for marketing/GDPR consent — issue #182).
+            try:
+                with transaction.atomic():
+                    CustomersAuditService.log_customer_event(
+                        event_type=event_type,
+                        customer=instance,
+                        user=getattr(instance, "_audit_user", None),
+                        context=AuditContext(actor_type="system"),
+                        old_values=old_values,
+                        new_values=new_values,
+                        description=f"Customer {instance.get_display_name()} {'created' if created else 'updated'}",
+                    )
+            except Exception:
+                logger.exception(
+                    "🔥 [Customer Signal] Generic customer audit write failed (customer_id=%s, %s)",
+                    instance.pk,
+                    "created" if created else "updated",
+                )
 
         if created:
             # New customer created
@@ -119,6 +130,13 @@ def handle_customer_created_or_updated(
 
     except Exception as e:
         logger.exception(f"🔥 [Customer Signal] Failed to handle customer save: {e}")
+    finally:
+        # Consume all transient per-save attribution on EVERY save (including saves that do
+        # not flip consent, where the consent handler never runs), so a stale source/category
+        # or captured originals cannot leak into a later save of the SAME instance.
+        instance.__dict__.pop("_original_customer_values", None)
+        instance.__dict__.pop("_consent_source", None)
+        instance.__dict__.pop("_consent_category", None)
 
 
 @receiver(pre_save, sender=Customer)
@@ -751,12 +769,34 @@ def _handle_marketing_consent_change(customer: Customer, old_consent: bool, new_
     """
     consent_action = "granted" if new_consent else "withdrawn"
 
+    # Source attribution: the service callers (EmailPreferenceService.update_preferences
+    # and process_unsubscribe) set instance._consent_source before save() so the signal
+    # records WHERE the change originated. Falls back to "system" for any other path that
+    # does not set it — direct Customer.save(), data imports, fixtures, admin, ad-hoc shell.
+    # GDPR Art. 7 requires this attribution; collapsing the prior service-layer
+    # log_simple_event call into the signal keeps a single audit record per consent flip.
+    # `or "system"` normalizes a present-but-falsy value so we never record "via None".
+    source = getattr(customer, "_consent_source", None) or "system"
+    category = getattr(customer, "_consent_category", None)
+    # NOTE: the transient _consent_source/_consent_category are consumed (cleared) in the
+    # post_save receiver's finally block on EVERY save — not here — so a source set on a save
+    # that does NOT flip consent (this handler never runs) cannot leak into a later flip.
+
+    evidence: dict[str, Any] = {
+        "customer_id": str(customer.id),
+        "old_consent": old_consent,
+        "new_consent": new_consent,
+        "source": source,
+    }
+    if category is not None:
+        evidence["category"] = category
+
     compliance_request = ComplianceEventRequest(
         compliance_type="marketing_consent",
         reference_id=f"customer_{customer.id}",
-        description=f"Marketing consent {consent_action}",
+        description=f"Marketing consent {consent_action} via {source}",
         status="success",
-        evidence={"customer_id": str(customer.id), "old_consent": old_consent, "new_consent": new_consent},
+        evidence=evidence,
     )
 
     try:

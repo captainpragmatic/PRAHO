@@ -623,9 +623,24 @@ class ComplianceReportService:
         privacy_events = [e for e in events if e.category == "privacy"]
         data_events = [e for e in events if e.category == "data_protection"]
 
-        # Consent management
+        # Consent management. Customer marketing-consent changes are recorded as the
+        # canonical ComplianceLog (compliance_type="marketing_consent") rather than an
+        # AuditEvent (issue #182), so count those here IN ADDITION to the privacy
+        # AuditEvents (which still carry User/gdpr/cookie consent). Sources are disjoint
+        # going forward. NOTE: a report window that straddles the #182 migration date can
+        # briefly over-count Customer marketing consent, which existed in both tables during
+        # the transition — acceptable for this coarse, on-demand metric.
+        from apps.audit.models import ComplianceLog  # noqa: PLC0415  # avoid import cycle
+
+        marketing_logs = ComplianceLog.objects.filter(
+            compliance_type="marketing_consent",
+            timestamp__gte=report.period_start,
+            timestamp__lte=report.period_end,
+        )
         consent_granted = len([e for e in privacy_events if "granted" in e.action])
+        consent_granted += marketing_logs.filter(evidence__new_consent=True).count()
         consent_withdrawn = len([e for e in privacy_events if "withdrawn" in e.action])
+        consent_withdrawn += marketing_logs.filter(evidence__new_consent=False).count()
 
         # Data subject requests
         export_requests = len([e for e in data_events if e.action == "data_export_requested"])
