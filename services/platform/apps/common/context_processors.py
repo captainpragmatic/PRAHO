@@ -58,7 +58,7 @@ def user_permissions(request: HttpRequest) -> dict[str, Any]:
             "can_view_audit": request.user.has_perm("audit.view_auditlog"),
         },
         "user_role": getattr(request.user, "role", "user"),
-        "can_access_admin": request.user.is_staff,
+        "can_access_admin": getattr(request.user, "is_staff_user", False),
     }
 
 
