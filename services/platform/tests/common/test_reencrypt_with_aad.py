@@ -124,18 +124,24 @@ class ReencryptWithAadCommandTest(TestCase):
         with self.assertRaises(CommandError):
             call_command("reencrypt_with_aad", "--batch", "0", stdout=StringIO())
 
-    def test_cas_does_not_overwrite_a_concurrent_change(self) -> None:
-        """If the row changed between read and update, the compare-and-swap must skip it."""
+    def test_v2_corrupt_row_flagged_not_skipped_as_healthy(self) -> None:
+        """A v2-shaped but undecryptable blob must be flagged corrupt, not counted 'already v2'."""
+        pm = self._make_pm()
+        self._write_raw(pm.id, "aes:v2:!!!garbage!!!")  # v2 prefix, cannot decrypt
+        with self.assertRaises(CommandError):
+            call_command("reencrypt_with_aad", stdout=StringIO(), stderr=StringIO())
+        self.assertEqual(self._read_raw(pm.id), "aes:v2:!!!garbage!!!")  # untouched
+
+    def test_cas_retries_and_resolves_after_a_stale_read(self) -> None:
+        """A first CAS miss (stale read) is retried against the row's real current value and migrates."""
         from apps.common.management.commands.reencrypt_with_aad import Command  # noqa: PLC0415
 
         pm = self._make_pm()
-        self._seed_v1(pm.id)  # DB holds v1 wire A
-
-        # A DIFFERENT but valid v1 wire (fresh nonce) — decryptable, so it passes classification
-        # and reaches the CAS UPDATE, but its raw bytes do NOT match what is actually in the DB,
-        # simulating an application write that landed after the command read the old value.
-        stale_wire = encrypt_sensitive_data(json.dumps(VALID))
-        stale_raw = json.dumps(stale_wire)
+        self._seed_v1(pm.id)  # DB holds the real v1
+        # A different valid v1 (fresh nonce) — decryptable, but its bytes don't match the DB,
+        # so the first CAS misses; the retry re-reads the real value (via the un-patched
+        # _read_one) and migrates it.
+        stale_raw = json.dumps(encrypt_sensitive_data(json.dumps(VALID)))
         pk = pm.id
 
         def fake_read_batch(
@@ -144,11 +150,37 @@ class ReencryptWithAadCommandTest(TestCase):
             return [(pk, stale_raw)] if last_pk is None else []
 
         with patch.object(Command, "_read_batch", fake_read_batch):
-            out = StringIO()
-            call_command("reencrypt_with_aad", stdout=out)
+            call_command("reencrypt_with_aad", stdout=StringIO())
 
-        # The real DB value was never overwritten with the stale-based re-encryption.
         stored = self._read_raw(pm.id)
         assert isinstance(stored, str)
-        self.assertTrue(stored.startswith("aes:v1:"))  # still the original v1, not migrated
-        self.assertIn("changed-concurrently", out.getvalue())
+        self.assertTrue(stored.startswith(VERSIONED_V2_PREFIX))  # retry resolved it
+        self.assertEqual(json.loads(decrypt_sensitive_data(stored)), VALID)
+
+    def test_cas_unresolved_raises_when_row_keeps_changing(self) -> None:
+        """If every attempt's CAS misses (row keeps changing), the command exits non-zero, un-migrated."""
+        from apps.common.management.commands.reencrypt_with_aad import Command  # noqa: PLC0415
+
+        pm = self._make_pm()
+        self._seed_v1(pm.id)
+        stale_raw = json.dumps(encrypt_sensitive_data(json.dumps(VALID)))  # never matches the DB
+        pk = pm.id
+
+        def fake_read_batch(
+            _self: Command, _q_table: str, _q_col: str, _q_pk: str, last_pk: object, _batch: int
+        ) -> list[tuple[object, object]]:
+            return [(pk, stale_raw)] if last_pk is None else []
+
+        def fake_read_one(_self: Command, _q_table: str, _q_col: str, _q_pk: str, _pk: object) -> object:
+            return stale_raw  # every re-read is still stale → CAS always misses
+
+        with (
+            patch.object(Command, "_read_batch", fake_read_batch),
+            patch.object(Command, "_read_one", fake_read_one),
+            self.assertRaises(CommandError),
+        ):
+            call_command("reencrypt_with_aad", stdout=StringIO(), stderr=StringIO())
+
+        stored = self._read_raw(pm.id)
+        assert isinstance(stored, str)
+        self.assertTrue(stored.startswith("aes:v1:"))  # never migrated (real value untouched)

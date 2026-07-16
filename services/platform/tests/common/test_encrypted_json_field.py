@@ -406,13 +406,25 @@ class EncryptedJSONFieldWritePathTest(TestCase):
             primary_phone="+40712345682",
         )
 
-    def test_queryset_update_with_dict_raises(self) -> None:
-        """.update(field=dict) bypasses pre_save (no AAD) — must raise, not silently write v1."""
+    def test_queryset_update_stores_unbound_v1_and_warns(self) -> None:
+        """.update(field=dict) bypasses pre_save — stores unbound v1 WITH a warning (not silent, not raised).
+
+        Raising here would break dumpdata→loaddata (which also bypasses pre_save); silently
+        writing v1 was the original defect. The middle ground: encrypt v1 and log loudly.
+        """
         pm = CustomerPaymentMethod.objects.create(
             customer=self.customer, method_type="bank_transfer", display_name="U", bank_details={}
         )
-        with self.assertRaises(TypeError):
+        with self.assertLogs("apps.common.fields", level="WARNING") as logs:
             CustomerPaymentMethod.objects.filter(pk=pm.pk).update(bank_details={"bank_name": "BT"})
+        self.assertTrue(any("without AAD context" in line for line in logs.output))
+
+        pm.refresh_from_db()
+        self.assertEqual(pm.bank_details, {"bank_name": "BT"})  # readable (require_v2 default False)
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT bank_details FROM customer_payment_methods WHERE id = %s", [pm.id])
+            raw = cursor.fetchone()[0]
+        self.assertIn("aes:v1:", str(raw))  # stored unbound (v1), no AAD
 
     def test_bulk_create_roundtrips_encrypted_v2(self) -> None:
         """bulk_create DOES run pre_save, so values are encrypted (v2) and round-trip."""

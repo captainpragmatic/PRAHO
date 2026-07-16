@@ -105,22 +105,28 @@ class EncryptedJSONField(models.JSONField):
         return encrypt_sensitive_data(json_str, aad=aad)
 
     def get_prep_value(self, value: Any) -> Any:
-        """Prepare an already-encrypted wire string for the DB adapter.
+        """Prepare a value for the DB adapter.
 
-        Normal saves flow through pre_save, which returns the encrypted string.
-        A raw dict reaching here means a write path that bypassed pre_save —
-        ``QuerySet.update()``, ``bulk_update()``, or a raw/fixture save — which
-        cannot bind AAD context. Fail loudly rather than silently persist an
-        unbound (v1) ciphertext.
+        Normal saves flow through pre_save, which returns the already-encrypted wire
+        string; that string passes straight through here. A raw (unencrypted) value
+        reaching this point came from a write path that bypassed pre_save —
+        ``QuerySet.update()``/``bulk_update()`` or a raw/fixture save (``loaddata``) —
+        where no model instance is available, so AAD context cannot be bound. Rather
+        than fail (which would break ``dumpdata``→``loaddata``) or silently downgrade,
+        encrypt WITHOUT AAD (v1) and log a warning so the unbound write is visible.
         """
         if value is None:
             return None
         if isinstance(value, str) and value.startswith(ENCRYPTED_PREFIX):
             return super().get_prep_value(value)
-        raise TypeError(
-            f"{type(self).__name__} cannot be written via QuerySet.update()/bulk_update()/raw save; "
-            "use Model.save() so the value is encrypted with AAD context."
+        logger.warning(
+            "EncryptedJSONField '%s' written without AAD context (pre_save was bypassed — e.g. "
+            "QuerySet.update()/bulk_update()/loaddata); stored as unbound v1 ciphertext. Use "
+            "Model.save() to bind AAD context.",
+            self.attname,
         )
+        json_str = json.dumps(value, cls=self.encoder)
+        return super().get_prep_value(encrypt_sensitive_data(json_str))
 
     def from_db_value(self, value: Any, expression: Any, connection: Any) -> Any:
         """Decrypt on read; handle legacy unencrypted data transparently.

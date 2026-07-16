@@ -427,6 +427,18 @@ class TestKeyringStrictValidation(SimpleTestCase):
         with self.assertRaises(ImproperlyConfigured):
             get_encryption_keys()
 
+    @override_settings(ENCRYPTION_KEYS=None, ENCRYPTION_KEY=TEST_KEY + "\n")
+    def test_key_with_surrounding_whitespace_accepted(self) -> None:
+        """A trailing newline (common from a mounted secret) is benign and must NOT brick the deploy."""
+        keys = get_encryption_keys()
+        self.assertEqual(len(keys[0]), 32)
+
+    @override_settings(ENCRYPTION_KEYS="iuTrSBoKchmRt7RiySTHNuANNDmWe_xIqZWtMQaLMXs=")
+    def test_encryption_keys_wrong_type_raises_not_silently_ignored(self) -> None:
+        """A present-but-wrong-type ENCRYPTION_KEYS (e.g. a bare string) must fail, not fall back."""
+        with self.assertRaises(ImproperlyConfigured):
+            get_encryption_keys()
+
     @override_settings(ENCRYPTION_KEYS=[TEST_KEY, ALT_KEY])
     def test_valid_ring_still_rotates(self) -> None:
         """Strict validation must not break a valid [current, previous] rotation ring."""

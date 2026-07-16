@@ -76,8 +76,10 @@ def _decode_key(key_b64: str | bytes) -> bytes:
     try:
         if isinstance(key_b64, bytes):
             key_b64 = key_b64.decode("ascii")
-        # Translate the URL-safe alphabet to standard so we can use strict validation.
-        std_b64 = key_b64.replace("-", "+").replace("_", "/")
+        # Strip surrounding whitespace (a trailing newline from a mounted secret is benign
+        # and decodes to the same bytes) BEFORE strict validation, then translate the
+        # URL-safe alphabet to standard. Strict decode still rejects internal junk chars.
+        std_b64 = key_b64.strip().replace("-", "+").replace("_", "/")
         key_bytes = base64.b64decode(std_b64, validate=True)
     except Exception as e:
         raise ImproperlyConfigured(f"Encryption key is not valid base64: {e}") from e
@@ -96,12 +98,19 @@ def get_encryption_keys() -> list[bytes]:
     First key is used for new encryptions; all keys are tried for decryption.
     """
     # Try ENCRYPTION_KEYS ordered ring first. Accept list OR tuple — a tuple is idiomatic
-    # in Django settings and must not be silently ignored (which would drop previous keys).
+    # in Django settings. If the setting is present it must be a valid ring: reject a
+    # wrong-typed value loudly rather than silently falling back (which would drop the
+    # configured previous keys and read old data as undecryptable).
     keys_setting = getattr(settings, "ENCRYPTION_KEYS", None)
-    if keys_setting and isinstance(keys_setting, (list, tuple)):
+    if keys_setting is not None:
+        if not isinstance(keys_setting, (list, tuple)):
+            raise ImproperlyConfigured(
+                f"ENCRYPTION_KEYS must be a list or tuple of base64 keys, got {type(keys_setting).__name__}"
+            )
         keys_b64 = [k for k in keys_setting if k]
         if keys_b64:
             return [_decode_key(k) for k in keys_b64]
+        # An all-empty ring falls through to the single-key path below.
 
     # Fall back to single ENCRYPTION_KEY / env var
     single_key = getattr(settings, "ENCRYPTION_KEY", None) or os.environ.get("DJANGO_ENCRYPTION_KEY")
