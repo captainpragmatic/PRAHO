@@ -36,6 +36,19 @@ SERVICE_STATUS_TABS = [
     {"value": "expired", "label": _("Expired"), "border_class": "border-orange-500", "text_class": "text-orange-400"},
 ]
 
+# Allowlist for the ?status= query param ("" = All tab).
+_VALID_STATUS_FILTERS = {tab["value"] for tab in SERVICE_STATUS_TABS}
+
+
+def _validated_status_filter(raw: str) -> str:
+    """Allowlist ?status= against the known tabs.
+
+    The value is attacker-influenced (query string) and gets echoed into the
+    empty-state message and forwarded to the platform API — unknown values
+    fall back to the All tab instead of being reflected.
+    """
+    return raw if raw in _VALID_STATUS_FILTERS else ""
+
 
 def _filter_services_by_query(services: list[dict], query: str) -> list[dict]:
     """Client-side search filtering across all visible and detail fields."""
@@ -90,7 +103,7 @@ def service_list(request: HttpRequest) -> HttpResponse:
     if not customer_id or not user_id:
         return redirect("/login/")
 
-    status_filter = request.GET.get("status", "")
+    status_filter = _validated_status_filter(request.GET.get("status", ""))
     search_query = request.GET.get("q", "").strip()
     try:
         page = int(request.GET.get("page", 1))
@@ -152,7 +165,7 @@ def service_search_api(request: HttpRequest) -> HttpResponse:
         return redirect("/login/")
 
     search_query = request.GET.get("q", "").strip()
-    status_filter = request.GET.get("status", "")
+    status_filter = _validated_status_filter(request.GET.get("status", ""))
 
     try:
         response = services_api.get_customer_services(

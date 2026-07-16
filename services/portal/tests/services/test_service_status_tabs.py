@@ -33,6 +33,25 @@ class ServiceStatusTabConfigTests(TestCase):
         missing = PLATFORM_SERVICE_STATUSES - tab_values
         self.assertEqual(missing, set(), f"statuses without a filter tab: {missing}")
 
+    def test_tab_set_exactly_mirrors_platform_statuses(self) -> None:
+        """Drift guardrail: the tab list is exactly All + the 7 platform statuses.
+
+        If the platform Service.STATUS_CHOICES gains or loses a status, update
+        BOTH the PLATFORM_SERVICE_STATUSES mirror above and SERVICE_STATUS_TABS —
+        this exact-set + count assertion fails on any one-sided edit, including
+        a re-introduced dead tab (e.g. "cancelled").
+        """
+        tab_values = [t["value"] for t in SERVICE_STATUS_TABS]
+        self.assertEqual(len(tab_values), len(set(tab_values)), "duplicate tab values")
+        self.assertEqual(set(tab_values), PLATFORM_SERVICE_STATUSES | {""})
+        self.assertEqual(len(tab_values), len(PLATFORM_SERVICE_STATUSES) + 1)
+
+    def test_newest_platform_status_has_a_tab(self) -> None:
+        # Canary pinned to the LAST entry of the platform STATUS_CHOICES tuple
+        # (provisioning/service_models.py). If a status is appended there, this
+        # name documents where to look when the mirror set needs updating.
+        self.assertIn("expired", {t["value"] for t in SERVICE_STATUS_TABS})
+
     def test_includes_all_services_default_tab(self) -> None:
         self.assertEqual(SERVICE_STATUS_TABS[0]["value"], "", "first tab must be the 'All' default")
 
@@ -70,3 +89,35 @@ class ServiceSearchStatusEmptyStateTests(TestCase):
         self.assertIn("View all services", body)
         # the API was filtered by the requested status
         self.assertEqual(mock_get.call_args.kwargs.get("status"), "expired")
+
+    @patch("apps.services.views.services_api.get_customer_services")
+    def test_unknown_status_is_not_reflected_in_search_partial(self, mock_get: object) -> None:
+        """?status= is attacker-influenced; unknown values must not be echoed.
+
+        Output is autoescaped, so this is content spoofing rather than XSS —
+        but 'No Visit Evil.Com Now services' in an authenticated page is still
+        a real reflection. Unknown statuses fall back to the All tab.
+        """
+        mock_get.return_value = {"results": [], "count": 0}
+
+        resp = self.client.get(reverse("services:search_api"), {"status": "visit_evil.com_now"})
+
+        self.assertEqual(resp.status_code, 200)
+        body = resp.content.decode()
+        self.assertNotIn("Evil", body)
+        self.assertNotIn("visit_evil", body)
+        # the bogus value is not forwarded to the platform API either
+        self.assertEqual(mock_get.call_args.kwargs.get("status"), "")
+
+    @patch("apps.services.views.services_api.get_services_summary")
+    @patch("apps.services.views.services_api.get_customer_services")
+    def test_unknown_status_is_dropped_on_list_view(self, mock_get: object, mock_summary: object) -> None:
+        mock_get.return_value = {"results": [], "count": 0}
+        mock_summary.return_value = {"active_services": 0, "total_services": 0}
+
+        resp = self.client.get(reverse("services:list"), {"status": "<script>alert(1)</script>"})
+
+        self.assertEqual(resp.status_code, 200)
+        body = resp.content.decode()
+        self.assertNotIn("alert(1)", body)
+        self.assertEqual(mock_get.call_args.kwargs.get("status"), "")
