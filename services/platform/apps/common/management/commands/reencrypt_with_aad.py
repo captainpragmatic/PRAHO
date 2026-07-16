@@ -39,7 +39,7 @@ from django.core.management.base import BaseCommand, CommandError, CommandParser
 from django.db import connection, models
 
 from apps.common.encryption import ENCRYPTED_PREFIX, VERSIONED_V2_PREFIX, decrypt_sensitive_data, encrypt_sensitive_data
-from apps.common.fields import EncryptedJSONField
+from apps.common.fields import EncryptedJSONField, _extract_embedded_aad
 
 logger = logging.getLogger(__name__)
 
@@ -199,12 +199,18 @@ class Command(BaseCommand):
         except (ValueError, TypeError):
             return "corrupt", None
 
-        # Already v2 — but confirm it actually decrypts, so a corrupt/tampered v2 blob is
-        # flagged rather than reported as healthy (which would break a later require_v2).
+        # Already v2 — confirm it is actually readable BY THIS FIELD before skipping, so a
+        # corrupt/tampered/transplanted v2 blob is flagged rather than reported healthy (which
+        # would read back as None under require_v2). Check both that it decrypts and that the
+        # embedded AAD prefix matches this table:field (the same cross-check from_db_value does).
         if isinstance(inner, str) and inner.startswith(VERSIONED_V2_PREFIX):
             try:
                 decrypt_sensitive_data(inner)
             except Exception:
+                return "corrupt", None
+            embedded = _extract_embedded_aad(inner)
+            expected_prefix = f"{table_name}:{attname}:".encode()
+            if embedded is None or not embedded.startswith(expected_prefix):
                 return "corrupt", None
             return "skip_v2", None
 

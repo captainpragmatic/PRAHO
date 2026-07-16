@@ -132,6 +132,19 @@ class ReencryptWithAadCommandTest(TestCase):
             call_command("reencrypt_with_aad", stdout=StringIO(), stderr=StringIO())
         self.assertEqual(self._read_raw(pm.id), "aes:v2:!!!garbage!!!")  # untouched
 
+    def test_transplanted_v2_row_flagged_not_skipped_as_healthy(self) -> None:
+        """A v2 blob bound to a DIFFERENT table:field decrypts but reads back None under require_v2.
+
+        The command must flag it (it can't safely report 'already v2'), not skip it as healthy.
+        """
+        pm = self._make_pm()
+        wrong = encrypt_sensitive_data(json.dumps(VALID), aad=b"other_table:other_field:99")
+        self.assertTrue(wrong.startswith(VERSIONED_V2_PREFIX))
+        self._write_raw(pm.id, wrong)
+        with self.assertRaises(CommandError):
+            call_command("reencrypt_with_aad", stdout=StringIO(), stderr=StringIO())
+        self.assertEqual(self._read_raw(pm.id), wrong)  # untouched (not migrated, not reported healthy)
+
     def test_cas_retries_and_resolves_after_a_stale_read(self) -> None:
         """A first CAS miss (stale read) is retried against the row's real current value and migrates."""
         from apps.common.management.commands.reencrypt_with_aad import Command  # noqa: PLC0415
