@@ -386,7 +386,7 @@
 {% if payment_info and stripe_config %}{% if order.status == 'awaiting_payment' %}
 {# nosemgrep: missing-integrity — Stripe does not support SRI on js.stripe.com #}
 <script src="https://js.stripe.com/v3/"></script>
-<script>
+<script nonce="{{ csp_nonce }}">
 document.addEventListener('DOMContentLoaded', function() {
   // Initialize Stripe
   const stripe = Stripe('{{ stripe_config.publishable_key|escapejs }}');
