@@ -428,6 +428,34 @@ class UpdatePreferencesTests(TestCase):
         self.assertEqual(records[0].evidence["source"], "unsubscribe_link")
         self.assertEqual(records[1].evidence["source"], "system")  # not the stale source
 
+    def test_source_without_flip_does_not_leak_into_later_flip(self) -> None:
+        """A source set on a save that does NOT flip consent must not attribute a later flip.
+
+        The consent handler only runs on an actual flip, so the transient attrs must be
+        cleared by the receiver on EVERY save — otherwise an unsubscribe-when-already-
+        unsubscribed leaves "unsubscribe_link" on the instance and a later unrelated flip
+        inherits it.
+        """
+        from apps.audit.models import ComplianceLog  # noqa: PLC0415
+
+        customer = self._make_customer(marketing=False)
+
+        # Save with a source but NO consent change (already False → False).
+        customer._consent_source = "unsubscribe_link"  # type: ignore[attr-defined]
+        customer.marketing_consent = False
+        customer.save(update_fields=["marketing_consent"])
+        self.assertNotIn("_consent_source", customer.__dict__)  # cleared despite no flip
+
+        # Later flip on the same instance without a source → must be "system".
+        customer.marketing_consent = True
+        customer.save(update_fields=["marketing_consent"])
+
+        records = ComplianceLog.objects.filter(
+            compliance_type="marketing_consent", reference_id=f"customer_{customer.id}"
+        )
+        self.assertEqual(records.count(), 1)
+        self.assertEqual(records.get().evidence["source"], "system")
+
     def test_generic_audit_failure_does_not_skip_marketing_compliance_log(self) -> None:
         """A failure in the earlier generic customer-audit write must not skip the canonical
         marketing ComplianceLog write later in the same receiver (issue #182 review)."""

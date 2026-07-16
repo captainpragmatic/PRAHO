@@ -97,7 +97,11 @@ def handle_customer_created_or_updated(
                         description=f"Customer {instance.get_display_name()} {'created' if created else 'updated'}",
                     )
             except Exception:
-                logger.exception("🔥 [Customer Signal] Generic customer audit write failed")
+                logger.exception(
+                    "🔥 [Customer Signal] Generic customer audit write failed (customer_id=%s, %s)",
+                    instance.pk,
+                    "created" if created else "updated",
+                )
 
         if created:
             # New customer created
@@ -127,10 +131,12 @@ def handle_customer_created_or_updated(
     except Exception as e:
         logger.exception(f"🔥 [Customer Signal] Failed to handle customer save: {e}")
     finally:
-        # Clear the captured originals so a later meta-only save on the SAME instance
-        # (which skips the pre_save refresh) cannot re-detect and duplicate a prior
-        # consent change.
+        # Consume all transient per-save attribution on EVERY save (including saves that do
+        # not flip consent, where the consent handler never runs), so a stale source/category
+        # or captured originals cannot leak into a later save of the SAME instance.
         instance.__dict__.pop("_original_customer_values", None)
+        instance.__dict__.pop("_consent_source", None)
+        instance.__dict__.pop("_consent_category", None)
 
 
 @receiver(pre_save, sender=Customer)
@@ -772,10 +778,9 @@ def _handle_marketing_consent_change(customer: Customer, old_consent: bool, new_
     # `or "system"` normalizes a present-but-falsy value so we never record "via None".
     source = getattr(customer, "_consent_source", None) or "system"
     category = getattr(customer, "_consent_category", None)
-    # Consume the transient attribution so a later save of the SAME instance cannot inherit
-    # a stale source/category and mis-attribute a subsequent consent change.
-    customer.__dict__.pop("_consent_source", None)
-    customer.__dict__.pop("_consent_category", None)
+    # NOTE: the transient _consent_source/_consent_category are consumed (cleared) in the
+    # post_save receiver's finally block on EVERY save — not here — so a source set on a save
+    # that does NOT flip consent (this handler never runs) cannot leak into a later flip.
 
     evidence: dict[str, Any] = {
         "customer_id": str(customer.id),
