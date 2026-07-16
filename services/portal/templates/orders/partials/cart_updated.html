@@ -1,8 +1,13 @@
 {% load i18n ui_components %}
 
 <!-- Updated Cart Widget (HTMX Response) -->
+<!-- miniCartOpen starts TRUE: this partial only renders after a successful cart
+     mutation (add/remove), where the mini-cart should be showing. The open state
+     must be server-rendered — the cartAdded HX-Trigger event fires BEFORE the
+     outerHTML swap, so a window listener could only ever open the old widget that
+     this very response is replacing. -->
 <div id="cart-widget" class="relative"
-     x-data="{ miniCartOpen: false }"
+     x-data="{ miniCartOpen: true }"
      @cart-added.window="miniCartOpen = true"
      @click.outside="miniCartOpen = false">
   <button @click="miniCartOpen = !miniCartOpen"
@@ -39,7 +44,8 @@
      (showToast → single #toast-container) rather than a bespoke inline Alpine box,
      so add-to-cart shows exactly one toast with consistent styling/position. The
      x-init fires on the HTMX-swapped node (Alpine already drives #cart-widget above);
-     the mini-cart dropdown still auto-opens via @cart-added.window for the cart link. -->
+     the mini-cart dropdown opens via the server-rendered miniCartOpen state above,
+     which keeps the View Cart / Checkout links reachable after the add. -->
 {% if success_message %}
 <div x-init="window.showToast && window.showToast('success', '{{ success_message|escapejs }}{% if product_name %} ({{ product_name|escapejs }}){% endif %}')" x-cloak></div>
 {% endif %}

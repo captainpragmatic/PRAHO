@@ -199,15 +199,21 @@ class TestCartUpdatedToastViewCartLink(SimpleTestCase):
     """ENH-1 + #102: after add-to-cart the View-Cart affordance is reachable via the
     auto-opening mini-cart dropdown (the inline toast 'View Cart' link was removed when
     the success notice was consolidated into showToast; the dropdown's cart link is the
-    canonical affordance now and auto-opens via @cart-added.window)."""
+    canonical affordance now).
+
+    The auto-open must be server-rendered state (``miniCartOpen: true``), NOT the
+    ``cartAdded``/``cart-added`` window event: HX-Trigger events are dispatched before
+    the outerHTML swap, so the only listener that could catch them sits on the widget
+    that the swap is about to replace — the swapped-in widget would initialise closed.
+    """
 
     def setUp(self) -> None:
         self.client = Client()
         _auth_client_with_product_mocked(self.client)
 
     def test_cart_updated_response_wires_auto_opening_mini_cart(self) -> None:
-        """The cart_updated response auto-loads the mini-cart dropdown that holds the
-        cart-review/checkout links (it opens on the cartAdded event)."""
+        """The cart_updated response renders the mini-cart dropdown open (it holds the
+        cart-review/checkout links), and the dropdown loads its content on swap."""
         with (
             patch("apps.orders.views.PlatformAPIClient") as mock_cls,
             patch("apps.orders.services.PlatformAPIClient") as svc_mock_cls,
@@ -225,11 +231,11 @@ class TestCartUpdatedToastViewCartLink(SimpleTestCase):
 
         self.assertEqual(response.status_code, 200)
         content = response.content.decode()
-        # The mini-cart dropdown (which contains the View Cart / Checkout links) is wired
-        # to auto-open and load its content after the add.
+        # The mini-cart dropdown (which contains the View Cart / Checkout links) is
+        # rendered OPEN by the server and loads its content after the add.
         self.assertIn('id="mini-cart"', content)
         self.assertIn("mini-cart/", content)  # hx-get to mini_cart_content
-        self.assertIn("@cart-added.window", content)
+        self.assertIn('x-data="{ miniCartOpen: true }"', content)
 
 
 # ---------------------------------------------------------------------------
