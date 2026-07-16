@@ -18,11 +18,13 @@ from apps.common.types import Retriability
 
 
 def _real_stripe_error_names() -> set[str]:
+    # Pin against the PUBLIC stripe.error module — stripe._error is private and can
+    # rename/move across SDK versions.
     return {
         name
-        for name in dir(stripe._error)
-        if isinstance(getattr(stripe._error, name), type)
-        and issubclass(getattr(stripe._error, name), BaseException)
+        for name in dir(stripe.error)
+        if isinstance(getattr(stripe.error, name), type)
+        and issubclass(getattr(stripe.error, name), BaseException)
     }
 
 
@@ -33,14 +35,10 @@ class StripeErrorClassificationTests(SimpleTestCase):
         self.assertLessEqual(_RETRIABLE_STRIPE_ERROR_NAMES, real)
         self.assertLessEqual(_NOT_RETRIABLE_STRIPE_ERROR_NAMES, real)
 
-    def test_provably_unapplied_errors_classify_retriable(self) -> None:
-        """Only failures where Stripe never processed the request are RETRIABLE."""
-        for exc in (
-            stripe.RateLimitError("rate limited"),
-            stripe.APIConnectionError("connection dropped"),
-        ):
-            with self.subTest(exc=type(exc).__name__):
-                self.assertEqual(_classify_stripe_error(exc), Retriability.RETRIABLE)
+    def test_only_rate_limit_is_retriable(self) -> None:
+        """RateLimitError is the ONLY provably-unapplied case: Stripe rejects it before
+        processing. Everything else may have committed server-side."""
+        self.assertEqual(_classify_stripe_error(stripe.RateLimitError("rate limited")), Retriability.RETRIABLE)
 
     def test_permanent_errors_classify_not_retriable(self) -> None:
         for exc in (
@@ -51,10 +49,12 @@ class StripeErrorClassificationTests(SimpleTestCase):
                 self.assertEqual(_classify_stripe_error(exc), Retriability.NOT_RETRIABLE)
 
     def test_ambiguous_errors_fall_back_to_unknown(self) -> None:
-        """APIError (indeterminate 5xx) and CardError (per-decline advice) must not
-        assert a retry policy blind — a mutating POST behind an APIError may have
-        committed server-side."""
+        """A lost response also raises APIConnectionError, so retrying a keyless POST
+        (Meter/Subscription/Item create) could double-create — UNKNOWN, not RETRIABLE.
+        APIError (indeterminate 5xx) and CardError (per-decline advice) are likewise
+        unsafe to classify blind."""
         for exc in (
+            stripe.APIConnectionError("connection dropped"),
             stripe.APIError("server error"),
             stripe.CardError("declined", param=None, code="card_declined"),
             stripe.StripeError("mystery"),

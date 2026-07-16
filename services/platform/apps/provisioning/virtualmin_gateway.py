@@ -812,10 +812,10 @@ class VirtualminGateway:
 
         logger.error(f"❌ [Virtualmin] {program} failed after {execution_time:.2f}s: {error_msg}")
 
-        return Err(
-            VirtualminTransientError(error_msg, self.server.hostname, program),
-            retriability=Retriability.RETRIABLE,
-        )
+        # A read timeout or 5xx after exhausting retries does NOT prove the mutating
+        # call was not applied server-side, so leave it UNKNOWN (the default) rather
+        # than asserting a blanket safe-to-replay.
+        return Err(VirtualminTransientError(error_msg, self.server.hostname, program))
 
     def _make_request(self, params: dict[str, Any], attempt: int) -> requests.Response:
         """
