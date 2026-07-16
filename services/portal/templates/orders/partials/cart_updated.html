@@ -35,25 +35,11 @@
   </div>
 </div>
 
-<!-- Success notification (if provided) -->
+<!-- Success notification (#102): route through the unified toast system
+     (showToast → single #toast-container) rather than a bespoke inline Alpine box,
+     so add-to-cart shows exactly one toast with consistent styling/position. The
+     x-init fires on the HTMX-swapped node (Alpine already drives #cart-widget above);
+     the mini-cart dropdown still auto-opens via @cart-added.window for the cart link. -->
 {% if success_message %}
-<div id="cart-success-message" class="fixed top-4 right-4 bg-green-600 text-white px-4 py-2 rounded-lg shadow-lg z-50 transform transition-transform duration-300"
-     x-data="{ show: true }"
-     x-init="setTimeout(() => show = false, 3000)"
-     x-show="show"
-     x-transition:enter="translate-x-full"
-     x-transition:enter-end="translate-x-0"
-     x-transition:leave="translate-x-0"
-     x-transition:leave-end="translate-x-full">
-  <div class="flex items-center">
-    {% icon "check" size="sm" css_class="mr-2 text-green-400" %}
-    <span>{{ success_message }}</span>
-    {% if product_name %}
-    <div class="text-xs opacity-90 ml-2">({{ product_name }})</div>
-    {% endif %}
-    <a href="{% url 'orders:cart_review' %}" class="text-blue-400 hover:text-blue-300 text-sm font-medium ml-2">
-      {% trans "View Cart" %} →
-    </a>
-  </div>
-</div>
+<div x-init="window.showToast && window.showToast('success', '{{ success_message|escapejs }}{% if product_name %} ({{ product_name|escapejs }}){% endif %}')" x-cloak></div>
 {% endif %}
