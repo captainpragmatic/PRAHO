@@ -59,8 +59,8 @@ class Ok(Generic[T]):
 
 # Tri-state retriability signal (issue #121)
 class Retriability(StrEnum):
-    RETRIABLE = "retriable"          # caller knows transient (DB timeout, 5xx)
-    NOT_RETRIABLE = "not_retriable"  # caller knows permanent (validation, 4xx)
+    RETRIABLE = "retriable"          # provably NOT applied — safe to replay (e.g. rate-limit reject, pre-send failure)
+    NOT_RETRIABLE = "not_retriable"  # provably permanent (validation, auth, 4xx)
     UNKNOWN = "unknown"              # caller did not classify (default)
 
 

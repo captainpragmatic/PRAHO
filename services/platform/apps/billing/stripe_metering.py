@@ -32,15 +32,15 @@ from .subscription_models import Subscription
 logger = logging.getLogger(__name__)
 
 
-# Stripe error class names whose failure is provably safe to replay. Only the two
-# cases where Stripe did NOT process the request qualify: RateLimitError (rejected
-# before processing) and APIConnectionError (the request never reached Stripe).
-# Names rather than imports because the stripe module is loaded lazily; every name
-# here must exist in stripe._error (guarded by
+# Stripe error class names whose failure is provably safe to replay. Only RateLimitError
+# qualifies: Stripe rejects it BEFORE processing, so the request was definitely not
+# applied. Names rather than imports because the stripe module is loaded lazily; every
+# name here must exist in stripe.error (guarded by
 # tests/billing/test_stripe_error_classification.py).
-# Deliberately UNKNOWN, not RETRIABLE: APIError (generic 5xx — the mutation may have
-# committed server-side; blind replay of a non-idempotent POST could double-create).
-_RETRIABLE_STRIPE_ERROR_NAMES = frozenset({"RateLimitError", "APIConnectionError"})
+# Deliberately UNKNOWN, not RETRIABLE: APIConnectionError (a LOST RESPONSE also raises
+# it, so a keyless Meter/Subscription/Item create POST could double-create on retry)
+# and APIError (generic 5xx — the mutation may have committed server-side).
+_RETRIABLE_STRIPE_ERROR_NAMES = frozenset({"RateLimitError"})
 # Stripe error class names that indicate an unambiguously permanent failure (4xx).
 # Deliberately UNKNOWN, not NOT_RETRIABLE: CardError (Stripe's advice is per-decline —
 # either try_again_later or do_not_try_again — so it can't be classified blind).

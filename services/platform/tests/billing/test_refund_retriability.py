@@ -11,9 +11,9 @@ same exception on every attempt, and labeling it RETRIABLE is exactly the
 from unittest.mock import patch
 
 from django.db import InterfaceError, OperationalError
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, TestCase
 
-from apps.billing.refund_service import RefundService
+from apps.billing.refund_service import RefundData, RefundService
 from apps.common.types import Err, Retriability
 
 
@@ -55,3 +55,32 @@ class RefundLookupRetriabilityTests(SimpleTestCase):
 
         assert isinstance(result, Err)
         self.assertEqual(result.retriability, Retriability.UNKNOWN)
+
+
+class RefundLivePathRetriabilityTests(TestCase):
+    """The RETRIABLE signal must reach the LIVE entry points (refund_order/refund_invoice),
+    not just the _get_order/_get_invoice helpers (PR #255 review P2).
+
+    Uses TestCase (real DB) so transaction.atomic() rolls the mocked deadlock back and
+    re-raises the OperationalError the outer handler classifies.
+    """
+
+    def test_refund_order_surfaces_transient_db_error_as_retriable(self) -> None:
+        with patch(
+            "apps.billing.refund_service.Order.objects.select_for_update",
+            side_effect=OperationalError("deadlock detected"),
+        ):
+            result = RefundService.refund_order("some-id", RefundData(amount_cents=100, reason="x"))
+
+        assert isinstance(result, Err)
+        self.assertEqual(result.retriability, Retriability.RETRIABLE)
+
+    def test_refund_invoice_surfaces_transient_db_error_as_retriable(self) -> None:
+        with patch(
+            "apps.billing.refund_service.Invoice.objects.select_for_update",
+            side_effect=InterfaceError("connection already closed"),
+        ):
+            result = RefundService.refund_invoice("some-id", RefundData(amount_cents=100, reason="x"))
+
+        assert isinstance(result, Err)
+        self.assertEqual(result.retriability, Retriability.RETRIABLE)

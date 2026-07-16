@@ -138,6 +138,11 @@ class RefundService:
                 # Process refund (already inside atomic block)
                 return RefundService._execute_order_refund_internal(order, refund_data)
 
+        except (OperationalError, InterfaceError):
+            # Transient DB failure (deadlock / dropped connection) anywhere in the
+            # locked flow — surface RETRIABLE instead of collapsing to UNKNOWN below.
+            logger.exception("Order refund hit a transient DB error for order_id=%s", order_id)
+            return Err("Failed to process refund: database error", retriability=Retriability.RETRIABLE)
         except Exception:
             logger.exception("Order refund processing failed for order_id=%s", order_id)
             return Err("Failed to process refund: internal error")
@@ -307,6 +312,9 @@ class RefundService:
                 # Process refund (already inside atomic block)
                 return RefundService._execute_invoice_refund_internal(invoice, refund_data)
 
+        except (OperationalError, InterfaceError):
+            logger.exception("Invoice refund hit a transient DB error for invoice_id=%s", invoice_id)
+            return Err("Failed to process refund: database error", retriability=Retriability.RETRIABLE)
         except Exception:
             logger.exception("Invoice refund processing failed for invoice_id=%s", invoice_id)
             return Err("Failed to process refund: internal error")
