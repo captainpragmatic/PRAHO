@@ -11,6 +11,7 @@ table_enhanced component for consistent UI across the platform.
 from typing import Any
 
 from django.urls import reverse
+from django.utils import timezone
 from django.utils.translation import gettext as _
 
 """
@@ -96,10 +97,11 @@ def prepare_billing_table_data(documents: list[Any], user: Any) -> dict[str, lis
             }
         }
 
-        # Date cell
+        # Date cell — show the Romanian wall clock, not the stored UTC one (#286).
+        created_local = timezone.localtime(created_at) if timezone.is_aware(created_at) else created_at
         date_cell = {
-            "content": f"<div class='text-white'>{created_at.strftime('%d.%m.%Y')}</div>"
-            f"<div class='text-slate-400 text-sm'>{created_at.strftime('%H:%M')}</div>"
+            "content": f"<div class='text-white'>{created_local.strftime('%d.%m.%Y')}</div>"
+            f"<div class='text-slate-400 text-sm'>{created_local.strftime('%H:%M')}</div>"
         }
 
         rows.append(
@@ -179,7 +181,12 @@ def prepare_orders_table_data(orders_page: Any, user: Any) -> dict[str, Any]:
                 "text": order.get_status_display(),
                 "variant": _get_order_status_variant(order.status),
             },
-            {"text": order.created_at.strftime("%d.%m.%Y"), "font_class": "font-mono", "text_color": "text-slate-300"},
+            {
+                # Romanian wall clock, not the stored UTC one (#286).
+                "text": timezone.localtime(order.created_at).strftime("%d.%m.%Y"),
+                "font_class": "font-mono",
+                "text_color": "text-slate-300",
+            },
         ]
 
         actions = [

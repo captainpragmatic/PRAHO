@@ -1599,7 +1599,7 @@ REFUND REQUEST DETAILS
 Invoice Number: {invoice.number}
 Invoice Total: {invoice.total_cents / 100:.2f} {invoice.currency}
 Invoice Status: {invoice.get_status_display()}
-Issue Date: {invoice.issued_at.strftime("%Y-%m-%d") if invoice.issued_at else "Draft"}
+Issue Date: {timezone.localtime(invoice.issued_at).strftime("%Y-%m-%d") if invoice.issued_at else "Draft"}
 
 Refund Reason: {reason_title}
 
