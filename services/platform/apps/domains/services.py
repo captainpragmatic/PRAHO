@@ -56,9 +56,30 @@ class DomainRegistrationConfig:
     domain_name: str
     tld: Any
     registrar: Any
+    registrant_data: dict[str, Any]
     years: int = 1
     whois_privacy: bool = False
     auto_renew: bool = True
+
+
+# Minimal country-name → ISO 3166-1 alpha-2 mapping for the registrant address.
+# The platform is Romania-first; unrecognized already-2-letter codes pass through.
+_COUNTRY_NAME_TO_CODE = {
+    "românia": "RO",
+    "romania": "RO",
+    "moldova": "MD",
+    "republica moldova": "MD",
+}
+
+
+def _country_to_iso_code(country: str) -> str:
+    """Best-effort ISO alpha-2 code from a free-text country field."""
+    normalized = country.strip().lower()
+    if normalized in _COUNTRY_NAME_TO_CODE:
+        return _COUNTRY_NAME_TO_CODE[normalized]
+    if len(country.strip()) == 2:  # noqa: PLR2004  # already an alpha-2 code
+        return country.strip().upper()
+    return ""
 
 
 # ===============================================================================
@@ -365,12 +386,19 @@ class DomainLifecycleService:
 
         tld, registrar = components.unwrap()
 
-        # Execute registration
+        # Build + validate registrant data BEFORE creating any row, so a customer
+        # missing required contact/tax data is rejected without leaving an orphan
+        # pending domain and without a blank-data call to the registrar.
+        registrant_result = DomainLifecycleService._build_registrant_data(customer)
+        if registrant_result.is_err():
+            return Err(registrant_result.unwrap_err())
+
         config = DomainRegistrationConfig(
             customer=customer,
             domain_name=domain_name,
             tld=tld,
             registrar=registrar,
+            registrant_data=registrant_result.unwrap(),
             years=years,
             whois_privacy=whois_privacy,
             auto_renew=auto_renew,
@@ -478,9 +506,8 @@ class DomainLifecycleService:
                                  because the registrar may hold the registration.
         Never raises.
         """
-        registrant_data = DomainLifecycleService._build_registrant_data(config.customer)
         success, payload = DomainRegistrarGateway.register_domain(
-            config.registrar, domain.name, config.years, registrant_data
+            config.registrar, domain.name, config.years, config.registrant_data
         )
 
         if not success:
@@ -522,13 +549,51 @@ class DomainLifecycleService:
             return "pending_unknown", str(e)
 
     @staticmethod
-    def _build_registrant_data(customer: Customer) -> dict[str, Any]:
-        """Assemble registrant contact data for a registrar from the customer."""
-        return {
-            "name": customer.get_display_name(),
-            "email": customer.primary_email,
-            "company": customer.company_name or "",
+    def _build_registrant_data(customer: Customer) -> Result[dict[str, Any], str]:
+        """Assemble registrar-ready registrant data from the customer, address, and tax profile.
+
+        Produces exactly the keys the Gandi/ROTLD mappers read (first_name, last_name,
+        email, phone, address, city, postal_code, country_code, entity_type,
+        company_name, cui, cnp) and validates that every registrar-required field is
+        present. Returns Err(message) listing any missing fields so registration is
+        rejected in PRAHO instead of sending blank contact data to the registrar.
+        """
+        entity_type = "company" if customer.customer_type == "company" else "individual"
+        address = customer.get_billing_address()
+        tax = customer.get_tax_profile()
+
+        name_parts = (customer.name or "").strip().split(None, 1)
+        first_name = name_parts[0] if name_parts else ""
+        last_name = name_parts[1] if len(name_parts) > 1 else ""
+
+        data: dict[str, Any] = {
+            "first_name": first_name,
+            "last_name": last_name,
+            "email": customer.primary_email or "",
+            "phone": customer.primary_phone or "",
+            "address": address.address_line1 if address else "",
+            "city": address.city if address else "",
+            "postal_code": address.postal_code if address else "",
+            "country_code": _country_to_iso_code(address.country) if address else "",
+            "entity_type": entity_type,
+            "company_name": customer.company_name or "",
+            "cui": tax.cui if tax else "",
+            "cnp": tax.cnp if tax else "",
         }
+
+        # Required for every registrant, plus entity-specific identity fields.
+        required = ["first_name", "email", "phone", "address", "city", "postal_code", "country_code"]
+        required.append("company_name" if entity_type == "company" else "last_name")
+        required.append("cui" if entity_type == "company" else "cnp")  # ROTLD regulatory requirement
+
+        missing = [field for field in required if not data[field]]
+        if missing:
+            return Err(
+                cast(str, _("Cannot register: customer is missing required registrant data: {fields}")).format(
+                    fields=", ".join(missing)
+                )
+            )
+        return Ok(data)
 
     @staticmethod
     def _validate_renewal_preconditions(domain: Domain) -> str | None:

@@ -9,7 +9,7 @@ from django.test import Client, TestCase
 from django.urls import reverse
 
 from apps.common.encryption import decrypt_sensitive_data, is_encrypted
-from apps.customers.models import Customer
+from apps.customers.models import Customer, CustomerAddress, CustomerTaxProfile
 from apps.domains.forms import RegistrarForm
 from apps.domains.models import TLD, Registrar, TLDRegistrarAssignment
 from apps.domains.services import DomainLifecycleService, DomainValidationService
@@ -118,9 +118,15 @@ class DomainRegistrationRaceConditionTests(TestCase):
         self.customer = Customer.objects.create(
             name="John Doe",
             primary_email="cust@example.com",
+            primary_phone="+40712345678",
             company_name="ACME",
             customer_type="individual",
         )
+        CustomerAddress.objects.create(
+            customer=self.customer, address_line1="Str. Test 1", city="Bucuresti", county="Bucuresti",
+            postal_code="010101", country="România", is_primary=True, is_current=True,
+        )
+        CustomerTaxProfile.objects.create(customer=self.customer, cnp="1900101123456")
 
     def test_duplicate_registration_returns_already_registered(self) -> None:
         # First registration must be registrar-confirmed to leave an active row —

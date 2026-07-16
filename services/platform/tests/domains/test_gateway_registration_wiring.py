@@ -15,10 +15,19 @@ from unittest.mock import patch
 
 from django.test import TestCase
 
-from apps.customers.models import Customer
+from apps.customers.models import Customer, CustomerAddress, CustomerTaxProfile
 from apps.domains.gateways import RegistrarGatewayFactory
 from apps.domains.models import TLD, Domain, Registrar, TLDRegistrarAssignment
 from apps.domains.services import DomainLifecycleService
+
+
+def _give_registrant_data(customer: Customer, *, cui: str = "", cnp: str = "") -> None:
+    """Attach a billing address + tax profile so registrant-data validation passes."""
+    CustomerAddress.objects.create(
+        customer=customer, address_line1="Str. Test 1", city="Bucuresti", county="Bucuresti",
+        postal_code="010101", country="România", is_primary=True, is_current=True,
+    )
+    CustomerTaxProfile.objects.create(customer=customer, cui=cui, cnp=cnp)
 
 
 class GatewayFactoryRegistrationTests(TestCase):
@@ -64,9 +73,11 @@ class DomainRegistrationGatewayWiringTests(TestCase):
         self.customer = Customer.objects.create(
             name="John Doe",
             primary_email="cust@example.com",
+            primary_phone="+40712345678",
             company_name="ACME",
             customer_type="individual",
         )
+        _give_registrant_data(self.customer, cnp="1900101123456")
 
     def test_successful_registrar_call_activates_domain_and_persists_fields(self) -> None:
         expires = datetime(2027, 1, 1, tzinfo=UTC)
@@ -203,3 +214,84 @@ class RenewalGatewayWiringTests(TestCase):
 
         self.assertTrue(result.is_err(), result)
         mock_renew.assert_not_called()
+
+
+class RegistrantDataBuildingTests(TestCase):
+    """_build_registrant_data must produce the exact keys the gateway mappers read,
+    sourced from Customer + address + tax profile, and validate required fields."""
+
+    def setUp(self) -> None:
+        self.CustomerAddress = CustomerAddress
+        self.CustomerTaxProfile = CustomerTaxProfile
+        self.company = Customer.objects.create(
+            name="Acme Contact", primary_email="biz@acme.ro", primary_phone="+40712345678",
+            company_name="Acme SRL", customer_type="company",
+        )
+        CustomerAddress.objects.create(
+            customer=self.company, address_line1="Str. Test 1", city="Bucuresti", county="Bucuresti",
+            postal_code="010101", country="România",
+            is_primary=True, is_current=True,
+        )
+        CustomerTaxProfile.objects.create(customer=self.company, cui="RO12345678", is_vat_payer=True)
+
+    def test_company_registrant_data_has_all_mapper_keys(self) -> None:
+        result = DomainLifecycleService._build_registrant_data(self.company)
+        self.assertTrue(result.is_ok(), result)
+        data = result.unwrap()
+        for key in ("first_name", "last_name", "email", "phone", "address", "city",
+                    "postal_code", "country_code", "entity_type", "company_name", "cui", "cnp"):
+            self.assertIn(key, data)
+        self.assertEqual(data["entity_type"], "company")
+        self.assertEqual(data["company_name"], "Acme SRL")
+        self.assertEqual(data["cui"], "RO12345678")
+        self.assertEqual(data["phone"], "+40712345678")
+        self.assertEqual(data["country_code"], "RO")
+        self.assertEqual(data["address"], "Str. Test 1")
+
+    def test_individual_registrant_data_carries_cnp(self) -> None:
+        individual = Customer.objects.create(
+            name="Ion Popescu", primary_email="ion@example.ro", primary_phone="+40799999999",
+            customer_type="individual",
+        )
+        self.CustomerAddress.objects.create(
+            customer=individual, address_line1="Str. B 2", city="Cluj", county="Cluj",
+            postal_code="400001", country="România", is_primary=True, is_current=True,
+        )
+        self.CustomerTaxProfile.objects.create(customer=individual, cnp="1900101123456")
+
+        result = DomainLifecycleService._build_registrant_data(individual)
+        self.assertTrue(result.is_ok(), result)
+        data = result.unwrap()
+        self.assertEqual(data["entity_type"], "individual")
+        self.assertEqual(data["first_name"], "Ion")
+        self.assertEqual(data["last_name"], "Popescu")
+        self.assertEqual(data["cnp"], "1900101123456")
+
+    def test_missing_address_is_rejected(self) -> None:
+        no_addr = Customer.objects.create(
+            name="No Address", primary_email="na@example.ro", primary_phone="+40700000000",
+            customer_type="individual",
+        )
+        self.CustomerTaxProfile.objects.create(customer=no_addr, cnp="1900101123456")
+        result = DomainLifecycleService._build_registrant_data(no_addr)
+        self.assertTrue(result.is_err(), result)
+
+    def test_registration_rejected_up_front_when_registrant_incomplete(self) -> None:
+        """A customer with no address/tax data must not create a pending Domain row."""
+        bare = Customer.objects.create(
+            name="Bare", primary_email="bare@example.ro", customer_type="company",
+        )
+        # register.com TLD+registrar resolution reuses the class-level fixtures? build minimal:
+        tld = TLD.objects.create(
+            extension="net", description=".net", registration_price_cents=1000, renewal_price_cents=1000,
+            transfer_price_cents=1000, registrar_cost_cents=500, min_registration_period=1, max_registration_period=10,
+        )
+        reg = Registrar.objects.create(
+            name="reg2", display_name="Reg2", website_url="https://r2.example",
+            api_endpoint="https://api.r2.example", status="active",
+        )
+        TLDRegistrarAssignment.objects.create(tld=tld, registrar=reg, is_primary=True, is_active=True, priority=1)
+
+        result = DomainLifecycleService.create_domain_registration(customer=bare, domain_name="bare.net", years=1)
+        self.assertTrue(result.is_err(), result)
+        self.assertFalse(Domain.objects.filter(name="bare.net").exists())
