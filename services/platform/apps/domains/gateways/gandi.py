@@ -4,6 +4,15 @@ Gandi REST API gateway for international domain registration.
 API docs: https://api.gandi.net/docs/domains/
 Auth: Personal Access Token via Authorization header.
 Rate limit: 30 requests / 2 seconds (negotiable for resellers).
+
+PROVISIONAL — NOT SANDBOX-VERIFIED. The success-response parsing here (expecting
+id/expires_at/auth_info in the register/renew body) was written from documentation
+and has not been validated against the live Gandi API, which documents a 202
+"accepted" body (message + Location) that likely requires polling the returned
+operation/domain resource for the confirmed state and expiry. Chargeable
+register/renew calls are gated behind settings.REGISTRAR_ADAPTERS_VERIFIED (default
+off) so this cannot run against real credentials until an operator validates it and
+reworks the 202 handling. Tracked as a follow-up.
 """
 
 from __future__ import annotations
@@ -84,12 +93,14 @@ class GandiGateway(BaseRegistrarGateway):
         if nameservers:
             body["nameservers"] = nameservers
 
+        # Gandi documents sharing_id as a query parameter, not a body field.
+        params = {}
         sharing_id = self._get_sharing_id()
         if sharing_id:
-            body["sharing_id"] = sharing_id
+            params["sharing_id"] = sharing_id
 
         try:
-            response = self._api_request("POST", url, json=body, headers=self._auth_headers())
+            response = self._api_request("POST", url, json=body, params=params, headers=self._auth_headers())
         except requests.RequestException as exc:
             return Err(
                 # A registration POST may have reached the registrar before the network

@@ -9,6 +9,12 @@ Romanian-specific requirements:
 - CUI (Company Unique Identifier) for businesses
 - CNP (Personal Numeric Code) for individuals
 - Registrar accreditation from ICI-Bucharest required
+
+PROVISIONAL — NOT SANDBOX-VERIFIED. The success-response parsing was written from
+documentation and has not been validated against the live ROTLD API. Chargeable
+register/renew calls are gated behind settings.REGISTRAR_ADAPTERS_VERIFIED (default
+off) so this cannot run against real credentials until an operator validates it.
+Tracked as a follow-up.
 """
 
 from __future__ import annotations

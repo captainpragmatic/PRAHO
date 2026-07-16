@@ -25,6 +25,7 @@ class RegistrarErrorCode(StrEnum):
     NETWORK_ERROR = "network_error"
     INVALID_RESPONSE = "invalid_response"
     WEBHOOK_SIGNATURE_INVALID = "webhook_signature_invalid"
+    NOT_CONFIGURED = "not_configured"
     INTERNAL_ERROR = "internal_error"
 
 

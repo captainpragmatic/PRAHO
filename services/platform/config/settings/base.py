@@ -366,6 +366,14 @@ REST_FRAMEWORK = {
 API_TOKEN_DEFAULT_TTL_DAYS = int(os.environ.get("API_TOKEN_DEFAULT_TTL_DAYS", "90"))
 API_TOKEN_MAX_TTL_DAYS = int(os.environ.get("API_TOKEN_MAX_TTL_DAYS", "365"))
 
+# Registrar gateway safety gate (ADR/#93). The Gandi/ROTLD response schemas were
+# implemented against documentation and have NOT been validated against a live
+# registrar sandbox (blocked on accreditation). Until an operator confirms an
+# adapter against the real API and flips this flag, the concrete gateways refuse
+# chargeable register/renew calls — so an unverified adapter can never mis-handle a
+# real, paid registrar operation. Availability checks (read-only) are always allowed.
+REGISTRAR_ADAPTERS_VERIFIED = os.environ.get("REGISTRAR_ADAPTERS_VERIFIED", "false").lower() == "true"
+
 # ===============================================================================
 # ROMANIAN BUSINESS CONFIGURATION
 # ===============================================================================

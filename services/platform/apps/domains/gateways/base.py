@@ -180,6 +180,8 @@ class BaseRegistrarGateway(ABC):
         nameservers: list[str] | None = None,
     ) -> Result[DomainRegistrationResult, RegistrarAPIError]:
         """Register a domain, with circuit breaker and idempotency protection."""
+        if guard := self._verified_adapter_guard():
+            return guard
         return self._execute_idempotent_operation(
             idempotency_key=f"domain_reg:{self.gateway_name}:{domain_name}",
             fn=lambda: self._do_register(domain_name, years, registrant_data, nameservers),
@@ -195,6 +197,8 @@ class BaseRegistrarGateway(ABC):
         years: int,
     ) -> Result[DomainRenewalResult, RegistrarAPIError]:
         """Renew a domain, with circuit breaker and idempotency protection."""
+        if guard := self._verified_adapter_guard():
+            return guard
         return self._execute_idempotent_operation(
             idempotency_key=f"domain_renew:{self.gateway_name}:{domain_name}:{years}",
             fn=lambda: self._do_renew(registrar_domain_id, domain_name, years),
@@ -202,6 +206,27 @@ class BaseRegistrarGateway(ABC):
             audit_event="domain_renewal",
             domain_name=domain_name,
             audit_metadata={"years": years},
+        )
+
+    def _verified_adapter_guard(self) -> Err[RegistrarAPIError] | None:
+        """Refuse chargeable register/renew calls until the adapter is sandbox-verified.
+
+        The concrete response schemas were built from documentation without a live
+        sandbox; ``settings.REGISTRAR_ADAPTERS_VERIFIED`` must be flipped on by an
+        operator after validating an adapter against the real registrar. Returns an
+        Err to short-circuit, or None when verified.
+        """
+        from django.conf import settings  # noqa: PLC0415  # avoid import-time settings access
+
+        if getattr(settings, "REGISTRAR_ADAPTERS_VERIFIED", False):
+            return None
+        return Err(
+            RegistrarAPIError(
+                f"{self.gateway_name} adapter is not verified against the registrar sandbox; "
+                "refusing chargeable operation (set REGISTRAR_ADAPTERS_VERIFIED=true once validated)",
+                code=RegistrarErrorCode.NOT_CONFIGURED,
+                registrar_name=self.registrar.name,
+            )
         )
 
     def _execute_idempotent_operation(  # noqa: PLR0913  # cohesive call + audit context for one op

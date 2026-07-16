@@ -12,7 +12,7 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import requests
-from django.test import TestCase
+from django.test import TestCase, override_settings
 
 from apps.common.types import Err, Ok
 from apps.domains.gateways import (
@@ -134,6 +134,7 @@ class RegistrarGatewayFactoryTests(TestCase):
 # ===============================================================================
 
 
+@override_settings(REGISTRAR_ADAPTERS_VERIFIED=True)
 class GandiGatewayRegisterTests(TestCase):
     """Gandi domain registration."""
 
@@ -277,6 +278,7 @@ class GandiGatewayAvailabilityTests(TestCase):
 # ===============================================================================
 
 
+@override_settings(REGISTRAR_ADAPTERS_VERIFIED=True)
 class ROTLDGatewayRegisterTests(TestCase):
     """ROTLD domain registration."""
 
@@ -406,6 +408,7 @@ class CircuitBreakerTests(TestCase):
 # ===============================================================================
 
 
+@override_settings(REGISTRAR_ADAPTERS_VERIFIED=True)
 class IdempotencyTests(TestCase):
     """Idempotency cache prevents duplicate registrations."""
 
@@ -455,6 +458,7 @@ class IdempotencyTests(TestCase):
 # ===============================================================================
 
 
+@override_settings(REGISTRAR_ADAPTERS_VERIFIED=True)
 class DomainRegistrarGatewayFacadeTests(TestCase):
     """The facade in services.py delegates to the gateway layer."""
 
@@ -510,6 +514,7 @@ class DomainRegistrarGatewayFacadeTests(TestCase):
 # ===============================================================================
 
 
+@override_settings(REGISTRAR_ADAPTERS_VERIFIED=True)
 class IdempotencyClaimTests(TestCase):
     """The idempotency key is claimed atomically before the call (H1)."""
 
@@ -574,6 +579,7 @@ class CircuitBreakerRecoveryTests(TestCase):
 # ===============================================================================
 
 
+@override_settings(REGISTRAR_ADAPTERS_VERIFIED=True)
 class GandiInvalidResponseTests(TestCase):
     """Missing/invalid expiry and malformed price are handled gracefully."""
 
@@ -645,6 +651,7 @@ class SafeJsonResponseSizeTests(TestCase):
         self.assertEqual(self.gateway._safe_json(resp), {"ok": True})
 
 
+@override_settings(REGISTRAR_ADAPTERS_VERIFIED=True)
 class RetryHonorsRetriabilityTests(TestCase):
     """_retry must key off the Err's Retriability tag, not the error class.
 
@@ -689,6 +696,7 @@ class RetryHonorsRetriabilityTests(TestCase):
         self.assertEqual(mock_request.call_count, 3)
 
 
+@override_settings(REGISTRAR_ADAPTERS_VERIFIED=True)
 class IdempotencyCacheSecretRedactionTests(TestCase):
     """The idempotency cache must never persist the EPP/auth transfer credential.
 
@@ -728,3 +736,41 @@ class IdempotencyCacheSecretRedactionTests(TestCase):
         # But nothing containing the secret was ever written to the cache.
         for call in mock_cache.set.call_args_list:
             self.assertNotIn("TOP-SECRET-EPP", repr(call))
+
+
+@override_settings(REGISTRAR_ADAPTERS_VERIFIED=False)
+class UnverifiedAdapterGuardTests(TestCase):
+    """Until an adapter is validated against the real registrar sandbox, chargeable
+    register/renew calls are refused; read-only availability is still allowed."""
+
+    def setUp(self) -> None:
+        self.registrar = _make_registrar("gandi")
+        self.gateway = GandiGateway(self.registrar)
+        self.registrant = {
+            "first_name": "Ion", "last_name": "Pop", "email": "ion@example.ro",
+            "phone": "+40712345678", "address": "Str. Test 1", "city": "Bucuresti",
+            "postal_code": "010101", "country_code": "RO", "entity_type": "individual",
+        }
+
+    @patch("apps.domains.gateways.gandi.GandiGateway._api_request")
+    def test_register_refused_when_unverified(self, mock_request: MagicMock) -> None:
+        result = self.gateway.register_domain("example.com", 1, self.registrant)
+        self.assertTrue(result.is_err())
+        self.assertEqual(result.unwrap_err().code, RegistrarErrorCode.NOT_CONFIGURED)
+        # No outbound call was attempted.
+        mock_request.assert_not_called()
+
+    @patch("apps.domains.gateways.gandi.GandiGateway._api_request")
+    def test_renew_refused_when_unverified(self, mock_request: MagicMock) -> None:
+        result = self.gateway.renew_domain("REG-1", "example.com", 1)
+        self.assertTrue(result.is_err())
+        self.assertEqual(result.unwrap_err().code, RegistrarErrorCode.NOT_CONFIGURED)
+        mock_request.assert_not_called()
+
+    @patch("apps.domains.gateways.base.cache")
+    @patch("apps.domains.gateways.gandi.GandiGateway._api_request")
+    def test_availability_allowed_when_unverified(self, mock_request: MagicMock, mock_cache: MagicMock) -> None:
+        mock_cache.get.return_value = 0
+        mock_request.return_value = _mock_response(200, {"products": [{"status": "available", "prices": [{}]}]})
+        result = self.gateway.check_availability("example.com")
+        self.assertTrue(result.is_ok(), result)
