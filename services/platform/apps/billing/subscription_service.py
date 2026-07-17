@@ -42,6 +42,39 @@ logger = logging.getLogger(__name__)
 _DEFAULT_MAX_PAYMENT_RETRIES = 5
 MAX_PAYMENT_RETRIES = _DEFAULT_MAX_PAYMENT_RETRIES
 
+# Subscription.billing_cycle and ProductPrice.get_price_for_period speak different vocabularies.
+# quarterly/custom are deliberately absent: ProductPrice only defines monthly, semiannual and
+# annual pricing, so there is no list price to resolve for those cycles — they need an explicit
+# custom_price_cents rather than an invented one.
+_BILLING_CYCLE_TO_PRICE_PERIOD = {
+    "monthly": "monthly",
+    "semi_annual": "semiannual",
+    "yearly": "annual",
+}
+
+
+def _resolve_subscription_unit_price_cents(product: Any, currency: Any, billing_cycle: str) -> Result[int, str]:
+    """Resolve a product's list price in cents for a subscription's billing cycle.
+
+    The list price lives on ProductPrice (per currency), not on Product: reading
+    `product.price_cents` / `product.unit_price_cents` — neither of which exists — always yielded
+    0, so every subscription without an explicit custom price was billed nothing (#209).
+    """
+    from apps.products.models import ProductPrice  # noqa: PLC0415  # Deferred: avoids circular import
+
+    period = _BILLING_CYCLE_TO_PRICE_PERIOD.get(billing_cycle)
+    if period is None:
+        return Err(
+            f"No list price is defined for billing cycle '{billing_cycle}'; "
+            f"pass custom_price_cents for this subscription"
+        )
+
+    price = ProductPrice.objects.filter(product=product, currency=currency, is_active=True).first()
+    if price is None:
+        return Err(f"No active {getattr(currency, 'code', currency)} price for product {product}")
+
+    return Ok(price.get_price_cents_for_period(period))
+
 
 def _build_customer_vat_info(customer: Any) -> CustomerVATInfo:
     """Build customer VAT context for TaxService.calculate_vat_for_document()."""
@@ -289,7 +322,12 @@ class SubscriptionService:
                 if data.get("custom_price_cents"):
                     unit_price_cents = data["custom_price_cents"]
                 else:
-                    unit_price_cents = getattr(product, "price_cents", 0) or getattr(product, "unit_price_cents", 0)
+                    price_result = _resolve_subscription_unit_price_cents(
+                        product, currency, data.get("billing_cycle", "monthly")
+                    )
+                    if price_result.is_err():
+                        return Err(price_result.unwrap_err())
+                    unit_price_cents = price_result.unwrap()
 
                 # Check for grandfathering
                 locked_price_cents = None
@@ -389,7 +427,12 @@ class SubscriptionService:
 
                 new_quantity = data.get("new_quantity", subscription.quantity)
                 new_billing_cycle = data.get("new_billing_cycle", subscription.billing_cycle)
-                new_price_cents = getattr(new_product, "price_cents", 0) or getattr(new_product, "unit_price_cents", 0)
+                new_price_result = _resolve_subscription_unit_price_cents(
+                    new_product, subscription.currency, new_billing_cycle
+                )
+                if new_price_result.is_err():
+                    return Err(new_price_result.unwrap_err())
+                new_price_cents = new_price_result.unwrap()
 
                 # Determine change type
                 if data.get("new_product_id") and new_price_cents > subscription.effective_price_cents:
@@ -803,6 +846,12 @@ class RecurringBillingService:
             errors=[],
         )
 
+        # Retire subscriptions the customer cancelled for end-of-period before selecting anything
+        # to bill. cancel(at_period_end=True) only raises a flag — nothing else in the codebase
+        # ever completes the cancellation — so without this they stay "active" and get billed
+        # again on every run, forever, past the date the customer cancelled (#209).
+        RecurringBillingService._finalize_period_end_cancellations(billing_date, result)
+
         # Find subscriptions due for billing
         due_subscriptions = Subscription.objects.filter(
             status="active",
@@ -877,6 +926,32 @@ class RecurringBillingService:
         return result
 
     @staticmethod
+    def _finalize_period_end_cancellations(billing_date: Any, result: Any) -> None:
+        """Complete cancellations the customer scheduled for the end of their billing period.
+
+        `cancel(at_period_end=True)` only raises the cancel_at_period_end flag and leaves the
+        subscription "active" so it keeps serving until the period the customer paid for runs
+        out. Nothing else completes that cancellation, so once the period ends the subscription
+        was simply billed again — and again on every subsequent run (#209).
+        """
+        expiring = Subscription.objects.filter(
+            status="active",
+            cancel_at_period_end=True,
+            current_period_end__lte=billing_date,
+        )
+
+        for subscription in expiring:
+            try:
+                with transaction.atomic():
+                    subscription._cancel_now()
+                    subscription.ended_at = timezone.now()
+                    subscription.save()
+                logger.info(f"🚫 [Billing] Cancelled subscription {subscription.id} at end of its billing period")
+            except TransitionNotAllowed as e:
+                logger.error(f"🔥 [Billing] Cannot cancel subscription {subscription.id} at period end: {e}")
+                result["errors"].append(f"Subscription {subscription.id}: period-end cancellation failed: {e}")
+
+    @staticmethod
     def _generate_renewal_invoice(subscription: Subscription) -> Result[Invoice, str]:
         """Generate a renewal invoice for a subscription."""
         try:
@@ -944,40 +1019,24 @@ class RecurringBillingService:
             f"via payment method {subscription.payment_method_id}"
         )
 
-        try:
-            from apps.billing.payment_service import PaymentService  # noqa: PLC0415  # Deferred: avoids circular import
-
-            # Create payment intent for the invoice amount
-            result = PaymentService.create_payment_intent_direct(
-                order_id=str(invoice.id),
-                amount_cents=invoice.total_cents,
-                currency=invoice.currency.code if invoice.currency else "RON",
-                customer_id=str(subscription.customer_id),
-                order_number=invoice.number,
-                gateway="stripe",
-                metadata={
-                    "subscription_id": str(subscription.id),
-                    "invoice_id": str(invoice.id),
-                    "recurring": True,
-                },
-            )
-
-            if not result.get("success"):
-                return Err(f"Payment intent creation failed: {result.get('error', 'unknown')}")
-
-            # Confirm the payment
-            payment_intent_id = result.get("payment_intent_id", "")
-            confirm = PaymentService.confirm_payment(payment_intent_id, gateway="stripe")
-
-            if confirm.get("success") and confirm.get("status") == "succeeded":
-                logger.info(f"✅ [Payment] Invoice {invoice.number} paid successfully")
-                return Ok(True)
-
-            return Err(f"Payment confirmation failed: {confirm.get('error', confirm.get('status', 'unknown'))}")
-
-        except Exception as e:
-            logger.error(f"🔥 [Payment] Error processing payment for {invoice.number}: {e}")
-            return Err(str(e))
+        # This path passed str(invoice.id) as `order_id`. Invoice is integer-keyed and Order is
+        # UUID-keyed, so the lookup raised `ValidationError: "N" is not a valid UUID`, which the
+        # broad except below turned into a cryptic renewal failure for every subscriber (#209).
+        #
+        # There is no correct value to pass: Invoice has no order FK — a subscription invoice has
+        # no order — and both PaymentService intent APIs are order-centric. Charging a
+        # subscription invoice needs an invoice-based payment intent, which does not exist yet
+        # (tracked separately). Fail explicitly so dunning records a real, actionable error
+        # instead of a UUID parse failure.
+        logger.error(
+            f"🔥 [Payment] Cannot charge subscription invoice {invoice.number}: "
+            f"no invoice-based payment intent API exists"
+        )
+        return Err(
+            "Subscription renewal payment is not implemented: charging a subscription invoice "
+            "requires an invoice-based payment intent; the order-based API cannot be used because "
+            "a subscription invoice has no order (see #209)"
+        )
 
     @staticmethod
     def handle_expired_trials() -> int:
