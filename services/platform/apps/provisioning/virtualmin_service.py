@@ -1307,20 +1307,15 @@ class VirtualminBackupManagementService:
             backup_result = backup_service.backup_domain(account=account, config=config)
 
             if backup_result.is_err():
-                # Update job with error
-                job.status = "failed"
-                job.error_message = backup_result.unwrap_err()  # type: ignore[attr-defined]
-                job.completed_at = timezone.now()
-                job.save()
+                # mark_failed persists the error to the real field (status_message); assigning a
+                # nonexistent `error_message` left the failure recorded nowhere.
+                job.mark_failed(backup_result.unwrap_err())
 
                 return Err(f"Backup failed: {backup_result.unwrap_err()}")
 
             # Update job with success
             backup_info = backup_result.unwrap()
-            job.status = "completed"
-            job.response_data = backup_info  # type: ignore[attr-defined]
-            job.completed_at = timezone.now()
-            job.save()
+            job.mark_completed(backup_info)
 
             logger.info(f"Backup job completed successfully: {job.id}")
             return Ok(job)
@@ -1381,20 +1376,14 @@ class VirtualminBackupManagementService:
             restore_result = backup_service.restore_domain(account=account, config=config, target_server=target_server)
 
             if restore_result.is_err():
-                # Update job with error
-                job.status = "failed"
-                job.error_message = restore_result.unwrap_err()  # type: ignore[attr-defined]
-                job.completed_at = timezone.now()
-                job.save()
+                # See the backup path: assigning `error_message` silently dropped the failure.
+                job.mark_failed(restore_result.unwrap_err())
 
                 return Err(f"Restore failed: {restore_result.unwrap_err()}")
 
             # Update job with success
             restore_info = restore_result.unwrap()
-            job.status = "completed"
-            job.response_data = restore_info  # type: ignore[attr-defined]
-            job.completed_at = timezone.now()
-            job.save()
+            job.mark_completed(restore_info)
 
             logger.info(f"Restore job completed successfully: {job.id}")
             return Ok(job)
