@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 from datetime import timedelta
+from decimal import Decimal
 from typing import Any, TypedDict
 
 from django.core.cache import cache
@@ -20,8 +21,8 @@ from django_q.tasks import async_task, schedule
 from apps.audit.services import AuditService
 from apps.billing.models import Payment
 from apps.billing.services import InvoiceService
-from apps.orders.models import Order
-from apps.orders.services import OrderService, StatusChangeData
+from apps.orders.models import Order, OrderItem
+from apps.orders.services import OrderCreateData, OrderService, StatusChangeData
 
 # Constants
 _DEFAULT_MAX_PAYMENT_FAILURES_BEFORE_ORDER_FAIL = 3
@@ -570,32 +571,54 @@ def _find_services_to_renew() -> Any:
             expires_at__gte=timezone.now(),  # Not already expired
             auto_renew=True,
         )
-        .select_related("customer", "plan")
-        .prefetch_related("orders")
+        .select_related("customer", "service_plan", "currency")
+        # The renewal needs the catalog Product the customer originally bought; ServicePlan has no
+        # link to Product, so the only path is back through the originating order item.
+        .prefetch_related("order_items__product")
     )
 
 
-def _create_renewal_order_data(service: Any) -> dict[str, Any]:
-    """Create renewal order data structure."""
-    return {
-        "customer_id": service.customer.id,
-        "items": [
+def _resolve_renewal_product_id(service: Any) -> Any | None:
+    """Return the catalog Product id to renew this service against, or None if it cannot be found.
+
+    OrderItem.product is a non-null FK and create_order rejects a missing product_id (#127), but
+    ServicePlan carries no link to Product — the only path from a service back to the catalog is
+    the order item that provisioned it. A service created outside an order (manual, migrated) has
+    no such item, and guessing a product would put a wrong price on a real invoice.
+    """
+    originating_item = service.order_items.order_by("-created_at").first()
+    return originating_item.product_id if originating_item else None
+
+
+def _create_renewal_order_data(service: Any, product_id: Any) -> OrderCreateData:
+    """Build the OrderCreateData for a service renewal.
+
+    Prices the renewal from `Service.price` — the per-cycle price this customer actually agreed
+    to — rather than the current plan list price, so a plan price change does not silently
+    re-rate an existing service. The period likewise comes from `Service.billing_cycle`; a
+    monthly service renews monthly.
+    """
+    return OrderCreateData(
+        customer=service.customer,
+        items=[
             {
-                "product_type": "service_renewal",
-                "product_id": str(service.plan.id) if service.plan else None,
+                "product_id": product_id,
+                "service_id": service.id,
                 "quantity": 1,
-                "unit_price_cents": service.plan.price_cents if service.plan else 0,
-                "name": f"Service Renewal - {service.name}",
+                "unit_price_cents": int(Decimal(service.price) * 100),
+                "setup_cents": 0,  # Renewals never re-charge setup.
+                "description": f"Service Renewal - {service.service_name}",
                 "meta": {
                     "renewal_service_id": str(service.id),
                     "original_expires_at": service.expires_at.isoformat(),
-                    "renewal_period": "1_year",
+                    "renewal_period": service.billing_cycle,
                 },
             }
         ],
-        "status": "awaiting_payment",
-        "meta": {"auto_renewal": True, "original_service_id": str(service.id)},
-    }
+        billing_address=OrderService.build_billing_address_from_customer(service.customer),
+        currency=service.currency.code,
+        meta={"auto_renewal": True, "original_service_id": str(service.id)},
+    )
 
 
 def _create_renewal_invoice(renewal_order: Any, service: Any, results: dict[str, Any]) -> None:
@@ -637,7 +660,7 @@ def _log_renewal_order_creation(renewal_order: Any, service: Any) -> None:
         event_type="renewal_order_created",
         user=None,
         content_object=renewal_order,
-        description=f"Renewal order {renewal_order.order_number} created for service {service.name}",
+        description=f"Renewal order {renewal_order.order_number} created for service {service.service_name}",
         actor_type="system",
         metadata={
             "order_id": str(renewal_order.id),
@@ -788,22 +811,39 @@ def process_recurring_orders() -> dict[str, Any]:
 
             for service in services_to_renew:
                 try:
-                    # Check if renewal order already exists
-                    existing_renewal = Order.objects.filter(
-                        customer=service.customer,
-                        status__in=["draft", "awaiting_payment", "paid", "provisioning"],
-                        items__meta__contains={"renewal_service_id": str(service.id)},
+                    # Check if renewal order already exists.
+                    # Keyed off the JSON key path rather than JSONField `contains`: the latter is a
+                    # PostgreSQL-only lookup, so this guard could not be exercised by the SQLite
+                    # test suite — the one thing standing between a service and double-billing.
+                    existing_renewal = OrderItem.objects.filter(
+                        order__customer=service.customer,
+                        order__status__in=["draft", "awaiting_payment", "paid", "provisioning"],
+                        config__renewal_service_id=str(service.id),
                     ).exists()
 
                     if existing_renewal:
                         logger.debug(f"⏭️ [RecurringOrders] Renewal order already exists for service {service.id}")
                         continue
 
+                    # A renewal must bill against the catalog product the customer originally
+                    # bought. Report rather than guess: a wrong product means a wrong price.
+                    product_id = _resolve_renewal_product_id(service)
+                    if product_id is None:
+                        logger.error(
+                            f"🔥 [RecurringOrders] Service {service.id} has no originating order item; "
+                            f"cannot resolve a product to renew against"
+                        )
+                        results["errors"].append(
+                            f"Service {service.id}: no originating order item; cannot resolve renewal product"
+                        )
+                        results["renewal_failures"] += 1
+                        continue
+
                     # Create renewal order
                     order_service = OrderService()
-                    renewal_order_data = _create_renewal_order_data(service)
+                    renewal_order_data = _create_renewal_order_data(service, product_id)
 
-                    create_result = order_service.create_order(renewal_order_data)  # type: ignore[arg-type]
+                    create_result = order_service.create_order(renewal_order_data)
 
                     if create_result.is_ok():
                         renewal_order = create_result.unwrap()
