@@ -1144,6 +1144,26 @@ class TestStripeGateway(TestCase):
         assert result["payment_intent_id"] == "pi_123"
         assert result["client_secret"] == "secret_456"
 
+    def test_create_payment_intent_forwards_idempotency_key(self):
+        mock_stripe = MagicMock()
+        mock_stripe.PaymentIntent.create.return_value = MagicMock(
+            id="pi_idempotent", client_secret="secret_idempotent"
+        )
+        gw = self._make_gateway(mock_stripe)
+
+        result = gw.create_payment_intent(
+            "order-authoritative",
+            2999,
+            metadata={"praho_order_id": "attacker-order", "platform": "attacker-platform"},
+            idempotency_key="payment-attempt-key",
+        )
+
+        assert result["success"] is True
+        create_kwargs = mock_stripe.PaymentIntent.create.call_args.kwargs
+        assert create_kwargs["idempotency_key"] == "payment-attempt-key"
+        assert create_kwargs["metadata"]["praho_order_id"] == "order-authoritative"
+        assert create_kwargs["metadata"]["platform"] == "PRAHO"
+
     def test_create_payment_intent_no_customer(self):
         mock_stripe = MagicMock()
         mock_stripe.PaymentIntent.create.return_value = MagicMock(id="pi_x", client_secret="sec")

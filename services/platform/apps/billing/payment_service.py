@@ -5,11 +5,14 @@ Gateway-agnostic payment orchestration with Romanian compliance.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 from typing import Any
 
 from django.conf import settings
 from django.db import transaction
+from django.db.models import Case, IntegerField, Value, When
 
 from apps.common.validators import log_security_event
 from apps.customers.models import (
@@ -153,7 +156,7 @@ class PaymentService:
             )
 
     @staticmethod
-    def create_payment_intent_direct(  # payment processing fields  # noqa: PLR0913, PLR0911  # Business logic parameters
+    def create_payment_intent_direct(  # payment processing fields  # noqa: C901, PLR0912, PLR0913, PLR0911
         order_id: str,
         amount_cents: int | None = None,
         currency: str = "RON",
@@ -227,24 +230,59 @@ class PaymentService:
                     error="amount_cents does not match order total",
                 )
 
-            # H19: Idempotency — return the existing pending payment intent if one
-            # already exists for this order, preventing duplicate gateway calls.
+            order_payment_filter = {
+                "customer_id": customer_id_int,
+                "payment_method": gateway,
+                "meta__order_id": str(order.id),
+            }
+            attempt_number = Payment.objects.filter(**order_payment_filter).count() + 1
+            resolved_currency = (order.currency.code if order.currency else None) or currency or "RON"
+            resolved_order_number = order.order_number
+
+            # H19: Reuse an existing pending or completed intent for this exact
+            # order and gateway. A succeeded payment can temporarily coexist with
+            # an awaiting-payment order while downstream invoice conversion retries.
+            # Count first so a Payment inserted between these queries either gets
+            # returned here or shares the attempt key derived below.
             existing_payment = (
                 Payment.objects.filter(
-                    customer_id=customer_id_int,
-                    status="pending",
+                    **order_payment_filter,
+                    status__in=("pending", "succeeded"),
                 )
-                .order_by("-created_at")
+                .select_related("currency")
+                .order_by(
+                    Case(
+                        When(status="succeeded", then=Value(0)),
+                        default=Value(1),
+                        output_field=IntegerField(),
+                    ),
+                    "-created_at",
+                )
                 .first()
             )
 
-            if (
-                existing_payment is not None
-                and existing_payment.meta
-                and existing_payment.meta.get("order_id") == str(order.id)
-            ):
+            if existing_payment is not None:
+                existing_currency = existing_payment.currency.code if existing_payment.currency else ""
+                if (
+                    existing_payment.amount_cents != expected_amount_cents
+                    or existing_currency.upper() != resolved_currency.upper()
+                ):
+                    logger.warning(
+                        "⚠️ [PaymentService] Existing %s payment %s does not match order %s amount/currency",
+                        existing_payment.status,
+                        existing_payment.id,
+                        order.id,
+                    )
+                    return PaymentIntentResult(
+                        success=False,
+                        payment_intent_id=existing_payment.gateway_txn_id or "",
+                        client_secret=None,
+                        error="Existing payment does not match the authoritative order amount or currency",
+                    )
+
                 logger.info(
-                    "♻️ [PaymentService] Returning existing pending payment %s for order %s",
+                    "♻️ [PaymentService] Returning existing %s payment %s for order %s",
+                    existing_payment.status,
                     existing_payment.id,
                     order.id,
                 )
@@ -254,9 +292,6 @@ class PaymentService:
                     client_secret=existing_payment.meta.get("client_secret"),
                     error=None,
                 )
-
-            resolved_currency = (order.currency.code if order.currency else None) or currency or "RON"
-            resolved_order_number = order_number or order.order_number
 
             logger.info(
                 "💳 Creating payment intent for order %s (%s %s) via %s",
@@ -269,21 +304,37 @@ class PaymentService:
             # Get payment gateway
             payment_gateway = PaymentGatewayFactory.create_gateway(gateway)
 
-            # Prepare metadata
-            payment_metadata = {
+            # Keep the idempotent gateway request stable across local retries.
+            # Caller metadata is persisted locally but is not sent to the gateway,
+            # where changing it for the same key would be rejected by Stripe.
+            gateway_metadata = {
                 "order_number": resolved_order_number,
                 "customer_id": str(customer_id_int),
                 "platform": "PRAHO",
                 "source": "portal_api",
-                **(metadata or {}),
+                "order_id": str(order.id),
+                "gateway": gateway,
             }
+            payment_metadata = {**(metadata or {}), **gateway_metadata}
+            idempotency_payload = {
+                "gateway": gateway,
+                "order_id": str(order.id),
+                "attempt_number": attempt_number,
+                "amount_cents": expected_amount_cents,
+                "currency": resolved_currency,
+                "metadata": gateway_metadata,
+            }
+            idempotency_key = hashlib.sha256(
+                json.dumps(idempotency_payload, sort_keys=True, separators=(",", ":")).encode()
+            ).hexdigest()
 
             # Create payment intent
             result = payment_gateway.create_payment_intent(
-                order_id=str(order_id),
+                order_id=str(order.id),
                 amount_cents=expected_amount_cents,
                 currency=resolved_currency,
-                metadata=payment_metadata,
+                metadata=gateway_metadata,
+                idempotency_key=idempotency_key,
             )
 
             if order.proforma is None and expected_amount_cents > 0:
@@ -317,40 +368,59 @@ class PaymentService:
                     client_secret = result.get("client_secret", "")
 
                     payment_meta: dict[str, Any] = {
-                        "client_secret": client_secret,
-                        "order_id": str(order_id),
-                        "gateway": gateway,
                         **payment_metadata,
+                        "client_secret": client_secret,
+                        "order_id": str(order.id),
+                        "gateway": gateway,
+                        "customer_id": str(customer_id_int),
                     }
                     if order.proforma is not None:
                         payment_meta["proforma_id"] = str(order.proforma.id)
 
-                    payment = Payment.objects.create(  # type: ignore[misc]
-                        invoice=None,  # Will be linked when proforma converts to invoice
-                        proforma=order.proforma,
-                        customer=order.customer,
-                        payment_method=gateway,
-                        amount_cents=expected_amount_cents,
-                        currency=currency_obj,
-                        status="pending",
-                        gateway_txn_id=payment_intent_id,
-                        meta=payment_meta,
+                    payment, payment_created = Payment.objects.get_or_create(
+                        idempotency_key=idempotency_key,
+                        defaults={
+                            "invoice": None,
+                            "proforma": order.proforma,
+                            "customer": order.customer,
+                            "payment_method": gateway,
+                            "amount_cents": expected_amount_cents,
+                            "currency": currency_obj,
+                            "status": "pending",
+                            "gateway_txn_id": payment_intent_id,
+                            "meta": payment_meta,
+                        },
                     )
 
-                logger.info(f"✅ Created payment {payment.id} for Portal order {order_id}")
+                if not payment_created and payment.status not in {"pending", "succeeded"}:
+                    return PaymentIntentResult(
+                        success=False,
+                        payment_intent_id=payment.gateway_txn_id or "",
+                        client_secret=payment.meta.get("client_secret"),
+                        error=f"Payment attempt is {payment.status}; retry to create a new attempt",
+                    )
 
-                log_security_event(
-                    "payment_intent_created_direct",
-                    {
-                        "payment_id": str(payment.id),
-                        "order_id": str(order_id),
-                        "amount_cents": expected_amount_cents,
-                        "currency": resolved_currency,
-                        "gateway": gateway,
-                        "source": "portal_api",
-                        "critical_financial_operation": True,
-                    },
+                result = PaymentIntentResult(
+                    success=True,
+                    payment_intent_id=payment.gateway_txn_id or "",
+                    client_secret=payment.meta.get("client_secret"),
+                    error=None,
                 )
+                if payment_created:
+                    logger.info(f"✅ Created payment {payment.id} for Portal order {order_id}")
+
+                    log_security_event(
+                        "payment_intent_created_direct",
+                        {
+                            "payment_id": str(payment.id),
+                            "order_id": str(order_id),
+                            "amount_cents": expected_amount_cents,
+                            "currency": resolved_currency,
+                            "gateway": gateway,
+                            "source": "portal_api",
+                            "critical_financial_operation": True,
+                        },
+                    )
 
             return result
 
@@ -474,6 +544,21 @@ class PaymentService:
             return PaymentConfirmResult(success=False, status="error", error=f"Payment confirmation failed: {e}")
 
     @staticmethod
+    def _persist_gateway_customer_id(customer_id: str, gateway_customer_id: str) -> str:
+        """Merge a new gateway customer ID into the latest customer metadata."""
+        with transaction.atomic():
+            customer = Customer.objects.select_for_update(of=("self",)).get(id=customer_id)
+            customer_meta = dict(customer.meta or {})
+            existing_gateway_customer_id = customer_meta.get("stripe_customer_id")
+            if existing_gateway_customer_id:
+                return str(existing_gateway_customer_id)
+
+            customer_meta["stripe_customer_id"] = gateway_customer_id
+            customer.meta = customer_meta
+            customer.save(update_fields=["meta"])
+            return gateway_customer_id
+
+    @staticmethod
     def create_subscription(
         customer_id: str, price_id: str, gateway: str = "stripe", metadata: dict[str, Any] | None = None
     ) -> SubscriptionResult:
@@ -501,23 +586,35 @@ class PaymentService:
             customer_meta = customer.meta if hasattr(customer, "meta") and customer.meta else {}
             gateway_customer_id = customer_meta.get("stripe_customer_id", "")
             if not gateway_customer_id:
-                # Create Stripe customer via gateway
+                created_gateway_customer_id = ""
                 try:
                     stripe_gateway = PaymentGatewayFactory.create_gateway(gateway)
                     if hasattr(stripe_gateway, "_stripe"):
+                        stripe_customer_metadata = {"praho_customer_id": str(customer.id)}
+                        stripe_customer_payload = {
+                            "customer_id": str(customer.id),
+                            "email": customer.primary_email or "",
+                            "name": customer.name or "",
+                            "metadata": stripe_customer_metadata,
+                        }
+                        stripe_customer_idempotency_key = hashlib.sha256(
+                            json.dumps(stripe_customer_payload, sort_keys=True, separators=(",", ":")).encode()
+                        ).hexdigest()
                         stripe_customer = stripe_gateway._stripe.Customer.create(
                             email=customer.primary_email or "",
                             name=customer.name or "",
-                            metadata={"praho_customer_id": str(customer.id)},
+                            metadata=stripe_customer_metadata,
+                            idempotency_key=stripe_customer_idempotency_key,
                         )
-                        gateway_customer_id = stripe_customer.id
-                        # Store for future use; cast to Any to satisfy mypy for dynamic JSONField
-                        customer_any: Any = customer
-                        customer_any.meta = {**customer_meta, "stripe_customer_id": gateway_customer_id}
-                        customer.save(update_fields=["meta"])
+                        created_gateway_customer_id = str(stripe_customer.id)
                 except Exception as e:
                     logger.warning(f"⚠️ Could not create Stripe customer: {e}")
                     gateway_customer_id = f"cus_praho_{customer_id}"
+                else:
+                    if created_gateway_customer_id:
+                        gateway_customer_id = PaymentService._persist_gateway_customer_id(
+                            customer_id, created_gateway_customer_id
+                        )
 
             # Prepare metadata
             subscription_metadata = {

@@ -477,6 +477,97 @@ class CreateSubscriptionTests(TestCase):
         self.assertFalse(result["success"])
         mock_log.assert_not_called()
 
+    @patch("apps.billing.payment_service.log_security_event")
+    @patch("apps.billing.payment_service.PaymentGatewayFactory.create_gateway")
+    def test_gateway_customer_write_preserves_meta_changed_during_network_call(
+        self, mock_create_gw: MagicMock, _mock_log: MagicMock
+    ) -> None:
+        self.customer.meta = {"existing_key": "preserve-me"}
+        self.customer.save(update_fields=["meta"])
+        gateway = _make_mock_gateway()
+
+        def create_stripe_customer(**_kwargs: Any) -> MagicMock:
+            customer_model = type(self.customer)
+            customer_model.objects.filter(pk=self.customer.pk).update(
+                meta={
+                    "existing_key": "preserve-me",
+                    "credit_balance_cents": 900,
+                    "stripe_customer_id": "cus_concurrent_winner",
+                }
+            )
+            return MagicMock(id="cus_stale_loser")
+
+        gateway._stripe.Customer.create.side_effect = create_stripe_customer
+        mock_create_gw.return_value = gateway
+
+        result = PaymentService.create_subscription(
+            customer_id=str(self.customer.id),
+            price_id="price_monthly_ron",
+        )
+
+        self.assertTrue(result["success"])
+        self.customer.refresh_from_db()
+        self.assertEqual(self.customer.meta["existing_key"], "preserve-me")
+        self.assertEqual(self.customer.meta["credit_balance_cents"], 900)
+        self.assertEqual(self.customer.meta["stripe_customer_id"], "cus_concurrent_winner")
+        gateway.create_subscription.assert_called_once_with(
+            customer_id="cus_concurrent_winner",
+            price_id="price_monthly_ron",
+            metadata={
+                "customer_id": str(self.customer.id),
+                "customer_name": self.customer.name,
+                "platform": "PRAHO",
+            },
+        )
+
+    @patch("apps.billing.payment_service.PaymentService._persist_gateway_customer_id")
+    @patch("apps.billing.payment_service.PaymentGatewayFactory.create_gateway")
+    def test_gateway_customer_persistence_failure_stops_subscription_creation(
+        self, mock_create_gw: MagicMock, mock_persist_customer_id: MagicMock
+    ) -> None:
+        gateway = _make_mock_gateway()
+        gateway._stripe.Customer.create.return_value = MagicMock(id="cus_created")
+        mock_create_gw.return_value = gateway
+        mock_persist_customer_id.side_effect = RuntimeError("database unavailable")
+
+        result = PaymentService.create_subscription(
+            customer_id=str(self.customer.id),
+            price_id="price_monthly_ron",
+        )
+
+        self.assertFalse(result["success"])
+        self.assertIn("database unavailable", result["error"])
+        gateway.create_subscription.assert_not_called()
+
+    @patch("apps.billing.payment_service.PaymentService._persist_gateway_customer_id")
+    @patch("apps.billing.payment_service.PaymentGatewayFactory.create_gateway")
+    def test_gateway_customer_retry_reuses_remote_idempotency_key(
+        self, mock_create_gw: MagicMock, mock_persist_customer_id: MagicMock
+    ) -> None:
+        gateway = _make_mock_gateway()
+        gateway._stripe.Customer.create.return_value = MagicMock(id="cus_idempotent")
+        mock_create_gw.return_value = gateway
+        mock_persist_customer_id.side_effect = [RuntimeError("database unavailable"), "cus_idempotent"]
+
+        first_result = PaymentService.create_subscription(
+            customer_id=str(self.customer.id),
+            price_id="price_monthly_ron",
+        )
+        second_result = PaymentService.create_subscription(
+            customer_id=str(self.customer.id),
+            price_id="price_monthly_ron",
+        )
+
+        self.assertFalse(first_result["success"])
+        self.assertTrue(second_result["success"])
+        customer_calls = gateway._stripe.Customer.create.call_args_list
+        self.assertEqual(len(customer_calls), 2)
+        first_key = customer_calls[0].kwargs["idempotency_key"]
+        second_key = customer_calls[1].kwargs["idempotency_key"]
+        self.assertEqual(first_key, second_key)
+        self.assertEqual(len(first_key), 64)
+        gateway.create_subscription.assert_called_once()
+
 
 # ---------------------------------------------------------------------------
 # handle_webhook_payment / _handle_stripe_payment_intent
