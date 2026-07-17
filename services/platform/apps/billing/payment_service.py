@@ -54,95 +54,31 @@ class PaymentService:
         order_id: str, gateway: str = "stripe", metadata: dict[str, Any] | None = None
     ) -> PaymentIntentResult:
         """
-        Create payment intent for order
+        Create a payment intent through the canonical, idempotent order path.
+
+        This compatibility entry point intentionally delegates to
+        ``create_payment_intent_direct`` so scheduled tasks and older callers
+        receive the same ownership, payable-state, and retry protections as the
+        Portal API.
 
         Args:
             order_id: PRAHO order UUID
             gateway: Payment gateway to use ('stripe', 'bank', etc.)
-            metadata: Additional metadata for payment
+            metadata: Additional metadata stored on the local Payment record.
+                Gateway metadata is derived from authoritative server data.
 
         Returns:
             PaymentIntentResult with client_secret for frontend integration
         """
         try:
-            # Get order details
             order = Order.objects.select_related("customer").get(id=order_id)
-
-            # Calculate total amount in cents (Romanian VAT included)
-            amount_cents = order.total_cents
-            currency = order.currency.code if order.currency else "RON"
-
-            logger.info(
-                f"💳 Creating payment intent for order {order.order_number} ({amount_cents} {currency}) via {gateway}"
+            return PaymentService.create_payment_intent_direct(
+                order_id=str(order.id),
+                customer_id=order.customer_id,
+                order_number=order.order_number,
+                gateway=gateway,
+                metadata=metadata,
             )
-
-            # Get payment gateway
-            payment_gateway = PaymentGatewayFactory.create_gateway(gateway)
-
-            # Prepare metadata
-            payment_metadata = {
-                "order_number": order.order_number,
-                "customer_id": str(order.customer.id),
-                "platform": "PRAHO",
-                **(metadata or {}),
-            }
-
-            # Create payment intent
-            result = payment_gateway.create_payment_intent(
-                order_id=str(order.id), amount_cents=amount_cents, currency=currency, metadata=payment_metadata
-            )
-
-            if result.get("success", False):
-                # Create Payment record with pending status
-                with transaction.atomic():
-                    # Get or create currency object
-                    currency_obj = None
-                    if currency:
-                        currency_obj, _ = Currency.objects.get_or_create(
-                            code=currency.upper(),
-                            defaults={
-                                "name": currency.upper(),
-                                "symbol": "RON" if currency.upper() == "RON" else currency.upper(),
-                                "decimals": 2,
-                            },
-                        )
-
-                    payment_intent_id = result.get("payment_intent_id", "")
-                    client_secret = result.get("client_secret", "")
-
-                    payment = Payment.objects.create(  # type: ignore[misc]
-                        invoice=None,  # Will be linked when order is processed
-                        customer=order.customer,
-                        payment_method=gateway,
-                        amount_cents=amount_cents,
-                        currency=currency_obj,
-                        status="pending",
-                        gateway_txn_id=payment_intent_id,
-                        meta={
-                            "payment_intent_id": payment_intent_id,
-                            "client_secret": client_secret,
-                            "order_id": str(order.id),
-                            "gateway": gateway,
-                            **payment_metadata,
-                        },
-                    )
-
-                logger.info(f"✅ Created payment {payment.id} for order {order.order_number}")
-
-                log_security_event(
-                    "payment_intent_created",
-                    {
-                        "payment_id": str(payment.id),
-                        "order_id": str(order.id),
-                        "order_number": order.order_number,
-                        "amount_cents": amount_cents,
-                        "currency": currency,
-                        "gateway": gateway,
-                        "critical_financial_operation": True,
-                    },
-                )
-
-            return result
 
         except Order.DoesNotExist:
             logger.error(f"❌ Order {order_id} not found")
@@ -150,7 +86,7 @@ class PaymentService:
                 success=False, payment_intent_id="", client_secret=None, error=f"Order {order_id} not found"
             )
         except Exception as e:
-            logger.error(f"🔥 Error creating payment intent: {e}")
+            logger.error(f"🔥 Error loading order for payment intent: {e}")
             return PaymentIntentResult(
                 success=False, payment_intent_id="", client_secret=None, error=f"Payment creation failed: {e}"
             )
@@ -173,9 +109,10 @@ class PaymentService:
             amount_cents: Amount in cents
             currency: ISO currency code (default: RON)
             customer_id: Customer ID for the payment
-            order_number: Human-readable order number
+            order_number: Optional assertion of the authoritative order number
             gateway: Payment gateway to use ('stripe', 'bank', etc.)
-            metadata: Additional metadata for payment
+            metadata: Additional metadata stored on the local Payment record.
+                Gateway metadata is derived from authoritative server data.
 
         Returns:
             PaymentIntentResult with client_secret for frontend integration
@@ -228,6 +165,14 @@ class PaymentService:
                     payment_intent_id="",
                     client_secret=None,
                     error="amount_cents does not match order total",
+                )
+
+            if order_number is not None and order_number != order.order_number:
+                return PaymentIntentResult(
+                    success=False,
+                    payment_intent_id="",
+                    client_secret=None,
+                    error="order_number does not match the authoritative order",
                 )
 
             order_payment_filter = {
@@ -311,7 +256,7 @@ class PaymentService:
                 "order_number": resolved_order_number,
                 "customer_id": str(customer_id_int),
                 "platform": "PRAHO",
-                "source": "portal_api",
+                "source": "payment_service",
                 "order_id": str(order.id),
                 "gateway": gateway,
             }
@@ -417,7 +362,7 @@ class PaymentService:
                             "amount_cents": expected_amount_cents,
                             "currency": resolved_currency,
                             "gateway": gateway,
-                            "source": "portal_api",
+                            "source": "payment_service",
                             "critical_financial_operation": True,
                         },
                     )

@@ -154,6 +154,44 @@ class PaymentIntentStatusGuardTests(TestCase):
         )
         self.assertTrue(result["success"])
 
+    @patch("apps.billing.payment_service.PaymentGatewayFactory")
+    def test_mismatched_order_number_is_rejected_before_gateway_call(self, mock_gw_factory: MagicMock) -> None:
+        order = _create_order(self.customer, status="awaiting_payment", total_cents=25000)
+
+        result = PaymentService.create_payment_intent_direct(
+            order_id=str(order.id),
+            customer_id=str(self.customer.id),
+            order_number="ORD-CALLER-MISMATCH",
+        )
+
+        self.assertFalse(result["success"])
+        self.assertIn("order_number does not match", result["error"] or "")
+        mock_gw_factory.create_gateway.assert_not_called()
+
+    @patch("apps.billing.payment_service.log_security_event", MagicMock())
+    @patch("apps.billing.payment_service.PaymentGatewayFactory")
+    def test_matching_order_number_uses_authoritative_value(self, mock_gw_factory: MagicMock) -> None:
+        gateway = MagicMock()
+        gateway.create_payment_intent.return_value = {
+            "success": True,
+            "payment_intent_id": "pi_matching_order_number",
+            "client_secret": "sec_matching_order_number",
+        }
+        mock_gw_factory.create_gateway.return_value = gateway
+        order = _create_order(self.customer, status="awaiting_payment", total_cents=25000)
+
+        result = PaymentService.create_payment_intent_direct(
+            order_id=str(order.id),
+            customer_id=str(self.customer.id),
+            order_number=order.order_number,
+        )
+
+        self.assertTrue(result["success"])
+        self.assertEqual(
+            gateway.create_payment_intent.call_args.kwargs["metadata"]["order_number"],
+            order.order_number,
+        )
+
 
 class PaymentIntentIdempotencyTests(TestCase):
     """H19: Duplicate payment intent creation must be prevented."""

@@ -811,6 +811,51 @@ class OrderServiceCreationTestCase(TestCase):
         self.assertEqual(first_service.status, "pending")
         self.assertEqual(second_service.status, "pending")
 
+    def test_committed_service_transition_survives_audit_callback_failure(self):
+        """A post-commit audit failure must not turn a committed transition into an error."""
+        from apps.orders.services import OrderServiceCreationService  # noqa: PLC0415
+        from apps.provisioning.models import Service  # noqa: PLC0415
+
+        order = Order.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            customer_email=self.customer.primary_email,
+            customer_name=self.customer.name,
+            subtotal_cents=2999,
+            tax_cents=0,
+            total_cents=2999,
+            billing_address={},
+        )
+        service = Service.objects.create(
+            customer=self.customer,
+            service_plan=self.service_plan,
+            currency=self.currency,
+            service_name="Audit callback service",
+            username="audit_callback_service",
+            billing_cycle="monthly",
+            price=Decimal("29.99"),
+        )
+        OrderItem.objects.create(
+            order=order,
+            product=self.product,
+            product_name=self.product.name,
+            product_type=self.product.product_type,
+            quantity=1,
+            unit_price_cents=2999,
+            line_total_cents=2999,
+            service=service,
+        )
+
+        with (
+            patch("apps.orders.services.log_security_event", side_effect=RuntimeError("audit unavailable")),
+            self.captureOnCommitCallbacks(execute=True),
+        ):
+            result = OrderServiceCreationService.update_service_status_on_payment(order)
+
+        self.assertTrue(result.is_ok())
+        service.refresh_from_db()
+        self.assertEqual(service.status, "provisioning")
+
     def test_service_creation_without_service_plan(self):
         """Test service creation when product has no default service plan"""
         from apps.orders.services import OrderServiceCreationService
@@ -1177,6 +1222,23 @@ class ConfirmOrderAuditHistoryOrderTestCase(TestCase):
             "paid",
             "First history record new_status must be 'paid'.",
         )
+
+    @patch("apps.orders.services.OrderPaymentConfirmationService._get_review_threshold")
+    def test_second_transition_failure_rolls_back_first_history_record(self, mock_threshold: object) -> None:
+        """A failed paid-to-provisioning transition must leave no partial paid history."""
+        from apps.orders.models import OrderStatusHistory  # noqa: PLC0415
+        from apps.orders.services import OrderPaymentConfirmationService  # noqa: PLC0415
+
+        mock_threshold.return_value = 1_000_000_00
+        order = self._create_awaiting_payment_order(total_cents=12100)
+
+        with patch.object(Order, "start_provisioning", side_effect=RuntimeError("transition failed")):
+            result = OrderPaymentConfirmationService.confirm_order(order)
+
+        self.assertTrue(result.is_err())
+        order.refresh_from_db()
+        self.assertEqual(order.status, "awaiting_payment")
+        self.assertFalse(OrderStatusHistory.objects.filter(order=order).exists())
 
 
 # ===============================================================================

@@ -843,7 +843,7 @@ class OrderServiceCreationService:
                                 details,
                             )
 
-                        transaction.on_commit(log_committed_transition)
+                        transaction.on_commit(log_committed_transition, robust=True)
 
             return Ok(updated_services)
 
@@ -983,6 +983,7 @@ class OrderPaymentConfirmationService:
             )
             return Err(f"Order {order.pk} no longer exists — cannot confirm")
         except (TransitionNotAllowed, ConcurrentTransition) as e:
+            transaction.set_rollback(True)
             logger.warning(
                 "⚠️ [OrderConfirm] FSM transition denied for %s (in-memory status=%s): %s",
                 order.order_number,
@@ -991,6 +992,7 @@ class OrderPaymentConfirmationService:
             )
             return Err(f"Order transition denied at status '{order.status}': {e}")
         except Exception as e:
+            transaction.set_rollback(True)
             logger.exception("🔥 [OrderConfirm] Failed to confirm order %s: %s", order.order_number, e)
             return Err(f"Failed to confirm order: {e}")
 
