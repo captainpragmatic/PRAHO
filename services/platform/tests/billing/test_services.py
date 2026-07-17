@@ -918,12 +918,12 @@ class InvoiceServiceCreateFromOrderBillToNameTestCase(TestCase):
     was produced at all.
     """
 
-    def setUp(self):
+    def setUp(self) -> None:
         self.currency, _ = Currency.objects.get_or_create(
             code='RON', defaults={'name': 'Romanian Leu', 'symbol': 'lei', 'is_active': True}
         )
 
-    def _order_for(self, customer):
+    def _order_for(self, customer: Customer) -> Any:
         from apps.orders.models import Order
 
         return Order.objects.create(
@@ -936,7 +936,7 @@ class InvoiceServiceCreateFromOrderBillToNameTestCase(TestCase):
             total_cents=11900,
         )
 
-    def test_create_from_order_names_an_individual_customer(self):
+    def test_create_from_order_names_an_individual_customer(self) -> None:
         """An individual has no company_name, so the invoice is named from Customer.name."""
         customer = Customer.objects.create(
             name='Ion Popescu',
@@ -951,7 +951,7 @@ class InvoiceServiceCreateFromOrderBillToNameTestCase(TestCase):
         self.assertTrue(result.is_ok(), f'invoice creation failed: {result}')
         self.assertEqual(result.value.bill_to_name, 'Ion Popescu')
 
-    def test_create_from_order_prefers_company_name_for_companies(self):
+    def test_create_from_order_prefers_company_name_for_companies(self) -> None:
         """Non-regression: a company is still billed under its company_name, not its name."""
         customer = Customer.objects.create(
             name='Internal Shortname',
@@ -966,7 +966,7 @@ class InvoiceServiceCreateFromOrderBillToNameTestCase(TestCase):
         self.assertTrue(result.is_ok(), f'invoice creation failed: {result}')
         self.assertEqual(result.value.bill_to_name, 'Test Company SRL')
 
-    def test_create_from_order_names_pfa_and_ngo_customers(self):
+    def test_create_from_order_names_pfa_and_ngo_customers(self) -> None:
         """pfa/ngo also leave company_name empty and hit the same path as individuals."""
         for customer_type, name in (('pfa', 'Popescu Ion PFA'), ('ngo', 'Asociatia Test')):
             with self.subTest(customer_type=customer_type):
