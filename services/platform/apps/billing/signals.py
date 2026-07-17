@@ -37,6 +37,7 @@ from apps.audit.services import (
 )
 from apps.common.validators import log_security_event
 
+from .efactura.eligibility import requires_efactura
 from .models import (
     CreditLedger,
     Invoice,
@@ -89,7 +90,6 @@ def _serialize_values_for_audit(values: dict[str, Any]) -> dict[str, Any]:
 
 # Financial thresholds in cents (Romanian business context)
 LARGE_REFUND_THRESHOLD_CENTS = 50000  # 500 EUR - requires finance team notification
-E_FACTURA_MINIMUM_AMOUNT = 100  # 100 RON - minimum for mandatory e-Factura
 
 # ===============================================================================
 # MODEL LIFECYCLE COVERAGE SIGNALS
@@ -403,8 +403,10 @@ def handle_invoice_created_or_updated(sender: type[Invoice], instance: Invoice, 
                 if instance.status == "refunded" and old_status != "refunded":
                     _handle_invoice_refund_completion(instance)
 
-        # Handle specific Romanian compliance requirements
-        if instance.status == "issued" and not instance.efactura_sent:
+        # Transitions are handled by _handle_invoice_issued(). A newly-created
+        # invoice may already be issued, so cover only that path here to avoid
+        # duplicate queue entries on draft -> issued transitions.
+        if created and instance.status == "issued" and not instance.efactura_sent and requires_efactura(instance):
             _trigger_efactura_submission(instance)
 
         # EXTENDED: Update billing analytics
@@ -1084,7 +1086,7 @@ def _handle_invoice_issued(invoice: Invoice) -> None:
         _send_invoice_issued_email(invoice)
         _schedule_payment_reminders(invoice)
 
-        if _requires_efactura_submission(invoice):
+        if requires_efactura(invoice):
             _trigger_efactura_submission(invoice)
 
         compliance_request = ComplianceEventRequest(
@@ -1475,13 +1477,6 @@ def _notify_finance_team_large_refund(invoice: Invoice) -> None:
 # ===============================================================================
 # BUSINESS LOGIC UTILITY FUNCTIONS
 # ===============================================================================
-
-
-def _requires_efactura_submission(invoice: Invoice) -> bool:
-    """Check if invoice requires e-Factura submission"""
-    return (
-        invoice.bill_to_country == "RO" and bool(invoice.bill_to_tax_id) and invoice.total >= E_FACTURA_MINIMUM_AMOUNT
-    )
 
 
 def _trigger_efactura_submission(invoice: Invoice) -> None:

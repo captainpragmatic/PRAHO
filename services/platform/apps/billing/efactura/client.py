@@ -613,9 +613,9 @@ class EFacturaClient:
         """Upload a B2C (consumer) invoice via ANAF's ``/uploadb2c`` endpoint.
 
         B2C e-invoicing has been mandatory since Jan 2025. The document is the same UBL, but the
-        endpoint differs and the buyer is identified by CNP rather than a CUI. The buyer-side XML
-        rules are live-contract sensitive (HIGHER risk) and MUST be confirmed against the ANAF
-        sandbox before go-live; this method's request shape is contract-fixture verified only.
+        endpoint differs and buyer legal identifier BT-47 contains either a supplied CNP or the
+        statutory thirteen zeroes. This method's request shape is contract-fixture verified; a
+        credentialed ANAF sandbox smoke test remains a separate pre-production gate.
         """
         if not self.config.is_valid():
             return UploadResponse.error("Invalid e-Factura configuration")

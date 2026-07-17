@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Romanian B2B/B2C e-Factura eligibility** — removed invalid amount and rollout gates from direct and signal-triggered submissions, centralized Romanian buyer classification, routed consumers through `/uploadb2c`, and emitted the statutory BT-47 buyer identifier (supplied CNP or thirteen zeroes) without VAT-registration elements. Obsolete B2B/B2C compliance settings are removed irreversibly. (#221)
 - **e-Factura prepaid balance** — partially-paid invoices now emit PrepaidAmount (BT-113) and a PayableAmount (BT-115) reduced by net collected payments (PayableAmount = TaxInclusive - Prepaid, BR-CO-16), derived from the refund-aware remaining balance. Completes the remaining scope of #178. (#177)
 - **e-Factura setup fees + document discounts** — represented document-level discounts (BT-92/BT-107 via a stored, frozen `discount_cents` and a BG-20 `AllowanceCharge`) and setup fees (as their own invoice line), so discounted/setup invoices reconcile (BT-106 = Σ line BT-131, TaxExclusive = TaxableAmount = net, BR-CO-10/13/14/17). The discount is derived from the totals invariant so legacy invoices reconcile without a backfill, and all three e-Factura XML paths (ANAF submission, staff download, legacy submission service) now route through the single canonical builder. Refund-aware invoice remaining balance (#189). (#188, #189)
 

@@ -153,10 +153,11 @@ class OrdersConfig(AppConfig):
 
 ### e-Factura Integration
 ```python
-# Automatic e-Factura submission
-@receiver(post_save, sender=Invoice)
-def handle_invoice_issued():
-    if _requires_efactura_submission(invoice):
+# Called once by the invoice status-transition dispatcher
+from apps.billing.efactura.eligibility import requires_efactura
+
+def _handle_invoice_issued(invoice):
+    if requires_efactura(invoice):
         _trigger_efactura_submission(invoice)
 ```
 

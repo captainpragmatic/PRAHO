@@ -211,19 +211,11 @@ class Command(BaseCommand):
                 "data_type": "decimal",
                 "is_sensitive": False,
             },
-            # B2B/B2C
+            # B2B
             {
                 "key": EFacturaSettingKeys.B2B_ENABLED,
                 "name": "B2B e-Factura Enabled",
                 "description": "Enable B2B e-Factura (mandatory since Jan 2024)",
-                "category": "efactura",
-                "data_type": "boolean",
-                "is_sensitive": False,
-            },
-            {
-                "key": EFacturaSettingKeys.B2C_ENABLED,
-                "name": "B2C e-Factura Enabled",
-                "description": "Enable B2C e-Factura (mandatory from Jan 2025)",
                 "category": "efactura",
                 "data_type": "boolean",
                 "is_sensitive": False,

@@ -9,6 +9,7 @@ from django.test import TestCase, override_settings
 from django.utils import timezone
 from lxml import etree
 
+from apps.billing.efactura.validator import CIUSROValidator
 from apps.billing.efactura.xml_builder import (
     CIUS_RO_CUSTOMIZATION_ID,
     NAMESPACES,
@@ -718,16 +719,41 @@ class UBLInvoiceBuilderTestCase(TestCase):
 
         self.assertIn("Customer name is required", str(context.exception))
 
-    def test_validation_error_missing_tax_id_for_romanian_b2b(self):
-        """Test that validation fails for missing tax ID in Romanian B2B."""
+    def test_romanian_b2c_without_tax_id_uses_thirteen_zero_identifier(self):
+        """Law 88/2026 requires thirteen zeroes when a consumer provides no fiscal ID."""
         self.invoice.bill_to_country = "RO"
         self.invoice.bill_to_tax_id = ""
 
-        builder = UBLInvoiceBuilder(self.invoice)
-        with self.assertRaises(XMLBuilderError) as context:
-            builder.build()
+        doc = etree.fromstring(UBLInvoiceBuilder(self.invoice).build().encode())
+        customer = doc.find(f".//{{{NAMESPACES['cac']}}}AccountingCustomerParty")
+        self.assertIsNotNone(customer)
+        buyer_id = customer.find(
+            f".//{{{NAMESPACES['cac']}}}PartyLegalEntity/{{{NAMESPACES['cbc']}}}CompanyID"
+        )
 
-        self.assertIn("Romanian B2B invoice requires customer tax ID", str(context.exception))
+        self.assertIsNotNone(buyer_id)
+        self.assertEqual(buyer_id.text, "0000000000000")
+        self.assertIsNone(
+            customer.find(f".//{{{NAMESPACES['cac']}}}PartyTaxScheme"),
+            "An unidentified consumer must not be represented as VAT-registered",
+        )
+        validation = CIUSROValidator().validate(etree.tostring(doc, encoding="unicode"))
+        self.assertTrue(validation.is_valid, [error.to_dict() for error in validation.errors])
+
+    def test_romanian_b2c_with_cnp_uses_cnp_as_buyer_legal_identifier(self):
+        """A consumer-provided CNP belongs in BT-47 without VAT-registration elements."""
+        self.invoice.bill_to_country = "RO"
+        self.invoice.bill_to_tax_id = "1850101123456"
+
+        doc = etree.fromstring(UBLInvoiceBuilder(self.invoice).build().encode())
+        customer = doc.find(f".//{{{NAMESPACES['cac']}}}AccountingCustomerParty")
+        buyer_id = customer.find(
+            f".//{{{NAMESPACES['cac']}}}PartyLegalEntity/{{{NAMESPACES['cbc']}}}CompanyID"
+        )
+
+        self.assertEqual(buyer_id.text, "1850101123456")
+        self.assertIsNone(customer.find(f".//{{{NAMESPACES['cac']}}}PartyIdentification"))
+        self.assertIsNone(customer.find(f".//{{{NAMESPACES['cac']}}}PartyTaxScheme"))
 
     @override_settings(COMPANY_NAME="")
     def test_validation_error_missing_supplier_config(self):
@@ -836,6 +862,21 @@ class UBLCreditNoteBuilderTestCase(TestCase):
 
         # Root should be CreditNote
         self.assertTrue(doc.tag.endswith("CreditNote"))
+
+    def test_romanian_b2c_credit_note_uses_anonymous_buyer_legal_identifier(self):
+        """B2C buyer identification must be consistent on invoice and credit-note UBL."""
+        self.credit_note.bill_to_tax_id = ""
+
+        doc = etree.fromstring(
+            UBLCreditNoteBuilder(self.credit_note, self.original_invoice).build().encode()
+        )
+        customer = doc.find(f".//{{{NAMESPACES['cac']}}}AccountingCustomerParty")
+        buyer_id = customer.find(
+            f".//{{{NAMESPACES['cac']}}}PartyLegalEntity/{{{NAMESPACES['cbc']}}}CompanyID"
+        )
+
+        self.assertEqual(buyer_id.text, "0000000000000")
+        self.assertIsNone(customer.find(f".//{{{NAMESPACES['cac']}}}PartyTaxScheme"))
 
     def test_credit_note_contains_billing_reference(self):
         """Test that credit note references original invoice."""

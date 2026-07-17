@@ -30,6 +30,7 @@ from xml.etree import ElementTree as ET
 from django.conf import settings
 from django.utils import timezone
 
+from apps.billing.efactura.eligibility import is_romanian_b2c
 from apps.common.types import Err, Ok, Result
 
 if TYPE_CHECKING:
@@ -581,7 +582,9 @@ class EFacturaSubmissionService:
         logger.info(f"🏛️ [e-Factura] Submitting invoice {invoice.number} to ANAF")
         try:
             client = EFacturaClient(config)
-            upload_resp = client.upload_invoice(xml_content)
+            upload_resp = (
+                client.upload_b2c(xml_content) if is_romanian_b2c(invoice) else client.upload_invoice(xml_content)
+            )
         except EFacturaClientError as exc:
             logger.error(f"🔥 [e-Factura] Client error submitting {invoice.number}: {exc}")
             return EFacturaSubmissionResult(

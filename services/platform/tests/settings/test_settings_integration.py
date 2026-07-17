@@ -17,15 +17,17 @@ See also: test_billing_terms.py for the original billing-term integration tests.
 
 from __future__ import annotations
 
+import importlib
 from decimal import Decimal
 
+from django.apps import apps as django_apps
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 
+from apps.settings.models import SystemSetting
 from apps.settings.services import SettingsService
 from apps.tickets.monitoring import SecurityEventTracker
 from apps.tickets.security import TicketAttachmentSecurityScanner
-
 
 # ── Tickets ───────────────────────────────────────────────────────────────────
 
@@ -380,3 +382,42 @@ class DefaultSettingsCompleteness(TestCase):
     def test_default_settings_not_empty(self) -> None:
         """DEFAULT_SETTINGS must contain entries."""
         self.assertGreater(len(SettingsService.DEFAULT_SETTINGS), 0)
+
+    def test_obsolete_efactura_compliance_gates_are_not_configurable(self) -> None:
+        """Mandatory Romanian B2B/B2C reporting must not expose rollout or amount gates."""
+        self.assertNotIn("billing.efactura_minimum_amount_cents", SettingsService.DEFAULT_SETTINGS)
+
+
+class ObsoleteEFacturaThresholdMigrationTests(TestCase):
+    """The data migration removes only obsolete e-Factura compliance gates."""
+
+    @staticmethod
+    def _create_setting(key: str, value: int) -> SystemSetting:
+        return SystemSetting.objects.create(
+            key=key,
+            category=key.split(".", 1)[0],
+            name=key,
+            description="Migration regression fixture",
+            data_type="integer",
+            value=value,
+            default_value=value,
+        )
+
+    def test_removes_obsolete_compliance_gates_and_preserves_other_settings(self) -> None:
+        legacy_keys = {
+            "billing.efactura_minimum_amount_cents",
+            "efactura.b2b.minimum_amount_cents",
+            "efactura.b2c.enabled",
+            "efactura.b2c.minimum_amount_cents",
+        }
+        for key in legacy_keys:
+            self._create_setting(key, 10000)
+        retained = self._create_setting("billing.efactura_batch_size", 100)
+
+        migration = importlib.import_module(
+            "apps.settings.migrations.0002_remove_obsolete_efactura_compliance_settings"
+        )
+        migration.remove_obsolete_efactura_compliance_settings(django_apps, None)
+
+        self.assertFalse(SystemSetting.objects.filter(key__in=legacy_keys).exists())
+        self.assertTrue(SystemSetting.objects.filter(pk=retained.pk).exists())

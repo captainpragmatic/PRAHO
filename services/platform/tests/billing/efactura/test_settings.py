@@ -262,9 +262,12 @@ class EFacturaSettingsTestCase(TestCase):
         """Test B2B is enabled by default (mandatory since 2024)."""
         self.assertTrue(self.settings.b2b_enabled)
 
-    def test_b2c_disabled_by_default(self):
-        """Test B2C is disabled by default (until 2025)."""
-        self.assertFalse(self.settings.b2c_enabled)
+    def test_b2c_compliance_cannot_be_feature_gated(self):
+        """Mandatory B2C reporting exposes neither an enabled nor an amount setting."""
+        self.assertFalse(hasattr(EFacturaSettingKeys, "B2C_ENABLED"))
+        self.assertFalse(hasattr(EFacturaSettingKeys, "B2C_MINIMUM_AMOUNT"))
+        self.assertNotIn("efactura.b2c.enabled", EFACTURA_DEFAULTS)
+        self.assertNotIn("efactura.b2c.minimum_amount_cents", EFACTURA_DEFAULTS)
 
     def test_archive_retention_years(self):
         """Test archive retention is 10 years (Romanian law)."""

@@ -206,34 +206,6 @@ DEFAULT_ALERT_COOLDOWN_HOURS = _DEFAULT_ALERT_COOLDOWN_HOURS
 
 
 # ===============================================================================
-# E-FACTURA (ROMANIAN ELECTRONIC INVOICING)
-# ===============================================================================
-
-# Module-level fallback for e-Factura minimum amount
-_DEFAULT_EFACTURA_MINIMUM_AMOUNT_CENTS = 10000  # 100 RON
-
-
-def get_efactura_minimum_amount_cents() -> int:
-    """Get minimum amount for mandatory e-Factura submission from SettingsService."""
-    try:
-        return max(
-            1,
-            SettingsService.get_integer_setting(
-                "billing.efactura_minimum_amount_cents", _DEFAULT_EFACTURA_MINIMUM_AMOUNT_CENTS
-            ),
-        )
-    except Exception:
-        logger.warning(
-            "Failed to read efactura_minimum_amount_cents from SettingsService, using fallback", exc_info=True
-        )
-        return _get_positive_int("BILLING_EFACTURA_MINIMUM_CENTS", _DEFAULT_EFACTURA_MINIMUM_AMOUNT_CENTS)
-
-
-# Backward-compatible module-level alias
-E_FACTURA_MINIMUM_AMOUNT_CENTS = _DEFAULT_EFACTURA_MINIMUM_AMOUNT_CENTS
-
-
-# ===============================================================================
 # HELPER FUNCTIONS
 # ===============================================================================
 

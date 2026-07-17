@@ -10,6 +10,7 @@ from __future__ import annotations
 import re
 from datetime import timedelta
 from decimal import Decimal
+from unittest.mock import Mock, patch
 from xml.etree import ElementTree as ET
 
 from django.test import TestCase, override_settings
@@ -365,6 +366,15 @@ class EFacturaXMLGeneratorTest(TestCase):
         self.assertIn("INV-XML-001", xml)
         self.assertIn("CustomizationID", xml)
 
+    def test_generates_canonical_b2c_ubl_with_anonymous_buyer_identifier(self) -> None:
+        """The legacy entry point must use the same compliant B2C builder as the primary service."""
+        self.invoice.bill_to_tax_id = ""
+
+        xml = self.generator.generate_invoice_xml(self.invoice).unwrap()
+
+        self.assertIn("0000000000000", xml)
+        self.assertNotIn("RO:CNP", xml)
+
     def test_incomplete_invoice_returns_err(self) -> None:
         bad = create_invoice(self.customer, self.currency, number="INV-BAD", total_cents=100)
         result = self.generator.generate_invoice_xml(bad)  # no lines / bill_to -> validation fails
@@ -435,6 +445,32 @@ class EFacturaSubmissionServiceTest(TestCase):
     def test_submit_invoice_includes_xml_hash(self) -> None:
         result = self.service.submit_invoice(self.invoice)
         self.assertIn("xml_hash", result.response_data)
+
+    @override_settings(DEBUG=False)
+    @patch("apps.billing.efactura.client.EFacturaClient")
+    @patch("apps.billing.efactura.client.EFacturaConfig.from_settings")
+    def test_submit_b2c_invoice_uses_b2c_endpoint(self, mock_from_settings, mock_client_class) -> None:
+        """Every submission entry point must route a Romanian consumer invoice to /uploadb2c."""
+        self.invoice.bill_to_tax_id = ""
+        config = Mock()
+        config.is_valid.return_value = True
+        mock_from_settings.return_value = config
+        client = mock_client_class.return_value
+        client.upload_b2c.return_value = Mock(
+            success=True,
+            upload_index="B2C-LEGACY-1",
+            raw_response={},
+        )
+        generated = Mock()
+        generated.is_ok.return_value = True
+        generated.unwrap.return_value = "<Invoice/>"
+
+        with patch.object(self.service.xml_generator, "generate_invoice_xml", return_value=generated):
+            result = self.service.submit_invoice(self.invoice)
+
+        self.assertTrue(result.success)
+        client.upload_b2c.assert_called_once_with("<Invoice/>")
+        client.upload_invoice.assert_not_called()
 
     def test_submit_invoice_simulated_flag(self) -> None:
         result = self.service.submit_invoice(self.invoice)

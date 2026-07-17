@@ -89,7 +89,6 @@ class SettingsService:
         "billing.negative_balance_threshold": "-100.00",
         "billing.subscription_grace_period_days": 7,
         "billing.max_payment_retry_attempts": 5,
-        "billing.efactura_minimum_amount_cents": 10000,
         "billing.efactura_submission_deadline_days": 5,
         "billing.efactura_deadline_warning_hours": 24,
         "billing.efactura_batch_size": 100,

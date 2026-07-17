@@ -26,6 +26,8 @@ if TYPE_CHECKING:
 from apps.billing.config import is_eu_country
 from apps.common.tax_service import TaxService
 
+from .eligibility import ANONYMOUS_B2C_BUYER_ID, is_romanian_b2c
+
 logger = logging.getLogger(__name__)
 
 # UBL 2.1 Namespaces
@@ -481,10 +483,6 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
         if not self.invoice.bill_to_country:
             errors.append("Customer country is required")
 
-        # Romanian B2B requires tax ID
-        if self.invoice.bill_to_country == "RO" and not self.invoice.bill_to_tax_id:
-            errors.append("Romanian B2B invoice requires customer tax ID (CUI)")
-
         if not self.invoice.lines.exists():
             errors.append("Invoice must have at least one line item")
 
@@ -589,7 +587,9 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
         customer = self._get_customer_info()
 
         # PartyIdentification with CUI - Mandatory for Romanian B2B
-        if customer.tax_id:
+        customer_tax_id = customer.tax_id.strip()
+        is_b2c = is_romanian_b2c(self.invoice)
+        if customer_tax_id and not is_b2c:
             party_id = self._add_cac(party, "PartyIdentification")
             id_elem = self._add_cbc(party_id, "ID", customer.numeric_tax_id)
 
@@ -608,11 +608,14 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
         self._add_postal_address(party, customer)
 
         # PartyTaxScheme - Mandatory if VAT registered
-        if customer.tax_id:
+        if customer_tax_id and not is_b2c:
             self._add_party_tax_scheme(party, customer.vat_number)
 
         # PartyLegalEntity - Mandatory
-        self._add_party_legal_entity(party, customer.name, customer.registration_number)
+        legal_identifier = customer.registration_number
+        if is_b2c:
+            legal_identifier = customer_tax_id or ANONYMOUS_B2C_BUYER_ID
+        self._add_party_legal_entity(party, customer.name, legal_identifier)
 
         # Contact - Optional
         self._add_contact(party, customer)
@@ -1050,7 +1053,9 @@ class UBLCreditNoteBuilder(BaseUBLBuilder):
         party = self._add_cac(customer_party, "Party")
         customer = self._get_customer_info()
 
-        if customer.tax_id:
+        customer_tax_id = customer.tax_id.strip()
+        is_b2c = is_romanian_b2c(self.invoice)
+        if customer_tax_id and not is_b2c:
             party_id = self._add_cac(party, "PartyIdentification")
             id_elem = self._add_cbc(party_id, "ID", customer.numeric_tax_id)
             id_elem.set("schemeID", "RO:CUI" if customer.country_code == "RO" else f"{customer.country_code}:VAT")
@@ -1060,10 +1065,13 @@ class UBLCreditNoteBuilder(BaseUBLBuilder):
 
         self._add_postal_address(party, customer)
 
-        if customer.tax_id:
+        if customer_tax_id and not is_b2c:
             self._add_party_tax_scheme(party, customer.vat_number)
 
-        self._add_party_legal_entity(party, customer.name, customer.registration_number)
+        legal_identifier = customer.registration_number
+        if is_b2c:
+            legal_identifier = customer_tax_id or ANONYMOUS_B2C_BUYER_ID
+        self._add_party_legal_entity(party, customer.name, legal_identifier)
 
     def _add_tax_total(self) -> None:
         """Add TaxTotal element."""

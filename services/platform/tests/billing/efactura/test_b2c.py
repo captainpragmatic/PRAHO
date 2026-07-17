@@ -216,10 +216,7 @@ class B2CDetectorTestCase(TestCase):
     """Test B2CDetector class."""
 
     def setUp(self):
-        self.mock_settings = Mock()
-        self.mock_settings.b2c_enabled = True
-        self.mock_settings.b2c_minimum_amount_cents = 0
-        self.detector = B2CDetector(settings=self.mock_settings)
+        self.detector = B2CDetector()
 
     def test_detect_b2c_romanian_no_tax_id(self):
         """Test detecting B2C invoice - Romanian buyer without tax ID."""
@@ -259,9 +256,8 @@ class B2CDetectorTestCase(TestCase):
         self.assertFalse(result.is_b2c)
 
     def test_detect_b2c_disabled(self):
-        """Test B2C detection when disabled in settings."""
-        self.mock_settings.b2c_enabled = False
-        detector = B2CDetector(settings=self.mock_settings)
+        """A stale rollout setting cannot disable mandatory B2C reporting."""
+        detector = B2CDetector()
 
         invoice = Mock()
         invoice.bill_to_country = "RO"
@@ -272,12 +268,10 @@ class B2CDetectorTestCase(TestCase):
         result = detector.detect(invoice)
 
         self.assertTrue(result.is_b2c)
-        self.assertFalse(result.requires_efactura)
+        self.assertTrue(result.requires_efactura)
 
     def test_detect_under_minimum_amount(self):
-        """Test B2C under minimum amount."""
-        self.mock_settings.b2c_minimum_amount_cents = 50000  # 500 EUR minimum
-
+        """B2C reporting has no minimum amount threshold."""
         invoice = Mock()
         invoice.bill_to_country = "RO"
         invoice.bill_to_tax_id = None
@@ -287,12 +281,10 @@ class B2CDetectorTestCase(TestCase):
         result = self.detector.detect(invoice)
 
         self.assertTrue(result.is_b2c)
-        self.assertFalse(result.requires_efactura)
+        self.assertTrue(result.requires_efactura)
 
     def test_detect_above_minimum_amount(self):
         """Test B2C above minimum amount."""
-        self.mock_settings.b2c_minimum_amount_cents = 5000  # 50 EUR minimum
-
         invoice = Mock()
         invoice.bill_to_country = "RO"
         invoice.bill_to_tax_id = None
@@ -348,8 +340,8 @@ class B2CXMLBuilderTestCase(TestCase):
     """Test B2CXMLBuilder class."""
 
     def test_scheme_id_constant(self):
-        """Test B2C scheme ID is correct."""
-        self.assertEqual(B2CXMLBuilder.B2C_SCHEME_ID, "RO:CNP")
+        """BT-47 has no invented RO:CNP scheme attribute."""
+        self.assertEqual(B2CXMLBuilder.B2C_SCHEME_ID, "")
 
     def test_test_cnp_constant(self):
         """Test ANAF test CNP is all zeros."""
@@ -362,20 +354,22 @@ class B2CXMLBuilderTestCase(TestCase):
             name="Ion Popescu",
         )
         self.assertEqual(result["identifier"], "1850101123456")
-        self.assertEqual(result["scheme_id"], "RO:CNP")
+        self.assertEqual(result["scheme_id"], "")
+        self.assertEqual(result["business_term"], "BT-47")
         self.assertEqual(result["name"], "Ion Popescu")
         self.assertTrue(result["is_b2c"])
         self.assertFalse(result["has_vat_registration"])
 
     def test_get_buyer_identification_without_cnp_production(self):
-        """Test buyer identification without CNP in production."""
+        """An unidentified consumer uses the statutory thirteen-zero identifier."""
         result = B2CXMLBuilder.get_buyer_identification(
             cnp=None,
             name="Ion Popescu",
             is_test_environment=False,
         )
-        self.assertEqual(result["identifier"], "")
+        self.assertEqual(result["identifier"], "0000000000000")
         self.assertEqual(result["scheme_id"], "")
+        self.assertEqual(result["business_term"], "BT-47")
 
     def test_get_buyer_identification_without_cnp_test(self):
         """Test buyer identification without CNP in test environment."""
@@ -385,7 +379,8 @@ class B2CXMLBuilderTestCase(TestCase):
             is_test_environment=True,
         )
         self.assertEqual(result["identifier"], "0000000000000")
-        self.assertEqual(result["scheme_id"], "RO:CNP")
+        self.assertEqual(result["scheme_id"], "")
+        self.assertEqual(result["business_term"], "BT-47")
 
     def test_validate_for_submission_test_environment(self):
         """Test validation in test environment is always valid."""
@@ -397,13 +392,13 @@ class B2CXMLBuilderTestCase(TestCase):
         self.assertEqual(error, "")
 
     def test_validate_for_submission_production_no_cnp(self):
-        """Test validation in production without CNP fails."""
+        """A consumer CNP is optional because the statutory zero identifier is valid."""
         is_valid, error = B2CXMLBuilder.validate_for_submission(
             cnp=None,
             is_test_environment=False,
         )
-        self.assertFalse(is_valid)
-        self.assertIn("CNP is required", error)
+        self.assertTrue(is_valid)
+        self.assertEqual(error, "")
 
     def test_validate_for_submission_production_invalid_cnp(self):
         """Test validation in production with invalid CNP fails."""
@@ -463,11 +458,10 @@ class B2CEdgeCasesTestCase(TestCase):
             # Expected to fail on date validation
             pass
 
-    def test_b2c_detector_default_settings(self):
-        """Test B2CDetector with default settings."""
+    def test_b2c_detector_has_no_compliance_toggle(self):
+        """Mandatory B2C reporting must not depend on mutable rollout settings."""
         detector = B2CDetector()
-        # Should work with default efactura_settings
-        self.assertIsNotNone(detector._settings)
+        self.assertFalse(hasattr(detector, "_settings"))
 
 
 class CNPCountyCodesTestCase(TestCase):

@@ -13,6 +13,7 @@ from django.db import transaction
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
+from apps.billing.efactura.eligibility import requires_b2b_efactura
 from apps.billing.models import (
     CreditLedger,
     Currency,
@@ -27,7 +28,6 @@ from apps.billing.models import (
     VATValidation,
 )
 from apps.billing.signals import (
-    E_FACTURA_MINIMUM_AMOUNT,
     LARGE_REFUND_THRESHOLD_CENTS,
     _activate_payment_services,
     _activate_pending_services,
@@ -59,7 +59,6 @@ from apps.billing.signals import (
     _invalidate_tax_cache,
     _log_billing_model_event,
     _notify_finance_team_large_refund,
-    _requires_efactura_submission,
     _revert_customer_credit_score,
     _schedule_payment_reminders,
     _schedule_payment_retry,
@@ -87,6 +86,7 @@ from apps.billing.signals import (
     _update_customer_payment_credit,
     _update_customer_payment_history,
     _update_customer_vat_status,
+    handle_invoice_created_or_updated,
 )
 from tests.factories.billing_factories import (
     CustomerFactory,
@@ -566,7 +566,74 @@ class TestInvoiceCreatedOrUpdatedSignal(TestCase):
             number="INV-SIG-004",
             status="issued",
             efactura_sent=False,
+            bill_to_country="RO",
+            bill_to_tax_id="RO12345678",
         )
+        mock_efactura.assert_called_once_with(invoice)
+
+    @patch("apps.billing.signals._update_billing_analytics")
+    @patch("apps.billing.signals._trigger_efactura_submission")
+    @patch("apps.billing.signals.BillingAuditService")
+    def test_created_issued_romanian_b2c_invoice_triggers_efactura(
+        self, mock_bas, mock_efactura, mock_analytics
+    ):
+        invoice = InvoiceFactory(
+            customer=self.customer,
+            currency=self.currency,
+            number="INV-SIG-B2C",
+            status="issued",
+            efactura_sent=False,
+            bill_to_country="RO",
+            bill_to_tax_id="",
+        )
+
+        mock_efactura.assert_called_once_with(invoice)
+
+    @patch("apps.billing.signals._update_billing_analytics")
+    @patch("apps.billing.signals._trigger_efactura_submission")
+    @patch("apps.billing.signals.BillingAuditService")
+    def test_created_issued_non_b2b_invoice_does_not_trigger_efactura(
+        self, mock_bas, mock_efactura, mock_analytics
+    ):
+        InvoiceFactory(
+            customer=self.customer,
+            currency=self.currency,
+            number="INV-SIG-005",
+            status="issued",
+            efactura_sent=False,
+            bill_to_country="DE",
+            bill_to_tax_id="DE123456789",
+        )
+
+        mock_efactura.assert_not_called()
+
+    def test_transition_to_issued_queues_eligible_invoice_once(self):
+        invoice = MagicMock()
+        invoice.configure_mock(
+            pk=1,
+            number="INV-SIG-006",
+            status="issued",
+            total_cents=5000,
+            total=Decimal("50.00"),
+            bill_to_country="RO",
+            bill_to_tax_id="RO12345678",
+            efactura_sent=False,
+        )
+        invoice.customer.id = 1
+        invoice._original_invoice_values = {"status": "draft"}
+
+        with (
+            patch("apps.billing.signals.BillingAuditService"),
+            patch("apps.billing.signals.AuditService"),
+            patch("apps.billing.signals.log_security_event"),
+            patch("apps.billing.signals._send_invoice_issued_email"),
+            patch("apps.billing.signals._schedule_payment_reminders"),
+            patch("apps.billing.signals._sync_orders_on_invoice_status_change"),
+            patch("apps.billing.signals._update_billing_analytics"),
+            patch("apps.billing.signals._trigger_efactura_submission") as mock_efactura,
+        ):
+            handle_invoice_created_or_updated(sender=MagicMock(), instance=invoice, created=False)
+
         mock_efactura.assert_called_once_with(invoice)
 
     @override_settings(DISABLE_AUDIT_SIGNALS=True)
@@ -577,7 +644,7 @@ class TestInvoiceCreatedOrUpdatedSignal(TestCase):
         InvoiceFactory(
             customer=self.customer,
             currency=self.currency,
-            number="INV-SIG-005",
+            number="INV-SIG-007",
             status="draft",
         )
         mock_bas.log_invoice_event.assert_not_called()
@@ -1268,12 +1335,52 @@ class TestHandlePaymentStatusChange(TestCase):
 class TestHandleInvoiceIssued(TestCase):
     @patch("apps.billing.signals.AuditService")
     @patch("apps.billing.signals._trigger_efactura_submission")
-    @patch("apps.billing.signals._requires_efactura_submission")
     @patch("apps.billing.signals._schedule_payment_reminders")
     @patch("apps.billing.signals._send_invoice_issued_email")
-    def test_with_efactura(self, mock_email, mock_reminders, mock_requires, mock_trigger, mock_audit):
-        mock_requires.return_value = True
+    def test_small_romanian_b2b_invoice_is_queued(
+        self, mock_email, mock_reminders, mock_trigger, mock_audit
+    ):
+        """The issued-invoice path must queue B2B invoices below the former threshold."""
         invoice = MagicMock()
+        invoice.bill_to_country = "RO"
+        invoice.bill_to_tax_id = "RO12345678"
+        invoice.total = Decimal("59.50")
+
+        _handle_invoice_issued(invoice)
+
+        mock_email.assert_called_once_with(invoice)
+        mock_reminders.assert_called_once_with(invoice)
+        mock_trigger.assert_called_once_with(invoice)
+        mock_audit.log_compliance_event.assert_called_once()
+
+    @patch("apps.billing.signals.AuditService")
+    @patch("apps.billing.signals._trigger_efactura_submission")
+    @patch("apps.billing.signals._schedule_payment_reminders")
+    @patch("apps.billing.signals._send_invoice_issued_email")
+    def test_small_romanian_b2c_invoice_is_queued(
+        self, mock_email, mock_reminders, mock_trigger, mock_audit
+    ):
+        """The issued-invoice path must queue Romanian B2C invoices of any amount."""
+        invoice = MagicMock()
+        invoice.bill_to_country = "RO"
+        invoice.bill_to_tax_id = ""
+        invoice.total = Decimal("1.00")
+
+        _handle_invoice_issued(invoice)
+
+        mock_email.assert_called_once_with(invoice)
+        mock_reminders.assert_called_once_with(invoice)
+        mock_trigger.assert_called_once_with(invoice)
+        mock_audit.log_compliance_event.assert_called_once()
+
+    @patch("apps.billing.signals.AuditService")
+    @patch("apps.billing.signals._trigger_efactura_submission")
+    @patch("apps.billing.signals._schedule_payment_reminders")
+    @patch("apps.billing.signals._send_invoice_issued_email")
+    def test_with_efactura(self, mock_email, mock_reminders, mock_trigger, mock_audit):
+        invoice = MagicMock()
+        invoice.bill_to_country = "RO"
+        invoice.bill_to_tax_id = "RO12345678"
         _handle_invoice_issued(invoice)
         mock_email.assert_called_once()
         mock_reminders.assert_called_once()
@@ -1282,12 +1389,12 @@ class TestHandleInvoiceIssued(TestCase):
 
     @patch("apps.billing.signals.AuditService")
     @patch("apps.billing.signals._trigger_efactura_submission")
-    @patch("apps.billing.signals._requires_efactura_submission")
     @patch("apps.billing.signals._schedule_payment_reminders")
     @patch("apps.billing.signals._send_invoice_issued_email")
-    def test_without_efactura(self, mock_email, mock_reminders, mock_requires, mock_trigger, mock_audit):
-        mock_requires.return_value = False
+    def test_without_efactura(self, mock_email, mock_reminders, mock_trigger, mock_audit):
         invoice = MagicMock()
+        invoice.bill_to_country = "DE"
+        invoice.bill_to_tax_id = "DE123456789"
         _handle_invoice_issued(invoice)
         mock_trigger.assert_not_called()
 
@@ -1588,34 +1695,38 @@ class TestEmailFunctions(TestCase):
 # ===============================================================================
 
 
-class TestRequiresEfacturaSubmission(TestCase):
-    def test_romanian_with_tax_id_above_minimum(self):
+class TestRequiresB2BEfactura(TestCase):
+    def test_romanian_with_tax_id(self):
         invoice = MagicMock()
         invoice.bill_to_country = "RO"
         invoice.bill_to_tax_id = "RO12345678"
-        invoice.total = Decimal("150")
-        assert _requires_efactura_submission(invoice) is True
+        assert requires_b2b_efactura(invoice) is True
 
     def test_non_romanian(self):
         invoice = MagicMock()
         invoice.bill_to_country = "DE"
         invoice.bill_to_tax_id = "DE123456789"
-        invoice.total = Decimal("150")
-        assert _requires_efactura_submission(invoice) is False
+        assert requires_b2b_efactura(invoice) is False
 
     def test_no_tax_id(self):
         invoice = MagicMock()
         invoice.bill_to_country = "RO"
         invoice.bill_to_tax_id = ""
-        invoice.total = Decimal("150")
-        assert _requires_efactura_submission(invoice) is False
+        assert requires_b2b_efactura(invoice) is False
 
-    def test_below_minimum(self):
+    def test_whitespace_only_tax_id_is_not_b2b(self):
+        """External billing data containing only whitespace must classify as B2C."""
+        invoice = MagicMock()
+        invoice.bill_to_country = "RO"
+        invoice.bill_to_tax_id = "   "
+        assert requires_b2b_efactura(invoice) is False
+
+    def test_small_romanian_b2b_invoice(self):
         invoice = MagicMock()
         invoice.bill_to_country = "RO"
         invoice.bill_to_tax_id = "RO12345678"
         invoice.total = Decimal("50")
-        assert _requires_efactura_submission(invoice) is False
+        assert requires_b2b_efactura(invoice) is True
 
 
 class TestTriggerEfacturaSubmission(TestCase):
@@ -2104,7 +2215,6 @@ class TestInvoicePaidConfirmOrderFailureLogging(TestCase):
 class TestConstants(TestCase):
     def test_constants_exist(self):
         assert LARGE_REFUND_THRESHOLD_CENTS == 50000
-        assert E_FACTURA_MINIMUM_AMOUNT == 100
 
 
 # ===============================================================================

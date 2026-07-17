@@ -34,6 +34,7 @@ from .client import (
     EFacturaClientError,
     NetworkError,
 )
+from .eligibility import is_romanian_b2c, requires_efactura
 from .models import EFacturaDocument, EFacturaDocumentType, EFacturaStatus
 from .validator import CIUSROValidator, ValidationResult
 from .xml_builder import UBLCreditNoteBuilder, UBLInvoiceBuilder, XMLBuilderError
@@ -137,13 +138,7 @@ class EFacturaService:
                 "Invoice was rejected by ANAF; correct it and submit a new e-Factura document"
             )
 
-        # B2C (consumer) invoices need a CNP-buyer XML the B2B UBLInvoiceBuilder cannot produce
-        # (it rejects RO invoices without a CUI). Reject cleanly BEFORE generating XML instead of
-        # failing confusingly in the builder; upload_b2c() stays ready for the B2C builder (#123).
-        if self._is_b2c(invoice):
-            return SubmissionResult.error(
-                "B2C e-Factura submission is not yet supported (requires the B2C XML builder + live ANAF verification)"
-            )
+        is_b2c = self._is_b2c(invoice)
 
         document = existing  # so the except blocks can mark the just-created document as error
         try:
@@ -176,8 +171,7 @@ class EFacturaService:
                         errors=error_dicts,
                     )
 
-            # Submit to ANAF (B2B /upload; B2C is rejected earlier until the B2C XML builder exists).
-            response = self._client.upload_invoice(xml_content)
+            response = self._client.upload_b2c(xml_content) if is_b2c else self._client.upload_invoice(xml_content)
 
             if response.success:
                 document.mark_submitted(response.upload_index)
@@ -407,7 +401,6 @@ class EFacturaService:
             issued_at__gte=now - lookback,
             issued_at__lte=now,
             bill_to_country="RO",
-            bill_to_tax_id__isnull=False,
             status="issued",
         ).exclude(efactura_document__status=EFacturaStatus.ACCEPTED.value)
 
@@ -426,39 +419,12 @@ class EFacturaService:
         return getattr(settings, "EFACTURA_ENABLED", False)
 
     def _is_b2c(self, invoice: Invoice) -> bool:
-        """Whether this invoice routes to ANAF's B2C (/uploadb2c) endpoint.
-
-        B2C XML buyer-identifier (CNP) rules are live-contract sensitive (#123); confirm against
-        the sandbox before go-live. A detection failure defaults to B2B (the safe common case).
-        """
-        from apps.billing.efactura.b2c import B2CDetector  # noqa: PLC0415  # avoids import cycle
-
-        try:
-            return B2CDetector().is_b2c_required(invoice)
-        except (AttributeError, KeyError, TypeError) as exc:
-            logger.warning(
-                "B2C detection failed for invoice %s (%s); defaulting to B2B upload",
-                getattr(invoice, "number", "?"),
-                exc,
-            )
-            return False
+        """Whether this invoice routes to ANAF's B2C (/uploadb2c) endpoint."""
+        return is_romanian_b2c(invoice)
 
     def _requires_efactura(self, invoice: Invoice) -> bool:
         """Check if invoice requires e-Factura submission."""
-        # Romanian B2B invoices require e-Factura
-        if invoice.bill_to_country != "RO":
-            return False
-
-        # Must have tax ID for B2B
-        if not invoice.bill_to_tax_id:
-            # B2C is also mandatory from 2025, but may use different rules
-            return getattr(settings, "EFACTURA_B2C_ENABLED", False)
-
-        # Minimum amount check (e.g., simplified invoices under 100 RON might be exempt)
-        from apps.settings.services import SettingsService  # noqa: PLC0415  # Deferred: avoids circular import
-
-        min_amount = SettingsService.get_integer_setting("billing.efactura_minimum_amount_cents", 10000)
-        return not invoice.total_cents < min_amount
+        return requires_efactura(invoice)
 
     def _get_existing_document(self, invoice: Invoice) -> EFacturaDocument | None:
         """Get existing e-Factura document for invoice."""

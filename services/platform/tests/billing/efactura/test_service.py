@@ -15,6 +15,7 @@ from apps.billing.efactura.client import (
     StatusResponse,
     UploadResponse,
 )
+from apps.billing.efactura.eligibility import is_romanian_b2c, requires_b2b_efactura
 from apps.billing.efactura.models import EFacturaDocument, EFacturaDocumentType, EFacturaStatus
 from apps.billing.efactura.service import (
     EFacturaService,
@@ -104,8 +105,6 @@ class MockInvoice:
 @override_settings(
     EFACTURA_ENABLED=True,
     EFACTURA_ENVIRONMENT="test",
-    EFACTURA_B2C_ENABLED=False,
-    EFACTURA_MINIMUM_AMOUNT_CENTS=0,
 )
 class EFacturaServiceTestCase(TestCase):
     """Test EFacturaService."""
@@ -134,6 +133,75 @@ class EFacturaServiceTestCase(TestCase):
         result = self.service.submit_invoice(self.invoice)
         self.assertFalse(result.success)
         self.assertIn("does not require", result.error_message.lower())
+
+    @patch("apps.billing.efactura.service.EFacturaDocument.objects")
+    @patch.object(EFacturaService, "_generate_xml")
+    def test_submit_small_romanian_b2b_invoice(self, mock_generate, mock_objects):
+        """A Romanian B2B invoice is mandatory regardless of its total."""
+        self.invoice.total_cents = 5950
+
+        mock_doc = Mock(spec=EFacturaDocument)
+        mock_doc.status = EFacturaStatus.DRAFT.value
+        mock_objects.get_or_create.return_value = (mock_doc, True)
+        mock_generate.return_value = "<Invoice/>"
+        self.mock_client.upload_invoice.return_value = UploadResponse(
+            success=True,
+            upload_index="small-b2b-upload",
+        )
+
+        with patch.object(self.service, "_log_audit_event"):
+            result = self.service.submit_invoice(self.invoice)
+
+        self.assertTrue(result.success, result.error_message)
+        self.mock_client.upload_invoice.assert_called_once()
+        mock_doc.mark_submitted.assert_called_once_with("small-b2b-upload")
+
+    @patch("apps.billing.efactura.service.EFacturaDocument.objects")
+    @patch.object(EFacturaService, "_generate_xml")
+    def test_submit_small_romanian_b2c_invoice_via_b2c_endpoint(self, mock_generate, mock_objects):
+        """Romanian B2C invoices are mandatory regardless of total or rollout settings."""
+        self.invoice.bill_to_tax_id = ""
+        self.invoice.total_cents = 100
+
+        mock_doc = Mock(spec=EFacturaDocument)
+        mock_doc.status = EFacturaStatus.DRAFT.value
+        mock_objects.get_or_create.return_value = (mock_doc, True)
+        mock_generate.return_value = "<Invoice/>"
+        self.mock_client.upload_b2c.return_value = UploadResponse(
+            success=True,
+            upload_index="small-b2c-upload",
+        )
+
+        with patch.object(self.service, "_log_audit_event"):
+            result = self.service.submit_invoice(self.invoice)
+
+        self.assertTrue(result.success, result.error_message)
+        self.mock_client.upload_b2c.assert_called_once_with("<Invoice/>")
+        self.mock_client.upload_invoice.assert_not_called()
+        mock_doc.mark_submitted.assert_called_once_with("small-b2c-upload")
+
+    @patch("apps.billing.efactura.service.EFacturaDocument.objects")
+    @patch.object(EFacturaService, "_generate_xml")
+    def test_submit_romanian_consumer_with_cnp_via_b2c_endpoint(self, mock_generate, mock_objects):
+        """Law 88/2026 keeps a natural-person invoice in B2C when the buyer supplies a CNP."""
+        self.invoice.bill_to_tax_id = "1850101123456"
+
+        mock_doc = Mock(spec=EFacturaDocument)
+        mock_doc.status = EFacturaStatus.DRAFT.value
+        mock_objects.get_or_create.return_value = (mock_doc, True)
+        mock_generate.return_value = "<Invoice/>"
+        self.mock_client.upload_b2c.return_value = UploadResponse(
+            success=True,
+            upload_index="cnp-b2c-upload",
+        )
+
+        with patch.object(self.service, "_log_audit_event"):
+            result = self.service.submit_invoice(self.invoice)
+
+        self.assertTrue(result.success, result.error_message)
+        self.mock_client.upload_b2c.assert_called_once_with("<Invoice/>")
+        self.mock_client.upload_invoice.assert_not_called()
+        mock_doc.mark_submitted.assert_called_once_with("cnp-b2c-upload")
 
     @patch("apps.billing.efactura.service.EFacturaDocument.objects")
     @patch.object(EFacturaService, "_generate_xml")
@@ -538,7 +606,7 @@ class EFacturaHelperMethodsTestCase(TestCase):
         """Test e-Factura disabled check."""
         self.assertFalse(self.service._is_efactura_enabled())
 
-    @override_settings(EFACTURA_B2C_ENABLED=False, EFACTURA_MINIMUM_AMOUNT_CENTS=0)
+    @override_settings(EFACTURA_B2C_ENABLED=False)
     def test_requires_efactura_b2b_romanian(self):
         """Test B2B Romanian invoice requires e-Factura."""
         invoice = MockInvoice(
@@ -553,32 +621,29 @@ class EFacturaHelperMethodsTestCase(TestCase):
         self.assertFalse(self.service._requires_efactura(invoice))
 
     @override_settings(EFACTURA_B2C_ENABLED=False)
-    def test_requires_efactura_b2c_disabled(self):
-        """Test B2C invoice when B2C disabled."""
+    def test_requires_efactura_b2c_cannot_be_disabled(self):
+        """A stale rollout setting cannot suppress mandatory Romanian B2C reporting."""
         invoice = MockInvoice(
             bill_to_country="RO",
             bill_to_tax_id=None,  # B2C - no tax ID
         )
-        self.assertFalse(self.service._requires_efactura(invoice))
-
-    @override_settings(EFACTURA_B2C_ENABLED=True)
-    def test_requires_efactura_b2c_enabled(self):
-        """Test B2C invoice when B2C enabled."""
-        invoice = MockInvoice(
-            bill_to_country="RO",
-            bill_to_tax_id=None,  # B2C
-        )
         self.assertTrue(self.service._requires_efactura(invoice))
 
-    @override_settings(EFACTURA_MINIMUM_AMOUNT_CENTS=10000)
-    def test_requires_efactura_below_minimum(self):
-        """Test invoice below minimum amount."""
+    def test_requires_efactura_for_small_b2b_invoice(self):
+        """Romanian B2B eligibility has no amount threshold."""
         invoice = MockInvoice(
             bill_to_country="RO",
             bill_to_tax_id="RO12345678",
-            total_cents=5000,  # Below 10000
+            total_cents=5000,
         )
-        self.assertFalse(self.service._requires_efactura(invoice))
+        self.assertTrue(self.service._requires_efactura(invoice))
+
+    def test_romanian_natural_person_identifier_is_b2c_not_b2b(self):
+        """A 13-digit personal identifier must not be mistaken for a company fiscal ID."""
+        invoice = MockInvoice(bill_to_country="RO", bill_to_tax_id="1850101123456")
+
+        self.assertTrue(is_romanian_b2c(invoice))
+        self.assertFalse(requires_b2b_efactura(invoice))
 
 
 class SubmitInvoiceConvenienceFunctionTestCase(TestCase):
@@ -602,7 +667,6 @@ class SubmitInvoiceConvenienceFunctionTestCase(TestCase):
     EFACTURA_ENABLED=True,
     EFACTURA_ENVIRONMENT="test",
     EFACTURA_B2C_ENABLED=False,
-    EFACTURA_MINIMUM_AMOUNT_CENTS=0,
 )
 class SubmissionLifecycleTests(TestCase):
     """DB-backed FSM trajectory tests for the e-Factura submission lifecycle (Phase 0, #123).
@@ -727,23 +791,26 @@ class SubmissionLifecycleTests(TestCase):
         self.assertEqual(doc.status, EFacturaStatus.SUBMITTED.value)
         self.assertEqual(doc.anaf_upload_index, "IDX-4")
 
-    def test_b2c_invoice_returns_clear_not_supported_error(self):
-        """#202 review (codex P1): the B2B UBLInvoiceBuilder rejects a no-CUI RO invoice, so a real
-        B2C submission failed in _generate_xml before ever reaching upload_b2c (the routing was only
-        exercised by mocked tests). B2C must now be rejected cleanly BEFORE XML generation."""
+    def test_b2c_invoice_submits_through_b2c_endpoint(self):
+        """A real B2C lifecycle must persist ANAF's upload index after B2C routing."""
         invoice = self._ro_invoice("INV-B2C-1")
+        invoice.bill_to_tax_id = ""
+        invoice.save(update_fields=["bill_to_tax_id"])
         client = Mock(spec=EFacturaClient)
+        client.upload_b2c.return_value = UploadResponse(success=True, upload_index="B2C-IDX-1")
         service = EFacturaService(client=client)
 
         with patch.object(service, "_generate_xml", return_value="<Invoice/>"), patch.object(
             service, "_log_audit_event"
-        ), patch.object(service, "_is_b2c", return_value=True):
+        ):
             result = service.submit_invoice(invoice)
 
-        self.assertFalse(result.success)
-        self.assertIn("b2c", result.error_message.lower())
-        client.upload_b2c.assert_not_called()
+        self.assertTrue(result.success, result.error_message)
+        client.upload_b2c.assert_called_once_with("<Invoice/>")
         client.upload_invoice.assert_not_called()
+        doc = EFacturaDocument.objects.get(invoice=invoice)
+        self.assertEqual(doc.status, EFacturaStatus.SUBMITTED.value)
+        self.assertEqual(doc.anaf_upload_index, "B2C-IDX-1")
 
     def test_fresh_failure_marks_new_document_as_error_not_queued(self):
         """#202 review (codex P2): a fresh submission that fails AFTER queue-before-upload must mark

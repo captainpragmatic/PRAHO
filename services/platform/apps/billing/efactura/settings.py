@@ -151,11 +151,8 @@ class EFacturaSettingKeys:
     VAT_RATE_REDUCED_2 = "efactura.vat.rate_reduced_2"  # 11% (consolidated)
     VAT_RATE_ZERO = "efactura.vat.rate_zero"
 
-    # B2B/B2C settings
+    # B2B setting (legacy observability only; mandatory eligibility is not configurable)
     B2B_ENABLED = "efactura.b2b.enabled"
-    B2C_ENABLED = "efactura.b2c.enabled"
-    B2C_MINIMUM_AMOUNT = "efactura.b2c.minimum_amount_cents"
-    B2B_MINIMUM_AMOUNT = "efactura.b2b.minimum_amount_cents"
 
     # Submission settings
     SUBMISSION_DEADLINE_DAYS = "efactura.submission.deadline_days"
@@ -226,11 +223,8 @@ EFACTURA_DEFAULTS: dict[str, Any] = {
     EFacturaSettingKeys.VAT_RATE_REDUCED_1: "11.00",  # Consolidated reduced rate (was 9%)
     EFacturaSettingKeys.VAT_RATE_REDUCED_2: "11.00",  # Consolidated reduced rate (was 5%)
     EFacturaSettingKeys.VAT_RATE_ZERO: "0.00",  # Exports, intra-EU supplies
-    # B2B/B2C
+    # B2B
     EFacturaSettingKeys.B2B_ENABLED: True,
-    EFacturaSettingKeys.B2C_ENABLED: False,  # Mandatory from Jan 2025
-    EFacturaSettingKeys.B2C_MINIMUM_AMOUNT: 0,
-    EFacturaSettingKeys.B2B_MINIMUM_AMOUNT: 0,
     # Submission (5 WORKING days per OUG 89/2025; was 5 calendar days pre-2026)
     EFacturaSettingKeys.SUBMISSION_DEADLINE_DAYS: 5,
     EFacturaSettingKeys.DEADLINE_WARNING_HOURS: 24,
@@ -579,27 +573,12 @@ class EFacturaSettings:
         """Get standard VAT rate as decimal."""
         return self.get_vat_rate("standard").rate
 
-    # ===== B2B/B2C Settings =====
+    # ===== B2B Settings =====
 
     @property
     def b2b_enabled(self) -> bool:
         """Check if B2B e-Factura is enabled."""
         return self._get_bool(EFacturaSettingKeys.B2B_ENABLED, True)
-
-    @property
-    def b2c_enabled(self) -> bool:
-        """Check if B2C e-Factura is enabled."""
-        return self._get_bool(EFacturaSettingKeys.B2C_ENABLED, False)
-
-    @property
-    def b2b_minimum_amount_cents(self) -> int:
-        """Minimum amount in cents for B2B e-Factura."""
-        return self._get_int(EFacturaSettingKeys.B2B_MINIMUM_AMOUNT, 0)
-
-    @property
-    def b2c_minimum_amount_cents(self) -> int:
-        """Minimum amount in cents for B2C e-Factura."""
-        return self._get_int(EFacturaSettingKeys.B2C_MINIMUM_AMOUNT, 0)
 
     # ===== Submission Settings =====
 
