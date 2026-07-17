@@ -15,7 +15,13 @@ from django.http import HttpRequest
 from apps.common.request_ip import get_safe_client_ip
 from apps.users.models import CustomerMembership, User, UserProfile
 
+from .models import AuditEvent
 from .services import AuditContext, AuditEventData, AuditService
+
+# Bumped when _calculate_event_hash changes shape, so old hashes are not compared against a new
+# algorithm and misreported as tampering. Its presence also marks an event as belonging to the
+# hashed era: a row without it predates #217 and is unverifiable rather than tampered.
+AUDIT_INTEGRITY_HASH_VERSION = 1
 
 
 @dataclass
@@ -757,6 +763,42 @@ def audit_customer_context_switch(
             metadata={"context_change": True, "customer_id": str(new_customer.id) if new_customer else None},
         )
     )
+
+
+# ===============================================================================
+# AUDIT EVENT INTEGRITY HASH
+# ===============================================================================
+
+
+@receiver(post_save, sender=AuditEvent)
+def stamp_audit_event_integrity_hash(sender: Any, instance: AuditEvent, created: bool, **kwargs: Any) -> None:
+    """Stamp a tamper-detection hash onto every newly created audit event.
+
+    _verify_hash_chain has always read metadata["integrity_hash"], but nothing ever wrote it, so
+    the stored hash was always absent, the mismatch branch was unreachable, and every integrity
+    check reported compliant no matter how the rows had been altered (#217).
+
+    Hooked on post_save rather than the three AuditEvent.objects.create() call sites because the
+    hash covers event.id and event.timestamp, which only exist once the row is written — and
+    because a signal also covers any creation site added later.
+    """
+    if not created:
+        # Audit events are append-only; re-hashing on update would launder a tampered row.
+        return
+
+    from .services import AuditIntegrityService  # noqa: PLC0415  # Deferred: avoids circular import
+
+    try:
+        metadata = instance.metadata if isinstance(instance.metadata, dict) else {}
+        metadata["integrity_hash"] = AuditIntegrityService._calculate_event_hash(instance)
+        metadata["integrity_hash_version"] = AUDIT_INTEGRITY_HASH_VERSION
+        # update_fields avoids re-entering this handler's `created` branch and touching other columns.
+        AuditEvent.objects.filter(pk=instance.pk).update(metadata=metadata)
+        instance.metadata = metadata
+    except Exception as e:
+        # An audit event that exists without a hash is far better than a lost audit event: the
+        # verifier reports the missing hash rather than silently passing.
+        logger.error(f"🔥 [Audit Integrity] Failed to stamp integrity hash on event {instance.pk}: {e}")
 
 
 # ===============================================================================

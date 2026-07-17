@@ -3266,9 +3266,40 @@ class AuditIntegrityService:
         for event in events:
             # Check if event data has been modified
             expected_hash = cls._calculate_event_hash(event)
-            stored_hash = event.metadata.get("integrity_hash")
+            metadata = event.metadata if isinstance(event.metadata, dict) else {}
+            stored_hash = metadata.get("integrity_hash")
 
-            if stored_hash and stored_hash != expected_hash:
+            if stored_hash is None:
+                # A missing hash used to short-circuit to "healthy", which is what made the whole
+                # check a no-op (#217). It is only a real finding for events written since hashing
+                # began — anything older simply cannot be verified, and reporting thousands of
+                # legacy rows as tampered would bury an actual mismatch.
+                if metadata.get("integrity_hash_version") is not None:
+                    issues.append(
+                        {
+                            "type": "missing_integrity_hash",
+                            "severity": "critical",
+                            "event_id": str(event.id),
+                            "timestamp": event.timestamp.isoformat(),
+                            "description": "Event has no integrity hash despite being written after "
+                            "hashing was enabled - possible tampering",
+                            "expected_hash": expected_hash,
+                            "stored_hash": None,
+                        }
+                    )
+                else:
+                    issues.append(
+                        {
+                            "type": "unverifiable_legacy_event",
+                            "severity": "info",
+                            "event_id": str(event.id),
+                            "timestamp": event.timestamp.isoformat(),
+                            "description": "Event predates integrity hashing and cannot be verified",
+                            "expected_hash": expected_hash,
+                            "stored_hash": None,
+                        }
+                    )
+            elif stored_hash != expected_hash:
                 issues.append(
                     {
                         "type": "hash_mismatch",
