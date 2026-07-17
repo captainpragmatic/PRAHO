@@ -578,6 +578,17 @@ def _find_services_to_renew() -> Any:
     )
 
 
+# A renewal order blocks a further renewal unless it is dead. Framed as "everything except the
+# dead states" on purpose: nothing extends Service.expires_at on renewal, so a renewed service
+# keeps matching the 30-day window every night and this guard is the only thing standing between
+# the customer and repeat billing. Listing the live states instead means any status added to
+# Order later (or simply missed — "completed" and "in_review" were) silently re-opens that hole.
+_RENEWAL_DEAD_ORDER_STATUSES = ("cancelled", "failed")
+_RENEWAL_BLOCKING_ORDER_STATUSES = tuple(
+    status for status, _label in Order.STATUS_CHOICES if status not in _RENEWAL_DEAD_ORDER_STATUSES
+)
+
+
 def _resolve_renewal_product_id(service: Any) -> Any | None:
     """Return the catalog Product id to renew this service against, or None if it cannot be found.
 
@@ -586,8 +597,11 @@ def _resolve_renewal_product_id(service: Any) -> Any | None:
     the order item that provisioned it. A service created outside an order (manual, migrated) has
     no such item, and guessing a product would put a wrong price on a real invoice.
     """
-    originating_item = service.order_items.order_by("-created_at").first()
-    return originating_item.product_id if originating_item else None
+    # Sort in Python rather than with .order_by(): the caller prefetches order_items__product, and
+    # any queryset method that re-filters or re-orders discards that cache and issues a fresh query
+    # per service (N+1 across the whole nightly run).
+    items = sorted(service.order_items.all(), key=lambda item: item.created_at, reverse=True)
+    return items[0].product_id if items else None
 
 
 def _create_renewal_order_data(service: Any, product_id: Any) -> OrderCreateData:
@@ -817,7 +831,7 @@ def process_recurring_orders() -> dict[str, Any]:
                     # test suite — the one thing standing between a service and double-billing.
                     existing_renewal = OrderItem.objects.filter(
                         order__customer=service.customer,
-                        order__status__in=["draft", "awaiting_payment", "paid", "provisioning"],
+                        order__status__in=_RENEWAL_BLOCKING_ORDER_STATUSES,
                         config__renewal_service_id=str(service.id),
                     ).exists()
 

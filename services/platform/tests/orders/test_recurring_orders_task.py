@@ -24,6 +24,7 @@ from apps.orders.tasks import (
 )
 from apps.products.models import Product
 from apps.provisioning.models import Server, Service, ServicePlan
+from tests.helpers.fsm_helpers import force_status
 
 
 class RecurringOrdersTaskTestCase(TestCase):
@@ -207,6 +208,27 @@ class RecurringOrdersTaskTestCase(TestCase):
         service = self._service(expires_in_days=10)
 
         process_recurring_orders()
+        from django.core.cache import cache  # noqa: PLC0415
+
+        cache.delete("process_recurring_orders_lock")
+        second = process_recurring_orders()
+
+        self.assertEqual(second["results"]["renewal_orders_created"], 0)
+        self.assertEqual(OrderItem.objects.filter(config__renewal_service_id=str(service.id)).count(), 1)
+
+    def test_completed_renewal_order_still_blocks_a_second_renewal(self):
+        """#293 review: the guard must match every status a renewal can reach.
+
+        Nothing extends Service.expires_at on renewal, so a renewed service keeps matching the
+        30-day window every night. If the guard misses a status the renewal has progressed to,
+        the task bills the customer again on the next run.
+        """
+        service = self._service(expires_in_days=10)
+        process_recurring_orders()
+
+        renewal_item = OrderItem.objects.get(config__renewal_service_id=str(service.id))
+        force_status(renewal_item.order, "completed")
+
         from django.core.cache import cache  # noqa: PLC0415
 
         cache.delete("process_recurring_orders_lock")
