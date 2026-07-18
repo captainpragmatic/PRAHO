@@ -24,6 +24,7 @@ from django.db.models import Count, Q, QuerySet
 from django.forms import ModelForm, modelform_factory
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from django.views.decorators.http import require_POST
 
@@ -1076,7 +1077,7 @@ REFUND REQUEST DETAILS
 Order Number: {order.order_number}
 Order Total: {order.total_cents / 100:.2f} {order.currency}
 Order Status: {order.get_status_display()}
-Created Date: {order.created_at.strftime("%Y-%m-%d %H:%M")}
+Created Date: {timezone.localtime(order.created_at).strftime("%Y-%m-%d %H:%M")}
 
 Refund Reason: {reason_title}
 
