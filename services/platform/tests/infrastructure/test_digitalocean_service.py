@@ -95,12 +95,22 @@ class TestDigitalOceanServiceCreateServer(TestCase):
 
 
 class TestDigitalOceanServiceDeleteServer(TestCase):
-    def test_delete_server_success(self) -> None:
+    @patch(
+        "apps.infrastructure.digitalocean_service.time.sleep",
+        side_effect=AssertionError("delete success test must not poll-sleep"),
+    )
+    def test_delete_server_success(self, mock_sleep: MagicMock) -> None:
         svc, client = _make_service()
         client.droplets.destroy.return_value = None
+        client.droplets.get.side_effect = RuntimeError("404 not found")
+
         result = svc.delete_server("12345")
+
         self.assertTrue(result.is_ok())
+        self.assertIs(result.unwrap(), True)
         client.droplets.destroy.assert_called_once_with(droplet_id=12345)
+        client.droplets.get.assert_called_once_with(droplet_id=12345)
+        mock_sleep.assert_not_called()
 
     def test_delete_server_not_found(self) -> None:
         svc, client = _make_service()

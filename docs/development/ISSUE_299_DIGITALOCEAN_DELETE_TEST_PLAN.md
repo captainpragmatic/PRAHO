@@ -1,6 +1,6 @@
 # Issue #299: Deterministic DigitalOcean delete test
 
-**Status:** Ready for implementation
+**Status:** Implemented; platform verification complete
 
 **Issue:** [#299](https://github.com/captainpragmatic/PRAHO/issues/299)
 
@@ -139,3 +139,20 @@ silence—is verified.
 - Both serial and parallel full platform runs terminate normally and print final
   success summaries.
 - The final diff remains test-only and retains DCO sign-off.
+
+## Verification record
+
+Verified on 2026-07-18:
+
+- RED: the focused regression test failed in 0.004s at
+  `digitalocean_service.py:152` when the old fixture reached `time.sleep`.
+- GREEN: the focused test passed in 0.002s.
+- The delete test class passed 2 tests; the full DigitalOcean module passed 23
+  tests.
+- The full serial platform suite passed 6,852 tests in 47.794s
+  (`OK (skipped=4)`).
+- The full parallel platform suite passed 6,852 tests in 14.226s
+  (`OK (skipped=4)`) and printed its final success marker.
+- Python syntax and every Platform lint phase passed. The full `make lint`
+  command remains blocked in the Portal phase by the pre-existing editable
+  Platform `.pth` entry in the shared virtualenv; no isolation bypass was used.
