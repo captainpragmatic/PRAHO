@@ -78,3 +78,29 @@ class ExternalSyncCustomerTestCase(TestCase):
         result = ExternalSyncService._sync_customer(str(customer.id))
 
         self.assertEqual(result["sync_targets"], [])
+
+    def test_individual_with_registered_company_name_is_business(self):
+        """Field-based, not type-based: an individual who registered a company name is
+        classified as a business — exactly as the VAT path treats them on real invoices."""
+        customer = Customer.objects.create(
+            name='Maria Ionescu',
+            customer_type='individual',
+            company_name='Side Business SRL',
+            primary_email='maria-side@example.ro',
+            status='active',
+        )
+
+        self.assertTrue(customer.is_business)
+
+    def test_company_with_empty_company_name_is_not_business(self):
+        """The complementary edge: a company record missing its company name falls out of
+        the business classification, matching the VAT path's field-based rule."""
+        customer = Customer.objects.create(
+            name='Shellco',
+            customer_type='company',
+            company_name='',
+            primary_email='shellco@example.ro',
+            status='active',
+        )
+
+        self.assertFalse(customer.is_business)

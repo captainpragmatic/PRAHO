@@ -394,9 +394,10 @@ class Customer(SoftDeleteModel):
         """Whether this customer is a registered business rather than a consumer.
 
         Keyed off company_name to match the definition the VAT path already applies to real
-        invoices (`_build_customer_vat_info` in billing/services.py). Company, PFA and NGO all
-        require a company name (see CustomerCreationForm), so all three are businesses;
-        individuals are not.
+        invoices (`_build_customer_vat_info` in billing/services.py). The classification is
+        field-based, not type-based: company, PFA and NGO all require a company name (see
+        CustomerCreationForm), and an individual who registered one is treated as a business
+        here exactly as the VAT path treats them.
         """
         return bool(self.company_name)
 
