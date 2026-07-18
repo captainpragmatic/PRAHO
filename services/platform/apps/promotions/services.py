@@ -58,6 +58,13 @@ def get_max_code_generation_attempts() -> int:
 COUPON_EXPIRY_WARNING_DAYS = 3
 
 
+def _lock_order_for_discount_update(order: Order) -> None:
+    """Refresh ``order`` under a row lock before changing its discount ledger."""
+    from apps.orders.models import Order as OrderModel  # noqa: PLC0415  # Deferred: avoids cross-app import cycle
+
+    order.refresh_from_db(from_queryset=OrderModel.objects.select_for_update(of=("self",)))
+
+
 # ===============================================================================
 # Data Classes for Results
 # ===============================================================================
@@ -502,13 +509,18 @@ class CouponService:
         """
         normalized_code = cls.normalize_code(code)
 
-        # Pre-fetch order items once for all operations
-        cached_items = list(order.items.select_related("product").all())
-
         # Quick validation without lock (fast-fail for invalid codes)
         coupon = cls.get_coupon_by_code(code)
         if coupon is None:
             return ApplyResult(success=False, error_message="Invalid coupon code")
+
+        # The caller fetched this Order before the transaction. Lock and refresh it
+        # before the coupon lock so all promotion paths share one lock order and no
+        # stale read-modify-write can erase a concurrently committed discount.
+        _lock_order_for_discount_update(order)
+
+        # Pre-fetch order items once from the locked order for all operations.
+        cached_items = list(order.items.select_related("product").all())
 
         # RACE CONDITION FIX: Lock the coupon row to prevent concurrent applications
         # This prevents multiple requests from using the last available coupon use
@@ -611,6 +623,8 @@ class CouponService:
         Remove a coupon from an order.
         Can specify either coupon or redemption_id.
         """
+        _lock_order_for_discount_update(order)
+
         if redemption_id:
             redemptions = CouponRedemption.objects.filter(
                 id=redemption_id,
@@ -975,6 +989,10 @@ class GiftCardService:
         validation = cls.validate_gift_card(code)
         if not validation.is_valid:
             return ApplyResult(success=False, error_message=validation.error_message)
+
+        # Order is the shared financial aggregate. Lock it before the gift card so
+        # coupon and card requests serialize without overwriting each other's value.
+        _lock_order_for_discount_update(order)
 
         gift_card = GiftCard.objects.select_for_update().get(code=code.upper().strip())
 
