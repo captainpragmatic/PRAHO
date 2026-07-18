@@ -111,6 +111,35 @@ class DriftRemediationTestBase(TestCase):
         )
         self.service = DriftRemediationService()
 
+    def _make_report(self, field_name: str = "ipv4_address", deployment: NodeDeployment | None = None) -> DriftReport:
+        """Another open report — the open-request-per-report constraint means
+        sibling requests in tests must attach to their own reports."""
+        deployment = deployment or self.deployment
+        return DriftReport.objects.create(
+            drift_check=self.check,
+            deployment=deployment,
+            severity="critical",
+            category="network",
+            field_name=field_name,
+            expected_value="1.2.3.4",
+            actual_value="5.6.7.8",
+        )
+
+    def _make_deployment(self, node_number: int) -> NodeDeployment:
+        return NodeDeployment.objects.create(
+            environment="prd",
+            node_type="sha",
+            provider=self.provider,
+            node_size=self.size,
+            region=self.region,
+            panel_type=self.panel,
+            hostname=f"prd-sha-het-de-fsn1-{node_number:03d}",
+            node_number=node_number,
+            status="completed",
+            external_node_id=f"1234{node_number}",
+            ipv4_address="1.2.3.5",
+        )
+
 
 class TestApproveReject(DriftRemediationTestBase):
     """Tests for approve/reject workflows."""
@@ -184,7 +213,19 @@ class TestApproveReject(DriftRemediationTestBase):
         self.assertEqual(self.remediation_request.scheduled_for, future)
 
     def test_accept_drift(self):
-        """Accepting drift should update DB to actual and mark resolved."""
+        """Accepting drift updates the deployment record and marks resolved."""
+        bigger = NodeSize.objects.create(
+            provider=self.provider,
+            name="Medium",
+            display_name="4 vCPU / 8GB",
+            provider_type_id="cpx41",
+            vcpus=4,
+            memory_gb=8,
+            disk_gb=80,
+            hourly_cost_eur="0.0200",
+            monthly_cost_eur="10.00",
+        )
+
         result = self.service.accept_drift(self.remediation_request.pk, self.admin)
         self.assertTrue(result.is_ok())
 
@@ -196,6 +237,88 @@ class TestApproveReject(DriftRemediationTestBase):
         self.assertTrue(self.report.resolved)
         self.assertEqual(self.report.resolution_type, "accepted")
         self.assertEqual(self.report.resolved_by, self.admin)
+
+        # The durable write-back: node_size now matches the observed reality
+        self.deployment.refresh_from_db()
+        self.assertEqual(self.deployment.node_size, bigger)
+
+    def test_accept_drift_server_type_requires_matching_node_size(self):
+        """Accepting a size PRAHO does not know about is refused, not faked."""
+        result = self.service.accept_drift(self.remediation_request.pk, self.admin)
+        self.assertTrue(result.is_err())
+        self.assertIn("No NodeSize matches", result.unwrap_err())
+
+        self.remediation_request.refresh_from_db()
+        self.assertEqual(self.remediation_request.status, "pending_approval")
+        self.report.refresh_from_db()
+        self.assertFalse(self.report.resolved)
+
+    def _reshape_report(self, field_name: str, expected: str, actual: str) -> None:
+        self.report.field_name = field_name
+        self.report.expected_value = expected
+        self.report.actual_value = actual
+        self.report.save(update_fields=["field_name", "expected_value", "actual_value"])
+
+    def test_accept_drift_writes_ipv4_to_deployment(self):
+        self._reshape_report("ipv4_address", "1.2.3.4", "5.6.7.8")
+
+        result = self.service.accept_drift(self.remediation_request.pk, self.admin)
+
+        self.assertTrue(result.is_ok())
+        self.deployment.refresh_from_db()
+        self.assertEqual(self.deployment.ipv4_address, "5.6.7.8")
+
+    def test_accept_drift_writes_ipv6_to_deployment(self):
+        self.deployment.ipv6_address = "2001:db8::1"
+        self.deployment.save(update_fields=["ipv6_address"])
+        self._reshape_report("ipv6_address", "2001:db8::1", "2001:db8::99")
+
+        result = self.service.accept_drift(self.remediation_request.pk, self.admin)
+
+        self.assertTrue(result.is_ok())
+        self.deployment.refresh_from_db()
+        self.assertEqual(self.deployment.ipv6_address, "2001:db8::99")
+
+    def test_accept_drift_rejects_invalid_observed_address(self):
+        self._reshape_report("ipv4_address", "1.2.3.4", "not-an-ip")
+
+        result = self.service.accept_drift(self.remediation_request.pk, self.admin)
+
+        self.assertTrue(result.is_err())
+        self.deployment.refresh_from_db()
+        self.assertEqual(self.deployment.ipv4_address, "1.2.3.4")
+
+    def test_accept_drift_powered_off_server_stops_deployment(self):
+        """Accepting an off server declares it intentionally stopped — it leaves scan scope."""
+        self._reshape_report("server_status", "running", "off")
+
+        result = self.service.accept_drift(self.remediation_request.pk, self.admin)
+
+        self.assertTrue(result.is_ok())
+        self.deployment.refresh_from_db()
+        self.assertEqual(self.deployment.status, "stopped")
+
+    def test_accept_drift_transient_server_status_refused(self):
+        """Only genuinely powered-off states are acceptable as 'stopped'."""
+        self._reshape_report("server_status", "running", "rebooting")
+
+        result = self.service.accept_drift(self.remediation_request.pk, self.admin)
+
+        self.assertTrue(result.is_err())
+        self.deployment.refresh_from_db()
+        self.assertEqual(self.deployment.status, "completed")
+
+    def test_accept_drift_refused_for_non_writable_fields(self):
+        """network/server_deleted drift has no durable write — Accept is refused."""
+        for field in ("network_unreachable", "server_deleted"):
+            self._reshape_report(field, "expected", "actual")
+
+            result = self.service.accept_drift(self.remediation_request.pk, self.admin)
+
+            self.assertTrue(result.is_err(), field)
+            self.assertIn("cannot be accepted", result.unwrap_err())
+            self.remediation_request.refresh_from_db()
+            self.assertEqual(self.remediation_request.status, "pending_approval")
 
     def test_cannot_approve_already_completed(self):
         """Cannot approve a completed request."""
@@ -317,9 +440,10 @@ class TestExecuteRemediation(DriftRemediationTestBase):
     @patch("apps.infrastructure.drift_remediation.DriftRemediationService._take_snapshot")
     def test_concurrent_remediation_prevented(self, mock_snapshot, mock_gateway, mock_health):
         """Only one active remediation per deployment."""
-        # Create an existing in-progress remediation
+        # Create an existing in-progress remediation (on its own report — only
+        # one open request may exist per report)
         DriftRemediationRequest.objects.create(
-            report=self.report,
+            report=self._make_report(),
             deployment=self.deployment,
             action_type="apply_desired",
             status="in_progress",
@@ -477,7 +601,7 @@ class TestExecutionClaim(DriftRemediationTestBase):
     ):
         """One crashed execution can never block a deployment forever."""
         stale = DriftRemediationRequest.objects.create(
-            report=self.report,
+            report=self._make_report(),
             deployment=self.deployment,
             action_type="apply_desired",
             status="in_progress",
@@ -544,15 +668,18 @@ class TestRecoverStaleRemediations(DriftRemediationTestBase):
 
     def test_stale_in_progress_marked_failed_fresh_untouched(self):
         stale = DriftRemediationRequest.objects.create(
-            report=self.report,
+            report=self._make_report(),
             deployment=self.deployment,
             action_type="apply_desired",
             status="in_progress",
             started_at=timezone.now() - timedelta(minutes=31),
         )
+        # A fresh execution on a DIFFERENT deployment (only one in_progress is
+        # allowed per deployment) must be left alone.
+        other_deployment = self._make_deployment(2)
         fresh = DriftRemediationRequest.objects.create(
-            report=self.report,
-            deployment=self.deployment,
+            report=self._make_report(deployment=other_deployment),
+            deployment=other_deployment,
             action_type="apply_desired",
             status="in_progress",
             started_at=timezone.now(),
@@ -569,7 +696,7 @@ class TestRecoverStaleRemediations(DriftRemediationTestBase):
 
     def test_in_progress_without_started_at_treated_as_stale(self):
         anomalous = DriftRemediationRequest.objects.create(
-            report=self.report,
+            report=self._make_report(),
             deployment=self.deployment,
             action_type="apply_desired",
             status="in_progress",

@@ -11,6 +11,7 @@ from __future__ import annotations
 import importlib
 
 from django.apps import apps as django_apps
+from django.db import IntegrityError, connection, transaction
 from django.test import TestCase
 
 from apps.infrastructure.models import (
@@ -29,8 +30,8 @@ _migration = importlib.import_module(
 )
 
 
-class TestDedupDriftMigration(TestCase):
-    """Exercise _dedup_drift_state survivor selection and normalization."""
+class _DriftDataTestBase(TestCase):
+    """Shared fixtures for the migration-dedup and constraint tests."""
 
     def setUp(self) -> None:
         self.provider = CloudProvider.objects.create(
@@ -108,6 +109,26 @@ class TestDedupDriftMigration(TestCase):
             status=status,
         )
 
+
+class TestDedupDriftMigration(_DriftDataTestBase):
+    """Exercise _dedup_drift_state survivor selection and normalization.
+
+    The fixtures deliberately contain duplicates that can only exist BEFORE
+    migration 0004's partial-unique constraints, so those constraints are
+    dropped for this class (SQLite DDL is transactional — the test rollback
+    restores them).
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        # Partial unique constraints are implemented as partial unique indexes
+        # on SQLite and PostgreSQL alike; DROP INDEX is transactional DDL, so
+        # the test rollback restores them.
+        with connection.cursor() as cursor:
+            for model in (DriftReport, DriftRemediationRequest):
+                for constraint in model._meta.constraints:
+                    cursor.execute(f'DROP INDEX IF EXISTS "{constraint.name}"')
+
     def _run(self) -> None:
         _migration._dedup_drift_state(django_apps, None)
 
@@ -177,3 +198,33 @@ class TestDedupDriftMigration(TestCase):
         type_request.refresh_from_db()
         self.assertEqual(ip_request.action_type, "manual_intervention")
         self.assertEqual(type_request.action_type, "apply_desired")
+
+class TestDriftConstraints(_DriftDataTestBase):
+    """The 0004 partial-unique constraints are live and enforce the invariants."""
+
+    def test_open_report_uniqueness_enforced_by_database(self):
+        """The partial unique constraint is the backstop against scan races."""
+        self._report()
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            self._report()
+
+        # A resolved duplicate is fine — uniqueness covers open rows only
+        DriftReport.objects.filter(deployment=self.deployment).update(resolved=True)
+        self._report()
+
+    def test_open_request_per_report_uniqueness_enforced(self):
+        report = self._report()
+        self._request(report, "pending_approval")
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            self._request(report, "approved")
+
+        # Closed requests do not collide
+        DriftRemediationRequest.objects.filter(report=report).update(status="failed")
+        self._request(report, "pending_approval")
+
+    def test_single_in_progress_per_deployment_enforced(self):
+        report_a = self._report(field_name="ipv4_address")
+        report_b = self._report(field_name="server_type")
+        self._request(report_a, "in_progress")
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            self._request(report_b, "in_progress")

@@ -949,6 +949,15 @@ class DriftReport(models.Model):
             models.Index(fields=["deployment", "severity", "-created_at"]),
             models.Index(fields=["resolved", "severity"]),
         ]
+        constraints = [
+            # The scanner refreshes the single open report per drifting field
+            # instead of minting duplicates every 15 minutes.
+            models.UniqueConstraint(
+                fields=["deployment", "field_name"],
+                condition=models.Q(resolved=False),
+                name="uniq_open_drift_report_per_field",
+            ),
+        ]
 
     def __str__(self) -> str:
         return f"DriftReport({self.deployment.hostname}, {self.field_name}, {self.severity})"
@@ -1040,6 +1049,22 @@ class DriftRemediationRequest(models.Model):
             models.Index(fields=["status", "-created_at"]),
             models.Index(fields=["deployment", "status"]),
             models.Index(fields=["scheduled_for"]),
+        ]
+        constraints = [
+            # One open request per report: concurrent scanners cannot
+            # double-mint approval work (check-then-create is not enough).
+            models.UniqueConstraint(
+                fields=["report"],
+                condition=models.Q(status__in=("pending_approval", "approved", "scheduled", "in_progress")),
+                name="uniq_open_request_per_report",
+            ),
+            # One execution per deployment, enforced by the database — the
+            # cross-backend backstop for the conditional-update claim.
+            models.UniqueConstraint(
+                fields=["deployment"],
+                condition=models.Q(status="in_progress"),
+                name="uniq_in_progress_remediation_per_deployment",
+            ),
         ]
 
     def __str__(self) -> str:

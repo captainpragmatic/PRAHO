@@ -15,6 +15,8 @@ import time
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
+from django.core.exceptions import ValidationError
+from django.core.validators import validate_ipv4_address, validate_ipv6_address
 from django.db import transaction
 from django.utils import timezone
 
@@ -26,6 +28,7 @@ from apps.infrastructure.models import (
     DriftReport,
     DriftSnapshot,
     NodeDeployment,
+    NodeSize,
 )
 from apps.infrastructure.provider_config import get_provider_token
 
@@ -240,27 +243,55 @@ class DriftRemediationService:
         request_id: int,
         user: User,
     ) -> Result[DriftRemediationRequest, str]:
-        """Update DB to match reality (accept actual state), mark resolved."""
+        """
+        Accept reality: durably write the observed value back to PRAHO's
+        records and mark the drift resolved. Flag-only acceptance would just
+        re-mint the identical drift on the next scan, so fields with nothing
+        durable to write (see DriftReport.ACCEPTABLE_DRIFT_FIELDS) are refused.
+        """
         try:
             req = DriftRemediationRequest.objects.select_related("report", "deployment").get(pk=request_id)
         except DriftRemediationRequest.DoesNotExist:
             return Err(f"Remediation request {request_id} not found")
 
-        if req.status not in ("pending_approval",):
-            return Err(f"Cannot accept drift for request in status '{req.status}'")
-
         report = req.report
-        report.resolved = True
-        report.resolved_at = timezone.now()
-        report.resolved_by = user
-        report.resolution_type = "accepted"
-        report.save(update_fields=["resolved", "resolved_at", "resolved_by", "resolution_type"])
+        if not report.is_acceptable:
+            return Err(
+                f"Drift on '{report.field_name}' cannot be accepted — fix it manually and re-scan, "
+                "or stop/decommission the deployment"
+            )
 
-        req.status = "completed"
-        req.action_type = "accept_actual"
-        req.completed_at = timezone.now()
-        req.save(update_fields=["status", "action_type", "completed_at"])
+        with transaction.atomic():
+            # Lock order everywhere: deployment -> request
+            deployment = NodeDeployment.objects.select_for_update().get(pk=req.deployment_id)
 
+            if (
+                report.field_name == "server_status"
+                and DriftRemediationRequest.objects.filter(deployment=deployment, status="in_progress").exists()
+            ):
+                return Err("A remediation is executing for this deployment — retry once it settles")
+
+            sync_result = self._sync_accepted_value(deployment, report)
+            if sync_result.is_err():
+                return Err(sync_result.unwrap_err())
+
+            # CAS flip: a concurrent approve/reject loses cleanly
+            updated = DriftRemediationRequest.objects.filter(pk=request_id, status="pending_approval").update(
+                status="completed",
+                action_type="accept_actual",
+                completed_at=timezone.now(),
+            )
+            if not updated:
+                req.refresh_from_db()
+                return Err(f"Cannot accept drift for request in status '{req.status}'")
+
+            report.resolved = True
+            report.resolved_at = timezone.now()
+            report.resolved_by = user
+            report.resolution_type = "accepted"
+            report.save(update_fields=["resolved", "resolved_at", "resolved_by", "resolution_type"])
+
+        req.refresh_from_db()
         logger.info(f"✅ [DriftRemediation] Drift accepted for {req.deployment.hostname} by {user.email}")
 
         try:
@@ -271,6 +302,47 @@ class DriftRemediationService:
             logger.warning(f"⚠️ [DriftRemediation] Failed to log audit for drift acceptance: {e}")
 
         return Ok(req)
+
+    def _sync_accepted_value(  # noqa: PLR0911  # Field dispatch: one exit per acceptable field
+        self, deployment: NodeDeployment, report: DriftReport
+    ) -> Result[bool, str]:
+        """Write the accepted actual value back to the deployment record."""
+        field = report.field_name
+        actual = (report.actual_value or "").strip()
+
+        if field in ("ipv4_address", "ipv6_address"):
+            validator = validate_ipv4_address if field == "ipv4_address" else validate_ipv6_address
+            try:
+                validator(actual)
+            except ValidationError:
+                return Err(f"Observed value '{actual}' is not a valid address — cannot accept")
+            setattr(deployment, field, actual)
+            deployment.save(update_fields=[field, "updated_at"])
+            return Ok(True)
+
+        if field == "server_type":
+            node_size = NodeSize.objects.filter(provider=deployment.provider, provider_type_id=actual).first()
+            if node_size is None:
+                return Err(f"No NodeSize matches provider type '{actual}' — create it first, then accept again")
+            deployment.node_size = node_size
+            deployment.save(update_fields=["node_size", "updated_at"])
+            return Ok(True)
+
+        if field == "server_status":
+            if actual not in ("off", "stopped"):
+                return Err(
+                    f"Cannot accept transient provider status '{actual}' — only a powered-off "
+                    "server can be accepted as stopped"
+                )
+            try:
+                # A stopped deployment leaves scan scope; the recovery task
+                # supersedes its remaining drift bookkeeping.
+                deployment.transition_to("stopped", "Accepted drift: server powered off at provider")
+            except ValidationError as e:
+                return Err(str(e))
+            return Ok(True)
+
+        return Err(f"Field '{field}' has no durable write-back")
 
     def execute_remediation(  # noqa: PLR0911  # Multi-step workflow: each gate exits early
         self,
