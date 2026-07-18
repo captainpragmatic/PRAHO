@@ -9,10 +9,11 @@ from __future__ import annotations
 
 import logging
 from datetime import timedelta
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, TypedDict
 
 from django.core.cache import cache
+from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 from django_q.models import Schedule
@@ -594,8 +595,10 @@ def _resolve_renewal_product_id(service: Any) -> Any | None:
 
     OrderItem.product is a non-null FK and create_order rejects a missing product_id (#127), but
     ServicePlan carries no link to Product — the only path from a service back to the catalog is
-    the order item that provisioned it. A service created outside an order (manual, migrated) has
-    no such item, and guessing a product would put a wrong price on a real invoice.
+    its order items. The NEWEST item wins deliberately: after an upgrade, it reflects what the
+    service now is, and renewal items resolve through this same path so repeated renewals
+    converge on the same product. A service created outside an order (manual, migrated) has no
+    item at all, and guessing a product would put a wrong price on a real invoice.
     """
     # Sort in Python rather than with .order_by(): the caller prefetches order_items__product, and
     # any queryset method that re-filters or re-orders discards that cache and issues a fresh query
@@ -619,7 +622,9 @@ def _create_renewal_order_data(service: Any, product_id: Any) -> OrderCreateData
                 "product_id": product_id,
                 "service_id": service.id,
                 "quantity": 1,
-                "unit_price_cents": int(Decimal(service.price) * 100),
+                # Explicit monetary rounding: bare int() truncates, so a migrated price like
+                # 29.995 would bill 2999 cents instead of 3000.
+                "unit_price_cents": int((Decimal(service.price) * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP)),
                 "setup_cents": 0,  # Renewals never re-charge setup.
                 "description": f"Service Renewal - {service.service_name}",
                 "meta": {
@@ -825,40 +830,52 @@ def process_recurring_orders() -> dict[str, Any]:
 
             for service in services_to_renew:
                 try:
-                    # Check if renewal order already exists.
-                    # Keyed off the JSON key path rather than JSONField `contains`: the latter is a
-                    # PostgreSQL-only lookup, so this guard could not be exercised by the SQLite
-                    # test suite — the one thing standing between a service and double-billing.
-                    existing_renewal = OrderItem.objects.filter(
-                        order__customer=service.customer,
-                        order__status__in=_RENEWAL_BLOCKING_ORDER_STATUSES,
-                        config__renewal_service_id=str(service.id),
-                    ).exists()
+                    # The run-level cache lock is the first concurrency layer, but it is not a
+                    # database invariant (it expires after 30 minutes and depends on the cache
+                    # backend). Locking the service row turns the guard-then-create below into a
+                    # DB-serialized section on PostgreSQL, so two overlapping runs cannot both
+                    # pass the guard for the same service and double-bill it.
+                    with transaction.atomic():
+                        Service.objects.select_for_update().get(pk=service.pk)
 
-                    if existing_renewal:
-                        logger.debug(f"⏭️ [RecurringOrders] Renewal order already exists for service {service.id}")
-                        continue
+                        # Check if renewal order already exists.
+                        # Keyed off the JSON key path rather than JSONField `contains`: the latter
+                        # is a PostgreSQL-only lookup, so this guard could not be exercised by the
+                        # SQLite test suite — the one thing standing between a service and
+                        # double-billing.
+                        existing_renewal = OrderItem.objects.filter(
+                            order__customer=service.customer,
+                            order__status__in=_RENEWAL_BLOCKING_ORDER_STATUSES,
+                            config__renewal_service_id=str(service.id),
+                        ).exists()
 
-                    # A renewal must bill against the catalog product the customer originally
-                    # bought. Report rather than guess: a wrong product means a wrong price.
-                    product_id = _resolve_renewal_product_id(service)
-                    if product_id is None:
-                        logger.error(
-                            f"🔥 [RecurringOrders] Service {service.id} has no originating order item; "
-                            f"cannot resolve a product to renew against"
-                        )
-                        results["errors"].append(
-                            f"Service {service.id}: no originating order item; cannot resolve renewal product"
-                        )
-                        results["renewal_failures"] += 1
-                        continue
+                        if existing_renewal:
+                            logger.debug(f"⏭️ [RecurringOrders] Renewal order already exists for service {service.id}")
+                            continue
 
-                    # Create renewal order
-                    order_service = OrderService()
-                    renewal_order_data = _create_renewal_order_data(service, product_id)
+                        # A renewal must bill against the catalog product the customer originally
+                        # bought. Report rather than guess: a wrong product means a wrong price.
+                        product_id = _resolve_renewal_product_id(service)
+                        if product_id is None:
+                            logger.error(
+                                f"🔥 [RecurringOrders] Service {service.id} has no originating order item; "
+                                f"cannot resolve a product to renew against"
+                            )
+                            results["errors"].append(
+                                f"Service {service.id}: no originating order item; cannot resolve renewal product"
+                            )
+                            results["renewal_failures"] += 1
+                            continue
 
-                    create_result = order_service.create_order(renewal_order_data)
+                        # Create renewal order — must commit inside the row lock so a second
+                        # worker's guard query sees it the moment it acquires the lock.
+                        order_service = OrderService()
+                        renewal_order_data = _create_renewal_order_data(service, product_id)
 
+                        create_result = order_service.create_order(renewal_order_data)
+
+                    # Invoice creation and logging stay OUTSIDE the lock: a failure there must
+                    # not roll back the committed renewal order (pre-existing behavior).
                     if create_result.is_ok():
                         renewal_order = create_result.unwrap()
                         results["renewal_orders_created"] += 1

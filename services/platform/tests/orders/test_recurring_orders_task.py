@@ -169,6 +169,58 @@ class RecurringOrdersTaskTestCase(TestCase):
 
         self.assertIsNone(_resolve_renewal_product_id(service))
 
+    def test_renewal_product_resolves_from_the_newest_order_item_after_upgrade(self):
+        """An upgraded service renews against what it now IS, not what it was first sold as.
+
+        The resolver deliberately picks the NEWEST order item: after an upgrade the latest
+        item carries the current catalog product. With only single-item fixtures either sort
+        direction passes, so this pins the choice with two items on different products.
+        """
+        service = self._service()
+        upgraded_product = Product.objects.create(
+            slug="pro-hosting",
+            name="Pro Hosting",
+            product_type="shared_hosting",
+            is_active=True,
+            is_public=True,
+        )
+        upgrade_order = Order.objects.create(
+            order_number="ORD-UPGRADE-1",
+            customer=self.customer,
+            currency=self.currency,
+            status="completed",
+            subtotal_cents=4999,
+            tax_cents=950,
+            total_cents=5949,
+        )
+        newest = OrderItem.objects.create(
+            order=upgrade_order,
+            product=upgraded_product,
+            service=service,
+            quantity=1,
+            unit_price_cents=4999,
+            tax_rate=Decimal("0.19"),
+            line_total_cents=4999,
+            product_name="Pro Hosting",
+            product_type="shared_hosting",
+        )
+        OrderItem.objects.filter(pk=newest.pk).update(created_at=timezone.now() + timedelta(seconds=60))
+        service.refresh_from_db()
+
+        self.assertEqual(_resolve_renewal_product_id(service), upgraded_product.id)
+
+    def test_renewal_price_rounds_half_up_to_cents(self):
+        """int() truncates: a three-decimal price like 29.995 must bill 3000 cents, not 2999.
+
+        Two-decimal fixtures cannot tell truncation from rounding, so this uses a price that
+        only survives an explicit ROUND_HALF_UP quantization.
+        """
+        service = self._service(price="29.995")
+
+        data = _create_renewal_order_data(service, self.product.id)
+
+        self.assertEqual(data.items[0]["unit_price_cents"], 3000)
+
     def test_service_without_originating_order_item_is_reported_not_silently_skipped(self):
         """A service that cannot be renewed must surface as an error, not vanish — an invisible
         non-renewing service is exactly the failure mode #223 is about."""
