@@ -71,6 +71,20 @@ def _make_invoice(customer, currency, **kw):
     return Invoice.objects.create(**defaults)
 
 
+def _make_bank_payment(customer, currency, *, invoice=None, order=None, amount_cents=10000):
+    """Create a refundable non-gateway payment through the real document links."""
+    meta = {"order_id": str(order.id)} if order is not None else {}
+    return Payment.objects.create(
+        customer=customer,
+        currency=currency,
+        invoice=invoice,
+        payment_method="bank",
+        amount_cents=amount_cents,
+        status="succeeded",
+        meta=meta,
+    )
+
+
 # ===========================================================================
 # Ok / Err canonical types (apps.common.types)
 # ===========================================================================
@@ -335,6 +349,7 @@ class TestRefundOrder(TestCase):
 
     def test_refund_order_success(self):
         order = _make_order(self.customer, self.currency, status="completed", total_cents=10000)
+        _make_bank_payment(self.customer, self.currency, order=order)
         data: RefundData = {"amount_cents": 10000, "refund_type": "full", "reason": "customer_request"}
         r = RefundService.refund_order(order.id, data)
         assert r.is_ok()
@@ -371,12 +386,14 @@ class TestRefundOrder(TestCase):
     def test_refund_order_with_amount_legacy(self):
         """Tests _normalize_refund_data path in refund_order."""
         order = _make_order(self.customer, self.currency, status="completed", total_cents=10000)
+        _make_bank_payment(self.customer, self.currency, order=order)
         data: RefundData = {"amount": 10000, "refund_type": "full", "reason": "customer_request"}
         r = RefundService.refund_order(order.id, data)
         assert r.is_ok()
 
     def test_refund_order_partial(self):
         order = _make_order(self.customer, self.currency, status="completed", total_cents=10000)
+        _make_bank_payment(self.customer, self.currency, order=order)
         data: RefundData = {"amount_cents": 3000, "refund_type": "partial", "reason": "customer_request"}
         r = RefundService.refund_order(order.id, data)
         assert r.is_ok()
@@ -393,6 +410,7 @@ class TestRefundInvoice(TestCase):
 
     def test_refund_invoice_success(self):
         inv = _make_invoice(self.customer, self.currency, status="paid", total_cents=10000)
+        _make_bank_payment(self.customer, self.currency, invoice=inv)
         data: RefundData = {"amount_cents": 10000, "refund_type": "full", "reason": "customer_request"}
         r = RefundService.refund_invoice(inv.id, data)
         assert r.is_ok()
@@ -421,6 +439,7 @@ class TestRefundInvoice(TestCase):
 
     def test_refund_invoice_with_legacy_amount(self):
         inv = _make_invoice(self.customer, self.currency, status="paid", total_cents=10000)
+        _make_bank_payment(self.customer, self.currency, invoice=inv)
         data: RefundData = {"amount": 5000, "refund_type": "full", "reason": "customer_request"}
         r = RefundService.refund_invoice(inv.id, data)
         assert r.is_ok()
@@ -923,6 +942,7 @@ class TestCreateRefundRecord(TestCase):
 
     def test_success_with_order(self):
         o = _make_order(self.customer, self.currency, status="completed", total_cents=10000)
+        _make_bank_payment(self.customer, self.currency, order=o)
         from apps.billing.refund_service import RefundRecordParams  # noqa: PLC0415
         params = RefundRecordParams(
             refund_id=uuid.uuid4(), order=o, invoice=None,
@@ -936,6 +956,7 @@ class TestCreateRefundRecord(TestCase):
 
     def test_success_with_invoice(self):
         inv = _make_invoice(self.customer, self.currency, status="paid", total_cents=10000)
+        _make_bank_payment(self.customer, self.currency, invoice=inv)
         from apps.billing.refund_service import RefundRecordParams  # noqa: PLC0415
         params = RefundRecordParams(
             refund_id=uuid.uuid4(), order=None, invoice=inv,
@@ -1060,10 +1081,11 @@ class TestCreateRefundRecord(TestCase):
                 f"Expected FK constraint log message, got: {cm.output}",
             )
 
-    def test_currency_creation_on_missing(self):
-        """When RON currency doesn't exist, it should be created."""
+    def test_uses_entity_currency_without_creating_ron(self):
+        """Refund audit rows retain the monetary operation's currency."""
         Currency.objects.filter(code="RON").delete()
-        o = _make_order(self.customer, _make_currency("EUR"), status="completed", total_cents=10000)
+        eur = _make_currency("EUR")
+        o = _make_order(self.customer, eur, status="completed", total_cents=10000)
         from apps.billing.refund_service import RefundRecordParams  # noqa: PLC0415
         params = RefundRecordParams(
             refund_id=uuid.uuid4(), order=o, invoice=None,
@@ -1072,7 +1094,8 @@ class TestCreateRefundRecord(TestCase):
         )
         r = RefundService._create_refund_record(params)
         assert r.is_ok()
-        assert Currency.objects.filter(code="RON").exists()
+        assert Refund.objects.get(order=o).currency == eur
+        assert not Currency.objects.filter(code="RON").exists()
 
 
 # ===========================================================================
@@ -1143,30 +1166,34 @@ class TestProcessEntityUpdates(TestCase):
 # _process_payment_refund_if_exists
 # ===========================================================================
 class TestProcessPaymentRefundIfExists(TestCase):
-    def test_no_payments_attr(self):
-        order = MagicMock(spec=["id"])
+    def setUp(self):
+        self.customer = _make_customer()
+        self.currency = _make_currency()
+
+    def test_order_without_payment_returns_err(self):
+        order = _make_order(self.customer, self.currency)
         r = RefundService._process_payment_refund_if_exists(order, None, None)
-        assert r is None
+        assert r.is_err()
+        assert "No successful payments" in r.unwrap_err()
 
-    def test_order_with_payments(self):
-        payment = MagicMock(id=1, status="succeeded", payment_method="bank_transfer", gateway_txn_id="")
-        order = MagicMock()
-        order.payments.first.return_value = payment
+    def test_order_resolves_payment_from_metadata(self):
+        order = _make_order(self.customer, self.currency)
+        payment = _make_bank_payment(self.customer, self.currency, order=order)
         r = RefundService._process_payment_refund_if_exists(order, None, {"refund_type": "full"})
-        assert r is not None
         assert r.is_ok()
+        assert r.unwrap()["payment"].pk == payment.pk
 
-    def test_invoice_with_payments(self):
-        payment = MagicMock(id=1, status="succeeded", payment_method="stripe")
-        invoice = MagicMock(spec=["id"])
-        invoice = MagicMock()
-        invoice.payments.first.return_value = payment
+    def test_invoice_resolves_payment_from_relation(self):
+        invoice = _make_invoice(self.customer, self.currency)
+        payment = _make_bank_payment(self.customer, self.currency, invoice=invoice)
         r = RefundService._process_payment_refund_if_exists(None, invoice, {"refund_type": "full"})
-        assert r is not None
+        assert r.is_ok()
+        assert r.unwrap()["payment"].pk == payment.pk
 
     def test_none_entities(self):
         r = RefundService._process_payment_refund_if_exists(None, None, None)
-        assert r is None
+        assert r.is_err()
+        assert "No successful payments" in r.unwrap_err()
 
 
 # ===========================================================================
@@ -1561,26 +1588,29 @@ class TestProcessPaymentRefund(TestCase):
 
     def test_payment_partial_refund(self):
         payment = self._make_succeeded_payment(gateway_txn_id="tx_partial_refund")
-        with self._mock_gateway_success():
-            r = RefundService._process_payment_refund(payment, {"refund_type": "partial"})
+        with self._mock_gateway_success(amount=5000):
+            r = RefundService._process_payment_refund(
+                payment,
+                {"refund_type": "partial", "amount_cents": 5000},
+            )
         assert r.is_ok()
         payment.refresh_from_db()
         assert payment.status == "partially_refunded"
 
     def test_payment_from_kwargs_order(self):
-        payment = MagicMock(id=1, status="succeeded", payment_method="stripe", amount_cents=10000, gateway_txn_id="tx_123")
-        order = MagicMock()
-        order.payments.first.return_value = payment
-        with self._mock_gateway_success():
-            r = RefundService._process_payment_refund(None, {"refund_type": "full"}, order=order)
+        customer = _make_customer()
+        currency = _make_currency()
+        order = _make_order(customer, currency)
+        _make_bank_payment(customer, currency, order=order)
+        r = RefundService._process_payment_refund(None, {"refund_type": "full"}, order=order)
         assert r.is_ok()
 
     def test_payment_from_kwargs_invoice(self):
-        payment = MagicMock(id=1, status="succeeded", payment_method="stripe", amount_cents=10000, gateway_txn_id="tx_123")
-        invoice = MagicMock()
-        invoice.payments.first.return_value = payment
-        with self._mock_gateway_success():
-            r = RefundService._process_payment_refund(None, None, invoice=invoice)
+        customer = _make_customer()
+        currency = _make_currency()
+        invoice = _make_invoice(customer, currency)
+        _make_bank_payment(customer, currency, invoice=invoice)
+        r = RefundService._process_payment_refund(None, None, invoice=invoice)
         assert r.is_ok()
 
     def test_refund_amount_cents_kwarg_full(self):
@@ -1613,10 +1643,10 @@ class TestProcessPaymentRefund(TestCase):
         r = RefundService._process_payment_refund(payment, {"refund_type": "full"})
         assert r.is_ok()
 
-    def test_no_payment_from_order_no_first(self):
-        """Order has payments attr but no first method."""
-        order = MagicMock()
-        order.payments = MagicMock(spec=[])  # no 'first'
+    def test_no_payment_from_order(self):
+        customer = _make_customer()
+        currency = _make_currency()
+        order = _make_order(customer, currency)
         r = RefundService._process_payment_refund(None, None, order=order)
         assert r.is_err()
 
@@ -1664,25 +1694,28 @@ class TestProcessBidirectionalRefund(TestCase):
 
     def test_success_with_order(self):
         o = _make_order(self.customer, self.currency, status="completed", total_cents=10000)
+        _make_bank_payment(self.customer, self.currency, order=o)
         r = RefundService._process_bidirectional_refund(
             order=o, invoice=None, refund_id=uuid.uuid4(),
             refund_data={"amount_cents": 5000, "refund_type": "partial", "reason": "customer_request"},
         )
-        assert r.is_ok()
+        assert r.is_ok(), r.unwrap_err() if r.is_err() else ""
         data = r.unwrap()
         assert data["order_status_updated"] is False  # Phase A: order status not changed on refund
 
     def test_success_with_invoice(self):
         inv = _make_invoice(self.customer, self.currency, status="paid", total_cents=10000)
+        _make_bank_payment(self.customer, self.currency, invoice=inv)
         r = RefundService._process_bidirectional_refund(
             order=None, invoice=inv, refund_id=uuid.uuid4(),
             refund_data={"amount_cents": 5000, "refund_type": "partial", "reason": "customer_request"},
         )
-        assert r.is_ok()
+        assert r.is_ok(), r.unwrap_err() if r.is_err() else ""
 
     def test_create_record_fails(self):
         with patch.object(RefundService, "_create_refund_record", return_value=Err("fail")):
             o = _make_order(self.customer, self.currency, status="completed", total_cents=10000)
+            _make_bank_payment(self.customer, self.currency, order=o)
             r = RefundService._process_bidirectional_refund(
                 order=o, refund_id=uuid.uuid4(), refund_data={"amount_cents": 5000},
             )
@@ -1691,22 +1724,21 @@ class TestProcessBidirectionalRefund(TestCase):
     def test_entity_updates_fail(self):
         with patch.object(RefundService, "_process_entity_updates", return_value=Err("fail")):
             o = _make_order(self.customer, self.currency, status="completed", total_cents=10000)
+            _make_bank_payment(self.customer, self.currency, order=o)
             r = RefundService._process_bidirectional_refund(
                 order=o, refund_id=uuid.uuid4(), refund_data={"amount_cents": 5000},
             )
             assert r.is_err()
 
     def test_payment_refund_err(self):
-        """Payment refund returns error but overall still succeeds."""
+        """Payment refund errors remain errors at the orchestration boundary."""
         o = _make_order(self.customer, self.currency, status="completed", total_cents=10000)
         with patch.object(RefundService, "_process_payment_refund_if_exists", return_value=Err("payment fail")):
             r = RefundService._process_bidirectional_refund(
                 order=o, refund_id=uuid.uuid4(), refund_data={"amount_cents": 5000, "reason": "test"},
             )
-            assert r.is_ok()
-            data = r.unwrap()
-            assert data["payment_refund_processed"] is False
-            assert data["payment_refund_error"] == "payment fail"
+            assert r.is_err()
+            assert r.unwrap_err() == "payment fail"
 
     def test_exception_path(self):
         with patch.object(RefundService, "_extract_refund_amount", side_effect=Exception("boom")):
@@ -1727,11 +1759,13 @@ class TestExecuteLegacyWrappers(TestCase):
 
     def test_execute_order_refund(self):
         o = _make_order(self.customer, self.currency, status="completed", total_cents=10000)
+        _make_bank_payment(self.customer, self.currency, order=o)
         r = RefundService._execute_order_refund(o, {"amount_cents": 10000, "refund_type": "full", "reason": "test"})
         assert r.is_ok()
 
     def test_execute_invoice_refund(self):
         inv = _make_invoice(self.customer, self.currency, status="paid", total_cents=10000)
+        _make_bank_payment(self.customer, self.currency, invoice=inv)
         r = RefundService._execute_invoice_refund(inv, {"amount_cents": 10000, "refund_type": "full", "reason": "test"})
         assert r.is_ok()
 

@@ -16,7 +16,7 @@ from django.db.models import Count, Q, Sum
 from django_fsm import ConcurrentTransition, TransitionNotAllowed
 
 from apps.billing.gateways.base import GATEWAY_PAYMENT_METHODS, PaymentGatewayFactory
-from apps.billing.models import Currency, Invoice, Refund, RefundStatusHistory, log_security_event
+from apps.billing.models import Invoice, Payment, Refund, RefundStatusHistory, log_security_event
 from apps.common.types import Err, Ok, Result
 from apps.orders.models import Order
 
@@ -93,6 +93,8 @@ class RefundRecordParams(TypedDict, total=False):
     refund_amount_cents: int
     original_cents: int
     refund_data: RefundData | None
+    payment: Payment
+    gateway_refund_id: str
 
 
 class RefundStatus(enum.Enum):
@@ -129,6 +131,13 @@ class RefundService:
                     order = Order.objects.select_for_update(of=("self",)).select_related("customer").get(id=order_id)
                 except Order.DoesNotExist:
                     return Err("Failed to process refund: Order not found")
+
+                # Invoice refunds acquire Invoice -> Payment locks. Match that
+                # order here before the order path reaches the same Payment so
+                # concurrent order/invoice refunds cannot deadlock or both call
+                # the gateway from different entry points.
+                if isinstance(order, Order) and order.invoice_id:
+                    order.invoice = Invoice.objects.select_for_update(of=("self",)).get(pk=order.invoice_id)
 
                 # Validate eligibility INSIDE the atomic block with lock held
                 validation_result = RefundService._validate_order_refund(order, refund_data)
@@ -724,7 +733,20 @@ class RefundService:
             refund_amount_cents = RefundService._extract_refund_amount(refund_data, kwargs)
             original_cents = RefundService._calculate_original_amount(order, invoice, refund_amount_cents)
 
-            # Create refund record
+            # Resolve and refund the authoritative payment before any durable
+            # Refund or Invoice mutation. The public callers hold an Order or
+            # Invoice row lock; this helper also locks the Payment row.
+            payment_result = RefundService._process_payment_refund_if_exists(order, invoice, refund_data)
+            if payment_result.is_err():
+                return Err(payment_result.unwrap_err())
+
+            payment_data = payment_result.unwrap()
+            payment = payment_data["payment"]
+            gateway_refund_id = str(payment_data.get("refund_id") or "")[:255]
+
+            # Create the local audit record only after the monetary operation
+            # succeeds. Refund already has the required linkage fields, so no
+            # schema change is needed.
             refund_result = RefundService._create_refund_record(
                 RefundRecordParams(
                     refund_id=refund_id,
@@ -733,6 +755,8 @@ class RefundService:
                     refund_amount_cents=refund_amount_cents,
                     original_cents=original_cents,
                     refund_data=refund_data,
+                    payment=payment,
+                    gateway_refund_id=gateway_refund_id,
                 )
             )
             if refund_result.is_err():
@@ -743,14 +767,8 @@ class RefundService:
             if result.is_err():
                 return result
 
-            # Process payment refund
-            payment_result = RefundService._process_payment_refund_if_exists(order, invoice, refund_data)
-
             final_result = result.unwrap()
-            if payment_result:
-                final_result["payment_refund_processed"] = payment_result.is_ok()
-                if payment_result.is_err():
-                    final_result["payment_refund_error"] = payment_result.unwrap_err()
+            final_result["payment_refund_processed"] = True
 
             return Ok(final_result)
         except Exception:
@@ -789,20 +807,21 @@ class RefundService:
             refund_amount_cents = params["refund_amount_cents"]
             original_cents = params["original_cents"]
             refund_data = params["refund_data"]
+            payment = params.get("payment")
+            gateway_refund_id = params.get("gateway_refund_id", "")
 
-            # Get or create default currency (RON)
-            try:
-                currency = Currency.objects.get(code="RON")
-            except Currency.DoesNotExist:
-                currency = Currency.objects.create(code="RON", name="Romanian Leu", symbol="lei")
+            # The refund is denominated in the currency of the monetary
+            # operation, not an assumed platform default.
+            currency = payment.currency if payment else (order.currency if order else invoice.currency)
 
             refund = Refund.objects.create(
                 id=refund_id,
                 customer=order.customer if order else invoice.customer,
                 order=order,
                 invoice=invoice,
+                payment=payment,
                 amount_cents=refund_amount_cents,
-                currency=currency,  # Use actual currency object
+                currency=currency,
                 original_amount_cents=original_cents,
                 refund_type=refund_data.get("refund_type", "full") if refund_data else "full",
                 reason=str(refund_data.get("reason", "customer_request")) if refund_data else "customer_request",
@@ -811,6 +830,7 @@ class RefundService:
                 if refund_data
                 else f"REF-{refund_id}",
                 status="pending",
+                gateway_refund_id=gateway_refund_id,
                 created_by=refund_data.get("initiated_by") if refund_data else None,  # type: ignore[misc]
             )
 
@@ -873,34 +893,75 @@ class RefundService:
             result["order_status_updated"] = False
             result["order_id"] = order.id
 
+        # Order refunds are recorded against the Order, but the financial
+        # document still needs to reflect the refund. Only follow the concrete
+        # Order relation here so mock/legacy callers do not invent an invoice.
+        invoice_to_update = invoice
+        if invoice_to_update is None and isinstance(order, Order) and order.invoice_id:
+            invoice_to_update = order.invoice
+
         # Process invoice updates
-        if invoice:
-            invoice_result = RefundService._update_invoice_refund_status(invoice, refund_data=refund_data)
+        if invoice_to_update:
+            invoice_result = RefundService._update_invoice_refund_status(invoice_to_update, refund_data=refund_data)
             if invoice_result.is_ok():
                 result["invoice_status_updated"] = True
             else:
                 logger.warning(
                     "⚠️ [Refund] Invoice status update failed for invoice %s: %s",
-                    invoice.id,
+                    invoice_to_update.id,
                     invoice_result.unwrap_err() if invoice_result.is_err() else "unknown",
                 )
                 result["invoice_status_updated"] = False
-            result["invoice_id"] = invoice.id
+            result["invoice_id"] = invoice_to_update.id
 
         return Ok(result)
 
     @staticmethod
     def _process_payment_refund_if_exists(
         order: Any, invoice: Any, refund_data: RefundData | None
-    ) -> Result[dict[str, Any], str] | None:
-        """Process payment refund if payment exists"""
-        payment_result = None
-        if order and hasattr(order, "payments"):
-            payment_result = RefundService._process_payment_refund(order.payments.first(), refund_data)
-        elif invoice and hasattr(invoice, "payments"):
-            payment_result = RefundService._process_payment_refund(invoice.payments.first(), refund_data)
+    ) -> Result[dict[str, Any], str]:
+        """Resolve and refund the single authoritative payment for an entity."""
+        payment_result = RefundService._resolve_refundable_payment(order, invoice)
+        if payment_result.is_err():
+            return Err(payment_result.unwrap_err())
 
-        return payment_result
+        payment = payment_result.unwrap()
+        gateway_result = RefundService._process_payment_refund(payment, refund_data)
+        if gateway_result.is_err():
+            return Err(gateway_result.unwrap_err())
+
+        return Ok({**gateway_result.unwrap(), "payment": payment})
+
+    @staticmethod
+    def _resolve_refundable_payment(order: Any, invoice: Any) -> Result[Payment, str]:
+        """Find and lock one refundable Payment through PRAHO's real relations."""
+        if invoice is not None:
+            relation_filter = Q(invoice_id=invoice.pk)
+            customer_id = invoice.customer_id
+        elif order is not None:
+            relation_filter = Q(meta__order_id=str(order.pk))
+            if order.invoice_id:
+                relation_filter |= Q(invoice_id=order.invoice_id)
+            if order.proforma_id:
+                relation_filter |= Q(proforma_id=order.proforma_id)
+            customer_id = order.customer_id
+        else:
+            return Err("No successful payments found to refund")
+
+        candidates = list(
+            Payment.objects.select_for_update(of=("self",))
+            .filter(
+                relation_filter,
+                customer_id=customer_id,
+                status__in=("succeeded", "partially_refunded"),
+            )
+            .order_by("-received_at", "-created_at")[:2]
+        )
+        if not candidates:
+            return Err("No successful payments found to refund")
+        if len(candidates) > 1:
+            return Err("Multiple successful payments found; select a payment-specific refund workflow")
+        return Ok(candidates[0])
 
     @staticmethod
     def _update_order_refund_status(
@@ -945,11 +1006,13 @@ class RefundService:
             # Update invoice status to indicate it has been refunded via FSM transitions
             if hasattr(invoice, "status"):
                 refund_type = refund_data.get("refund_type", "full") if refund_data else "full"
-                current_amount = refund_data.get("amount_cents", 0) if refund_data else 0
 
                 # Check if this refund makes it fully refunded
                 try:
-                    if already_refunded + current_amount >= total_amount_cents or refund_type == "full":
+                    # The Refund row is created before this method runs, so the
+                    # aggregate already includes the current operation. Adding
+                    # current_amount again would turn a 50% refund into a full one.
+                    if already_refunded >= total_amount_cents or refund_type == "full":
                         invoice.refund_invoice()
                     else:
                         invoice.mark_partially_refunded()
@@ -1013,7 +1076,11 @@ class RefundService:
 
         # Single source of truth: Refund model (#125 — removed meta.refunds fallback)
         try:
-            return int(Refund.objects.filter(invoice=invoice).aggregate(total=Sum("amount_cents", default=0))["total"])
+            return int(
+                Refund.objects.filter(Q(invoice=invoice) | Q(payment__invoice=invoice)).aggregate(
+                    total=Sum("amount_cents", default=0)
+                )["total"]
+            )
         except (TypeError, AttributeError) as exc:
             logger.error(
                 "Refund amount aggregation failed for invoice_id=%s — aborting to prevent over-refund",
@@ -1144,12 +1211,13 @@ class RefundService:
         invoice = kwargs.get("invoice")
         refund_amount_cents = kwargs.get("refund_amount_cents")
 
-        # If payment not passed directly, try to get from order/invoice
+        # If payment not passed directly, resolve it through the same
+        # authoritative document relations used by the public refund flow.
         if not payment:
-            if order and hasattr(order, "payments"):
-                payment = order.payments.first() if hasattr(order.payments, "first") else None
-            elif invoice and hasattr(invoice, "payments"):
-                payment = invoice.payments.first() if hasattr(invoice.payments, "first") else None
+            payment_result = RefundService._resolve_refundable_payment(order, invoice)
+            if payment_result.is_err():
+                return Err(payment_result.unwrap_err())
+            payment = payment_result.unwrap()
 
         try:
             if not payment:
@@ -1158,10 +1226,10 @@ class RefundService:
             # Lock the payment row to prevent concurrent refund double-execution.
             # Without this, two concurrent refund requests can both read status="succeeded",
             # both call the gateway, and the customer receives double the refund.
-            from apps.billing.payment_models import Payment  # noqa: PLC0415
-
             if isinstance(payment, Payment) and payment.pk:
                 payment = Payment.objects.select_for_update(of=("self",)).get(pk=payment.pk)
+                if payment.status not in {"succeeded", "partially_refunded"}:
+                    return Err(f"Payment is not refundable from status '{payment.status}'")
 
             # Determine refund type for status update (used after gateway succeeds)
             refund_type = refund_data.get("refund_type", "partial") if refund_data else "partial"
@@ -1184,41 +1252,13 @@ class RefundService:
 
             # GATEWAY-FIRST: call gateway before updating local state to prevent accounting drift
             effective_amount = refund_amount_cents or (refund_data.get("amount_cents", 0) if refund_data else 0)
-            gateway_result = RefundService._execute_gateway_refund(payment, refund_amount_cents, effective_amount)
+            gateway_amount_cents = refund_amount_cents or effective_amount or None
+            gateway_result = RefundService._execute_gateway_refund(payment, gateway_amount_cents, effective_amount)
 
             # Only update local payment status AFTER gateway succeeds (or for non-gateway payments)
             if gateway_result.is_ok() and hasattr(payment, "status"):
-                # Use FSM transition methods to avoid protected-field direct assignment.
-                # refund_payment() transitions succeeded → refunded.
-                # partially_refund() transitions succeeded → partially_refunded.
-                try:
-                    if refund_type == "full":
-                        payment.refund_payment()
-                    else:
-                        payment.partially_refund()
-                    payment.save()
-                except (TransitionNotAllowed, ConcurrentTransition):
-                    # Payment may already be in refunded/partially_refunded state,
-                    # or a concurrent process is modifying the same record (ADR-0034).
-                    # Log at ERROR: gateway refund succeeded but local status is now inconsistent.
-                    logger.error(
-                        "🔥 [Refund] Gateway refund succeeded but Payment %s FSM transition "
-                        "to '%s' failed (current status: %s) — reconciliation required",
-                        payment.id,
-                        "refunded" if refund_type == "full" else "partially_refunded",
-                        payment.status,
-                    )
-                    log_security_event(
-                        event_type="refund_reconciliation_gap",
-                        details={
-                            "payment_id": str(payment.id),
-                            "gateway_status": "refunded",
-                            "local_status": payment.status,
-                            "refund_type": refund_type,
-                            "severity": "critical",
-                            "action_required": "manual_reconciliation",
-                        },
-                    )
+                processed_amount = gateway_result.unwrap().get("total_refunded_cents", effective_amount)
+                RefundService._update_payment_status_after_refund(payment, refund_type, int(processed_amount))
 
             return gateway_result
 
@@ -1228,6 +1268,51 @@ class RefundService:
                 getattr(payment, "pk", None) if payment else None,
             )
             return Err("Failed to process payment refund")
+
+    @staticmethod
+    def _update_payment_status_after_refund(payment: Any, refund_type: str, refund_amount_cents: int) -> None:
+        """Apply the coarse Payment FSM state after a successful gateway refund."""
+        try:
+            is_fully_refunded = refund_type in (RefundType.FULL, "full")
+            if isinstance(payment, Payment):
+                previously_refunded = int(payment.refunds.aggregate(total=Sum("amount_cents", default=0))["total"])
+                is_fully_refunded = (
+                    is_fully_refunded or previously_refunded + refund_amount_cents >= payment.amount_cents
+                )
+            target_status = "refunded" if is_fully_refunded else "partially_refunded"
+
+            if payment.status == "partially_refunded":
+                if is_fully_refunded:
+                    payment.complete_refund()
+                else:
+                    # A second partial refund does not change the coarse Payment
+                    # state; individual Refund rows retain the amounts.
+                    return
+            elif is_fully_refunded:
+                payment.refund_payment()
+            else:
+                payment.partially_refund()
+            payment.save()
+        except (TransitionNotAllowed, ConcurrentTransition):
+            # The gateway succeeded but the local status could not converge.
+            logger.error(
+                "🔥 [Refund] Gateway refund succeeded but Payment %s FSM transition "
+                "to '%s' failed (current status: %s) — reconciliation required",
+                payment.id,
+                target_status,
+                payment.status,
+            )
+            log_security_event(
+                event_type="refund_reconciliation_gap",
+                details={
+                    "payment_id": str(payment.id),
+                    "gateway_status": "refunded",
+                    "local_status": payment.status,
+                    "refund_type": refund_type,
+                    "severity": "critical",
+                    "action_required": "manual_reconciliation",
+                },
+            )
 
     @staticmethod
     def _execute_gateway_refund(

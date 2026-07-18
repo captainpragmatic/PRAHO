@@ -85,6 +85,7 @@ class RefundServiceTestCase(TestCase):
             status='succeeded',
             amount_cents=12100,
             currency=self.currency,
+            payment_method='bank',
             gateway_txn_id='test_txn_123'
         )
 
@@ -115,7 +116,7 @@ class RefundServiceTestCase(TestCase):
         # Verify result
         self.assertEqual(refund_result['refund_type'], RefundType.PARTIAL)
         self.assertEqual(refund_result['amount_refunded_cents'], refund_amount)
-        self.assertFalse(refund_result['payment_refund_processed'])
+        self.assertTrue(refund_result['payment_refund_processed'])
 
         # Note: Order status update is temporarily disabled during transaction issue investigation
         # Expected behavior: self.order.status should be 'partially_refunded'
