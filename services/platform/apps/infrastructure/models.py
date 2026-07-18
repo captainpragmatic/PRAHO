@@ -895,7 +895,16 @@ class DriftReport(models.Model):
         ("remediated", _("Remediated")),
         ("accepted", _("Accepted")),
         ("ignored", _("Ignored")),
+        ("superseded", _("Superseded")),
+        ("healed", _("Healed Externally")),
     ]
+
+    # Fields whose accepted actual value can be durably written back to PRAHO's
+    # records (accepting anything else would just re-mint the same drift on the
+    # next scan).
+    ACCEPTABLE_DRIFT_FIELDS: ClassVar[frozenset[str]] = frozenset(
+        {"ipv4_address", "ipv6_address", "server_type", "server_status"}
+    )
 
     drift_check = models.ForeignKey(
         "DriftCheck",
@@ -927,6 +936,8 @@ class DriftReport(models.Model):
     resolution_type = models.CharField(
         max_length=20, choices=RESOLUTION_CHOICES, blank=True, verbose_name=_("Resolution Type")
     )
+    last_seen_at = models.DateTimeField(null=True, blank=True, verbose_name=_("Last Seen At"))
+    occurrence_count = models.PositiveIntegerField(default=1, verbose_name=_("Occurrence Count"))
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -942,6 +953,11 @@ class DriftReport(models.Model):
     def __str__(self) -> str:
         return f"DriftReport({self.deployment.hostname}, {self.field_name}, {self.severity})"
 
+    @property
+    def is_acceptable(self) -> bool:
+        """Whether accepting this drift performs a durable write (see ACCEPTABLE_DRIFT_FIELDS)."""
+        return self.field_name in self.ACCEPTABLE_DRIFT_FIELDS
+
 
 class DriftRemediationRequest(models.Model):
     """Tracks the approval workflow for fixing HIGH/CRITICAL drift."""
@@ -949,6 +965,7 @@ class DriftRemediationRequest(models.Model):
     ACTION_TYPE_CHOICES: ClassVar[list[tuple[str, str | _StrPromise]]] = [
         ("apply_desired", _("Apply Desired State")),
         ("accept_actual", _("Accept Actual State")),
+        ("manual_intervention", _("Manual Intervention")),
         ("schedule", _("Schedule")),
         ("ignore", _("Ignore")),
     ]
@@ -962,7 +979,12 @@ class DriftRemediationRequest(models.Model):
         ("failed", _("Failed")),
         ("rolled_back", _("Rolled Back")),
         ("rollback_failed", _("Rollback Failed")),
+        ("superseded", _("Superseded")),
     ]
+
+    # Statuses that count as "open" work for dedup purposes: while one of these
+    # exists for a report, the scanner must not mint another request.
+    OPEN_STATUSES: ClassVar[tuple[str, ...]] = ("pending_approval", "approved", "scheduled", "in_progress")
 
     report = models.ForeignKey(
         "DriftReport",
@@ -1003,6 +1025,7 @@ class DriftRemediationRequest(models.Model):
     rejected_reason = models.TextField(blank=True, verbose_name=_("Rejected Reason"))
     scheduled_for = models.DateTimeField(null=True, blank=True, verbose_name=_("Scheduled For"))
     snapshot_id = models.CharField(max_length=100, blank=True, verbose_name=_("Snapshot ID"))
+    execution_claimed_at = models.DateTimeField(null=True, blank=True, verbose_name=_("Execution Claimed At"))
     started_at = models.DateTimeField(null=True, blank=True, verbose_name=_("Started At"))
     completed_at = models.DateTimeField(null=True, blank=True, verbose_name=_("Completed At"))
     error_message = models.TextField(blank=True, verbose_name=_("Error Message"))
