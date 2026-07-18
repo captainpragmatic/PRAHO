@@ -1667,6 +1667,9 @@ def api_create_payment_intent(  # noqa: C901, PLR0911, PLR0912  # Complexity: mu
         "gateway": "stripe",
         "metadata": {...}
     }
+
+    Caller metadata is stored on the local Payment record. Metadata sent to the
+    gateway is derived from authoritative server data.
     """
     logger = logging.getLogger(__name__)
     customer, auth_error = _require_customer_auth_for_portal_api(request)

@@ -818,27 +818,38 @@ class OrderServiceCreationService:
             Result containing list of updated services or error message
         """
         try:
-            updated_services = []
+            with transaction.atomic():
+                service_ids = (
+                    order.items.exclude(service_id__isnull=True).values_list("service_id", flat=True).distinct()
+                )
+                services = Service.objects.select_for_update(of=("self",)).filter(pk__in=service_ids).order_by("pk")
+                updated_services = []
 
-            for item in order.items.select_related("service").all():
-                if item.service and item.service.status == "pending":
-                    item.service.start_provisioning()
-                    item.service.save(update_fields=["status"])
-                    updated_services.append(item.service)
+                for service in services:
+                    if service.status == "pending":
+                        service.start_provisioning()
+                        service.save(update_fields=["status"])
+                        updated_services.append(service)
 
-                    logger.info(f"🔄 [ServiceCreation] Updated service {item.service.id} status to provisioning")
-
-                    # Log audit event
-                    log_security_event(
-                        "service_status_updated",
-                        {
-                            "service_id": str(item.service.id),
+                        event_details = {
+                            "service_id": str(service.id),
                             "order_id": str(order.id),
                             "old_status": "pending",
                             "new_status": "provisioning",
                             "reason": "payment_confirmed",
-                        },
-                    )
+                        }
+
+                        def log_committed_transition(details: dict[str, str] = event_details) -> None:
+                            logger.info(
+                                "🔄 [ServiceCreation] Updated service %s status to provisioning",
+                                details["service_id"],
+                            )
+                            log_security_event(
+                                "service_status_updated",
+                                details,
+                            )
+
+                        transaction.on_commit(log_committed_transition, robust=True)
 
             return Ok(updated_services)
 
@@ -978,6 +989,7 @@ class OrderPaymentConfirmationService:
             )
             return Err(f"Order {order.pk} no longer exists — cannot confirm")
         except (TransitionNotAllowed, ConcurrentTransition) as e:
+            transaction.set_rollback(True)
             logger.warning(
                 "⚠️ [OrderConfirm] FSM transition denied for %s (in-memory status=%s): %s",
                 order.order_number,
@@ -986,6 +998,7 @@ class OrderPaymentConfirmationService:
             )
             return Err(f"Order transition denied at status '{order.status}': {e}")
         except Exception as e:
+            transaction.set_rollback(True)
             logger.exception("🔥 [OrderConfirm] Failed to confirm order %s: %s", order.order_number, e)
             return Err(f"Failed to confirm order: {e}")
 
