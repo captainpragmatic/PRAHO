@@ -2,7 +2,7 @@
 # ADDITIONAL BILLING MODELS TESTS - EDGE CASES & MISSING FUNCTIONALITY
 # ===============================================================================
 
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from unittest.mock import Mock, patch
 
@@ -513,12 +513,19 @@ class PaymentCollectionRunModelAdditionalTestCase(TestCase):
         )
 
     def test_payment_collection_run_str_representation(self):
-        """Test PaymentCollectionRun __str__ method"""
-        expected_parts = ['manual', 'running', str(self.collection_run.started_at.date())]
+        """Test PaymentCollectionRun __str__ method.
+
+        #286: the timestamp is the Romanian wall clock, not the stored UTC one. 2025-12-31 22:30
+        UTC is 2026-01-01 00:30 in Romania. The expectation is a literal rather than derived from
+        started_at — deriving it would mirror whatever __str__ does and assert nothing (and,
+        against .date(), would re-encode the very UTC bug this pins).
+        """
+        self.collection_run.started_at = datetime(2025, 12, 31, 22, 30, tzinfo=UTC)
+        self.collection_run.save()
+
         str_repr = str(self.collection_run)
 
-        for part in expected_parts:
-            self.assertIn(part, str_repr)
+        self.assertEqual(str_repr, 'manual Collection Run 2026-01-01 00:30 - running')
 
     def test_payment_collection_run_amount_property(self):
         """Test PaymentCollectionRun amount property conversion"""

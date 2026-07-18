@@ -125,10 +125,14 @@ class UUIDSerializationTestCase(TestCase):
         self.assertIsNotNone(audit_event.id)
         self.assertEqual(audit_event.action, 'test_uuid_metadata')
 
-        # Verify metadata was properly serialized and stored
+        # Verify metadata was properly serialized and stored.
+        # Assert the caller's keys survive rather than the total count: audit events are also
+        # stamped with integrity-hash keys on save (#217), and this test is about UUID
+        # serialization, not how many keys the platform adds of its own.
         stored_metadata = audit_event.metadata
         self.assertIsInstance(stored_metadata, dict)
-        self.assertEqual(len(stored_metadata), len(metadata_with_uuids))
+        for key in metadata_with_uuids:
+            self.assertIn(key, stored_metadata)
 
         # All stored values should be strings (serialized)
         for key, value in stored_metadata.items():

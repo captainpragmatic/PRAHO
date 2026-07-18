@@ -68,7 +68,15 @@ def _resolve_subscription_unit_price_cents(product: Any, currency: Any, billing_
     if price is None:
         return Err(f"No active {getattr(currency, 'code', currency)} price for product {product}")
 
-    return Ok(price.get_price_cents_for_period(period))
+    cents = price.get_price_cents_for_period(period)
+    if not cents or cents <= 0:
+        # A zero/None period price means "unset" on ProductPrice, not a real list price —
+        # returning it as Ok would recreate the billed-zero defect this fix removes (#209).
+        return Err(
+            f"Product {product} has no usable {period} list price in "
+            f"{getattr(currency, 'code', currency)}; pass custom_price_cents"
+        )
+    return Ok(cents)
 
 
 def get_max_payment_retries() -> int:

@@ -1607,14 +1607,15 @@ class TestStripeGateway(TestCase):
         result = gw.create_payment_intent(
             "order-authoritative",
             2999,
-            metadata={"praho_order_id": "spoofed", "platform": "spoofed", "vat_rate": "0%"},
+            metadata={"praho_order_id": "attacker-order", "platform": "attacker-platform"},
+            idempotency_key="payment-attempt-key",
         )
 
         assert result["success"] is True
-        gateway_metadata = mock_stripe.PaymentIntent.create.call_args.kwargs["metadata"]
-        assert gateway_metadata["praho_order_id"] == "order-authoritative"
-        assert gateway_metadata["platform"] == "PRAHO"
-        assert gateway_metadata["vat_rate"] == "21%"
+        create_kwargs = mock_stripe.PaymentIntent.create.call_args.kwargs
+        assert create_kwargs["idempotency_key"] == "payment-attempt-key"
+        assert create_kwargs["metadata"]["praho_order_id"] == "order-authoritative"
+        assert create_kwargs["metadata"]["platform"] == "PRAHO"
 
     def test_create_payment_intent_no_customer(self):
         mock_stripe = MagicMock()

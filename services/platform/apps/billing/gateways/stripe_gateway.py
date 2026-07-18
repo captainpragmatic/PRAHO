@@ -129,6 +129,7 @@ class StripeGateway(BasePaymentGateway):
             currency: ISO currency code (RON, EUR, USD)
             customer_id: Stripe customer ID (optional)
             metadata: Additional metadata
+            idempotency_key: Stable Stripe retry key (optional)
 
         Returns:
             PaymentIntentResult with client_secret for frontend
@@ -153,6 +154,8 @@ class StripeGateway(BasePaymentGateway):
             # Add customer if provided
             if customer_id:
                 payment_intent_params["customer"] = customer_id
+            if idempotency_key:
+                payment_intent_params["idempotency_key"] = idempotency_key
 
             # Create payment intent
             if idempotency_key:

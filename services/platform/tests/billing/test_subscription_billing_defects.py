@@ -23,7 +23,7 @@ from apps.products.models import Product, ProductPrice
 
 def _make_currency() -> Currency:
     currency, _ = Currency.objects.get_or_create(
-        code="RON", defaults={"name": "Romanian Leu", "symbol": "lei"}
+        code="RON", defaults={"name": "Romanian Leu", "symbol": "lei", "is_active": True}
     )
     return currency
 

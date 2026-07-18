@@ -1387,6 +1387,23 @@ class ConfirmOrderAuditHistoryOrderTestCase(TestCase):
             "First history record new_status must be 'paid'.",
         )
 
+    @patch("apps.orders.services.OrderPaymentConfirmationService._get_review_threshold")
+    def test_second_transition_failure_rolls_back_first_history_record(self, mock_threshold: object) -> None:
+        """A failed paid-to-provisioning transition must leave no partial paid history."""
+        from apps.orders.models import OrderStatusHistory  # noqa: PLC0415
+        from apps.orders.services import OrderPaymentConfirmationService  # noqa: PLC0415
+
+        mock_threshold.return_value = 1_000_000_00
+        order = self._create_awaiting_payment_order(total_cents=12100)
+
+        with patch.object(Order, "start_provisioning", side_effect=RuntimeError("transition failed")):
+            result = OrderPaymentConfirmationService.confirm_order(order)
+
+        self.assertTrue(result.is_err())
+        order.refresh_from_db()
+        self.assertEqual(order.status, "awaiting_payment")
+        self.assertFalse(OrderStatusHistory.objects.filter(order=order).exists())
+
 
 # ===============================================================================
 # TASK 5.8: Proforma reuse on retry (failed → awaiting_payment)

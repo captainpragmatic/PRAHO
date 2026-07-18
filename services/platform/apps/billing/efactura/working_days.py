@@ -9,11 +9,14 @@ holidays — including the moveable Orthodox Easter and Pentecost — via the `h
 from __future__ import annotations
 
 import datetime
-from zoneinfo import ZoneInfo
 
 import holidays
 
-ROMANIA_TZ = ZoneInfo("Europe/Bucharest")
+from apps.billing.efactura.settings import ROMANIA_TIMEZONE, ro_local_date
+
+# Single source of truth for the Romanian timezone lives in efactura.settings; re-exported here
+# under this module's historical name for back-compat.
+ROMANIA_TZ = ROMANIA_TIMEZONE
 
 # date.weekday() returns 0=Monday..6=Sunday; values < this are working weekdays (Mon-Fri).
 _SATURDAY = 5
@@ -45,6 +48,6 @@ def submission_deadline_datetime(issued_at: datetime.datetime, working_days: int
     `issued_at` is first converted to the Romanian LOCAL calendar date so the day boundary is RO
     time, not UTC — an invoice issued at 23:30 UTC counts from the next Romanian day.
     """
-    issue_date = issued_at.astimezone(ROMANIA_TZ).date()
+    issue_date = ro_local_date(issued_at)
     deadline_date = add_working_days(issue_date, working_days)
     return datetime.datetime.combine(deadline_date, datetime.time.max, tzinfo=ROMANIA_TZ)

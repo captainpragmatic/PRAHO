@@ -294,7 +294,7 @@ def _generate_placeholder_pdf(invoice: Invoice) -> bytes:
     content = f"""Invoice: {invoice.number}
 Customer: {invoice.customer.get_display_name() if invoice.customer else "N/A"}
 Amount: {Decimal(invoice.total_cents) / 100:.2f}
-Date: {invoice.created_at.strftime("%Y-%m-%d") if invoice.created_at else "N/A"}
+Date: {timezone.localtime(invoice.created_at).strftime("%Y-%m-%d") if invoice.created_at else "N/A"}
 
 This is a placeholder PDF. Install weasyprint for proper PDF generation.
 """

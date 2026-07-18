@@ -14,6 +14,7 @@ from django.db.models import Q, QuerySet
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from django.views.decorators.http import require_http_methods
 
@@ -132,7 +133,8 @@ def _build_domain_table_data(domains: QuerySet[Domain] | list[Domain], user: Use
                 },
                 {
                     "component": "text",
-                    "text": domain.expires_at.strftime("%d %b %Y") if domain.expires_at else "N/A",
+                    # Romanian calendar day, not the stored UTC one (#286).
+                    "text": timezone.localtime(domain.expires_at).strftime("%d %b %Y") if domain.expires_at else "N/A",
                     "align": "center",
                     "title": expiry_title,
                     "text_color": f"text-{expiry_variant}-600" if expiry_variant != "secondary" else "",

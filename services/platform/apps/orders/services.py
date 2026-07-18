@@ -477,9 +477,15 @@ class OrderService:
                 if billing_period:
                     item_config["billing_period"] = billing_period
 
+                # OrderItemData.service_id was accepted but silently dropped here, so renewal
+                # items never linked back to their Service and renewal history was invisible
+                # on Service.order_items (#223). Stringified because django-stubs' FK-id
+                # setter union does not include UUID; Django adapts it back at the DB layer.
+                service_id = item_data.get("service_id")
                 OrderItem.objects.create(
                     order=order,
                     product_id=product_id,
+                    service_id=str(service_id) if service_id else None,
                     quantity=item_data["quantity"],
                     unit_price_cents=item_data["unit_price_cents"],
                     setup_cents=int(item_data.get("setup_cents", 0)),
@@ -892,14 +898,22 @@ class OrderServiceCreationService:
                     # the newly linked services are read back under the same row locks.
                     items = list(items_query.all())
 
+                # #294: lock every service in ONE statement ordered by pk. Locking per item
+                # in iteration order can deadlock against paths that lock the same rows in
+                # pk order (the recurring-collection and renewal paths do).
+                service_pks = sorted({item.service_id for item in items if item.service_id is not None})
+                locked_services = {
+                    service.pk: service
+                    for service in Service.objects.select_for_update(of=("self",))
+                    .select_related("currency")
+                    .filter(pk__in=service_pks)
+                    .order_by("pk")
+                }
+
                 for item in items:
                     if item.service_id is None:
                         raise ValueError(f"Paid order item {item.id} has no service")
-                    service = (
-                        Service.objects.select_for_update(of=("self",))
-                        .select_related("currency")
-                        .get(pk=item.service_id)
-                    )
+                    service = locked_services[item.service_id]
                     if service.status not in {"pending", "provisioning"}:
                         raise ValueError(f"Service {service.id} cannot enter provisioning from status {service.status}")
 
@@ -933,19 +947,28 @@ class OrderServiceCreationService:
                         service.save(update_fields=["status"])
                         updated_services.append(service)
 
-                        logger.info(f"🔄 [ServiceCreation] Updated service {service.id} status to provisioning")
+                        event_details = {
+                            "service_id": str(service.id),
+                            "order_id": str(order.id),
+                            "old_status": "pending",
+                            "new_status": "provisioning",
+                            "reason": "payment_confirmed",
+                        }
 
-                        # Log audit event
-                        log_security_event(
-                            "service_status_updated",
-                            {
-                                "service_id": str(service.id),
-                                "order_id": str(order.id),
-                                "old_status": "pending",
-                                "new_status": "provisioning",
-                                "reason": "payment_confirmed",
-                            },
-                        )
+                        # #294: emit the (non-monetary) status audit only after commit — a
+                        # failure in audit emission must never roll back the financial
+                        # transaction, and a rolled-back transaction must not emit audits.
+                        def log_committed_transition(details: dict[str, str] = event_details) -> None:
+                            logger.info(
+                                "🔄 [ServiceCreation] Updated service %s status to provisioning",
+                                details["service_id"],
+                            )
+                            log_security_event(
+                                "service_status_updated",
+                                details,
+                            )
+
+                        transaction.on_commit(log_committed_transition, robust=True)
 
             return Ok(updated_services)
 
@@ -1091,6 +1114,7 @@ class OrderPaymentConfirmationService:
             )
             return Err(f"Order {order.pk} no longer exists — cannot confirm")
         except (TransitionNotAllowed, ConcurrentTransition) as e:
+            transaction.set_rollback(True)
             logger.warning(
                 "⚠️ [OrderConfirm] FSM transition denied for %s (in-memory status=%s): %s",
                 order.order_number,
@@ -1099,6 +1123,7 @@ class OrderPaymentConfirmationService:
             )
             return Err(f"Order transition denied at status '{order.status}': {e}")
         except Exception as e:
+            transaction.set_rollback(True)
             logger.exception("🔥 [OrderConfirm] Failed to confirm order %s: %s", order.order_number, e)
             return Err(f"Failed to confirm order: {e}")
 

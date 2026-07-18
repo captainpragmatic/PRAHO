@@ -127,6 +127,20 @@ jobs:
     - name: Full lint (all 7 phases)
       run: make lint
 
+    - name: Billing payment-intent concurrency tests (PostgreSQL)
+      timeout-minutes: 5
+      env:
+        DJANGO_SETTINGS_MODULE: config.settings.ci
+        DB_NAME: postgres
+        DB_USER: test
+        DB_PASSWORD: test
+        DB_HOST: localhost
+      run: |
+        cd services/platform
+        PYTHONPATH="$PWD" "$UV_PROJECT_ENVIRONMENT/bin/python" manage.py test \
+          tests.billing.test_payment_intent_security.DirectPaymentIntentPostgresConcurrencyTests \
+          --settings=config.settings.ci --verbosity=2
+
     - name: Platform tests with coverage (no failfast — complete picture)
       run: |
         cd services/platform

@@ -9,13 +9,25 @@ from typing import Any
 
 from django.conf import settings
 from django.db.models.signals import post_save, pre_delete
+
+# Bound directly (not via the transaction module attribute): tests elsewhere patch
+# django.db.transaction.atomic through their own module's reference, which mutates the
+# SHARED module attribute — this signal's savepoint must not be swept into assertions
+# about other apps' transaction behavior.
+from django.db.transaction import atomic
 from django.dispatch import Signal, receiver
 from django.http import HttpRequest
 
 from apps.common.request_ip import get_safe_client_ip
 from apps.users.models import CustomerMembership, User, UserProfile
 
+from .models import AuditEvent
 from .services import AuditContext, AuditEventData, AuditService
+
+# Bumped when _calculate_event_hash changes shape, so old hashes are not compared against a new
+# algorithm and misreported as tampering. Its presence also marks an event as belonging to the
+# hashed era: a row without it predates #217 and is unverifiable rather than tampered.
+AUDIT_INTEGRITY_HASH_VERSION = 1
 
 
 @dataclass
@@ -757,6 +769,59 @@ def audit_customer_context_switch(
             metadata={"context_change": True, "customer_id": str(new_customer.id) if new_customer else None},
         )
     )
+
+
+# ===============================================================================
+# AUDIT EVENT INTEGRITY HASH
+# ===============================================================================
+
+
+@receiver(post_save, sender=AuditEvent)
+def stamp_audit_event_integrity_hash(sender: Any, instance: AuditEvent, created: bool, **kwargs: Any) -> None:
+    """Stamp a tamper-detection hash onto every newly created audit event.
+
+    _verify_hash_chain has always read metadata["integrity_hash"], but nothing ever wrote it, so
+    the stored hash was always absent, the mismatch branch was unreachable, and every integrity
+    check reported compliant no matter how the rows had been altered (#217).
+
+    Hooked on post_save rather than the three AuditEvent.objects.create() call sites because the
+    hash covers event.id and event.timestamp, which only exist once the row is written — and
+    because a signal also covers any creation site added later.
+    """
+    if not created:
+        # Audit events are append-only; re-hashing on update would launder a tampered row.
+        return
+
+    from .services import AuditIntegrityService  # noqa: PLC0415  # Deferred: avoids circular import
+
+    base_metadata = instance.metadata if isinstance(instance.metadata, dict) else {}
+    try:
+        metadata = dict(base_metadata)
+        metadata["integrity_hash"] = AuditIntegrityService._calculate_event_hash(instance)
+        metadata["integrity_hash_version"] = AUDIT_INTEGRITY_HASH_VERSION
+        # QuerySet.update() cannot re-enter this handler (updates emit no post_save), and a
+        # nested atomic() is essential, not decorative: a DB error in this statement marks the
+        # CALLER's connection needs_rollback, and this handler fires inside money-moving atomic
+        # blocks (order confirmation). Without the savepoint, swallowing the exception below
+        # would let the caller "commit" a transaction Django then silently rolls back — the
+        # exact SFH-3 failure mode (audit failure must never undo a financial transaction).
+        with atomic():
+            AuditEvent.objects.filter(pk=instance.pk).update(metadata=metadata)
+        instance.metadata = metadata
+    except Exception as e:
+        # An audit event that exists without a hash is far better than a lost audit event.
+        logger.error(f"🔥 [Audit Integrity] Failed to stamp integrity hash on event {instance.pk}: {e}")
+        # Best effort: land the version marker alone so the verifier reports this row as
+        # missing_integrity_hash (critical) — without it the row is byte-identical to a
+        # pre-hashing legacy row and demotes to an info-level "unverifiable" finding, which
+        # is precisely the low-visibility outcome #217 exists to eliminate.
+        try:
+            with atomic():
+                AuditEvent.objects.filter(pk=instance.pk).update(
+                    metadata={**base_metadata, "integrity_hash_version": AUDIT_INTEGRITY_HASH_VERSION}
+                )
+        except Exception:
+            logger.error(f"🔥 [Audit Integrity] Could not mark event {instance.pk} for critical follow-up")
 
 
 # ===============================================================================

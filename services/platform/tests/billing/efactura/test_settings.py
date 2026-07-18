@@ -9,7 +9,7 @@ Tests cover:
 - Validation and edge cases
 """
 
-from datetime import timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from io import StringIO
 from unittest.mock import patch
@@ -30,8 +30,33 @@ from apps.billing.efactura.settings import (
     EFacturaSettings,
     VATCategory,
     VATRateConfig,
+    ro_local_date,
 )
 from apps.settings.models import SystemSetting
+
+
+class RoLocalDateTestCase(TestCase):
+    """Unit tests for ro_local_date() — the RO-local calendar conversion behind #220."""
+
+    def test_winter_offset_rolls_after_2200_utc(self):
+        """EET is UTC+2: 22:30 UTC is already 00:30 the NEXT Romanian day."""
+        self.assertEqual(ro_local_date(datetime(2026, 1, 15, 22, 30, tzinfo=UTC)), date(2026, 1, 16))
+
+    def test_winter_offset_does_not_roll_before_2200_utc(self):
+        """EET is UTC+2, not +3: 21:30 UTC is 23:30 the SAME Romanian day. A fixed
+        UTC+3 implementation would wrongly roll here — this pins the winter offset."""
+        self.assertEqual(ro_local_date(datetime(2026, 1, 15, 21, 30, tzinfo=UTC)), date(2026, 1, 15))
+
+    def test_summer_offset_rolls_after_2100_utc(self):
+        """EEST is UTC+3: 21:30 UTC is already 00:30 the NEXT Romanian day. A fixed
+        UTC+2 implementation would wrongly NOT roll here — this pins the summer offset."""
+        self.assertEqual(ro_local_date(datetime(2026, 7, 15, 21, 30, tzinfo=UTC)), date(2026, 7, 16))
+
+    def test_rejects_naive_datetime(self):
+        """#220: a naive datetime has no defensible RO-local date; assuming one would
+        reintroduce the bug class this helper exists to prevent. Guard must not erode."""
+        with self.assertRaises(ValueError):
+            ro_local_date(datetime(2026, 1, 15, 22, 30))
 
 
 class VATCategoryTestCase(TestCase):

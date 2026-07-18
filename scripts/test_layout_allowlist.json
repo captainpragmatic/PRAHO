@@ -4,6 +4,7 @@
   ],
   "allowed_duplicate_name_patterns": [
     "^CoerceRetryAfterSecondsTests\\.test_",
+    "^RomanianDateFilterTimezoneTestCase\\.test_",
     "^TestProdLoggingConfiguration\\.test_",
     "^TestStagingLoggingConfiguration\\.test_",
     "^EFacturaEnvironmentTestCase\\.test_oauth_base_url$",

@@ -17,7 +17,7 @@ from __future__ import annotations
 import logging
 import zoneinfo
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from enum import StrEnum
 from functools import cached_property
@@ -78,6 +78,25 @@ UNIT_CODES = {
 
 # Romanian timezone (required by ANAF)
 ROMANIA_TIMEZONE = zoneinfo.ZoneInfo("Europe/Bucharest")
+
+
+def ro_local_date(dt: datetime) -> date:
+    """Return the Romanian LOCAL calendar date of an aware datetime.
+
+    With USE_TZ=True datetimes are handled in UTC, so `dt.date()` yields the UTC calendar date —
+    the PREVIOUS day for anything between 00:00 and 02:00/03:00 Romanian time. Every legal calendar
+    date filed with ANAF (BT-2 IssueDate, BT-9 DueDate) and every submission-deadline computation
+    must use the Romanian day boundary, not UTC's (see issue #220).
+
+    Lives here rather than in working_days.py so callers that only need the date conversion do not
+    take a hard module-level dependency on that module's `holidays` import.
+
+    Naive datetimes are rejected: there is no defensible RO-local date for an instant with no
+    timezone, and assuming one would reintroduce the bug class this helper exists to prevent.
+    """
+    if dt.tzinfo is None or dt.tzinfo.utcoffset(dt) is None:
+        raise ValueError(f"ro_local_date requires an aware datetime, got naive: {dt!r}")
+    return dt.astimezone(ROMANIA_TIMEZONE).date()
 
 
 class VATCategory(StrEnum):

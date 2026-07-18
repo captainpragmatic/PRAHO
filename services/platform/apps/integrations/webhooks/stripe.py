@@ -384,12 +384,23 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
 
             if customer_email:
                 try:
-                    customer = Customer.objects.get(primary_email=customer_email)
+                    with transaction.atomic():
+                        customer = Customer.objects.select_for_update(of=("self",)).get(primary_email=customer_email)
+                        customer_meta = dict(customer.meta or {})
+                        existing_customer_id = customer_meta.get("stripe_customer_id")
 
-                    # Store Stripe customer ID in metadata
-                    if hasattr(customer, "meta") and customer.meta is not None:
-                        customer.meta["stripe_customer_id"] = stripe_customer_id
-                        customer.meta["stripe_linked_at"] = timezone.now().isoformat()
+                        if existing_customer_id and stripe_customer_id and existing_customer_id != stripe_customer_id:
+                            logger.warning(
+                                "⚠️ [Stripe] Ignoring customer.created ID %s for %s; already linked to %s",
+                                stripe_customer_id,
+                                customer.id,
+                                existing_customer_id,
+                            )
+                        elif stripe_customer_id:
+                            customer_meta["stripe_customer_id"] = stripe_customer_id
+
+                        customer_meta["stripe_linked_at"] = timezone.now().isoformat()
+                        customer.meta = customer_meta
                         customer.save(update_fields=["meta", "updated_at"])
 
                     logger.info(f"🔗 Linked Stripe customer {stripe_customer_id} to {customer}")

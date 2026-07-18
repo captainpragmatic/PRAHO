@@ -143,7 +143,9 @@ class CreatePaymentIntentTests(TestCase):
 
     @patch("apps.billing.payment_service.log_security_event")
     @patch("apps.billing.payment_service.PaymentGatewayFactory.create_gateway")
-    def test_passes_metadata_to_gateway(self, mock_create_gw: MagicMock, mock_log: MagicMock) -> None:
+    def test_compatibility_wrapper_keeps_caller_metadata_local_only(
+        self, mock_create_gw: MagicMock, mock_log: MagicMock
+    ) -> None:
         gw = _make_mock_gateway()
         mock_create_gw.return_value = gw
 
@@ -152,8 +154,34 @@ class CreatePaymentIntentTests(TestCase):
         )
 
         call_kwargs = gw.create_payment_intent.call_args[1]
-        self.assertIn("custom_key", call_kwargs["metadata"])
+        self.assertNotIn("custom_key", call_kwargs["metadata"])
         self.assertEqual(call_kwargs["metadata"]["platform"], "PRAHO")
+        payment = Payment.objects.get(gateway_txn_id="pi_test123")
+        self.assertEqual(payment.meta["custom_key"], "custom_value")
+
+    @patch("apps.billing.payment_service.log_security_event")
+    @patch("apps.billing.payment_service.PaymentGatewayFactory.create_gateway")
+    def test_repeated_compatibility_calls_reuse_one_keyed_payment(
+        self, mock_create_gw: MagicMock, mock_log: MagicMock
+    ) -> None:
+        gateway = _make_mock_gateway()
+        gateway.create_payment_intent.side_effect = [
+            _pi_result(pi_id="pi_legacy_first", client_secret="sec_legacy_first"),
+            _pi_result(pi_id="pi_legacy_duplicate", client_secret="sec_legacy_duplicate"),
+        ]
+        mock_create_gw.return_value = gateway
+
+        first = PaymentService.create_payment_intent(str(self.order.id))
+        second = PaymentService.create_payment_intent(str(self.order.id))
+
+        self.assertTrue(first["success"])
+        self.assertTrue(second["success"])
+        self.assertEqual(first["payment_intent_id"], "pi_legacy_first")
+        self.assertEqual(second["payment_intent_id"], "pi_legacy_first")
+        gateway.create_payment_intent.assert_called_once()
+        payment = Payment.objects.get(gateway_txn_id="pi_legacy_first")
+        self.assertIsNotNone(payment.idempotency_key)
+        self.assertEqual(Payment.objects.filter(meta__order_id=str(self.order.id)).count(), 1)
 
 
 # ---------------------------------------------------------------------------
@@ -179,7 +207,7 @@ class CreatePaymentIntentDirectTests(TestCase):
             amount_cents=self.order.total_cents,
             currency="RON",
             customer_id=str(self.customer.id),
-            order_number="ORD-DIRECT-001",
+            order_number=self.order.order_number,
         )
 
         self.assertTrue(result["success"])
