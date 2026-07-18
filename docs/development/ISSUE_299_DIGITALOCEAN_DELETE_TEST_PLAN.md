@@ -38,8 +38,9 @@ The corrected test must prove that PRAHO:
 ### A. Model the provider lifecycle and add a sleep bomb (selected)
 
 Configure `droplets.get()` to raise the same not-found-shaped exception already
-covered by `get_server()`, and patch `digitalocean_service.time.sleep` to raise
-an assertion if called.
+covered by `get_server()`, and patch
+`apps.infrastructure.digitalocean_service.time.sleep` to raise an assertion if
+called.
 
 - Preserves production behavior.
 - Exercises the real `delete_server()` -> `get_server()` boundary.
