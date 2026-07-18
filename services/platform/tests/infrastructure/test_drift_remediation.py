@@ -11,8 +11,11 @@ from unittest.mock import MagicMock, patch
 
 from django.test import TestCase
 from django.utils import timezone
+from django.utils.module_loading import import_string
+from django_q.models import Schedule
 
 from apps.common.types import Err, Ok
+from apps.infrastructure.apps import InfrastructureConfig
 from apps.infrastructure.cloud_gateway import ServerInfo
 from apps.infrastructure.drift_remediation import DriftRemediationService
 from apps.infrastructure.models import (
@@ -509,6 +512,151 @@ class TestExecuteRemediation(DriftRemediationTestBase):
         self.assertEqual(self.remediation_request.status, "failed")
 
 
+class TestReviewHardening(DriftRemediationTestBase):
+    """Regression tests for the adversarial-review findings."""
+
+    def test_reject_cannot_overwrite_in_progress(self):
+        """A stale reject must lose against a concurrent claim (CAS, not blind save)."""
+        self.remediation_request.status = "in_progress"
+        self.remediation_request.started_at = timezone.now()
+        self.remediation_request.save(update_fields=["status", "started_at"])
+
+        result = self.service.reject_remediation(self.remediation_request.pk, self.admin, "too late")
+
+        self.assertTrue(result.is_err())
+        self.remediation_request.refresh_from_db()
+        self.assertEqual(self.remediation_request.status, "in_progress")
+
+    def test_schedule_cannot_overwrite_in_progress(self):
+        self.remediation_request.status = "in_progress"
+        self.remediation_request.started_at = timezone.now()
+        self.remediation_request.save(update_fields=["status", "started_at"])
+
+        result = self.service.schedule_remediation(
+            self.remediation_request.pk, self.admin, timezone.now() + timedelta(hours=1)
+        )
+
+        self.assertTrue(result.is_err())
+        self.remediation_request.refresh_from_db()
+        self.assertEqual(self.remediation_request.status, "in_progress")
+
+    def test_accept_refused_while_sibling_execution_in_progress(self):
+        """Accepting a power-off must not race a running remediation."""
+        self.report.field_name = "server_status"
+        self.report.expected_value = "running"
+        self.report.actual_value = "off"
+        self.report.save(update_fields=["field_name", "expected_value", "actual_value"])
+        DriftRemediationRequest.objects.create(
+            report=self._make_report(),
+            deployment=self.deployment,
+            action_type="apply_desired",
+            status="in_progress",
+            started_at=timezone.now(),
+        )
+
+        result = self.service.accept_drift(self.remediation_request.pk, self.admin)
+
+        self.assertTrue(result.is_err())
+        self.assertIn("retry once it settles", result.unwrap_err())
+        self.deployment.refresh_from_db()
+        self.assertEqual(self.deployment.status, "completed")
+
+    def test_accept_refused_when_report_resolved_meanwhile(self):
+        self.report.resolved = True
+        self.report.save(update_fields=["resolved"])
+
+        result = self.service.accept_drift(self.remediation_request.pk, self.admin)
+
+        self.assertTrue(result.is_err())
+        self.assertIn("resolved in the meantime", result.unwrap_err())
+
+    def test_is_acceptable_false_for_transitional_server_status(self):
+        self.report.field_name = "server_status"
+        self.report.actual_value = "rebooting"
+        self.assertFalse(self.report.is_acceptable)
+        self.report.actual_value = "off"
+        self.assertTrue(self.report.is_acceptable)
+
+    @patch("django_q.tasks.async_task", return_value="task-123")
+    def test_stale_claimed_approved_is_requeued(self, mock_async):
+        """The PRIMARY orphan shape: claimed for execution, task lost, claim aged out."""
+        self.remediation_request.status = "approved"
+        self.remediation_request.approved_at = timezone.now() - timedelta(days=1)
+        self.remediation_request.execution_claimed_at = timezone.now() - timedelta(minutes=45)
+        self.remediation_request.save(update_fields=["status", "approved_at", "execution_claimed_at"])
+
+        result = recover_stale_remediations_task()
+
+        self.assertEqual(result["requeued_count"], 1)
+        mock_async.assert_called_once()
+        self.remediation_request.refresh_from_db()
+        self.assertEqual(self.remediation_request.status, "approved")
+
+    @patch("apps.infrastructure.drift_remediation.DriftRemediationService._verify_remediation")
+    @patch("apps.infrastructure.drift_remediation.DriftRemediationService._get_gateway")
+    @patch("apps.infrastructure.drift_remediation.DriftRemediationService._take_snapshot")
+    def test_execute_remediation_task_resolves_and_runs(self, mock_snapshot, mock_gateway, mock_verify):
+        """The dotted-path task target actually exists and drives execution."""
+        task = import_string("apps.infrastructure.tasks.execute_remediation_task")
+        self.remediation_request.status = "approved"
+        self.remediation_request.save(update_fields=["status"])
+        snapshot = DriftSnapshot.objects.create(
+            deployment=self.deployment,
+            provider_snapshot_id="snap-task",
+            snapshot_type="pre_remediation",
+            status="available",
+        )
+        mock_snapshot.return_value = Ok(snapshot)
+        mock_gw = MagicMock()
+        mock_gw.resize.return_value = Ok(True)
+        mock_gateway.return_value = mock_gw
+        mock_verify.return_value = Ok(True)
+
+        outcome = task(self.remediation_request.pk)
+
+        self.assertEqual(outcome, {"status": "completed"})
+        self.remediation_request.refresh_from_db()
+        self.assertEqual(self.remediation_request.status, "completed")
+
+    @patch("apps.infrastructure.drift_remediation.DriftRemediationService._rollback")
+    @patch("apps.infrastructure.drift_remediation.DriftRemediationService._verify_remediation")
+    @patch("apps.infrastructure.drift_remediation.DriftRemediationService._get_gateway")
+    @patch("apps.infrastructure.drift_remediation.DriftRemediationService._take_snapshot")
+    def test_failed_rollback_is_reported_as_rollback_failed(
+        self, mock_snapshot, mock_gateway, mock_verify, mock_rollback
+    ):
+        """A failed snapshot restore must never masquerade as a clean rollback."""
+        self.remediation_request.status = "approved"
+        self.remediation_request.save(update_fields=["status"])
+        snapshot = DriftSnapshot.objects.create(
+            deployment=self.deployment,
+            provider_snapshot_id="snap-rbf",
+            snapshot_type="pre_remediation",
+            status="available",
+        )
+        mock_snapshot.return_value = Ok(snapshot)
+        mock_gw = MagicMock()
+        mock_gw.resize.return_value = Ok(True)
+        mock_gateway.return_value = mock_gw
+        mock_verify.return_value = Err("Server unreachable")
+        mock_rollback.return_value = Err("restore failed")
+
+        result = self.service.execute_remediation(self.remediation_request)
+
+        self.assertTrue(result.is_err())
+        self.remediation_request.refresh_from_db()
+        self.assertEqual(self.remediation_request.status, "rollback_failed")
+        self.assertIn("restore failed", self.remediation_request.error_message)
+
+    def test_recover_stale_remediations_schedule_registered(self):
+        """Deleting the apps.py schedule entry must not go unnoticed."""
+        InfrastructureConfig._schedule_infrastructure_tasks(sender=InfrastructureConfig)
+
+        schedule = Schedule.objects.get(name="infra_recover_stale_remediations")
+        self.assertEqual(schedule.func, "apps.infrastructure.tasks.recover_stale_remediations_task")
+        self.assertEqual(schedule.minutes, 15)
+
+
 class TestCleanupSnapshots(DriftRemediationTestBase):
     """Tests for snapshot cleanup."""
 
@@ -526,22 +674,6 @@ class TestCleanupSnapshots(DriftRemediationTestBase):
         )
         self.assertEqual(expired.count(), 1)
         self.assertEqual(expired.first().provider_snapshot_id, "snap-old")
-
-
-class TestScheduledRemediation(DriftRemediationTestBase):
-    """Tests for scheduled remediation execution."""
-
-    def test_scheduled_remediation_executes_when_due(self):
-        """Scheduled requests with past due time should be found."""
-        self.remediation_request.status = "scheduled"
-        self.remediation_request.scheduled_for = timezone.now() - timedelta(minutes=5)
-        self.remediation_request.save(update_fields=["status", "scheduled_for"])
-
-        due = DriftRemediationRequest.objects.filter(
-            status="scheduled",
-            scheduled_for__lte=timezone.now(),
-        )
-        self.assertEqual(due.count(), 1)
 
 
 class TestExecutionClaim(DriftRemediationTestBase):
@@ -882,16 +1014,60 @@ class TestVerifyRemediation(DriftRemediationTestBase):
         self.assertEqual(mock_conn.call_count, 3)
 
     @patch("apps.infrastructure.drift_remediation.socket.create_connection")
-    def test_ssh_deadline_exhausted_errs(self, mock_conn, _settings):
-        """A server that never answers SSH fails verification after the budget."""
+    def test_ssh_deadline_exhausted_is_inconclusive_not_rollback(self, mock_conn, _settings):
+        """Provider confirmed + SSH dead = Ok(False): fail WITHOUT snapshot restore."""
         gateway = MagicMock()
         gateway.get_server.return_value = Ok(self._server())
         mock_conn.side_effect = OSError("refused")
 
         result = self.service._verify_remediation(self.deployment, gateway, "server_status", "running")
 
+        self.assertTrue(result.is_ok())
+        self.assertFalse(result.unwrap())
+
+    @patch("apps.infrastructure.drift_remediation.socket.create_connection")
+    def test_ipv6_only_deployment_skips_reachability_probe(self, mock_conn, _settings):
+        """No IPv4 address: a confirmed provider outcome must not be rolled back."""
+        self.deployment.ipv4_address = None
+        self.deployment.save(update_fields=["ipv4_address"])
+        gateway = MagicMock()
+        gateway.get_server.return_value = Ok(self._server())
+
+        result = self.service._verify_remediation(self.deployment, gateway, "server_status", "running")
+
+        self.assertTrue(result.is_ok())
+        self.assertTrue(result.unwrap())
+        mock_conn.assert_not_called()
+
+    @patch("apps.infrastructure.drift_remediation.DriftRemediationService._rollback")
+    @patch("apps.infrastructure.drift_remediation.DriftRemediationService._get_gateway")
+    @patch("apps.infrastructure.drift_remediation.DriftRemediationService._take_snapshot")
+    def test_inconclusive_verification_fails_without_rollback(self, mock_snapshot, mock_gateway, mock_rollback, _settings):
+        """Ok(False) from verification marks the request failed and never restores the snapshot."""
+        self.remediation_request.status = "approved"
+        self.remediation_request.save(update_fields=["status"])
+        snapshot = DriftSnapshot.objects.create(
+            deployment=self.deployment,
+            provider_snapshot_id="snap-inconclusive",
+            snapshot_type="pre_remediation",
+            status="available",
+        )
+        mock_snapshot.return_value = Ok(snapshot)
+        mock_gw = MagicMock()
+        mock_gw.resize.return_value = Ok(True)
+        mock_gateway.return_value = mock_gw
+
+        with patch(
+            "apps.infrastructure.drift_remediation.DriftRemediationService._verify_remediation",
+            return_value=Ok(False),
+        ):
+            result = self.service.execute_remediation(self.remediation_request)
+
         self.assertTrue(result.is_err())
-        self.assertIn("unreachable on port 22", result.unwrap_err())
+        self.assertIn("manual check required", result.unwrap_err())
+        mock_rollback.assert_not_called()
+        self.remediation_request.refresh_from_db()
+        self.assertEqual(self.remediation_request.status, "failed")
 
     @patch("apps.infrastructure.drift_remediation.socket.create_connection")
     def test_probe_timeout_clamped_to_remaining_budget(self, mock_conn, _settings):

@@ -965,6 +965,10 @@ class DriftReport(models.Model):
     @property
     def is_acceptable(self) -> bool:
         """Whether accepting this drift performs a durable write (see ACCEPTABLE_DRIFT_FIELDS)."""
+        if self.field_name == "server_status":
+            # Only a genuinely powered-off server can be accepted as stopped;
+            # transitional/unknown provider states have no durable write.
+            return (self.actual_value or "").strip() in ("off", "stopped")
         return self.field_name in self.ACCEPTABLE_DRIFT_FIELDS
 
 

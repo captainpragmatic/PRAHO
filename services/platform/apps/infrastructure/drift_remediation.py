@@ -103,15 +103,24 @@ _DEFAULT_STALE_AFTER_MINUTES = 30
 
 
 def get_stale_after_minutes() -> int:
-    """Age after which in_progress/approved remediation state counts as stranded."""
+    """
+    Age after which in_progress/approved remediation state counts as stranded.
+    Floored above the longest possible LIVE execution (django-q2 worker timeout
+    plus the verification budget) — a misconfigured low value must never let
+    the reaper kill, and thereby double-execute, a running remediation.
+    """
+    import math  # noqa: PLC0415  # Stdlib, local to keep module imports lean
+
+    from django.conf import settings as django_settings  # noqa: PLC0415  # Deferred: settings access
+
     from apps.settings.services import SettingsService  # noqa: PLC0415  # Deferred: avoids circular import
 
-    return max(
-        1,
-        SettingsService.get_integer_setting(
-            "infrastructure.remediation_stale_after_minutes", _DEFAULT_STALE_AFTER_MINUTES
-        ),
+    q_timeout = int((getattr(django_settings, "Q_CLUSTER", None) or {}).get("timeout") or 300)
+    floor_minutes = math.ceil((q_timeout + _get_verify_max_wait()) / 60) + 1
+    configured = SettingsService.get_integer_setting(
+        "infrastructure.remediation_stale_after_minutes", _DEFAULT_STALE_AFTER_MINUTES
     )
+    return max(floor_minutes, configured)
 
 
 # Snapshot expiry in days
@@ -188,12 +197,15 @@ class DriftRemediationService:
         except DriftRemediationRequest.DoesNotExist:
             return Err(f"Remediation request {request_id} not found")
 
-        if req.status not in ("pending_approval",):
+        # Conditional update like every other transition: a stale read must
+        # never overwrite a concurrent approve/accept/claim.
+        updated = DriftRemediationRequest.objects.filter(pk=request_id, status="pending_approval").update(
+            status="rejected", rejected_reason=reason
+        )
+        if not updated:
+            req.refresh_from_db()
             return Err(f"Cannot reject request in status '{req.status}'")
-
-        req.status = "rejected"
-        req.rejected_reason = reason
-        req.save(update_fields=["status", "rejected_reason"])
+        req.refresh_from_db()
 
         InfrastructureAuditService.log_drift_remediation_rejected(
             deployment=req.deployment,
@@ -217,17 +229,24 @@ class DriftRemediationService:
         except DriftRemediationRequest.DoesNotExist:
             return Err(f"Remediation request {request_id} not found")
 
-        if req.status not in ("pending_approval", "approved"):
-            return Err(f"Cannot schedule request in status '{req.status}'")
-
         if req.action_type != "apply_desired":
             return Err("This drift has no automated fix — scheduling it would execute a no-op")
 
-        req.status = "scheduled"
-        req.scheduled_for = scheduled_for
-        req.approved_by = user
-        req.approved_at = timezone.now()
-        req.save(update_fields=["status", "scheduled_for", "approved_by", "approved_at"])
+        # Conditional update: scheduling must never overwrite a row a worker
+        # has already claimed in_progress (that would discard the running
+        # execution's terminal write and re-execute the provider mutation).
+        updated = DriftRemediationRequest.objects.filter(
+            pk=request_id, status__in=("pending_approval", "approved")
+        ).update(
+            status="scheduled",
+            scheduled_for=scheduled_for,
+            approved_by=user,
+            approved_at=timezone.now(),
+        )
+        if not updated:
+            req.refresh_from_db()
+            return Err(f"Cannot schedule request in status '{req.status}'")
+        req.refresh_from_db()
 
         InfrastructureAuditService.log_drift_remediation_scheduled(
             deployment=req.deployment,
@@ -238,7 +257,7 @@ class DriftRemediationService:
         logger.info(f"✅ [DriftRemediation] Request {request_id} scheduled for {scheduled_for}")
         return Ok(req)
 
-    def accept_drift(
+    def accept_drift(  # noqa: PLR0911  # Guarded workflow: one early exit per validation
         self,
         request_id: int,
         user: User,
@@ -262,8 +281,18 @@ class DriftRemediationService:
             )
 
         with transaction.atomic():
-            # Lock order everywhere: deployment -> request
+            # Lock order everywhere: deployment -> request. Validation happens
+            # AFTER locking so a concurrent approve/heal/reject cannot flip the
+            # status between check and write.
             deployment = NodeDeployment.objects.select_for_update().get(pk=req.deployment_id)
+            locked_req = DriftRemediationRequest.objects.select_for_update().get(pk=request_id)
+
+            if locked_req.status != "pending_approval":
+                return Err(f"Cannot accept drift for request in status '{locked_req.status}'")
+
+            report.refresh_from_db()
+            if report.resolved:
+                return Err("Drift was resolved in the meantime — nothing left to accept")
 
             if (
                 report.field_name == "server_status"
@@ -273,15 +302,18 @@ class DriftRemediationService:
 
             sync_result = self._sync_accepted_value(deployment, report)
             if sync_result.is_err():
+                # A normal return from atomic() COMMITS — force rollback so a
+                # partial deployment write can never survive a failed accept.
+                transaction.set_rollback(True)
                 return Err(sync_result.unwrap_err())
 
-            # CAS flip: a concurrent approve/reject loses cleanly
             updated = DriftRemediationRequest.objects.filter(pk=request_id, status="pending_approval").update(
                 status="completed",
                 action_type="accept_actual",
                 completed_at=timezone.now(),
             )
             if not updated:
+                transaction.set_rollback(True)
                 req.refresh_from_db()
                 return Err(f"Cannot accept drift for request in status '{req.status}'")
 
@@ -404,6 +436,16 @@ class DriftRemediationService:
             return self._rollback_after_failure(
                 request, deployment, snapshot, "Health check failed", health_result.unwrap_err()
             )
+        if health_result.unwrap() is False:
+            # Provider confirmed the fix but the server never answered SSH:
+            # restoring the snapshot would be a destructive response to an
+            # inconclusive signal — hand it to staff instead.
+            msg = (
+                f"Provider confirms the remediation of '{field_name}' but {deployment.hostname} "
+                "is unreachable on port 22 — manual check required"
+            )
+            self._mark_failed(request, msg)
+            return Err(msg)
 
         # Step 4: Mark complete (CAS — a reaped/externally-transitioned row is
         # never overwritten, and its report stays open for the next scan)
@@ -457,23 +499,26 @@ class DriftRemediationService:
             locked_deployment = NodeDeployment.objects.select_for_update().get(pk=deployment.pk)
 
             if locked_deployment.status != "completed":
-                DriftRemediationRequest.objects.filter(pk=request.pk, status="approved").update(status="superseded")
-                return Err(f"Deployment {deployment.hostname} left scan scope (status '{locked_deployment.status}')")
+                reason = f"Deployment {deployment.hostname} left scan scope (status '{locked_deployment.status}')"
+                self._retire_approved(request, "superseded", reason)
+                return Err(reason)
 
             report = DriftReport.objects.get(pk=request.report_id)
             if report.resolved:
-                DriftRemediationRequest.objects.filter(pk=request.pk, status="approved").update(status="superseded")
+                self._retire_approved(request, "superseded", "Drift report was resolved after approval")
                 return Err("Drift report was resolved after approval — nothing left to remediate")
 
             details = request.action_details or {}
-            if (
-                details.get("expected_value", "") != report.expected_value
+            fingerprint_stale = (
+                details.get("field_name", "") != report.field_name
+                or details.get("expected_value", "") != report.expected_value
                 or details.get("actual_value", "") != report.actual_value
-            ):
-                DriftRemediationRequest.objects.filter(pk=request.pk, status="approved").update(
-                    status="failed",
-                    error_message="Drift changed since approval — the next scan mints a fresh request",
-                    completed_at=now,
+                # Legacy rows lack the severity key — only compare when present
+                or ("severity" in details and details["severity"] != report.severity)
+            )
+            if fingerprint_stale:
+                self._retire_approved(
+                    request, "failed", "Drift changed since approval — the next scan mints a fresh request"
                 )
                 return Err("Drift changed since approval — stale request not executed")
 
@@ -505,6 +550,24 @@ class DriftRemediationService:
                 return Err(f"Cannot execute remediation in status '{request.status}'")
 
         return Ok(True)
+
+    def _retire_approved(self, request: DriftRemediationRequest, new_status: str, reason: str) -> None:
+        """Retire an approved-but-unexecutable request (audited — it carried a human approval)."""
+        fields = {"status": new_status}
+        if new_status == "failed":
+            fields["error_message"] = reason
+        updated = DriftRemediationRequest.objects.filter(pk=request.pk, status="approved").update(
+            **fields, completed_at=timezone.now()
+        )
+        if not updated:
+            return
+        request.refresh_from_db()
+        try:
+            InfrastructureAuditService.log_drift_remediation_failed(
+                request.deployment, request, reason, InfrastructureAuditContext()
+            )
+        except Exception as e:
+            logger.warning(f"⚠️ [DriftRemediation] Failed to log audit for retired approval: {e}")
 
     def _rollback_after_failure(
         self,
@@ -596,6 +659,11 @@ class DriftRemediationService:
         Bounded by a total wall-clock budget that includes an initial boot grace
         (power-on/resize reboots take time — an instant probe false-negatives and
         triggers a destructive snapshot rollback).
+
+        Tri-state result: Ok(True) = fully verified; Ok(False) = the provider
+        confirmed the outcome but reachability is inconclusive — the caller must
+        fail WITHOUT a destructive snapshot restore; Err = the provider never
+        confirmed the outcome (rollback is justified).
         """
         deadline = _monotonic() + _get_verify_max_wait()
 
@@ -607,7 +675,20 @@ class DriftRemediationService:
         if outcome_result.is_err():
             return outcome_result
 
-        return self._verify_health(deployment, deadline)
+        if not deployment.ipv4_address:
+            # IPv6-only / address-less deployments cannot be probed; the
+            # provider outcome is confirmed, which is all we can verify.
+            logger.warning(
+                f"⚠️ [DriftRemediation] {deployment.hostname} has no IPv4 address — "
+                "skipping reachability probe after confirmed provider outcome"
+            )
+            return Ok(True)
+
+        health_result = self._verify_health(deployment, deadline)
+        if health_result.is_err():
+            return Ok(False)
+
+        return Ok(True)
 
     def _await_provider_outcome(
         self,

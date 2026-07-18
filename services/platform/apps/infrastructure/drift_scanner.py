@@ -500,8 +500,19 @@ class DriftScannerService:
                 }
                 req.save(update_fields=["action_details"])
                 return
-            # approved/scheduled against outdated values: retire and re-mint
-            DriftRemediationRequest.objects.filter(pk=req.pk, status=req.status).update(status="superseded")
+            # approved/scheduled against outdated values: retire and re-mint.
+            # These carried a human approval — audit their retirement.
+            retired = DriftRemediationRequest.objects.filter(pk=req.pk, status=req.status).update(status="superseded")
+            if retired:
+                try:
+                    InfrastructureAuditService.log_drift_remediation_failed(
+                        report.deployment,
+                        req,
+                        "Superseded: drift changed before execution",
+                        InfrastructureAuditContext(),
+                    )
+                except Exception:
+                    logger.warning(f"⚠️ [DriftScanner] Failed to log audit for superseded request {req.pk}")
 
         # A rejection mutes re-minting until the observed drift actually changes
         latest = report.remediation_requests.order_by("-created_at").first()
