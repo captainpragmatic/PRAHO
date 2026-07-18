@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from django.conf import settings
+from django.db import transaction
 from django.db.models.signals import post_save, pre_delete
 from django.dispatch import Signal, receiver
 from django.http import HttpRequest
@@ -788,17 +789,34 @@ def stamp_audit_event_integrity_hash(sender: Any, instance: AuditEvent, created:
 
     from .services import AuditIntegrityService  # noqa: PLC0415  # Deferred: avoids circular import
 
+    base_metadata = instance.metadata if isinstance(instance.metadata, dict) else {}
     try:
-        metadata = instance.metadata if isinstance(instance.metadata, dict) else {}
+        metadata = dict(base_metadata)
         metadata["integrity_hash"] = AuditIntegrityService._calculate_event_hash(instance)
         metadata["integrity_hash_version"] = AUDIT_INTEGRITY_HASH_VERSION
-        # update_fields avoids re-entering this handler's `created` branch and touching other columns.
-        AuditEvent.objects.filter(pk=instance.pk).update(metadata=metadata)
+        # QuerySet.update() cannot re-enter this handler (updates emit no post_save), and a
+        # nested atomic() is essential, not decorative: a DB error in this statement marks the
+        # CALLER's connection needs_rollback, and this handler fires inside money-moving atomic
+        # blocks (order confirmation). Without the savepoint, swallowing the exception below
+        # would let the caller "commit" a transaction Django then silently rolls back — the
+        # exact SFH-3 failure mode (audit failure must never undo a financial transaction).
+        with transaction.atomic():
+            AuditEvent.objects.filter(pk=instance.pk).update(metadata=metadata)
         instance.metadata = metadata
     except Exception as e:
-        # An audit event that exists without a hash is far better than a lost audit event: the
-        # verifier reports the missing hash rather than silently passing.
+        # An audit event that exists without a hash is far better than a lost audit event.
         logger.error(f"🔥 [Audit Integrity] Failed to stamp integrity hash on event {instance.pk}: {e}")
+        # Best effort: land the version marker alone so the verifier reports this row as
+        # missing_integrity_hash (critical) — without it the row is byte-identical to a
+        # pre-hashing legacy row and demotes to an info-level "unverifiable" finding, which
+        # is precisely the low-visibility outcome #217 exists to eliminate.
+        try:
+            with transaction.atomic():
+                AuditEvent.objects.filter(pk=instance.pk).update(
+                    metadata={**base_metadata, "integrity_hash_version": AUDIT_INTEGRITY_HASH_VERSION}
+                )
+        except Exception:
+            logger.error(f"🔥 [Audit Integrity] Could not mark event {instance.pk} for critical follow-up")
 
 
 # ===============================================================================

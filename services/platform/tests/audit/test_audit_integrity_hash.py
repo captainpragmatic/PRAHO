@@ -8,6 +8,8 @@ unreachable, and every integrity check reported compliant regardless of how rows
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 from django.contrib.contenttypes.models import ContentType
 from django.test import TestCase
 
@@ -111,3 +113,47 @@ class AuditEventIntegrityHashTestCase(TestCase):
         original_hash = event.metadata["integrity_hash"]
 
         self.assertEqual(AuditIntegrityService._calculate_event_hash(event), original_hash)
+
+    def test_stamping_failure_still_marks_the_event_for_critical_follow_up(self) -> None:
+        """#304 review: a stamping failure must not leave the row byte-identical to a legacy
+        row — that demotes it to an info-level "unverifiable" finding, the exact
+        low-visibility outcome #217 eliminates. The fallback lands the version marker alone,
+        so verification reports missing_integrity_hash (critical)."""
+        with patch.object(
+            AuditIntegrityService, "_calculate_event_hash", side_effect=RuntimeError("hash boom")
+        ):
+            event = self._event(description="Stamping failed for this row")
+
+        event.refresh_from_db()
+        self.assertNotIn("integrity_hash", event.metadata)
+        self.assertIn("integrity_hash_version", event.metadata)
+
+        issues = AuditIntegrityService._verify_hash_chain([event])
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0]["type"], "missing_integrity_hash")
+        self.assertEqual(issues[0]["severity"], "critical")
+
+    def test_one_malformed_row_does_not_abort_the_sweep(self) -> None:
+        """#304 review: a per-event computation failure used to propagate and abort the whole
+        verification run — every other event in the window silently went unverified. The bad
+        row now yields its own critical finding and the sweep continues, still catching the
+        tampered row after it."""
+        broken = self._event(description="This row will fail verification computation")
+        tampered = self._event(description="This row gets tampered")
+        AuditEvent.objects.filter(pk=tampered.pk).update(description="Rewritten by an attacker")
+        broken.refresh_from_db()
+        tampered.refresh_from_db()
+
+        real_calc = AuditIntegrityService._calculate_event_hash.__func__
+
+        def calc(event: AuditEvent) -> str:
+            if event.pk == broken.pk:
+                raise RuntimeError("verification boom")
+            return real_calc(AuditIntegrityService, event)
+
+        with patch.object(AuditIntegrityService, "_calculate_event_hash", side_effect=calc):
+            issues = AuditIntegrityService._verify_hash_chain([broken, tampered])
+
+        kinds = {issue["type"] for issue in issues}
+        self.assertIn("verification_error", kinds)
+        self.assertIn("hash_mismatch", kinds)

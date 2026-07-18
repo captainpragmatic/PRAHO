@@ -3260,12 +3260,38 @@ class AuditIntegrityService:
 
     @classmethod
     def _verify_hash_chain(cls, events: list[AuditEvent]) -> list[dict[str, Any]]:
-        """Verify cryptographic hash chain of audit events."""
+        """Verify per-event integrity hashes of audit events.
+
+        Honest threat model (#217, upgrade tracked in #313): despite this function's
+        historical name there is no chaining here — each event carries an independent,
+        UNKEYED SHA-256 over a subset of its fields. That detects naive tampering (a row
+        edited without recomputing its hash) and deletion of the hash key, and nothing
+        more: an attacker with UPDATE access and source knowledge can recompute a matching
+        hash, strip both metadata keys to demote a row to "legacy", or delete rows
+        outright. A keyed MAC with real chaining exists in siem.py's HashChainManager;
+        #313 covers converging on it and widening the covered fields.
+        """
         issues = []
 
         for event in events:
-            # Check if event data has been modified
-            expected_hash = cls._calculate_event_hash(event)
+            # One malformed row must not abort the whole sweep: the exception would
+            # propagate to verify_audit_integrity's outer except and every other event in
+            # the window would silently go unverified for this run.
+            try:
+                expected_hash = cls._calculate_event_hash(event)
+            except Exception as e:
+                issues.append(
+                    {
+                        "type": "verification_error",
+                        "severity": "critical",
+                        "event_id": str(event.id),
+                        "timestamp": event.timestamp.isoformat(),
+                        "description": f"Could not compute integrity hash for verification: {e}",
+                        "expected_hash": None,
+                        "stored_hash": None,
+                    }
+                )
+                continue
             metadata = event.metadata if isinstance(event.metadata, dict) else {}
             stored_hash = metadata.get("integrity_hash")
 
