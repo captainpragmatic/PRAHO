@@ -137,6 +137,86 @@ class RefundGatewayIntegrityTests(TestCase):
         self.assertEqual(refund.payment_id, payment.id)
         self.assertEqual(refund.gateway_refund_id, "re_order_refund")
 
+    def test_full_invoice_refund_without_amount_materializes_exact_gateway_and_ledger_amount(self) -> None:
+        invoice = self._make_invoice()
+        payment = self._make_payment(invoice, transaction_id="pi_full_without_amount")
+        gateway = MagicMock()
+        gateway.refund_payment.return_value = {
+            "success": True,
+            "refund_id": "re_full_without_amount",
+            "amount_refunded_cents": 10_000,
+            "status": "succeeded",
+            "error": None,
+        }
+        refund_data: RefundData = {
+            "refund_type": "full",
+            "reason": "customer_request",
+            "notes": "Full refund amount must be materialized before the gateway call",
+        }
+
+        with patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway", return_value=gateway):
+            result = RefundService.refund_invoice(invoice.id, refund_data)
+
+        self.assertTrue(result.is_ok(), result.unwrap_err() if result.is_err() else "")
+        self.assertEqual(result.unwrap()["amount_refunded_cents"], 10_000)
+        gateway.refund_payment.assert_called_once_with(
+            gateway_txn_id="pi_full_without_amount",
+            amount_cents=10_000,
+        )
+
+        payment.refresh_from_db()
+        invoice.refresh_from_db()
+        refund = Refund.objects.get(invoice=invoice)
+        self.assertEqual(refund.amount_cents, 10_000)
+        self.assertEqual(payment.status, "refunded")
+        self.assertEqual(invoice.status, "refunded")
+
+    def test_direct_order_orchestration_locks_linked_invoice_before_gateway(self) -> None:
+        invoice = self._make_invoice()
+        order = self._make_order(invoice)
+        self._make_payment(invoice, transaction_id="pi_direct_order_lock")
+        order._state.fields_cache.pop("invoice", None)
+        gateway = MagicMock()
+        gateway_response = {
+            "success": True,
+            "refund_id": "re_direct_order_lock",
+            "amount_refunded_cents": 10_000,
+            "status": "succeeded",
+            "error": None,
+        }
+
+        with (
+            patch.object(Invoice.objects, "select_for_update", wraps=Invoice.objects.select_for_update) as lock_invoice,
+            patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway", return_value=gateway),
+        ):
+            def refund_after_invoice_lock(**_kwargs: object) -> dict[str, object]:
+                lock_invoice.assert_called_once_with(of=("self",))
+                return gateway_response
+
+            gateway.refund_payment.side_effect = refund_after_invoice_lock
+            result = RefundService._process_bidirectional_refund(
+                order=order,
+                refund_id=uuid.uuid4(),
+                refund_data=self._refund_data(),
+            )
+
+        self.assertTrue(result.is_ok(), result.unwrap_err() if result.is_err() else "")
+        lock_invoice.assert_called_once_with(of=("self",))
+        gateway.refund_payment.assert_called_once()
+
+    def test_partial_payment_refund_without_amount_fails_before_gateway(self) -> None:
+        invoice = self._make_invoice()
+        payment = self._make_payment(invoice, transaction_id="pi_partial_without_amount")
+
+        with patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway") as gateway_factory:
+            result = RefundService._process_payment_refund(payment, {"refund_type": "partial"})
+
+        self.assertTrue(result.is_err())
+        self.assertIn("positive amount is required", result.unwrap_err())
+        gateway_factory.assert_not_called()
+        payment.refresh_from_db()
+        self.assertEqual(payment.status, "succeeded")
+
     def test_partial_order_refund_sends_exact_amount_and_keeps_documents_partial(self) -> None:
         invoice = self._make_invoice()
         order = self._make_order(invoice)
@@ -211,6 +291,52 @@ class RefundGatewayIntegrityTests(TestCase):
         self.assertEqual(payment.status, "refunded")
         self.assertEqual(invoice.status, "refunded")
         self.assertEqual(Refund.objects.filter(order=order, payment=payment).count(), 2)
+
+    def test_full_order_refund_after_partial_uses_remaining_payment_balance(self) -> None:
+        invoice = self._make_invoice()
+        order = self._make_order(invoice)
+        payment = self._make_payment(invoice, transaction_id="pi_partial_then_full")
+        gateway = MagicMock()
+        gateway.refund_payment.side_effect = [
+            {
+                "success": True,
+                "refund_id": "re_initial_partial",
+                "amount_refunded_cents": 4_000,
+                "status": "succeeded",
+                "error": None,
+            },
+            {
+                "success": True,
+                "refund_id": "re_remaining_full",
+                "amount_refunded_cents": 6_000,
+                "status": "succeeded",
+                "error": None,
+            },
+        ]
+        partial_refund = self._refund_data(amount_cents=4_000)
+        partial_refund["refund_type"] = "partial"
+        full_refund = self._refund_data(amount_cents=10_000)
+
+        with patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway", return_value=gateway):
+            partial_result = RefundService.refund_order(order.id, partial_refund)
+            full_result = RefundService.refund_order(order.id, full_refund)
+
+        self.assertTrue(partial_result.is_ok(), partial_result.unwrap_err() if partial_result.is_err() else "")
+        self.assertTrue(full_result.is_ok(), full_result.unwrap_err() if full_result.is_err() else "")
+        self.assertEqual(full_result.unwrap()["amount_refunded_cents"], 6_000)
+        self.assertEqual(
+            [call.kwargs["amount_cents"] for call in gateway.refund_payment.call_args_list],
+            [4_000, 6_000],
+        )
+
+        payment.refresh_from_db()
+        invoice.refresh_from_db()
+        self.assertEqual(payment.status, "refunded")
+        self.assertEqual(invoice.status, "refunded")
+        self.assertEqual(
+            list(Refund.objects.filter(order=order).order_by("created_at").values_list("amount_cents", flat=True)),
+            [4_000, 6_000],
+        )
 
     def test_invoice_without_refundable_payment_fails_without_local_mutation(self) -> None:
         invoice = self._make_invoice()

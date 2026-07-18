@@ -1637,8 +1637,9 @@ class TestProcessPaymentRefund(TestCase):
         assert "Failed to process payment refund" in r.unwrap_err()
 
     def test_payment_no_status_attr(self):
-        payment = MagicMock(spec=["id", "payment_method", "save"])
+        payment = MagicMock(spec=["id", "amount_cents", "payment_method", "save"])
         payment.id = 1
+        payment.amount_cents = 10000
         del payment.status
         r = RefundService._process_payment_refund(payment, {"refund_type": "full"})
         assert r.is_ok()
