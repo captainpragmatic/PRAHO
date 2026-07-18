@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+from django.db import IntegrityError, transaction
 from django.test import TestCase
 from django.utils import timezone
 
@@ -93,6 +94,48 @@ class StackedCouponDiscountTestCase(PromotionsMoneyTestCase):
 
         self.assertEqual(result.discount_cents, 4000)
 
+    def test_two_stacked_coupons_through_the_real_apply_path(self) -> None:
+        """#303 review: the unit tests hand-set discount_cents; this drives apply_coupon
+        twice sequentially — lock, calculate, accumulate, persist — and asserts the PERSISTED
+        sum through the real path (it is an integration test of the sequential flow, not a
+        concurrency test; the lost-update race is tracked separately)."""
+        self._coupon("STACK60A", "60.00")
+        self._coupon("STACK60B", "60.00")
+
+        first = CouponService.apply_coupon(code="STACK60A", order=self.order, customer=self.customer)
+        second = CouponService.apply_coupon(code="STACK60B", order=self.order, customer=self.customer)
+
+        self.assertTrue(first.success, f"first apply failed: {first.error_message}")
+        self.assertTrue(second.success, f"second apply failed: {second.error_message}")
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.discount_cents, 10000)
+
+    def test_negative_stored_discount_is_impossible_and_clamped_in_memory(self) -> None:
+        """#303 review: a corrupt negative discount_cents would inflate the cap's headroom
+        past the base. The database excludes it (order_discount_non_negative CHECK), and the
+        cap additionally clamps unsaved in-memory state as defense-in-depth."""
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            Order.objects.filter(pk=self.order.pk).update(discount_cents=-5000)
+
+        # In-memory (unsaved) negative state still must not inflate the cap. A percent
+        # coupon cannot exceed its base by construction, so only an oversized FIXED coupon
+        # discriminates the clamp: without it, remaining = 10000 - (-5000) = 15000 and the
+        # 20000 fixed coupon yields 15000 — over-discounting the base by half.
+        self.order.discount_cents = -5000
+        oversized = Coupon.objects.create(
+            code="FIXED200",
+            name="Fixed 200",
+            discount_type="fixed",
+            discount_amount_cents=20000,
+            currency=self.currency,
+            status="active",
+            is_active=True,
+            is_stackable=True,
+            valid_from=timezone.now() - timezone.timedelta(days=1),
+        )
+        result = CouponService.calculate_discount(oversized, self.order)
+        self.assertEqual(result.discount_cents, 10000)
+
     def test_stacked_coupons_never_exceed_the_order_value(self) -> None:
         """The sum of stacked discounts is bounded by the subtotal — no free order."""
         self.order.discount_cents = 10000  # fully discounted already
@@ -122,12 +165,15 @@ class GiftCardCurrencyTestCase(PromotionsMoneyTestCase):
         )
 
     def test_same_currency_gift_card_redeems(self) -> None:
-        """Non-regression: a RON card still works on a RON order."""
+        """Non-regression: a RON card still works on a RON order — and for exact amounts:
+        the full 10,000-cent balance covers the 10,000-cent order and is debited once."""
         card = self._gift_card(self.currency)
 
         result = GiftCardService.redeem_gift_card(code=card.code, order=self.order, customer=self.customer)
 
         self.assertTrue(result.success, f"redemption failed: {result.error_message}")
+        card.refresh_from_db()
+        self.assertEqual(card.current_balance_cents, 0)
 
     def test_foreign_currency_gift_card_is_refused(self) -> None:
         """A EUR card against a RON order applied foreign cents 1:1 — now refused."""
@@ -147,3 +193,6 @@ class GiftCardCurrencyTestCase(PromotionsMoneyTestCase):
         card.refresh_from_db()
         self.assertEqual(card.current_balance_cents, 10000)
         self.assertEqual(card.status, "active")
+        # The order is equally untouched: no discount, no total change.
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.total_cents, 10000)

@@ -459,7 +459,9 @@ class CouponService:
         # Capping against the full base let every stacked coupon claim the whole subtotal
         # independently: two stackable 60% coupons summed to 120% and the order went free (#231).
         # The cap has to be the base MINUS whatever earlier coupons already took.
-        already_discounted_cents = int(getattr(order, "discount_cents", 0) or 0)
+        # Clamped at zero: a negative stored discount (corrupt/legacy data) must not
+        # INFLATE the remaining headroom past the base.
+        already_discounted_cents = max(0, int(getattr(order, "discount_cents", 0) or 0))
         remaining_discountable_cents = max(0, base_amount_cents - already_discounted_cents)
         if discount_cents > remaining_discountable_cents:
             discount_cents = remaining_discountable_cents
