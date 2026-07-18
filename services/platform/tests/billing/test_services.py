@@ -517,14 +517,21 @@ class RefundServiceComprehensiveCoverageTestCase(TestCase):
     def test_process_bidirectional_refund_simplified_behavior(self) -> None:
         """Test _process_bidirectional_refund with simplified order processing."""
         mock_order = self._create_test_order()
+        Payment.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            payment_method="bank",
+            amount_cents=mock_order.total_cents,
+            status="succeeded",
+            meta={"order_id": str(mock_order.id)},
+        )
 
-        refund_data = self._create_refund_data()
+        refund_data = self._create_refund_data(refund_type=RefundType.PARTIAL, amount_cents=5000)
         result = RefundService._process_bidirectional_refund(
             order=mock_order,
             invoice=None,
             refund_id=uuid.uuid4(),
-            refund_amount_cents=5000,
-            refund_data=refund_data
+            refund_data=refund_data,
         )
 
         # With simplified processing, refunds should succeed

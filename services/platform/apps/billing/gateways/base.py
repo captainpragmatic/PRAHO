@@ -172,6 +172,8 @@ class BasePaymentGateway(ABC):
         gateway_txn_id: str,
         amount_cents: int | None = None,
         reason: str = "requested_by_customer",
+        *,
+        idempotency_key: str | None = None,
     ) -> RefundResult:
         """
         Refund a payment via the gateway.
