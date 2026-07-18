@@ -6,6 +6,7 @@ Romanian business formatting for dates, currency, legal compliance
 
 import decimal
 import re
+from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
@@ -204,6 +205,14 @@ def romanian_date(value: Any, format_type: str = "short") -> str:
     """
     if not value:
         return ""
+
+    # The formatters read .day/.month/.year/.hour straight off the value, which bypasses Django's
+    # template localization. With USE_TZ=True an aware datetime is in UTC, so those attributes are
+    # the UTC wall clock — the PREVIOUS day between 00:00 and 02:00/03:00 Romanian time. Convert
+    # once here so every formatter renders the Romanian calendar (#286). Plain dates carry no
+    # timezone and are passed through untouched.
+    if isinstance(value, datetime) and timezone.is_aware(value):
+        value = timezone.localtime(value)
 
     try:
         formatter = ROMANIAN_DATE_FORMATTERS.get(format_type, _format_default)

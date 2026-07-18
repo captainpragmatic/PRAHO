@@ -22,6 +22,7 @@ from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
 
 from apps.billing.models import Invoice, ProformaInvoice
+from apps.common.utils import format_romanian_date
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +58,7 @@ def _register_fonts() -> None:
         pdfmetrics.registerFont(TTFont(name, str(path)))
     # Map the family so bold resolution is correct for any future flowable use.
     pdfmetrics.registerFontFamily(_FONT, normal=_FONT, bold=_FONT_BOLD, italic=_FONT, boldItalic=_FONT_BOLD)
+
 
 # Coordinate-based layout has no text wrapping/clipping, so free-text fields must
 # be clamped to a width that fits their column — otherwise long values overrun the
@@ -480,11 +482,11 @@ class RomanianDocumentPDFGenerator:
         # from what will actually be drawn rather than a fixed guess.
         vat_lines = 1 if discount > 0 else max(1, len(vat_groups))
         block_lines = (
-            3                              # subtotal, total-VAT, grand-total
+            3  # subtotal, total-VAT, grand-total
             + vat_lines
-            + (1 if discount > 0 else 0)   # discount line
+            + (1 if discount > 0 else 0)  # discount line
             + (1 if has_reverse_charge else 0)
-            + 2                            # generous allowance for exchange-rate + status lines
+            + 2  # generous allowance for exchange-rate + status lines
         )
         needed = block_lines * 0.7 * cm
         totals_y = self._table_end_y - 1 * cm
@@ -617,14 +619,14 @@ class RomanianInvoicePDFGenerator(RomanianDocumentPDFGenerator):
             self.canvas.drawString(
                 2 * cm,
                 self.height - 5.5 * cm,
-                str(_t("Issue date: {date}")).format(date=self.invoice.issued_at.strftime("%d.%m.%Y")),
+                str(_t("Issue date: {date}")).format(date=format_romanian_date(self.invoice.issued_at)),
             )
 
         if self.invoice.due_at:
             self.canvas.drawString(
                 2 * cm,
                 self.height - 6 * cm,
-                str(_t("Due date: {date}")).format(date=self.invoice.due_at.strftime("%d.%m.%Y")),
+                str(_t("Due date: {date}")).format(date=format_romanian_date(self.invoice.due_at)),
             )
 
         # Status indicator
@@ -637,7 +639,7 @@ class RomanianInvoicePDFGenerator(RomanianDocumentPDFGenerator):
         """Render payment status information."""
         if self.invoice.status != "paid":
             self.canvas.setFont(_FONT_BOLD, 10)
-            due_date_str = self.invoice.due_at.strftime("%d.%m.%Y") if self.invoice.due_at else str(_t("undefined"))
+            due_date_str = format_romanian_date(self.invoice.due_at) if self.invoice.due_at else str(_t("undefined"))
             self.canvas.drawString(
                 2 * cm, totals_y - 0.5 * cm, str(_t("Unpaid invoice - Due: {date}")).format(date=due_date_str)
             )
@@ -646,7 +648,7 @@ class RomanianInvoicePDFGenerator(RomanianDocumentPDFGenerator):
             self.canvas.drawString(
                 2 * cm,
                 totals_y - 0.5 * cm,
-                str(_t("Invoice paid on: {date}")).format(date=self.invoice.paid_at.strftime("%d.%m.%Y")),
+                str(_t("Invoice paid on: {date}")).format(date=format_romanian_date(self.invoice.paid_at)),
             )
 
 
@@ -678,12 +680,12 @@ class RomanianProformaPDFGenerator(RomanianDocumentPDFGenerator):
         self.canvas.drawString(
             2 * cm,
             self.height - 5.5 * cm,
-            str(_t("Date: {date}")).format(date=self.proforma.created_at.strftime("%d.%m.%Y")),
+            str(_t("Date: {date}")).format(date=format_romanian_date(self.proforma.created_at)),
         )
         self.canvas.drawString(
             2 * cm,
             self.height - 6 * cm,
-            str(_t("Valid until: {date}")).format(date=self.proforma.valid_until.strftime("%d.%m.%Y")),
+            str(_t("Valid until: {date}")).format(date=format_romanian_date(self.proforma.valid_until)),
         )
 
 

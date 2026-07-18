@@ -3,7 +3,7 @@ Test Suite for Common App - Utilities and Helper Functions
 Tests Romanian date formatting, security utilities, and business logic helpers.
 """
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -63,6 +63,44 @@ class TestRomanianDateFormatting(TestCase):
 
         self.assertEqual(date_result, '05.01.2023')
         self.assertEqual(datetime_result, '05.01.2023 09:05')
+
+    def test_format_romanian_date_converts_aware_datetime_to_ro_local(self):
+        """#286: an aware datetime must be rendered in the Romanian calendar, not UTC.
+
+        2025-12-31 22:30 UTC is already 2026-01-01 00:30 in Romania. Formatting the UTC wall
+        clock would print 31.12.2025 — the wrong day, and the wrong YEAR — on the invoice PDF
+        the customer receives, contradicting the date filed with ANAF (#220).
+        """
+        aware = datetime(2025, 12, 31, 22, 30, tzinfo=UTC)
+
+        self.assertEqual(format_romanian_date(aware), '01.01.2026')
+
+    def test_format_romanian_datetime_converts_aware_datetime_to_ro_local(self):
+        """#286: the same conversion applies to the datetime variant, including the clock time.
+
+        22:30 UTC is 00:30 the next day in Romania (EET, UTC+2).
+        """
+        aware = datetime(2025, 12, 31, 22, 30, tzinfo=UTC)
+
+        self.assertEqual(format_romanian_datetime(aware), '01.01.2026 00:30')
+
+    def test_format_romanian_date_handles_summer_time_offset(self):
+        """#286: Romania is EEST (UTC+3) in summer, not a hardcoded +2.
+
+        2026-06-15 21:30 UTC is 2026-06-16 00:30 EEST — a fix that assumed a fixed +2 offset
+        would wrongly print 15.06.2026.
+        """
+        aware = datetime(2026, 6, 15, 21, 30, tzinfo=UTC)
+
+        self.assertEqual(format_romanian_date(aware), '16.06.2026')
+
+    def test_format_romanian_date_passes_naive_datetime_through(self):
+        """#286 non-regression: naive datetimes carry no timezone, so they are formatted as
+        given rather than assumed to be UTC. Callers that already hold a local wall clock keep
+        working unchanged."""
+        naive = datetime(2025, 12, 31, 22, 30)
+
+        self.assertEqual(format_romanian_date(naive), '31.12.2025')
 
 
 class TestInvoiceNumberGeneration(TestCase):
