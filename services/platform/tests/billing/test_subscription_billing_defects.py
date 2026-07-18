@@ -82,6 +82,23 @@ class SubscriptionListPriceResolutionTestCase(TestCase):
         self.assertTrue(result.is_ok(), f"creation failed: {result}")
         self.assertEqual(result.unwrap().unit_price_cents, self.price.get_price_cents_for_period("annual"))
 
+    def test_active_free_promotion_is_a_valid_list_price_for_supported_cycles(self) -> None:
+        """An explicit, unexpired zero-cent promotion is a real price, not an unset base price."""
+        self.price.promo_price_cents = 0
+        self.price.promo_valid_until = timezone.now() + timedelta(days=1)
+        self.price.save(update_fields=["promo_price_cents", "promo_valid_until", "updated_at"])
+
+        for billing_cycle in ("monthly", "semi_annual", "yearly"):
+            with self.subTest(billing_cycle=billing_cycle):
+                result = SubscriptionService.create_subscription(
+                    customer=self.customer,
+                    product=self.product,
+                    data={"billing_cycle": billing_cycle, "quantity": 1},
+                )
+
+                self.assertTrue(result.is_ok(), f"creation failed for {billing_cycle}: {result}")
+                self.assertEqual(result.unwrap().unit_price_cents, 0)
+
     def test_custom_price_still_overrides_the_list_price(self) -> None:
         """Non-regression: an explicit price wins over the catalog."""
         result = SubscriptionService.create_subscription(
