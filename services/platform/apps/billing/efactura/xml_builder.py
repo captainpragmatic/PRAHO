@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import TYPE_CHECKING, Any
 
@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from apps.billing.invoice_models import Invoice, InvoiceLine
 
 from apps.billing.config import is_eu_country
+from apps.billing.efactura.settings import ro_local_date
 from apps.common.tax_service import TaxService
 
 logger = logging.getLogger(__name__)
@@ -246,7 +247,18 @@ class BaseUBLBuilder:
         return self._add_element(parent, self._cac(tag))
 
     def _format_date(self, dt: date | None) -> str:
-        """Format date as YYYY-MM-DD."""
+        """Format a plain calendar date as YYYY-MM-DD.
+
+        Rejects datetime instances: datetime subclasses date, so passing an aware datetime here
+        type-checks cleanly but silently formats its UTC wall clock, emitting the wrong legal
+        calendar date (#220). MyPy cannot catch this — hence the runtime guard. Convert with
+        ro_local_date() at the call site.
+        """
+        if isinstance(dt, datetime):
+            raise TypeError(
+                "_format_date received a datetime; use ro_local_date(dt) to get the Romanian "
+                "local calendar date first (see issue #220)"
+            )
         if dt is None:
             return ""
         return dt.strftime("%Y-%m-%d")
@@ -532,11 +544,11 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
         # Issue Date - Mandatory (validated in _validate_invoice)
         if self.invoice.issued_at is None:
             raise ValueError("Invoice must have issued_at set for e-Factura XML generation")
-        self._add_cbc(self.root, "IssueDate", self._format_date(self.invoice.issued_at.date()))
+        self._add_cbc(self.root, "IssueDate", self._format_date(ro_local_date(self.invoice.issued_at)))
 
         # Due Date - Optional but recommended
         if self.invoice.due_at:
-            self._add_cbc(self.root, "DueDate", self._format_date(self.invoice.due_at.date()))
+            self._add_cbc(self.root, "DueDate", self._format_date(ro_local_date(self.invoice.due_at)))
 
         # Invoice Type Code - Mandatory
         self._add_cbc(self.root, "InvoiceTypeCode", INVOICE_TYPE_COMMERCIAL)
@@ -646,7 +658,7 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
 
         # Payment Due Date
         if self.invoice.due_at:
-            self._add_cbc(payment_means, "PaymentDueDate", self._format_date(self.invoice.due_at.date()))
+            self._add_cbc(payment_means, "PaymentDueDate", self._format_date(ro_local_date(self.invoice.due_at)))
 
         # Payment ID (reference for bank transfer)
         self._add_cbc(payment_means, "PaymentID", self.invoice.number)
@@ -671,8 +683,14 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
         if self.invoice.due_at and self.invoice.issued_at:
             payment_terms = self._add_cac(self.root, "PaymentTerms")
 
-            days = (self.invoice.due_at - self.invoice.issued_at).days
-            due_date_str = self._format_date(self.invoice.due_at.date())
+            # Net days and the emitted due date must share ONE calendar basis — the Romanian one
+            # (#220). Deriving days from the raw aware datetimes floors a partial day and can
+            # contradict the two dates printed alongside it in the same note.
+            due_local = ro_local_date(self.invoice.due_at)
+            issued_local = ro_local_date(self.invoice.issued_at)
+
+            days = (due_local - issued_local).days
+            due_date_str = self._format_date(due_local)
 
             note = f"Net {days} days, due {due_date_str}" if days > 0 else f"Due on receipt ({due_date_str})"
 
@@ -1008,7 +1026,7 @@ class UBLCreditNoteBuilder(BaseUBLBuilder):
         self._add_cbc(self.root, "ID", self.invoice.number)
         if self.invoice.issued_at is None:
             raise ValueError("Invoice must have issued_at set for e-Factura XML generation")
-        self._add_cbc(self.root, "IssueDate", self._format_date(self.invoice.issued_at.date()))
+        self._add_cbc(self.root, "IssueDate", self._format_date(ro_local_date(self.invoice.issued_at)))
         self._add_cbc(self.root, "CreditNoteTypeCode", INVOICE_TYPE_CREDIT_NOTE)
 
         notes = getattr(self.invoice, "notes", "")
@@ -1025,7 +1043,9 @@ class UBLCreditNoteBuilder(BaseUBLBuilder):
             self._add_cbc(invoice_ref, "ID", self.original_invoice.number)
 
             if self.original_invoice.issued_at:
-                self._add_cbc(invoice_ref, "IssueDate", self._format_date(self.original_invoice.issued_at.date()))
+                self._add_cbc(
+                    invoice_ref, "IssueDate", self._format_date(ro_local_date(self.original_invoice.issued_at))
+                )
 
     def _add_supplier_party(self) -> None:
         """Add supplier party (same as invoice)."""
