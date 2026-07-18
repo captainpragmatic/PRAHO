@@ -81,6 +81,20 @@ class PeriodCorrectAPIOrderPricingTests(TestCase):
         self.assertEqual(self.price.get_price_cents_for_period("monthly"), 0)
         self.assertEqual(self.price.get_price_cents_for_period("annual"), 0)
 
+    def test_catalog_serializer_exposes_the_effective_monthly_promotion_price(self) -> None:
+        from apps.api.orders.serializers import ProductPriceSerializer  # noqa: PLC0415
+
+        self.price.promo_valid_until = timezone.now() + timedelta(days=1)
+        self.assertEqual(self.price.monthly_price, Decimal("100.00"))
+
+        for promo_price_cents, expected in ((8_000, "80.00"), (0, "0.00")):
+            with self.subTest(promo_price_cents=promo_price_cents):
+                self.price.promo_price_cents = promo_price_cents
+
+                serialized = ProductPriceSerializer(self.price).data
+
+                self.assertEqual(serialized["monthly_price"], expected)
+
     def test_period_accessor_ignores_expired_promotion(self) -> None:
         self.price.promo_price_cents = 8_000
         self.price.promo_valid_until = timezone.now() - timedelta(seconds=1)
