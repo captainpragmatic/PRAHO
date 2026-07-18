@@ -238,6 +238,33 @@ def _trigger_service_provisioning(order: Order) -> None:
         logger.exception(f"🔥 [Order Signal] Provisioning trigger failed: {e}")
 
 
+def _cancel_linked_subscription_for_order(*, service_id: object, feedback: str) -> None:
+    """Retire recurring collection when the initial order entitlement ends."""
+    from apps.billing.subscription_models import Subscription  # noqa: PLC0415
+
+    subscription = Subscription.objects.select_for_update(of=("self",)).filter(service_id=service_id).first()
+    if subscription is None:
+        return
+
+    if subscription.status in {"pending", "trialing", "active", "past_due", "paused"}:
+        subscription.cancel(
+            reason="other",
+            at_period_end=False,
+            feedback=feedback,
+        )
+    subscription.auto_payment_enabled = False
+    subscription.payment_authorization = None
+    subscription.saved_payment_method = None
+    subscription.save(
+        update_fields=[
+            "auto_payment_enabled",
+            "payment_authorization",
+            "saved_payment_method",
+            "updated_at",
+        ]
+    )
+
+
 def _handle_order_cancellation(order: Order, old_status: str) -> None:  # noqa: PLR0912, PLR0915, C901
     """Handle order cancellation cleanup.
 
@@ -247,6 +274,8 @@ def _handle_order_cancellation(order: Order, old_status: str) -> None:  # noqa: 
     """
     try:
         with transaction.atomic():
+            from apps.provisioning.models import Service  # noqa: PLC0415
+
             # D3: Handle services linked to cancelled order items.
             # H6 fix: Only hard-delete services in "pending" status (never provisioned).
             # Services in "provisioning" or "active" state represent real infrastructure
@@ -256,11 +285,18 @@ def _handle_order_cancellation(order: Order, old_status: str) -> None:  # noqa: 
             for item in (
                 order.items.select_for_update(of=("self",)).select_related("service").filter(service__isnull=False)
             ):
-                service = item.service
-                if service is None:
+                if item.service_id is None:
                     continue  # Narrowing: filter guarantees non-null but type annotation is Service | None
+                service = Service.objects.select_for_update(of=("self",)).get(pk=item.service_id)
                 service_id = str(service.id)
                 service_name = service.service_name
+
+                _cancel_linked_subscription_for_order(
+                    service_id=service.id,
+                    feedback=f"Initial order {order.order_number} cancelled",
+                )
+                service.auto_renew = False
+                service.save(update_fields=["auto_renew", "updated_at"])
 
                 # Cancel provisioning FSM on the item
                 if item.provisioning_status in ("pending", "in_progress"):
@@ -286,9 +322,16 @@ def _handle_order_cancellation(order: Order, old_status: str) -> None:  # noqa: 
                     try:
                         if service.status == "provisioning":
                             service.fail_provisioning()
+                            service_update_fields = ["status", "updated_at"]
                         else:
                             service.suspend(reason=f"Order {order.order_number} cancelled")
-                        service.save(update_fields=["status", "updated_at"])
+                            service_update_fields = [
+                                "status",
+                                "suspended_at",
+                                "suspension_reason",
+                                "updated_at",
+                            ]
+                        service.save(update_fields=service_update_fields)
                         suspended_service_details.append(
                             {"id": service_id, "name": service_name, "action": "suspended"}
                         )
@@ -826,17 +869,18 @@ def _handle_invoice_refunded(sender: Any, invoice: Any, refund_type: str, **kwar
         for order in orders:
             # H2 fix: Wrap per-order service suspension in an atomic block with
             # select_for_update(of=("self",)) to prevent TOCTOU race conditions.
-            # of=("self",) prevents locking FK tables (service, product) which
-            # could cause deadlocks.
+            # Lock order items and then their Service rows in a consistent order.
             with transaction.atomic():
+                from apps.provisioning.models import Service  # noqa: PLC0415
+
                 items_with_services = (
                     order.items.select_for_update(of=("self",)).filter(service__isnull=False).select_related("service")
                 )
 
                 for item in items_with_services:
-                    service = item.service
-                    if service is None:
+                    if item.service_id is None:
                         continue
+                    service = Service.objects.select_for_update(of=("self",)).get(pk=item.service_id)
 
                     # C3 fix: Capture the action taken BEFORE mutation so the audit log
                     # reflects reality. Previously, service.status was checked AFTER
@@ -844,10 +888,23 @@ def _handle_invoice_refunded(sender: Any, invoice: Any, refund_type: str, **kwar
                     action_taken = "flagged_for_review"
 
                     if refund_type == "full":
+                        _cancel_linked_subscription_for_order(
+                            service_id=service.id,
+                            feedback=f"Initial invoice {invoice.number} fully refunded",
+                        )
+                        service.auto_renew = False
+                        service.save(update_fields=["auto_renew", "updated_at"])
                         if service.status == "active":
                             try:
                                 service.suspend(reason=f"Full refund on invoice {invoice.number}")
-                                service.save(update_fields=["status", "updated_at"])
+                                service.save(
+                                    update_fields=[
+                                        "status",
+                                        "suspended_at",
+                                        "suspension_reason",
+                                        "updated_at",
+                                    ]
+                                )
                                 action_taken = "suspended"
                                 logger.info(
                                     "⚠️ [Refund] Suspended service %s for refunded invoice %s",

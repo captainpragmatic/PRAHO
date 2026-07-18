@@ -104,8 +104,6 @@ class MockInvoice:
 @override_settings(
     EFACTURA_ENABLED=True,
     EFACTURA_ENVIRONMENT="test",
-    EFACTURA_B2C_ENABLED=False,
-    EFACTURA_MINIMUM_AMOUNT_CENTS=0,
 )
 class EFacturaServiceTestCase(TestCase):
     """Test EFacturaService."""
@@ -538,7 +536,6 @@ class EFacturaHelperMethodsTestCase(TestCase):
         """Test e-Factura disabled check."""
         self.assertFalse(self.service._is_efactura_enabled())
 
-    @override_settings(EFACTURA_B2C_ENABLED=False, EFACTURA_MINIMUM_AMOUNT_CENTS=0)
     def test_requires_efactura_b2b_romanian(self):
         """Test B2B Romanian invoice requires e-Factura."""
         invoice = MockInvoice(
@@ -552,14 +549,18 @@ class EFacturaHelperMethodsTestCase(TestCase):
         invoice = MockInvoice(bill_to_country="DE")
         self.assertFalse(self.service._requires_efactura(invoice))
 
+    def test_requires_efactura_normalizes_lowercase_romanian_country_code(self):
+        invoice = MockInvoice(bill_to_country="ro")
+
+        self.assertTrue(self.service._requires_efactura(invoice))
+
     @override_settings(EFACTURA_B2C_ENABLED=False)
-    def test_requires_efactura_b2c_disabled(self):
-        """Test B2C invoice when B2C disabled."""
+    def test_legacy_b2c_disable_flag_cannot_override_mandatory_submission(self):
         invoice = MockInvoice(
             bill_to_country="RO",
             bill_to_tax_id=None,  # B2C - no tax ID
         )
-        self.assertFalse(self.service._requires_efactura(invoice))
+        self.assertTrue(self.service._requires_efactura(invoice))
 
     @override_settings(EFACTURA_B2C_ENABLED=True)
     def test_requires_efactura_b2c_enabled(self):
@@ -571,14 +572,48 @@ class EFacturaHelperMethodsTestCase(TestCase):
         self.assertTrue(self.service._requires_efactura(invoice))
 
     @override_settings(EFACTURA_MINIMUM_AMOUNT_CENTS=10000)
-    def test_requires_efactura_below_minimum(self):
-        """Test invoice below minimum amount."""
+    def test_legacy_minimum_cannot_exempt_a_small_romanian_invoice(self):
         invoice = MockInvoice(
             bill_to_country="RO",
             bill_to_tax_id="RO12345678",
             total_cents=5000,  # Below 10000
         )
-        self.assertFalse(self.service._requires_efactura(invoice))
+        self.assertTrue(self.service._requires_efactura(invoice))
+
+    @patch("apps.billing.efactura.b2c.B2CDetector.is_b2c_required", side_effect=TypeError("invalid snapshot"))
+    def test_b2c_detection_failure_does_not_silently_route_to_b2b(self, _detector):
+        invoice = MockInvoice(bill_to_country="RO", bill_to_tax_id=None)
+
+        with self.assertRaises(TypeError):
+            self.service._is_b2c(invoice)
+
+    @patch("apps.billing.invoice_models.Invoice.objects.filter")
+    def test_deadline_monitor_covers_paid_invoices_and_recovers_a_missing_document(self, invoice_filter):
+        paid_invoice = MockInvoice(status="paid")
+        queryset = Mock()
+        queryset.exclude.return_value = [paid_invoice]
+        invoice_filter.return_value = queryset
+        recovered_document = Mock(spec=EFacturaDocument)
+        recovered_document.submission_deadline = timezone.now() + timezone.timedelta(hours=36)
+
+        with (
+            patch.object(self.service, "_get_existing_document", return_value=None),
+            patch.object(
+                self.service,
+                "_get_or_create_document",
+                return_value=recovered_document,
+            ) as get_or_create,
+        ):
+            approaching = self.service.check_approaching_deadlines(hours=48)
+
+        self.assertEqual(approaching, [recovered_document])
+        get_or_create.assert_called_once_with(paid_invoice)
+        statuses = set(invoice_filter.call_args.kwargs["status__in"])
+        self.assertEqual(
+            statuses,
+            {"issued", "paid", "overdue", "void", "refunded", "partially_refunded"},
+        )
+        self.assertEqual(invoice_filter.call_args.kwargs["bill_to_country__iexact"], "RO")
 
 
 class SubmitInvoiceConvenienceFunctionTestCase(TestCase):
@@ -601,8 +636,6 @@ class SubmitInvoiceConvenienceFunctionTestCase(TestCase):
 @override_settings(
     EFACTURA_ENABLED=True,
     EFACTURA_ENVIRONMENT="test",
-    EFACTURA_B2C_ENABLED=False,
-    EFACTURA_MINIMUM_AMOUNT_CENTS=0,
 )
 class SubmissionLifecycleTests(TestCase):
     """DB-backed FSM trajectory tests for the e-Factura submission lifecycle (Phase 0, #123).
@@ -620,7 +653,7 @@ class SubmissionLifecycleTests(TestCase):
         cls.currency = CurrencyFactory(code="RON")
         cls.customer = CustomerFactory()
 
-    def _ro_invoice(self, number: str):
+    def _ro_invoice(self, number: str, *, bill_to_tax_id: str = "RO12345678"):
         from tests.factories import InvoiceFactory  # noqa: PLC0415
 
         return InvoiceFactory(
@@ -628,15 +661,13 @@ class SubmissionLifecycleTests(TestCase):
             currency=self.currency,
             number=number,
             bill_to_country="RO",
-            bill_to_tax_id="RO12345678",
+            bill_to_tax_id=bill_to_tax_id,
             status="issued",
         )
 
     def _submitted_doc(self, invoice, upload_index: str) -> EFacturaDocument:
         """Build an EFacturaDocument in SUBMITTED state via the real FSM transitions."""
-        doc = EFacturaDocument.objects.create(
-            invoice=invoice, document_type=EFacturaDocumentType.INVOICE.value
-        )
+        doc = EFacturaDocument.objects.create(invoice=invoice, document_type=EFacturaDocumentType.INVOICE.value)
         doc.mark_queued()
         doc.save()
         doc.mark_submitted(upload_index)
@@ -655,8 +686,9 @@ class SubmissionLifecycleTests(TestCase):
         client.upload_invoice.return_value = UploadResponse(success=True, upload_index="IDX-1")
         service = EFacturaService(client=client)
 
-        with patch.object(service, "_generate_xml", return_value="<Invoice/>"), patch.object(
-            service, "_log_audit_event"
+        with (
+            patch.object(service, "_generate_xml", return_value="<Invoice/>"),
+            patch.object(service, "_log_audit_event"),
         ):
             result = service.submit_invoice(invoice)
 
@@ -674,8 +706,12 @@ class SubmissionLifecycleTests(TestCase):
         from tests.factories import InvoiceFactory  # noqa: PLC0415
 
         invoice = InvoiceFactory(
-            customer=self.customer, currency=self.currency, number="INV-LC-2",
-            bill_to_country="RO", bill_to_tax_id="RO12345678", status="issued",
+            customer=self.customer,
+            currency=self.currency,
+            number="INV-LC-2",
+            bill_to_country="RO",
+            bill_to_tax_id="RO12345678",
+            status="issued",
         )
         doc = self._submitted_doc(invoice, "IDX-2")
         client = Mock(spec=EFacturaClient)
@@ -716,8 +752,9 @@ class SubmissionLifecycleTests(TestCase):
         client = Mock(spec=EFacturaClient)
         service = EFacturaService(client=client)
 
-        with patch.object(service, "_generate_xml", return_value="<Invoice/>"), patch.object(
-            service, "_log_audit_event"
+        with (
+            patch.object(service, "_generate_xml", return_value="<Invoice/>"),
+            patch.object(service, "_log_audit_event"),
         ):
             result = service.submit_invoice(invoice)
 
@@ -727,23 +764,66 @@ class SubmissionLifecycleTests(TestCase):
         self.assertEqual(doc.status, EFacturaStatus.SUBMITTED.value)
         self.assertEqual(doc.anaf_upload_index, "IDX-4")
 
-    def test_b2c_invoice_returns_clear_not_supported_error(self):
-        """#202 review (codex P1): the B2B UBLInvoiceBuilder rejects a no-CUI RO invoice, so a real
-        B2C submission failed in _generate_xml before ever reaching upload_b2c (the routing was only
-        exercised by mocked tests). B2C must now be rejected cleanly BEFORE XML generation."""
-        invoice = self._ro_invoice("INV-B2C-1")
+    def test_b2c_invoice_is_submitted_to_consumer_endpoint(self):
+        """Romanian consumer invoices use /uploadb2c and never fall through to the B2B endpoint."""
+        invoice = self._ro_invoice("INV-B2C-1", bill_to_tax_id="")
         client = Mock(spec=EFacturaClient)
+        client.upload_b2c.return_value = UploadResponse(success=True, upload_index="B2C-1")
         service = EFacturaService(client=client)
 
-        with patch.object(service, "_generate_xml", return_value="<Invoice/>"), patch.object(
-            service, "_log_audit_event"
-        ), patch.object(service, "_is_b2c", return_value=True):
+        with (
+            patch.object(service, "_generate_xml", return_value="<Invoice/>"),
+            patch.object(service, "_log_audit_event"),
+        ):
             result = service.submit_invoice(invoice)
 
-        self.assertFalse(result.success)
-        self.assertIn("b2c", result.error_message.lower())
-        client.upload_b2c.assert_not_called()
+        self.assertTrue(result.success, msg=result.error_message)
+        client.upload_b2c.assert_called_once_with("<Invoice/>")
         client.upload_invoice.assert_not_called()
+        document = EFacturaDocument.objects.get(invoice=invoice)
+        self.assertEqual(document.anaf_upload_index, "B2C-1")
+
+    def test_b2b_credit_note_is_submitted_with_credit_note_standard(self):
+        invoice = self._ro_invoice("CN-B2B-1")
+        EFacturaDocument.objects.create(
+            invoice=invoice,
+            document_type=EFacturaDocumentType.CREDIT_NOTE.value,
+        )
+        client = Mock(spec=EFacturaClient)
+        client.upload_credit_note.return_value = UploadResponse(success=True, upload_index="CN-B2B-1")
+        service = EFacturaService(client=client)
+
+        with (
+            patch.object(service, "_generate_xml", return_value="<CreditNote/>"),
+            patch.object(service, "_log_audit_event"),
+        ):
+            result = service.submit_invoice(invoice)
+
+        self.assertTrue(result.success, msg=result.error_message)
+        client.upload_credit_note.assert_called_once_with("<CreditNote/>")
+        client.upload_invoice.assert_not_called()
+        client.upload_b2c.assert_not_called()
+
+    def test_b2c_credit_note_is_submitted_to_consumer_endpoint_with_credit_note_standard(self):
+        invoice = self._ro_invoice("CN-B2C-1", bill_to_tax_id="")
+        EFacturaDocument.objects.create(
+            invoice=invoice,
+            document_type=EFacturaDocumentType.CREDIT_NOTE.value,
+        )
+        client = Mock(spec=EFacturaClient)
+        client.upload_b2c.return_value = UploadResponse(success=True, upload_index="CN-B2C-1")
+        service = EFacturaService(client=client)
+
+        with (
+            patch.object(service, "_generate_xml", return_value="<CreditNote/>"),
+            patch.object(service, "_log_audit_event"),
+        ):
+            result = service.submit_invoice(invoice)
+
+        self.assertTrue(result.success, msg=result.error_message)
+        client.upload_b2c.assert_called_once_with("<CreditNote/>", standard="CN")
+        client.upload_invoice.assert_not_called()
+        client.upload_credit_note.assert_not_called()
 
     def test_fresh_failure_marks_new_document_as_error_not_queued(self):
         """#202 review (codex P2): a fresh submission that fails AFTER queue-before-upload must mark
@@ -754,9 +834,11 @@ class SubmissionLifecycleTests(TestCase):
         client.upload_invoice.side_effect = NetworkError("boom")
         service = EFacturaService(client=client)
 
-        with patch.object(service, "_generate_xml", return_value="<Invoice/>"), patch.object(
-            service, "_log_audit_event"
-        ), patch.object(service, "_is_b2c", return_value=False):
+        with (
+            patch.object(service, "_generate_xml", return_value="<Invoice/>"),
+            patch.object(service, "_log_audit_event"),
+            patch.object(service, "_is_b2c", return_value=False),
+        ):
             result = service.submit_invoice(invoice)
 
         self.assertFalse(result.success)
@@ -768,9 +850,7 @@ class SubmissionLifecycleTests(TestCase):
         """#202 review (copilot): submit_invoice on an ANAF-rejected doc must NOT re-POST (duplicate
         submission) — it returns a clear error directing a corrected resubmission."""
         invoice = self._ro_invoice("INV-REJ-1")
-        doc = EFacturaDocument.objects.create(
-            invoice=invoice, document_type=EFacturaDocumentType.INVOICE.value
-        )
+        doc = EFacturaDocument.objects.create(invoice=invoice, document_type=EFacturaDocumentType.INVOICE.value)
         doc.mark_queued()
         doc.save()
         doc.mark_submitted("IDX-R")
@@ -780,8 +860,9 @@ class SubmissionLifecycleTests(TestCase):
         client = Mock(spec=EFacturaClient)
         service = EFacturaService(client=client)
 
-        with patch.object(service, "_generate_xml", return_value="<Invoice/>"), patch.object(
-            service, "_log_audit_event"
+        with (
+            patch.object(service, "_generate_xml", return_value="<Invoice/>"),
+            patch.object(service, "_log_audit_event"),
         ):
             result = service.submit_invoice(invoice)
 
@@ -796,9 +877,11 @@ class SubmissionLifecycleTests(TestCase):
         client.upload_invoice.return_value = UploadResponse(success=True, upload_index="B2B-1")
         service = EFacturaService(client=client)
 
-        with patch.object(service, "_generate_xml", return_value="<Invoice/>"), patch.object(
-            service, "_log_audit_event"
-        ), patch.object(service, "_is_b2c", return_value=False):
+        with (
+            patch.object(service, "_generate_xml", return_value="<Invoice/>"),
+            patch.object(service, "_log_audit_event"),
+            patch.object(service, "_is_b2c", return_value=False),
+        ):
             result = service.submit_invoice(invoice)
 
         self.assertTrue(result.success, msg=result.error_message)

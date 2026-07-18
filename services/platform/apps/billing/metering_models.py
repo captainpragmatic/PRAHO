@@ -7,7 +7,7 @@ Based on industry best practices for SaaS usage-based billing:
 - Flexible aggregation (sum, count, max, last, unique)
 - Tiered and volume-based pricing
 - Real-time usage tracking and alerts
-- Stripe Meter integration support
+- PRAHO-owned rating and invoicing
 """
 
 from __future__ import annotations
@@ -18,9 +18,10 @@ import uuid
 from decimal import Decimal
 from typing import Any, ClassVar
 
-from django.core.validators import MaxValueValidator
+from django.core.exceptions import ValidationError
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
-from django.db.models import Max, Sum
+from django.db.models import F, Max, Sum
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from django_fsm import FSMField, transition
@@ -94,14 +95,6 @@ class UsageMeter(models.Model):
     )
     display_name = models.CharField(max_length=200, help_text=_("Human-readable name (e.g., 'Disk Space Usage')"))
     description = models.TextField(blank=True, help_text=_("Detailed description of what this meter tracks"))
-
-    # Stripe integration
-    stripe_meter_id = models.CharField(
-        max_length=100, blank=True, help_text=_("Stripe Meter ID for external billing sync")
-    )
-    stripe_meter_event_name = models.CharField(
-        max_length=100, blank=True, help_text=_("Event name configured in Stripe Meter")
-    )
 
     # Aggregation configuration
     aggregation_type = models.CharField(
@@ -182,7 +175,6 @@ class UsageMeter(models.Model):
         indexes = (
             models.Index(fields=["name"]),
             models.Index(fields=["category", "is_active"]),
-            models.Index(fields=["stripe_meter_id"]),
         )
 
     def __str__(self) -> str:
@@ -242,7 +234,10 @@ class UsageEvent(models.Model):
 
     # Event data
     value = models.DecimalField(
-        max_digits=18, decimal_places=8, help_text=_("Usage value (interpretation depends on meter aggregation)")
+        max_digits=18,
+        decimal_places=8,
+        validators=[MinValueValidator(Decimal("0"))],
+        help_text=_("Usage value (interpretation depends on meter aggregation)"),
     )
 
     # Timestamps
@@ -281,6 +276,7 @@ class UsageEvent(models.Model):
             models.UniqueConstraint(
                 fields=["meter", "customer", "idempotency_key"], name="unique_usage_event_idempotency"
             ),
+            models.CheckConstraint(condition=models.Q(value__gte=0), name="usage_event_value_non_negative"),
         )
         indexes = (
             models.Index(fields=["customer", "-timestamp"]),
@@ -409,12 +405,6 @@ class UsageAggregation(models.Model):
         help_text=_("Invoice line generated from this aggregation"),
     )
 
-    # Stripe sync
-    stripe_usage_record_id = models.CharField(
-        max_length=100, blank=True, help_text=_("Stripe usage record ID for reconciliation")
-    )
-    stripe_synced_at = models.DateTimeField(null=True, blank=True, help_text=_("When usage was synced to Stripe"))
-
     # Audit
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -535,6 +525,16 @@ class BillingCycle(models.Model):
         ("invoiced", _("Invoiced")),
         ("finalized", _("Finalized")),
     )
+    COLLECTION_STATUS_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
+        ("unbilled", _("Unbilled")),
+        ("prepared", _("Prepared")),
+        ("scheduled", _("Scheduled")),
+        ("processing", _("Processing")),
+        ("paid", _("Paid")),
+        ("past_due", _("Past Due")),
+        ("failed", _("Failed")),
+        ("waived", _("Waived")),
+    )
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
@@ -546,6 +546,12 @@ class BillingCycle(models.Model):
 
     # Status
     status = FSMField(max_length=20, choices=STATUS_CHOICES, default="upcoming", protected=True)
+    collection_status = models.CharField(
+        max_length=20,
+        choices=COLLECTION_STATUS_CHOICES,
+        default="unbilled",
+        db_index=True,
+    )
 
     # Totals (calculated during closing)
     base_charge_cents = models.BigIntegerField(default=0, help_text=_("Fixed subscription charge for this period"))
@@ -555,12 +561,32 @@ class BillingCycle(models.Model):
     tax_cents = models.BigIntegerField(default=0, help_text=_("Tax amount"))
     total_cents = models.BigIntegerField(default=0, help_text=_("Total amount due for this cycle"))
 
-    # Invoice
+    # Collection documents
+    proforma = models.ForeignKey(
+        "billing.ProformaInvoice",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="billing_cycles",
+    )
     invoice = models.ForeignKey(
         "billing.Invoice", on_delete=models.SET_NULL, null=True, blank=True, related_name="billing_cycles"
     )
+    usage_invoice = models.ForeignKey(
+        "billing.Invoice",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="usage_billing_cycles",
+        help_text=_("Post-paid usage invoice; separate from the prepaid renewal invoice"),
+    )
 
     # Processing timestamps
+    charge_scheduled_at = models.DateTimeField(null=True, blank=True)
+    collection_started_at = models.DateTimeField(null=True, blank=True)
+    paid_at = models.DateTimeField(null=True, blank=True)
+    entitlement_applied_at = models.DateTimeField(null=True, blank=True)
+    collection_attempt_count = models.PositiveIntegerField(default=0)
     closed_at = models.DateTimeField(null=True, blank=True, help_text=_("When cycle was closed for new events"))
     invoiced_at = models.DateTimeField(null=True, blank=True, help_text=_("When invoice was generated"))
     finalized_at = models.DateTimeField(null=True, blank=True, help_text=_("When cycle was fully finalized"))
@@ -581,15 +607,61 @@ class BillingCycle(models.Model):
                 condition=models.Q(status__in=["upcoming", "active", "closing", "closed", "invoiced", "finalized"]),
                 name="billingcycle_status_valid_values",
             ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    collection_status__in=[
+                        "unbilled",
+                        "prepared",
+                        "scheduled",
+                        "processing",
+                        "paid",
+                        "past_due",
+                        "failed",
+                        "waived",
+                    ]
+                ),
+                name="billingcycle_collection_status_valid",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(period_end__gt=F("period_start")),
+                name="billingcycle_period_end_after_start",
+            ),
         )
         indexes = (
             models.Index(fields=["subscription", "-period_start"]),
             models.Index(fields=["status", "period_end"]),
             models.Index(fields=["status", "-period_start"]),
+            models.Index(fields=["collection_status", "charge_scheduled_at"]),
         )
 
     def __str__(self) -> str:
         return f"{self.subscription} - {self.period_start.date()} to {self.period_end.date()}"
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        self.clean()
+        super().save(*args, **kwargs)
+
+    def clean(self) -> None:
+        """Reject invalid and overlapping half-open subscription periods."""
+        super().clean()
+        errors: dict[str, Any] = {}
+        if self.period_start is not None and self.period_end is not None:
+            if self.period_end <= self.period_start:
+                errors["period_end"] = _("Billing cycle end must be after its start")
+            elif self.subscription_id is not None:
+                overlaps = (
+                    BillingCycle.objects.filter(
+                        subscription_id=self.subscription_id,
+                        period_start__lt=self.period_end,
+                        period_end__gt=self.period_start,
+                    )
+                    .exclude(pk=self.pk)
+                    .exists()
+                )
+                if overlaps:
+                    errors["period_start"] = _("Billing cycle overlaps another period for this subscription")
+        if errors:
+            raise ValidationError(errors)
 
     def refresh_from_db(
         self,
@@ -659,9 +731,9 @@ class BillingCycle(models.Model):
         """Mark as invoiced after invoice generation."""
         self.invoiced_at = timezone.now()
 
-    @transition(field=status, source="invoiced", target="finalized")
+    @transition(field=status, source=["closed", "invoiced"], target="finalized")
     def finalize(self) -> None:
-        """Mark as finalized (complete lifecycle)."""
+        """Mark the lifecycle complete, with or without billable usage."""
         self.finalized_at = timezone.now()
 
 
@@ -732,6 +804,24 @@ class PricingTier(models.Model):
             models.Index(fields=["meter", "is_active"]),
             models.Index(fields=["meter", "is_default"]),
         )
+        constraints = (
+            models.CheckConstraint(
+                condition=models.Q(unit_price_cents__isnull=True) | models.Q(unit_price_cents__gte=0),
+                name="pricingtier_unit_price_nonneg",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(minimum_charge_cents__gte=0),
+                name="pricingtier_min_charge_nonneg",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(valid_from__isnull=True)
+                    | models.Q(valid_until__isnull=True)
+                    | models.Q(valid_until__gt=F("valid_from"))
+                ),
+                name="pricingtier_valid_window",
+            ),
+        )
 
     def __str__(self) -> str:
         return f"{self.name} - {self.meter.name}"
@@ -753,9 +843,10 @@ class PricingTierBracket(models.Model):
 
     For graduated pricing, each bracket defines a range and its rate.
     Example:
-    - 0-100 GB: $0.10/GB
-    - 101-500 GB: $0.08/GB
-    - 501+ GB: $0.05/GB
+    Ranges are half-open and contiguous:
+    - [0, 100) GB: $0.10/GB
+    - [100, 500) GB: $0.08/GB
+    - [500, unlimited) GB: $0.05/GB
     """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -782,6 +873,22 @@ class PricingTierBracket(models.Model):
         ordering = ("pricing_tier", "sort_order", "from_quantity")
         constraints = (
             models.UniqueConstraint(fields=["pricing_tier", "from_quantity"], name="unique_tier_bracket_start"),
+            models.CheckConstraint(
+                condition=models.Q(from_quantity__gte=0),
+                name="pricingbracket_from_nonneg",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(to_quantity__isnull=True) | models.Q(to_quantity__gt=F("from_quantity")),
+                name="pricingbracket_range_valid",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(unit_price_cents__gte=0),
+                name="pricingbracket_unit_price_nonneg",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(flat_fee_cents__gte=0),
+                name="pricingbracket_flat_fee_nonneg",
+            ),
         )
 
     def __str__(self) -> str:

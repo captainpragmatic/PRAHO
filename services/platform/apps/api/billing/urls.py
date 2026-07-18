@@ -20,4 +20,26 @@ urlpatterns = [
     path("proformas/", views.customer_proformas_api, name="customer_proformas"),
     path("proformas/<str:proforma_number>/", views.customer_proforma_detail_api, name="customer_proforma_detail"),
     path("proformas/<str:proforma_number>/pdf/", views.proforma_pdf_export, name="proforma_pdf_export"),
+    # Customer-controlled recurring card authorization and subscription enrollment
+    path("recurring-payments/", views.recurring_payments_overview_api, name="recurring_payments_overview"),
+    path(
+        "recurring-payments/authorize/begin/",
+        views.begin_recurring_authorization_api,
+        name="begin_recurring_authorization",
+    ),
+    path(
+        "recurring-payments/authorize/complete/",
+        views.complete_recurring_authorization_api,
+        name="complete_recurring_authorization",
+    ),
+    path(
+        "recurring-payments/authorize/withdraw/",
+        views.withdraw_recurring_authorization_api,
+        name="withdraw_recurring_authorization",
+    ),
+    path(
+        "recurring-payments/subscriptions/auto-payment/",
+        views.subscription_auto_payment_api,
+        name="subscription_auto_payment",
+    ),
 ]

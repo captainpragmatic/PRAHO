@@ -867,7 +867,6 @@ class Command(BaseCommand):
             customer=customer,
             payment_terms=30,
             preferred_currency="RON",
-            auto_payment_enabled=True,
             credit_limit=Decimal("25000.00"),
         )
 
@@ -1027,7 +1026,6 @@ class Command(BaseCommand):
             customer=customer,
             payment_terms=payment_terms_options[index % len(payment_terms_options)],
             preferred_currency=currencies[index % len(currencies)],
-            auto_payment_enabled=index % 4 == 0,
             credit_limit=Decimal("5000.00") if customer_type == "company" else Decimal("0.00"),
         )
 
@@ -1443,7 +1441,6 @@ class Command(BaseCommand):
             customer=customer,
             payment_terms=[15, 30, 45, 60][idx % 4],
             preferred_currency=currencies[idx % len(currencies)],
-            auto_payment_enabled=idx in (5, 6),
             credit_limit=Decimal("10000.00") if customer.customer_type == "company" else Decimal("0.00"),
         )
 

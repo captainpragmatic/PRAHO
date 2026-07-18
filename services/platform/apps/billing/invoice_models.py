@@ -24,6 +24,7 @@ from apps.billing.validators import (
     validate_financial_json,
     validate_financial_text_field,
 )
+from apps.common.cnp_validator import validate_cnp
 from apps.common.financial_arithmetic import calculate_document_totals, calculate_line_totals
 from apps.common.validators import log_security_event
 
@@ -137,6 +138,12 @@ class Invoice(models.Model):
     # Billing address snapshot (immutable once issued)
     bill_to_name = models.CharField(max_length=255, default="")
     bill_to_tax_id = models.CharField(max_length=50, blank=True)
+    bill_to_cnp = models.CharField(
+        max_length=13,
+        blank=True,
+        validators=[validate_cnp],
+        help_text=_("Romanian personal fiscal identifier snapshotted when the invoice is created"),
+    )
     bill_to_registration_number = models.CharField(max_length=50, blank=True)  # Nr. Reg. Com. / J number
     bill_to_email = models.EmailField(blank=True)
     bill_to_address1 = models.CharField(max_length=255, blank=True)
@@ -201,6 +208,10 @@ class Invoice(models.Model):
                 ),
                 name="invoice_status_valid_values",
             ),
+            models.CheckConstraint(
+                condition=models.Q(bill_to_tax_id="") | models.Q(bill_to_cnp=""),
+                name="invoice_one_fiscal_id",
+            ),
         ]
 
     def __str__(self) -> str:
@@ -215,13 +226,29 @@ class Invoice(models.Model):
             "discount_cents",
         }
     )
+    _BILLING_SNAPSHOT_FIELDS: ClassVar[frozenset[str]] = frozenset(
+        {
+            "bill_to_name",
+            "bill_to_tax_id",
+            "bill_to_cnp",
+            "bill_to_registration_number",
+            "bill_to_email",
+            "bill_to_address1",
+            "bill_to_address2",
+            "bill_to_city",
+            "bill_to_region",
+            "bill_to_postal",
+            "bill_to_country",
+        }
+    )
+    _LOCKED_FIELDS: ClassVar[frozenset[str]] = _FINANCIAL_FIELDS | _BILLING_SNAPSHOT_FIELDS
 
     def save(self, *args: Any, **kwargs: Any) -> None:
         """Calculate subtotal from total and tax on save with validation"""
         update_fields = kwargs.get("update_fields")
-        # H2 fix: Skip clean() when update_fields contains no financial fields.
+        # H2 fix: Skip clean() when update_fields contains no locked fields.
         # This avoids the immutability DB query on status/meta-only saves.
-        if update_fields and not (set(update_fields) & self._FINANCIAL_FIELDS):
+        if update_fields and not (set(update_fields) & self._LOCKED_FIELDS):
             super().save(*args, **kwargs)
             return
 
@@ -267,21 +294,16 @@ class Invoice(models.Model):
         # once locked. Status transitions (mark_as_paid, void) are still
         # allowed because they don't alter monetary values.
         if self.locked_at and self.pk:
-            db_vals = (
-                type(self)
-                .objects.filter(pk=self.pk)
-                .values_list("locked_at", "total_cents", "subtotal_cents", "tax_cents", "discount_cents")
-                .first()
-            )
-            if db_vals and db_vals[0] is not None:
-                _db_locked, db_total, db_subtotal, db_tax, db_discount = db_vals
-                if (
-                    self.total_cents != db_total
-                    or self.subtotal_cents != db_subtotal
-                    or self.tax_cents != db_tax
-                    or self.discount_cents != db_discount
-                ):
-                    raise ValidationError(_("Cannot modify financial data on a locked invoice"))
+            locked_field_names = sorted(self._LOCKED_FIELDS)
+            db_vals = type(self).objects.filter(pk=self.pk).values("locked_at", *locked_field_names).first()
+            if (
+                db_vals
+                and db_vals["locked_at"] is not None
+                and any(getattr(self, field_name) != db_vals[field_name] for field_name in locked_field_names)
+            ):
+                raise ValidationError(
+                    _("Cannot modify financial data on a locked invoice or alter its billing snapshot")
+                )
 
         # Validate date consistency
         if self.issued_at and self.due_at and self.due_at <= self.issued_at:
@@ -466,6 +488,13 @@ class InvoiceLine(models.Model):
         blank=True,
         help_text=_("Related service if applicable"),
     )
+    billing_cycle = models.ForeignKey(
+        "billing.BillingCycle",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="invoice_lines",
+    )
 
     description = models.CharField(max_length=500)
     quantity = models.DecimalField(max_digits=12, decimal_places=3, default=Decimal("1.000"))
@@ -499,6 +528,7 @@ class InvoiceLine(models.Model):
         verbose_name_plural = _("Invoice Lines")
         indexes = (
             models.Index(fields=["service"]),
+            models.Index(fields=["billing_cycle"]),
             models.Index(fields=["invoice", "kind"]),
         )
         constraints: ClassVar[list[models.BaseConstraint]] = [

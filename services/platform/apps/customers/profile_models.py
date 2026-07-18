@@ -135,9 +135,6 @@ class CustomerBillingProfile(SoftDeleteModel):
         max_length=3, choices=CurrencyCode.choices(), default="RON", verbose_name=_("Monedă preferată")
     )
 
-    # Automatic Payment
-    auto_payment_enabled = models.BooleanField(default=False)
-
     # Audit
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

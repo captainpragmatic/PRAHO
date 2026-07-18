@@ -72,9 +72,10 @@ def _cart_item(
     product_id: uuid.UUID | None = None,
     product_slug: str | None = None,
     quantity: int = 1,
+    billing_period: str = BILLING_PERIOD,
 ) -> dict:
     """Build a cart item dict as the view's inner loop expects it."""
-    item: dict = {"quantity": quantity, "billing_period": BILLING_PERIOD, "config": {}}
+    item: dict = {"quantity": quantity, "billing_period": billing_period, "config": {}}
     if product_id is not None:
         item["product_id"] = product_id
     if product_slug is not None:
@@ -187,6 +188,17 @@ class CartCalculateProductByUUIDTestCase(TestCase):
 
         # Subtotal must be at least quantity × monthly price (setup_cents may add more)
         self.assertGreaterEqual(data["subtotal_cents"], 3 * self.price.monthly_price_cents)
+
+    def test_annual_period_charges_the_full_discounted_term(self) -> None:
+        """Annual checkout must charge 12 months, not one monthly installment."""
+        self.price.annual_discount_percent = 10
+        self.price.save(update_fields=["annual_discount_percent"])
+
+        items = [_cart_item(product_id=self.product.id, billing_period="annual")]
+        data = _call_calculate(self.customer, self.currency, items)
+
+        self.assertEqual(data["subtotal_cents"], 32_400)
+        self.assertEqual(data["items"][0]["unit_price_cents"], 32_400)
 
 
 class CartCalculateProductBySlugTestCase(TestCase):

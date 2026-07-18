@@ -326,7 +326,6 @@ def handle_billing_profile_changes(
     - Credit limit monitoring and alerts
     - Payment terms changes for Romanian law compliance
     - Currency preference updates
-    - Billing automation configuration
     """
     try:
         event_type = "customer_billing_profile_created" if created else "customer_billing_profile_updated"
@@ -336,7 +335,6 @@ def handle_billing_profile_changes(
             "payment_terms": instance.payment_terms,
             "credit_limit": float(instance.credit_limit),
             "preferred_currency": instance.preferred_currency,
-            "auto_payment_enabled": instance.auto_payment_enabled,
         }
 
         # Enhanced billing profile audit logging
@@ -389,7 +387,6 @@ def store_original_billing_values(
                     "payment_terms": getattr(original, "payment_terms", None),
                     "credit_limit": float(getattr(original, "credit_limit", 0)),
                     "preferred_currency": getattr(original, "preferred_currency", None),
-                    "auto_payment_enabled": getattr(original, "auto_payment_enabled", None),
                 }
             except CustomerBillingProfile.DoesNotExist:
                 instance._original_billing_values = {}

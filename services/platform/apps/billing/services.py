@@ -9,8 +9,8 @@ Includes comprehensive usage-based billing services:
 - RatingEngine: Charge calculation with tiered pricing
 - UsageAlertService: Threshold monitoring and alerts
 - UsageInvoiceService: Automatic invoice generation from usage
-- BillingCycleManager: Subscription billing cycle management
-- Stripe metering integration services
+- UsageBillingService: Local usage cycle close and invoice management
+- PRAHO-owned usage invoice services
 
 This file serves as a re-export hub following ADR-0012 feature-based organization.
 """
@@ -31,7 +31,13 @@ from django.db import IntegrityError, transaction
 from django.utils import timezone as tz
 
 from apps.billing.currency_models import Currency as CurrencyModel
-from apps.billing.models import Currency, Invoice, InvoiceLine, InvoiceSequence
+from apps.billing.fiscal_identity import (
+    billing_country_code,
+    get_customer_fiscal_identity,
+    normalize_business_tax_id,
+    validated_cnp_or_empty,
+)
+from apps.billing.models import Invoice, InvoiceLine, InvoiceSequence
 from apps.common.tax_service import CustomerVATInfo, TaxService
 from apps.common.types import Err, Ok, Result
 
@@ -73,15 +79,8 @@ from .refund_service import (
     RefundStatus,
     RefundType,
 )
-from .stripe_metering import (
-    StripeMeterEventService,
-    StripeMeterService,
-    StripeMeterWebhookHandler,
-    StripeSubscriptionMeterService,
-    StripeUsageSyncService,
-)
 from .usage_invoice_service import (
-    BillingCycleManager,
+    UsageBillingService,
     UsageInvoiceService,
 )
 
@@ -117,15 +116,6 @@ class InvoiceService:
         """
         try:
             with transaction.atomic():
-                # Get default currency (RON) - use get_or_create with proper error handling
-                try:
-                    currency = Currency.objects.get(code="RON")
-                except Currency.DoesNotExist:
-                    # Use get_or_create inside atomic block to handle concurrent creation
-                    currency, _ = Currency.objects.get_or_create(
-                        code="RON", defaults={"name": "Romanian Leu", "symbol": "lei", "is_active": True}
-                    )
-
                 # Get invoice sequence with lock to prevent race conditions
                 # Using select_for_update ensures only one process generates a number at a time
                 try:
@@ -144,28 +134,43 @@ class InvoiceService:
                 # already-taxed amount and double-taxed the invoice header.
                 order_discount_cents = int(getattr(order, "discount_cents", 0) or 0)
                 taxable_subtotal_cents = max(0, int(order.subtotal_cents) - order_discount_cents)
+                billing_address = order.billing_address or {}
+                bill_to_country = billing_country_code(billing_address.get("country"))
                 vat_result = TaxService.calculate_vat_for_document(
                     subtotal_cents=taxable_subtotal_cents,
-                    customer_info=_build_customer_vat_info(order.customer, order_id=str(order.id)),
+                    customer_info=_build_customer_vat_info(
+                        order.customer,
+                        order_id=str(order.id),
+                        country=bill_to_country,
+                    ),
+                )
+                fiscal_identity = get_customer_fiscal_identity(order.customer)
+                business_tax_id = (
+                    normalize_business_tax_id(billing_address.get("vat_number", ""))
+                    or normalize_business_tax_id(billing_address.get("vat_id", ""))
+                    or fiscal_identity.business_tax_id
                 )
 
                 # Create invoice - all within the same atomic block to ensure consistency
                 invoice = Invoice.objects.create(
                     customer=order.customer,
                     number=sequence.get_next_number("INV"),
-                    currency=currency,
+                    currency=order.currency,
                     subtotal_cents=vat_result.subtotal_cents,
                     tax_cents=vat_result.vat_cents,
                     total_cents=vat_result.total_cents,
                     discount_cents=order_discount_cents,
                     status="draft",
-                    # Copy billing address from customer
-                    bill_to_name=order.customer.get_billing_name(),
-                    bill_to_tax_id=getattr(order.customer, "cui", "") or "",
-                    bill_to_email=order.customer.primary_email or "",
-                    bill_to_address1=getattr(order.customer, "address", "") or "",
-                    bill_to_city=getattr(order.customer, "city", "") or "",
-                    bill_to_country="RO",  # Default to Romania
+                    bill_to_name=billing_address.get("company_name", "") or order.customer_name,
+                    bill_to_tax_id=business_tax_id,
+                    bill_to_cnp=fiscal_identity.cnp if not business_tax_id else "",
+                    bill_to_email=order.customer_email,
+                    bill_to_address1=billing_address.get("address_line1", "") or billing_address.get("line1", ""),
+                    bill_to_address2=billing_address.get("address_line2", "") or billing_address.get("line2", ""),
+                    bill_to_city=billing_address.get("city", ""),
+                    bill_to_region=billing_address.get("county", "") or billing_address.get("region", ""),
+                    bill_to_postal=billing_address.get("postal_code", "") or billing_address.get("postal", ""),
+                    bill_to_country=bill_to_country,
                     meta={"order_id": str(order.id)},
                 )
 
@@ -219,10 +224,19 @@ class InvoiceService:
 _services_logger = logging.getLogger(__name__)
 
 
-def _build_customer_vat_info(customer: Any, order_id: str | None = None) -> CustomerVATInfo:
+def _build_customer_vat_info(
+    customer: Any,
+    order_id: str | None = None,
+    *,
+    country: object | None = None,
+) -> CustomerVATInfo:
     """Build customer VAT context for TaxService.calculate_vat_for_document()."""
+    country_source = country
+    if country_source is None:
+        billing_address = customer.get_billing_address()
+        country_source = getattr(billing_address, "country", "")
     info: CustomerVATInfo = {
-        "country": (getattr(customer, "country", None) or "RO"),
+        "country": billing_country_code(country_source),
         "is_business": bool(getattr(customer, "company_name", "")),
         "vat_number": None,
         "customer_id": str(getattr(customer, "id", "")),
@@ -278,12 +292,14 @@ class PaymentRetryService:
         if not next_retry_date:
             return Err("No more retry dates available")
 
-        PaymentRetryAttempt.objects.create(
+        PaymentRetryAttempt.objects.get_or_create(
             payment=payment,
-            policy=policy,
             attempt_number=existing_attempts + 1,
-            scheduled_at=next_retry_date,
-            status="pending",
+            defaults={
+                "policy": policy,
+                "scheduled_at": next_retry_date,
+                "status": "pending",
+            },
         )
         _services_logger.info(
             f"✅ [Retry] Scheduled retry #{existing_attempts + 1} for payment {payment_id} at {next_retry_date}"
@@ -292,14 +308,12 @@ class PaymentRetryService:
 
 
 class EFacturaService:
-    """Delegate to real EFacturaSubmissionService."""
+    """Compatibility facade over the canonical e-Factura document lifecycle."""
 
     @staticmethod
     def submit_invoice(invoice_id: str) -> Result[bool, str]:
-        """Submit invoice to ANAF e-Factura via EFacturaSubmissionService."""
-        from apps.billing.efactura_service import (  # noqa: PLC0415
-            EFacturaSubmissionService,
-        )
+        """Submit an invoice through the canonical e-Factura service."""
+        from apps.billing.efactura.service import EFacturaService as CanonicalEFacturaService  # noqa: PLC0415
         from apps.billing.models import Invoice as InvoiceModel  # noqa: PLC0415  # Deferred: test mockability
 
         try:
@@ -307,12 +321,12 @@ class EFacturaService:
         except InvoiceModel.DoesNotExist:
             return Err(f"Invoice not found: {invoice_id}")
 
-        service = EFacturaSubmissionService()
+        service = CanonicalEFacturaService()
         result = service.submit_invoice(invoice)
         if result.success:
             _services_logger.info(f"✅ [e-Factura] Submitted invoice {invoice.number}")
             return Ok(True)
-        return Err(result.message or "e-Factura submission failed")
+        return Err(result.error_message or "e-Factura submission failed")
 
 
 class InvoiceNumberingService:
@@ -329,6 +343,7 @@ class ProformaConversionService:
     """Convert proforma invoices to real invoices."""
 
     @staticmethod
+    @transaction.atomic
     def convert_to_invoice(proforma_id: str) -> Result[Any, str]:
         """Convert a proforma to a real invoice with tax recalculation."""
         from apps.billing.models import ProformaInvoice  # noqa: PLC0415  # Deferred: test mockability
@@ -363,6 +378,10 @@ class ProformaConversionService:
                 subtotal_cents = proforma.subtotal_cents or 0
                 tax_cents = proforma.tax_cents or 0
                 total_cents = proforma.total_cents or 0
+                business_tax_id = normalize_business_tax_id(getattr(proforma, "bill_to_tax_id", ""))
+                personal_tax_id = (
+                    "" if business_tax_id else validated_cnp_or_empty(getattr(proforma, "bill_to_cnp", ""))
+                )
 
                 invoice = Invoice.objects.create(
                     customer=proforma.customer,
@@ -375,14 +394,15 @@ class ProformaConversionService:
                     due_at=tz.now() + timedelta(days=30),
                     bill_to_name=proforma.bill_to_name or "",
                     bill_to_email=proforma.bill_to_email or "",
-                    bill_to_tax_id=getattr(proforma, "bill_to_tax_id", "") or "",
+                    bill_to_tax_id=business_tax_id,
+                    bill_to_cnp=personal_tax_id,
                     bill_to_registration_number=getattr(proforma, "bill_to_registration_number", "") or "",
                     bill_to_address1=getattr(proforma, "bill_to_address1", "") or "",
                     bill_to_address2=getattr(proforma, "bill_to_address2", "") or "",
                     bill_to_city=getattr(proforma, "bill_to_city", "") or "",
                     bill_to_region=getattr(proforma, "bill_to_region", "") or "",
                     bill_to_postal=getattr(proforma, "bill_to_postal", "") or "",
-                    bill_to_country=getattr(proforma, "bill_to_country", "RO") or "RO",
+                    bill_to_country=billing_country_code(getattr(proforma, "bill_to_country", "")),
                     meta={"proforma_id": str(proforma.id), "proforma_number": proforma.number},
                 )
                 # Issue via FSM transition to set locked_at and issued_at
@@ -395,6 +415,7 @@ class ProformaConversionService:
                         invoice=invoice,
                         kind=line.kind,
                         service=line.service,
+                        billing_cycle=line.billing_cycle,
                         description=line.description,
                         quantity=line.quantity,
                         unit_price_cents=line.unit_price_cents,
@@ -411,6 +432,10 @@ class ProformaConversionService:
                         seller_item_id=line.seller_item_id,
                         sort_order=line.sort_order,
                     )
+
+                from apps.billing.metering_models import BillingCycle  # noqa: PLC0415
+
+                BillingCycle.objects.filter(proforma=proforma).update(invoice=invoice)
 
                 # Update proforma status via FSM transition
                 proforma.convert()
@@ -447,7 +472,6 @@ __all__ = [
     "AggregationService",
     # Core billing services
     "BillingAnalyticsService",
-    "BillingCycleManager",
     "EFacturaService",
     "InvoiceNumberingService",
     "InvoiceService",
@@ -466,13 +490,8 @@ __all__ = [
     "RefundStatus",
     "RefundType",
     "Result",
-    # Stripe metering services
-    "StripeMeterEventService",
-    "StripeMeterService",
-    "StripeMeterWebhookHandler",
-    "StripeSubscriptionMeterService",
-    "StripeUsageSyncService",
     "UsageAlertService",
+    "UsageBillingService",
     "UsageEventData",
     "UsageInvoiceService",
     # Helper functions

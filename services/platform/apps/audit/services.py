@@ -2453,7 +2453,6 @@ class CustomersAuditService:
             "payment_terms": billing_profile.payment_terms,
             "credit_limit": float(billing_profile.credit_limit),
             "preferred_currency": billing_profile.preferred_currency,
-            "auto_payment_enabled": billing_profile.auto_payment_enabled,
             "account_balance": float(billing_profile.get_account_balance()),
             "created_at": billing_profile.created_at.isoformat(),
             "updated_at": billing_profile.updated_at.isoformat(),

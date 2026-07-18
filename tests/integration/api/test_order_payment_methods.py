@@ -9,6 +9,7 @@ from rest_framework.test import APIRequestFactory
 from apps.api.orders.views import confirm_order
 from apps.billing.gateways.base import PaymentConfirmResult
 from apps.billing.models import Currency
+from apps.billing.payment_models import Payment
 from apps.customers.models import Customer
 from apps.orders.models import Order
 from apps.users.models import CustomerMembership, User
@@ -85,10 +86,23 @@ class OrderPaymentMethodIntegrationTests(TestCase):
 
     def test_matching_payment_intent_confirms_order(self) -> None:
         order = self._make_order(payment_method="card", payment_intent_id="pi_match1234567890")
+        Payment.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            amount_cents=order.total_cents,
+            payment_method="stripe",
+            gateway_txn_id=order.payment_intent_id,
+        )
         request = self._confirm_request(payment_intent_id="pi_match1234567890")
 
         mock_gateway = MagicMock()
-        mock_gateway.confirm_payment.return_value = PaymentConfirmResult(success=True, status="succeeded", error=None, amount_received=0)
+        mock_gateway.confirm_payment.return_value = PaymentConfirmResult(
+            success=True,
+            status="succeeded",
+            error=None,
+            amount_received=0,
+            currency="ron",
+        )
 
         with patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway", return_value=mock_gateway), \
              patch("apps.api.orders.views._provision_confirmed_order_item"):

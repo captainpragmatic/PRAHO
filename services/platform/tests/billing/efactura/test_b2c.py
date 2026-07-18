@@ -217,8 +217,6 @@ class B2CDetectorTestCase(TestCase):
 
     def setUp(self):
         self.mock_settings = Mock()
-        self.mock_settings.b2c_enabled = True
-        self.mock_settings.b2c_minimum_amount_cents = 0
         self.detector = B2CDetector(settings=self.mock_settings)
 
     def test_detect_b2c_romanian_no_tax_id(self):
@@ -246,6 +244,26 @@ class B2CDetectorTestCase(TestCase):
 
         self.assertFalse(result.is_b2c)
 
+    def test_whitespace_only_tax_id_is_treated_as_missing(self):
+        invoice = Mock()
+        invoice.bill_to_country = "RO"
+        invoice.bill_to_tax_id = "   "
+        invoice.bill_to_name = "Ion Popescu"
+
+        result = self.detector.detect(invoice)
+
+        self.assertTrue(result.is_b2c)
+
+    def test_lowercase_romanian_country_code_is_normalized(self):
+        invoice = Mock()
+        invoice.bill_to_country = "ro"
+        invoice.bill_to_tax_id = ""
+        invoice.bill_to_name = "Ion Popescu"
+
+        result = self.detector.detect(invoice)
+
+        self.assertTrue(result.is_b2c)
+
     def test_detect_foreign_buyer(self):
         """Test foreign buyer is not B2C."""
         invoice = Mock()
@@ -258,9 +276,8 @@ class B2CDetectorTestCase(TestCase):
 
         self.assertFalse(result.is_b2c)
 
-    def test_detect_b2c_disabled(self):
-        """Test B2C detection when disabled in settings."""
-        self.mock_settings.b2c_enabled = False
+    def test_legacy_b2c_disable_flag_cannot_override_mandatory_submission(self):
+        self.mock_settings.b2c_enabled = False  # Legacy value must be ignored.
         detector = B2CDetector(settings=self.mock_settings)
 
         invoice = Mock()
@@ -272,11 +289,10 @@ class B2CDetectorTestCase(TestCase):
         result = detector.detect(invoice)
 
         self.assertTrue(result.is_b2c)
-        self.assertFalse(result.requires_efactura)
+        self.assertTrue(result.requires_efactura)
 
-    def test_detect_under_minimum_amount(self):
-        """Test B2C under minimum amount."""
-        self.mock_settings.b2c_minimum_amount_cents = 50000  # 500 EUR minimum
+    def test_legacy_minimum_cannot_exempt_a_small_b2c_invoice(self):
+        self.mock_settings.b2c_minimum_amount_cents = 50000  # Legacy value must be ignored.
 
         invoice = Mock()
         invoice.bill_to_country = "RO"
@@ -287,7 +303,7 @@ class B2CDetectorTestCase(TestCase):
         result = self.detector.detect(invoice)
 
         self.assertTrue(result.is_b2c)
-        self.assertFalse(result.requires_efactura)
+        self.assertTrue(result.requires_efactura)
 
     def test_detect_above_minimum_amount(self):
         """Test B2C above minimum amount."""
@@ -358,24 +374,33 @@ class B2CXMLBuilderTestCase(TestCase):
     def test_get_buyer_identification_with_cnp(self):
         """Test buyer identification with valid CNP."""
         result = B2CXMLBuilder.get_buyer_identification(
-            cnp="1850101123456",
+            cnp="1850101123451",
             name="Ion Popescu",
         )
-        self.assertEqual(result["identifier"], "1850101123456")
+        self.assertEqual(result["identifier"], "1850101123451")
         self.assertEqual(result["scheme_id"], "RO:CNP")
         self.assertEqual(result["name"], "Ion Popescu")
         self.assertTrue(result["is_b2c"])
         self.assertFalse(result["has_vat_registration"])
 
+    def test_get_buyer_identification_replaces_invalid_cnp_with_statutory_identifier(self):
+        result = B2CXMLBuilder.get_buyer_identification(
+            cnp="1850101123456",
+            name="Ion Popescu",
+        )
+
+        self.assertEqual(result["identifier"], "0000000000000")
+        self.assertEqual(result["scheme_id"], "RO:CNP")
+
     def test_get_buyer_identification_without_cnp_production(self):
-        """Test buyer identification without CNP in production."""
+        """Production B2C uses the statutory zero identifier when no CNP is supplied."""
         result = B2CXMLBuilder.get_buyer_identification(
             cnp=None,
             name="Ion Popescu",
             is_test_environment=False,
         )
-        self.assertEqual(result["identifier"], "")
-        self.assertEqual(result["scheme_id"], "")
+        self.assertEqual(result["identifier"], "0000000000000")
+        self.assertEqual(result["scheme_id"], "RO:CNP")
 
     def test_get_buyer_identification_without_cnp_test(self):
         """Test buyer identification without CNP in test environment."""
@@ -397,13 +422,13 @@ class B2CXMLBuilderTestCase(TestCase):
         self.assertEqual(error, "")
 
     def test_validate_for_submission_production_no_cnp(self):
-        """Test validation in production without CNP fails."""
+        """A missing CNP is valid because production XML uses 13 zero digits."""
         is_valid, error = B2CXMLBuilder.validate_for_submission(
             cnp=None,
             is_test_environment=False,
         )
-        self.assertFalse(is_valid)
-        self.assertIn("CNP is required", error)
+        self.assertTrue(is_valid)
+        self.assertEqual(error, "")
 
     def test_validate_for_submission_production_invalid_cnp(self):
         """Test validation in production with invalid CNP fails."""
@@ -476,11 +501,54 @@ class CNPCountyCodesTestCase(TestCase):
     def test_all_county_codes_defined(self):
         """Test all Romanian county codes are defined."""
         expected_counties = [
-            "01", "02", "03", "04", "05", "06", "07", "08", "09", "10",
-            "11", "12", "13", "14", "15", "16", "17", "18", "19", "20",
-            "21", "22", "23", "24", "25", "26", "27", "28", "29", "30",
-            "31", "32", "33", "34", "35", "36", "37", "38", "39", "40",
-            "41", "42", "43", "44", "45", "46", "51", "52",
+            "01",
+            "02",
+            "03",
+            "04",
+            "05",
+            "06",
+            "07",
+            "08",
+            "09",
+            "10",
+            "11",
+            "12",
+            "13",
+            "14",
+            "15",
+            "16",
+            "17",
+            "18",
+            "19",
+            "20",
+            "21",
+            "22",
+            "23",
+            "24",
+            "25",
+            "26",
+            "27",
+            "28",
+            "29",
+            "30",
+            "31",
+            "32",
+            "33",
+            "34",
+            "35",
+            "36",
+            "37",
+            "38",
+            "39",
+            "40",
+            "41",
+            "42",
+            "43",
+            "44",
+            "45",
+            "46",
+            "51",
+            "52",
         ]
         for county in expected_counties:
             self.assertIn(county, CNPValidator.COUNTY_CODES)

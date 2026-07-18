@@ -3,7 +3,10 @@
 # ===============================================================================
 
 import logging
+import uuid
+from typing import Any
 
+from django.db.models import QuerySet
 from django.http import HttpRequest
 from rest_framework import status
 from rest_framework.authentication import BaseAuthentication
@@ -15,7 +18,13 @@ from apps.api.secure_auth import public_api_endpoint, require_customer_authentic
 from apps.billing.models import Currency, Invoice
 from apps.billing.pdf_generators import RomanianInvoicePDFGenerator, RomanianProformaPDFGenerator
 from apps.billing.proforma_models import ProformaInvoice
-from apps.customers.models import Customer
+from apps.billing.recurring_authorization_service import RecurringPaymentAuthorizationService
+from apps.billing.recurring_models import RecurringPaymentAuthorization
+from apps.billing.subscription_models import Subscription
+from apps.common.request_ip import get_safe_client_ip
+from apps.customers.models import Customer, CustomerPaymentMethod
+from apps.settings.services import SettingsService
+from apps.users.models import User
 
 from .serializers import (
     CurrencySerializer,
@@ -27,6 +36,251 @@ from .serializers import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _request_actor(request: HttpRequest) -> User | None:
+    """Resolve actor from the already HMAC-validated signed request body."""
+    data = request.data if hasattr(request, "data") else {}
+    user_id = _positive_int(data.get("user_id"))
+    if user_id is None:
+        return None
+    return User.objects.filter(id=user_id, is_active=True).first()
+
+
+def _error(message: str, response_status: int = status.HTTP_400_BAD_REQUEST) -> Response:
+    return Response({"success": False, "error": message}, status=response_status)
+
+
+def _billing_actor(request: HttpRequest, customer: Customer) -> tuple[User | None, Response | None]:
+    actor = _request_actor(request)
+    if actor is None:
+        return None, _error("Authentication required", status.HTTP_401_UNAUTHORIZED)
+    role = RecurringPaymentAuthorizationService.validate_customer_billing_principal(customer, actor)
+    if role.is_err():
+        return None, _error(role.unwrap_err(), status.HTTP_403_FORBIDDEN)
+    return actor, None
+
+
+def _positive_int(value: object) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        return None
+    try:
+        parsed = int(value)
+    except ValueError:
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _uuid(value: object) -> uuid.UUID | None:
+    try:
+        return uuid.UUID(str(value))
+    except (TypeError, ValueError, AttributeError):
+        return None
+
+
+def _active_card_methods(customer: Customer) -> QuerySet[CustomerPaymentMethod]:
+    return CustomerPaymentMethod.objects.filter(
+        customer=customer,
+        method_type="stripe_card",
+        is_active=True,
+        deleted_at__isnull=True,
+    ).order_by("-is_default", "created_at")
+
+
+def _serialize_recurring_overview(customer: Customer) -> dict[str, Any]:
+    active_authorizations = {
+        authorization.payment_method_id: authorization
+        for authorization in RecurringPaymentAuthorization.objects.filter(
+            customer=customer,
+            status="active",
+        ).select_related("payment_method")
+    }
+    payment_methods = []
+    for method in _active_card_methods(customer):
+        authorization = active_authorizations.get(method.id)
+        payment_methods.append(
+            {
+                "id": method.id,
+                "display_name": method.display_name,
+                "last_four": method.last_four,
+                "is_default": method.is_default,
+                "authorization": (
+                    {
+                        "id": str(authorization.id),
+                        "status": authorization.status,
+                        "terms_version": authorization.terms_version,
+                        "granted_at": authorization.granted_at.isoformat() if authorization.granted_at else None,
+                    }
+                    if authorization
+                    else None
+                ),
+            }
+        )
+
+    subscription_records = (
+        Subscription.objects.filter(customer=customer)
+        .select_related("product", "service", "payment_authorization")
+        .order_by("subscription_number")
+    )
+    subscriptions = []
+    for subscription in subscription_records:
+        service = subscription.service
+        subscriptions.append(
+            {
+                "id": str(subscription.id),
+                "number": subscription.subscription_number,
+                "name": service.service_name if service is not None else subscription.product.name,
+                "status": subscription.status,
+                "billing_cycle": subscription.billing_cycle,
+                "auto_payment_enabled": subscription.auto_payment_enabled,
+                "authorization_id": (
+                    str(subscription.payment_authorization_id) if subscription.payment_authorization_id else None
+                ),
+                "cancel_at_period_end": subscription.cancel_at_period_end,
+            }
+        )
+    return {
+        "success": True,
+        "terms_version": RecurringPaymentAuthorizationService.TERMS_VERSION,
+        "terms_text": RecurringPaymentAuthorizationService.TERMS_TEXT,
+        "payment_methods": payment_methods,
+        "subscriptions": subscriptions,
+    }
+
+
+@api_view(["POST"])
+@authentication_classes([])
+@permission_classes([AllowAny])
+@require_customer_authentication
+def recurring_payments_overview_api(request: HttpRequest, customer: Customer) -> Response:
+    """Return safe mandate and per-subscription enrollment state."""
+    _actor, auth_error = _billing_actor(request, customer)
+    if auth_error is not None:
+        return auth_error
+    return Response(_serialize_recurring_overview(customer))
+
+
+@api_view(["POST"])
+@authentication_classes([])
+@permission_classes([AllowAny])
+@require_customer_authentication
+def begin_recurring_authorization_api(request: HttpRequest, customer: Customer) -> Response:
+    actor, auth_error = _billing_actor(request, customer)
+    if auth_error is not None:
+        return auth_error
+    assert actor is not None
+    method_id = _positive_int(request.data.get("payment_method_id"))
+    if method_id is None:
+        return _error("Invalid saved payment method")
+    method = _active_card_methods(customer).filter(id=method_id).first()
+    if method is None:
+        return _error("Saved payment method not found", status.HTTP_404_NOT_FOUND)
+    try:
+        publishable_key = SettingsService.get_setting("integrations.stripe_publishable_key", default="")
+    except Exception:
+        publishable_key = ""
+    if not publishable_key:
+        return _error("Stripe publishable key is not configured", status.HTTP_503_SERVICE_UNAVAILABLE)
+    result = RecurringPaymentAuthorizationService.begin(
+        customer=customer,
+        payment_method=method,
+        actor=actor,
+        terms_accepted=request.data.get("terms_accepted") is True,
+        accepted_terms_version=str(request.data.get("terms_version", "")),
+    )
+    if result.is_err():
+        return _error(result.unwrap_err())
+    payload = result.unwrap()
+    return Response({"success": True, **payload, "publishable_key": str(publishable_key)})
+
+
+@api_view(["POST"])
+@authentication_classes([])
+@permission_classes([AllowAny])
+@require_customer_authentication
+def complete_recurring_authorization_api(request: HttpRequest, customer: Customer) -> Response:
+    actor, auth_error = _billing_actor(request, customer)
+    if auth_error is not None:
+        return auth_error
+    assert actor is not None
+    method_id = _positive_int(request.data.get("payment_method_id"))
+    if method_id is None:
+        return _error("Invalid saved payment method")
+    method = _active_card_methods(customer).filter(id=method_id).first()
+    if method is None:
+        return _error("Saved payment method not found", status.HTTP_404_NOT_FOUND)
+    result = RecurringPaymentAuthorizationService.complete(
+        customer=customer,
+        payment_method=method,
+        setup_intent_id=str(request.data.get("setup_intent_id", "")),
+        actor=actor,
+        ip_address=get_safe_client_ip(request),
+        user_agent=request.headers.get("User-Agent", ""),
+    )
+    if result.is_err():
+        return _error(result.unwrap_err())
+    return Response({"success": True, "authorization_id": str(result.unwrap().id)})
+
+
+@api_view(["POST"])
+@authentication_classes([])
+@permission_classes([AllowAny])
+@require_customer_authentication
+def withdraw_recurring_authorization_api(request: HttpRequest, customer: Customer) -> Response:
+    actor, auth_error = _billing_actor(request, customer)
+    if auth_error is not None:
+        return auth_error
+    assert actor is not None
+    authorization_id = _uuid(request.data.get("authorization_id"))
+    if authorization_id is None:
+        return _error("Invalid recurring-payment authorization")
+    authorization = RecurringPaymentAuthorization.objects.filter(id=authorization_id, customer=customer).first()
+    if authorization is None:
+        return _error("Recurring-payment authorization not found", status.HTTP_404_NOT_FOUND)
+    result = RecurringPaymentAuthorizationService.withdraw(
+        authorization=authorization,
+        actor=actor,
+        reason="Customer withdrew authorization in the portal",
+    )
+    if result.is_err():
+        return _error(result.unwrap_err())
+    return Response({"success": True})
+
+
+@api_view(["POST"])
+@authentication_classes([])
+@permission_classes([AllowAny])
+@require_customer_authentication
+def subscription_auto_payment_api(request: HttpRequest, customer: Customer) -> Response:
+    actor, auth_error = _billing_actor(request, customer)
+    if auth_error is not None:
+        return auth_error
+    assert actor is not None
+    enabled_value = request.data.get("enabled")
+    subscription_id = _uuid(request.data.get("subscription_id"))
+    if subscription_id is None or not isinstance(enabled_value, bool):
+        return _error("Invalid automatic-payment request")
+    subscription = Subscription.objects.filter(id=subscription_id, customer=customer).first()
+    if subscription is None:
+        return _error("Subscription not found", status.HTTP_404_NOT_FOUND)
+    enabled = enabled_value
+    authorization = None
+    if enabled:
+        authorization_id = _uuid(request.data.get("authorization_id"))
+        if authorization_id is None:
+            return _error("Invalid recurring-payment authorization")
+        authorization = RecurringPaymentAuthorization.objects.filter(
+            id=authorization_id, customer=customer, status="active"
+        ).first()
+    result = RecurringPaymentAuthorizationService.set_subscription_auto_payment(
+        subscription=subscription,
+        authorization=authorization,
+        enabled=enabled,
+        actor=actor,
+    )
+    if result.is_err():
+        return _error(result.unwrap_err())
+    return Response({"success": True, "auto_payment_enabled": result.unwrap().auto_payment_enabled})
 
 
 class MiddlewareUserAuthentication(BaseAuthentication):

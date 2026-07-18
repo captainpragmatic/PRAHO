@@ -722,6 +722,17 @@ class SendInvoiceEmailTest(TestCase):
         self.assertEqual(attach_call[0][2], "application/pdf")
 
     @patch("apps.billing.invoice_service.generate_invoice_pdf", return_value=b"fake-pdf")
+    def test_email_body_uses_invoice_due_at(self, mock_pdf: MagicMock) -> None:
+        with patch("django.core.mail.EmailMessage") as mock_email_cls:
+            mock_msg = Mock()
+            mock_email_cls.return_value = mock_msg
+
+            send_invoice_email(self.invoice, recipient_email="test@test.com")
+
+        body = mock_email_cls.call_args.kwargs["body"]
+        self.assertIn(self.invoice.due_at.strftime("%Y-%m-%d"), body)
+
+    @patch("apps.billing.invoice_service.generate_invoice_pdf", return_value=b"fake-pdf")
     def test_empty_primary_email_returns_false(self, mock_pdf: MagicMock) -> None:
         self.customer.primary_email = ""
         self.customer.save(update_fields=["primary_email"])

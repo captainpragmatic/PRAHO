@@ -83,7 +83,6 @@ class ProfileService:
             "payment_terms",
             "credit_limit",
             "preferred_currency",
-            "auto_payment_enabled",
         }
     )
 

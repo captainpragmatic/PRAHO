@@ -393,8 +393,6 @@ class B2CSecurityTestCase(TestCase):
     def test_b2c_with_malicious_customer_name(self):
         """Test B2C handles malicious customer names."""
         mock_settings = Mock()
-        mock_settings.b2c_enabled = True
-        mock_settings.b2c_minimum_amount_cents = 0
         detector = B2CDetector(settings=mock_settings)
 
         invoice = Mock()

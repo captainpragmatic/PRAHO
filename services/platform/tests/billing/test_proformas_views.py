@@ -25,7 +25,7 @@ from apps.billing.views import (
 )
 
 # Note: Some helper functions may have been moved to services or removed in refactoring
-from apps.customers.models import Customer
+from apps.customers.models import Customer, CustomerAddress
 from apps.users.models import CustomerMembership, User
 
 UserModel = get_user_model()
@@ -88,6 +88,30 @@ class ProformaViewsTestCase(TestCase):
         self.assertEqual(proforma.customer, self.customer)
         self.assertTrue(proforma.number.startswith('PRO-'))
         self.assertEqual(proforma.valid_until, valid_until)
+
+    def test_create_proforma_snapshots_normalized_billing_address(self):
+        CustomerAddress.objects.create(
+            customer=self.customer,
+            is_billing=True,
+            address_line1="Strada Test 1",
+            address_line2="Etaj 2",
+            city="Bucharest",
+            county="Bucharest",
+            postal_code="010101",
+            country="România",
+        )
+
+        proforma = _create_proforma_with_sequence(
+            self.customer,
+            timezone.now() + timezone.timedelta(days=30),
+        )
+
+        self.assertEqual(proforma.bill_to_address1, "Strada Test 1")
+        self.assertEqual(proforma.bill_to_address2, "Etaj 2")
+        self.assertEqual(proforma.bill_to_city, "Bucharest")
+        self.assertEqual(proforma.bill_to_region, "Bucharest")
+        self.assertEqual(proforma.bill_to_postal, "010101")
+        self.assertEqual(proforma.bill_to_country, "RO")
 
     def test_proforma_create_get(self):
         """Test proforma create GET request"""
