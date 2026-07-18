@@ -14,6 +14,7 @@ from typing import Any, ClassVar, TypedDict
 
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
+from django.db.models import Q
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from django_fsm import ConcurrentTransition, ConcurrentTransitionMixin, FSMField, TransitionNotAllowed, transition
@@ -462,16 +463,45 @@ class PaymentRetryPolicy(models.Model):
         verbose_name = _("Payment Retry Policy")
         verbose_name_plural = _("Payment Retry Policies")
         ordering = ("name",)
+        constraints = (
+            models.UniqueConstraint(
+                fields=("is_default",),
+                condition=Q(is_default=True, is_active=True),
+                name="one_active_default_retry_policy",
+            ),
+            models.CheckConstraint(
+                condition=Q(max_attempts__gte=1, max_attempts__lte=10),
+                name="retry_policy_max_attempts_valid",
+            ),
+            models.CheckConstraint(
+                condition=Q(suspend_service_after_days__isnull=True) | Q(suspend_service_after_days__gte=0),
+                name="retry_policy_suspend_days_nonneg",
+            ),
+            models.CheckConstraint(
+                condition=Q(terminate_service_after_days__isnull=True) | Q(terminate_service_after_days__gte=0),
+                name="retry_policy_terminate_days_nonneg",
+            ),
+        )
 
     def __str__(self) -> str:
         return f"{self.name} ({len(self.retry_intervals_days)} attempts)"
 
     def get_next_retry_date(self, failure_date: datetime, attempt_number: int) -> datetime | None:
-        """Calculate next retry date based on policy"""
-        if attempt_number >= len(self.retry_intervals_days):
+        """Calculate the next retry date from a strictly validated JSON interval."""
+        if (
+            isinstance(attempt_number, bool)
+            or not isinstance(attempt_number, int)
+            or attempt_number < 0
+            or attempt_number >= self.max_attempts
+            or not isinstance(self.retry_intervals_days, list)
+            or attempt_number >= len(self.retry_intervals_days)
+        ):
             return None
 
         days_to_wait = self.retry_intervals_days[attempt_number]
+        if isinstance(days_to_wait, bool) or not isinstance(days_to_wait, int) or days_to_wait < 0:
+            logger.critical("Invalid retry interval at index %s for policy %s", attempt_number, self.id)
+            return None
         return failure_date + timedelta(days=days_to_wait)
 
 
@@ -486,6 +516,14 @@ class PaymentRetryAttempt(models.Model):
     # Payment reference
     payment = models.ForeignKey(
         "Payment", on_delete=models.CASCADE, related_name="retry_attempts", help_text=_("Original failed payment")
+    )
+    result_payment = models.ForeignKey(
+        "Payment",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="result_for_retry_attempts",
+        help_text=_("New payment attempt created by this retry"),
     )
     policy = models.ForeignKey(
         PaymentRetryPolicy, on_delete=models.PROTECT, help_text=_("Retry policy used for this attempt")

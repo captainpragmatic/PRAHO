@@ -87,6 +87,7 @@ dependencies = [
     "bleach>=6.3.0",
     "python-stdnum>=2.2",
     "holidays>=0.40",  # Romanian public-holiday calendar for working-day e-Factura deadlines
+    "Babel>=2.18.0",  # ISO country-name normalization for immutable billing snapshots
 ]
 
 # ===============================================================================

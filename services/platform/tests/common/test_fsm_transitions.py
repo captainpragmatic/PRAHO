@@ -30,7 +30,7 @@ from apps.customers.customer_models import Customer
 from apps.domains.models import TLD, Domain, Registrar
 from apps.orders.models import Order, OrderItem
 from apps.orders.signals import _handle_order_status_change
-from apps.orders.tasks import process_pending_orders, process_recurring_orders
+from apps.orders.tasks import process_pending_orders
 from apps.products.models import Product
 from apps.promotions.models import PromotionCampaign
 from apps.provisioning.relationship_models import ServiceGroup
@@ -1983,11 +1983,5 @@ class TestH6TaskLockAtomicity(TestCase):
     def test_pending_orders_uses_atomic_lock(self) -> None:
         """process_pending_orders must use cache.add() for atomic lock acquisition."""
         source = inspect.getsource(process_pending_orders)
-        self.assertIn("cache.add(", source, "Lock must use atomic cache.add(), not cache.get()")
-        self.assertNotIn("cache.get(lock_key)", source, "TOCTOU: cache.get() + cache.set() is racy")
-
-    def test_recurring_orders_uses_atomic_lock(self) -> None:
-        """process_recurring_orders must use cache.add() for atomic lock acquisition."""
-        source = inspect.getsource(process_recurring_orders)
         self.assertIn("cache.add(", source, "Lock must use atomic cache.add(), not cache.get()")
         self.assertNotIn("cache.get(lock_key)", source, "TOCTOU: cache.get() + cache.set() is racy")

@@ -20,6 +20,7 @@ from apps.customers.models import Customer
 from apps.orders.models import Order, OrderItem
 from apps.orders.services import OrderPaymentConfirmationService, OrderService, StatusChangeData
 from apps.products.models import Product
+from apps.provisioning.models import ServicePlan
 from tests.helpers.fsm_helpers import force_status
 
 User = get_user_model()
@@ -30,9 +31,7 @@ DEFAULT_THRESHOLD = 500000
 
 class ReviewGateTestBase(TestCase):
     def setUp(self):
-        self.currency, _ = Currency.objects.get_or_create(
-            code="RON", defaults={"symbol": "lei", "decimals": 2}
-        )
+        self.currency, _ = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei", "decimals": 2})
         self.customer = Customer.objects.create(
             name="Review Test SRL",
             customer_type="company",
@@ -45,6 +44,13 @@ class ReviewGateTestBase(TestCase):
             product_type="vps",
             is_active=True,
         )
+        self.service_plan = ServicePlan.objects.create(
+            name="Review Gate VPS",
+            plan_type="vps",
+            price_monthly=Decimal("100.00"),
+        )
+        self.product.default_service_plan = self.service_plan
+        self.product.save(update_fields=["default_service_plan"])
 
     def _create_order(self, total_cents=12100):
         order = Order.objects.create(
@@ -306,7 +312,11 @@ class TestC1ProvisioningGuard(ReviewGateTestBase):
         # Mock Stripe gateway to return success
         mock_gateway = MagicMock()
         mock_gateway.confirm_payment.return_value = PaymentConfirmResult(
-            success=True, status="succeeded", error=None, amount_received=DEFAULT_THRESHOLD,
+            success=True,
+            status="succeeded",
+            error=None,
+            amount_received=DEFAULT_THRESHOLD,
+            currency="ron",
         )
         mock_gateway_factory.return_value = mock_gateway
 
@@ -317,7 +327,7 @@ class TestC1ProvisioningGuard(ReviewGateTestBase):
 
         # Create high-value order with exact total (no tax recalculation drift).
         # Give it an invoice directly so confirm_order uses the order.invoice branch.
-        from apps.billing.models import Invoice  # noqa: PLC0415
+        from apps.billing.models import Invoice, Payment  # noqa: PLC0415
 
         order = self._create_order_exact(total_cents=DEFAULT_THRESHOLD)
         invoice = Invoice.objects.create(
@@ -334,6 +344,14 @@ class TestC1ProvisioningGuard(ReviewGateTestBase):
         order.invoice = invoice
         order.save(update_fields=["payment_method", "payment_intent_id", "invoice"])
         force_status(order, "awaiting_payment")
+        Payment.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            invoice=invoice,
+            amount_cents=order.total_cents,
+            payment_method="stripe",
+            gateway_txn_id=order.payment_intent_id,
+        )
 
         factory = APIRequestFactory()
         request = factory.post(
@@ -345,12 +363,15 @@ class TestC1ProvisioningGuard(ReviewGateTestBase):
         request._portal_authenticated = True
 
         response = confirm_order(request, str(order.id))
-        self.assertIn(response.status_code, [200, 201], f"confirm_order returned {response.status_code}: {getattr(response, 'data', 'no data')}")
+        self.assertIn(
+            response.status_code,
+            [200, 201],
+            f"confirm_order returned {response.status_code}: {getattr(response, 'data', 'no data')}",
+        )
 
         order.refresh_from_db()
         self.assertEqual(
-            order.status, "in_review",
-            f"High-value order should be in_review after confirm, got: {order.status}"
+            order.status, "in_review", f"High-value order should be in_review after confirm, got: {order.status}"
         )
         # C1 BUG: without fix, _provision_confirmed_order_item IS called for in_review orders
         mock_provision.assert_not_called()
@@ -518,28 +539,47 @@ class TestReviewGateRoleGuard(TestCase):
     """H3: Only admin/billing staff or superusers can approve/reject orders under review."""
 
     def setUp(self) -> None:
-        self.currency, _ = Currency.objects.get_or_create(
-            code="RON", defaults={"symbol": "lei", "decimals": 2}
-        )
+        self.currency, _ = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei", "decimals": 2})
         self.customer = Customer.objects.create(
-            name="Role Guard SRL", customer_type="company", status="active",
+            name="Role Guard SRL",
+            customer_type="company",
+            status="active",
             primary_email="roleguard@test.ro",
         )
         self.product = Product.objects.create(
-            name="VPS Role Test", slug="vps-role-test", product_type="vps", is_active=True,
+            name="VPS Role Test",
+            slug="vps-role-test",
+            product_type="vps",
+            is_active=True,
         )
+        self.service_plan = ServicePlan.objects.create(
+            name="VPS Role Test",
+            plan_type="vps",
+            price_monthly=Decimal("100.00"),
+        )
+        self.product.default_service_plan = self.service_plan
+        self.product.save(update_fields=["default_service_plan"])
 
     def _create_in_review_order(self) -> Order:
         order = Order.objects.create(
-            customer=self.customer, currency=self.currency,
-            customer_email=self.customer.primary_email, customer_name=self.customer.name,
-            subtotal_cents=600000, tax_cents=126000, total_cents=726000,
+            customer=self.customer,
+            currency=self.currency,
+            customer_email=self.customer.primary_email,
+            customer_name=self.customer.name,
+            subtotal_cents=600000,
+            tax_cents=126000,
+            total_cents=726000,
             billing_address={},
         )
         OrderItem.objects.create(
-            order=order, product=self.product, product_name=self.product.name,
-            product_type=self.product.product_type, quantity=1,
-            unit_price_cents=600000, tax_rate=Decimal("0.2100"), tax_cents=126000,
+            order=order,
+            product=self.product,
+            product_name=self.product.name,
+            product_type=self.product.product_type,
+            quantity=1,
+            unit_price_cents=600000,
+            tax_rate=Decimal("0.2100"),
+            tax_cents=126000,
             line_total_cents=726000,
         )
         force_status(order, "in_review")
@@ -547,7 +587,10 @@ class TestReviewGateRoleGuard(TestCase):
 
     def _create_staff_user(self, email: str, staff_role: str, is_superuser: bool = False) -> User:
         return User.objects.create_user(
-            email=email, password="testpass123", staff_role=staff_role, is_superuser=is_superuser,
+            email=email,
+            password="testpass123",
+            staff_role=staff_role,
+            is_superuser=is_superuser,
         )
 
     def test_support_staff_cannot_approve_review(self) -> None:

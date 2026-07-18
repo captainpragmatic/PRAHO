@@ -37,6 +37,7 @@ from apps.audit.services import (
 )
 from apps.common.validators import log_security_event
 
+from .fiscal_identity import normalize_country_code
 from .models import (
     CreditLedger,
     Invoice,
@@ -45,6 +46,7 @@ from .models import (
     PaymentRetryAttempt,
     PriceGrandfathering,
     ProformaInvoice,
+    RecurringPaymentAuthorization,
     Refund,
     Subscription,
     TaxRule,
@@ -89,7 +91,6 @@ def _serialize_values_for_audit(values: dict[str, Any]) -> dict[str, Any]:
 
 # Financial thresholds in cents (Romanian business context)
 LARGE_REFUND_THRESHOLD_CENTS = 50000  # 500 EUR - requires finance team notification
-E_FACTURA_MINIMUM_AMOUNT = 100  # 100 RON - minimum for mandatory e-Factura
 
 # ===============================================================================
 # MODEL LIFECYCLE COVERAGE SIGNALS
@@ -171,6 +172,59 @@ def audit_subscription_deleted(sender: type[Subscription], instance: Subscriptio
             "status": instance.status,
         },
         metadata={"model": "Subscription"},
+    )
+
+
+@receiver(post_save, sender=RecurringPaymentAuthorization)
+def audit_recurring_payment_authorization_lifecycle(
+    sender: type[RecurringPaymentAuthorization],
+    instance: RecurringPaymentAuthorization,
+    created: bool,
+    **kwargs: Any,
+) -> None:
+    """Audit creation and every persisted state change of an off-session mandate."""
+    event_type = "recurring_payment_authorization_created" if created else "recurring_payment_authorization_updated"
+    _log_billing_model_event(
+        event_type=event_type,
+        instance=instance,
+        description=(f"Recurring-payment authorization {instance.id} {'created' if created else 'updated'}"),
+        new_values={
+            "authorization_id": str(instance.id),
+            "customer_id": str(instance.customer_id),
+            "payment_method_id": str(instance.payment_method_id),
+            "status": instance.status,
+            "terms_version": instance.terms_version,
+            "granted_by_id": str(instance.granted_by_id) if instance.granted_by_id else None,
+            "granted_by_role": instance.granted_by_role,
+            "granted_at": instance.granted_at,
+            "withdrawn_at": instance.withdrawn_at,
+            "withdrawn_by_id": str(instance.withdrawn_by_id) if instance.withdrawn_by_id else None,
+            "revoked_at": instance.revoked_at,
+            "revoked_by_id": str(instance.revoked_by_id) if instance.revoked_by_id else None,
+        },
+        metadata={"model": "RecurringPaymentAuthorization"},
+    )
+
+
+@receiver(pre_delete, sender=RecurringPaymentAuthorization)
+def audit_recurring_payment_authorization_deleted(
+    sender: type[RecurringPaymentAuthorization],
+    instance: RecurringPaymentAuthorization,
+    **kwargs: Any,
+) -> None:
+    """Audit deletion without copying consent hashes, IP addresses, or user agents."""
+    _log_billing_model_event(
+        event_type="recurring_payment_authorization_deleted",
+        instance=instance,
+        description=f"Recurring-payment authorization {instance.id} deleted",
+        old_values={
+            "authorization_id": str(instance.id),
+            "customer_id": str(instance.customer_id),
+            "payment_method_id": str(instance.payment_method_id),
+            "status": instance.status,
+            "terms_version": instance.terms_version,
+        },
+        metadata={"model": "RecurringPaymentAuthorization"},
     )
 
 
@@ -403,8 +457,11 @@ def handle_invoice_created_or_updated(sender: type[Invoice], instance: Invoice, 
                 if instance.status == "refunded" and old_status != "refunded":
                     _handle_invoice_refund_completion(instance)
 
-        # Handle specific Romanian compliance requirements
-        if instance.status == "issued" and not instance.efactura_sent:
+        # An existing invoice's transition to issued is handled above by
+        # _handle_invoice_status_change(). Only cover invoices created directly
+        # in the issued state here; otherwise one save queues the same ANAF
+        # submission twice and later unrelated saves keep re-queuing it.
+        if created and instance.status == "issued" and not instance.efactura_sent:
             _trigger_efactura_submission(instance)
 
         # EXTENDED: Update billing analytics
@@ -905,6 +962,9 @@ def _activate_payment_services(payment: Payment) -> None:
 def _update_customer_payment_credit(payment: Payment, old_status: str) -> None:
     """Update customer credit score based on payment events"""
     try:
+        if (payment.meta or {}).get("reservation_abandoned") is True:
+            return
+
         from apps.customers.services import CustomerCreditService
 
         event_type = None
@@ -1064,7 +1124,11 @@ def _handle_payment_status_change(payment: Payment, old_status: str, new_status:
 
         if new_status == "succeeded" and old_status != "succeeded":
             _handle_payment_success(payment)
-        elif new_status == "failed" and old_status in ["pending", "processing"]:
+        elif (
+            new_status == "failed"
+            and old_status in ["pending", "processing"]
+            and (payment.meta or {}).get("reservation_abandoned") is not True
+        ):
             _handle_payment_failure(payment)
         elif new_status == "refunded":
             _handle_payment_refund(payment)
@@ -1478,24 +1542,28 @@ def _notify_finance_team_large_refund(invoice: Invoice) -> None:
 
 
 def _requires_efactura_submission(invoice: Invoice) -> bool:
-    """Check if invoice requires e-Factura submission"""
-    return (
-        invoice.bill_to_country == "RO" and bool(invoice.bill_to_tax_id) and invoice.total >= E_FACTURA_MINIMUM_AMOUNT
-    )
+    """Queue every Romanian PRAHO invoice; B2B/B2C totals do not change eligibility."""
+    return normalize_country_code(invoice.bill_to_country) == "RO"
 
 
 def _trigger_efactura_submission(invoice: Invoice) -> None:
-    """Trigger e-Factura submission for Romanian compliance"""
-    try:
-        from apps.billing.efactura.tasks import queue_efactura_submission
+    """Queue Romanian e-Factura submission only after the invoice commit succeeds."""
+    invoice_id = str(invoice.id)
+    invoice_number = invoice.number
 
-        task_id = queue_efactura_submission(str(invoice.id))
-        if task_id:
-            logger.info(f"🏛️ [e-Factura] Queued submission for {invoice.number} (task: {task_id})")
-        else:
-            logger.warning(f"⚠️ [e-Factura] Failed to queue submission for {invoice.number}")
-    except ImportError as e:
-        logger.warning(f"⚠️ [e-Factura] e-Factura module not available: {e}")
+    def _queue_after_commit() -> None:
+        try:
+            from apps.billing.efactura.tasks import queue_efactura_submission
+
+            task_id = queue_efactura_submission(invoice_id)
+            if task_id:
+                logger.info(f"🏛️ [e-Factura] Queued submission for {invoice_number} (task: {task_id})")
+            else:
+                logger.warning(f"⚠️ [e-Factura] Failed to queue submission for {invoice_number}")
+        except ImportError as e:
+            logger.warning(f"⚠️ [e-Factura] e-Factura module not available: {e}")
+
+    transaction.on_commit(_queue_after_commit)
 
 
 def _schedule_payment_reminders(invoice: Invoice) -> None:
@@ -1698,7 +1766,7 @@ def _handle_efactura_refund_reporting(invoice: Invoice) -> None:
     """Handle e-Factura refund reporting for Romanian compliance"""
     try:
         # Check if this invoice has an e-Factura document that was accepted
-        if invoice.bill_to_country == "RO":
+        if normalize_country_code(invoice.bill_to_country) == "RO":
             try:
                 from apps.billing.efactura.models import EFacturaDocument, EFacturaStatus
 

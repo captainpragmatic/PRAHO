@@ -18,7 +18,6 @@ from django.utils import timezone
 
 from apps.billing.metering_service import UsageAlertService
 from apps.billing.models import Invoice, InvoiceSequence, Payment, ProformaInvoice
-from apps.billing.payment_service import PaymentService
 from apps.billing.proforma_models import ProformaInvoice as ProformaInvoiceModel
 from apps.billing.services import (
     EFacturaService,
@@ -27,7 +26,6 @@ from apps.billing.services import (
     ProformaConversionService,
 )
 from apps.billing.signals import _handle_efactura_refund_reporting
-from apps.billing.subscription_service import RecurringBillingService
 from apps.billing.tasks import (
     _send_payment_reminder,
     cancel_payment_reminders,
@@ -64,7 +62,7 @@ class PaymentRetryServiceTests(TestCase):
 
         result = PaymentRetryService.retry_payment("payment-123")
         self.assertTrue(result.is_ok())
-        mock_attempt_cls.objects.create.assert_called_once()
+        mock_attempt_cls.objects.get_or_create.assert_called_once()
 
     @patch("apps.billing.payment_models.Payment.objects")
     def test_retry_payment_not_found(self, mock_objects):
@@ -82,14 +80,15 @@ class PaymentRetryServiceTests(TestCase):
 class EFacturaServiceTests(TestCase):
     """A2: EFacturaService.submit_invoice()"""
 
-    @patch("apps.billing.efactura_service.EFacturaSubmissionService")
+    @patch("apps.billing.efactura.service.EFacturaService")
     @patch("apps.billing.models.Invoice")
     def test_submit_delegates(self, mock_invoice_cls, mock_service_cls):
         mock_invoice_cls.objects.get.return_value = MagicMock(number="INV-001")
-        mock_service_cls.return_value.submit_invoice.return_value = MagicMock(success=True, message="OK")
+        mock_service_cls.return_value.submit_invoice.return_value = MagicMock(success=True, error_message="")
 
         result = EFacturaService.submit_invoice("inv-id")
         self.assertTrue(result.is_ok())
+        mock_service_cls.return_value.submit_invoice.assert_called_once()
 
     @patch("apps.billing.invoice_models.Invoice.objects")
     def test_submit_not_found(self, mock_objects):
@@ -97,11 +96,14 @@ class EFacturaServiceTests(TestCase):
         result = EFacturaService.submit_invoice("bad-id")
         self.assertTrue(result.is_err())
 
-    @patch("apps.billing.efactura_service.EFacturaSubmissionService")
+    @patch("apps.billing.efactura.service.EFacturaService")
     @patch("apps.billing.models.Invoice")
     def test_submit_failure(self, mock_invoice_cls, mock_service_cls):
         mock_invoice_cls.objects.get.return_value = MagicMock(number="INV-001")
-        mock_service_cls.return_value.submit_invoice.return_value = MagicMock(success=False, message="ANAF error")
+        mock_service_cls.return_value.submit_invoice.return_value = MagicMock(
+            success=False,
+            error_message="ANAF error",
+        )
 
         result = EFacturaService.submit_invoice("inv-id")
         self.assertTrue(result.is_err())
@@ -152,16 +154,40 @@ class SubmitEfacturaTaskTests(TestCase):
     """B1: submit_efactura()"""
 
     @patch("apps.audit.services.AuditService.log_simple_event")
-    @patch("apps.billing.efactura_service.EFacturaSubmissionService")
+    @patch("apps.billing.efactura.service.EFacturaService")
     @patch("apps.billing.tasks.Invoice")
     def test_calls_real_service(self, mock_inv_cls, mock_svc_cls, mock_audit):
         mock_inv = MagicMock(id="i1", number="INV-1", meta={})
         mock_inv.customer = MagicMock(id="c1")
         mock_inv_cls.objects.get.return_value = mock_inv
-        mock_svc_cls.return_value.submit_invoice.return_value = MagicMock(success=True, message="OK")
+        mock_svc_cls.return_value.submit_invoice.return_value = MagicMock(success=True, error_message="")
 
         result = submit_efactura("i1")
         self.assertTrue(result["success"])
+        mock_svc_cls.return_value.submit_invoice.assert_called_once_with(mock_inv)
+
+    @patch("apps.audit.services.AuditService.log_simple_event")
+    @patch("apps.billing.efactura.service.EFacturaService")
+    @patch("apps.billing.tasks.Invoice")
+    def test_submission_failure_is_not_reported_as_task_success(
+        self,
+        mock_inv_cls: MagicMock,
+        mock_svc_cls: MagicMock,
+        mock_audit: MagicMock,
+    ) -> None:
+        mock_inv = MagicMock(id="i1", number="INV-1", meta={})
+        mock_inv.customer = MagicMock(id="c1")
+        mock_inv_cls.objects.get.return_value = mock_inv
+        mock_svc_cls.return_value.submit_invoice.return_value = MagicMock(
+            success=False,
+            error_message="ANAF rejected upload",
+        )
+
+        result = submit_efactura("i1")
+
+        self.assertFalse(result["success"])
+        self.assertEqual(result["error"], "ANAF rejected upload")
+        mock_inv.save.assert_not_called()
 
 
 class SchedulePaymentRemindersTests(TestCase):
@@ -173,7 +199,7 @@ class SchedulePaymentRemindersTests(TestCase):
     def test_schedules_reminders(self, mock_inv_cls, mock_audit, mock_async):
         mock_inv = MagicMock(
             id="i1", number="INV-1", status="issued",
-            due_date=timezone.now().date() + timedelta(days=14),
+            due_at=timezone.now() + timedelta(days=14),
         )
         mock_inv.customer = MagicMock(id="c1")
         mock_inv_cls.objects.get.return_value = mock_inv
@@ -209,7 +235,7 @@ class StartDunningProcessTests(TestCase):
     @patch("apps.billing.tasks.Invoice")
     def test_sends_email_and_schedules(self, mock_inv_cls, mock_audit, mock_email, mock_policy_cls, mock_attempt_cls):
         mock_payment = MagicMock(id="p1")
-        mock_inv = MagicMock(id="i1", number="INV-1", status="overdue", due_date=timezone.now().date())
+        mock_inv = MagicMock(id="i1", number="INV-1", status="overdue", due_at=timezone.now())
         mock_inv.customer = MagicMock(id="c1")
         mock_inv.payments.filter.return_value.order_by.return_value.exists.return_value = True
         mock_inv.payments.filter.return_value.order_by.return_value.first.return_value = mock_payment
@@ -307,27 +333,6 @@ class SendPaymentReminderHelperTests(TestCase):
 
         result = _send_payment_reminder("i1")
         self.assertTrue(result["success"])
-
-
-# ===============================================================================
-# GROUP C: payment_service.py
-# ===============================================================================
-
-
-class ProcessRecurringBillingTests(TestCase):
-    """C5-C8: process_recurring_billing() delegates"""
-
-    @patch("apps.billing.subscription_service.RecurringBillingService")
-    def test_delegates(self, mock_rbs):
-        mock_rbs.run_billing_cycle.return_value = {
-            "subscriptions_processed": 5, "invoices_created": 3,
-            "payments_attempted": 3, "payments_succeeded": 2, "payments_failed": 1,
-            "total_billed_cents": 50000, "errors": [],
-        }
-
-        result = PaymentService.process_recurring_billing()
-        self.assertEqual(result["processed"], 5)
-        self.assertEqual(result["succeeded"], 2)
 
 
 # TriggerDunningOnFailureTests and TriggerOrderCompletionTests REMOVED:
@@ -458,34 +463,8 @@ class CreditNoteSignalTests(TestCase):
 
 
 # ===============================================================================
-# GROUP F: Subscription & Metering
+# GROUP F: Metering
 # ===============================================================================
-
-
-class SubscriptionProcessPaymentTests(TestCase):
-    """F1: RecurringBillingService._process_payment()"""
-
-    def test_charging_a_subscription_invoice_is_not_implemented(self) -> None:
-        """#209: a subscription invoice cannot be charged through the order-based payment API.
-
-        This previously mocked PaymentService and asserted success, so it never exercised the
-        real call — which passed str(invoice.id) as `order_id`. Invoice is integer-keyed and
-        Order is UUID-keyed, so it raised `ValidationError: "N" is not a valid UUID` and every
-        renewal payment failed with a cryptic error. Invoice has no order FK (a subscription
-        invoice has no order), so there is no correct value to pass; the failure is now explicit.
-        """
-        mock_sub = MagicMock(id="s1", payment_method_id="pm_1", customer_id="c1")
-        mock_inv = MagicMock(id="i1", number="INV-1", total_cents=5000, currency=MagicMock(code="RON"))
-
-        result = RecurringBillingService._process_payment(mock_sub, mock_inv)
-
-        self.assertTrue(result.is_err())
-        self.assertIn("invoice-based payment intent", result.error)
-
-    def test_no_payment_method(self) -> None:
-        result = RecurringBillingService._process_payment(MagicMock(payment_method_id=""), MagicMock())
-        self.assertTrue(result.is_err())
-        self.assertIn("No payment method", result.error)
 
 
 class UsageAlertEmailTests(TestCase):

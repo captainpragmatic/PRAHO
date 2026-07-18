@@ -14,12 +14,12 @@ from unittest.mock import MagicMock, patch
 
 from django.core.exceptions import ValidationError
 from django.db import DatabaseError, connection
-from django.test import TestCase
+from django.test import TestCase, TransactionTestCase
 from django.utils import timezone
 
 from apps.billing.invoice_models import Invoice, InvoiceSequence
 from apps.billing.models import Currency
-from apps.billing.proforma_models import ProformaSequence
+from apps.billing.proforma_models import ProformaInvoice, ProformaSequence
 from apps.billing.proforma_service import ProformaPaymentService, ProformaService
 from apps.billing.services import ProformaConversionService
 from apps.customers.models import Customer
@@ -87,6 +87,42 @@ class ProformaLifecycleTestBaseLocal(TestCase):
 # =============================================================================
 # C1: ProformaConversionService recalculates VAT — amount drift risk
 # =============================================================================
+
+
+class TestProformaConversionLockBoundary(TransactionTestCase):
+    """The row lock must be acquired inside the conversion transaction on PostgreSQL."""
+
+    def test_select_for_update_is_evaluated_inside_atomic_block(self) -> None:
+        currency, _ = Currency.objects.get_or_create(
+            code="RON", defaults={"symbol": "lei", "decimals": 2}
+        )
+        customer = Customer.objects.create(
+            name="Lock Test SRL",
+            customer_type="company",
+            company_name="Lock Test SRL",
+            primary_email="lock@example.ro",
+            status="active",
+        )
+        InvoiceSequence.objects.get_or_create(scope="default")
+        proforma = ProformaInvoice.objects.create(
+            customer=customer,
+            currency=currency,
+            number="PRO-LOCK-BOUNDARY",
+            valid_until=timezone.now() + timedelta(days=30),
+            bill_to_name=customer.company_name,
+            bill_to_country="RO",
+        )
+        manager_type = type(ProformaInvoice.objects)
+        real_select_for_update = manager_type.select_for_update
+
+        def guarded_select_for_update(manager, *args, **kwargs):
+            self.assertTrue(connection.in_atomic_block)
+            return real_select_for_update(manager, *args, **kwargs)
+
+        with patch.object(manager_type, "select_for_update", guarded_select_for_update):
+            result = ProformaConversionService.convert_to_invoice(str(proforma.id))
+
+        self.assertTrue(result.is_ok(), result)
 
 
 class TestC1ProformaConversionVATDrift(ProformaLifecycleTestBaseLocal):
@@ -267,6 +303,14 @@ class TestH2InvoiceSaveOptimization(TestCase):
         self.invoice.total_cents = 99999
         with self.assertRaises(ValidationError):
             self.invoice.save(update_fields=["total_cents"])
+
+    def test_fiscal_identity_snapshot_update_is_blocked_on_locked_invoice(self):
+        """An issued invoice must retain the exact recipient identity used for fiscal reporting."""
+        self.assertIsNotNone(self.invoice.locked_at)
+        self.invoice.bill_to_cnp = "1850101123451"
+
+        with self.assertRaises(ValidationError):
+            self.invoice.save(update_fields=["bill_to_cnp"])
 
 
 # =============================================================================

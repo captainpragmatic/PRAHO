@@ -15,6 +15,7 @@ from django.test import RequestFactory, TestCase
 
 from apps.billing.models import Currency
 from apps.customers.models import Customer
+from apps.orders.models import Order
 from apps.products.models import Product, ProductPrice
 
 BILLING_PERIOD = "monthly"
@@ -116,6 +117,20 @@ class CreateOrderSlugFallbackTestCase(TestCase):
         if status_code == 400:
             error_msg = data.get("error", "").lower()
             self.assertNotIn("product not found", error_msg, "UUID lookup should resolve the product")
+
+    def test_annual_order_persists_full_term_price_and_period_snapshot(self) -> None:
+        """Renewal enrollment must inherit the term and amount the customer paid."""
+        self.price.annual_discount_percent = 10
+        self.price.save(update_fields=["annual_discount_percent"])
+        items = [{"product_id": str(self.product.id), "quantity": 1, "billing_period": "annual"}]
+
+        status_code, data = _call_create_order(self.customer, items)
+
+        self.assertEqual(status_code, 201, data)
+        order = Order.objects.get(pk=data["order"]["id"])
+        item = order.items.get()
+        self.assertEqual(item.unit_price_cents, 54_000)
+        self.assertEqual(item.billing_period, "annual")
 
     def test_create_order_uuid_inactive_product_returns_400(self) -> None:
         """UUID lookup of inactive product returns 400."""

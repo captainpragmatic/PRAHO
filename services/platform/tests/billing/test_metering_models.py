@@ -140,19 +140,6 @@ class UsageMeterModelTestCase(TestCase):
         # Should return Django's display value for choice
         self.assertIsNotNone(meter2.get_unit_display_text())
 
-    def test_stripe_integration_fields(self):
-        """Test Stripe meter integration fields."""
-        meter = UsageMeter.objects.create(
-            name="stripe_meter",
-            display_name="Stripe Meter",
-            aggregation_type="sum",
-            unit="count",
-            stripe_meter_id="meter_abc123",
-            stripe_meter_event_name="api_calls",
-        )
-        self.assertEqual(meter.stripe_meter_id, "meter_abc123")
-        self.assertEqual(meter.stripe_meter_event_name, "api_calls")
-
 
 class UsageEventModelTestCase(TestCase):
     """Test UsageEvent model functionality."""
@@ -730,6 +717,54 @@ class PricingTierModelTestCase(TestCase):
         )
 
         self.assertEqual(tier.pricing_model, "package")
+
+    def test_pricing_tier_rejects_negative_charges(self):
+        for field_values in ({"unit_price_cents": -1}, {"minimum_charge_cents": -1}):
+            with self.subTest(field_values=field_values), self.assertRaises(IntegrityError), transaction.atomic():
+                PricingTier.objects.create(
+                    name=f"Invalid {field_values}",
+                    meter=self.meter,
+                    pricing_model="per_unit",
+                    currency=self.currency,
+                    **field_values,
+                )
+
+    def test_pricing_tier_rejects_reversed_validity_window(self):
+        now = timezone.now()
+
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            PricingTier.objects.create(
+                name="Invalid validity",
+                meter=self.meter,
+                pricing_model="per_unit",
+                currency=self.currency,
+                unit_price_cents=1,
+                valid_from=now,
+                valid_until=now,
+            )
+
+    def test_pricing_bracket_rejects_invalid_ranges_and_negative_charges(self):
+        tier = PricingTier.objects.create(
+            name="Validated brackets",
+            meter=self.meter,
+            pricing_model="graduated",
+            currency=self.currency,
+        )
+        invalid_brackets = (
+            {"from_quantity": Decimal("-1"), "to_quantity": None, "unit_price_cents": 1},
+            {"from_quantity": Decimal("1"), "to_quantity": Decimal("1"), "unit_price_cents": 1},
+            {"from_quantity": Decimal("0"), "to_quantity": None, "unit_price_cents": -1},
+            {
+                "from_quantity": Decimal("0"),
+                "to_quantity": None,
+                "unit_price_cents": 1,
+                "flat_fee_cents": -1,
+            },
+        )
+
+        for bracket_values in invalid_brackets:
+            with self.subTest(bracket_values=bracket_values), self.assertRaises(IntegrityError), transaction.atomic():
+                PricingTierBracket.objects.create(pricing_tier=tier, **bracket_values)
 
 
 class UsageThresholdAndAlertTestCase(TestCase):

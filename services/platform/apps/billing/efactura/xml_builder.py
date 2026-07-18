@@ -25,6 +25,7 @@ if TYPE_CHECKING:
 
 from apps.billing.config import is_eu_country
 from apps.billing.efactura.settings import ro_local_date
+from apps.billing.fiscal_identity import normalize_business_tax_id, normalize_country_code, validated_cnp_or_empty
 from apps.common.tax_service import TaxService
 
 logger = logging.getLogger(__name__)
@@ -51,6 +52,7 @@ PEPPOL_PROFILE_ID = "urn:fdc:peppol.eu:2017:poacc:billing:01:1.0"
 INVOICE_TYPE_COMMERCIAL = "380"  # Commercial invoice
 INVOICE_TYPE_CREDIT_NOTE = "381"  # Credit note
 INVOICE_TYPE_DEBIT_NOTE = "383"  # Debit note
+B2C_NO_FISCAL_IDENTIFIER = "0000000000000"
 
 # Payment means codes (UNCL4461). Keys are the canonical Payment.payment_method values
 # (Payment.METHOD_CHOICES); inbound aliases like "card" are normalized to these before
@@ -161,7 +163,7 @@ class BaseUBLBuilder:
     def _get_customer_info(self) -> CompanyInfo:
         """Get customer (buyer) information from invoice."""
         if self._customer is None:
-            bill_to_country = getattr(self.invoice, "bill_to_country", None) or "RO"
+            bill_to_country = normalize_country_code(getattr(self.invoice, "bill_to_country", None)) or "RO"
             street = (
                 getattr(self.invoice, "bill_to_street", None) or getattr(self.invoice, "bill_to_address1", "") or ""
             )
@@ -170,7 +172,7 @@ class BaseUBLBuilder:
             )
             self._customer = CompanyInfo(
                 name=getattr(self.invoice, "bill_to_name", "") or "",
-                tax_id=getattr(self.invoice, "bill_to_tax_id", "") or "",
+                tax_id=normalize_business_tax_id(getattr(self.invoice, "bill_to_tax_id", "")),
                 registration_number=getattr(self.invoice, "bill_to_registration_number", "") or "",
                 street=street,
                 city=getattr(self.invoice, "bill_to_city", "") or "",
@@ -410,6 +412,37 @@ class BaseUBLBuilder:
 
         return tax_scheme
 
+    def _customer_fiscal_identifier(self, customer: CompanyInfo) -> tuple[str, str] | None:
+        """Return the buyer identifier and PRAHO display scheme for UBL party fields."""
+        if customer.tax_id:
+            identifier = customer.numeric_tax_id
+            scheme_id = "RO:CUI" if customer.country_code == "RO" else f"{customer.country_code}:VAT"
+        elif customer.country_code == "RO":
+            identifier = validated_cnp_or_empty(getattr(self.invoice, "bill_to_cnp", "")) or B2C_NO_FISCAL_IDENTIFIER
+            scheme_id = "RO:CNP"
+        else:
+            return None
+
+        return identifier, scheme_id
+
+    def _add_customer_identification(self, party: etree._Element, customer: CompanyInfo) -> None:
+        """Add the general buyer identifier while BT-47 is emitted by PartyLegalEntity."""
+        fiscal_identifier = self._customer_fiscal_identifier(customer)
+        if fiscal_identifier is None:
+            return
+        identifier, scheme_id = fiscal_identifier
+
+        party_id = self._add_cac(party, "PartyIdentification")
+        id_elem = self._add_cbc(party_id, "ID", identifier)
+        id_elem.set("schemeID", scheme_id)
+
+    def _customer_legal_identifier(self, customer: CompanyInfo) -> str:
+        """Return BT-47, which ANAF uses for a Romanian buyer's fiscal identifier."""
+        fiscal_identifier = self._customer_fiscal_identifier(customer)
+        if customer.country_code == "RO" and fiscal_identifier is not None:
+            return fiscal_identifier[0]
+        return customer.registration_number
+
     def _add_party_legal_entity(
         self, parent: etree._Element, name: str, registration_number: str = ""
     ) -> etree._Element:
@@ -492,10 +525,6 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
 
         if not self.invoice.bill_to_country:
             errors.append("Customer country is required")
-
-        # Romanian B2B requires tax ID
-        if self.invoice.bill_to_country == "RO" and not self.invoice.bill_to_tax_id:
-            errors.append("Romanian B2B invoice requires customer tax ID (CUI)")
 
         if not self.invoice.lines.exists():
             errors.append("Invoice must have at least one line item")
@@ -600,17 +629,7 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
 
         customer = self._get_customer_info()
 
-        # PartyIdentification with CUI - Mandatory for Romanian B2B
-        if customer.tax_id:
-            party_id = self._add_cac(party, "PartyIdentification")
-            id_elem = self._add_cbc(party_id, "ID", customer.numeric_tax_id)
-
-            # Set scheme based on country
-            if customer.country_code == "RO":
-                id_elem.set("schemeID", "RO:CUI")
-            else:
-                # For EU VAT numbers
-                id_elem.set("schemeID", f"{customer.country_code}:VAT")
+        self._add_customer_identification(party, customer)
 
         # PartyName - Mandatory
         party_name = self._add_cac(party, "PartyName")
@@ -624,7 +643,7 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
             self._add_party_tax_scheme(party, customer.vat_number)
 
         # PartyLegalEntity - Mandatory
-        self._add_party_legal_entity(party, customer.name, customer.registration_number)
+        self._add_party_legal_entity(party, customer.name, self._customer_legal_identifier(customer))
 
         # Contact - Optional
         self._add_contact(party, customer)
@@ -1070,10 +1089,7 @@ class UBLCreditNoteBuilder(BaseUBLBuilder):
         party = self._add_cac(customer_party, "Party")
         customer = self._get_customer_info()
 
-        if customer.tax_id:
-            party_id = self._add_cac(party, "PartyIdentification")
-            id_elem = self._add_cbc(party_id, "ID", customer.numeric_tax_id)
-            id_elem.set("schemeID", "RO:CUI" if customer.country_code == "RO" else f"{customer.country_code}:VAT")
+        self._add_customer_identification(party, customer)
 
         party_name = self._add_cac(party, "PartyName")
         self._add_cbc(party_name, "Name", customer.name)
@@ -1083,7 +1099,7 @@ class UBLCreditNoteBuilder(BaseUBLBuilder):
         if customer.tax_id:
             self._add_party_tax_scheme(party, customer.vat_number)
 
-        self._add_party_legal_entity(party, customer.name, customer.registration_number)
+        self._add_party_legal_entity(party, customer.name, self._customer_legal_identifier(customer))
 
     def _add_tax_total(self) -> None:
         """Add TaxTotal element."""

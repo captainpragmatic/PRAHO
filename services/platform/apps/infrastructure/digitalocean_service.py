@@ -158,7 +158,14 @@ class DigitalOceanService(CloudProviderGateway):
         """Get droplet info by ID. Returns None if not found."""
         try:
             response = self.client.droplets.get(droplet_id=int(server_id))
-            droplet = response["droplet"]
+            # pydo does NOT raise on 404 for this endpoint — 404 sits in its allowed status
+            # list and the DECODED ERROR PAYLOAD is returned instead ({"id": "not_found", ...}).
+            # The absence of the droplet key IS the not-found signal; reading it blindly raised
+            # KeyError('droplet'), which matched neither string below, so a deleted droplet
+            # could never be confirmed gone and delete_server polled to its full timeout (#299).
+            droplet = response.get("droplet") if isinstance(response, dict) else None
+            if droplet is None:
+                return Ok(None)
             return Ok(self._droplet_to_server_info(droplet))
         except Exception as e:
             if "not found" in str(e).lower() or "404" in str(e).lower():

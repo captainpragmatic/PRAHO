@@ -35,6 +35,8 @@ from apps.billing.services import (
 )
 from apps.common.types import Err, Ok
 from apps.customers.models import Customer
+from apps.orders.services import OrderCreateData, OrderService
+from apps.products.models import Product, ProductPrice
 from apps.users.models import CustomerMembership, User
 from tests.helpers.fsm_helpers import force_status
 
@@ -752,39 +754,43 @@ class RefundServiceComprehensiveCoverageTestCase(TestCase):
         """Test get_refund_eligibility for order (Line 747-750)."""
         mock_order = self._create_test_order()
 
-        with patch('apps.orders.models.Order.objects.get', return_value=mock_order):
-            with patch.object(RefundService, '_validate_order_refund_eligibility') as mock_validate:
-                eligibility: RefundEligibility = {
-                    'is_eligible': True,
-                    'reason': 'Eligible',
-                    'max_refund_amount_cents': 10000,
-                    'already_refunded_cents': 5000
-                }
-                mock_validate.return_value = Ok(eligibility)
+        with (
+            patch('apps.orders.models.Order.objects.get', return_value=mock_order),
+            patch.object(RefundService, '_validate_order_refund_eligibility') as mock_validate,
+        ):
+            eligibility: RefundEligibility = {
+                'is_eligible': True,
+                'reason': 'Eligible',
+                'max_refund_amount_cents': 10000,
+                'already_refunded_cents': 5000
+            }
+            mock_validate.return_value = Ok(eligibility)
 
-                result = RefundService.get_refund_eligibility('order', mock_order.id, 5000)
+            result = RefundService.get_refund_eligibility('order', mock_order.id, 5000)
 
-                self.assertTrue(result.is_ok())
-                returned_eligibility = result.unwrap()
-                self.assertTrue(returned_eligibility['is_eligible'])
+            self.assertTrue(result.is_ok())
+            returned_eligibility = result.unwrap()
+            self.assertTrue(returned_eligibility['is_eligible'])
 
     def test_get_refund_eligibility_invoice_success(self) -> None:
         """Test get_refund_eligibility for invoice (Line 752-755)."""
-        with patch('apps.billing.models.Invoice.objects.get', return_value=self.invoice):
-            with patch.object(RefundService, '_validate_invoice_refund_eligibility') as mock_validate:
-                eligibility: RefundEligibility = {
-                    'is_eligible': True,
-                    'reason': 'Eligible',
-                    'max_refund_amount_cents': 11900,
-                    'already_refunded_cents': 0
-                }
-                mock_validate.return_value = Ok(eligibility)
+        with (
+            patch('apps.billing.models.Invoice.objects.get', return_value=self.invoice),
+            patch.object(RefundService, '_validate_invoice_refund_eligibility') as mock_validate,
+        ):
+            eligibility: RefundEligibility = {
+                'is_eligible': True,
+                'reason': 'Eligible',
+                'max_refund_amount_cents': 11900,
+                'already_refunded_cents': 0
+            }
+            mock_validate.return_value = Ok(eligibility)
 
-                result = RefundService.get_refund_eligibility('invoice', self.invoice.id, 5000)
+            result = RefundService.get_refund_eligibility('invoice', self.invoice.id, 5000)
 
-                self.assertTrue(result.is_ok())
-                returned_eligibility = result.unwrap()
-                self.assertTrue(returned_eligibility['is_eligible'])
+            self.assertTrue(result.is_ok())
+            returned_eligibility = result.unwrap()
+            self.assertTrue(returned_eligibility['is_eligible'])
 
     def test_get_refund_eligibility_unexpected_exception(self) -> None:
         """Test get_refund_eligibility with unexpected exception (Line 760-762)."""
@@ -933,15 +939,55 @@ class InvoiceServiceCreateFromOrderBillToNameTestCase(TestCase):
     def _order_for(self, customer: Customer) -> Any:
         from apps.orders.models import Order
 
+        # Invoices bill from the ORDER-TIME SNAPSHOT now, not the live customer; mirror the
+        # production capture (OrderService.create_order stores get_billing_name() as
+        # customer_name). The end-to-end capture test below pins that production site.
         return Order.objects.create(
             order_number=f'ORD-{uuid.uuid4().hex[:8].upper()}',
             customer=customer,
             currency=self.currency,
             status='draft',
+            customer_name=customer.get_billing_name(),
+            customer_email=customer.primary_email or 'billing@example.ro',
             subtotal_cents=10000,
             tax_cents=1900,
             total_cents=11900,
         )
+
+    def test_order_snapshot_captures_the_legal_billing_name(self) -> None:
+        """#211 at the snapshot layer: create_order must record get_billing_name() as the
+        customer_name snapshot — capturing the raw internal name would resurface the
+        wrong-legal-identity bug one layer up, because invoices now bill the snapshot."""
+        customer = Customer.objects.create(
+            name='Ion Popescu',
+            customer_type='pfa',
+            company_name='Popescu Ion PFA',
+            primary_email='pfa-snapshot@example.ro',
+            status='active',
+        )
+        product = Product.objects.create(
+            slug=f'snap-{uuid.uuid4().hex[:8]}', name='Snapshot Hosting',
+            product_type='shared_hosting', is_active=True, is_public=True,
+        )
+        ProductPrice.objects.create(
+            product=product, currency=self.currency, monthly_price_cents=10000, is_active=True,
+        )
+        result = OrderService().create_order(
+            OrderCreateData(
+                customer=customer,
+                items=[{
+                    'product_id': product.id,
+                    'quantity': 1,
+                    'unit_price_cents': 10000,
+                    'description': 'Snapshot Hosting',
+                }],
+                billing_address={'company_name': '', 'country': 'RO'},
+                currency='RON',
+            )
+        )
+
+        self.assertTrue(result.is_ok(), f'order creation failed: {result}')
+        self.assertEqual(result.unwrap().customer_name, 'Popescu Ion PFA')
 
     def test_create_from_order_names_an_individual_customer(self) -> None:
         """An individual has no company_name, so the invoice is named from Customer.name."""

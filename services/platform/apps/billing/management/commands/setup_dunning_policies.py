@@ -235,7 +235,7 @@ class PaymentRetryPolicySetup:
         """Display next steps for dunning system configuration."""
         self.stdout.write("\n💡 Next steps:")
         self.stdout.write("   1. Configure email templates for dunning campaigns")
-        self.stdout.write("   2. Set up cron job for: python manage.py run_payment_collection")
+        self.stdout.write("   2. Register retry polling with: python manage.py setup_scheduled_tasks --billing-only")
         self.stdout.write("   3. Test with failed payments: python manage.py test_dunning_system")
         self.stdout.write("   4. Monitor collection runs in Django admin")
 

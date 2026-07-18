@@ -710,7 +710,16 @@ class TestAuditIntegrityService(TestCase):
         self.assertEqual(check.status, "healthy")
 
     def test_verify_audit_integrity_hash_mismatch(self):
-        self._create_event(metadata={"integrity_hash": "wrong_hash_value"})
+        """A tampered event must be reported as compromised.
+
+        This used to pass `metadata={"integrity_hash": "wrong_hash_value"}` at creation. Events
+        are now stamped with their real hash on save (#217) — and deliberately so: a caller must
+        not be able to choose an audit event's own integrity hash. Tamper after the fact instead,
+        which is what an attacker with database access would actually do.
+        """
+        event = self._create_event()
+        AuditEvent.objects.filter(pk=event.pk).update(description="TAMPERED — this never happened")
+
         result = AuditIntegrityService.verify_audit_integrity(
             self.now - timedelta(hours=1), self.now + timedelta(hours=1), "hash_verification"
         )
@@ -1582,7 +1591,6 @@ class TestCustomersAuditService(TestCase):
         billing_profile.payment_terms = "net30"
         billing_profile.credit_limit = Decimal("1000.00")
         billing_profile.preferred_currency = "RON"
-        billing_profile.auto_payment_enabled = True
         billing_profile.get_account_balance.return_value = Decimal("500.00")
         billing_profile.created_at = timezone.now()
         billing_profile.updated_at = timezone.now()

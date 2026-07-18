@@ -71,10 +71,9 @@ logger = logging.getLogger(__name__)
 # Customer access function removed - platform is staff-only
 _DEFAULT_MAX_PAYMENT_AMOUNT_CENTS = 100_000_000
 
-# S-1: Allowlist for payment_method values accepted by process_proforma_payment.
-# Values are checked case-insensitively. Unknown methods return HTTP 400 immediately,
-# before any service call, to prevent injection of arbitrary method strings.
-ALLOWED_PAYMENT_METHODS: frozenset[str] = frozenset({"bank_transfer", "bank", "card", "stripe", "cash", "other"})
+# Staff may record only offline settlement. Gateway methods must arrive through
+# their verified gateway convergence path, never through an admin form.
+ALLOWED_PAYMENT_METHODS: frozenset[str] = frozenset({"bank_transfer", "bank", "cash", "other"})
 
 
 def _get_max_payment_amount_cents() -> int:
@@ -672,12 +671,16 @@ def invoice_detail(request: HttpRequest, pk: int) -> HttpResponse:
 
 def _create_proforma_with_sequence(customer: Customer, valid_until: datetime) -> ProformaInvoice:
     """Create a new proforma with proper sequence number."""
+    from apps.billing.fiscal_identity import billing_country_code, get_customer_fiscal_identity  # noqa: PLC0415
+
     with transaction.atomic():
         sequence, _created = ProformaSequence.objects.get_or_create(scope="default")
         proforma_number = sequence.get_next_number("PRO")
 
         # Create proforma
         ron_currency = Currency.objects.get(code="RON")
+        fiscal_identity = get_customer_fiscal_identity(customer)
+        billing_address = customer.get_billing_address()
 
         return ProformaInvoice.objects.create(
             customer=customer,
@@ -687,7 +690,14 @@ def _create_proforma_with_sequence(customer: Customer, valid_until: datetime) ->
             # Copy customer billing info
             bill_to_name=customer.company_name or customer.name,
             bill_to_email=customer.primary_email,
-            bill_to_tax_id=(getattr(customer, "tax_profile", None) and customer.tax_profile.vat_number) or "",
+            bill_to_tax_id=fiscal_identity.business_tax_id,
+            bill_to_cnp=fiscal_identity.cnp,
+            bill_to_address1=getattr(billing_address, "address_line1", "") or "",
+            bill_to_address2=getattr(billing_address, "address_line2", "") or "",
+            bill_to_city=getattr(billing_address, "city", "") or "",
+            bill_to_region=getattr(billing_address, "county", "") or "",
+            bill_to_postal=getattr(billing_address, "postal_code", "") or "",
+            bill_to_country=billing_country_code(getattr(billing_address, "country", "")),
         )
 
 
@@ -1354,7 +1364,9 @@ def payment_list(request: HttpRequest) -> HttpResponse:
 
 
 @billing_staff_required
-def process_payment(request: HttpRequest, pk: int) -> HttpResponse:
+def process_payment(  # noqa: C901, PLR0911  # Explicit financial validation and concurrency guards
+    request: HttpRequest, pk: int
+) -> HttpResponse:
     """
     💳 Process payment for invoice
     """
@@ -1373,41 +1385,59 @@ def process_payment(request: HttpRequest, pk: int) -> HttpResponse:
         except (ValueError, TypeError, decimal.InvalidOperation):
             return JsonResponse({"error": "Invalid amount provided"}, status=400)
 
+        if not amount.is_finite():
+            return JsonResponse({"error": "Invalid amount provided"}, status=400)
+        amount_cents_decimal = amount * 100
+        if amount_cents_decimal != amount_cents_decimal.to_integral_value():
+            return JsonResponse({"error": "Payment amount cannot contain fractional cents"}, status=400)
+        amount_cents = int(amount_cents_decimal)
+        if amount_cents <= 0 or amount_cents > _get_max_payment_amount_cents():
+            return JsonResponse({"error": "Payment amount is outside the permitted range"}, status=400)
+
         raw_method = request.POST.get("payment_method", "bank_transfer")
         payment_method = raw_method.lower() if raw_method else "bank_transfer"
         if payment_method not in ALLOWED_PAYMENT_METHODS:
-            return JsonResponse({"error": f"Invalid payment method: {raw_method}"}, status=400)
+            return JsonResponse(
+                {"error": f"Only offline payment methods may be recorded manually: {raw_method}"}, status=400
+            )
+        payment_method = "bank" if payment_method == "bank_transfer" else payment_method
 
-        # Create payment record
-        Payment.objects.create(
-            customer=invoice.customer,
-            invoice=invoice,
-            amount_cents=int(amount * 100),
-            currency=invoice.currency,
-            payment_method=payment_method,
-            status="succeeded",  # Changed from 'completed' to match model choices
-            created_by=request.user,
-        )
+        from apps.billing.payment_convergence import PaymentSuccessService  # noqa: PLC0415
 
-        # Update invoice status if fully paid via FSM transition
-        if invoice.get_remaining_amount() <= 0:
-            try:
-                invoice.mark_as_paid()
-            except TransitionNotAllowed:
-                logger.warning(
-                    f"⚠️ [Billing] Cannot mark invoice {invoice.number} as paid from status '{invoice.status}'"
+        with transaction.atomic():
+            locked_invoice = Invoice.objects.select_for_update(of=("self",)).get(pk=invoice.pk)
+            if locked_invoice.payments.filter(status="pending", payment_method="stripe").exists():
+                return JsonResponse(
+                    {"error": "Invoice has an unresolved automatic card payment"},
+                    status=409,
                 )
-                messages.warning(
-                    request,
-                    _(
-                        "⚠️ Payment registered but invoice #{number} could not be marked as paid (status: {status})."
-                    ).format(number=invoice.number, status=invoice.status),
+            remaining_cents = locked_invoice.get_remaining_amount()
+            if remaining_cents <= 0:
+                return JsonResponse({"error": "Invoice has no outstanding balance"}, status=409)
+            if amount_cents > remaining_cents:
+                return JsonResponse({"error": "Payment amount exceeds the outstanding invoice balance"}, status=400)
+
+            payment = Payment.objects.create(
+                customer=locked_invoice.customer,
+                invoice=locked_invoice,
+                amount_cents=amount_cents,
+                currency=locked_invoice.currency,
+                payment_method=payment_method,
+                reference_number=request.POST.get("reference", "")[:100],
+                created_by=request.user,
+                meta={"source": "staff_offline_payment"},
+            )
+            payment.succeed()
+            payment.save(update_fields=["status", "updated_at"])
+            convergence = PaymentSuccessService.converge_local_paid_document(payment.id)
+            if convergence.is_err():
+                transaction.set_rollback(True)
+                logger.error(
+                    "Offline payment convergence failed for invoice %s: %s", invoice.id, convergence.unwrap_err()
                 )
-            else:
-                invoice.save()
-                messages.success(request, _("✅ Payment of {amount} RON has been registered!").format(amount=amount))
-        else:
-            messages.success(request, _("✅ Payment of {amount} RON has been registered!").format(amount=amount))
+                return JsonResponse({"error": "Payment could not be applied safely"}, status=409)
+
+        messages.success(request, _("✅ Payment of {amount} RON has been registered!").format(amount=amount))
         return JsonResponse({"success": True})
 
     return JsonResponse({"error": "Invalid method"}, status=405)
@@ -1712,8 +1742,11 @@ def api_create_payment_intent(  # noqa: C901, PLR0911, PLR0912  # Complexity: mu
         if currency and currency not in ["RON", "EUR", "USD"]:
             return JsonResponse({"success": False, "error": "currency must be one of: RON, EUR, USD"}, status=400)
 
-        if gateway not in ["stripe", "bank"]:
-            return JsonResponse({"success": False, "error": "gateway must be one of: stripe, bank"}, status=400)
+        if gateway != "stripe":
+            return JsonResponse({"success": False, "error": "gateway must be: stripe"}, status=400)
+
+        if not isinstance(metadata, dict):
+            return JsonResponse({"success": False, "error": "metadata must be an object"}, status=400)
 
         # Create payment intent using PaymentService
         result = PaymentService.create_payment_intent_direct(
@@ -1811,84 +1844,6 @@ def api_confirm_payment(  # noqa: PLR0911  # Complexity: multi-step business log
         return JsonResponse({"success": False, "error": "Invalid JSON payload"}, status=400)
     except Exception as e:
         logger.error(f"🔥 API: Unexpected error confirming payment: {e}")
-        return JsonResponse({"success": False, "error": "Internal server error"}, status=500)
-
-
-@csrf_exempt  # nosemgrep: no-csrf-exempt — HMAC-authenticated inter-service endpoint
-@require_http_methods(["POST"])
-def api_create_subscription(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911  # Complexity: multi-step business logic
-    """
-    🔐 API: Create recurring subscription
-
-    Expected payload:
-    {
-        "customer_id": "uuid-string",
-        "price_id": "price_...",
-        "gateway": "stripe",
-        "metadata": {...}
-    }
-    """
-    logger = logging.getLogger(__name__)
-    customer, auth_error = _require_customer_auth_for_portal_api(request)
-    if auth_error is not None:
-        return auth_error
-    assert customer is not None
-    try:
-        # Parse request data
-        data = json.loads(request.body)
-        customer_id = data.get("customer_id")
-        price_id = data.get("price_id")
-        gateway = data.get("gateway", "stripe")
-        metadata = data.get("metadata", {})
-
-        # Validate required fields
-        if not price_id:
-            return JsonResponse({"success": False, "error": "price_id is required"}, status=400)
-        if customer_id is not None:
-            try:
-                if int(customer_id) != customer.id:
-                    return JsonResponse({"success": False, "error": "customer_id mismatch"}, status=403)
-            except (TypeError, ValueError):
-                return JsonResponse({"success": False, "error": "customer_id must be a valid integer"}, status=400)
-
-        # Create subscription using PaymentService
-        result = PaymentService.create_subscription(
-            customer_id=str(customer.id), price_id=price_id, gateway=gateway, metadata=metadata
-        )
-
-        if result["success"]:
-            logger.info(f"✅ API: Created subscription {result['subscription_id']} for customer {customer.id}")
-            return JsonResponse(
-                {"success": True, "subscription_id": result["subscription_id"], "status": result["status"]}
-            )
-        else:
-            logger.error(f"❌ API: Failed to create subscription: {result['error']}")
-            return JsonResponse({"success": False, "error": result["error"]}, status=400)
-
-    except json.JSONDecodeError:
-        return JsonResponse({"success": False, "error": "Invalid JSON payload"}, status=400)
-    except Exception as e:
-        logger.error(f"🔥 API: Unexpected error creating subscription: {e}")
-        return JsonResponse({"success": False, "error": "Internal server error"}, status=500)
-
-
-@require_http_methods(["GET"])
-def api_payment_methods(request: HttpRequest, customer_id: str) -> JsonResponse:
-    """
-    🔐 API: Get available payment methods for customer
-
-    URL: /api/billing/payment-methods/{customer_id}/
-    """
-    logger = logging.getLogger(__name__)
-    try:
-        # Get available payment methods
-        methods = PaymentService.get_available_payment_methods(customer_id)
-
-        logger.info(f"✅ API: Retrieved {len(methods)} payment methods for customer {customer_id}")
-        return JsonResponse({"success": True, "payment_methods": methods})
-
-    except Exception as e:
-        logger.error(f"🔥 API: Unexpected error getting payment methods: {e}")
         return JsonResponse({"success": False, "error": "Internal server error"}, status=500)
 
 
