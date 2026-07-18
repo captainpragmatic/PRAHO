@@ -982,3 +982,21 @@ class InvoiceServiceCreateFromOrderBillToNameTestCase(TestCase):
 
                 self.assertTrue(result.is_ok(), f'invoice creation failed: {result}')
                 self.assertEqual(result.value.bill_to_name, name)
+
+    def test_create_from_order_prefers_registered_name_for_pfa_with_trading_name(self) -> None:
+        """A PFA/SRL that registered a trading name must be billed under it — the legal
+        identity lives in company_name for every customer type (registration requires the
+        field), not only for customer_type == 'company'. A type-gated accessor would bill
+        this customer under the internal label."""
+        customer = Customer.objects.create(
+            name='Ion Popescu',
+            customer_type='pfa',
+            company_name='Popescu Ion PFA',
+            primary_email='pfa-trading@example.ro',
+            status='active',
+        )
+
+        result = InvoiceService().create_from_order(self._order_for(customer))
+
+        self.assertTrue(result.is_ok(), f'invoice creation failed: {result}')
+        self.assertEqual(result.value.bill_to_name, 'Popescu Ion PFA')
