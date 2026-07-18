@@ -11,7 +11,7 @@ from django.test import TestCase
 from django.utils import timezone
 
 from apps.billing.models import Currency, Invoice, Payment, Refund
-from apps.billing.refund_service import RefundData, RefundService
+from apps.billing.refund_service import Err, RefundData, RefundService
 from apps.customers.models import Customer
 from apps.orders.models import Order
 
@@ -372,3 +372,65 @@ class RefundGatewayIntegrityTests(TestCase):
         self.assertEqual(first_payment.status, "succeeded")
         self.assertEqual(second_payment.status, "succeeded")
         self.assertFalse(Refund.objects.filter(invoice=invoice).exists())
+
+    def test_post_gateway_exception_rolls_back_payment_and_invoice_status(self) -> None:
+        """A crash after gateway success must not commit a half-written refund.
+
+        The payment status update fires a post_save signal that cascades the
+        invoice to refunded BEFORE the Refund row exists. If a later step dies
+        with a non-database exception, the swallowed-exception Err return must
+        mark the surrounding transaction for rollback — otherwise both
+        documents commit as refunded with zero Refund rows and no audit trail.
+        """
+        invoice = self._make_invoice()
+        payment = self._make_payment(invoice, transaction_id="pi_post_gateway_crash")
+        gateway = MagicMock()
+        gateway.refund_payment.return_value = {
+            "success": True,
+            "refund_id": "re_post_gateway_crash",
+            "amount_refunded_cents": 10_000,
+            "status": "succeeded",
+            "error": None,
+        }
+
+        with (
+            patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway", return_value=gateway),
+            patch.object(RefundService, "_create_refund_record", side_effect=RuntimeError("post-gateway crash")),
+        ):
+            result = RefundService.refund_invoice(invoice.id, self._refund_data())
+
+        self.assertTrue(result.is_err())
+        invoice.refresh_from_db()
+        payment.refresh_from_db()
+        self.assertEqual(invoice.status, "paid")
+        self.assertEqual(payment.status, "succeeded")
+        self.assertEqual(payment.meta, {})
+        self.assertFalse(Refund.objects.exists())
+
+    def test_post_gateway_err_return_rolls_back_payment_and_invoice_status(self) -> None:
+        """An Err RETURN (not an exception) after gateway success must also roll back."""
+        invoice = self._make_invoice()
+        payment = self._make_payment(invoice, transaction_id="pi_post_gateway_err")
+        gateway = MagicMock()
+        gateway.refund_payment.return_value = {
+            "success": True,
+            "refund_id": "re_post_gateway_err",
+            "amount_refunded_cents": 10_000,
+            "status": "succeeded",
+            "error": None,
+        }
+
+        with (
+            patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway", return_value=gateway),
+            patch.object(
+                RefundService, "_create_refund_record", return_value=Err("simulated record failure")
+            ),
+        ):
+            result = RefundService.refund_invoice(invoice.id, self._refund_data())
+
+        self.assertTrue(result.is_err())
+        invoice.refresh_from_db()
+        payment.refresh_from_db()
+        self.assertEqual(invoice.status, "paid")
+        self.assertEqual(payment.status, "succeeded")
+        self.assertFalse(Refund.objects.exists())

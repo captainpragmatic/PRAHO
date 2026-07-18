@@ -730,8 +730,16 @@ class RefundService:
             # Centralize the Order -> Invoice lock here so every caller,
             # including internal orchestration callers, establishes the same
             # Invoice -> Payment lock order before touching the gateway.
+            # Contract: every Err exit below marks the caller's transaction for
+            # rollback. Pre-gateway exits have no pending writes (no-op); the
+            # post-gateway exits MUST NOT commit — the payment status update
+            # cascades the invoice to refunded via post_save signal BEFORE the
+            # Refund row exists, and a plain return Err would commit that
+            # half-written state (#319 convention). The gateway idempotency key
+            # makes the rolled-back attempt safe to retry.
             invoice_result = RefundService._lock_related_invoice_for_refund(order, invoice)
             if invoice_result.is_err():
+                transaction.set_rollback(True)
                 return Err(invoice_result.unwrap_err())
             invoice_for_processing = invoice_result.unwrap()
 
@@ -739,6 +747,7 @@ class RefundService:
             # Refund or Invoice mutation. This helper also locks the Payment row.
             payment_result = RefundService._process_payment_refund_if_exists(order, invoice_for_processing, refund_data)
             if payment_result.is_err():
+                transaction.set_rollback(True)
                 return Err(payment_result.unwrap_err())
 
             payment_data = payment_result.unwrap()
@@ -773,6 +782,7 @@ class RefundService:
                 )
             )
             if refund_result.is_err():
+                transaction.set_rollback(True)
                 return refund_result  # type: ignore[return-value]
 
             # Process entity updates
@@ -780,6 +790,7 @@ class RefundService:
                 order, invoice_for_processing, refund_id, effective_refund_data
             )
             if result.is_err():
+                transaction.set_rollback(True)
                 return result
 
             final_result = result.unwrap()
@@ -793,6 +804,7 @@ class RefundService:
                 order.pk if order else None,
                 invoice.pk if invoice else None,
             )
+            transaction.set_rollback(True)
             return Err("Failed to process refund")
 
     @staticmethod
