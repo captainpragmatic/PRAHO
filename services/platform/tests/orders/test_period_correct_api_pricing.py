@@ -118,6 +118,23 @@ class PeriodCorrectAPIOrderPricingTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["preview"]["subtotal_cents"], 57_000)
 
+    def test_preflight_rejects_periods_without_price_model_support(self) -> None:
+        from apps.api.orders.views import preflight_order  # noqa: PLC0415
+
+        for billing_period in ("quarterly", "yearly", "biennial", "triennial"):
+            with self.subTest(billing_period=billing_period):
+                request = self._post(
+                    "/api/orders/preflight/",
+                    {"currency": "RON", "items": [self._cart_item(billing_period)]},
+                )
+
+                with patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)):
+                    response = preflight_order(request)
+
+                self.assertEqual(response.status_code, 400)
+                self.assertFalse(response.data["success"])
+                self.assertIn("billing_period", response.data["details"][0])
+
     def test_create_order_persists_sealed_price_for_every_billing_period(self) -> None:
         from apps.api.orders.views import create_order  # noqa: PLC0415
 

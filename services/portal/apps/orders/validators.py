@@ -30,9 +30,7 @@ class OrderInputValidator:
     """Centralized validation for order inputs with security focus"""
 
     # Romanian hosting provider specific configurations
-    ALLOWED_BILLING_PERIODS: ClassVar[frozenset[str]] = frozenset(
-        {"monthly", "quarterly", "semiannual", "annual", "yearly", "biennial", "triennial"}
-    )
+    ALLOWED_BILLING_PERIODS: ClassVar[frozenset[str]] = frozenset({"monthly", "semiannual", "annual"})
     MAX_CONFIG_STRING_LENGTH = 100
 
     # Domain validation with international support

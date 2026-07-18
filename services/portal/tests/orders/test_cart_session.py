@@ -129,7 +129,7 @@ class TestGDPRCompliantCartSession(SimpleTestCase):
 
         # Add two items
         cart.add_item('product1', 1, 'monthly')
-        cart.add_item('product2', 2, 'yearly')
+        cart.add_item('product2', 2, 'annual')
 
         self.assertEqual(len(cart.get_items()), 2)
 
@@ -146,7 +146,7 @@ class TestGDPRCompliantCartSession(SimpleTestCase):
 
         # Add items
         cart.add_item('product1', 2, 'monthly')
-        cart.add_item('product2', 1, 'yearly')
+        cart.add_item('product2', 1, 'annual')
 
         # Test counters
         self.assertEqual(cart.get_item_count(), 2)
@@ -158,7 +158,7 @@ class TestGDPRCompliantCartSession(SimpleTestCase):
 
         # Add items
         cart.add_item('product1', 1, 'monthly')
-        cart.add_item('product2', 2, 'yearly')
+        cart.add_item('product2', 2, 'annual')
 
         # Clear cart
         cart.clear()
@@ -205,7 +205,7 @@ class TestGDPRCompliantCartSession(SimpleTestCase):
 
         # Add different items to each cart
         cart1.add_item('product1', 1, 'monthly')
-        cart2.add_item('product2', 2, 'yearly')
+        cart2.add_item('product2', 2, 'annual')
 
         # Verify isolation
         self.assertEqual(len(cart1.get_items()), 1)

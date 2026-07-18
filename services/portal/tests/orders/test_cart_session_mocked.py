@@ -126,7 +126,7 @@ class TestGDPRCompliantCartSessionMocked(SimpleTestCase):
 
         # Manually add items
         item_id1 = cart._generate_item_id('product1', 'monthly')
-        item_id2 = cart._generate_item_id('product2', 'yearly')
+        item_id2 = cart._generate_item_id('product2', 'annual')
 
         cart.cart['items'] = [
             {
@@ -140,7 +140,7 @@ class TestGDPRCompliantCartSessionMocked(SimpleTestCase):
                 'item_id': item_id2,
                 'product_slug': 'product2',
                 'quantity': 2,
-                'billing_period': 'yearly',
+                'billing_period': 'annual',
                 'product_name': 'Product 2'
             }
         ]
@@ -172,7 +172,7 @@ class TestGDPRCompliantCartSessionMocked(SimpleTestCase):
                 'item_id': 'item2',
                 'product_slug': 'product2',
                 'quantity': 1,
-                'billing_period': 'yearly',
+                'billing_period': 'annual',
                 'product_name': 'Product 2'
             }
         ]

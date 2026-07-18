@@ -37,6 +37,7 @@ from apps.provisioning.tasks import queue_service_provisioning
 from .serializers import (
     CartCalculationInputSerializer,
     CartCalculationOutputSerializer,
+    CartItemInputSerializer,
     OrderCreateInputSerializer,
     OrderDetailSerializer,
     OrderListSerializer,
@@ -354,7 +355,7 @@ def _resolve_currency(raw_code: object) -> tuple[Currency | None, Response | Non
 @permission_classes([AllowAny])  # No permissions required (auth handled by secure_auth)
 @throttle_classes([OrderCalculateThrottle])
 @require_customer_authentication
-def preflight_order(  # noqa: PLR0911, PLR0915  # Complexity: multi-step business logic
+def preflight_order(  # noqa: PLR0911, PLR0912, PLR0915  # Complexity: multi-step business logic
     request: Request, customer: Customer
 ) -> Response:  # Complexity: order processing pipeline  # Complexity: multi-step business logic
     """
@@ -376,6 +377,20 @@ def preflight_order(  # noqa: PLR0911, PLR0915  # Complexity: multi-step busines
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
+        # Keep preflight on the same item contract as calculation and creation.
+        item_serializer = CartItemInputSerializer(data=cart_items, many=True)
+        if not item_serializer.is_valid():
+            return Response(
+                {
+                    "success": False,
+                    "errors": [str(_("Cart contains invalid items"))],
+                    "warnings": [],
+                    "details": item_serializer.errors,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        cart_items = item_serializer.validated_data
 
         # Create a preview order data structure (without saving to DB)
         currency, error_response = _resolve_currency(request.data.get("currency", "RON"))
