@@ -444,13 +444,15 @@ class OrderService:
                 if product_id is None:
                     raise ValueError(f"Order item missing product_id: {item_data.get('description', 'unknown')}")
 
+                # OrderItemData.service_id was accepted but silently dropped here, so renewal
+                # items never linked back to their Service and renewal history was invisible
+                # on Service.order_items (#223). Stringified because django-stubs' FK-id
+                # setter union does not include UUID; Django adapts it back at the DB layer.
+                service_id = item_data.get("service_id")
                 OrderItem.objects.create(
                     order=order,
                     product_id=product_id,
-                    # OrderItemData.service_id was accepted but silently dropped here, so
-                    # renewal items never linked back to their Service and renewal history
-                    # was invisible on Service.order_items (#223).
-                    service_id=item_data.get("service_id"),
+                    service_id=str(service_id) if service_id else None,
                     quantity=item_data["quantity"],
                     unit_price_cents=item_data["unit_price_cents"],
                     setup_cents=int(item_data.get("setup_cents", 0)),
