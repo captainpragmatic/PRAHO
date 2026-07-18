@@ -2,7 +2,7 @@
 # COMPREHENSIVE BILLING PDF GENERATORS TESTS
 # ===============================================================================
 
-from datetime import date
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from io import BytesIO
 from unittest.mock import Mock, patch
@@ -78,6 +78,25 @@ class BaseRomanianDocumentPDFGeneratorTestCase(TestCase):
         self.assertIsInstance(generator.canvas, canvas.Canvas)
         self.assertEqual(generator.width, A4[0])
         self.assertEqual(generator.height, A4[1])
+
+    def test_invoice_dates_rendered_in_romanian_local_calendar(self):
+        """#286: the PDF must print the Romanian calendar date, not the UTC one.
+
+        An invoice issued 2025-12-31 22:30 UTC is already 2026-01-01 00:30 in Romania. Printing
+        the UTC wall clock would put 31.12.2025 on the document the customer receives — the wrong
+        day and the wrong YEAR — contradicting the IssueDate filed with ANAF (#220).
+        """
+        self.invoice.issued_at = datetime(2025, 12, 31, 22, 30, tzinfo=UTC)
+        self.invoice.due_at = datetime(2026, 1, 30, 22, 30, tzinfo=UTC)
+        self.invoice.save()
+
+        generator = RomanianInvoicePDFGenerator(self.invoice)
+        drawn = []
+        with patch.object(generator.canvas, 'drawString', side_effect=lambda x, y, text: drawn.append(text)):
+            generator._render_document_details()
+
+        self.assertIn('Issue date: 01.01.2026', drawn)
+        self.assertIn('Due date: 31.01.2026', drawn)
 
     def test_get_company_info_defaults(self):
         """Test _get_company_info with current project settings"""
