@@ -615,6 +615,8 @@ def _create_renewal_order_data(service: Any, product_id: Any) -> OrderCreateData
     re-rate an existing service. The period likewise comes from `Service.billing_cycle`; a
     monthly service renews monthly.
     """
+    billing_period = "semiannual" if service.billing_cycle == "semi_annual" else service.billing_cycle
+
     return OrderCreateData(
         customer=service.customer,
         items=[
@@ -626,6 +628,7 @@ def _create_renewal_order_data(service: Any, product_id: Any) -> OrderCreateData
                 # 29.995 would bill 2999 cents instead of 3000.
                 "unit_price_cents": int((Decimal(service.price) * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP)),
                 "setup_cents": 0,  # Renewals never re-charge setup.
+                "billing_period": billing_period,
                 "description": f"Service Renewal - {service.service_name}",
                 "meta": {
                     "renewal_service_id": str(service.id),

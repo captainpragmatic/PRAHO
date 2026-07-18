@@ -59,6 +59,7 @@ class OrderItemData(TypedDict, total=False):
     quantity: int
     unit_price_cents: int
     setup_cents: int
+    billing_period: str
     description: str
     meta: dict[str, Any]
 
@@ -449,6 +450,14 @@ class OrderService:
                 # on Service.order_items (#223). Stringified because django-stubs' FK-id
                 # setter union does not include UUID; Django adapts it back at the DB layer.
                 service_id = item_data.get("service_id")
+                billing_period = item_data.get("billing_period", "monthly")
+                if billing_period not in OrderItem.BILLING_PERIOD_CHOICES:
+                    raise ValueError(f"Unsupported order item billing period: {billing_period}")
+
+                # OrderItem stores the period in config. Override any client-supplied config value
+                # with the validated top-level field so the amount and persisted period cannot diverge.
+                item_config = dict(item_data.get("meta") or {})
+                item_config["billing_period"] = billing_period
                 OrderItem.objects.create(
                     order=order,
                     product_id=product_id,
@@ -461,7 +470,7 @@ class OrderService:
                     line_total_cents=line_total_cents,
                     product_name=item_data["description"],
                     product_type="hosting",  # Default type
-                    config=item_data.get("meta", {}),
+                    config=item_config,
                 )
 
             # After creating items, ensure order totals are consistent with item data (includes setup fees)

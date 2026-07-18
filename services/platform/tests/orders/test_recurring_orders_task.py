@@ -172,8 +172,16 @@ class RecurringOrdersTaskTestCase(TestCase):
 
         data = _create_renewal_order_data(service, self.product.id)
 
+        self.assertEqual(data.items[0]["billing_period"], "annual")
         self.assertEqual(data.items[0]["meta"]["renewal_period"], "annual")
         self.assertEqual(data.items[0]["unit_price_cents"], 29999)
+
+    def test_renewal_order_data_normalizes_semiannual_cycle_vocabulary(self):
+        service = self._service(price="149.99", cycle="semi_annual")
+
+        data = _create_renewal_order_data(service, self.product.id)
+
+        self.assertEqual(data.items[0]["billing_period"], "semiannual")
 
     def test_renewal_product_resolves_from_the_originating_order_item(self):
         """ServicePlan has no link to Product, so the renewal product comes from the order item

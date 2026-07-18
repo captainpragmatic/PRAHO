@@ -231,13 +231,14 @@ def calculate_cart_totals(  # noqa: PLR0912, PLR0915  # Complexity: multi-step b
             # Build order item data (include setup fee for accurate totals)
             # Include product_slug + billing_period as stable identifiers so callers
             # can map per-item totals deterministically (not by list index).
+            billing_period = item_data.get("billing_period", "monthly")
             order_items.append(
                 {
                     "product_id": product.id,
                     "product_slug": product.slug,
-                    "billing_period": item_data.get("billing_period", "monthly"),
+                    "billing_period": billing_period,
                     "quantity": item_data["quantity"],
-                    "unit_price_cents": int(product_price.effective_monthly_price_cents),
+                    "unit_price_cents": product_price.get_price_cents_for_period(billing_period),
                     "setup_cents": int(product_price.setup_cents),
                     "description": product.name,
                     "meta": item_data.get("config", {}),
@@ -423,7 +424,7 @@ def preflight_order(  # noqa: PLR0911, PLR0915  # Complexity: multi-step busines
                     )
 
                 quantity = int(cart_item.get("quantity", 1))
-                unit_price_cents = int(price.effective_monthly_price_cents)
+                unit_price_cents = price.get_price_cents_for_period(cart_item["billing_period"])
                 setup_cents = int(price.setup_cents or 0)
 
                 # Calculate line total
@@ -726,7 +727,7 @@ def create_order(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-
                     "product_id": product.id,
                     "service_id": None,  # Not used for new orders
                     "quantity": item_data["quantity"],
-                    "unit_price_cents": int(price.effective_monthly_price_cents),
+                    "unit_price_cents": price.get_price_cents_for_period(billing_period),
                     "setup_cents": int(price.setup_cents),
                     "billing_period": billing_period,
                     "description": product.name,
