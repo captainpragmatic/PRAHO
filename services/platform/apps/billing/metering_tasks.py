@@ -225,6 +225,24 @@ def generate_pending_invoices() -> dict[str, Any]:
         return {"success": False, "error": str(e)}
 
 
+def collect_due_usage_invoices() -> dict[str, Any]:
+    """Collect post-paid usage invoices whose persisted charge time is due."""
+    from .usage_invoice_service import UsageBillingService  # noqa: PLC0415
+
+    logger.info("Collecting due usage invoices")
+
+    try:
+        collected, errors = UsageBillingService.collect_due_usage_invoices()
+        return {
+            "success": errors == 0,
+            "collected": collected,
+            "errors": errors,
+        }
+    except Exception as e:
+        logger.exception(f"Error collecting due usage invoices: {e}")
+        return {"success": False, "error": str(e)}
+
+
 def run_billing_cycle_workflow() -> dict[str, Any]:
     """
     Run the complete billing cycle workflow.
@@ -233,6 +251,7 @@ def run_billing_cycle_workflow() -> dict[str, Any]:
     1. Closes expired cycles
     2. Rates pending aggregations
     3. Generates invoices
+    4. Collects usage invoices whose persisted charge time is due
     Should be run hourly.
     """
     logger.info("Running billing cycle workflow")
@@ -241,6 +260,7 @@ def run_billing_cycle_workflow() -> dict[str, Any]:
         "closed_cycles": None,
         "rated": None,
         "invoices": None,
+        "usage_collection": None,
     }
 
     try:
@@ -252,6 +272,9 @@ def run_billing_cycle_workflow() -> dict[str, Any]:
 
         # Step 3: Generate invoices
         results["invoices"] = generate_pending_invoices()
+
+        # Step 4: Collect only invoices whose notice window has elapsed
+        results["usage_collection"] = collect_due_usage_invoices()
 
         # Log workflow completion
         AuditService.log_simple_event(

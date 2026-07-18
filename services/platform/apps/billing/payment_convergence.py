@@ -14,7 +14,7 @@ from apps.common.types import Err, Ok, Result
 
 from .metering_models import BillingCycle, UsageAggregation
 from .payment_models import Payment, PaymentRetryAttempt, PaymentRetryPolicy
-from .recurring_billing import fixed_renewal_schedule, next_billing_period_end
+from .recurring_billing import fixed_renewal_schedule
 from .subscription_models import Subscription
 from .validators import log_security_event
 
@@ -447,13 +447,7 @@ class PaymentSuccessService:
         elif current_end < cycle.period_end:
             return f"Subscription period mismatch for {subscription.subscription_number}"
 
-        next_period_end = next_billing_period_end(
-            cycle.period_end,
-            subscription.billing_cycle,
-            anchor_day=subscription.billing_anchor_day,
-            custom_cycle_days=subscription.custom_cycle_days,
-        )
-        next_proforma_at, next_charge_at = fixed_renewal_schedule(next_period_end)
+        next_proforma_at, next_charge_at = fixed_renewal_schedule(cycle.period_end)
         subscription.next_proforma_at = next_proforma_at
         subscription.next_charge_at = next_charge_at
         subscription.next_billing_date = next_proforma_at

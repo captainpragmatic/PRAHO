@@ -16,6 +16,7 @@ from unittest.mock import MagicMock, patch
 from django.test import TestCase
 from django.utils import timezone
 
+from apps.billing import metering_tasks
 from apps.billing.metering_models import (
     BillingCycle,
     UsageAggregation,
@@ -240,6 +241,16 @@ class BillingCycleTasksTestCase(TestCase):
         self.assertTrue(result["success"])
         self.assertEqual(result["generated"], 3)
 
+    @patch("apps.billing.usage_invoice_service.UsageBillingService")
+    def test_collect_due_usage_invoices(self, mock_service_class):
+        mock_service_class.collect_due_usage_invoices.return_value = (2, 1)
+
+        result = metering_tasks.collect_due_usage_invoices()
+
+        self.assertFalse(result["success"])
+        self.assertEqual(result["collected"], 2)
+        self.assertEqual(result["errors"], 1)
+
 
 class RatePendingAggregationsTestCase(TestCase):
     """Test rate_pending_aggregations task."""
@@ -321,6 +332,7 @@ class BillingWorkflowTestCase(TestCase):
     """Test run_billing_cycle_workflow task."""
 
     @patch("apps.audit.services.AuditService")
+    @patch("apps.billing.metering_tasks.collect_due_usage_invoices")
     @patch("apps.billing.metering_tasks.generate_pending_invoices")
     @patch("apps.billing.metering_tasks.rate_pending_aggregations")
     @patch("apps.billing.metering_tasks.close_expired_billing_cycles")
@@ -329,12 +341,14 @@ class BillingWorkflowTestCase(TestCase):
         mock_close,
         mock_rate,
         mock_generate,
+        mock_collect,
         mock_audit,
     ):
         """Test complete billing cycle workflow."""
         mock_close.return_value = {"success": True, "closed": 5}
         mock_rate.return_value = {"success": True, "rated": 10}
         mock_generate.return_value = {"success": True, "generated": 3}
+        mock_collect.return_value = {"success": True, "collected": 2, "errors": 0}
 
         result = run_billing_cycle_workflow()
 
@@ -343,6 +357,8 @@ class BillingWorkflowTestCase(TestCase):
         mock_close.assert_called_once()
         mock_rate.assert_called_once()
         mock_generate.assert_called_once()
+        mock_collect.assert_called_once()
+        self.assertEqual(result["results"]["usage_collection"]["collected"], 2)
 
 
 class AlertTasksTestCase(TestCase):

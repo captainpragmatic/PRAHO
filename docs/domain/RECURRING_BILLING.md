@@ -37,10 +37,10 @@ From 1 January 2026, the submission deadline is five Romanian working days. A CN
 | `billing-expired-trials` | Cancel unpaid expired trials and expire their services |
 | `billing-grace-expirations` | Apply subscription and service non-payment lifecycle |
 | `Process Pending Usage Events` | Retry usage events that were not aggregated immediately |
-| `Run Billing Cycle Workflow` | Close expired cycles, rate usage, issue usage invoices, and queue authorized collection |
+| `Run Billing Cycle Workflow` | Close expired cycles, rate usage, issue usage invoices, and collect due authorized usage charges |
 | `Collect Virtualmin Usage` / `Collect Service Usage` | Record local cumulative hosting snapshots |
 
-The fixed renewal schedule is proforma at period end minus 14 days and automatic charge at period end minus 7 days. A definitive recurring decline schedules exactly one policy-controlled retry chain; duplicate webhook or synchronous handling cannot consume another retry slot. Retry ownership is persisted before the Stripe call, and stale worker leases resume idempotently after two task timeouts without recharging an already-succeeded result. Usage is rated after the measured period ends and is invoiced separately.
+The fixed renewal schedule is proforma at period end minus 14 days and automatic charge at period end minus 7 days. A definitive recurring decline schedules exactly one policy-controlled retry chain; duplicate webhook or synchronous handling cannot consume another retry slot. Retry ownership is persisted before the Stripe call, and stale worker leases resume idempotently after two task timeouts without recharging an already-succeeded result. Usage is rated and invoiced after the measured period ends; its automatic charge is scheduled for period end plus 7 days and is not attempted when the invoice is issued.
 
 Usage rating is fail closed. Billing periods must be positive and non-overlapping, every aggregation must belong to the cycle's customer and subscription, and each billable meter must resolve an exact meter price in the subscription currency at the cycle start. Expired, overlapping, negative, gapped, or incomplete price schedules are rejected; fractional cents use banker's rounding, and the exact tier and brackets are snapshotted onto the rated aggregation. Missing prices or one failed meter roll back the complete cycle rating, so partial usage can never be invoiced.
 

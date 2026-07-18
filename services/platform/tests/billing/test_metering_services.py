@@ -18,6 +18,7 @@ from django.db.models import Sum
 from django.test import TestCase, TransactionTestCase
 from django.utils import timezone
 
+from apps.billing.gateways.base import PaymentIntentResult
 from apps.billing.models import (
     BillingCycle,
     CreditLedger,
@@ -48,6 +49,7 @@ from apps.billing.usage_invoice_service import UsageBillingService
 from apps.common.types import Err
 from apps.customers.models import Customer, CustomerAddress, CustomerPaymentMethod
 from apps.products.models import Product
+from apps.settings.services import SettingsService
 
 
 def _metering_service_setup(test_instance):
@@ -849,6 +851,35 @@ class UsageInvoiceServiceTestCase(TestCase):
 
         self.service = UsageInvoiceService()
 
+    def _enable_usage_auto_payment(self) -> CustomerPaymentMethod:
+        method = CustomerPaymentMethod.objects.create(
+            customer=self.customer,
+            method_type="stripe_card",
+            stripe_customer_id="cus_usage_invoice",
+            stripe_payment_method_id="pm_usage_invoice",
+            display_name="Visa ending 4242",
+            last_four="4242",
+            is_active=True,
+        )
+        authorization = RecurringPaymentAuthorization.objects.create(
+            customer=self.customer,
+            payment_method=method,
+            status="active",
+            setup_intent_id="seti_usage_invoice",
+            terms_version=RecurringPaymentAuthorizationService.TERMS_VERSION,
+            terms_text=RecurringPaymentAuthorizationService.TERMS_TEXT,
+            terms_text_hash=hashlib.sha256(RecurringPaymentAuthorizationService.TERMS_TEXT.encode("utf-8")).hexdigest(),
+            granted_by_role="owner",
+            granted_at=timezone.now(),
+        )
+        self.subscription.saved_payment_method = method
+        self.subscription.payment_authorization = authorization
+        self.subscription.auto_payment_enabled = True
+        self.subscription.save(
+            update_fields=["saved_payment_method", "payment_authorization", "auto_payment_enabled", "updated_at"]
+        )
+        return method
+
     def test_generate_invoice_from_cycle(self):
         """Test generating invoice from billing cycle."""
         zero_charge_aggregation = UsageAggregation.objects.create(
@@ -1019,39 +1050,98 @@ class UsageInvoiceServiceTestCase(TestCase):
         self.assertEqual(invoice.total_cents, 4)
 
     @patch("apps.billing.tasks.process_auto_payment_async")
-    def test_pending_usage_invoice_queues_authorized_auto_payment(self, mock_auto_payment):
-        method = CustomerPaymentMethod.objects.create(
-            customer=self.customer,
-            method_type="stripe_card",
-            stripe_customer_id="cus_usage_invoice",
-            stripe_payment_method_id="pm_usage_invoice",
-            display_name="Visa ending 4242",
-            last_four="4242",
-            is_active=True,
-        )
-        authorization = RecurringPaymentAuthorization.objects.create(
-            customer=self.customer,
-            payment_method=method,
-            status="active",
-            setup_intent_id="seti_usage_invoice",
-            terms_version=RecurringPaymentAuthorizationService.TERMS_VERSION,
-            terms_text=RecurringPaymentAuthorizationService.TERMS_TEXT,
-            terms_text_hash=hashlib.sha256(RecurringPaymentAuthorizationService.TERMS_TEXT.encode("utf-8")).hexdigest(),
-            granted_by_role="owner",
-            granted_at=timezone.now(),
-        )
-        self.subscription.saved_payment_method = method
-        self.subscription.payment_authorization = authorization
-        self.subscription.auto_payment_enabled = True
-        self.subscription.save(
-            update_fields=["saved_payment_method", "payment_authorization", "auto_payment_enabled", "updated_at"]
-        )
+    def test_pending_usage_invoice_waits_for_scheduled_charge_time(self, mock_auto_payment):
+        self._enable_usage_auto_payment()
 
         generated, errors = UsageBillingService.generate_pending_invoices()
 
         self.assertEqual((generated, errors), (1, 0))
         self.billing_cycle.refresh_from_db()
-        mock_auto_payment.assert_called_once_with(str(self.billing_cycle.usage_invoice_id))
+        assert self.billing_cycle.usage_invoice_id is not None
+        usage_invoice = Invoice.objects.get(id=self.billing_cycle.usage_invoice_id)
+        self.assertEqual(usage_invoice.due_at, self.billing_cycle.period_end + timedelta(days=7))
+        mock_auto_payment.assert_not_called()
+
+    @patch("apps.billing.payment_service.PaymentGatewayFactory.create_gateway")
+    def test_usage_collection_charges_once_at_due_boundary(self, mock_create_gateway):
+        self._enable_usage_auto_payment()
+        SettingsService.update_setting(
+            key="billing.recurring_auto_collection_enabled",
+            value=True,
+            reason="Exercise usage collection schedule",
+        )
+        generated, errors = UsageBillingService.generate_pending_invoices()
+        self.assertEqual((generated, errors), (1, 0))
+        self.billing_cycle.refresh_from_db()
+        assert self.billing_cycle.usage_invoice_id is not None
+        usage_invoice = Invoice.objects.get(id=self.billing_cycle.usage_invoice_id)
+
+        gateway = MagicMock()
+        gateway.create_off_session_payment_intent.return_value = PaymentIntentResult(
+            success=True,
+            payment_intent_id="pi_usage_due_305",
+            client_secret=None,
+            error=None,
+        )
+        mock_create_gateway.return_value = gateway
+
+        before_due = UsageBillingService.collect_due_usage_invoices(
+            as_of=usage_invoice.due_at - timedelta(microseconds=1)
+        )
+        at_due = UsageBillingService.collect_due_usage_invoices(as_of=usage_invoice.due_at)
+        after_due = UsageBillingService.collect_due_usage_invoices(as_of=usage_invoice.due_at + timedelta(hours=1))
+
+        self.assertEqual(before_due, (0, 0))
+        self.assertEqual(at_due, (1, 0))
+        self.assertEqual(after_due, (0, 0))
+        payment = Payment.objects.get(invoice=usage_invoice, payment_method="stripe")
+        self.assertEqual(payment.gateway_txn_id, "pi_usage_due_305")
+        self.assertEqual(payment.status, "pending")
+        gateway.create_off_session_payment_intent.assert_called_once()
+
+    @patch("apps.billing.payment_service.PaymentGatewayFactory.create_gateway")
+    def test_usage_collection_resumes_an_uncertain_gateway_attempt(self, mock_create_gateway):
+        self._enable_usage_auto_payment()
+        SettingsService.update_setting(
+            key="billing.recurring_auto_collection_enabled",
+            value=True,
+            reason="Exercise resumable usage collection",
+        )
+        generated, errors = UsageBillingService.generate_pending_invoices()
+        self.assertEqual((generated, errors), (1, 0))
+        self.billing_cycle.refresh_from_db()
+        assert self.billing_cycle.usage_invoice_id is not None
+        usage_invoice = Invoice.objects.get(id=self.billing_cycle.usage_invoice_id)
+
+        gateway = MagicMock()
+        gateway.create_off_session_payment_intent.side_effect = [
+            PaymentIntentResult(
+                success=False,
+                payment_intent_id="",
+                client_secret=None,
+                error="connection interrupted",
+                retryable=True,
+            ),
+            PaymentIntentResult(
+                success=True,
+                payment_intent_id="pi_usage_resumed_305",
+                client_secret=None,
+                error=None,
+            ),
+        ]
+        mock_create_gateway.return_value = gateway
+
+        uncertain = UsageBillingService.collect_due_usage_invoices(as_of=usage_invoice.due_at)
+        resumed = UsageBillingService.collect_due_usage_invoices(as_of=usage_invoice.due_at + timedelta(hours=1))
+
+        self.assertEqual(uncertain, (0, 1))
+        self.assertEqual(resumed, (1, 0))
+        payment = Payment.objects.get(invoice=usage_invoice, payment_method="stripe")
+        self.assertEqual(payment.gateway_txn_id, "pi_usage_resumed_305")
+        self.assertEqual(gateway.create_off_session_payment_intent.call_count, 2)
+        first_key = gateway.create_off_session_payment_intent.call_args_list[0].kwargs["idempotency_key"]
+        second_key = gateway.create_off_session_payment_intent.call_args_list[1].kwargs["idempotency_key"]
+        self.assertEqual(first_key, second_key)
 
     def test_cycle_without_billable_usage_finalizes_without_zero_invoice(self):
         self.aggregation.charge_cents = 0

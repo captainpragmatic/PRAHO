@@ -564,8 +564,8 @@ def process_auto_payment(invoice_id: str) -> dict[str, Any]:
 
         invoice = Invoice.objects.get(id=invoice_id)
 
-        if invoice.status != "issued":
-            logger.info(f"💳 [AutoPay] Invoice {invoice.number} is not issued/pending, skipping auto-payment")
+        if invoice.status not in {"issued", "overdue"}:
+            logger.info(f"💳 [AutoPay] Invoice {invoice.number} is not payable, skipping auto-payment")
             return {
                 "success": True,
                 "invoice_id": str(invoice.id),

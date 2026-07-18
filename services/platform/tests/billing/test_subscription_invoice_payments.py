@@ -1904,6 +1904,40 @@ class SubscriptionInvoicePaymentTestCase(TestCase):
         self.assertEqual(self.subscription.last_payment_amount_cents, self.invoice.total_cents)
         self.assertEqual(self.service.expires_at, self.billing_cycle.period_end)
 
+    @patch("apps.billing.payment_service.log_security_event")
+    @patch("apps.billing.payment_service.PaymentGatewayFactory.create_gateway")
+    def test_paid_fixed_cycle_schedules_next_renewal_from_paid_through_boundary(
+        self,
+        mock_create_gateway: MagicMock,
+        _mock_log_security_event: MagicMock,
+    ) -> None:
+        gateway = MagicMock()
+        gateway.create_off_session_payment_intent.return_value = _intent_result(
+            payment_intent_id="pi_next_renewal_schedule_305"
+        )
+        gateway.confirm_payment.return_value = self._succeeded_gateway_result()
+        mock_create_gateway.return_value = gateway
+
+        intent = PaymentService.create_payment_intent_for_invoice(
+            self.invoice.id,
+            self.payment_method.stripe_payment_method_id,
+        )
+        result = PaymentService.confirm_payment(
+            intent["payment_intent_id"],
+            customer_id=self.customer.id,
+        )
+
+        self.assertTrue(result["success"], result)
+        self.subscription.refresh_from_db()
+        self.assertEqual(
+            self.subscription.next_proforma_at,
+            self.billing_cycle.period_end - timedelta(days=14),
+        )
+        self.assertEqual(
+            self.subscription.next_charge_at,
+            self.billing_cycle.period_end - timedelta(days=7),
+        )
+
     @patch("apps.billing.payment_service.PaymentGatewayFactory.create_gateway")
     def test_postpaid_usage_invoice_uses_the_subscription_mandate(
         self,
@@ -2003,6 +2037,29 @@ class SubscriptionInvoicePaymentTestCase(TestCase):
             collection_status="paid",
         )
         mock_create_intent.return_value = _intent_result(payment_intent_id="pi_usage_task_301")
+
+        result = process_auto_payment(str(self.invoice.id))
+
+        self.assertTrue(result["success"], result)
+        mock_create_intent.assert_called_once_with(
+            invoice_id=self.invoice.id,
+            payment_method_id=self.payment_method.stripe_payment_method_id,
+        )
+
+    @patch("apps.billing.payment_service.PaymentService.create_payment_intent_for_invoice")
+    def test_overdue_usage_invoice_remains_collectable_after_a_missed_run(
+        self,
+        mock_create_intent: MagicMock,
+    ) -> None:
+        BillingCycle.objects.filter(pk=self.billing_cycle.pk).update(
+            invoice=None,
+            usage_invoice=self.invoice,
+            status="invoiced",
+            collection_status="paid",
+        )
+        self.invoice.mark_overdue()
+        self.invoice.save(update_fields=["status", "updated_at"])
+        mock_create_intent.return_value = _intent_result(payment_intent_id="pi_overdue_usage_task_305")
 
         result = process_auto_payment(str(self.invoice.id))
 

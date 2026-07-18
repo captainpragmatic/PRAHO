@@ -13,13 +13,13 @@ This service handles:
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
 from django.core.exceptions import ObjectDoesNotExist
 from django.db import transaction
-from django.db.models import Max, Sum
+from django.db.models import Exists, Max, OuterRef, Sum
 from django.utils import timezone
 from django_fsm import TransitionNotAllowed
 
@@ -34,6 +34,7 @@ from .invoice_models import Invoice, InvoiceLine, InvoiceSequence
 from .metering_models import BillingCycle, UsageAggregation, UsageMeter
 from .metering_service import AggregationService, RatingEngine
 from .payment_models import CreditLedger, Payment
+from .recurring_billing import usage_collection_schedule
 
 logger = logging.getLogger(__name__)
 
@@ -155,6 +156,7 @@ class UsageInvoiceService:
             total_cents = net_amount_cents + tax_cents
             customer_credit = self._get_customer_credit_balance(customer)
             credit_applied_cents = min(max(customer_credit, 0), total_cents)
+            _notice_at, charge_at = usage_collection_schedule(billing_cycle.period_end)
 
             # Create invoice - subtotal is the NET taxable amount (matching Invoice.clean() validation)
             invoice = Invoice.objects.create(
@@ -167,7 +169,7 @@ class UsageInvoiceService:
                 total_cents=total_cents,
                 discount_cents=discount_cents,
                 issued_at=timezone.now(),
-                due_at=billing_config.get_payment_due_date(),
+                due_at=charge_at,
                 bill_to_name=billing_address.get("name", ""),
                 bill_to_tax_id=billing_address.get("tax_id", ""),
                 bill_to_cnp=billing_address.get("cnp", ""),
@@ -496,11 +498,6 @@ class UsageBillingService:
                 if not invoice_id:
                     continue
                 generated += 1
-                cycle = BillingCycle.objects.select_related("subscription").get(pk=cycle_id)
-                if cycle.subscription.auto_payment_enabled:
-                    from .tasks import process_auto_payment_async  # noqa: PLC0415
-
-                    process_auto_payment_async(invoice_id)
             else:
                 errors += 1
                 logger.error(f"Error generating invoice for cycle {cycle_id}: {result.unwrap_err()}")
@@ -508,3 +505,47 @@ class UsageBillingService:
         logger.info(f"Generated {generated} invoices, {errors} errors")
 
         return generated, errors
+
+    @staticmethod
+    def collect_due_usage_invoices(as_of: datetime | None = None) -> tuple[int, int]:
+        """Collect authorized post-paid usage only when its notice window has elapsed."""
+        from .tasks import process_auto_payment  # noqa: PLC0415
+
+        run_at = as_of or timezone.now()
+        # Leave a gateway-less pending reservation eligible so PaymentService can
+        # resume its original idempotency key after an interrupted create call.
+        blocking_recurring_attempts = Payment.objects.filter(
+            invoice_id=OuterRef("usage_invoice_id"),
+            payment_method="stripe",
+            meta__source="recurring_billing",
+        ).exclude(status="pending", gateway_txn_id__isnull=True)
+        due_invoice_ids = list(
+            BillingCycle.objects.filter(
+                status="invoiced",
+                usage_invoice__status__in=("issued", "overdue"),
+                usage_invoice__due_at__lte=run_at,
+                subscription__auto_payment_enabled=True,
+            )
+            .annotate(has_blocking_attempt=Exists(blocking_recurring_attempts))
+            .filter(has_blocking_attempt=False)
+            .order_by()
+            .values_list("usage_invoice_id", flat=True)
+            .distinct()
+        )
+
+        collected = 0
+        errors = 0
+        for invoice_id in due_invoice_ids:
+            result = process_auto_payment(str(invoice_id))
+            if result.get("success"):
+                collected += 1
+            else:
+                errors += 1
+                logger.error(
+                    "Usage auto-collection failed for invoice %s: %s",
+                    invoice_id,
+                    result.get("error") or "unknown error",
+                )
+
+        logger.info("Collected %s due usage invoices, %s errors", collected, errors)
+        return collected, errors
