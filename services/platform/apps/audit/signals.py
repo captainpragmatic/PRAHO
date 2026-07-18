@@ -8,8 +8,13 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from django.conf import settings
-from django.db import transaction
 from django.db.models.signals import post_save, pre_delete
+
+# Bound directly (not via the transaction module attribute): tests elsewhere patch
+# django.db.transaction.atomic through their own module's reference, which mutates the
+# SHARED module attribute — this signal's savepoint must not be swept into assertions
+# about other apps' transaction behavior.
+from django.db.transaction import atomic
 from django.dispatch import Signal, receiver
 from django.http import HttpRequest
 
@@ -800,7 +805,7 @@ def stamp_audit_event_integrity_hash(sender: Any, instance: AuditEvent, created:
         # blocks (order confirmation). Without the savepoint, swallowing the exception below
         # would let the caller "commit" a transaction Django then silently rolls back — the
         # exact SFH-3 failure mode (audit failure must never undo a financial transaction).
-        with transaction.atomic():
+        with atomic():
             AuditEvent.objects.filter(pk=instance.pk).update(metadata=metadata)
         instance.metadata = metadata
     except Exception as e:
@@ -811,7 +816,7 @@ def stamp_audit_event_integrity_hash(sender: Any, instance: AuditEvent, created:
         # pre-hashing legacy row and demotes to an info-level "unverifiable" finding, which
         # is precisely the low-visibility outcome #217 exists to eliminate.
         try:
-            with transaction.atomic():
+            with atomic():
                 AuditEvent.objects.filter(pk=instance.pk).update(
                     metadata={**base_metadata, "integrity_hash_version": AUDIT_INTEGRITY_HASH_VERSION}
                 )
