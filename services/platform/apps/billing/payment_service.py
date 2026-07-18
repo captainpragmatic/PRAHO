@@ -571,11 +571,21 @@ class PaymentService:
                     client_secret=None,
                     error=reservation_error,
                 )
+            # #240/#294 replay safety: a resumed attempt reuses its original idempotency
+            # key, and Stripe rejects a key replay whose request differs. The gateway
+            # request therefore derives from the attempt's STORED snapshot — identical to
+            # payment_metadata on a fresh attempt, and the original request on a resume,
+            # no matter what metadata the retry caller passes.
+            snapshot_metadata = {
+                k: v
+                for k, v in (payment.meta or {}).items()
+                if k not in ("client_secret", "order_id", "gateway") and v is not None
+            }
             result = payment_gateway.create_payment_intent(
                 order_id=str(order.id),
                 amount_cents=expected_amount_cents,
                 currency=resolved_currency,
-                metadata=payment_metadata,
+                metadata=snapshot_metadata,
                 idempotency_key=idempotency_key,
             )
             if not result.get("success", False):

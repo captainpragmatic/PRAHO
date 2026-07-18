@@ -141,23 +141,41 @@ class CreatePaymentIntentTests(TestCase):
         self.assertFalse(result["success"])
         self.assertIn("Payment creation failed", result["error"])
 
-    @patch("apps.billing.payment_service.log_security_event")
-    @patch("apps.billing.payment_service.PaymentGatewayFactory.create_gateway")
-    def test_compatibility_wrapper_keeps_caller_metadata_local_only(
-        self, mock_create_gw: MagicMock, mock_log: MagicMock
-    ) -> None:
-        gw = _make_mock_gateway()
-        mock_create_gw.return_value = gw
+    def test_resumed_attempt_replays_its_original_metadata(self) -> None:
+        """#240/#294 replay safety under the snapshot contract: caller metadata reaches the
+        gateway, but a RESUMED attempt (pending, no gateway id) must replay the ORIGINAL
+        attempt's metadata with its original idempotency key — a retry passing different
+        caller metadata would otherwise be rejected by Stripe as a mismatched key reuse."""
+        order = _make_order(self.customer, total_cents=11900)
+        gateway = _make_mock_gateway()
+        with (
+            patch("apps.billing.payment_service.log_security_event", MagicMock()),
+            patch("apps.billing.payment_service.PaymentGatewayFactory.create_gateway", return_value=gateway),
+        ):
+            gateway.create_payment_intent.return_value = {
+                "success": False,
+                "payment_intent_id": None,
+                "client_secret": None,
+                "error": "network interruption",
+            }
+            PaymentService.create_payment_intent_direct(
+                order_id=str(order.id),
+                customer_id=str(self.customer.id),
+                metadata={"campaign": "original-value"},
+            )
+            gateway.create_payment_intent.return_value = {
+                "success": True,
+                "payment_intent_id": "pi_replayed",
+                "client_secret": "cs_replayed",
+            }
+            PaymentService.create_payment_intent_direct(
+                order_id=str(order.id),
+                customer_id=str(self.customer.id),
+                metadata={"campaign": "CHANGED-value"},
+            )
 
-        PaymentService.create_payment_intent(
-            str(self.order.id), gateway="stripe", metadata={"custom_key": "custom_value"}
-        )
-
-        call_kwargs = gw.create_payment_intent.call_args[1]
-        self.assertNotIn("custom_key", call_kwargs["metadata"])
-        self.assertEqual(call_kwargs["metadata"]["platform"], "PRAHO")
-        payment = Payment.objects.get(gateway_txn_id="pi_test123")
-        self.assertEqual(payment.meta["custom_key"], "custom_value")
+        replay_kwargs = gateway.create_payment_intent.call_args.kwargs
+        self.assertEqual(replay_kwargs["metadata"].get("campaign"), "original-value")
 
     @patch("apps.billing.payment_service.log_security_event")
     @patch("apps.billing.payment_service.PaymentGatewayFactory.create_gateway")

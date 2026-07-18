@@ -394,7 +394,11 @@ class OrderService:
                 idempotency_key=data.idempotency_key,
                 # Customer snapshot fields
                 customer_email=data.customer.primary_email,
-                customer_name=data.customer.name,
+                # The snapshot is what invoices bill from now on: capture the LEGAL billing
+                # identity (registered/trading name first, per Customer.get_billing_name),
+                # not the internal label — an individual/PFA with a registered trading name
+                # must be invoiced under it (#211).
+                customer_name=data.customer.get_billing_name(),
                 customer_company=data.customer.company_name or "",
                 customer_vat_id=getattr(data.customer.tax_profile, "vat_number", "")
                 if hasattr(data.customer, "tax_profile")
