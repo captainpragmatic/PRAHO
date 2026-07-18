@@ -194,6 +194,79 @@ class UBLInvoiceBuilderTestCase(TestCase):
         note = doc.find(f".//{{{NAMESPACES['cac']}}}PaymentTerms/{{{NAMESPACES['cbc']}}}Note")
         self.assertEqual(note.text, "Net 30 days, due 2026-02-15")
 
+    def _invoice_at(self, number, issued_at, due_at):
+        """Invoice with explicit aware timestamps, for DST-boundary date assertions."""
+        invoice = InvoiceFactory(
+            customer=self.customer, currency=self.currency, number=number,
+            bill_to_name="Customer SRL", bill_to_country="RO", bill_to_tax_id="RO87654321",
+            status="issued", issued_at=issued_at, due_at=due_at,
+            subtotal_cents=100000, tax_total_cents=19000, total_cents=119000,
+        )
+        InvoiceLineFactory(
+            invoice=invoice, description="Web Hosting Service", unit_price_cents=100000,
+            quantity=1, tax_rate=Decimal("0.1900"),
+        )
+        return invoice
+
+    def test_issue_date_rolls_in_summer_at_2130_utc(self):
+        """#220: EEST is UTC+3 — 21:30 UTC in July is already 00:30 the next Romanian day.
+        A fixed-UTC+2 implementation would NOT roll here; paired with the winter test below,
+        this pins that the conversion is DST-aware, not a constant offset."""
+        invoice = self._invoice_at(
+            "INV-2026-TZ2",
+            issued_at=datetime(2026, 7, 15, 21, 30, tzinfo=UTC),
+            due_at=datetime(2026, 8, 14, 21, 30, tzinfo=UTC),
+        )
+        doc = etree.fromstring(UBLInvoiceBuilder(invoice).build().encode())
+
+        self.assertEqual(doc.find(f".//{{{NAMESPACES['cbc']}}}IssueDate").text, "2026-07-16")
+
+    def test_issue_date_does_not_roll_in_winter_at_2130_utc(self):
+        """#220: EET is UTC+2 — 21:30 UTC in January is 23:30 the SAME Romanian day.
+        A fixed-UTC+3 implementation would wrongly roll here."""
+        invoice = self._invoice_at(
+            "INV-2026-TZ3",
+            issued_at=datetime(2026, 1, 15, 21, 30, tzinfo=UTC),
+            due_at=datetime(2026, 2, 14, 21, 30, tzinfo=UTC),
+        )
+        doc = etree.fromstring(UBLInvoiceBuilder(invoice).build().encode())
+
+        self.assertEqual(doc.find(f".//{{{NAMESPACES['cbc']}}}IssueDate").text, "2026-01-15")
+
+    def test_payment_terms_spring_dst_crossing_yields_net_1_day(self):
+        """#220: the Net-N derivation must use RO-local dates, not the raw timedelta.
+
+        2026-03-28 23:30 UTC → 2026-03-29 22:30 UTC is only 23 elapsed hours (spring-forward
+        skips one), but the Romanian dates are consecutive (Mar 29 → Mar 30). The old
+        raw-datetime derivation floors 23h to 0 days and would emit "Due on receipt" —
+        contradicting the two distinct dates. Only the RO-local derivation emits Net 1.
+        """
+        invoice = self._invoice_at(
+            "INV-2026-DST1",
+            issued_at=datetime(2026, 3, 28, 23, 30, tzinfo=UTC),
+            due_at=datetime(2026, 3, 29, 22, 30, tzinfo=UTC),
+        )
+        doc = etree.fromstring(UBLInvoiceBuilder(invoice).build().encode())
+
+        note = doc.find(f".//{{{NAMESPACES['cac']}}}PaymentTerms/{{{NAMESPACES['cbc']}}}Note")
+        self.assertEqual(note.text, "Net 1 days, due 2026-03-30")
+
+    def test_payment_terms_fall_dst_crossing_yields_due_on_receipt(self):
+        """#220: converse of the spring case. 2026-10-24 21:30 UTC → 2026-10-25 21:30 UTC is
+        24 elapsed hours (fall-back repeats one), but both instants are the SAME Romanian date
+        (Oct 25, 00:30 EEST and 23:30 EET). The old derivation would emit "Net 1 days"; the
+        RO-local derivation correctly emits "Due on receipt". Also locks the days <= 0 branch.
+        """
+        invoice = self._invoice_at(
+            "INV-2026-DST2",
+            issued_at=datetime(2026, 10, 24, 21, 30, tzinfo=UTC),
+            due_at=datetime(2026, 10, 25, 21, 30, tzinfo=UTC),
+        )
+        doc = etree.fromstring(UBLInvoiceBuilder(invoice).build().encode())
+
+        note = doc.find(f".//{{{NAMESPACES['cac']}}}PaymentTerms/{{{NAMESPACES['cbc']}}}Note")
+        self.assertEqual(note.text, "Due on receipt (2026-10-25)")
+
     def test_line_period_dates_are_untouched_datefields(self):
         """#220 non-regression: period_start/period_end are DateField (plain dates), not
         datetimes. They carry no timezone and must NOT be converted — .astimezone() on a date
