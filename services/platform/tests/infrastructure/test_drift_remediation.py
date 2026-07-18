@@ -26,6 +26,7 @@ from apps.infrastructure.models import (
     NodeSize,
     PanelType,
 )
+from apps.infrastructure.tasks import apply_scheduled_remediations_task, recover_stale_remediations_task
 from apps.users.models import User
 
 
@@ -347,6 +348,10 @@ class TestExecuteRemediation(DriftRemediationTestBase):
     @patch("apps.infrastructure.drift_remediation.DriftRemediationService._take_snapshot")
     def test_execute_fails_fast_for_unfixable_field_without_snapshot(self, mock_snapshot):
         """Unfixable fields must fail before any snapshot — no no-op 'remediated', no rollback."""
+        self.report.field_name = "ipv4_address"
+        self.report.expected_value = "1.2.3.4"
+        self.report.actual_value = "5.6.7.8"
+        self.report.save(update_fields=["field_name", "expected_value", "actual_value"])
         self.remediation_request.status = "approved"
         self.remediation_request.action_details = {
             "field_name": "ipv4_address",
@@ -413,6 +418,240 @@ class TestScheduledRemediation(DriftRemediationTestBase):
             scheduled_for__lte=timezone.now(),
         )
         self.assertEqual(due.count(), 1)
+
+
+class TestExecutionClaim(DriftRemediationTestBase):
+    """Tests for the claim gate: status precondition, lifecycle and fingerprint checks."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.remediation_request.status = "approved"
+        self.remediation_request.save(update_fields=["status"])
+
+    def test_execute_requires_approved_status(self):
+        """Q-retry re-entry or API misuse cannot re-execute a settled request."""
+        self.remediation_request.status = "completed"
+        self.remediation_request.save(update_fields=["status"])
+
+        result = self.service.execute_remediation(self.remediation_request)
+        self.assertTrue(result.is_err())
+        self.assertIn("Cannot execute remediation in status", result.unwrap_err())
+
+    def test_execute_superseded_when_deployment_left_scan_scope(self):
+        """A stopped/destroyed deployment must never be remediated."""
+        self.deployment.status = "stopped"
+        self.deployment.save(update_fields=["status"])
+
+        result = self.service.execute_remediation(self.remediation_request)
+        self.assertTrue(result.is_err())
+        self.assertIn("left scan scope", result.unwrap_err())
+        self.remediation_request.refresh_from_db()
+        self.assertEqual(self.remediation_request.status, "superseded")
+
+    def test_execute_superseded_when_report_resolved(self):
+        """A report resolved after approval leaves nothing to remediate."""
+        self.report.resolved = True
+        self.report.save(update_fields=["resolved"])
+
+        result = self.service.execute_remediation(self.remediation_request)
+        self.assertTrue(result.is_err())
+        self.remediation_request.refresh_from_db()
+        self.assertEqual(self.remediation_request.status, "superseded")
+
+    def test_execute_fails_when_fingerprint_stale(self):
+        """A request approved against older drift values must not execute them."""
+        self.report.expected_value = "cpx31"
+        self.report.save(update_fields=["expected_value"])
+
+        result = self.service.execute_remediation(self.remediation_request)
+        self.assertTrue(result.is_err())
+        self.assertIn("Drift changed since approval", result.unwrap_err())
+        self.remediation_request.refresh_from_db()
+        self.assertEqual(self.remediation_request.status, "failed")
+
+    @patch("apps.infrastructure.drift_remediation.DriftRemediationService._verify_remediation")
+    @patch("apps.infrastructure.drift_remediation.DriftRemediationService._get_gateway")
+    @patch("apps.infrastructure.drift_remediation.DriftRemediationService._take_snapshot")
+    def test_stale_in_progress_is_reaped_inline_and_new_claim_succeeds(
+        self, mock_snapshot, mock_gateway, mock_verify
+    ):
+        """One crashed execution can never block a deployment forever."""
+        stale = DriftRemediationRequest.objects.create(
+            report=self.report,
+            deployment=self.deployment,
+            action_type="apply_desired",
+            status="in_progress",
+            started_at=timezone.now() - timedelta(minutes=31),
+        )
+        snapshot = DriftSnapshot.objects.create(
+            deployment=self.deployment,
+            provider_snapshot_id="snap-claim",
+            snapshot_type="pre_remediation",
+            status="available",
+        )
+        mock_snapshot.return_value = Ok(snapshot)
+        mock_gw = MagicMock()
+        mock_gw.resize.return_value = Ok(True)
+        mock_gateway.return_value = mock_gw
+        mock_verify.return_value = Ok(True)
+
+        result = self.service.execute_remediation(self.remediation_request)
+
+        self.assertTrue(result.is_ok())
+        stale.refresh_from_db()
+        self.assertEqual(stale.status, "failed")
+        self.assertIn("auto-recovered", stale.error_message)
+        self.remediation_request.refresh_from_db()
+        self.assertEqual(self.remediation_request.status, "completed")
+
+    @patch("apps.infrastructure.drift_remediation.DriftRemediationService._verify_remediation")
+    @patch("apps.infrastructure.drift_remediation.DriftRemediationService._get_gateway")
+    @patch("apps.infrastructure.drift_remediation.DriftRemediationService._take_snapshot")
+    def test_completion_refuses_externally_transitioned_row(self, mock_snapshot, mock_gateway, mock_verify):
+        """A row the recovery task reaped mid-flight is never overwritten to completed."""
+        snapshot = DriftSnapshot.objects.create(
+            deployment=self.deployment,
+            provider_snapshot_id="snap-cas",
+            snapshot_type="pre_remediation",
+            status="available",
+        )
+        mock_snapshot.return_value = Ok(snapshot)
+        mock_gw = MagicMock()
+        mock_gw.resize.return_value = Ok(True)
+        mock_gateway.return_value = mock_gw
+
+        def _reap_then_ok(*args, **kwargs):
+            DriftRemediationRequest.objects.filter(pk=self.remediation_request.pk).update(status="failed")
+            return Ok(True)
+
+        mock_verify.side_effect = _reap_then_ok
+
+        result = self.service.execute_remediation(self.remediation_request)
+
+        self.assertTrue(result.is_err())
+        self.assertIn("externally transitioned", result.unwrap_err())
+        self.remediation_request.refresh_from_db()
+        self.assertEqual(self.remediation_request.status, "failed")
+        self.report.refresh_from_db()
+        self.assertFalse(self.report.resolved)
+
+
+class TestRecoverStaleRemediations(DriftRemediationTestBase):
+    """Tests for the periodic recovery task (three sweeps)."""
+
+    def _run_task(self) -> dict:
+        return recover_stale_remediations_task()
+
+    def test_stale_in_progress_marked_failed_fresh_untouched(self):
+        stale = DriftRemediationRequest.objects.create(
+            report=self.report,
+            deployment=self.deployment,
+            action_type="apply_desired",
+            status="in_progress",
+            started_at=timezone.now() - timedelta(minutes=31),
+        )
+        fresh = DriftRemediationRequest.objects.create(
+            report=self.report,
+            deployment=self.deployment,
+            action_type="apply_desired",
+            status="in_progress",
+            started_at=timezone.now(),
+        )
+
+        result = self._run_task()
+
+        stale.refresh_from_db()
+        fresh.refresh_from_db()
+        self.assertEqual(stale.status, "failed")
+        self.assertIn("auto-recovered", stale.error_message)
+        self.assertEqual(fresh.status, "in_progress")
+        self.assertEqual(result["recovered_count"], 1)
+
+    def test_in_progress_without_started_at_treated_as_stale(self):
+        anomalous = DriftRemediationRequest.objects.create(
+            report=self.report,
+            deployment=self.deployment,
+            action_type="apply_desired",
+            status="in_progress",
+            started_at=None,
+        )
+        # created_at is auto_now_add; age it past the threshold
+        DriftRemediationRequest.objects.filter(pk=anomalous.pk).update(
+            created_at=timezone.now() - timedelta(minutes=31)
+        )
+
+        self._run_task()
+
+        anomalous.refresh_from_db()
+        self.assertEqual(anomalous.status, "failed")
+
+    @patch("django_q.tasks.async_task", return_value="task-123")
+    def test_orphaned_approved_is_requeued_not_failed(self, mock_async):
+        """Human approval is re-driven, never silently discarded."""
+        self.remediation_request.status = "approved"
+        self.remediation_request.approved_at = timezone.now() - timedelta(minutes=45)
+        self.remediation_request.save(update_fields=["status", "approved_at"])
+
+        result = self._run_task()
+
+        self.remediation_request.refresh_from_db()
+        self.assertEqual(self.remediation_request.status, "approved")
+        self.assertIsNotNone(self.remediation_request.execution_claimed_at)
+        mock_async.assert_called_once_with(
+            "apps.infrastructure.tasks.execute_remediation_task",
+            self.remediation_request.pk,
+            task_name=f"remediation_{self.remediation_request.pk}",
+        )
+        self.assertEqual(result["requeued_count"], 1)
+
+    @patch("django_q.tasks.async_task", return_value="task-123")
+    def test_just_claimed_approved_is_left_alone(self, mock_async):
+        """A freshly claimed batch row must not be double-enqueued by the reaper."""
+        self.remediation_request.status = "approved"
+        self.remediation_request.approved_at = timezone.now() - timedelta(days=2)  # human approved long ago
+        self.remediation_request.execution_claimed_at = timezone.now()  # just claimed for execution
+        self.remediation_request.save(update_fields=["status", "approved_at", "execution_claimed_at"])
+
+        result = self._run_task()
+
+        mock_async.assert_not_called()
+        self.assertEqual(result["requeued_count"], 0)
+
+    def test_out_of_scope_deployment_drift_is_swept(self):
+        self.deployment.status = "stopped"
+        self.deployment.save(update_fields=["status"])
+
+        result = self._run_task()
+
+        self.report.refresh_from_db()
+        self.remediation_request.refresh_from_db()
+        self.assertTrue(self.report.resolved)
+        self.assertEqual(self.report.resolution_type, "superseded")
+        self.assertEqual(self.remediation_request.status, "superseded")
+        self.assertEqual(result["swept_reports"], 1)
+        self.assertEqual(result["swept_requests"], 1)
+
+
+class TestApplyScheduledRemediations(DriftRemediationTestBase):
+    """Tests for the per-row claim + enqueue scheduled task."""
+
+    @patch("django_q.tasks.async_task", return_value="task-123")
+    def test_due_scheduled_requests_claimed_and_enqueued_individually(self, mock_async):
+        self.remediation_request.status = "scheduled"
+        self.remediation_request.scheduled_for = timezone.now() - timedelta(minutes=5)
+        self.remediation_request.save(update_fields=["status", "scheduled_for"])
+
+        result = apply_scheduled_remediations_task()
+
+        self.remediation_request.refresh_from_db()
+        self.assertEqual(self.remediation_request.status, "approved")
+        self.assertIsNotNone(self.remediation_request.execution_claimed_at)
+        mock_async.assert_called_once_with(
+            "apps.infrastructure.tasks.execute_remediation_task",
+            self.remediation_request.pk,
+            task_name=f"remediation_{self.remediation_request.pk}",
+        )
+        self.assertEqual(result, {"claimed": 1, "due": 1})
 
 
 class _FakeClock:

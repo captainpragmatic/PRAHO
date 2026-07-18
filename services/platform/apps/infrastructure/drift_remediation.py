@@ -23,12 +23,13 @@ from apps.infrastructure.audit_service import InfrastructureAuditContext, Infras
 from apps.infrastructure.cloud_gateway import CloudProviderGateway, get_cloud_gateway
 from apps.infrastructure.models import (
     DriftRemediationRequest,
+    DriftReport,
     DriftSnapshot,
+    NodeDeployment,
 )
 from apps.infrastructure.provider_config import get_provider_token
 
 if TYPE_CHECKING:
-    from apps.infrastructure.models import NodeDeployment
     from apps.users.models import User
 
 logger = logging.getLogger(__name__)
@@ -89,6 +90,23 @@ def _get_verify_poll_interval() -> int:
         1,
         SettingsService.get_integer_setting(
             "infrastructure.remediation_verify_poll_interval_seconds", _DEFAULT_VERIFY_POLL_INTERVAL
+        ),
+    )
+
+
+# 6x the django-q2 hard worker kill (300s): a live execution can never be
+# mistaken for a crashed one.
+_DEFAULT_STALE_AFTER_MINUTES = 30
+
+
+def get_stale_after_minutes() -> int:
+    """Age after which in_progress/approved remediation state counts as stranded."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415  # Deferred: avoids circular import
+
+    return max(
+        1,
+        SettingsService.get_integer_setting(
+            "infrastructure.remediation_stale_after_minutes", _DEFAULT_STALE_AFTER_MINUTES
         ),
     )
 
@@ -264,20 +282,10 @@ class DriftRemediationService:
         """
         deployment = request.deployment
 
-        # Prevent concurrent remediation on same deployment
-        with transaction.atomic():
-            active = (
-                DriftRemediationRequest.objects.select_for_update()
-                .filter(deployment=deployment, status="in_progress")
-                .exclude(pk=request.pk)
-                .exists()
-            )
-            if active:
-                return Err("Another remediation is already in progress for this deployment")
-
-            request.status = "in_progress"
-            request.started_at = timezone.now()
-            request.save(update_fields=["status", "started_at"])
+        claim_result = self._claim_for_execution(request, deployment)
+        if claim_result.is_err():
+            return claim_result
+        request.refresh_from_db()
 
         # Pre-flight: refuse work that has no automated fix BEFORE any snapshot,
         # so legacy/manual requests fail fast instead of no-op'ing into a
@@ -325,10 +333,19 @@ class DriftRemediationService:
                 request, deployment, snapshot, "Health check failed", health_result.unwrap_err()
             )
 
-        # Step 4: Mark complete
-        request.status = "completed"
-        request.completed_at = timezone.now()
-        request.save(update_fields=["status", "completed_at"])
+        # Step 4: Mark complete (CAS — a reaped/externally-transitioned row is
+        # never overwritten, and its report stays open for the next scan)
+        finalized = DriftRemediationRequest.objects.filter(pk=request.pk, status="in_progress").update(
+            status="completed", completed_at=timezone.now()
+        )
+        if not finalized:
+            request.refresh_from_db()
+            logger.warning(
+                f"⚠️ [DriftRemediation] Request {request.pk} finished but was externally "
+                f"transitioned to '{request.status}' — not marking completed"
+            )
+            return Err(f"Request was externally transitioned to '{request.status}' during execution")
+        request.refresh_from_db()
 
         # Mark the associated report as resolved
         report = request.report
@@ -345,6 +362,75 @@ class DriftRemediationService:
             )
         except Exception as e:
             logger.warning(f"⚠️ [DriftRemediation] Failed to log audit for completion: {e}")
+
+        return Ok(True)
+
+    def _claim_for_execution(
+        self,
+        request: DriftRemediationRequest,
+        deployment: NodeDeployment,
+    ) -> Result[bool, str]:
+        """
+        Atomically claim the request for execution. The conditional update
+        (approved -> in_progress) is the portable correctness layer — SQLite's
+        select_for_update is a no-op, so row locks alone cannot prevent a
+        double claim. The deployment row lock serializes claims per deployment
+        on PostgreSQL; the partial-unique in_progress constraint is the DB
+        backstop.
+        """
+        now = timezone.now()
+        stale_cutoff = now - timedelta(minutes=get_stale_after_minutes())
+
+        with transaction.atomic():
+            locked_deployment = NodeDeployment.objects.select_for_update().get(pk=deployment.pk)
+
+            if locked_deployment.status != "completed":
+                DriftRemediationRequest.objects.filter(pk=request.pk, status="approved").update(status="superseded")
+                return Err(f"Deployment {deployment.hostname} left scan scope (status '{locked_deployment.status}')")
+
+            report = DriftReport.objects.get(pk=request.report_id)
+            if report.resolved:
+                DriftRemediationRequest.objects.filter(pk=request.pk, status="approved").update(status="superseded")
+                return Err("Drift report was resolved after approval — nothing left to remediate")
+
+            details = request.action_details or {}
+            if (
+                details.get("expected_value", "") != report.expected_value
+                or details.get("actual_value", "") != report.actual_value
+            ):
+                DriftRemediationRequest.objects.filter(pk=request.pk, status="approved").update(
+                    status="failed",
+                    error_message="Drift changed since approval — the next scan mints a fresh request",
+                    completed_at=now,
+                )
+                return Err("Drift changed since approval — stale request not executed")
+
+            # Fresh in_progress sibling blocks; a stale one (crashed worker) is
+            # reaped inline so a single stuck row can never block the
+            # deployment forever.
+            blocking = False
+            siblings = (
+                DriftRemediationRequest.objects.select_for_update()
+                .filter(deployment=deployment, status="in_progress")
+                .exclude(pk=request.pk)
+            )
+            for sibling in siblings:
+                if sibling.started_at and sibling.started_at >= stale_cutoff:
+                    blocking = True
+                else:
+                    self._mark_failed(
+                        sibling,
+                        "Remediation stuck in progress — auto-recovered (worker crash suspected)",
+                    )
+            if blocking:
+                return Err("Another remediation is already in progress for this deployment")
+
+            claimed = DriftRemediationRequest.objects.filter(pk=request.pk, status="approved").update(
+                status="in_progress", started_at=now
+            )
+            if not claimed:
+                request.refresh_from_db()
+                return Err(f"Cannot execute remediation in status '{request.status}'")
 
         return Ok(True)
 
@@ -542,49 +628,45 @@ class DriftRemediationService:
             logger.error(f"🔥 [DriftRemediation] Gateway retrieval failed: {e}")
             return None
 
-    def _mark_failed(self, request: DriftRemediationRequest, error: str) -> None:
-        """Mark a remediation request as failed."""
-        request.status = "failed"
-        request.error_message = error[:1000]
-        request.completed_at = timezone.now()
-        request.save(update_fields=["status", "error_message", "completed_at"])
+    def _finalize_from_in_progress(self, request: DriftRemediationRequest, new_status: str, error: str) -> bool:
+        """
+        Conditional terminal transition: only an in_progress row may be
+        finalized, so a request the recovery task already reaped is never
+        overwritten by a slow worker's stale result.
+        """
+        updated = DriftRemediationRequest.objects.filter(pk=request.pk, status="in_progress").update(
+            status=new_status,
+            error_message=error[:1000],
+            completed_at=timezone.now(),
+        )
+        request.refresh_from_db()
+        if not updated:
+            logger.warning(
+                f"⚠️ [DriftRemediation] Skipped marking request {request.pk} '{new_status}': "
+                f"status is already '{request.status}'"
+            )
+            return False
 
         try:
             InfrastructureAuditService.log_drift_remediation_failed(
                 request.deployment, request, error, InfrastructureAuditContext()
             )
         except Exception as e:
-            logger.warning(f"⚠️ [DriftRemediation] Failed to log audit for failure: {e}")
+            logger.warning(f"⚠️ [DriftRemediation] Failed to log audit for '{new_status}': {e}")
+        return True
+
+    def _mark_failed(self, request: DriftRemediationRequest, error: str) -> None:
+        """Mark a remediation request as failed."""
+        self._finalize_from_in_progress(request, "failed", error)
 
     def _mark_rolled_back(self, request: DriftRemediationRequest, error: str) -> None:
         """Mark a remediation request as rolled back after failure."""
-        request.status = "rolled_back"
-        request.error_message = error[:1000]
-        request.completed_at = timezone.now()
-        request.save(update_fields=["status", "error_message", "completed_at"])
-
-        try:
-            InfrastructureAuditService.log_drift_remediation_failed(
-                request.deployment, request, error, InfrastructureAuditContext()
-            )
-        except Exception as e:
-            logger.warning(f"⚠️ [DriftRemediation] Failed to log audit for rollback: {e}")
+        self._finalize_from_in_progress(request, "rolled_back", error)
 
     def _mark_rollback_failed(self, request: DriftRemediationRequest, error: str) -> None:
         """Mark a remediation request as rollback_failed when rollback itself fails."""
-        request.status = "rollback_failed"
-        request.error_message = error[:1000]
-        request.completed_at = timezone.now()
-        request.save(update_fields=["status", "error_message", "completed_at"])
-
         logger.error(f"🔥 [DriftRemediation] Rollback failed for {request.deployment.hostname}: {error}")
-
-        try:
-            InfrastructureAuditService.log_drift_remediation_failed(
-                request.deployment, request, error, InfrastructureAuditContext()
-            )
-        except Exception as e:
-            logger.warning(f"⚠️ [DriftRemediation] Failed to log audit for rollback failure: {e}")
+        self._finalize_from_in_progress(request, "rollback_failed", error)
 
 
 # Module-level singleton

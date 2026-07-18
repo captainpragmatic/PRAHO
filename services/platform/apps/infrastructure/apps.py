@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 
 _CLEANUP_FAILED_INTERVAL_MINUTES = 360  # 6 hours
 _RECOVER_STUCK_INTERVAL_MINUTES = 30
+_RECOVER_STALE_REMEDIATIONS_INTERVAL_MINUTES = 15
 
 
 class InfrastructureConfig(AppConfig):
@@ -68,6 +69,12 @@ class InfrastructureConfig(AppConfig):
                 "recover_stuck_deployments",
                 "apps.infrastructure.tasks.recover_stuck_deployments_task",
                 _RECOVER_STUCK_INTERVAL_MINUTES,
+                Schedule.MINUTES,
+            ),
+            (
+                "recover_stale_remediations",
+                "apps.infrastructure.tasks.recover_stale_remediations_task",
+                _RECOVER_STALE_REMEDIATIONS_INTERVAL_MINUTES,
                 Schedule.MINUTES,
             ),
         ]
