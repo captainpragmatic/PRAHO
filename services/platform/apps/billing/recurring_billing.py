@@ -13,6 +13,7 @@ from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 
+from apps.billing.efactura.settings import ro_local_date
 from apps.common.types import Err, Ok, Result
 from apps.settings.services import SettingsService
 
@@ -87,6 +88,12 @@ def usage_collection_schedule(period_end: datetime) -> tuple[datetime, datetime]
 class RecurringCollectionGate:
     """Single fail-closed policy gate for every automatic recurring charge."""
 
+    # "paused" here is a SYSTEM dunning state only: _pause_now()'s sole caller is
+    # grace-period expiration (payment_overdue), so collecting from a paused subscription
+    # and resuming it on success IS the intended dunning-recovery path. If a customer-facing
+    # pause is ever wired to Subscription.pause(), it must NOT reuse this status — a
+    # customer pause in the T-14..T-7 window would otherwise be charged and silently
+    # resumed against their intent.
     _FIXED_RENEWAL_STATUSES = frozenset({"active", "trialing", "past_due", "paused"})
     _RENEWABLE_SERVICE_STATUSES = frozenset({"active", "suspended"})
 
@@ -170,7 +177,18 @@ class RecurringCollectionGate:
                 return Err(
                     f"Billing cycle {cycle.id} is not scheduled for collection (status: {cycle.collection_status})"
                 )
-            if not is_usage_invoice:
+            if is_usage_invoice:
+                # Usage bills CONSUMED service, so a cancelled subscription's final usage
+                # cycle remains legitimately collectible — but that is the ONLY divergence
+                # from the renewal lifecycle. Anything else (expired, incomplete, unpaid
+                # teardown states) must not produce an off-session charge: skipping the
+                # lifecycle check entirely left long-terminated services chargeable forever.
+                if subscription.status not in (RecurringCollectionGate._FIXED_RENEWAL_STATUSES | {"cancelled"}):
+                    return Err(
+                        f"Subscription {subscription.id} status '{subscription.status}' does not "
+                        f"permit automatic usage collection"
+                    )
+            else:
                 lifecycle_error = RecurringCollectionGate._validate_fixed_renewal_lifecycle(subscription)
                 if lifecycle_error:
                     return Err(lifecycle_error)
@@ -397,14 +415,16 @@ class RecurringBillingOrchestrator:
                                     billing_cycle=cycle,
                                     description=(
                                         f"{subscription.product.name} - {subscription.billing_cycle.replace('_', ' ').title()} "
-                                        f"({cycle.period_start.date()} to {cycle.period_end.date()})"
+                                        f"({ro_local_date(cycle.period_start)} to {ro_local_date(cycle.period_end)})"
                                     ),
                                     quantity=Decimal(subscription.quantity),
                                     unit_price_cents=subscription.effective_price_cents,
                                     tax_rate=vat_rate,
                                     domain_name=getattr(subscription.service, "domain", "") or "",
-                                    period_start=cycle.period_start.date(),
-                                    period_end=cycle.period_end.date(),
+                                    # Romanian calendar days: these are DateFields emitted verbatim into
+                                    # the e-Factura InvoicePeriod (#220/#286); raw .date() is the UTC day.
+                                    period_start=ro_local_date(cycle.period_start),
+                                    period_end=ro_local_date(cycle.period_end),
                                     unit_code="C62",
                                     tax_category_code=tax_category,
                                     seller_item_id=subscription.product.slug,
@@ -526,7 +546,11 @@ class RecurringBillingOrchestrator:
                         BillingCycle.objects.select_for_update(of=("self",))
                         .filter(
                             proforma_id=proforma_id,
-                            collection_status__in=["prepared", "past_due", "processing"],
+                            # NOT past_due: an early failure webhook may have already converged
+                            # this attempt — overwriting its verdict back to "processing" hides
+                            # the definitive failure from mark_overdue_renewals and corrupts
+                            # the attempt state. The webhook's word is final.
+                            collection_status__in=["prepared", "processing"],
                         )
                         .order_by("subscription_id", "id")
                     )

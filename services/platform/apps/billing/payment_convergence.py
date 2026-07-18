@@ -170,7 +170,7 @@ class PaymentSuccessService:
             return Err(f"Payment-success convergence failed: {exc}")
 
     @staticmethod
-    def recover_unlinked_recurring_attempt(
+    def recover_unlinked_recurring_attempt(  # noqa: PLR0911  # Preserve distinct fail-closed rejection reasons
         gateway_txn_id: str,
         gateway_facts: Mapping[str, Any],
     ) -> Result[Payment, str]:
@@ -209,6 +209,14 @@ class PaymentSuccessService:
             return Err("Ambiguous pending recurring payment for early gateway event")
 
         payment = candidates[0]
+        # Attempt-level precision, not just document-level: a redelivered webhook from an
+        # EARLIER attempt (whose intent ID capture regressed or predates it) must never bind
+        # to a later attempt's pending payment — that records a real charge as failed.
+        attempt_marker = metadata.get("payment_attempt")
+        if attempt_marker is not None and str(payment.id) != str(attempt_marker):
+            return Err(
+                f"Gateway event belongs to payment attempt {attempt_marker}, not the pending attempt {payment.id}"
+            )
         validation_error = PaymentSuccessService._validate_gateway_facts(payment, gateway_facts)
         if validation_error:
             PaymentSuccessService._log_validation_failure(payment, validation_error, gateway_facts)
@@ -468,7 +476,20 @@ class PaymentSuccessService:
                 },
             )
         elif subscription.status in {"past_due", "paused"}:
+            prior_status = subscription.status
             subscription._resume_now()
+            # Dunning recovery is a money-state transition and must be auditable like the
+            # sibling trial-conversion branch: which subscription resumed, from which state,
+            # on which invoice's successful collection.
+            log_security_event(
+                event_type="subscription_dunning_recovered",
+                details={
+                    "subscription_id": str(subscription.id),
+                    "subscription_number": subscription.subscription_number,
+                    "previous_status": prior_status,
+                    "invoice_id": str(cycle.invoice_id),
+                },
+            )
         subscription.save()
 
         if service is not None:

@@ -367,7 +367,22 @@ class StripeGateway(BasePaymentGateway):
             )
         except self._stripe.error.StripeError as e:
             self.logger.warning("❌ Off-session Stripe payment failed for %s %s: %s", document_type, document_id, e)
-            return PaymentIntentResult(success=False, payment_intent_id="", client_secret=None, error=str(e))
+            # A decline still CREATES the PaymentIntent before failing it. Discarding its ID
+            # orphans the failure webhook Stripe will deliver for it — which can then be
+            # recovered onto a LATER retry attempt's pending payment, recording a genuinely
+            # successful charge as failed. Surface the ID so the caller persists it.
+            declined_intent = getattr(getattr(e, "error", None), "payment_intent", None)
+            declined_intent_id = (
+                declined_intent.get("id", "")
+                if isinstance(declined_intent, dict)
+                else getattr(declined_intent, "id", "") or ""
+            )
+            return PaymentIntentResult(
+                success=False,
+                payment_intent_id=declined_intent_id or "",
+                client_secret=None,
+                error=str(e),
+            )
         except Exception as e:
             self.logger.error("🔥 Unexpected off-session payment error for %s %s: %s", document_type, document_id, e)
             return PaymentIntentResult(

@@ -197,13 +197,19 @@ class UsageInvoiceService:
                 if agg.charge_cents > 0:
                     description = self._format_usage_description(agg)
 
+                    # quantity=1 with the EXACT rated charge as the unit price: InvoiceLine.save()
+                    # unconditionally recomputes line_total_cents as quantity * unit_price_cents,
+                    # so a truncated per-unit price silently replaced the rated charge (a 1-cent
+                    # charge over 3 units collapsed to 0) and every rounding artifact surfaced as
+                    # a phantom discount on the fiscal document. Graduated/tiered usage has no
+                    # single meaningful unit price; the consumed volume stays in the description.
                     line = InvoiceLine.objects.create(
                         invoice=invoice,
                         kind="service",
                         service=None,
                         description=description,
-                        quantity=agg.overage_value,
-                        unit_price_cents=self._get_unit_price_cents(agg),
+                        quantity=1,
+                        unit_price_cents=agg.charge_cents,
                         tax_rate=vat_rate,
                         line_total_cents=agg.charge_cents,  # Pre-tax
                     )

@@ -33,10 +33,19 @@ _PAYMENT_IDEMPOTENCY_KEY_MAX_LENGTH = 64
 logger = logging.getLogger(__name__)
 
 
-def _mark_invoice_payment_attempt_failed(payment_id: int, error: str | None) -> None:
-    """Terminally record a definitive gateway failure so a later retry gets a new key."""
+def _mark_invoice_payment_attempt_failed(payment_id: int, error: str | None, gateway_txn_id: str = "") -> None:
+    """Terminally record a definitive gateway failure so a later retry gets a new key.
+
+    The declined PaymentIntent's ID is persisted when the gateway surfaced one: Stripe will
+    deliver a failure webhook for that intent, and with the ID on this (terminal) payment the
+    webhook resolves HERE instead of entering the unlinked-recovery path, where it could bind
+    to a later retry attempt's pending payment and record a real charge as failed.
+    """
     with transaction.atomic():
         payment = Payment.objects.select_for_update(of=("self",)).get(id=payment_id)
+        if gateway_txn_id and not payment.gateway_txn_id:
+            payment.gateway_txn_id = gateway_txn_id
+            payment.save(update_fields=["gateway_txn_id", "updated_at"])
         changed = payment.apply_gateway_event("failed", {"gateway_error": error or "unknown"})
         if changed:
             converge_recurring_payment_failure(payment)
@@ -890,6 +899,8 @@ class PaymentService:
                     client_secret=None,
                     error=reservation_error,
                 )
+            # Attempt-scoped: lets webhook recovery bind ONLY to this exact attempt.
+            gateway_metadata["payment_attempt"] = str(payment.id)
             result = payment_gateway.create_off_session_payment_intent(
                 document_id=str(invoice.id),
                 document_type="invoice",
@@ -902,7 +913,9 @@ class PaymentService:
             )
             if not result.get("success", False):
                 if not result.get("retryable", False):
-                    _mark_invoice_payment_attempt_failed(payment.id, result.get("error"))
+                    _mark_invoice_payment_attempt_failed(
+                        payment.id, result.get("error"), gateway_txn_id=result.get("payment_intent_id") or ""
+                    )
                 return result
 
             payment_intent_id = result.get("payment_intent_id", "")
@@ -1174,6 +1187,8 @@ class PaymentService:
                     client_secret=None,
                     error=reservation_error,
                 )
+            # Attempt-scoped: lets webhook recovery bind ONLY to this exact attempt.
+            gateway_metadata["payment_attempt"] = str(payment.id)
             result = payment_gateway.create_off_session_payment_intent(
                 document_id=str(proforma.id),
                 document_type="proforma",
@@ -1186,7 +1201,9 @@ class PaymentService:
             )
             if not result.get("success", False):
                 if not result.get("retryable", False):
-                    _mark_invoice_payment_attempt_failed(payment.id, result.get("error"))
+                    _mark_invoice_payment_attempt_failed(
+                        payment.id, result.get("error"), gateway_txn_id=result.get("payment_intent_id") or ""
+                    )
                 return result
 
             payment_intent_id = result.get("payment_intent_id", "")

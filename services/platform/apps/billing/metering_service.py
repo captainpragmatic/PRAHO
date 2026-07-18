@@ -164,14 +164,13 @@ class MeteringService:
             if not isinstance(event_data.value, Decimal) or not event_data.value.is_finite() or event_data.value < 0:
                 return Err("Usage event value must be a finite non-negative decimal")
 
-            snapshot_sources = {"virtualmin", "service_monitor"}
-            snapshot_meters = {"disk_usage_gb", "bandwidth_gb"}
-            if (
-                event_data.source in snapshot_sources
-                and meter.name in snapshot_meters
-                and meter.aggregation_type not in {"last", "max"}
-            ):
-                return Err(f"Cumulative hosting snapshot meter '{meter.name}' must use last or max aggregation")
+            # Keyed on the meter's own semantic category, meter-wide: a cumulative snapshot
+            # (storage/bandwidth gauges) summed across readings overbills by construction, no
+            # matter what the meter is named or which source fed it — the earlier name+source
+            # allowlist let a differently-named cumulative meter (or another source) bypass
+            # the guard with the default "sum" aggregation.
+            if meter.category in {"storage", "bandwidth"} and meter.aggregation_type not in {"last", "max"}:
+                return Err(f"Cumulative {meter.category} meter '{meter.name}' must use last or max aggregation")
 
             # Get customer
             try:

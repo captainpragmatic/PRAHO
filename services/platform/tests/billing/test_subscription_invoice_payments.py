@@ -179,6 +179,7 @@ class SubscriptionInvoicePaymentTestCase(TestCase):
                 "customer_id": str(self.customer.id),
                 "platform": "PRAHO",
                 "source": "recurring_billing",
+                "payment_attempt": "1",
             },
         )
 
@@ -429,6 +430,7 @@ class SubscriptionInvoicePaymentTestCase(TestCase):
                         "customer_id": str(self.customer.id),
                         "platform": "PRAHO",
                         "source": "recurring_billing",
+                        "payment_attempt": "1",
                     },
                 }
             }
@@ -825,6 +827,7 @@ class SubscriptionInvoicePaymentTestCase(TestCase):
                         "customer_id": str(self.customer.id),
                         "platform": "PRAHO",
                         "source": "recurring_billing",
+                        "payment_attempt": "1",
                     },
                     "last_payment_error": {"message": "card declined"},
                 }
@@ -1354,6 +1357,7 @@ class SubscriptionInvoicePaymentTestCase(TestCase):
                         "customer_id": str(self.customer.id),
                         "platform": "PRAHO",
                         "source": "recurring_billing",
+                        "payment_attempt": "1",
                     },
                 }
             }
@@ -1511,6 +1515,7 @@ class SubscriptionInvoicePaymentTestCase(TestCase):
                 "customer_id": str(self.customer.id),
                 "platform": "PRAHO",
                 "source": "recurring_billing",
+                "payment_attempt": "1",
             },
             idempotency_key=f"invoice:{self.invoice.id}:stripe:1",
         )
@@ -2666,3 +2671,91 @@ class CalendarBillingPeriodTestCase(SimpleTestCase):
             next_billing_period_end(leap_day, "yearly", anchor_day=29),
             datetime(2029, 2, 28, 8, 0, tzinfo=bucharest),
         )
+
+
+class WebhookAttemptMisbindingRegressionTests(TestCase):
+    """#305 review CRITICAL: a redelivered failure webhook from an earlier declined attempt
+    must never bind to a LATER retry attempt's pending payment — that records a genuinely
+    successful charge as failed, strands the customer in dunning, and orphans the real
+    success webhook. Recovery is attempt-precise via the payment_attempt metadata marker."""
+
+    def setUp(self) -> None:
+        self.currency, _ = Currency.objects.get_or_create(
+            code="RON", defaults={"name": "Romanian Leu", "symbol": "lei", "decimals": 2}
+        )
+        self.customer = Customer.objects.create(
+            name="Misbind Test SRL",
+            customer_type="company",
+            company_name="Misbind Test SRL",
+            primary_email="misbind@test.ro",
+            status="active",
+        )
+        self.invoice = Invoice.objects.create(
+            customer=self.customer,
+            number="INV-MISBIND-1",
+            currency=self.currency,
+            status="issued",
+            subtotal_cents=10000,
+            tax_cents=2100,
+            total_cents=12100,
+        )
+        # Attempt 1: declined, terminal. Attempt 2: pending, awaiting its own intent.
+        self.p1 = Payment.objects.create(
+            customer=self.customer,
+            invoice=self.invoice,
+            payment_method="stripe",
+            amount_cents=12100,
+            currency=self.currency,
+            status="failed",
+            meta={"source": "recurring_billing", "invoice_id": str(self.invoice.id)},
+        )
+        self.p2 = Payment.objects.create(
+            customer=self.customer,
+            invoice=self.invoice,
+            payment_method="stripe",
+            amount_cents=12100,
+            currency=self.currency,
+            status="pending",
+            meta={
+                "source": "recurring_billing",
+                "invoice_id": str(self.invoice.id),
+                "invoice_number": "INV-MISBIND-1",
+                "stripe_customer_id": "cus_misbind",
+                "stripe_payment_method_id": "pm_misbind",
+            },
+        )
+
+    def _facts(self, attempt_id: object) -> dict:
+        return {
+            "metadata": {
+                "source": "recurring_billing",
+                "invoice_id": str(self.invoice.id),
+                "invoice_number": "INV-MISBIND-1",
+                "customer_id": str(self.customer.id),
+                "payment_attempt": str(attempt_id),
+            },
+            "amount_received": 12100,
+            "currency": "ron",
+            "customer_id": "cus_misbind",
+            "payment_method_id": "pm_misbind",
+        }
+
+    def test_earlier_attempts_webhook_cannot_bind_to_the_later_pending_attempt(self) -> None:
+        result = PaymentSuccessService.recover_unlinked_recurring_attempt(
+            "pi_from_declined_attempt_1", self._facts(self.p1.id)
+        )
+
+        self.assertTrue(result.is_err())
+        self.assertIn(str(self.p1.id), result.unwrap_err())
+        self.p2.refresh_from_db()
+        self.assertEqual(self.p2.status, "pending")
+        self.assertFalse(self.p2.gateway_txn_id)
+
+    def test_matching_attempt_marker_still_recovers_the_right_payment(self) -> None:
+        result = PaymentSuccessService.recover_unlinked_recurring_attempt(
+            "pi_for_attempt_2", self._facts(self.p2.id)
+        )
+
+        self.assertTrue(result.is_ok(), f"recovery failed: {result}")
+        self.p2.refresh_from_db()
+        self.assertEqual(self.p2.gateway_txn_id, "pi_for_attempt_2")

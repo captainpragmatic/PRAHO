@@ -420,7 +420,9 @@ class TestMeteringServiceRecordEvent(TestCase):
     @patch("apps.billing.metering_service.MeteringService._check_thresholds_async")
     @patch("apps.billing.metering_service.MeteringService._schedule_aggregation_update")
     def test_cumulative_hosting_snapshot_cannot_feed_sum_meter(self, mock_agg, mock_thresh):
-        meter = _make_meter(name="bandwidth_gb", aggregation_type="sum")
+        # Keyed on the meter's semantic category now — the guard fires for ANY cumulative
+        # bandwidth/storage meter regardless of name or source.
+        meter = _make_meter(name="bandwidth_gb", aggregation_type="sum", category="bandwidth")
 
         result = self.svc.record_event(
             UsageEventData(
@@ -432,7 +434,7 @@ class TestMeteringServiceRecordEvent(TestCase):
         )
 
         assert result.is_err()
-        assert "snapshot" in result.error.lower()
+        assert "cumulative" in result.error.lower()
         mock_agg.assert_not_called()
 
 
