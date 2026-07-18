@@ -1311,6 +1311,15 @@ class VirtualminBackupManagementService:
                 # nonexistent `error_message` left the failure recorded nowhere.
                 job.mark_failed(backup_result.unwrap_err())
 
+                # Backup/restore have no branch in the retry dispatcher
+                # (process_failed_virtualmin_jobs handles create/suspend/unsuspend/delete
+                # only). mark_failed() arms next_retry_at unconditionally, so the sweeper
+                # would flip this job back to "pending", wipe the status_message persisted
+                # above, and dispatch nothing — a forever-stuck job with its failure reason
+                # lost. Opt out of the sweep until these operations support retry.
+                job.next_retry_at = None
+                job.save(update_fields=["next_retry_at", "updated_at"])
+
                 return Err(f"Backup failed: {backup_result.unwrap_err()}")
 
             # Update job with success
@@ -1378,6 +1387,15 @@ class VirtualminBackupManagementService:
             if restore_result.is_err():
                 # See the backup path: assigning `error_message` silently dropped the failure.
                 job.mark_failed(restore_result.unwrap_err())
+
+                # Backup/restore have no branch in the retry dispatcher
+                # (process_failed_virtualmin_jobs handles create/suspend/unsuspend/delete
+                # only). mark_failed() arms next_retry_at unconditionally, so the sweeper
+                # would flip this job back to "pending", wipe the status_message persisted
+                # above, and dispatch nothing — a forever-stuck job with its failure reason
+                # lost. Opt out of the sweep until these operations support retry.
+                job.next_retry_at = None
+                job.save(update_fields=["next_retry_at", "updated_at"])
 
                 return Err(f"Restore failed: {restore_result.unwrap_err()}")
 
