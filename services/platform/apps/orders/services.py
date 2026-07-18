@@ -33,6 +33,13 @@ Handles order lifecycle, Romanian VAT compliance, and integration with billing/p
 UserModel = get_user_model()
 logger = logging.getLogger(__name__)
 
+_SERVICE_BILLING_CYCLE_BY_ORDER_PERIOD = {
+    "monthly": "monthly",
+    "quarterly": "quarterly",
+    "semiannual": "semi_annual",
+    "annual": "annual",
+}
+
 # ===============================================================================
 # ORDER SERVICE PARAMETER OBJECTS
 # ===============================================================================
@@ -692,10 +699,8 @@ class OrderServiceCreationService:
                 if item.domain_name:
                     service_name = f"{item.product_name} - {item.domain_name}"
 
-                # Extract billing cycle from item config or use monthly as default
-                billing_cycle = item.config.get("billing_cycle", "monthly")
-                if billing_cycle not in ["monthly", "quarterly", "annual"]:
-                    billing_cycle = "monthly"
+                # OrderItem.billing_period is the server-authoritative period priced at checkout.
+                billing_cycle = _SERVICE_BILLING_CYCLE_BY_ORDER_PERIOD.get(item.billing_period, "monthly")
 
                 # Generate unique username (will be updated during provisioning) (#130/M7)
                 username = f"tmp_{uuid.uuid4().hex[:12]}"
