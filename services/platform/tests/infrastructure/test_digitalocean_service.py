@@ -102,7 +102,14 @@ class TestDigitalOceanServiceDeleteServer(TestCase):
     def test_delete_server_success(self, mock_sleep: MagicMock) -> None:
         svc, client = _make_service()
         client.droplets.destroy.return_value = None
-        client.droplets.get.side_effect = RuntimeError("404 not found")
+        # Faithful to pydo 0.27.0: droplets.get does NOT raise on 404 — it RETURNS the
+        # decoded error payload. A raising fixture would exercise the string-matching
+        # except branch that a real 404 never reaches, keeping this test green while
+        # production polled to timeout on every deletion (#299).
+        client.droplets.get.return_value = {
+            "id": "not_found",
+            "message": "The resource you were accessing could not be found.",
+        }
 
         result = svc.delete_server("12345")
 
@@ -110,6 +117,12 @@ class TestDigitalOceanServiceDeleteServer(TestCase):
         self.assertIs(result.unwrap(), True)
         client.droplets.destroy.assert_called_once_with(droplet_id=12345)
         client.droplets.get.assert_called_once_with(droplet_id=12345)
+        # Destroy must precede the absence check — individually asserted calls would also
+        # pass under a check-then-destroy implementation.
+        self.assertEqual(
+            [c[0] for c in client.droplets.method_calls],
+            ["destroy", "get"],
+        )
         mock_sleep.assert_not_called()
 
     def test_delete_server_not_found(self) -> None:
