@@ -995,8 +995,10 @@ class EmailService:
             "customer_name": customer.get_display_name(),
             "invoice_number": invoice.number,
             # Dates shown to the customer must be the Romanian calendar day, matching the PDF
-            # and the date filed with ANAF — not the UTC day (#286).
-            "invoice_date": timezone.localtime(invoice.created_at).strftime("%Y-%m-%d"),
+            # and the date filed with ANAF — not the UTC day (#286). The template presents this
+            # as the issue date, so it must derive from issued_at — created_at is the draft
+            # instant and can be an earlier day; it only stands in when never formally issued.
+            "invoice_date": timezone.localtime(invoice.issued_at or invoice.created_at).strftime("%Y-%m-%d"),
             "total_amount": str(invoice.total),
             "currency": invoice.currency.code if invoice.currency else "RON",
             "due_date": timezone.localtime(invoice.due_at).strftime("%Y-%m-%d") if invoice.due_at else "N/A",

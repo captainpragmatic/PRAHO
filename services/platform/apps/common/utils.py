@@ -124,11 +124,19 @@ def _to_romanian_local(dt: datetime) -> datetime:
     Romanian time. Customer-facing dates (invoice PDFs, notification emails) must show the
     Romanian day, matching the date filed with ANAF (see #286, #220).
 
+    The target zone is pinned to Europe/Bucharest rather than Django's active timezone:
+    these helpers promise the ROMANIAN wall clock, and a future timezone.activate() with a
+    user timezone must not make the PDF disagree with the e-Factura XML, whose conversion
+    (apps.billing.efactura.settings.ro_local_date) is likewise pinned.
+
     Naive datetimes carry no timezone to convert from, so they are returned unchanged rather
-    than assumed to be UTC: callers holding an already-local wall clock keep working.
+    than assumed to be UTC: callers holding an already-local wall clock keep working. This is
+    deliberately laxer than ro_local_date(), which raises on naive input — that helper feeds
+    mandatory legal XML fields where every caller is a guaranteed-aware ORM datetime, while
+    these are generic formatters with pre-existing naive-input callers in tests.
     """
     if timezone.is_aware(dt):
-        return timezone.localtime(dt)
+        return timezone.localtime(dt, ZoneInfo("Europe/Bucharest"))
     return dt
 
 

@@ -10,15 +10,14 @@ Tests:
 - Email preferences
 """
 
-import hashlib
-from datetime import timedelta
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 from django.core import mail
 from django.core.cache import cache
 from django.test import TestCase, override_settings
-from django.utils import timezone
 
+from apps.customers.models import Customer
 from apps.notifications.models import (
     EmailCampaign,
     EmailLog,
@@ -27,15 +26,100 @@ from apps.notifications.models import (
     EmailTemplate,
 )
 from apps.notifications.services import (
-    EmailPreferenceService,
     EmailRateLimiter,
-    EmailResult,
     EmailService,
     EmailSuppressionService,
     render_template_safely,
     validate_template_context,
 )
 from config.settings.test import LOCMEM_TEST_CACHE
+from tests.factories import CurrencyFactory, CustomerFactory, InvoiceFactory
+
+
+class InvoiceEmailRomanianDateTests(TestCase):
+    """#286: invoice lifecycle emails must show the Romanian calendar day, not the UTC one.
+
+    2025-12-31 22:30 UTC is already 2026-01-01 00:30 in Romania (EET, UTC+2). The email, the
+    PDF (#286) and the e-Factura XML filed with ANAF (#220) must all agree on that Romanian
+    date; formatting the raw UTC value would put the wrong day — and across New Year the
+    wrong YEAR — in the customer's inbox.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.currency = CurrencyFactory(code="RON")
+        cls.customer = CustomerFactory()
+
+    def _invoice(self, **kwargs):
+        defaults = {
+            "customer": self.customer,
+            "currency": self.currency,
+            "status": "issued",
+            "subtotal_cents": 100000,
+            "tax_total_cents": 19000,
+            "total_cents": 119000,
+        }
+        defaults.update(kwargs)
+        return InvoiceFactory(**defaults)
+
+    def _sent_context(self, send_method, invoice):
+        with patch.object(EmailService, "send_template_email", return_value=MagicMock()) as sender:
+            send_method(invoice)
+        return sender.call_args.kwargs["context"]
+
+    def test_invoice_created_email_uses_romanian_issue_date(self):
+        """invoice_date derives from issued_at (the template labels it the issue date) and
+        rolls to the Romanian day — matching the PDF and the XML for the same invoice."""
+        invoice = self._invoice(
+            number="INV-EMAIL-TZ1",
+            issued_at=datetime(2025, 12, 31, 22, 30, tzinfo=UTC),
+            due_at=datetime(2026, 1, 30, 22, 30, tzinfo=UTC),
+        )
+
+        context = self._sent_context(EmailService.send_invoice_created, invoice)
+
+        self.assertEqual(context["invoice_date"], "2026-01-01")
+        self.assertEqual(context["due_date"], "2026-01-31")
+
+    def test_invoice_created_email_falls_back_to_created_at_when_never_issued(self):
+        """A draft that was never formally issued has no issued_at; the creation instant is
+        the only date there is, still rendered as the Romanian day."""
+        invoice = self._invoice(number="INV-EMAIL-TZ2", issued_at=None, due_at=None)
+        type(invoice).objects.filter(pk=invoice.pk).update(
+            created_at=datetime(2025, 12, 31, 22, 30, tzinfo=UTC)
+        )
+        invoice.refresh_from_db()
+
+        context = self._sent_context(EmailService.send_invoice_created, invoice)
+
+        self.assertEqual(context["invoice_date"], "2026-01-01")
+        self.assertEqual(context["due_date"], "N/A")
+
+    def test_invoice_paid_email_uses_romanian_summer_date(self):
+        """paid_date rolls under EEST (UTC+3): 21:30 UTC in June is already the next Romanian
+        day. A conversion hardcoding winter's +2 would fail this."""
+        invoice = self._invoice(
+            number="INV-EMAIL-TZ3",
+            status="paid",
+            issued_at=datetime(2026, 6, 1, 9, 0, tzinfo=UTC),
+            paid_at=datetime(2026, 6, 15, 21, 30, tzinfo=UTC),
+        )
+
+        context = self._sent_context(EmailService.send_invoice_paid, invoice)
+
+        self.assertEqual(context["paid_date"], "2026-06-16")
+
+    def test_payment_reminder_email_uses_romanian_due_date(self):
+        """The reminder's due_date must agree with the DueDate on the invoice documents."""
+        invoice = self._invoice(
+            number="INV-EMAIL-TZ4",
+            issued_at=datetime(2026, 1, 1, 9, 0, tzinfo=UTC),
+            due_at=datetime(2026, 1, 30, 22, 30, tzinfo=UTC),
+        )
+
+        context = self._sent_context(EmailService.send_payment_reminder, invoice)
+
+        self.assertEqual(context["due_date"], "2026-01-31")
 
 
 class EmailServiceBasicTests(TestCase):
@@ -45,7 +129,6 @@ class EmailServiceBasicTests(TestCase):
         """Set up test fixtures."""
         # Clear suppression list and cache to avoid cross-test contamination
         EmailSuppression.objects.all().delete()
-        from django.core.cache import cache
         cache.clear()
 
         self.template = EmailTemplate.objects.create(
@@ -127,7 +210,6 @@ class EmailServiceTemplateTests(TestCase):
         """Set up test fixtures."""
         # Clear suppression list and cache to avoid cross-test contamination
         EmailSuppression.objects.all().delete()
-        from django.core.cache import cache
         cache.clear()
 
         self.template_en = EmailTemplate.objects.create(
@@ -371,8 +453,6 @@ class EmailPreferenceModelTests(TestCase):
 
     def setUp(self):
         """Set up test fixtures."""
-        from apps.customers.models import Customer
-
         self.customer = Customer.objects.create(
             name="Test Customer",
             customer_type="individual",
