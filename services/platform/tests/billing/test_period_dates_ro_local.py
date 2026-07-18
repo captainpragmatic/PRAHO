@@ -12,7 +12,6 @@ from datetime import UTC, date, datetime
 from decimal import Decimal
 
 from django.test import TestCase
-from django.utils import timezone
 
 from apps.billing.invoice_models import InvoiceSequence
 from apps.billing.models import Currency, ProformaInvoice
@@ -83,14 +82,20 @@ class PeriodDatesRomanianLocalTests(TestCase):
         # which is already 2026-02-15 in Romania.
         self.assertEqual(line.period_end, date(2026, 2, 15))
 
-    def test_manual_proforma_line_period_start_uses_romanian_date(self) -> None:
+    def test_manual_proforma_line_period_bounds_use_romanian_dates(self) -> None:
         """The staff proforma line editor derives period_start from the proforma's creation
-        instant — across New Year the UTC day is not just wrong, it is in the wrong YEAR."""
+        instant — across New Year the UTC day is not just wrong, it is in the wrong YEAR.
+
+        period_end is assigned the raw aware valid_until and relies on Django's DateField
+        coercion, which casts through the default timezone before truncating (BT-135): a
+        controlled near-midnight valid_until pins that behavior as a repo-owned guarantee
+        rather than a reading of Django internals.
+        """
         proforma = ProformaInvoice.objects.create(
             customer=self.customer,
             number="PRO-PERIOD-TZ",
             currency=self.currency,
-            valid_until=timezone.now(),
+            valid_until=datetime(2026, 1, 30, 22, 30, tzinfo=UTC),
             subtotal_cents=0,
             tax_cents=0,
             total_cents=0,
@@ -113,3 +118,5 @@ class PeriodDatesRomanianLocalTests(TestCase):
         self.assertEqual(errors, [])
         line = proforma.lines.first()
         self.assertEqual(line.period_start, date(2026, 1, 1))
+        # 2026-01-30 22:30 UTC is already 2026-01-31 in Romania.
+        self.assertEqual(line.period_end, date(2026, 1, 31))
