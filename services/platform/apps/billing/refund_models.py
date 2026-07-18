@@ -318,9 +318,10 @@ class RefundNote(models.Model):
         ordering = ("-created_at",)
 
     def __str__(self) -> str:
-        return (
-            f"Note on {self.refund.reference_number} - {self.note_type} - {self.created_at.strftime('%Y-%m-%d %H:%M')}"
-        )
+        # Romanian wall clock, not the stored UTC one — this string surfaces in the admin,
+        # logs and audit trails, where a UTC time read as local is misleading (#286).
+        created_local = timezone.localtime(self.created_at)
+        return f"Note on {self.refund.reference_number} - {self.note_type} - {created_local.strftime('%Y-%m-%d %H:%M')}"
 
     def clean(self) -> None:
         """Validate note data"""

@@ -610,7 +610,9 @@ class PaymentCollectionRun(models.Model):
         duration = ""
         if self.completed_at:
             duration = f" ({(self.completed_at - self.started_at).total_seconds():.0f}s)"
-        return f"{self.run_type} Collection Run {self.started_at.strftime('%Y-%m-%d %H:%M')} - {self.status}{duration}"
+        # Romanian wall clock, not the stored UTC one (#286).
+        started_local = timezone.localtime(self.started_at)
+        return f"{self.run_type} Collection Run {started_local.strftime('%Y-%m-%d %H:%M')} - {self.status}{duration}"
 
     @property
     def duration_minutes(self) -> int | None:

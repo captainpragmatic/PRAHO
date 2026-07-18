@@ -85,13 +85,15 @@ class BasePaymentGateway(ABC):
         """Gateway identifier (e.g., 'stripe', 'paypal')"""
 
     @abstractmethod
-    def create_payment_intent(
+    def create_payment_intent(  # noqa: PLR0913
         self,
         order_id: str,
         amount_cents: int,
         currency: str = "RON",
         customer_id: str | None = None,
         metadata: dict[str, Any] | None = None,
+        *,
+        idempotency_key: str | None = None,
     ) -> PaymentIntentResult:
         """
         Create payment intent for immediate payment
@@ -102,6 +104,7 @@ class BasePaymentGateway(ABC):
             currency: ISO currency code (default: RON)
             customer_id: Gateway customer ID (optional)
             metadata: Additional metadata
+            idempotency_key: Stable gateway retry key (optional)
 
         Returns:
             PaymentIntentResult with success status and client_secret
