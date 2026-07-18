@@ -378,6 +378,17 @@ class Customer(SoftDeleteModel):
             return self.company_name
         return self.name
 
+    def get_billing_name(self) -> str:
+        """Name to bill under on legal documents (invoices, proformas).
+
+        The registered/trading name wins whenever present, for EVERY customer type —
+        unlike get_display_name(), which only honours company_name for companies.
+        PFA/SRL and NGO records legitimately carry their registered name in
+        company_name (registration requires the field for all types), and a legal
+        document must name that identity, not the internal label.
+        """
+        return self.company_name or self.name
+
     @property
     def is_business(self) -> bool:
         """Whether this customer is a registered business rather than a consumer.

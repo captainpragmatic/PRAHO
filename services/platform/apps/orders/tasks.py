@@ -9,9 +9,11 @@ from __future__ import annotations
 
 import logging
 from datetime import timedelta
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, TypedDict
 
 from django.core.cache import cache
+from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 from django_q.models import Schedule
@@ -20,8 +22,8 @@ from django_q.tasks import async_task, schedule
 from apps.audit.services import AuditService
 from apps.billing.models import Payment
 from apps.billing.services import InvoiceService
-from apps.orders.models import Order
-from apps.orders.services import OrderService, StatusChangeData
+from apps.orders.models import Order, OrderItem
+from apps.orders.services import OrderCreateData, OrderService, StatusChangeData
 
 # Constants
 _DEFAULT_MAX_PAYMENT_FAILURES_BEFORE_ORDER_FAIL = 3
@@ -570,65 +572,161 @@ def _find_services_to_renew() -> Any:
             expires_at__gte=timezone.now(),  # Not already expired
             auto_renew=True,
         )
-        .select_related("customer", "plan")
-        .prefetch_related("orders")
+        .select_related("customer", "service_plan", "currency")
+        # The renewal needs the catalog Product the customer originally bought; ServicePlan has no
+        # link to Product, so the only path is back through the originating order item.
+        .prefetch_related("order_items__product")
     )
 
 
-def _create_renewal_order_data(service: Any) -> dict[str, Any]:
-    """Create renewal order data structure."""
-    return {
-        "customer_id": service.customer.id,
-        "items": [
+# A renewal order blocks a further renewal unless it is dead. Framed as "everything except the
+# dead states" on purpose: nothing extends Service.expires_at on renewal, so a renewed service
+# keeps matching the 30-day window every night and this guard is the only thing standing between
+# the customer and repeat billing. Listing the live states instead means any status added to
+# Order later (or simply missed — "completed" and "in_review" were) silently re-opens that hole.
+_RENEWAL_DEAD_ORDER_STATUSES = ("cancelled", "failed")
+_RENEWAL_BLOCKING_ORDER_STATUSES = tuple(
+    status for status, _label in Order.STATUS_CHOICES if status not in _RENEWAL_DEAD_ORDER_STATUSES
+)
+
+
+def _resolve_renewal_product_id(service: Any) -> Any | None:
+    """Return the catalog Product id to renew this service against, or None if it cannot be found.
+
+    OrderItem.product is a non-null FK and create_order rejects a missing product_id (#127), but
+    ServicePlan carries no link to Product — the only path from a service back to the catalog is
+    its order items. The NEWEST item wins deliberately: after an upgrade, it reflects what the
+    service now is, and renewal items resolve through this same path so repeated renewals
+    converge on the same product. A service created outside an order (manual, migrated) has no
+    item at all, and guessing a product would put a wrong price on a real invoice.
+    """
+    # Sort in Python rather than with .order_by(): the caller prefetches order_items__product, and
+    # any queryset method that re-filters or re-orders discards that cache and issues a fresh query
+    # per service (N+1 across the whole nightly run).
+    items = sorted(service.order_items.all(), key=lambda item: item.created_at, reverse=True)
+    return items[0].product_id if items else None
+
+
+def _create_renewal_order_data(service: Any, product_id: Any) -> OrderCreateData:
+    """Build the OrderCreateData for a service renewal.
+
+    Prices the renewal from `Service.price` — the per-cycle price this customer actually agreed
+    to — rather than the current plan list price, so a plan price change does not silently
+    re-rate an existing service. The period likewise comes from `Service.billing_cycle`; a
+    monthly service renews monthly.
+    """
+    return OrderCreateData(
+        customer=service.customer,
+        items=[
             {
-                "product_type": "service_renewal",
-                "product_id": str(service.plan.id) if service.plan else None,
+                "product_id": product_id,
+                "service_id": service.id,
                 "quantity": 1,
-                "unit_price_cents": service.plan.price_cents if service.plan else 0,
-                "name": f"Service Renewal - {service.name}",
+                # Explicit monetary rounding: bare int() truncates, so a migrated price like
+                # 29.995 would bill 2999 cents instead of 3000.
+                "unit_price_cents": int((Decimal(service.price) * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP)),
+                "setup_cents": 0,  # Renewals never re-charge setup.
+                "description": f"Service Renewal - {service.service_name}",
                 "meta": {
                     "renewal_service_id": str(service.id),
                     "original_expires_at": service.expires_at.isoformat(),
-                    "renewal_period": "1_year",
+                    "renewal_period": service.billing_cycle,
                 },
             }
         ],
-        "status": "awaiting_payment",
-        "meta": {"auto_renewal": True, "original_service_id": str(service.id)},
-    }
+        billing_address=OrderService.build_billing_address_from_customer(service.customer),
+        currency=service.currency.code,
+        meta={"auto_renewal": True, "original_service_id": str(service.id)},
+    )
 
 
-def _create_renewal_invoice(renewal_order: Any, service: Any, results: dict[str, Any]) -> None:
-    """Create invoice for renewal order and handle auto-payment."""
-    if renewal_order.total_cents <= 0:
-        return
+def _process_service_renewal(service: Any, results: dict[str, Any]) -> None:
+    """Create and submit one service's renewal order; updates `results` in place.
 
-    try:
-        invoice_service = InvoiceService()
-        invoice_result = invoice_service.create_from_order(renewal_order)
+    Raises on unrecoverable failures — the caller's per-service except reports them.
+    """
+    # The run-level cache lock is the first concurrency layer, but it is not a database
+    # invariant (it expires after 30 minutes and depends on the cache backend). Locking the
+    # service row turns the guard-then-create below into a DB-serialized section on
+    # PostgreSQL, so two overlapping runs cannot both pass the guard for the same service
+    # and double-bill it.
+    with transaction.atomic():
+        Service.objects.select_for_update().get(pk=service.pk)
 
-        if invoice_result.is_ok():
-            invoice = invoice_result.unwrap()
-            renewal_order.invoice = invoice
-            renewal_order.save(update_fields=["invoice", "updated_at"])
+        # Check if renewal order already exists.
+        # Keyed off the JSON key path rather than JSONField `contains`: the latter is a
+        # PostgreSQL-only lookup, so this guard could not be exercised by the SQLite test
+        # suite — the one thing standing between a service and double-billing.
+        existing_renewal = OrderItem.objects.filter(
+            order__customer=service.customer,
+            order__status__in=_RENEWAL_BLOCKING_ORDER_STATUSES,
+            config__renewal_service_id=str(service.id),
+        ).exists()
 
-            # If customer has auto-pay enabled, attempt payment
-            if hasattr(service.customer, "auto_pay_enabled") and service.customer.auto_pay_enabled:
-                async_task("apps.billing.tasks.process_auto_payment", invoice.id, timeout=TASK_TIME_LIMIT)
-                results["auto_renewals_processed"] += 1
-                logger.info(
-                    f"💳 [RecurringOrders] Triggered auto-payment for renewal order {renewal_order.order_number}"
-                )
-        else:
-            error = invoice_result.unwrap_err()
+        if existing_renewal:
+            logger.debug(f"⏭️ [RecurringOrders] Renewal order already exists for service {service.id}")
+            return
+
+        # A renewal must bill against the catalog product the customer originally bought.
+        # Report rather than guess: a wrong product means a wrong price.
+        product_id = _resolve_renewal_product_id(service)
+        if product_id is None:
             logger.error(
-                f"🔥 [RecurringOrders] Failed to create invoice for renewal order {renewal_order.order_number}: {error}"
+                f"🔥 [RecurringOrders] Service {service.id} has no originating order item; "
+                f"cannot resolve a product to renew against"
             )
-            results["errors"].append(f"Invoice creation failed for renewal {renewal_order.order_number}: {error}")
+            results["errors"].append(f"Service {service.id}: no originating order item; cannot resolve renewal product")
+            results["renewal_failures"] += 1
+            return
 
-    except Exception as e:
-        logger.error(f"🔥 [RecurringOrders] Error creating invoice for renewal: {e}")
-        results["errors"].append(f"Invoice creation error: {e}")
+        # Create renewal order — must commit inside the row lock so a second worker's
+        # guard query sees it the moment it acquires the lock.
+        create_result = OrderService().create_order(_create_renewal_order_data(service, product_id))
+
+        if create_result.is_ok():
+            renewal_order = create_result.unwrap()
+            # ADR-0038: billing documents hang off the awaiting_payment transition —
+            # Phase B creates the proforma there. An order left in draft is invisible to
+            # every downstream processor (process_pending_orders and
+            # sync_order_payment_status both filter it out), and because draft blocks the
+            # idempotency guard above, it would also suppress every future renewal
+            # attempt for this service. Promote or roll back: a half-created renewal must
+            # not survive the transaction.
+            promote_result = OrderService.update_order_status(
+                renewal_order,
+                StatusChangeData(
+                    new_status="awaiting_payment",
+                    notes="Automatic renewal (nightly task)",
+                    changed_by=None,
+                ),
+            )
+            if promote_result.is_err():
+                raise ValueError(
+                    f"renewal order {renewal_order.order_number} could not be "
+                    f"submitted for payment: {promote_result.unwrap_err()}"
+                )
+            renewal_order.refresh_from_db()
+
+    # Reporting stays OUTSIDE the lock — it must not roll back the committed renewal order.
+    if create_result.is_ok():
+        results["renewal_orders_created"] += 1
+        results["created_orders"].append(
+            {
+                "order_id": str(renewal_order.id),
+                "order_number": renewal_order.order_number,
+                "service_id": str(service.id),
+                "customer_id": str(service.customer.id),
+                "expires_at": service.expires_at.isoformat(),
+                "total_cents": renewal_order.total_cents,
+            }
+        )
+        _log_renewal_order_creation(renewal_order, service)
+        logger.info(f"🔄 [RecurringOrders] Created renewal order {renewal_order.order_number} for service {service.id}")
+    else:
+        error = create_result.unwrap_err()
+        logger.error(f"🔥 [RecurringOrders] Failed to create renewal order for service {service.id}: {error}")
+        results["errors"].append(f"Service {service.id}: {error}")
+        results["renewal_failures"] += 1
 
 
 def _log_renewal_order_creation(renewal_order: Any, service: Any) -> None:
@@ -637,7 +735,7 @@ def _log_renewal_order_creation(renewal_order: Any, service: Any) -> None:
         event_type="renewal_order_created",
         user=None,
         content_object=renewal_order,
-        description=f"Renewal order {renewal_order.order_number} created for service {service.name}",
+        description=f"Renewal order {renewal_order.order_number} created for service {service.service_name}",
         actor_type="system",
         metadata={
             "order_id": str(renewal_order.id),
@@ -788,56 +886,7 @@ def process_recurring_orders() -> dict[str, Any]:
 
             for service in services_to_renew:
                 try:
-                    # Check if renewal order already exists
-                    existing_renewal = Order.objects.filter(
-                        customer=service.customer,
-                        status__in=["draft", "awaiting_payment", "paid", "provisioning"],
-                        items__meta__contains={"renewal_service_id": str(service.id)},
-                    ).exists()
-
-                    if existing_renewal:
-                        logger.debug(f"⏭️ [RecurringOrders] Renewal order already exists for service {service.id}")
-                        continue
-
-                    # Create renewal order
-                    order_service = OrderService()
-                    renewal_order_data = _create_renewal_order_data(service)
-
-                    create_result = order_service.create_order(renewal_order_data)  # type: ignore[arg-type]
-
-                    if create_result.is_ok():
-                        renewal_order = create_result.unwrap()
-                        results["renewal_orders_created"] += 1
-
-                        results["created_orders"].append(
-                            {
-                                "order_id": str(renewal_order.id),
-                                "order_number": renewal_order.order_number,
-                                "service_id": str(service.id),
-                                "customer_id": str(service.customer.id),
-                                "expires_at": service.expires_at.isoformat(),
-                                "total_cents": renewal_order.total_cents,
-                            }
-                        )
-
-                        # Create invoice for the renewal order
-                        _create_renewal_invoice(renewal_order, service, results)
-
-                        # Log renewal order creation
-                        _log_renewal_order_creation(renewal_order, service)
-
-                        logger.info(
-                            f"🔄 [RecurringOrders] Created renewal order {renewal_order.order_number} for service {service.id}"
-                        )
-
-                    else:
-                        error = create_result.unwrap_err()
-                        logger.error(
-                            f"🔥 [RecurringOrders] Failed to create renewal order for service {service.id}: {error}"
-                        )
-                        results["errors"].append(f"Service {service.id}: {error}")
-                        results["renewal_failures"] += 1
-
+                    _process_service_renewal(service, results)
                 except Exception as e:
                     logger.error(f"🔥 [RecurringOrders] Error processing service {service.id}: {e}")
                     results["errors"].append(f"Service {service.id}: {e}")
