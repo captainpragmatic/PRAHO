@@ -13,6 +13,7 @@ from django.test import TestCase
 from django.utils import timezone
 
 from apps.common.types import Err, Ok
+from apps.infrastructure.cloud_gateway import ServerInfo
 from apps.infrastructure.drift_remediation import DriftRemediationService
 from apps.infrastructure.models import (
     CloudProvider,
@@ -183,7 +184,7 @@ class TestApproveReject(DriftRemediationTestBase):
 class TestExecuteRemediation(DriftRemediationTestBase):
     """Tests for remediation execution with snapshot safety."""
 
-    @patch("apps.infrastructure.drift_remediation.DriftRemediationService._verify_health")
+    @patch("apps.infrastructure.drift_remediation.DriftRemediationService._verify_remediation")
     @patch("apps.infrastructure.drift_remediation.DriftRemediationService._get_gateway")
     @patch("apps.infrastructure.drift_remediation.DriftRemediationService._take_snapshot")
     def test_execute_remediation_success(self, mock_snapshot, mock_gateway, mock_health):
@@ -223,7 +224,7 @@ class TestExecuteRemediation(DriftRemediationTestBase):
         mock_snapshot.assert_called_once()
 
     @patch("apps.infrastructure.drift_remediation.DriftRemediationService._rollback")
-    @patch("apps.infrastructure.drift_remediation.DriftRemediationService._verify_health")
+    @patch("apps.infrastructure.drift_remediation.DriftRemediationService._verify_remediation")
     @patch("apps.infrastructure.drift_remediation.DriftRemediationService._get_gateway")
     @patch("apps.infrastructure.drift_remediation.DriftRemediationService._take_snapshot")
     def test_rollback_on_health_check_failure(self, mock_snapshot, mock_gateway, mock_health, mock_rollback):
@@ -277,7 +278,7 @@ class TestExecuteRemediation(DriftRemediationTestBase):
         self.assertTrue(result.is_err())
         mock_rollback.assert_called_once()
 
-    @patch("apps.infrastructure.drift_remediation.DriftRemediationService._verify_health")
+    @patch("apps.infrastructure.drift_remediation.DriftRemediationService._verify_remediation")
     @patch("apps.infrastructure.drift_remediation.DriftRemediationService._get_gateway")
     @patch("apps.infrastructure.drift_remediation.DriftRemediationService._take_snapshot")
     def test_concurrent_remediation_prevented(self, mock_snapshot, mock_gateway, mock_health):
@@ -316,7 +317,7 @@ class TestCleanupSnapshots(DriftRemediationTestBase):
 
     def test_cleanup_expired_snapshots(self):
         """Old snapshots should be deletable."""
-        snapshot = DriftSnapshot.objects.create(
+        DriftSnapshot.objects.create(
             deployment=self.deployment,
             provider_snapshot_id="snap-old",
             snapshot_type="pre_remediation",
@@ -344,6 +345,129 @@ class TestScheduledRemediation(DriftRemediationTestBase):
             scheduled_for__lte=timezone.now(),
         )
         self.assertEqual(due.count(), 1)
+
+
+class _FakeClock:
+    """Deterministic stand-in for the module's _monotonic/_sleep aliases."""
+
+    def __init__(self) -> None:
+        self.now = 0.0
+        self.sleeps: list[float] = []
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.sleeps.append(seconds)
+        self.now += seconds
+
+
+def _verify_settings(key: str, default: int) -> int:
+    return {
+        "infrastructure.remediation_boot_grace_seconds": 30,
+        "infrastructure.remediation_verify_max_wait_seconds": 150,
+        "infrastructure.remediation_verify_poll_interval_seconds": 10,
+        "infrastructure.health_check_timeout_seconds": 10,
+    }.get(key, default)
+
+
+@patch("apps.settings.services.SettingsService.get_integer_setting", side_effect=_verify_settings)
+class TestVerifyRemediation(DriftRemediationTestBase):
+    """Tests for the bounded, outcome-aware verification loop."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.clock = _FakeClock()
+        clock_patches = [
+            patch("apps.infrastructure.drift_remediation._monotonic", self.clock.monotonic),
+            patch("apps.infrastructure.drift_remediation._sleep", self.clock.sleep),
+        ]
+        for p in clock_patches:
+            p.start()
+            self.addCleanup(p.stop)
+
+    def _server(self, status: str = "running", server_type: str = "cpx21") -> ServerInfo:
+        return ServerInfo(
+            server_id="12345",
+            name=self.deployment.hostname,
+            status=status,
+            ipv4_address="1.2.3.4",
+            server_type=server_type,
+        )
+
+    @patch("apps.infrastructure.drift_remediation.socket.create_connection")
+    def test_verify_remediation_polls_outcome_within_budget(self, mock_conn, _settings):
+        """Provider still converging on the first poll must not fail verification."""
+        gateway = MagicMock()
+        gateway.get_server.side_effect = [
+            Ok(self._server(server_type="cpx41")),
+            Ok(self._server(server_type="cpx21")),
+        ]
+        result = self.service._verify_remediation(self.deployment, gateway, "server_type", "cpx21")
+
+        self.assertTrue(result.is_ok())
+        self.assertEqual(gateway.get_server.call_count, 2)
+        self.assertEqual(self.clock.sleeps[0], 30)  # boot grace before first probe
+
+    @patch("apps.infrastructure.drift_remediation.socket.create_connection")
+    def test_power_on_waits_for_running_status(self, mock_conn, _settings):
+        """server_status remediation verifies the provider reports running."""
+        gateway = MagicMock()
+        gateway.get_server.side_effect = [
+            Ok(self._server(status="starting")),
+            Ok(self._server(status="running")),
+        ]
+        result = self.service._verify_remediation(self.deployment, gateway, "server_status", "running")
+
+        self.assertTrue(result.is_ok())
+        self.assertEqual(gateway.get_server.call_count, 2)
+
+    @patch("apps.infrastructure.drift_remediation.socket.create_connection")
+    def test_outcome_deadline_exhausted_errs_without_ssh_probe(self, mock_conn, _settings):
+        """A provider that never converges fails verification after the budget."""
+        gateway = MagicMock()
+        gateway.get_server.return_value = Ok(self._server(server_type="cpx41"))
+
+        result = self.service._verify_remediation(self.deployment, gateway, "server_type", "cpx21")
+
+        self.assertTrue(result.is_err())
+        self.assertIn("not confirmed by provider", result.unwrap_err())
+        self.assertLessEqual(self.clock.now, 151)
+        mock_conn.assert_not_called()
+
+    @patch("apps.infrastructure.drift_remediation.socket.create_connection")
+    def test_ssh_retries_until_reachable(self, mock_conn, _settings):
+        """Connection-refused during boot is retried, not treated as failure."""
+        gateway = MagicMock()
+        gateway.get_server.return_value = Ok(self._server())
+        mock_conn.side_effect = [OSError("refused"), OSError("refused"), MagicMock()]
+
+        result = self.service._verify_remediation(self.deployment, gateway, "server_status", "running")
+
+        self.assertTrue(result.is_ok())
+        self.assertEqual(mock_conn.call_count, 3)
+
+    @patch("apps.infrastructure.drift_remediation.socket.create_connection")
+    def test_ssh_deadline_exhausted_errs(self, mock_conn, _settings):
+        """A server that never answers SSH fails verification after the budget."""
+        gateway = MagicMock()
+        gateway.get_server.return_value = Ok(self._server())
+        mock_conn.side_effect = OSError("refused")
+
+        result = self.service._verify_remediation(self.deployment, gateway, "server_status", "running")
+
+        self.assertTrue(result.is_err())
+        self.assertIn("unreachable on port 22", result.unwrap_err())
+
+    @patch("apps.infrastructure.drift_remediation.socket.create_connection")
+    def test_probe_timeout_clamped_to_remaining_budget(self, mock_conn, _settings):
+        """Near the deadline the socket timeout must not overshoot the budget."""
+        mock_conn.return_value = MagicMock()
+
+        result = self.service._verify_health(self.deployment, deadline=self.clock.now + 3)
+
+        self.assertTrue(result.is_ok())
+        self.assertEqual(mock_conn.call_args.kwargs["timeout"], 3)
 
 
 class TestAuditEvents(DriftRemediationTestBase):

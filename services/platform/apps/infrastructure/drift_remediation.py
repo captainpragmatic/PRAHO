@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import socket
+import time
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
@@ -35,6 +36,17 @@ logger = logging.getLogger(__name__)
 # TCP probe timeout for health checks
 _DEFAULT_HEALTH_CHECK_TIMEOUT = 10
 
+# Verification loop defaults: a powered-on/resized server needs boot time before
+# port 22 answers; the whole verify stage must stay well under Django-Q2's
+# 300s worker timeout (rollback still has to fit in the same task).
+_DEFAULT_VERIFY_BOOT_GRACE = 30
+_DEFAULT_VERIFY_MAX_WAIT = 150
+_DEFAULT_VERIFY_POLL_INTERVAL = 10
+
+# Patchable aliases so tests can drive the verification loop with a fake clock.
+_sleep = time.sleep
+_monotonic = time.monotonic
+
 
 def _get_health_check_timeout() -> int:
     """Read health check timeout from SettingsService with DB-cache layer."""
@@ -42,6 +54,42 @@ def _get_health_check_timeout() -> int:
 
     return SettingsService.get_integer_setting(
         "infrastructure.health_check_timeout_seconds", _DEFAULT_HEALTH_CHECK_TIMEOUT
+    )
+
+
+def _get_verify_boot_grace() -> int:
+    """Seconds to wait before the first post-remediation probe."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415  # Deferred: avoids circular import
+
+    return max(
+        0,
+        SettingsService.get_integer_setting(
+            "infrastructure.remediation_boot_grace_seconds", _DEFAULT_VERIFY_BOOT_GRACE
+        ),
+    )
+
+
+def _get_verify_max_wait() -> int:
+    """Total wall-clock budget for the verification stage, grace included."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415  # Deferred: avoids circular import
+
+    return max(
+        1,
+        SettingsService.get_integer_setting(
+            "infrastructure.remediation_verify_max_wait_seconds", _DEFAULT_VERIFY_MAX_WAIT
+        ),
+    )
+
+
+def _get_verify_poll_interval() -> int:
+    """Delay between verification probes."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415  # Deferred: avoids circular import
+
+    return max(
+        1,
+        SettingsService.get_integer_setting(
+            "infrastructure.remediation_verify_poll_interval_seconds", _DEFAULT_VERIFY_POLL_INTERVAL
+        ),
     )
 
 
@@ -244,8 +292,14 @@ class DriftRemediationService:
 
             return Err(apply_result.unwrap_err())
 
-        # Step 3: Verify health
-        health_result = self._verify_health(deployment)
+        # Step 3: Verify the remediated state (provider outcome + reachability)
+        details = request.action_details or {}
+        health_result = self._verify_remediation(
+            deployment,
+            gateway,
+            details.get("field_name", ""),
+            details.get("expected_value", ""),
+        )
         if health_result.is_err():
             logger.error(f"🔥 [DriftRemediation] Health check failed, rolling back: {health_result.unwrap_err()}")
             rollback_result = self._rollback(deployment, snapshot.provider_snapshot_id)
@@ -341,24 +395,92 @@ class DriftRemediationService:
         # For other field types, no automated fix available
         return Ok(True)
 
+    def _verify_remediation(
+        self,
+        deployment: NodeDeployment,
+        gateway: CloudProviderGateway,
+        field_name: str,
+        expected_value: str,
+    ) -> Result[bool, str]:
+        """
+        Verify the remediated STATE, not just liveness: poll the provider until the
+        drifted field reports the expected value, then confirm SSH reachability.
+        Bounded by a total wall-clock budget that includes an initial boot grace
+        (power-on/resize reboots take time — an instant probe false-negatives and
+        triggers a destructive snapshot rollback).
+        """
+        deadline = _monotonic() + _get_verify_max_wait()
+
+        grace = min(_get_verify_boot_grace(), max(0.0, deadline - _monotonic()))
+        if grace > 0:
+            _sleep(grace)
+
+        outcome_result = self._await_provider_outcome(deployment, gateway, field_name, expected_value, deadline)
+        if outcome_result.is_err():
+            return outcome_result
+
+        return self._verify_health(deployment, deadline)
+
+    def _await_provider_outcome(
+        self,
+        deployment: NodeDeployment,
+        gateway: CloudProviderGateway,
+        field_name: str,
+        expected_value: str,
+        deadline: float,
+    ) -> Result[bool, str]:
+        """Poll gateway.get_server() until the remediated field matches expectations."""
+        if field_name not in ("server_type", "server_status"):
+            return Ok(True)
+
+        last_observed = "unknown"
+        while True:
+            server_result = gateway.get_server(deployment.external_node_id)
+            if server_result.is_ok() and server_result.unwrap() is not None:
+                server_info = server_result.unwrap()
+                if field_name == "server_type":
+                    last_observed = server_info.server_type
+                    if server_info.server_type == expected_value:
+                        return Ok(True)
+                else:
+                    last_observed = server_info.status
+                    if server_info.status == "running":
+                        return Ok(True)
+
+            remaining = deadline - _monotonic()
+            if remaining <= 0:
+                return Err(
+                    f"Remediation of '{field_name}' on {deployment.hostname} not confirmed by provider "
+                    f"(last observed: {last_observed})"
+                )
+            _sleep(min(_get_verify_poll_interval(), remaining))
+
     def _verify_health(
         self,
         deployment: NodeDeployment,
+        deadline: float,
     ) -> Result[bool, str]:
-        """TCP probe port 22 + Virtualmin API check if linked."""
+        """TCP-probe port 22 until reachable or the verification deadline passes."""
         if not deployment.ipv4_address:
             return Err("No IP address to verify")
 
-        try:
-            with socket.create_connection(
-                (str(deployment.ipv4_address), 22),
-                timeout=_get_health_check_timeout(),
-            ):
-                pass
-        except (OSError, TimeoutError):
-            return Err(f"Server {deployment.hostname} unreachable on port 22 after remediation")
+        while True:
+            remaining = deadline - _monotonic()
+            probe_timeout = min(_get_health_check_timeout(), max(1.0, remaining))
+            try:
+                with socket.create_connection(
+                    (str(deployment.ipv4_address), 22),
+                    timeout=probe_timeout,
+                ):
+                    pass
+            except (OSError, TimeoutError):
+                remaining = deadline - _monotonic()
+                if remaining <= 0:
+                    return Err(f"Server {deployment.hostname} unreachable on port 22 after remediation")
+                _sleep(min(_get_verify_poll_interval(), remaining))
+                continue
 
-        return Ok(True)
+            return Ok(True)
 
     def _rollback(
         self,
