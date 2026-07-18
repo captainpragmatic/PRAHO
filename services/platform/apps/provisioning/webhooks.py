@@ -467,13 +467,21 @@ def server_webhook_health_check(request: HttpRequest, server_id: str) -> JsonRes
     """🏥 Health check endpoint for server webhooks"""
     try:
         server = get_object_or_404(Server, id=server_id, is_active=True)
+        api_endpoint_configured = bool(server.management_api_url)
+        webhook_secret_configured = bool(server.management_webhook_secret)
+        # Server has no has_valid_api_config attribute; reading it raised AttributeError, so
+        # this endpoint could never report healthy. Config is complete when both of the values
+        # reported below — the API endpoint and the webhook secret — are set. The top-level
+        # status must reflect that: a monitor keyed on it must not read an unconfigured
+        # server as healthy. HTTP stays 200 — the endpoint itself is alive either way.
+        has_valid_api_config = api_endpoint_configured and webhook_secret_configured
         return JsonResponse(
             {
-                "status": "healthy",
+                "status": "healthy" if has_valid_api_config else "degraded",
                 "server": server.name,
-                "api_endpoint_configured": bool(server.management_api_url),
-                "webhook_secret_configured": bool(server.management_webhook_secret),
-                "has_valid_api_config": server.has_valid_api_config,  # type: ignore[attr-defined]
+                "api_endpoint_configured": api_endpoint_configured,
+                "webhook_secret_configured": webhook_secret_configured,
+                "has_valid_api_config": has_valid_api_config,
             }
         )
     except Exception as e:

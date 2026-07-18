@@ -465,32 +465,27 @@ class CreditNoteSignalTests(TestCase):
 class SubscriptionProcessPaymentTests(TestCase):
     """F1: RecurringBillingService._process_payment()"""
 
-    @patch("apps.billing.payment_service.PaymentService")
-    def test_creates_intent_and_confirms(self, mock_pay_svc):
+    def test_charging_a_subscription_invoice_is_not_implemented(self) -> None:
+        """#209: a subscription invoice cannot be charged through the order-based payment API.
+
+        This previously mocked PaymentService and asserted success, so it never exercised the
+        real call — which passed str(invoice.id) as `order_id`. Invoice is integer-keyed and
+        Order is UUID-keyed, so it raised `ValidationError: "N" is not a valid UUID` and every
+        renewal payment failed with a cryptic error. Invoice has no order FK (a subscription
+        invoice has no order), so there is no correct value to pass; the failure is now explicit.
+        """
         mock_sub = MagicMock(id="s1", payment_method_id="pm_1", customer_id="c1")
         mock_inv = MagicMock(id="i1", number="INV-1", total_cents=5000, currency=MagicMock(code="RON"))
 
-        mock_pay_svc.create_payment_intent_direct.return_value = {"success": True, "payment_intent_id": "pi_1"}
-        mock_pay_svc.confirm_payment.return_value = {"success": True, "status": "succeeded"}
-
         result = RecurringBillingService._process_payment(mock_sub, mock_inv)
-        self.assertTrue(result.is_ok())
 
-    @patch("apps.billing.payment_service.PaymentService")
-    def test_no_payment_method(self, mock_pay_svc):
+        self.assertTrue(result.is_err())
+        self.assertIn("invoice-based payment intent", result.error)
+
+    def test_no_payment_method(self) -> None:
         result = RecurringBillingService._process_payment(MagicMock(payment_method_id=""), MagicMock())
         self.assertTrue(result.is_err())
-
-    @patch("apps.billing.payment_service.PaymentService")
-    def test_intent_fails(self, mock_pay_svc):
-        mock_pay_svc.create_payment_intent_direct.return_value = {"success": False, "error": "Declined"}
-
-        mock_sub = MagicMock(id="s1", payment_method_id="pm_1", customer_id="c1")
-        mock_inv = MagicMock(id="i1", number="INV-1", total_cents=5000, currency=MagicMock(code="RON"))
-
-        result = RecurringBillingService._process_payment(mock_sub, mock_inv)
-        self.assertTrue(result.is_err())
-        self.assertIn("Declined", result.error)
+        self.assertIn("No payment method", result.error)
 
 
 class UsageAlertEmailTests(TestCase):

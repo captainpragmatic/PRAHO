@@ -112,13 +112,15 @@ class StripeGateway(BasePaymentGateway):
             self.logger.error(f"❌ Stripe configuration invalid: {e}")
             return False
 
-    def create_payment_intent(
+    def create_payment_intent(  # noqa: PLR0913
         self,
         order_id: str,
         amount_cents: int,
         currency: str = "RON",
         customer_id: str | None = None,
         metadata: dict[str, Any] | None = None,
+        *,
+        idempotency_key: str | None = None,
     ) -> PaymentIntentResult:
         """
         Create Stripe Payment Intent
@@ -129,6 +131,7 @@ class StripeGateway(BasePaymentGateway):
             currency: ISO currency code (RON, EUR, USD)
             customer_id: Stripe customer ID (optional)
             metadata: Additional metadata
+            idempotency_key: Stable Stripe retry key (optional)
 
         Returns:
             PaymentIntentResult with client_secret for frontend
@@ -140,10 +143,10 @@ class StripeGateway(BasePaymentGateway):
                 "currency": currency.lower(),
                 "automatic_payment_methods": {"enabled": True},
                 "metadata": {
+                    **(metadata or {}),
                     "praho_order_id": order_id,
                     "platform": "PRAHO",
                     "vat_rate": "21%",  # Romanian VAT rate
-                    **(metadata or {}),
                 },
                 # Romanian business compliance
                 "statement_descriptor_suffix": "PRAHO",
@@ -153,6 +156,8 @@ class StripeGateway(BasePaymentGateway):
             # Add customer if provided
             if customer_id:
                 payment_intent_params["customer"] = customer_id
+            if idempotency_key:
+                payment_intent_params["idempotency_key"] = idempotency_key
 
             # Create payment intent
             payment_intent = self._stripe.PaymentIntent.create(**payment_intent_params)

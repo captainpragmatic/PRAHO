@@ -455,9 +455,16 @@ class CouponService:
             discount_cents = coupon.max_discount_cents
             breakdown["capped_at"] = coupon.max_discount_cents
 
-        # Ensure discount doesn't exceed base amount
-        if discount_cents > base_amount_cents:
-            discount_cents = base_amount_cents
+        # Ensure the discount doesn't exceed what is still discountable on the order.
+        # Capping against the full base let every stacked coupon claim the whole subtotal
+        # independently: two stackable 60% coupons summed to 120% and the order went free (#231).
+        # The cap has to be the base MINUS whatever earlier coupons already took.
+        # Clamped at zero: a negative stored discount (corrupt/legacy data) must not
+        # INFLATE the remaining headroom past the base.
+        already_discounted_cents = max(0, int(getattr(order, "discount_cents", 0) or 0))
+        remaining_discountable_cents = max(0, base_amount_cents - already_discounted_cents)
+        if discount_cents > remaining_discountable_cents:
+            discount_cents = remaining_discountable_cents
             breakdown["limited_to_order_value"] = True
 
         return DiscountResult(
@@ -970,6 +977,17 @@ class GiftCardService:
             return ApplyResult(success=False, error_message=validation.error_message)
 
         gift_card = GiftCard.objects.select_for_update().get(code=code.upper().strip())
+
+        # A gift card holds a balance in ITS OWN currency. Redeeming across currencies applied the
+        # foreign cents 1:1 — a 100 EUR card wiped 100 RON of an order at a fifth of its worth
+        # (#232). There is no FX conversion here, so refuse rather than guess a rate. This mirrors
+        # the fixed-amount coupon guard in validate_coupon.
+        if gift_card.currency and order.currency and order.currency.code != gift_card.currency.code:
+            return ApplyResult(
+                success=False,
+                error_message=f"Gift card is in {gift_card.currency.code} and cannot be redeemed against "
+                f"a {order.currency.code} order",
+            )
 
         # Calculate amount to redeem
         order_remaining = order.total_cents
