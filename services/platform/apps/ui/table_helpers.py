@@ -8,6 +8,7 @@ table_enhanced component for consistent UI across the platform.
 ===============================================================================
 """
 
+from datetime import datetime
 from typing import Any
 
 from django.urls import reverse
@@ -98,7 +99,13 @@ def prepare_billing_table_data(documents: list[Any], user: Any) -> dict[str, lis
         }
 
         # Date cell — show the Romanian wall clock, not the stored UTC one (#286).
-        created_local = timezone.localtime(created_at) if timezone.is_aware(created_at) else created_at
+        # datetime check must come first: is_aware() calls utcoffset(), which a plain date
+        # (a legal dict-producer value) lacks — the fallback exists for exactly those inputs.
+        created_local = (
+            timezone.localtime(created_at)
+            if isinstance(created_at, datetime) and timezone.is_aware(created_at)
+            else created_at
+        )
         date_cell = {
             "content": f"<div class='text-white'>{created_local.strftime('%d.%m.%Y')}</div>"
             f"<div class='text-slate-400 text-sm'>{created_local.strftime('%H:%M')}</div>"
