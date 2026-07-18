@@ -397,6 +397,8 @@ class StripeGateway(BasePaymentGateway):
         gateway_txn_id: str,
         amount_cents: int | None = None,
         reason: str = "requested_by_customer",
+        *,
+        idempotency_key: str | None = None,
     ) -> RefundResult:
         """
         Create a Stripe Refund for a PaymentIntent.
@@ -413,6 +415,11 @@ class StripeGateway(BasePaymentGateway):
             params: dict[str, Any] = {"payment_intent": gateway_txn_id, "reason": reason}
             if amount_cents is not None:
                 params["amount"] = amount_cents
+            if idempotency_key:
+                # A retry after an uncertain outcome (timeout) must replay the SAME refund,
+                # not create a second one — the key is derived from the payment's ledger
+                # state, so it is stable across retries of the same logical refund.
+                params["idempotency_key"] = idempotency_key
 
             refund = self._stripe.Refund.create(**params)
 

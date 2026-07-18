@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import timedelta
+from unittest import mock
 from unittest.mock import MagicMock, patch
 
 from django.test import TestCase
@@ -97,6 +98,7 @@ class RefundGatewayIntegrityTests(TestCase):
         gateway.refund_payment.assert_called_once_with(
             gateway_txn_id="pi_gateway_failure",
             amount_cents=10_000,
+            idempotency_key=mock.ANY,
         )
 
         invoice.refresh_from_db()
@@ -127,6 +129,7 @@ class RefundGatewayIntegrityTests(TestCase):
         gateway.refund_payment.assert_called_once_with(
             gateway_txn_id="pi_order_refund",
             amount_cents=10_000,
+            idempotency_key=mock.ANY,
         )
 
         payment.refresh_from_db()
@@ -162,6 +165,7 @@ class RefundGatewayIntegrityTests(TestCase):
         gateway.refund_payment.assert_called_once_with(
             gateway_txn_id="pi_full_without_amount",
             amount_cents=10_000,
+            idempotency_key=mock.ANY,
         )
 
         payment.refresh_from_db()
@@ -239,6 +243,7 @@ class RefundGatewayIntegrityTests(TestCase):
         gateway.refund_payment.assert_called_once_with(
             gateway_txn_id="pi_partial_order_refund",
             amount_cents=2_500,
+            idempotency_key=mock.ANY,
         )
 
         payment.refresh_from_db()
