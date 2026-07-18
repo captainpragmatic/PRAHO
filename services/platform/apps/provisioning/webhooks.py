@@ -476,8 +476,8 @@ def server_webhook_health_check(request: HttpRequest, server_id: str) -> JsonRes
                 "api_endpoint_configured": api_endpoint_configured,
                 "webhook_secret_configured": webhook_secret_configured,
                 # Server has no has_valid_api_config attribute; reading it raised AttributeError,
-                # so this endpoint could never report healthy. The config is valid when both
-                # halves the caller is already shown are present.
+                # so this endpoint could never report healthy. The config is valid when both of
+                # the values reported above — the API endpoint and the webhook secret — are set.
                 "has_valid_api_config": api_endpoint_configured and webhook_secret_configured,
             }
         )
