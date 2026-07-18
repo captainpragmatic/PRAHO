@@ -6,7 +6,6 @@ Supports:
 - Multiple billing cycles (monthly, quarterly, yearly, custom)
 - Trial periods with automatic conversion
 - Price grandfathering for existing customers
-- Proration for mid-cycle changes
 - Dunning and grace periods
 - Usage-based billing integration
 """
@@ -94,7 +93,7 @@ class Subscription(models.Model):
     Manages the complete subscription lifecycle:
     - Trialing → Active → Past Due → Cancelled/Expired
 
-    Supports grandfathered pricing and mid-cycle changes with proration.
+    Supports grandfathered pricing and PRAHO-owned renewal collection.
     """
 
     STATUS_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
@@ -142,6 +141,14 @@ class Subscription(models.Model):
         on_delete=models.PROTECT,
         related_name="subscriptions",
         help_text=_("Product/plan being subscribed to"),
+    )
+    service = models.OneToOneField(
+        "provisioning.Service",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="subscription",
+        help_text=_("Independently cancellable service whose recurring billing PRAHO owns"),
     )
 
     # Subscription identification
@@ -222,6 +229,14 @@ class Subscription(models.Model):
         db_index=True,
         help_text=_("Date when next invoice will be generated"),
     )
+    billing_anchor_day = models.PositiveSmallIntegerField(
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(1), MaxValueValidator(31)],
+        help_text=_("Original calendar day used when advancing month-based periods"),
+    )
+    next_proforma_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    next_charge_at = models.DateTimeField(null=True, blank=True, db_index=True)
 
     # Trial configuration
     trial_start = models.DateTimeField(
@@ -279,10 +294,23 @@ class Subscription(models.Model):
     )
 
     # Payment tracking
-    payment_method_id = models.CharField(
-        max_length=255,
+    saved_payment_method = models.ForeignKey(
+        "customers.CustomerPaymentMethod",
+        on_delete=models.PROTECT,
+        null=True,
         blank=True,
-        help_text=_("Stripe PaymentMethod ID or other gateway reference"),
+        related_name="subscriptions",
+    )
+    payment_authorization = models.ForeignKey(
+        "billing.RecurringPaymentAuthorization",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="subscriptions",
+    )
+    auto_payment_enabled = models.BooleanField(
+        default=False,
+        help_text=_("Collect this subscription automatically under its active customer mandate"),
     )
     last_payment_date = models.DateTimeField(
         null=True,
@@ -309,12 +337,6 @@ class Subscription(models.Model):
     )
 
     # External references
-    stripe_subscription_id = models.CharField(
-        max_length=100,
-        blank=True,
-        db_index=True,
-        help_text=_("Stripe Subscription ID for syncing"),
-    )
     external_reference = models.CharField(
         max_length=255,
         blank=True,
@@ -352,7 +374,6 @@ class Subscription(models.Model):
             models.Index(fields=["customer", "status"]),
             models.Index(fields=["status", "next_billing_date"]),
             models.Index(fields=["product", "status"]),
-            models.Index(fields=["stripe_subscription_id"]),
             models.Index(
                 fields=["status", "next_billing_date"],
                 condition=Q(status="active"),
@@ -371,6 +392,13 @@ class Subscription(models.Model):
             models.CheckConstraint(
                 condition=Q(status__in=["trialing", "active", "past_due", "paused", "cancelled", "expired", "pending"]),
                 name="subscription_status_valid_values",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    Q(auto_payment_enabled=False)
+                    | (Q(saved_payment_method__isnull=False) & Q(payment_authorization__isnull=False))
+                ),
+                name="subscription_auto_payment_has_mandate",
             ),
         ]
 
@@ -405,6 +433,26 @@ class Subscription(models.Model):
             and self.current_period_end <= self.current_period_start
         ):
             raise ValidationError(_("Period end must be after period start"))
+
+        if self.saved_payment_method_id:
+            saved_payment_method = self.saved_payment_method
+            if saved_payment_method is None or saved_payment_method.customer_id != self.customer_id:
+                raise ValidationError({"saved_payment_method": _("Saved payment method must belong to the customer.")})
+
+        if self.payment_authorization_id:
+            authorization = self.payment_authorization
+            if authorization is None or authorization.customer_id != self.customer_id:
+                raise ValidationError(
+                    {"payment_authorization": _("Recurring payment authorization must belong to the customer.")}
+                )
+            if self.saved_payment_method_id and authorization.payment_method_id != self.saved_payment_method_id:
+                raise ValidationError(
+                    {"payment_authorization": _("Authorization must cover the selected saved payment method.")}
+                )
+        if self.auto_payment_enabled and (not self.saved_payment_method_id or not self.payment_authorization_id):
+            raise ValidationError(
+                _("Automatic payment requires both a saved payment method and recurring-payment authorization.")
+            )
 
     def _generate_subscription_number(self) -> str:
         """Generate unique subscription number."""
@@ -568,13 +616,21 @@ class Subscription(models.Model):
 
     def activate(self, user: Any = None) -> None:
         """Activate the subscription."""
+        from .recurring_billing import next_billing_period_end  # noqa: PLC0415
+
         now = timezone.now()
 
         with transaction.atomic():
             self._activate_now()
             self.started_at = self.started_at or now
             self.current_period_start = now
-            self.current_period_end = now + timedelta(days=self.cycle_days)
+            self.billing_anchor_day = self.billing_anchor_day or now.day
+            self.current_period_end = next_billing_period_end(
+                now,
+                self.billing_cycle,
+                anchor_day=self.billing_anchor_day,
+                custom_cycle_days=self.custom_cycle_days,
+            )
             self.next_billing_date = self.current_period_end
             self.save()
 
@@ -614,28 +670,8 @@ class Subscription(models.Model):
             )
 
     def convert_trial(self, user: Any = None) -> None:
-        """Convert trial to paid subscription."""
-        if self.status != "trialing":
-            raise ValidationError(_("Can only convert subscriptions in trial status"))
-
-        with transaction.atomic():
-            self.trial_converted = True
-            self._convert_trial_now()
-            now = timezone.now()
-            self.started_at = self.started_at or now
-            self.current_period_start = now
-            self.current_period_end = now + timedelta(days=self.cycle_days)
-            self.next_billing_date = self.current_period_end
-            self.save()
-
-            log_security_event(
-                event_type="subscription_trial_converted",
-                details={
-                    "subscription_id": str(self.id),
-                    "subscription_number": self.subscription_number,
-                },
-                user_email=user.email if user else None,
-            )
+        """Reject unverified trial conversion; convergence owns paid entitlement."""
+        raise ValidationError(_("Trial conversion requires a verified payment through PaymentSuccessService."))
 
     def cancel(
         self,
@@ -707,6 +743,10 @@ class Subscription(models.Model):
                 paused_duration = timezone.now() - self.paused_at
                 self.current_period_end += paused_duration
                 self.next_billing_date += paused_duration
+                if self.next_proforma_at is not None:
+                    self.next_proforma_at += paused_duration
+                if self.next_charge_at is not None:
+                    self.next_charge_at += paused_duration
 
             self.paused_at = None
             self.resume_at = None
@@ -720,35 +760,23 @@ class Subscription(models.Model):
             )
 
     def renew(self, user: Any = None) -> None:
-        """Renew subscription for next billing period."""
-        with transaction.atomic():
-            self.current_period_start = self.current_period_end
-            self.current_period_end = self.current_period_start + timedelta(days=self.cycle_days)
-            self.next_billing_date = self.current_period_end
-            self.failed_payment_count = 0
-            self.grace_period_ends_at = None
-            self.save()
-
-            log_security_event(
-                event_type="subscription_renewed",
-                details={
-                    "subscription_id": str(self.id),
-                    "new_period_end": self.current_period_end.isoformat(),
-                },
-                user_email=user.email if user else None,
-            )
+        """Reject unverified renewal; convergence owns paid entitlement."""
+        raise ValidationError(_("Subscription renewal requires a verified payment through PaymentSuccessService."))
 
     def mark_payment_failed(self) -> None:
-        """Record a failed payment attempt."""
+        """Record a failed attempt without consuming entitlement already paid for."""
         with transaction.atomic():
             self.failed_payment_count = F("failed_payment_count") + 1
             self.save(update_fields=["failed_payment_count", "updated_at"])
             self.refresh_from_db()
 
-            # Enter past due status if first failure — use FSM transition.
-            if self.status == "active":
+            # Fixed renewals are collected before the current paid-through
+            # boundary. A decline may schedule retries immediately, but grace
+            # cannot start while the customer still has paid entitlement.
+            now = timezone.now()
+            if self.status == "active" and now >= self.current_period_end:
                 self._go_past_due()
-                self.grace_period_ends_at = timezone.now() + timedelta(days=self.grace_period_days)
+                self.grace_period_ends_at = now + timedelta(days=self.grace_period_days)
                 self.save(update_fields=["status", "grace_period_ends_at", "updated_at"])
 
             log_security_event(
@@ -763,27 +791,8 @@ class Subscription(models.Model):
             )
 
     def record_payment(self, amount_cents: int, user: Any = None) -> None:
-        """Record a successful payment."""
-        with transaction.atomic():
-            self.last_payment_date = timezone.now()
-            self.last_payment_amount_cents = amount_cents
-            self.failed_payment_count = 0
-            self.grace_period_ends_at = None
-
-            if self.status == "past_due":
-                self._resume_now()
-
-            self.save()
-
-            log_security_event(
-                event_type="subscription_payment_recorded",
-                details={
-                    "subscription_id": str(self.id),
-                    "amount_cents": amount_cents,
-                    "critical_financial_operation": True,
-                },
-                user_email=user.email if user else None,
-            )
+        """Reject unverified payment assertions; convergence owns paid state."""
+        raise ValidationError(_("Subscription payment requires verification through PaymentSuccessService."))
 
     def apply_grandfathered_price(
         self,
@@ -819,8 +828,11 @@ class Subscription(models.Model):
 
 class SubscriptionChange(models.Model):
     """
-    Tracks subscription changes (upgrades, downgrades, quantity changes).
-    Calculates and stores proration amounts.
+    Historical schema for subscription-change audit records.
+
+    The incomplete executable plan-change engine was retired. A replacement must
+    coordinate provisioning, renewal-boundary changes, and Romanian fiscal credit
+    documents before these records can safely drive billing state.
     """
 
     CHANGE_TYPE_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
@@ -942,69 +954,6 @@ class SubscriptionChange(models.Model):
     def proration_amount(self) -> Decimal:
         """Get proration amount as Decimal."""
         return Decimal(self.proration_amount_cents) / 100
-
-    def calculate_proration(self) -> None:
-        """Calculate proration amounts for this change."""
-        if not self.prorate:
-            self.proration_amount_cents = 0
-            self.unused_credit_cents = 0
-            self.new_charge_cents = 0
-            return
-
-        sub = self.subscription
-        now = timezone.now()
-
-        # Calculate days remaining in current period
-        days_remaining = 0 if sub.current_period_end <= now else (sub.current_period_end - now).days
-
-        days_in_period = sub.cycle_days
-
-        if days_in_period <= 0:
-            days_in_period = 30  # Fallback
-
-        # Calculate unused credit from old plan
-        old_daily_rate = (self.old_price_cents * self.old_quantity) / days_in_period
-        self.unused_credit_cents = int(old_daily_rate * days_remaining)
-
-        # Calculate charge for new plan
-        new_daily_rate = (self.new_price_cents * self.new_quantity) / days_in_period
-        self.new_charge_cents = int(new_daily_rate * days_remaining)
-
-        # Net proration (positive = customer pays, negative = credit)
-        self.proration_amount_cents = self.new_charge_cents - self.unused_credit_cents
-
-    def apply(self, user: Any = None) -> None:
-        """Apply the subscription change."""
-        if self.status != "pending":
-            raise ValidationError(_("Cannot apply change with status: %(status)s") % {"status": self.status})
-
-        with transaction.atomic():
-            sub = self.subscription
-
-            # Update subscription
-            if self.new_product:
-                sub.product = self.new_product
-            sub.unit_price_cents = self.new_price_cents
-            sub.quantity = self.new_quantity
-            sub.billing_cycle = self.new_billing_cycle
-            sub.save()
-
-            # Mark change as applied
-            self.status = "applied"  # fsm-bypass: SubscriptionChange is not FSM-protected
-            self.applied_at = timezone.now()
-            self.save()
-
-            log_security_event(
-                event_type="subscription_change_applied",
-                details={
-                    "subscription_id": str(sub.id),
-                    "change_id": str(self.id),
-                    "change_type": self.change_type,
-                    "proration_amount_cents": self.proration_amount_cents,
-                    "critical_financial_operation": True,
-                },
-                user_email=user.email if user else None,
-            )
 
 
 # ===============================================================================

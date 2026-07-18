@@ -26,6 +26,7 @@ from apps.billing.proforma_models import ProformaInvoice, ProformaSequence
 from apps.customers.models import Customer
 from apps.orders.models import Order, OrderItem
 from apps.products.models import Product
+from apps.provisioning.models import ServicePlan
 from apps.users.models import User
 from tests.helpers.fsm_helpers import force_status
 
@@ -54,6 +55,13 @@ class CardProformaTestBase(TestCase):
             product_type="shared_hosting",
             is_active=True,
         )
+        self.service_plan = ServicePlan.objects.create(
+            name="Card Test Shared Hosting",
+            plan_type="shared_hosting",
+            price_monthly=Decimal("100.00"),
+        )
+        self.product.default_service_plan = self.service_plan
+        self.product.save(update_fields=["default_service_plan"])
         self.user = User.objects.create_user(
             email="admin-card@pragmatichost.com",
             password="testpass123",
@@ -224,22 +232,10 @@ class TestCreatePaymentIntentDirectLinksProforma(CardProformaTestBase):
         )
 
     @patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway")
-    def test_no_proforma_with_nonzero_total_returns_warning_not_error(
+    def test_no_proforma_with_nonzero_total_fails_closed(
         self, mock_create_gateway: MagicMock
     ) -> None:
-        """Order with total > 0 but no proforma logs a warning — gateway call still proceeds.
-
-        Phase 1 plan allows the payment intent to be created even without a proforma
-        (order may not be in awaiting_payment yet). The proforma link is simply absent.
-        This test documents the current behaviour so a future constraint change is explicit.
-        """
-        mock_gateway = MagicMock()
-        mock_gateway.create_payment_intent.return_value = {
-            "success": True,
-            "payment_intent_id": "pi_no_proforma_warn3",
-            "client_secret": "cs_test3",
-        }
-        mock_create_gateway.return_value = mock_gateway
+        """A positive order must have an authoritative proforma before Stripe is called."""
 
         # Order in draft — no proforma exists yet
         order = self._create_order_with_items()
@@ -247,27 +243,18 @@ class TestCreatePaymentIntentDirectLinksProforma(CardProformaTestBase):
 
         from apps.billing.payment_service import PaymentService  # noqa: PLC0415
 
-        with self.assertLogs("apps.billing.payment_service", level="WARNING"):
-            result = PaymentService.create_payment_intent_direct(
-                order_id=str(order.id),
-                customer_id=str(order.customer.id),
-                amount_cents=order.total_cents,
-                currency="RON",
-                gateway="stripe",
-            )
-
-        # The service logs a warning but does NOT return an error (no proforma is non-fatal)
-        self.assertTrue(
-            result.get("success"),
-            "create_payment_intent_direct should still succeed even without a proforma "
-            "(it logs a warning for monitoring but does not block the customer)",
+        result = PaymentService.create_payment_intent_direct(
+            order_id=str(order.id),
+            customer_id=str(order.customer.id),
+            amount_cents=order.total_cents,
+            currency="RON",
+            gateway="stripe",
         )
 
-        payment = Payment.objects.get(gateway_txn_id="pi_no_proforma_warn3")
-        self.assertIsNone(
-            payment.proforma,
-            "Payment.proforma must be None when order has no proforma",
-        )
+        self.assertFalse(result.get("success"))
+        self.assertIn("authoritative proforma", result.get("error", ""))
+        self.assertFalse(Payment.objects.exists())
+        mock_create_gateway.assert_not_called()
 
 
 # ===============================================================================
@@ -290,6 +277,7 @@ class TestWebhookConvertsProformaForCardPayment(CardProformaTestBase):
                     "id": stripe_payment_id,
                     "payment_method": "pm_test",
                     "amount_received": 12100,
+                    "currency": "ron",
                 },
             },
         }
@@ -391,7 +379,11 @@ class TestConfirmOrderConvertsProformaBeforeWebhook(CardProformaTestBase):
 
         mock_gateway = MagicMock()
         mock_gateway.confirm_payment.return_value = PaymentConfirmResult(
-            success=True, status="succeeded", error=None, amount_received=12100,
+            success=True,
+            status="succeeded",
+            error=None,
+            amount_received=12100,
+            currency="ron",
         )
 
         request = self._make_confirm_request({"payment_intent_id": "pi_testConfirmPfm53abcd"})
@@ -429,6 +421,9 @@ class TestConfirmOrderConvertsProformaBeforeWebhook(CardProformaTestBase):
             order.invoice,
             "Order.invoice must be set after proforma-to-invoice conversion",
         )
+        payment.refresh_from_db()
+        self.assertEqual(payment.meta["stripe_amount_received"], 12100)
+        self.assertEqual(payment.meta["stripe_currency"], "ron")
 
     def test_confirm_order_invoice_linked_to_order_after_conversion(self) -> None:
         """After confirm_order converts the proforma, order.invoice must be the new invoice.
@@ -452,7 +447,11 @@ class TestConfirmOrderConvertsProformaBeforeWebhook(CardProformaTestBase):
 
         mock_gateway = MagicMock()
         mock_gateway.confirm_payment.return_value = PaymentConfirmResult(
-            success=True, status="succeeded", error=None, amount_received=12100,
+            success=True,
+            status="succeeded",
+            error=None,
+            amount_received=12100,
+            currency="ron",
         )
 
         request = self._make_confirm_request({"payment_intent_id": "pi_testInvLink53bdefgh"})
@@ -675,25 +674,13 @@ class TestFallbackTaskUsesProformaPath(CardProformaTestBase):
 
 
 class TestCreatePaymentIntentDirectNoProforma(CardProformaTestBase):
-    """Phase 1 edge case: create_payment_intent_direct when order has no proforma."""
+    """Fail-closed behavior when an order has no authoritative proforma."""
 
     @patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway")
-    def test_logs_warning_but_succeeds_when_order_not_in_awaiting_payment(
+    def test_draft_order_without_proforma_never_reaches_gateway(
         self, mock_create_gateway: MagicMock
     ) -> None:
-        """Draft order (no proforma): payment intent created with warning, no proforma link.
-
-        The Phase 1 plan specifies: if order.proforma is None and total > 0, LOG a warning
-        but do NOT return an error. The portal may call this endpoint before the
-        awaiting_payment signal fires (race between request and signal).
-        """
-        mock_gateway = MagicMock()
-        mock_gateway.create_payment_intent.return_value = {
-            "success": True,
-            "payment_intent_id": "pi_draft_order_5_6",
-            "client_secret": "cs_test6",
-        }
-        mock_create_gateway.return_value = mock_gateway
+        """Draft orders cannot bypass the billing snapshot by racing order finalization."""
 
         order = self._create_order_with_items()
         # Remain in draft — no proforma
@@ -702,30 +689,18 @@ class TestCreatePaymentIntentDirectNoProforma(CardProformaTestBase):
 
         from apps.billing.payment_service import PaymentService  # noqa: PLC0415
 
-        with self.assertLogs("apps.billing.payment_service", level="WARNING"):
-            result = PaymentService.create_payment_intent_direct(
-                order_id=str(order.id),
-                customer_id=str(order.customer.id),
-                amount_cents=order.total_cents,
-                currency="RON",
-                gateway="stripe",
-            )
-
-        self.assertTrue(
-            result.get("success"),
-            "create_payment_intent_direct must succeed even for draft order (warning, not error)",
+        result = PaymentService.create_payment_intent_direct(
+            order_id=str(order.id),
+            customer_id=str(order.customer.id),
+            amount_cents=order.total_cents,
+            currency="RON",
+            gateway="stripe",
         )
 
-        payment = Payment.objects.get(gateway_txn_id="pi_draft_order_5_6")
-        self.assertIsNone(
-            payment.proforma,
-            "Payment.proforma must be None when order is in draft (no proforma exists)",
-        )
-        self.assertNotIn(
-            "proforma_id",
-            payment.meta,
-            "payment.meta must not contain proforma_id when no proforma exists",
-        )
+        self.assertFalse(result.get("success"))
+        self.assertIn("authoritative proforma", result.get("error", ""))
+        self.assertFalse(Payment.objects.exists())
+        mock_create_gateway.assert_not_called()
 
     @patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway")
     def test_payment_intent_succeeds_for_free_order(self, mock_create_gateway: MagicMock) -> None:

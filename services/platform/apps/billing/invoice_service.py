@@ -351,7 +351,7 @@ Please find attached invoice {invoice.number}.
 Invoice Details:
 - Invoice Number: {invoice.number}
 - Amount: €{Decimal(invoice.total_cents) / 100:.2f}
-- Due Date: {invoice.due_date.strftime("%Y-%m-%d") if hasattr(invoice, "due_date") and invoice.due_date else "N/A"}
+- Due Date: {invoice.due_at.strftime("%Y-%m-%d") if invoice.due_at else "N/A"}
 
 Thank you for your business.
 

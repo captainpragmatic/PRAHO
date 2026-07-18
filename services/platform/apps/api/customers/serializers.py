@@ -346,7 +346,6 @@ class CustomerBillingProfileSerializer(serializers.Serializer):
 
     payment_terms = serializers.CharField(max_length=50, allow_blank=True)
     preferred_currency = serializers.CharField(max_length=3, default="RON")
-    auto_payment_enabled = serializers.BooleanField(default=False)
 
 
 class CustomerDetailSerializer(serializers.ModelSerializer):

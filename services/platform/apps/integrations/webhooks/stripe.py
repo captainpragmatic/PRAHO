@@ -40,8 +40,6 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
     Handles Stripe events:
     - payment_intent.succeeded → Update Payment status
     - payment_intent.payment_failed → Mark payment failed
-    - invoice.payment_succeeded → Update Invoice status
-    - invoice.payment_failed → Trigger dunning process
     - customer.created → Link Stripe customer to our Customer
     - charge.dispute.created → Alert for dispute handling
     """
@@ -105,7 +103,6 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
         # Event handler registry - maps event prefixes to handler methods
         self._event_handlers: dict[str, StripeEventHandler] = {
             "payment_intent.": self.handle_payment_intent_event,
-            "invoice.": self.handle_invoice_event,
             "customer.": self.handle_customer_event,
             "charge.": self.handle_charge_event,
             "setup_intent.": self.handle_setup_intent_event,
@@ -139,7 +136,100 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
                 return handler
         return None
 
-    def handle_payment_intent_event(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: payment_intent.succeeded/failed paths share state, extraction would fragment the lock scope
+    def _handle_payment_intent_succeeded(  # noqa: C901, PLR0911, PLR0912  # Explicit recovery prevents charged/no-invoice loss
+        self,
+        stripe_payment_id: str,
+        payment_intent: dict[str, Any],
+    ) -> tuple[bool, str]:
+        """Validate success, then convert a proforma using Proforma -> Payment lock order."""
+        from apps.billing.payment_convergence import PaymentSuccessService  # noqa: PLC0415
+
+        previous_status = (
+            Payment.objects.filter(gateway_txn_id=stripe_payment_id).values_list("status", flat=True).first()
+        )
+        convergence = PaymentSuccessService.converge_gateway_success(
+            stripe_payment_id,
+            {
+                "amount_received": payment_intent.get("amount_received"),
+                "currency": payment_intent.get("currency"),
+                "customer_id": payment_intent.get("customer"),
+                "payment_method_id": payment_intent.get("payment_method"),
+                "metadata": payment_intent.get("metadata"),
+            },
+        )
+        if convergence.is_err():
+            error = convergence.unwrap_err()
+            if error.startswith("Payment not found"):
+                metadata = payment_intent.get("metadata")
+                if isinstance(metadata, dict) and metadata.get("source") == "recurring_billing":
+                    logger.critical(
+                        "Recurring Stripe success %s has no exact local pending payment: %s",
+                        stripe_payment_id,
+                        error,
+                    )
+                    return False, error
+                logger.warning("⚠️ Payment not found for Stripe PaymentIntent: %s", stripe_payment_id)
+                return True, f"Payment not found (external): {stripe_payment_id}"
+            logger.critical("Stripe success convergence rejected for %s: %s", stripe_payment_id, error)
+            return False, error
+        payment = convergence.unwrap()
+
+        if payment.proforma_id is None:
+            proforma_id_from_meta = (payment.meta or {}).get("proforma_id")
+            if proforma_id_from_meta:
+                from apps.billing.proforma_models import ProformaInvoice  # noqa: PLC0415
+
+                try:
+                    recovered_proforma = ProformaInvoice.objects.get(id=proforma_id_from_meta)
+                except ProformaInvoice.DoesNotExist:
+                    logger.error(
+                        "🔥 [Stripe] Proforma %s in payment %s metadata was not found",
+                        proforma_id_from_meta,
+                        payment.id,
+                    )
+                else:
+                    if recovered_proforma.status == "converted":
+                        return True, f"Payment {payment.id} already processed (idempotent)"
+                    payment.proforma = recovered_proforma
+                    payment.save(update_fields=["proforma", "updated_at"])
+                    logger.warning(
+                        "⚠️ [Stripe] Re-linked proforma %s to payment %s from metadata",
+                        recovered_proforma.number,
+                        payment.id,
+                    )
+
+        if payment.proforma:
+            payment.proforma.refresh_from_db()
+            if payment.proforma.status == "converted":
+                return True, f"Payment {payment.id} already processed (idempotent)"
+            try:
+                from apps.billing.proforma_service import ProformaPaymentService  # noqa: PLC0415
+
+                convert_result = ProformaPaymentService.record_payment_and_convert(
+                    proforma_id=str(payment.proforma.id),
+                    amount_cents=payment.amount_cents,
+                    payment_method="stripe",
+                    existing_payment=payment,
+                )
+                if convert_result.is_err():
+                    error = convert_result.unwrap_err()
+                    logger.critical(
+                        "🔥 [Stripe] Proforma conversion failed for payment %s: %s",
+                        payment.id,
+                        error,
+                    )
+                    return False, f"conversion failed: {error}"
+            except Exception as exc:
+                logger.exception("🔥 [Stripe] Proforma auto-convert failed: %s", exc)
+                return False, f"conversion failed: {exc}"
+        elif previous_status == "succeeded":
+            return True, f"Payment {payment.id} already processed (idempotent)"
+
+        transaction.on_commit(lambda: self._notify_portal_payment_success(payment, payment_intent))
+        logger.info("✅ Payment %s marked as succeeded from Stripe", payment.id)
+        return True, f"Payment {payment.id} succeeded"
+
+    def handle_payment_intent_event(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Locked success/failure outcomes
         self, event_type: str, payload: dict[str, Any]
     ) -> tuple[bool, str]:
         """💳 Handle PaymentIntent events with race condition protection.
@@ -153,128 +243,46 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
         if not stripe_payment_id:
             return False, "Missing PaymentIntent ID"
 
+        if event_type == "payment_intent.succeeded":
+            return self._handle_payment_intent_succeeded(stripe_payment_id, payment_intent)
+
         # SECURITY: Use atomic transaction with row locking to prevent race conditions
         with transaction.atomic():
             try:
                 # Lock the payment row to prevent concurrent updates
                 payment = Payment.objects.select_for_update(of=("self",)).get(gateway_txn_id=stripe_payment_id)
             except Payment.DoesNotExist:
-                # Payment not found - might be created outside our system
-                logger.warning(f"⚠️ Payment not found for Stripe PaymentIntent: {stripe_payment_id}")
-                return True, f"Payment not found (external): {stripe_payment_id}"
+                metadata = payment_intent.get("metadata")
+                if event_type == "payment_intent.payment_failed" and (
+                    isinstance(metadata, dict) and metadata.get("source") == "recurring_billing"
+                ):
+                    from apps.billing.payment_convergence import PaymentSuccessService  # noqa: PLC0415
 
-            if event_type == "payment_intent.succeeded":
-                meta_update = {
-                    "stripe_payment_intent": stripe_payment_id,
-                    "stripe_payment_method": payment_intent.get("payment_method"),
-                    "stripe_amount_received": payment_intent.get("amount_received"),
-                }
-                changed = payment.apply_gateway_event("succeeded", meta_update)
-
-                if not changed:
-                    # C1 fix: Even if payment is already succeeded, check if proforma
-                    # still needs conversion. This handles Stripe retries after a
-                    # conversion failure: payment committed as "succeeded" but proforma
-                    # not yet converted. Without this, the early-return would skip
-                    # conversion forever, leaving the customer with no invoice.
-                    if payment.proforma:
-                        payment.proforma.refresh_from_db()
-                        if payment.proforma.status not in ("converted",):
-                            logger.info(
-                                "🔄 [Stripe] Payment %s already succeeded but proforma %s not converted — retrying conversion",
-                                payment.id,
-                                payment.proforma.number,
-                            )
-                            # Fall through to the proforma conversion block below
-                        else:
-                            return True, f"Payment {payment.id} already processed (idempotent)"
-                    else:
-                        # B-1 fix: Savepoint rollback can NULL out payment.proforma FK
-                        # even though meta["proforma_id"] was written before the savepoint.
-                        # Re-link the proforma from meta so conversion can be retried.
-                        proforma_id_from_meta = (payment.meta or {}).get("proforma_id")
-                        if proforma_id_from_meta:
-                            try:
-                                from apps.billing.proforma_models import (  # noqa: PLC0415
-                                    ProformaInvoice,
-                                )
-
-                                recovered_proforma = ProformaInvoice.objects.get(id=proforma_id_from_meta)
-                                if recovered_proforma.status == "converted":
-                                    return True, f"Payment {payment.id} already processed (idempotent)"
-                                # Re-link so the conversion block below uses payment.proforma
-                                payment.proforma = recovered_proforma
-                                payment.save(update_fields=["proforma", "updated_at"])
-                                logger.warning(
-                                    "⚠️ [Stripe] B-1 recovery: re-linked proforma %s to payment %s from meta — "
-                                    "proforma FK was NULL (savepoint rollback). Retrying conversion.",
-                                    recovered_proforma.number,
-                                    payment.id,
-                                )
-                                # Fall through to the proforma conversion block below
-                            except ProformaInvoice.DoesNotExist:
-                                logger.error(
-                                    "🔥 [Stripe] B-1 recovery failed: proforma %s in meta not found for payment %s",
-                                    proforma_id_from_meta,
-                                    payment.id,
-                                )
-                                return True, f"Payment {payment.id} already processed (idempotent)"
-                        else:
-                            logger.info(
-                                "⏭️ Payment %s already in terminal state, skipping duplicate webhook", payment.id
-                            )
-                            return True, f"Payment {payment.id} already processed (idempotent)"
-
-                # B7: If payment has a proforma, auto-convert proforma→invoice
-                if payment.proforma:
-                    try:
-                        from apps.billing.proforma_service import (  # noqa: PLC0415
-                            ProformaPaymentService,
+                    recovery = PaymentSuccessService.recover_unlinked_recurring_attempt(
+                        stripe_payment_id,
+                        {
+                            "amount_received": payment_intent.get("amount"),
+                            "currency": payment_intent.get("currency"),
+                            "customer_id": payment_intent.get("customer"),
+                            "payment_method_id": payment_intent.get("payment_method"),
+                            "metadata": metadata,
+                        },
+                    )
+                    if recovery.is_err():
+                        error = recovery.unwrap_err()
+                        logger.critical(
+                            "Recurring Stripe failure %s has no exact local pending payment: %s",
+                            stripe_payment_id,
+                            error,
                         )
+                        return False, error
+                    payment = recovery.unwrap()
+                else:
+                    # The PaymentIntent may have been created outside PRAHO.
+                    logger.warning("⚠️ Payment not found for Stripe PaymentIntent: %s", stripe_payment_id)
+                    return True, f"Payment not found (external): {stripe_payment_id}"
 
-                        convert_result = ProformaPaymentService.record_payment_and_convert(
-                            proforma_id=str(payment.proforma.id),
-                            amount_cents=payment.amount_cents,
-                            payment_method="stripe",
-                            existing_payment=payment,
-                        )
-                        if convert_result.is_ok():
-                            logger.info(
-                                "✅ [Stripe] Auto-converted proforma %s after payment %s succeeded",
-                                payment.proforma.number,
-                                payment.id,
-                            )
-                        else:
-                            # C1: Return False so Stripe retries the webhook.
-                            # Payment is already marked succeeded but invoice was not
-                            # created — retry gives the conversion another chance.
-                            err_msg = convert_result.unwrap_err() if convert_result.is_err() else "unknown"
-                            logger.critical(
-                                "🔥 [Stripe] Proforma conversion failed for payment %s: %s — customer charged but no invoice created",
-                                payment.id,
-                                err_msg,
-                            )
-                            return False, f"conversion failed: {err_msg}"
-                    except Exception as e:
-                        logger.exception("🔥 [Stripe] Proforma auto-convert failed: %s", e)
-                        return False, f"conversion failed: {e}"
-
-                # Update associated invoice if exists (fallback for non-proforma payments)
-                elif payment.invoice:
-                    payment.invoice.update_status_from_payments()
-
-                # H6 fix: Move Portal notification to on_commit to release DB row lock
-                # before making outbound HTTP call. The select_for_update lock is held
-                # during the entire atomic block — network latency extends lock duration.
-                _payment = payment
-                _pi = payment_intent
-                _self = self
-                transaction.on_commit(lambda: _self._notify_portal_payment_success(_payment, _pi))
-
-                logger.info(f"✅ Payment {payment.id} marked as succeeded from Stripe")
-                return True, f"Payment {payment.id} succeeded"
-
-            elif event_type == "payment_intent.payment_failed":
+            if event_type == "payment_intent.payment_failed":
                 failure_reason = payment_intent.get("last_payment_error", {}).get("message", "Unknown error")
 
                 meta_update = {
@@ -286,6 +294,20 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
                 if not changed:
                     logger.warning(f"⚠️ Payment {payment.id} already in terminal state, ignoring failure event")
                     return True, f"Payment {payment.id} already in terminal state, ignoring failure"
+
+                if (payment.meta or {}).get("source") == "recurring_billing":
+                    from apps.billing.payment_convergence import (  # noqa: PLC0415
+                        converge_recurring_payment_failure,
+                    )
+
+                    cycle_count = converge_recurring_payment_failure(payment)
+                    if cycle_count == 0:
+                        transaction.set_rollback(True)
+                        logger.critical(
+                            "Recurring Stripe failure %s has no linked billing cycle",
+                            stripe_payment_id,
+                        )
+                        return False, "Recurring payment has no linked billing cycle"
 
                 # Trigger dunning process if this was an invoice payment
                 if payment.invoice:
@@ -351,24 +373,6 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
             else:
                 return True, f"Skipped PaymentIntent event: {event_type}"
 
-    def handle_invoice_event(self, event_type: str, payload: dict[str, Any]) -> tuple[bool, str]:
-        """🧾 Handle Stripe Invoice events"""
-        stripe_invoice = payload.get("data", {}).get("object", {})
-        stripe_invoice_id = stripe_invoice.get("id")
-
-        if event_type == "invoice.payment_succeeded":
-            # Find our invoice by Stripe ID or customer
-            logger.info(f"🎉 Stripe invoice payment succeeded: {stripe_invoice_id}")
-            return True, f"Invoice payment succeeded: {stripe_invoice_id}"
-
-        elif event_type == "invoice.payment_failed":
-            # Trigger dunning process
-            logger.warning(f"❌ Stripe invoice payment failed: {stripe_invoice_id}")
-            return True, f"Invoice payment failed: {stripe_invoice_id}"
-
-        else:
-            return True, f"Skipped Invoice event: {event_type}"
-
     def handle_customer_event(self, event_type: str, payload: dict[str, Any]) -> tuple[bool, str]:
         """👤 Handle Stripe Customer events"""
         stripe_customer = payload.get("data", {}).get("object", {})
@@ -403,8 +407,49 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
         charge_id = charge.get("id")
 
         if event_type == "charge.dispute.created":
-            # Alert for dispute handling
-            logger.critical(f"🚨 DISPUTE CREATED for charge {charge_id} - manual review required!")
+            dispute_id = charge_id
+            payment_intent_ref = charge.get("payment_intent")
+            if isinstance(payment_intent_ref, dict):
+                payment_intent_ref = payment_intent_ref.get("id")
+            payment_intent_id = payment_intent_ref if isinstance(payment_intent_ref, str) else None
+            dispute_amount = charge.get("amount", 0)
+            if isinstance(dispute_amount, bool) or not isinstance(dispute_amount, int | float):
+                dispute_amount = 0
+            dispute_currency = str(charge.get("currency") or "unknown").upper()
+
+            logger.critical(
+                "🚨 DISPUTE CREATED %s for PaymentIntent %s - manual review required!",
+                dispute_id,
+                payment_intent_id,
+            )
+
+            if payment_intent_id:
+                with transaction.atomic():
+                    payment = (
+                        Payment.objects.select_for_update(of=("self",)).filter(gateway_txn_id=payment_intent_id).first()
+                    )
+                    if payment is not None and payment.status != "disputed":
+                        changed = payment.apply_gateway_event(
+                            "disputed",
+                            {
+                                "dispute_id": dispute_id,
+                                "dispute_charge_id": charge.get("charge"),
+                                "dispute_reason": charge.get("reason"),
+                                "dispute_amount_cents": dispute_amount,
+                                "dispute_currency": dispute_currency,
+                                "dispute_created_at": timezone.now().isoformat(),
+                            },
+                        )
+                        if not changed:
+                            logger.critical(
+                                "Stripe dispute %s could not transition payment %s from %s",
+                                dispute_id,
+                                payment.id,
+                                payment.status,
+                            )
+                            return False, f"Payment {payment.id} cannot transition to disputed"
+            else:
+                logger.critical("Stripe dispute %s did not identify a PaymentIntent", dispute_id)
 
             # Send urgent notification to admin
             try:
@@ -412,35 +457,23 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
                     NotificationService,  # Circular: cross-app  # Deferred: avoids circular import
                 )
 
-                dispute_amount = charge.get("dispute", {}).get("amount", charge.get("amount", 0))
                 NotificationService.send_admin_alert(
-                    subject=f"URGENT: Stripe Dispute Created - {charge_id}",
-                    message=f"A dispute has been created for charge {charge_id}.\n"
-                    f"Amount: ${dispute_amount / 100:.2f}\n"
-                    f"Reason: {charge.get('dispute', {}).get('reason', 'Unknown')}\n"
+                    subject=f"URGENT: Stripe Dispute Created - {dispute_id}",
+                    message=f"A dispute has been created for PaymentIntent {payment_intent_id or 'unknown'}.\n"
+                    f"Amount: {dispute_amount / 100:.2f} {dispute_currency}\n"
+                    f"Reason: {charge.get('reason', 'Unknown')}\n"
                     f"Please review immediately.",
                     alert_type="dispute",
-                    metadata={"charge_id": charge_id, "dispute": charge.get("dispute", {})},
+                    metadata={
+                        "dispute_id": dispute_id,
+                        "charge_id": charge.get("charge"),
+                        "payment_intent_id": payment_intent_id,
+                    },
                 )
             except Exception as notify_error:
                 logger.error(f"⚠️ Failed to send dispute notification: {notify_error}")
 
-            # Update payment record with dispute flag
-            try:
-                with transaction.atomic():
-                    payment = Payment.objects.select_for_update(of=("self",)).filter(gateway_txn_id=charge_id).first()
-                    if payment:
-                        meta_update = {
-                            "dispute_id": charge.get("dispute", {}).get("id"),
-                            "dispute_reason": charge.get("dispute", {}).get("reason"),
-                            "dispute_created_at": timezone.now().isoformat(),
-                        }
-                        payment.apply_gateway_event("disputed", meta_update)
-                        logger.info(f"📝 Updated payment {payment.id} with dispute flag")
-            except Exception as update_error:
-                logger.error(f"⚠️ Failed to update payment with dispute: {update_error}")
-
-            return True, f"Dispute created for charge: {charge_id}"
+            return True, f"Dispute created: {dispute_id}"
 
         elif event_type == "charge.succeeded":
             # Charge succeeded - payment completed

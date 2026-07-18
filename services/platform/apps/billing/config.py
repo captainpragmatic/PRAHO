@@ -167,7 +167,6 @@ MAX_FUTURE_EVENT_DRIFT_MINUTES = _DEFAULT_FUTURE_EVENT_DRIFT_MINUTES
 
 # Batch sizes for various operations
 BATCH_SIZE_DEFAULT = _get_positive_int("BILLING_BATCH_SIZE_DEFAULT", 100)
-BATCH_SIZE_STRIPE_SYNC = _get_positive_int("BILLING_BATCH_SIZE_STRIPE", 100)
 BATCH_SIZE_AGGREGATION = _get_positive_int("BILLING_BATCH_SIZE_AGGREGATION", 1000)
 
 # Iterator chunk size for memory-efficient processing
@@ -203,34 +202,6 @@ def get_alert_cooldown_hours() -> int:
 
 # Backward-compatible module-level alias
 DEFAULT_ALERT_COOLDOWN_HOURS = _DEFAULT_ALERT_COOLDOWN_HOURS
-
-
-# ===============================================================================
-# E-FACTURA (ROMANIAN ELECTRONIC INVOICING)
-# ===============================================================================
-
-# Module-level fallback for e-Factura minimum amount
-_DEFAULT_EFACTURA_MINIMUM_AMOUNT_CENTS = 10000  # 100 RON
-
-
-def get_efactura_minimum_amount_cents() -> int:
-    """Get minimum amount for mandatory e-Factura submission from SettingsService."""
-    try:
-        return max(
-            1,
-            SettingsService.get_integer_setting(
-                "billing.efactura_minimum_amount_cents", _DEFAULT_EFACTURA_MINIMUM_AMOUNT_CENTS
-            ),
-        )
-    except Exception:
-        logger.warning(
-            "Failed to read efactura_minimum_amount_cents from SettingsService, using fallback", exc_info=True
-        )
-        return _get_positive_int("BILLING_EFACTURA_MINIMUM_CENTS", _DEFAULT_EFACTURA_MINIMUM_AMOUNT_CENTS)
-
-
-# Backward-compatible module-level alias
-E_FACTURA_MINIMUM_AMOUNT_CENTS = _DEFAULT_EFACTURA_MINIMUM_AMOUNT_CENTS
 
 
 # ===============================================================================

@@ -73,6 +73,63 @@ class CreateInvoiceFromOrderTests(TestCase):
         self.assertEqual(line.tax_cents, expected_tax)
         self.assertEqual(line.line_total_cents, line.subtotal_cents + expected_tax)
 
+    def test_create_from_order_snapshots_individual_cnp(self) -> None:
+        from apps.customers.models import CustomerTaxProfile  # noqa: PLC0415
+
+        self.customer.customer_type = "individual"
+        self.customer.company_name = ""
+        self.customer.save(update_fields=["customer_type", "company_name"])
+        CustomerTaxProfile.objects.create(customer=self.customer, cnp="1850101123451")
+
+        invoice = InvoiceService().create_from_order(self._order()).unwrap()
+
+        self.assertEqual(invoice.bill_to_cnp, "1850101123451")
+        self.assertEqual(invoice.bill_to_tax_id, "")
+
+    def test_create_from_order_preserves_foreign_currency_address_and_vat_context(self) -> None:
+        eur = Currency.objects.create(code="EUR", symbol="€", decimals=2)
+        order = Order.objects.create(
+            customer=self.customer,
+            currency=eur,
+            customer_email=self.customer.primary_email,
+            customer_name=self.customer.name,
+            subtotal_cents=10000,
+            tax_cents=1900,
+            total_cents=11900,
+            billing_address={
+                "company_name": "Example GmbH",
+                "country": "Germany",
+                "address_line1": "Unter den Linden 1",
+                "address_line2": "Floor 2",
+                "city": "Berlin",
+                "county": "Berlin",
+                "postal_code": "10117",
+            },
+        )
+        OrderItem.objects.create(
+            order=order,
+            product=self.product,
+            product_name=self.product.name,
+            product_type=self.product.product_type,
+            quantity=2,
+            unit_price_cents=5000,
+            tax_rate=Decimal("0.1900"),
+            tax_cents=1900,
+            line_total_cents=11900,
+        )
+
+        invoice = InvoiceService().create_from_order(order).unwrap()
+
+        self.assertEqual(invoice.currency, eur)
+        self.assertEqual(invoice.tax_cents, 1900)
+        self.assertEqual(invoice.bill_to_name, "Example GmbH")
+        self.assertEqual(invoice.bill_to_country, "DE")
+        self.assertEqual(invoice.bill_to_address1, "Unter den Linden 1")
+        self.assertEqual(invoice.bill_to_address2, "Floor 2")
+        self.assertEqual(invoice.bill_to_city, "Berlin")
+        self.assertEqual(invoice.bill_to_region, "Berlin")
+        self.assertEqual(invoice.bill_to_postal, "10117")
+
     def test_create_from_order_does_not_double_tax_header(self) -> None:
         """The invoice header VAT must be computed on the NET base (gross line subtotal), not on
         order.total_cents (already tax-inclusive). The old code passed order.total_cents to the

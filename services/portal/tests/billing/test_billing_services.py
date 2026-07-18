@@ -2,7 +2,7 @@ import unittest
 from unittest.mock import patch
 
 from apps.api_client.services import PlatformAPIClient, PlatformAPIError
-from apps.billing.services import InvoiceViewService
+from apps.billing.services import InvoiceViewService, RecurringPaymentsService
 
 
 class BillingServicesTests(unittest.TestCase):
@@ -56,42 +56,6 @@ class BillingServicesTests(unittest.TestCase):
         mock_post.assert_called_once()
         called_endpoint = mock_post.call_args.args[0]
         self.assertEqual(called_endpoint, '/billing/proformas/')
-
-
-class PaymentMethodsServiceTests(unittest.TestCase):
-    """Tests for InvoiceViewService.get_payment_methods."""
-
-    def setUp(self) -> None:
-        self.service = InvoiceViewService()
-
-    @patch('apps.billing.services.PlatformAPIClient.get_payment_methods')
-    def test_get_payment_methods_success(self, mock_get):
-        mock_get.return_value = {
-            'success': True,
-            'payment_methods': [
-                {'type': 'card', 'name': 'Stripe', 'supports_recurring': True},
-                {'type': 'bank_transfer', 'name': 'Bank Transfer', 'supports_recurring': False},
-            ],
-        }
-
-        methods = self.service.get_payment_methods(customer_id=123, user_id=7)
-        self.assertEqual(len(methods), 2)
-        self.assertEqual(methods[0]['type'], 'card')
-        mock_get.assert_called_once_with(customer_id='123', user_id='7')
-
-    @patch('apps.billing.services.PlatformAPIClient.get_payment_methods')
-    def test_get_payment_methods_api_failure(self, mock_get):
-        mock_get.return_value = {'success': False, 'error': 'Service unavailable'}
-
-        methods = self.service.get_payment_methods(customer_id=123, user_id=7)
-        self.assertEqual(methods, [])
-
-    @patch('apps.billing.services.PlatformAPIClient.get_payment_methods')
-    def test_get_payment_methods_exception(self, mock_get):
-        mock_get.side_effect = Exception('Connection error')
-
-        methods = self.service.get_payment_methods(customer_id=123, user_id=7)
-        self.assertEqual(methods, [])
 
 
 class RefundServiceTests(unittest.TestCase):
@@ -212,47 +176,81 @@ class RefundServiceTests(unittest.TestCase):
         self.assertFalse(result['success'])
 
 
-class SubscriptionClientTests(unittest.TestCase):
-    """Tests for PlatformAPIClient.create_subscription."""
+class RecurringPaymentsClientTests(unittest.TestCase):
+    """Portal calls only PRAHO-owned recurring-payment endpoints."""
 
-    @patch('apps.api_client.services.PlatformAPIClient.post_billing')
-    def test_create_subscription_calls_correct_endpoint(self, mock_post):
+    @patch("apps.billing.services.PlatformAPIClient.post")
+    def test_overview_uses_hmac_body_identity(self, mock_post):
+        mock_post.return_value = {"success": True, "payment_methods": [], "subscriptions": []}
 
-        mock_post.return_value = {
-            'success': True,
-            'subscription_id': 'sub_123',
-            'status': 'active',
-        }
+        result = RecurringPaymentsService().overview(customer_id=42, user_id=7)
 
-        client = PlatformAPIClient()
-        result = client.create_subscription(
-            customer_id='42',
-            price_id='price_hosting_monthly',
-            billing_cycle='monthly',
+        self.assertTrue(result["success"])
+        mock_post.assert_called_once_with(
+            "/billing/recurring-payments/",
+            data={"customer_id": 42, "action": "recurring_payment_overview"},
             user_id=7,
         )
 
-        self.assertTrue(result['success'])
-        mock_post.assert_called_once()
-        call_args = mock_post.call_args
-        self.assertEqual(call_args[0][0], 'create-subscription/')
-        data = call_args[1].get('data') or call_args[0][1] if len(call_args[0]) > 1 else call_args[1]['data']
-        self.assertEqual(data['customer_id'], '42')
-        self.assertEqual(data['price_id'], 'price_hosting_monthly')
+    @patch("apps.billing.services.PlatformAPIClient.post")
+    def test_begin_and_complete_authorization_use_typed_endpoints(self, mock_post):
+        mock_post.side_effect = [
+            {"success": True, "setup_intent_id": "seti_portal", "client_secret": "secret"},
+            {"success": True, "authorization_id": "auth_portal"},
+        ]
+        service = RecurringPaymentsService()
 
-    @patch('apps.api_client.services.PlatformAPIClient.get_billing')
-    def test_get_payment_methods_calls_correct_endpoint(self, mock_get):
+        begin = service.begin_authorization(
+            customer_id=42,
+            user_id=7,
+            payment_method_id=9,
+            terms_accepted=True,
+            terms_version="2026-07-17",
+        )
+        complete = service.complete_authorization(
+            customer_id=42,
+            user_id=7,
+            payment_method_id=9,
+            setup_intent_id="seti_portal",
+        )
 
-        mock_get.return_value = {
-            'success': True,
-            'payment_methods': [{'type': 'card'}],
-        }
+        self.assertTrue(begin["success"])
+        self.assertTrue(complete["success"])
+        self.assertEqual(mock_post.call_args_list[0].args[0], "/billing/recurring-payments/authorize/begin/")
+        self.assertEqual(
+            mock_post.call_args_list[0].kwargs["data"],
+            {
+                "customer_id": 42,
+                "action": "begin_recurring_authorization",
+                "payment_method_id": 9,
+                "terms_accepted": True,
+                "terms_version": "2026-07-17",
+            },
+        )
+        self.assertEqual(mock_post.call_args_list[1].args[0], "/billing/recurring-payments/authorize/complete/")
 
-        client = PlatformAPIClient()
-        result = client.get_payment_methods(customer_id='42', user_id='7')
+    @patch("apps.billing.services.PlatformAPIClient.post")
+    def test_subscription_toggle_and_mandate_withdrawal_are_distinct(self, mock_post):
+        mock_post.return_value = {"success": True}
+        service = RecurringPaymentsService()
 
-        self.assertTrue(result['success'])
-        mock_get.assert_called_once_with('payment-methods/42/', user_id=7)
+        service.set_subscription_auto_payment(
+            customer_id=42,
+            user_id=7,
+            subscription_id="sub_local",
+            authorization_id="auth_local",
+            enabled=False,
+        )
+        service.withdraw_authorization(customer_id=42, user_id=7, authorization_id="auth_local")
+
+        self.assertEqual(
+            mock_post.call_args_list[0].args[0],
+            "/billing/recurring-payments/subscriptions/auto-payment/",
+        )
+        self.assertEqual(
+            mock_post.call_args_list[1].args[0],
+            "/billing/recurring-payments/authorize/withdraw/",
+        )
 
     @patch('apps.api_client.services.PlatformAPIClient.post_billing')
     def test_process_refund_calls_correct_endpoint(self, mock_post):

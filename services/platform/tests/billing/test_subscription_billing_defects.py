@@ -16,14 +16,14 @@ from django.utils import timezone
 
 from apps.billing.currency_models import Currency
 from apps.billing.subscription_models import Subscription
-from apps.billing.subscription_service import RecurringBillingService, SubscriptionService
+from apps.billing.subscription_service import SubscriptionLifecycleService, SubscriptionService
 from apps.customers.models import Customer
 from apps.products.models import Product, ProductPrice
 
 
 def _make_currency() -> Currency:
     currency, _ = Currency.objects.get_or_create(
-        code="RON", defaults={"name": "Romanian Leu", "symbol": "lei", "is_active": True}
+        code="RON", defaults={"name": "Romanian Leu", "symbol": "lei"}
     )
     return currency
 
@@ -167,7 +167,7 @@ class PeriodEndCancellationTestCase(TestCase):
     def test_subscription_cancelled_at_period_end_is_retired_not_billed(self) -> None:
         subscription = self._subscription(cancel_at_period_end=True, period_end_days=-1)
 
-        RecurringBillingService.run_billing_cycle(dry_run=True)
+        SubscriptionLifecycleService.finalize_period_end_cancellations()
 
         subscription.refresh_from_db()
         self.assertEqual(subscription.status, "cancelled")
@@ -177,7 +177,7 @@ class PeriodEndCancellationTestCase(TestCase):
         """The customer paid through the period end — service continues until then."""
         subscription = self._subscription(cancel_at_period_end=True, period_end_days=10)
 
-        RecurringBillingService.run_billing_cycle(dry_run=True)
+        SubscriptionLifecycleService.finalize_period_end_cancellations()
 
         subscription.refresh_from_db()
         self.assertEqual(subscription.status, "active")
@@ -185,7 +185,7 @@ class PeriodEndCancellationTestCase(TestCase):
     def test_ordinary_active_subscription_is_untouched(self) -> None:
         subscription = self._subscription(cancel_at_period_end=False, period_end_days=-1)
 
-        RecurringBillingService.run_billing_cycle(dry_run=True)
+        SubscriptionLifecycleService.finalize_period_end_cancellations()
 
         subscription.refresh_from_db()
         self.assertEqual(subscription.status, "active")

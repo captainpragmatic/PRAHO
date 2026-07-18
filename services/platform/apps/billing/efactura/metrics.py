@@ -262,8 +262,8 @@ class EFacturaMetrics:
             {
                 "cius_ro_version": CIUS_RO_VERSION,
                 "environment": efactura_settings.environment.value,
-                "b2b_enabled": str(efactura_settings.b2b_enabled),
-                "b2c_enabled": str(efactura_settings.b2c_enabled),
+                "b2b_in_scope": "True",
+                "b2c_in_scope": "True",
             }
         )
 

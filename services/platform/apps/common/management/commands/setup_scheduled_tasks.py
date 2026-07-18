@@ -8,6 +8,7 @@ from typing import Any
 
 from django.core.management.base import BaseCommand, CommandError, CommandParser
 
+from apps.billing.tasks import setup_billing_scheduled_tasks
 from apps.common.tasks import setup_system_status_scheduled_tasks
 from apps.orders.tasks import setup_order_scheduled_tasks
 from apps.provisioning.virtualmin_tasks import setup_virtualmin_scheduled_tasks
@@ -15,7 +16,7 @@ from apps.users.tasks import setup_user_security_scheduled_tasks
 
 
 class Command(BaseCommand):
-    help = "Set up all scheduled tasks for PRAHO Platform (Virtualmin + User Security + Orders + System Status)"
+    help = "Set up all scheduled tasks for PRAHO Platform"
 
     def add_arguments(self, parser: CommandParser) -> None:
         parser.add_argument(
@@ -34,6 +35,11 @@ class Command(BaseCommand):
             help="Set up only user security tasks",
         )
         parser.add_argument(
+            "--billing-only",
+            action="store_true",
+            help="Set up only billing and usage tasks",
+        )
+        parser.add_argument(
             "--orders-only",
             action="store_true",
             help="Set up only order processing tasks",
@@ -48,20 +54,22 @@ class Command(BaseCommand):
         """Validate mutually exclusive command options."""
         virtualmin_only = options.get("virtualmin_only", False)
         security_only = options.get("security_only", False)
+        billing_only = options.get("billing_only", False)
         orders_only = options.get("orders_only", False)
         status_only = options.get("status_only", False)
 
         # Check for mutually exclusive flags
-        exclusive_flags = [virtualmin_only, security_only, orders_only, status_only]
+        exclusive_flags = [virtualmin_only, security_only, billing_only, orders_only, status_only]
         if sum(exclusive_flags) > 1:
             raise CommandError(
                 "Cannot specify multiple exclusive flags "
-                "(--virtualmin-only, --security-only, --orders-only, --status-only)"
+                "(--virtualmin-only, --security-only, --billing-only, --orders-only, --status-only)"
             )
 
         return {
             "virtualmin_only": virtualmin_only,
             "security_only": security_only,
+            "billing_only": billing_only,
             "orders_only": orders_only,
             "status_only": status_only,
         }
@@ -115,7 +123,15 @@ class Command(BaseCommand):
             self.stdout.write("📦 Order Processing:")
             self.stdout.write("  - Process Pending Orders: Every 5 minutes")
             self.stdout.write("  - Sync Payment Status: Every 15 minutes")
-            self.stdout.write("  - Process Recurring Orders: Daily at 1 AM")
+
+        if run_all or flags["billing_only"]:
+            self.stdout.write("")
+            self.stdout.write("💳 Billing:")
+            self.stdout.write("  - Prepare and collect recurring proformas: Hourly at :15")
+            self.stdout.write("  - Retry failed recurring payments: Every 15 minutes")
+            self.stdout.write("  - Expire unpaid trials: Daily at 00:30")
+            self.stdout.write("  - Apply grace-period lifecycle: Daily at 01:00")
+            self.stdout.write("  - Process and rate local usage: Periodic")
 
         if run_all or flags["status_only"]:
             self.stdout.write("")
@@ -148,6 +164,9 @@ class Command(BaseCommand):
             # Set up Order Processing tasks
             if run_all or flags["orders_only"]:
                 self._setup_task_category("order processing", "📦", setup_order_scheduled_tasks, all_results)
+
+            if run_all or flags["billing_only"]:
+                self._setup_task_category("billing", "💳", setup_billing_scheduled_tasks, all_results)
 
             # Set up System Status tasks
             if run_all or flags["status_only"]:

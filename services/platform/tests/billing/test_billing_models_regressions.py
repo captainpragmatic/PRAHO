@@ -403,38 +403,25 @@ class PaymentRetryPolicyModelAdditionalTestCase(TestCase):
         self.assertEqual(len(self.policy.retry_intervals_days), 5)
 
     def test_payment_retry_policy_default_uniqueness(self):
-        """Test that only one default policy can exist"""
-        # Create first default policy
-        default_policy1 = PaymentRetryPolicy.objects.create(
+        """Only one active default retry policy may exist."""
+        PaymentRetryPolicy.objects.create(
             name='Default Policy 1',
             is_default=True,
             is_active=True
         )
 
-        # Creating second default policy should either fail or make first non-default
-        # This depends on the model implementation
-        default_policy2 = PaymentRetryPolicy.objects.create(
-            name='Default Policy 2',
-            is_default=True,
-            is_active=True
-        )
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            PaymentRetryPolicy.objects.create(
+                name='Default Policy 2',
+                is_default=True,
+                is_active=True
+            )
 
-        # Refresh from database to check current state
-        default_policy1.refresh_from_db()
-        default_policy2.refresh_from_db()
-
-        # At least one should be marked as default
-        default_policies = PaymentRetryPolicy.objects.filter(is_default=True)
-        self.assertGreaterEqual(default_policies.count(), 1)
-
-        # Verify that if both exist, only one is marked as default
-        # (implementation detail may vary)
-        if default_policy1.is_default and default_policy2.is_default:
-            # If both are still default, there should be exactly 2 defaults
-            self.assertEqual(default_policies.count(), 2)
-        else:
-            # Otherwise exactly one should be default
-            self.assertEqual(default_policies.count(), 1)
+    def test_payment_retry_policy_rejects_invalid_json_intervals(self):
+        for invalid_interval in (True, -1, "3", None):
+            with self.subTest(invalid_interval=invalid_interval):
+                self.policy.retry_intervals_days = [invalid_interval]
+                self.assertIsNone(self.policy.get_next_retry_date(timezone.now(), 0))
 
 
 class PaymentRetryAttemptModelAdditionalTestCase(TestCase):

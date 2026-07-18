@@ -898,10 +898,6 @@ class PlatformAPIClient:
         """Download invoice PDF."""
         return self._make_binary_request("POST", f"/api/billing/invoices/{invoice_id}/pdf/", data={"user_id": user_id})
 
-    def get_payment_methods(self, customer_id: str, user_id: str) -> dict[str, Any]:
-        """Get payment methods for a customer."""
-        return self.get_billing(f"payment-methods/{customer_id}/", user_id=int(user_id))
-
     def process_refund(  # noqa: PLR0913
         self,
         invoice_id: int | None = None,
@@ -923,35 +919,6 @@ class PlatformAPIClient:
         if amount_cents:
             data["amount_cents"] = amount_cents
         return self.post_billing("process-refund/", data=data)
-
-    def get_subscriptions(self, customer_id: str, user_id: str) -> dict[str, Any]:
-        """Get subscriptions for a customer."""
-        return self.get_billing(f"subscriptions/{customer_id}/", user_id=int(user_id))
-
-    def cancel_subscription(self, subscription_id: int, reason: str = "", user_id: str = "") -> dict[str, Any]:
-        """Cancel a subscription."""
-        return self.post_billing(
-            f"subscriptions/{subscription_id}/cancel/",
-            data={"reason": reason, "user_id": user_id},
-        )
-
-    def create_subscription(
-        self,
-        customer_id: str,
-        price_id: str,
-        billing_cycle: str = "monthly",
-        user_id: int | None = None,
-    ) -> dict[str, Any]:
-        """Create a subscription for a customer."""
-        return self.post_billing(
-            "create-subscription/",
-            data={
-                "customer_id": customer_id,
-                "price_id": price_id,
-                "billing_cycle": billing_cycle,
-                "user_id": user_id,
-            },
-        )
 
     def get_invoice_details(self, invoice_id: int, user_id: int) -> dict[str, Any]:
         """Get invoice details"""

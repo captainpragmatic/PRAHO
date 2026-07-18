@@ -4,6 +4,7 @@
 
 import json
 import logging
+import uuid
 from typing import Any
 
 from django.contrib import messages
@@ -17,7 +18,7 @@ from apps.common.decorators import log_access_attempt, require_billing_access
 from apps.common.pagination import PaginatorData, build_pagination_params
 from apps.common.rate_limit_feedback import handle_platform_error
 
-from .services import BillingDataSyncService, InvoiceViewService
+from .services import BillingDataSyncService, InvoiceViewService, RecurringPaymentsService
 
 logger = logging.getLogger(__name__)
 
@@ -615,35 +616,172 @@ def proforma_detail_view(request: HttpRequest, proforma_number: str) -> HttpResp
 # ===============================================================================
 
 
-@require_http_methods(["GET"])
-def payment_methods_view(request: HttpRequest) -> JsonResponse:
-    """
-    💳 Payment Methods API
-
-    GET /billing/payment-methods/
-
-    Returns available payment methods for the current customer.
-    Used by checkout and account pages via HTMX/fetch.
-    """
-    customer_id = getattr(request, "customer_id", None) or request.session.get("customer_id")
-    if not customer_id:
-        return JsonResponse({"success": False, "error": "Authentication required"}, status=401)
-
+def _positive_int(value: Any) -> int | None:
+    """Parse an external identifier without accepting booleans as integers."""
+    if value is None or isinstance(value, bool):
+        return None
     try:
-        invoice_service = InvoiceViewService()
-        user_id = getattr(request.user, "id", None)
-        if not user_id:
-            return JsonResponse({"success": False, "error": "Authentication required"}, status=401)
-        methods = invoice_service.get_payment_methods(
-            int(customer_id),
-            int(user_id),
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _recurring_session_ids(request: HttpRequest) -> tuple[int, int] | None:
+    customer_id = _positive_int(getattr(request, "current_customer_id", None) or request.session.get("customer_id"))
+    user_id = _positive_int(request.session.get("user_id"))
+    if customer_id is None or user_id is None:
+        return None
+    return customer_id, user_id
+
+
+def _json_body(request: HttpRequest) -> dict[str, Any] | None:
+    try:
+        data = json.loads(request.body or b"{}")
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+@require_http_methods(["GET"])
+@require_billing_access()
+def recurring_payments_view(request: HttpRequest) -> HttpResponse:
+    """Render customer-owned recurring-payment controls."""
+    identity = _recurring_session_ids(request)
+    if identity is None:
+        return redirect("/login/")
+    overview = RecurringPaymentsService().overview(customer_id=identity[0], user_id=identity[1])
+    payment_methods: list[dict[str, Any]] = []
+    for raw_method in overview.get("payment_methods", []):
+        if not isinstance(raw_method, dict):
+            continue
+        method_id = _positive_int(raw_method.get("id"))
+        if method_id is None:
+            continue
+        method = dict(raw_method)
+        method["id"] = method_id
+        method["last_four"] = str(method.get("last_four") or "")
+        method["display_name"] = str(
+            method.get("display_name") or (_("Card ending %(last_four)s") % {"last_four": method["last_four"]})
         )
+        method["begin_attrs"] = f'data-payment-method-id="{method_id}"'
+        authorization = method.get("authorization")
+        if isinstance(authorization, dict):
+            try:
+                authorization_id = uuid.UUID(str(authorization.get("id")))
+            except (TypeError, ValueError, AttributeError):
+                method["authorization"] = None
+            else:
+                authorization["id"] = str(authorization_id)
+                method["withdraw_attrs"] = f'data-authorization-id="{authorization_id}"'
+        else:
+            method["authorization"] = None
+        payment_methods.append(method)
 
-        return JsonResponse({"success": True, "payment_methods": methods})
+    subscription_options = [{"value": "", "label": _("Automatic payment off")}]
+    subscription_options.extend(
+        {
+            "value": method["authorization"]["id"],
+            "label": _("Pay automatically with %(card)s") % {"card": method["display_name"]},
+        }
+        for method in payment_methods
+        if method.get("authorization")
+    )
+    subscriptions: list[dict[str, Any]] = []
+    for raw_subscription in overview.get("subscriptions", []):
+        if not isinstance(raw_subscription, dict):
+            continue
+        try:
+            subscription_id = uuid.UUID(str(raw_subscription.get("id")))
+        except (TypeError, ValueError, AttributeError):
+            continue
+        subscription = dict(raw_subscription)
+        subscription["id"] = str(subscription_id)
+        subscription["control_id"] = f"subscription-{subscription_id}"
+        subscription["control_name"] = f"subscription_{subscription_id}"
+        subscription["authorization_options"] = subscription_options
+        subscriptions.append(subscription)
+    return render(
+        request,
+        "billing/recurring_payments.html",
+        {
+            "page_title": _("Automatic payments"),
+            "overview": overview,
+            "payment_methods": payment_methods,
+            "subscriptions": subscriptions,
+        },
+    )
 
-    except Exception as e:
-        logger.error(f"🔥 [Portal Billing] Payment methods error for customer {customer_id}: {e}")
-        return JsonResponse({"success": False, "error": "Unable to load payment methods"}, status=500)
+
+@require_http_methods(["POST"])
+@require_billing_access()
+def recurring_authorization_begin(request: HttpRequest) -> JsonResponse:
+    identity = _recurring_session_ids(request)
+    data = _json_body(request)
+    if identity is None or data is None:
+        return JsonResponse({"success": False, "error": "Invalid request"}, status=400)
+    payment_method_id = _positive_int(data.get("payment_method_id"))
+    if payment_method_id is None:
+        return JsonResponse({"success": False, "error": "Invalid payment method"}, status=400)
+    result = RecurringPaymentsService().begin_authorization(
+        customer_id=identity[0],
+        user_id=identity[1],
+        payment_method_id=payment_method_id,
+        terms_accepted=data.get("terms_accepted") is True,
+        terms_version=str(data.get("terms_version", "")),
+    )
+    return JsonResponse(result, status=200 if result.get("success") else 400)
+
+
+@require_http_methods(["POST"])
+@require_billing_access()
+def recurring_authorization_complete(request: HttpRequest) -> JsonResponse:
+    identity = _recurring_session_ids(request)
+    data = _json_body(request)
+    if identity is None or data is None:
+        return JsonResponse({"success": False, "error": "Invalid request"}, status=400)
+    payment_method_id = _positive_int(data.get("payment_method_id"))
+    if payment_method_id is None:
+        return JsonResponse({"success": False, "error": "Invalid payment method"}, status=400)
+    result = RecurringPaymentsService().complete_authorization(
+        customer_id=identity[0],
+        user_id=identity[1],
+        payment_method_id=payment_method_id,
+        setup_intent_id=str(data.get("setup_intent_id", "")),
+    )
+    return JsonResponse(result, status=200 if result.get("success") else 400)
+
+
+@require_http_methods(["POST"])
+@require_billing_access()
+def recurring_authorization_withdraw(request: HttpRequest) -> JsonResponse:
+    identity = _recurring_session_ids(request)
+    data = _json_body(request)
+    if identity is None or data is None:
+        return JsonResponse({"success": False, "error": "Invalid request"}, status=400)
+    result = RecurringPaymentsService().withdraw_authorization(
+        customer_id=identity[0],
+        user_id=identity[1],
+        authorization_id=str(data.get("authorization_id", "")),
+    )
+    return JsonResponse(result, status=200 if result.get("success") else 400)
+
+
+@require_http_methods(["POST"])
+@require_billing_access()
+def subscription_auto_payment(request: HttpRequest) -> JsonResponse:
+    identity = _recurring_session_ids(request)
+    data = _json_body(request)
+    if identity is None or data is None or not isinstance(data.get("enabled"), bool):
+        return JsonResponse({"success": False, "error": "Invalid request"}, status=400)
+    result = RecurringPaymentsService().set_subscription_auto_payment(
+        customer_id=identity[0],
+        user_id=identity[1],
+        subscription_id=str(data.get("subscription_id", "")),
+        authorization_id=str(data["authorization_id"]) if data.get("authorization_id") else None,
+        enabled=data["enabled"],
+    )
+    return JsonResponse(result, status=200 if result.get("success") else 400)
 
 
 # ===============================================================================

@@ -4,15 +4,17 @@
 """
 Comprehensive test suite for usage-based billing services.
 Tests MeteringService, AggregationService, RatingEngine,
-UsageAlertService, UsageInvoiceService, and BillingCycleManager.
+UsageAlertService and UsageInvoiceService.
 """
 
 from __future__ import annotations
 
+import hashlib
 from datetime import timedelta
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
+from django.db.models import Sum
 from django.test import TestCase, TransactionTestCase
 from django.utils import timezone
 
@@ -22,6 +24,7 @@ from apps.billing.models import (
     Currency,
     Invoice,
     InvoiceSequence,
+    Payment,
     PricingTier,
     PricingTierBracket,
     Subscription,
@@ -32,24 +35,24 @@ from apps.billing.models import (
     UsageMeter,
     UsageThreshold,
 )
+from apps.billing.recurring_authorization_service import RecurringPaymentAuthorizationService
+from apps.billing.recurring_models import RecurringPaymentAuthorization
 from apps.billing.services import (
-    BillingCycleManager,
     MeteringService,
     RatingEngine,
     UsageAlertService,
     UsageEventData,
     UsageInvoiceService,
 )
-from apps.customers.models import Customer
+from apps.billing.usage_invoice_service import UsageBillingService
+from apps.common.types import Err
+from apps.customers.models import Customer, CustomerAddress, CustomerPaymentMethod
 from apps.products.models import Product
-from tests.helpers.fsm_helpers import force_status
 
 
 def _metering_service_setup(test_instance):
     """Shared setup for metering service test classes."""
-    test_instance.currency, _ = Currency.objects.get_or_create(
-        code="RON", defaults={"symbol": "lei", "decimals": 2}
-    )
+    test_instance.currency, _ = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei", "decimals": 2})
     test_instance.customer = Customer.objects.create(
         name="Test Customer",
         customer_type="individual",
@@ -77,13 +80,15 @@ class MeteringServiceTestCase(TestCase):
 
     def test_record_event_success(self):
         """Test successful event recording."""
-        result = self.service.record_event(UsageEventData(
-            meter_name="api_requests",
-            customer_id=str(self.customer.id),
-            value=Decimal("100"),
-            source="api_gateway",
-            idempotency_key="test-key-001",
-        ))
+        result = self.service.record_event(
+            UsageEventData(
+                meter_name="api_requests",
+                customer_id=str(self.customer.id),
+                value=Decimal("100"),
+                source="api_gateway",
+                idempotency_key="test-key-001",
+            )
+        )
 
         self.assertTrue(result.is_ok())
         event = result.unwrap()
@@ -92,22 +97,26 @@ class MeteringServiceTestCase(TestCase):
 
     def test_record_event_meter_not_found(self):
         """Test event recording with invalid meter."""
-        result = self.service.record_event(UsageEventData(
-            meter_name="nonexistent_meter",
-            customer_id=str(self.customer.id),
-            value=Decimal("100"),
-        ))
+        result = self.service.record_event(
+            UsageEventData(
+                meter_name="nonexistent_meter",
+                customer_id=str(self.customer.id),
+                value=Decimal("100"),
+            )
+        )
 
         self.assertTrue(result.is_err())
         self.assertIn("Meter not found", result.error)
 
     def test_record_event_customer_not_found(self):
         """Test event recording with invalid customer."""
-        result = self.service.record_event(UsageEventData(
-            meter_name="api_requests",
-            customer_id="99999999",  # Non-existent customer ID
-            value=Decimal("100"),
-        ))
+        result = self.service.record_event(
+            UsageEventData(
+                meter_name="api_requests",
+                customer_id="99999999",  # Non-existent customer ID
+                value=Decimal("100"),
+            )
+        )
 
         self.assertTrue(result.is_err())
         # Error could be about customer not found or field type mismatch
@@ -118,11 +127,13 @@ class MeteringServiceTestCase(TestCase):
         self.meter.is_active = False
         self.meter.save()
 
-        result = self.service.record_event(UsageEventData(
-            meter_name="api_requests",
-            customer_id=str(self.customer.id),
-            value=Decimal("100"),
-        ))
+        result = self.service.record_event(
+            UsageEventData(
+                meter_name="api_requests",
+                customer_id=str(self.customer.id),
+                value=Decimal("100"),
+            )
+        )
 
         self.assertTrue(result.is_err())
         self.assertIn("inactive", result.error.lower())
@@ -148,21 +159,20 @@ class MeteringServiceTestCase(TestCase):
         self.assertEqual(result1.unwrap().id, result2.unwrap().id)
 
         # Only one event should exist
-        self.assertEqual(
-            UsageEvent.objects.filter(idempotency_key="duplicate-test-key").count(),
-            1
-        )
+        self.assertEqual(UsageEvent.objects.filter(idempotency_key="duplicate-test-key").count(), 1)
 
     def test_record_event_timestamp_too_old(self):
         """Test event with timestamp outside grace period."""
         old_timestamp = timezone.now() - timedelta(hours=48)  # 48 hours ago
 
-        result = self.service.record_event(UsageEventData(
-            meter_name="api_requests",
-            customer_id=str(self.customer.id),
-            value=Decimal("100"),
-            timestamp=old_timestamp,
-        ))
+        result = self.service.record_event(
+            UsageEventData(
+                meter_name="api_requests",
+                customer_id=str(self.customer.id),
+                value=Decimal("100"),
+                timestamp=old_timestamp,
+            )
+        )
 
         self.assertTrue(result.is_err())
         self.assertIn("too old", result.error.lower())
@@ -171,12 +181,14 @@ class MeteringServiceTestCase(TestCase):
         """Test event with future timestamp."""
         future_timestamp = timezone.now() + timedelta(hours=1)
 
-        result = self.service.record_event(UsageEventData(
-            meter_name="api_requests",
-            customer_id=str(self.customer.id),
-            value=Decimal("100"),
-            timestamp=future_timestamp,
-        ))
+        result = self.service.record_event(
+            UsageEventData(
+                meter_name="api_requests",
+                customer_id=str(self.customer.id),
+                value=Decimal("100"),
+                timestamp=future_timestamp,
+            )
+        )
 
         self.assertTrue(result.is_err())
         self.assertIn("future", result.error.lower())
@@ -249,26 +261,30 @@ class MeteringServiceTransactionTests(TransactionTestCase):
         from django.conf import settings
 
         # Check if using SQLite (which doesn't support concurrent writes)
-        db_engine = settings.DATABASES['default']['ENGINE']
-        is_sqlite = 'sqlite' in db_engine
+        db_engine = settings.DATABASES["default"]["ENGINE"]
+        is_sqlite = "sqlite" in db_engine
 
         if is_sqlite:
             # For SQLite, just verify the basic idempotency works sequentially
             # Real concurrency test would need PostgreSQL
             idempotency_key = "concurrent-test-key-sqlite"
 
-            result1 = self.service.record_event(UsageEventData(
-                meter_name="api_requests",
-                customer_id=str(self.customer.id),
-                value=Decimal("100"),
-                idempotency_key=idempotency_key,
-            ))
-            result2 = self.service.record_event(UsageEventData(
-                meter_name="api_requests",
-                customer_id=str(self.customer.id),
-                value=Decimal("100"),
-                idempotency_key=idempotency_key,
-            ))
+            result1 = self.service.record_event(
+                UsageEventData(
+                    meter_name="api_requests",
+                    customer_id=str(self.customer.id),
+                    value=Decimal("100"),
+                    idempotency_key=idempotency_key,
+                )
+            )
+            result2 = self.service.record_event(
+                UsageEventData(
+                    meter_name="api_requests",
+                    customer_id=str(self.customer.id),
+                    value=Decimal("100"),
+                    idempotency_key=idempotency_key,
+                )
+            )
 
             self.assertTrue(result1.is_ok())
             self.assertTrue(result2.is_ok())
@@ -288,12 +304,14 @@ class MeteringServiceTransactionTests(TransactionTestCase):
             def record_event():
                 try:
                     svc = MeteringService()
-                    result = svc.record_event(UsageEventData(
-                        meter_name="api_requests",
-                        customer_id=str(self.customer.id),
-                        value=Decimal("100"),
-                        idempotency_key=idempotency_key,
-                    ))
+                    result = svc.record_event(
+                        UsageEventData(
+                            meter_name="api_requests",
+                            customer_id=str(self.customer.id),
+                            value=Decimal("100"),
+                            idempotency_key=idempotency_key,
+                        )
+                    )
                     return result
                 except Exception as e:
                     return e
@@ -320,9 +338,7 @@ class RatingEngineTestCase(TestCase):
 
     def setUp(self):
         """Set up test data."""
-        self.currency, _ = Currency.objects.get_or_create(
-            code="RON", defaults={"symbol": "lei", "decimals": 2}
-        )
+        self.currency, _ = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei", "decimals": 2})
 
         self.customer = Customer.objects.create(
             name="Test Customer",
@@ -375,6 +391,7 @@ class RatingEngineTestCase(TestCase):
             subscription=self.subscription,
             product=self.product,
             unit_price_cents=50,  # 0.50 per GB overage
+            meta={"meter_name": self.meter.name},
         )
 
         # Create aggregation with overage
@@ -407,6 +424,7 @@ class RatingEngineTestCase(TestCase):
             subscription=self.subscription,
             product=self.product,
             unit_price_cents=50,
+            meta={"meter_name": self.meter.name},
         )
 
         now = timezone.now()
@@ -468,11 +486,23 @@ class RatingEngineTestCase(TestCase):
             unit="gb",
         )
 
-        # Single subscription item - all aggregations use same unit price
-        SubscriptionItem.objects.create(
-            subscription=self.subscription,
-            product=self.product,
+        PricingTier.objects.create(
+            name="Bandwidth unit price",
+            meter=self.meter,
+            pricing_model="per_unit",
+            currency=self.currency,
             unit_price_cents=50,
+            is_default=True,
+            is_active=True,
+        )
+        PricingTier.objects.create(
+            name="Storage unit price",
+            meter=meter2,
+            pricing_model="per_unit",
+            currency=self.currency,
+            unit_price_cents=50,
+            is_default=True,
+            is_active=True,
         )
 
         now = timezone.now()
@@ -508,38 +538,130 @@ class RatingEngineTestCase(TestCase):
         # 150 GB bandwidth * 50 cents + 15 GB storage * 50 cents
         self.assertEqual(data["total_usage_charge_cents"], 7500 + 750)
 
+    def test_rate_billing_cycle_retry_keeps_previously_rated_charges(self):
+        storage_meter = UsageMeter.objects.create(
+            name="retry_storage",
+            display_name="Retry storage",
+            aggregation_type="last",
+            unit="gb",
+        )
+        PricingTier.objects.create(
+            name="Retry bandwidth unit price",
+            meter=self.meter,
+            pricing_model="per_unit",
+            currency=self.currency,
+            unit_price_cents=50,
+            is_default=True,
+            is_active=True,
+        )
+        now = timezone.now()
+        UsageAggregation.objects.create(
+            meter=storage_meter,
+            customer=self.customer,
+            subscription=self.subscription,
+            billing_cycle=self.billing_cycle,
+            period_start=now,
+            period_end=now + timedelta(days=30),
+            total_value=Decimal("50"),
+            billable_value=Decimal("50"),
+            overage_value=Decimal("50"),
+            charge_cents=2500,
+            status="rated",
+        )
+        UsageAggregation.objects.create(
+            meter=self.meter,
+            customer=self.customer,
+            subscription=self.subscription,
+            billing_cycle=self.billing_cycle,
+            period_start=now,
+            period_end=now + timedelta(days=30),
+            total_value=Decimal("10"),
+            status="pending_rating",
+        )
+
+        result = self.engine.rate_billing_cycle(str(self.billing_cycle.id))
+
+        self.assertTrue(result.is_ok())
+        self.billing_cycle.refresh_from_db()
+        self.assertEqual(self.billing_cycle.usage_charge_cents, 3000)
+        self.assertEqual(result.unwrap()["total_usage_charge_cents"], 3000)
+
+    def test_rate_billing_cycle_rolls_back_every_aggregation_when_one_fails(self):
+        storage_meter = UsageMeter.objects.create(
+            name="atomic_storage",
+            display_name="Atomic storage",
+            aggregation_type="last",
+            unit="gb",
+        )
+        for meter in (self.meter, storage_meter):
+            PricingTier.objects.create(
+                name=f"Atomic {meter.name}",
+                meter=meter,
+                pricing_model="per_unit",
+                currency=self.currency,
+                unit_price_cents=50,
+                is_default=True,
+                is_active=True,
+            )
+        now = timezone.now()
+        first = UsageAggregation.objects.create(
+            meter=self.meter,
+            customer=self.customer,
+            subscription=self.subscription,
+            billing_cycle=self.billing_cycle,
+            period_start=now,
+            period_end=now + timedelta(days=30),
+            total_value=Decimal("10"),
+            status="pending_rating",
+        )
+        second = UsageAggregation.objects.create(
+            meter=storage_meter,
+            customer=self.customer,
+            subscription=self.subscription,
+            billing_cycle=self.billing_cycle,
+            period_start=now,
+            period_end=now + timedelta(days=30),
+            total_value=Decimal("5"),
+            status="pending_rating",
+        )
+        real_rate = self.engine.rate_aggregation
+        calls = 0
+
+        def fail_second(aggregation_id: str):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                return Err("second meter pricing unavailable")
+            return real_rate(aggregation_id)
+
+        with patch.object(self.engine, "rate_aggregation", side_effect=fail_second):
+            result = self.engine.rate_billing_cycle(str(self.billing_cycle.id))
+
+        self.assertTrue(result.is_err())
+        first.refresh_from_db()
+        second.refresh_from_db()
+        self.billing_cycle.refresh_from_db()
+        self.assertEqual(first.status, "pending_rating")
+        self.assertEqual(second.status, "pending_rating")
+        self.assertEqual(first.charge_cents, 0)
+        self.assertEqual(self.billing_cycle.usage_charge_cents, 0)
+
     def test_apply_rounding_up(self):
         """Test rounding up mode."""
-        result = self.engine._apply_rounding(
-            Decimal("5.3"),
-            "up",
-            Decimal("1")
-        )
+        result = self.engine._apply_rounding(Decimal("5.3"), "up", Decimal("1"))
         self.assertEqual(result, Decimal("6"))
 
     def test_apply_rounding_down(self):
         """Test rounding down mode."""
-        result = self.engine._apply_rounding(
-            Decimal("5.9"),
-            "down",
-            Decimal("1")
-        )
+        result = self.engine._apply_rounding(Decimal("5.9"), "down", Decimal("1"))
         self.assertEqual(result, Decimal("5"))
 
     def test_apply_rounding_nearest(self):
         """Test rounding to nearest mode."""
-        result1 = self.engine._apply_rounding(
-            Decimal("5.3"),
-            "nearest",
-            Decimal("1")
-        )
+        result1 = self.engine._apply_rounding(Decimal("5.3"), "nearest", Decimal("1"))
         self.assertEqual(result1, Decimal("5"))
 
-        result2 = self.engine._apply_rounding(
-            Decimal("5.5"),
-            "nearest",
-            Decimal("1")
-        )
+        result2 = self.engine._apply_rounding(Decimal("5.5"), "nearest", Decimal("1"))
         self.assertEqual(result2, Decimal("6"))
 
 
@@ -548,9 +670,7 @@ class GraduatedPricingTestCase(TestCase):
 
     def setUp(self):
         """Set up graduated pricing test data."""
-        self.currency, _ = Currency.objects.get_or_create(
-            code="RON", defaults={"symbol": "lei", "decimals": 2}
-        )
+        self.currency, _ = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei", "decimals": 2})
 
         self.customer = Customer.objects.create(
             name="Test Customer",
@@ -607,19 +727,13 @@ class GraduatedPricingTestCase(TestCase):
 
     def test_graduated_pricing_single_bracket(self):
         """Test usage in single bracket."""
-        charge = self.engine._calculate_tiered_charge(
-            Decimal("50"),
-            self.tier
-        )
+        charge = self.engine._calculate_tiered_charge(Decimal("50"), self.tier)
         # 50 GB * 50 cents = 2500 cents
         self.assertEqual(charge, 2500)
 
     def test_graduated_pricing_multiple_brackets(self):
         """Test usage spanning multiple brackets."""
-        charge = self.engine._calculate_tiered_charge(
-            Decimal("250"),
-            self.tier
-        )
+        charge = self.engine._calculate_tiered_charge(Decimal("250"), self.tier)
         # First 100 GB: 100 * 50 = 5000
         # Next 150 GB: 150 * 40 = 6000
         # Total: 11000 cents
@@ -627,10 +741,7 @@ class GraduatedPricingTestCase(TestCase):
 
     def test_graduated_pricing_all_brackets(self):
         """Test usage spanning all brackets."""
-        charge = self.engine._calculate_tiered_charge(
-            Decimal("700"),
-            self.tier
-        )
+        charge = self.engine._calculate_tiered_charge(Decimal("700"), self.tier)
         # First 100 GB: 100 * 50 = 5000
         # Next 400 GB: 400 * 40 = 16000
         # Last 200 GB: 200 * 30 = 6000
@@ -641,7 +752,7 @@ class GraduatedPricingTestCase(TestCase):
         """Test minimum charge is applied."""
         charge = self.engine._calculate_tiered_charge(
             Decimal("0.5"),  # Very small usage
-            self.tier
+            self.tier,
         )
         # 0.5 * 50 = 25 cents, but minimum is 100
         self.assertEqual(charge, 100)
@@ -652,9 +763,7 @@ class UsageInvoiceServiceTestCase(TestCase):
 
     def setUp(self):
         """Set up test data."""
-        self.currency, _ = Currency.objects.get_or_create(
-            code="RON", defaults={"symbol": "lei", "decimals": 2}
-        )
+        self.currency, _ = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei", "decimals": 2})
 
         self.customer = Customer.objects.create(
             name="Test Company SRL",
@@ -698,12 +807,25 @@ class UsageInvoiceServiceTestCase(TestCase):
         )
 
         now = timezone.now()
+        self.collection_invoice = Invoice.objects.create(
+            customer=self.customer,
+            number="INV-FIXED-COLLECTION",
+            currency=self.currency,
+            subtotal_cents=2999,
+            tax_cents=0,
+            total_cents=2999,
+            due_at=now,
+            bill_to_name=self.customer.company_name,
+            bill_to_email=self.customer.primary_email,
+        )
         self.billing_cycle = BillingCycle.objects.create(
             subscription=self.subscription,
             period_start=now - timedelta(days=30),
             period_end=now,
             status="closed",
             base_charge_cents=2999,
+            usage_charge_cents=2500,
+            invoice=self.collection_invoice,
         )
 
         # Create aggregation with overage
@@ -729,9 +851,33 @@ class UsageInvoiceServiceTestCase(TestCase):
 
     def test_generate_invoice_from_cycle(self):
         """Test generating invoice from billing cycle."""
-        result = self.service.generate_invoice_from_cycle(str(self.billing_cycle.id))
+        zero_charge_aggregation = UsageAggregation.objects.create(
+            meter=UsageMeter.objects.create(
+                name="included_storage",
+                display_name="Included storage",
+                aggregation_type="sum",
+                unit="gb",
+            ),
+            customer=self.customer,
+            subscription=self.subscription,
+            billing_cycle=self.billing_cycle,
+            period_start=self.billing_cycle.period_start,
+            period_end=self.billing_cycle.period_end,
+            total_value=Decimal("10"),
+            included_allowance=Decimal("10"),
+            charge_cents=0,
+            status="rated",
+        )
+
+        with patch.object(
+            BillingCycle.objects,
+            "select_for_update",
+            wraps=BillingCycle.objects.select_for_update,
+        ) as lock_cycle:
+            result = self.service.generate_invoice_from_cycle(str(self.billing_cycle.id))
 
         self.assertTrue(result.is_ok())
+        lock_cycle.assert_called()
         data = result.unwrap()
 
         self.assertIn("invoice_id", data)
@@ -740,16 +886,71 @@ class UsageInvoiceServiceTestCase(TestCase):
         # Verify invoice was created
         invoice = Invoice.objects.get(id=data["invoice_id"])
         self.assertEqual(invoice.customer, self.customer)
-        self.assertEqual(invoice.status, "draft")
+        self.assertEqual(invoice.status, "issued")
+        self.assertEqual(invoice.subtotal_cents, 2500)
 
         # Verify line items
         lines = invoice.lines.all()
-        self.assertGreaterEqual(lines.count(), 2)  # Base + usage
+        self.assertEqual(lines.count(), 1)
+        self.assertNotIn("Basic Hosting", lines.get().description)
 
         # Verify billing cycle updated
         self.billing_cycle.refresh_from_db()
         self.assertEqual(self.billing_cycle.status, "invoiced")
-        self.assertEqual(self.billing_cycle.invoice, invoice)
+        self.assertEqual(self.billing_cycle.invoice, self.collection_invoice)
+        self.assertEqual(self.billing_cycle.usage_invoice, invoice)
+        zero_charge_aggregation.refresh_from_db()
+        self.assertEqual(zero_charge_aggregation.status, "invoiced")
+
+    def test_usage_invoice_snapshots_individual_cnp(self):
+        from apps.customers.models import CustomerTaxProfile  # noqa: PLC0415
+
+        self.customer.customer_type = "individual"
+        self.customer.company_name = ""
+        self.customer.save(update_fields=["customer_type", "company_name"])
+        CustomerTaxProfile.objects.create(customer=self.customer, cnp="1850101123451")
+
+        result = self.service.generate_invoice_from_cycle(str(self.billing_cycle.id))
+
+        self.assertTrue(result.is_ok(), result)
+        invoice = Invoice.objects.get(id=result.unwrap()["invoice_id"])
+        self.assertEqual(invoice.bill_to_cnp, "1850101123451")
+        self.assertEqual(invoice.bill_to_tax_id, "")
+
+    def test_usage_invoice_normalizes_romanian_address_country(self):
+        CustomerAddress.objects.create(
+            customer=self.customer,
+            is_billing=True,
+            address_line1="Strada Test 1",
+            city="Bucharest",
+            county="Bucharest",
+            postal_code="010101",
+            country="România",
+        )
+
+        result = self.service.generate_invoice_from_cycle(str(self.billing_cycle.id))
+
+        self.assertTrue(result.is_ok(), result)
+        invoice = Invoice.objects.get(id=result.unwrap()["invoice_id"])
+        self.assertEqual(invoice.bill_to_country, "RO")
+
+    def test_usage_invoice_uses_foreign_billing_country_for_snapshot_and_vat(self):
+        CustomerAddress.objects.create(
+            customer=self.customer,
+            is_billing=True,
+            address_line1="Unter den Linden 1",
+            city="Berlin",
+            county="Berlin",
+            postal_code="10117",
+            country="Germany",
+        )
+
+        result = self.service.generate_invoice_from_cycle(str(self.billing_cycle.id))
+
+        self.assertTrue(result.is_ok(), result)
+        invoice = Invoice.objects.get(id=result.unwrap()["invoice_id"])
+        self.assertEqual(invoice.bill_to_country, "DE")
+        self.assertEqual(invoice.tax_cents, 475)
 
     def test_generate_invoice_already_exists(self):
         """Test error when invoice already generated (cycle marked as invoiced)."""
@@ -762,6 +963,174 @@ class UsageInvoiceServiceTestCase(TestCase):
         self.assertTrue(result2.is_err())
         # Error message indicates billing cycle isn't ready (already invoiced)
         self.assertIn("invoiced", result2.error.lower())
+
+    def test_account_credit_is_a_payment_and_does_not_reduce_invoice_tax_base(self):
+        CreditLedger.objects.create(
+            customer=self.customer,
+            delta_cents=1000,
+            reason="Customer account credit",
+        )
+
+        result = self.service.generate_invoice_from_cycle(str(self.billing_cycle.id))
+
+        self.assertTrue(result.is_ok(), result.unwrap_err() if result.is_err() else "")
+        invoice = Invoice.objects.get(id=result.unwrap()["invoice_id"])
+        self.assertEqual(invoice.subtotal_cents, 2500)
+        self.assertEqual(invoice.tax_cents, 525)
+        self.assertEqual(invoice.total_cents, 3025)
+        self.assertEqual(invoice.get_remaining_amount(), 2025)
+        credit_payment = Payment.objects.get(invoice=invoice, meta__source="customer_credit")
+        self.assertEqual(credit_payment.amount_cents, 1000)
+        self.assertEqual(credit_payment.status, "succeeded")
+        self.assertFalse(invoice.lines.filter(kind="credit").exists())
+        self.assertEqual(
+            CreditLedger.objects.filter(customer=self.customer).aggregate(total=Sum("delta_cents"))["total"],
+            0,
+        )
+
+    def test_usage_discount_uses_document_allowance_without_negative_line(self):
+        self.billing_cycle.discount_cents = 500
+        self.billing_cycle.save(update_fields=["discount_cents", "updated_at"])
+
+        result = self.service.generate_invoice_from_cycle(str(self.billing_cycle.id))
+
+        self.assertTrue(result.is_ok(), result.unwrap_err() if result.is_err() else "")
+        invoice = Invoice.objects.get(id=result.unwrap()["invoice_id"])
+        self.assertEqual(invoice.discount_cents, 500)
+        self.assertEqual(invoice.subtotal_cents, 2000)
+        self.assertEqual(invoice.tax_cents, 420)
+        self.assertEqual(invoice.total_cents, 2420)
+        self.assertEqual(invoice.lines.count(), 1)
+        self.assertEqual(invoice.lines.get().subtotal_cents, 2500)
+
+    def test_usage_vat_uses_authoritative_financial_rounding(self):
+        self.aggregation.overage_value = Decimal("1")
+        self.aggregation.charge_cents = 3
+        self.aggregation.save(update_fields=["overage_value", "charge_cents", "updated_at"])
+        self.billing_cycle.usage_charge_cents = 3
+        self.billing_cycle.save(update_fields=["usage_charge_cents", "updated_at"])
+
+        result = self.service.generate_invoice_from_cycle(str(self.billing_cycle.id))
+
+        self.assertTrue(result.is_ok(), result.unwrap_err() if result.is_err() else "")
+        invoice = Invoice.objects.get(id=result.unwrap()["invoice_id"])
+        self.assertEqual(invoice.subtotal_cents, 3)
+        self.assertEqual(invoice.tax_cents, 1)
+        self.assertEqual(invoice.total_cents, 4)
+
+    @patch("apps.billing.tasks.process_auto_payment_async")
+    def test_pending_usage_invoice_queues_authorized_auto_payment(self, mock_auto_payment):
+        method = CustomerPaymentMethod.objects.create(
+            customer=self.customer,
+            method_type="stripe_card",
+            stripe_customer_id="cus_usage_invoice",
+            stripe_payment_method_id="pm_usage_invoice",
+            display_name="Visa ending 4242",
+            last_four="4242",
+            is_active=True,
+        )
+        authorization = RecurringPaymentAuthorization.objects.create(
+            customer=self.customer,
+            payment_method=method,
+            status="active",
+            setup_intent_id="seti_usage_invoice",
+            terms_version=RecurringPaymentAuthorizationService.TERMS_VERSION,
+            terms_text=RecurringPaymentAuthorizationService.TERMS_TEXT,
+            terms_text_hash=hashlib.sha256(RecurringPaymentAuthorizationService.TERMS_TEXT.encode("utf-8")).hexdigest(),
+            granted_by_role="owner",
+            granted_at=timezone.now(),
+        )
+        self.subscription.saved_payment_method = method
+        self.subscription.payment_authorization = authorization
+        self.subscription.auto_payment_enabled = True
+        self.subscription.save(
+            update_fields=["saved_payment_method", "payment_authorization", "auto_payment_enabled", "updated_at"]
+        )
+
+        generated, errors = UsageBillingService.generate_pending_invoices()
+
+        self.assertEqual((generated, errors), (1, 0))
+        self.billing_cycle.refresh_from_db()
+        mock_auto_payment.assert_called_once_with(str(self.billing_cycle.usage_invoice_id))
+
+    def test_cycle_without_billable_usage_finalizes_without_zero_invoice(self):
+        self.aggregation.charge_cents = 0
+        self.aggregation.overage_value = Decimal("0")
+        self.aggregation.save(update_fields=["charge_cents", "overage_value", "updated_at"])
+        self.billing_cycle.usage_charge_cents = 0
+        self.billing_cycle.save(update_fields=["usage_charge_cents", "updated_at"])
+
+        generated, errors = UsageBillingService.generate_pending_invoices()
+
+        self.assertEqual((generated, errors), (0, 0))
+        self.billing_cycle.refresh_from_db()
+        self.assertEqual(self.billing_cycle.status, "finalized")
+        self.assertIsNone(self.billing_cycle.usage_invoice_id)
+
+    def test_unrated_usage_is_never_finalized_from_a_stale_zero_total(self):
+        UsageAggregation.objects.filter(pk=self.aggregation.pk).update(
+            status="pending_rating",
+            charge_cents=0,
+            charge_calculated_at=None,
+        )
+        self.billing_cycle.usage_charge_cents = 0
+        self.billing_cycle.save(update_fields=["usage_charge_cents", "updated_at"])
+
+        generated, errors = UsageBillingService.generate_pending_invoices()
+
+        self.assertEqual((generated, errors), (0, 1))
+        self.billing_cycle.refresh_from_db()
+        self.aggregation.refresh_from_db()
+        self.assertEqual(self.billing_cycle.status, "closed")
+        self.assertEqual(self.aggregation.status, "pending_rating")
+        self.assertIsNone(self.billing_cycle.usage_invoice_id)
+
+    def test_expired_cycles_wait_for_active_meter_late_event_window(self):
+        now = timezone.now()
+        inside_subscription = Subscription.objects.create(
+            customer=self.customer,
+            product=self.product,
+            currency=self.currency,
+            subscription_number="SUB-INV-GRACE-INSIDE",
+            status="active",
+            billing_cycle="monthly",
+            unit_price_cents=2999,
+            current_period_start=now - timedelta(days=30),
+            current_period_end=now,
+            next_billing_date=now,
+        )
+        beyond_subscription = Subscription.objects.create(
+            customer=self.customer,
+            product=self.product,
+            currency=self.currency,
+            subscription_number="SUB-INV-GRACE-BEYOND",
+            status="active",
+            billing_cycle="monthly",
+            unit_price_cents=2999,
+            current_period_start=now - timedelta(days=30),
+            current_period_end=now,
+            next_billing_date=now,
+        )
+        inside_grace = BillingCycle.objects.create(
+            subscription=inside_subscription,
+            period_start=now - timedelta(days=61),
+            period_end=now - timedelta(hours=23),
+            status="active",
+        )
+        beyond_grace = BillingCycle.objects.create(
+            subscription=beyond_subscription,
+            period_start=now - timedelta(days=62),
+            period_end=now - timedelta(hours=25),
+            status="active",
+        )
+
+        closed, errors = UsageBillingService.close_expired_cycles()
+
+        self.assertEqual((closed, errors), (1, 0))
+        inside_grace.refresh_from_db()
+        beyond_grace.refresh_from_db()
+        self.assertEqual(inside_grace.status, "active")
+        self.assertEqual(beyond_grace.status, "closed")
 
     def test_credit_ledger_can_be_created(self):
         """Test that credit ledger entries can be created for customers."""
@@ -790,134 +1159,12 @@ class UsageInvoiceServiceTestCase(TestCase):
         self.assertIn("not found", result.error.lower())
 
 
-class BillingCycleManagerTestCase(TestCase):
-    """Test BillingCycleManager functionality."""
-
-    def setUp(self):
-        """Set up test data."""
-        self.currency, _ = Currency.objects.get_or_create(
-            code="RON", defaults={"symbol": "lei", "decimals": 2}
-        )
-
-        self.customer = Customer.objects.create(
-            name="Test Customer",
-            primary_email="test@example.com",
-            status="active",
-        )
-
-        self.product = Product.objects.create(
-            slug="basic-bcmgr",
-            name="Basic",
-            product_type="shared_hosting",
-        )
-
-        now = timezone.now()
-        self.subscription = Subscription.objects.create(
-            customer=self.customer,
-            product=self.product,
-            currency=self.currency,
-            subscription_number="SUB-BCMGR-001",
-            status="active",
-            billing_cycle="monthly",
-            unit_price_cents=2999,
-            current_period_start=now,
-            current_period_end=now + timedelta(days=30),
-            next_billing_date=now + timedelta(days=30),
-        )
-
-        self.manager = BillingCycleManager()
-
-    def test_create_billing_cycle(self):
-        """Test creating a new billing cycle."""
-        now = timezone.now()
-
-        result = self.manager.create_billing_cycle(
-            str(self.subscription.id),
-            period_start=now
-        )
-
-        self.assertTrue(result.is_ok())
-        cycle = result.unwrap()
-
-        self.assertEqual(cycle.subscription, self.subscription)
-        self.assertEqual(cycle.status, "active")
-        self.assertEqual(cycle.base_charge_cents, 2999)
-
-        # Verify period end is approximately 1 month later
-        expected_end = now + timedelta(days=30)
-        self.assertAlmostEqual(
-            cycle.period_end.timestamp(),
-            expected_end.timestamp(),
-            delta=86400 * 3  # Within 3 days (months vary 28-31 days)
-        )
-
-    def test_create_billing_cycle_quarterly(self):
-        """Test creating quarterly billing cycle."""
-        self.subscription.billing_cycle = "quarterly"
-        self.subscription.save()
-
-        now = timezone.now()
-        result = self.manager.create_billing_cycle(
-            str(self.subscription.id),
-            period_start=now
-        )
-
-        self.assertTrue(result.is_ok())
-        cycle = result.unwrap()
-
-        # Verify period is ~3 months
-        delta = cycle.period_end - cycle.period_start
-        self.assertGreater(delta.days, 85)
-        self.assertLess(delta.days, 95)
-
-    def test_create_billing_cycle_inactive_subscription(self):
-        """Test error for inactive subscription."""
-        force_status(self.subscription, "cancelled")
-
-        result = self.manager.create_billing_cycle(str(self.subscription.id))
-
-        self.assertTrue(result.is_err())
-        self.assertIn("not active", result.error.lower())
-
-    def test_advance_all_subscriptions(self):
-        """Test advancing all subscriptions."""
-        # Set up subscription with expired period
-        past = timezone.now() - timedelta(days=35)
-        self.subscription.current_period_start = past
-        self.subscription.current_period_end = timezone.now() - timedelta(days=5)
-        self.subscription.save()
-
-        created, errors, _ = self.manager.advance_all_subscriptions()
-
-        self.assertEqual(created, 1)
-        self.assertEqual(errors, 0)
-
-    def test_close_expired_cycles(self):
-        """Test closing expired billing cycles."""
-        now = timezone.now()
-
-        # Create expired cycle
-        BillingCycle.objects.create(
-            subscription=self.subscription,
-            period_start=now - timedelta(days=35),
-            period_end=now - timedelta(days=5),
-            status="active",
-        )
-
-        closed, errors = self.manager.close_expired_cycles()
-
-        self.assertEqual(closed, 1)
-        self.assertEqual(errors, 0)
-
-
 class UsageAlertServiceTestCase(TestCase):
     """Test UsageAlertService functionality."""
 
     def setUp(self):
         """Set up test data."""
-        self.currency, _ = Currency.objects.get_or_create(
-            code="RON", defaults={"symbol": "lei", "decimals": 2}
-        )
+        self.currency, _ = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei", "decimals": 2})
 
         self.customer = Customer.objects.create(
             name="Test Customer",
@@ -988,11 +1235,7 @@ class UsageAlertServiceTestCase(TestCase):
             is_active=True,
         )
 
-        alerts = self.service.check_thresholds(
-            str(self.customer.id),
-            str(self.meter.id),
-            str(self.subscription.id)
-        )
+        alerts = self.service.check_thresholds(str(self.customer.id), str(self.meter.id), str(self.subscription.id))
 
         self.assertEqual(len(alerts), 0)
 
@@ -1006,11 +1249,7 @@ class UsageAlertServiceTestCase(TestCase):
             notify_customer=True,
         )
 
-        alerts = self.service.check_thresholds(
-            str(self.customer.id),
-            str(self.meter.id),
-            str(self.subscription.id)
-        )
+        alerts = self.service.check_thresholds(str(self.customer.id), str(self.meter.id), str(self.subscription.id))
 
         self.assertEqual(len(alerts), 1)
         self.assertEqual(alerts[0].status, "pending")
@@ -1024,11 +1263,7 @@ class UsageAlertServiceTestCase(TestCase):
             is_active=True,
         )
 
-        alerts = self.service.check_thresholds(
-            str(self.customer.id),
-            str(self.meter.id),
-            str(self.subscription.id)
-        )
+        alerts = self.service.check_thresholds(str(self.customer.id), str(self.meter.id), str(self.subscription.id))
 
         self.assertEqual(len(alerts), 1)
 
@@ -1043,19 +1278,11 @@ class UsageAlertServiceTestCase(TestCase):
         )
 
         # First check
-        alerts1 = self.service.check_thresholds(
-            str(self.customer.id),
-            str(self.meter.id),
-            str(self.subscription.id)
-        )
+        alerts1 = self.service.check_thresholds(str(self.customer.id), str(self.meter.id), str(self.subscription.id))
         self.assertEqual(len(alerts1), 1)
 
         # Second check should not create new alert
-        alerts2 = self.service.check_thresholds(
-            str(self.customer.id),
-            str(self.meter.id),
-            str(self.subscription.id)
-        )
+        alerts2 = self.service.check_thresholds(str(self.customer.id), str(self.meter.id), str(self.subscription.id))
         self.assertEqual(len(alerts2), 0)
 
     @patch("apps.notifications.services.EmailService.send_template_email")

@@ -13,7 +13,7 @@ providing a historical record of why the system is built the way it is.
 ## How to Create a New ADR
 
 1. Create a new file: `ADR-XXXX-short-descriptive-title.md`
-2. Use the next available number (currently: **ADR-0038**)
+2. Use the next available number (currently: **ADR-0040**)
 3. Follow the standard format: Status, Date, Authors, Context, Decision, Consequences
 4. Set status to **Proposed** initially, then update to **Accepted** after team review
 
@@ -66,6 +66,8 @@ providing a historical record of why the system is built the way it is.
 | [ADR-0035](ADR-0035-unified-design-system.md) | Unified Design System Architecture | Active | 2026-03-17 |
 | [ADR-0036](ADR-0036-tiered-ci-testing-strategy.md) | Tiered CI Testing Strategy | Active | 2026-03-20 |
 | [ADR-0037](ADR-0037-psycopg-v3-migration.md) | psycopg v3 Migration | Active | 2026-03-20 |
+| [ADR-0038](ADR-0038-proforma-payment-convergence.md) | Proforma Payment Convergence Architecture | Accepted | 2026-03 |
+| [ADR-0039](ADR-0039-praho-owned-recurring-billing.md) | PRAHO-Owned Recurring Billing | Accepted | 2026-07 |
 
 ### 🟡 Partially Superseded
 
@@ -117,6 +119,11 @@ Platform Traffic Management
 Token & Inter-Service Auth
   ADR-0031 (API token auth) ──related──▶ ADR-0017, ADR-0024
   ADR-0032 (dual HMAC) ──related──▶ ADR-0017, ADR-0031
+
+Billing Ownership
+  ADR-0025 (amounts in cents) ──related──▶ ADR-0038 (proforma convergence)
+  ADR-0038 ──extended by──▶ ADR-0039 (PRAHO-owned recurring billing)
+  ADR-0039 ──related──▶ ADR-0034 (FSM lifecycle)
 ```
 
 ---
@@ -164,13 +171,15 @@ Token & Inter-Service Auth
 - [ADR-0025](ADR-0025-monetary-amounts-in-cents.md) — Monetary amounts in cents
 - [ADR-0027](ADR-0027-hcloud-sdk-infrastructure-provisioning.md) — Hetzner SDK provisioning
 - [ADR-0029](ADR-0029-config-drift-detection.md) — Drift detection and remediation workflow
+- [ADR-0038](ADR-0038-proforma-payment-convergence.md) — Atomic proforma payment and invoice convergence
+- [ADR-0039](ADR-0039-praho-owned-recurring-billing.md) — PRAHO-owned subscriptions, consent, collection, and usage billing
 
 ---
 
 ## Statistics
 
-- **Total ADRs**: 37 (ADR-0001 through ADR-0037)
-- **Active**: 31 (Accepted + Implemented)
+- **Total ADRs**: 39 (ADR-0001 through ADR-0039)
+- **Active**: 33 (Accepted + Implemented)
 - **Partially Superseded**: 1
 - **Superseded / Historical**: 5
-- **Next available**: ADR-0038
+- **Next available**: ADR-0040

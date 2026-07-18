@@ -16,8 +16,8 @@ during security review:
 import uuid
 from datetime import datetime, timedelta
 from decimal import Decimal
-from unittest.mock import patch
 
+from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.db.models import Max
 from django.test import TestCase, TransactionTestCase
@@ -34,7 +34,6 @@ from apps.billing.metering_models import (
 )
 from apps.billing.metering_service import MeteringService, UsageAlertService, UsageEventData
 from apps.billing.models import Currency, Subscription
-from apps.billing.stripe_metering import StripeUsageSyncService
 from apps.customers.models import Customer
 from apps.products.models import Product
 
@@ -252,14 +251,7 @@ class InvoiceCalculationRedTeamTestCase(TestCase):
         self.assertIsInstance(event.value, Decimal)
 
     def test_negative_usage_value_validation(self):
-        """
-        Test that negative usage values are handled.
-
-        RED TEAM FINDING: Currently, negative values ARE accepted by the system.
-        This may be intentional (for refunds/credits) or a vulnerability.
-        This test documents the current behavior - consider adding validation
-        if negative values should be rejected.
-        """
+        """Negative events cannot reduce rated usage; credits use the ledger."""
         UsageMeter.objects.create(
             name="negative_test",
             display_name="Negative Test",
@@ -279,10 +271,17 @@ class InvoiceCalculationRedTeamTestCase(TestCase):
             value=Decimal("-10"),  # Negative value
         ))
 
-        # FINDING: Negative values are currently ACCEPTED
-        # This test documents current behavior - review if this is desired
-        self.assertTrue(result.is_ok())  # Negative values are accepted
-        # If rejection is desired, uncomment: self.assertFalse(result.is_ok())
+        self.assertTrue(result.is_err())
+        self.assertIn("non-negative", result.unwrap_err())
+        self.assertFalse(UsageEvent.objects.filter(customer=customer).exists())
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            UsageEvent.objects.create(
+                meter=UsageMeter.objects.get(name="negative_test"),
+                customer=customer,
+                value=Decimal("-1"),
+                timestamp=timezone.now(),
+                idempotency_key="negative-direct-write",
+            )
 
 
 class BillingCycleBoundaryTestCase(TestCase):
@@ -317,15 +316,8 @@ class BillingCycleBoundaryTestCase(TestCase):
             next_billing_date=now + timedelta(days=30),
         )
 
-    def test_overlapping_billing_cycles_allowed(self):
-        """
-        RED TEAM FINDING: Overlapping billing cycles are NOT rejected.
-
-        This test documents that the system currently allows overlapping
-        billing cycles for the same subscription, which could lead to
-        double-billing. Consider adding a database constraint or model
-        validation to prevent this.
-        """
+    def test_overlapping_billing_cycles_rejected(self):
+        """A subscription cannot own two periods covering the same instant."""
         now = timezone.now()
 
         BillingCycle.objects.create(
@@ -335,37 +327,26 @@ class BillingCycleBoundaryTestCase(TestCase):
             status="active",
         )
 
-        # FINDING: Overlapping cycles are currently ALLOWED
-        BillingCycle.objects.create(
-            subscription=self.subscription,
-            period_start=now + timedelta(days=15),  # Overlaps with cycle1
-            period_end=now + timedelta(days=45),
-            status="active",
-        )
-        # Both cycles exist - this is a potential billing issue
-        self.assertEqual(BillingCycle.objects.filter(
-            subscription=self.subscription
-        ).count(), 2)
+        with self.assertRaises(ValidationError):
+            BillingCycle.objects.create(
+                subscription=self.subscription,
+                period_start=now + timedelta(days=15),
+                period_end=now + timedelta(days=45),
+                status="active",
+            )
+        self.assertEqual(BillingCycle.objects.filter(subscription=self.subscription).count(), 1)
 
-    def test_billing_cycle_period_end_before_start_allowed(self):
-        """
-        RED TEAM FINDING: period_end before period_start is NOT rejected.
-
-        This test documents that the system currently allows creating
-        billing cycles where end date is before start date. Consider
-        adding model validation in clean() method.
-        """
+    def test_billing_cycle_period_end_before_start_rejected(self):
+        """A cycle must have a strictly positive duration."""
         now = timezone.now()
 
-        # FINDING: Invalid date range is currently ALLOWED
-        cycle = BillingCycle.objects.create(
-            subscription=self.subscription,
-            period_start=now,
-            period_end=now - timedelta(days=1),  # End before start!
-            status="active",
-        )
-        # Invalid cycle was created
-        self.assertIsNotNone(cycle.id)
+        with self.assertRaises(ValidationError):
+            BillingCycle.objects.create(
+                subscription=self.subscription,
+                period_start=now,
+                period_end=now - timedelta(days=1),
+                status="active",
+            )
 
     def test_leap_year_billing_cycle(self):
         """Test billing cycle crossing leap day."""
@@ -378,88 +359,6 @@ class BillingCycleBoundaryTestCase(TestCase):
             status="active",
         )
         self.assertEqual((cycle.period_end - cycle.period_start).days, 29)
-
-
-class StripeSyncFailureTestCase(TestCase):
-    """
-    Test Stripe sync error handling and recovery.
-
-    Note: Comprehensive Stripe error handling tests are in test_stripe_metering.py.
-    This test class validates that the sync service is properly structured.
-    """
-
-    def setUp(self):
-        """Set up test data."""
-        self.meter = UsageMeter.objects.create(
-            name="stripe_test",
-            display_name="Stripe Test",
-            aggregation_type="sum",
-            unit="units",
-            stripe_meter_event_name="stripe_test_meter",
-        )
-        self.customer = Customer.objects.create(
-            name="Test Customer",
-            primary_email="test@example.com",
-            status="active",
-        )
-        self.currency, _ = Currency.objects.get_or_create(
-            code="RON", defaults={"symbol": "lei", "decimals": 2}
-        )
-        self.product = Product.objects.create(
-            slug="test-plan-stripe",
-            name="Test Plan",
-            product_type="shared_hosting",
-        )
-        now = timezone.now()
-        self.subscription = Subscription.objects.create(
-            customer=self.customer,
-            product=self.product,
-            currency=self.currency,
-            subscription_number="SUB-STRIPE-RT001",
-            status="active",
-            billing_cycle="monthly",
-            unit_price_cents=2999,
-            current_period_start=now,
-            current_period_end=now + timedelta(days=30),
-            next_billing_date=now + timedelta(days=30),
-            stripe_subscription_id="sub_test123",
-        )
-        now = timezone.now()
-        self.billing_cycle = BillingCycle.objects.create(
-            subscription=self.subscription,
-            period_start=now,
-            period_end=now + timedelta(days=30),
-            status="active",
-        )
-        self.aggregation = UsageAggregation.objects.create(
-            meter=self.meter,
-            customer=self.customer,
-            subscription=self.subscription,
-            billing_cycle=self.billing_cycle,
-            period_start=now,
-            period_end=now + timedelta(days=30),
-            total_value=Decimal("100"),
-            billable_value=Decimal("100"),
-            status="rated",
-        )
-
-    @patch("apps.billing.stripe_metering.get_stripe")
-    def test_stripe_not_configured(self, mock_get_stripe):
-        """Test handling when Stripe is not configured."""
-        mock_get_stripe.return_value = None
-
-        service = StripeUsageSyncService()
-        result = service.sync_aggregation_to_stripe(str(self.aggregation.id))
-
-        # Should handle gracefully when Stripe not configured
-        self.assertFalse(result.is_ok())
-
-    def test_sync_nonexistent_aggregation(self):
-        """Test syncing with invalid aggregation ID."""
-        service = StripeUsageSyncService()
-        result = service.sync_aggregation_to_stripe(str(uuid.uuid4()))
-
-        self.assertFalse(result.is_ok())
 
 
 class UsageAlertRedTeamTestCase(TestCase):

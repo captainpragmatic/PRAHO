@@ -1789,6 +1789,7 @@ name = "praho-platform"
 version = "0.28.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "babel" },
     { name = "bleach" },
     { name = "django" },
     { name = "django-environ" },
@@ -1897,6 +1898,7 @@ prod = [
 
 [package.metadata]
 requires-dist = [
+    { name = "babel", specifier = ">=2.18.0" },
     { name = "bleach", specifier = ">=6.3.0" },
     { name = "django", specifier = ">=5.2,<5.3" },
     { name = "django-environ", specifier = ">=0.12.0" },

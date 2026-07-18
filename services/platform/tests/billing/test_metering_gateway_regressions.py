@@ -49,6 +49,7 @@ from tests.helpers.fsm_helpers import force_status
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_currency():
     return Currency.objects.create(code=uuid.uuid4().hex[:3].upper(), symbol="X", decimals=2)
 
@@ -119,6 +120,7 @@ def _make_aggregation(meter, customer, billing_cycle, subscription=None, **kwarg
 # Result dataclass tests
 # ============================================================================
 
+
 class TestResult(TestCase):
     def test_ok(self):
         r = Ok(42)
@@ -152,6 +154,7 @@ class TestResult(TestCase):
 # _parse_decimal
 # ============================================================================
 
+
 class TestParseDecimal(TestCase):
     def test_none(self):
         assert _parse_decimal(None) == Decimal("0")
@@ -172,6 +175,7 @@ class TestParseDecimal(TestCase):
 # ============================================================================
 # _get_allowance helpers
 # ============================================================================
+
 
 class TestGetAllowanceFromSubscriptionItem(TestCase):
     def test_none_item(self):
@@ -239,6 +243,7 @@ class TestGetAllowanceFromServicePlan(TestCase):
 # _get_subscription_item_for_meter
 # ============================================================================
 
+
 class TestGetSubscriptionItemForMeter(TestCase):
     def setUp(self):
         self.currency = _make_currency()
@@ -259,25 +264,26 @@ class TestGetSubscriptionItemForMeter(TestCase):
     def test_returns_item_by_product_slug(self):
         # Create product with slug matching meter name
         prod = _make_product(slug=self.meter.name)
-        SubscriptionItem.objects.create(
-            subscription=self.subscription, product=prod, unit_price_cents=500, meta={}
-        )
+        SubscriptionItem.objects.create(subscription=self.subscription, product=prod, unit_price_cents=500, meta={})
         result = _get_subscription_item_for_meter(self.subscription, self.meter)
         assert result is not None
 
-    def test_returns_fallback_item(self):
-        # Item with no matching slug/meta — should still return items.first() as fallback
+    def test_does_not_return_unrelated_fallback_item(self):
+        # A base plan item must never become the price for an unrelated meter.
         SubscriptionItem.objects.create(
             subscription=self.subscription, product=self.product, unit_price_cents=500, meta={}
         )
         result = _get_subscription_item_for_meter(self.subscription, self.meter)
-        assert result is not None
+        assert result is None
 
     def test_active_items_filtered(self):
         # Create two items, one with is_active meta
         prod2 = _make_product()
         SubscriptionItem.objects.create(
-            subscription=self.subscription, product=self.product, unit_price_cents=500, meta={"is_active": True}
+            subscription=self.subscription,
+            product=self.product,
+            unit_price_cents=500,
+            meta={"is_active": True, "meter_name": self.meter.name},
         )
         SubscriptionItem.objects.create(
             subscription=self.subscription, product=prod2, unit_price_cents=600, meta={"is_active": False}
@@ -290,6 +296,7 @@ class TestGetSubscriptionItemForMeter(TestCase):
 # MeteringService
 # ============================================================================
 
+
 class TestMeteringServiceRecordEvent(TestCase):
     def setUp(self):
         self.currency = _make_currency()
@@ -300,46 +307,50 @@ class TestMeteringServiceRecordEvent(TestCase):
     @patch("apps.billing.metering_service.MeteringService._check_thresholds_async")
     @patch("apps.billing.metering_service.MeteringService._schedule_aggregation_update")
     def test_success(self, mock_agg, mock_thresh):
-        result = self.svc.record_event(UsageEventData(
-            meter_name=self.meter.name,
-            customer_id=str(self.customer.id),
-            value=Decimal("10"),
-        ))
+        result = self.svc.record_event(
+            UsageEventData(
+                meter_name=self.meter.name,
+                customer_id=str(self.customer.id),
+                value=Decimal("10"),
+            )
+        )
         assert result.is_ok()
         assert UsageEvent.objects.count() == 1
 
     def test_meter_not_found(self):
-        result = self.svc.record_event(UsageEventData(
-            meter_name="nonexistent", customer_id=str(self.customer.id), value=Decimal("1")
-        ))
+        result = self.svc.record_event(
+            UsageEventData(meter_name="nonexistent", customer_id=str(self.customer.id), value=Decimal("1"))
+        )
         assert result.is_err()
         assert "Meter not found" in result.error
 
     def test_meter_inactive(self):
         self.meter.is_active = False
         self.meter.save()
-        result = self.svc.record_event(UsageEventData(
-            meter_name=self.meter.name, customer_id=str(self.customer.id), value=Decimal("1")
-        ))
+        result = self.svc.record_event(
+            UsageEventData(meter_name=self.meter.name, customer_id=str(self.customer.id), value=Decimal("1"))
+        )
         assert result.is_err()
         assert "inactive" in result.error
 
     def test_customer_not_found(self):
-        result = self.svc.record_event(UsageEventData(
-            meter_name=self.meter.name, customer_id="999999", value=Decimal("1")
-        ))
+        result = self.svc.record_event(
+            UsageEventData(meter_name=self.meter.name, customer_id="999999", value=Decimal("1"))
+        )
         assert result.is_err()
         assert "Customer not found" in result.error
 
     @patch("apps.billing.metering_service.MeteringService._check_thresholds_async")
     @patch("apps.billing.metering_service.MeteringService._schedule_aggregation_update")
     def test_timestamp_too_old(self, mock_agg, mock_thresh):
-        result = self.svc.record_event(UsageEventData(
-            meter_name=self.meter.name,
-            customer_id=str(self.customer.id),
-            value=Decimal("1"),
-            timestamp=timezone.now() - timedelta(hours=48),
-        ))
+        result = self.svc.record_event(
+            UsageEventData(
+                meter_name=self.meter.name,
+                customer_id=str(self.customer.id),
+                value=Decimal("1"),
+                timestamp=timezone.now() - timedelta(hours=48),
+            )
+        )
         assert result.is_err()
         assert "too old" in result.error
 
@@ -347,12 +358,14 @@ class TestMeteringServiceRecordEvent(TestCase):
     @patch("apps.billing.metering_service.MeteringService._check_thresholds_async")
     @patch("apps.billing.metering_service.MeteringService._schedule_aggregation_update")
     def test_timestamp_in_future(self, mock_agg, mock_thresh, mock_drift):
-        result = self.svc.record_event(UsageEventData(
-            meter_name=self.meter.name,
-            customer_id=str(self.customer.id),
-            value=Decimal("1"),
-            timestamp=timezone.now() + timedelta(hours=1),
-        ))
+        result = self.svc.record_event(
+            UsageEventData(
+                meter_name=self.meter.name,
+                customer_id=str(self.customer.id),
+                value=Decimal("1"),
+                timestamp=timezone.now() + timedelta(hours=1),
+            )
+        )
         assert result.is_err()
         assert "future" in result.error
 
@@ -373,28 +386,54 @@ class TestMeteringServiceRecordEvent(TestCase):
 
     @patch("apps.billing.metering_service.MeteringService._check_thresholds_async")
     @patch("apps.billing.metering_service.MeteringService._schedule_aggregation_update")
-    def test_with_subscription_and_service(self, mock_agg, mock_thresh):
+    def test_explicit_unknown_service_is_rejected(self, mock_agg, mock_thresh):
         product = _make_product()
         sub = _make_subscription(self.customer, product, self.currency)
-        result = self.svc.record_event(UsageEventData(
-            meter_name=self.meter.name,
-            customer_id=str(self.customer.id),
-            value=Decimal("5"),
-            subscription_id=str(sub.id),
-            service_id="999999",  # non-existent, should warn but not fail
-        ))
-        assert result.is_ok()
+        result = self.svc.record_event(
+            UsageEventData(
+                meter_name=self.meter.name,
+                customer_id=str(self.customer.id),
+                value=Decimal("5"),
+                subscription_id=str(sub.id),
+                service_id="999999",
+            )
+        )
+        assert result.is_err()
+        assert "service" in result.error.lower()
+        mock_agg.assert_not_called()
 
     @patch("apps.billing.metering_service.MeteringService._check_thresholds_async")
     @patch("apps.billing.metering_service.MeteringService._schedule_aggregation_update")
-    def test_nonexistent_subscription_warns(self, mock_agg, mock_thresh):
-        result = self.svc.record_event(UsageEventData(
-            meter_name=self.meter.name,
-            customer_id=str(self.customer.id),
-            value=Decimal("5"),
-            subscription_id=str(uuid.uuid4()),
-        ))
-        assert result.is_ok()
+    def test_nonexistent_subscription_is_rejected(self, mock_agg, mock_thresh):
+        result = self.svc.record_event(
+            UsageEventData(
+                meter_name=self.meter.name,
+                customer_id=str(self.customer.id),
+                value=Decimal("5"),
+                subscription_id=str(uuid.uuid4()),
+            )
+        )
+        assert result.is_err()
+        assert "subscription" in result.error.lower()
+        mock_agg.assert_not_called()
+
+    @patch("apps.billing.metering_service.MeteringService._check_thresholds_async")
+    @patch("apps.billing.metering_service.MeteringService._schedule_aggregation_update")
+    def test_cumulative_hosting_snapshot_cannot_feed_sum_meter(self, mock_agg, mock_thresh):
+        meter = _make_meter(name="bandwidth_gb", aggregation_type="sum")
+
+        result = self.svc.record_event(
+            UsageEventData(
+                meter_name=meter.name,
+                customer_id=str(self.customer.id),
+                value=Decimal("5"),
+                source="virtualmin",
+            )
+        )
+
+        assert result.is_err()
+        assert "snapshot" in result.error.lower()
+        mock_agg.assert_not_called()
 
 
 class TestMeteringServiceBulkEvents(TestCase):
@@ -457,46 +496,83 @@ class TestUpdateAggregationSync(TestCase):
     def test_sync_update_with_subscription(self):
         _agg = _make_aggregation(self.meter, self.customer, self.billing_cycle, self.subscription)
         event = UsageEvent.objects.create(
-            meter=self.meter, customer=self.customer, subscription=self.subscription,
-            value=Decimal("10"), timestamp=timezone.now(), idempotency_key="k1",
+            meter=self.meter,
+            customer=self.customer,
+            subscription=self.subscription,
+            value=Decimal("10"),
+            timestamp=timezone.now(),
+            idempotency_key="k1",
         )
-        with patch.object(Subscription, "get_current_billing_cycle", return_value=self.billing_cycle, create=True):
-            self.svc._update_aggregation_sync(event)
+        self.svc._update_aggregation_sync(event)
         event.refresh_from_db()
         assert event.is_processed
 
     def test_sync_update_no_subscription_finds_active(self):
         _agg = _make_aggregation(self.meter, self.customer, self.billing_cycle, self.subscription)
         event = UsageEvent.objects.create(
-            meter=self.meter, customer=self.customer, subscription=None,
-            value=Decimal("5"), timestamp=timezone.now(), idempotency_key="k2",
+            meter=self.meter,
+            customer=self.customer,
+            subscription=None,
+            value=Decimal("5"),
+            timestamp=timezone.now(),
+            idempotency_key="k2",
         )
-        with patch.object(Subscription, "get_current_billing_cycle", return_value=self.billing_cycle, create=True):
-            self.svc._update_aggregation_sync(event)
+        self.svc._update_aggregation_sync(event)
         event.refresh_from_db()
         assert event.is_processed
 
     def test_sync_update_no_subscription_at_all(self):
-        """No subscription for customer — should log warning and return."""
+        """No eligible subscription is a real processing failure, not a silent success."""
         # Make subscription inactive
         force_status(self.subscription, "cancelled")
         event = UsageEvent.objects.create(
-            meter=self.meter, customer=self.customer, subscription=None,
-            value=Decimal("5"), timestamp=timezone.now(), idempotency_key="k3",
+            meter=self.meter,
+            customer=self.customer,
+            subscription=None,
+            value=Decimal("5"),
+            timestamp=timezone.now(),
+            idempotency_key="k3",
         )
-        self.svc._update_aggregation_sync(event)
+        with self.assertRaisesMessage(ValueError, "No eligible subscription"):
+            self.svc._update_aggregation_sync(event)
         event.refresh_from_db()
         assert not event.is_processed
 
     def test_sync_no_billing_cycle(self):
         event = UsageEvent.objects.create(
-            meter=self.meter, customer=self.customer, subscription=self.subscription,
-            value=Decimal("5"), timestamp=timezone.now(), idempotency_key="k4",
+            meter=self.meter,
+            customer=self.customer,
+            subscription=self.subscription,
+            value=Decimal("5"),
+            timestamp=timezone.now(),
+            idempotency_key="k4",
         )
-        with patch.object(Subscription, "get_current_billing_cycle", return_value=None, create=True):
+        self.billing_cycle.delete()
+        with self.assertRaisesMessage(ValueError, "No eligible billing cycle"):
             self.svc._update_aggregation_sync(event)
         event.refresh_from_db()
         assert not event.is_processed
+
+    def test_event_at_period_boundary_uses_the_next_cycle(self):
+        boundary = self.billing_cycle.period_end
+        next_cycle = _make_billing_cycle(
+            self.subscription,
+            period_start=boundary,
+            period_end=boundary + timedelta(days=30),
+        )
+        event = UsageEvent.objects.create(
+            meter=self.meter,
+            customer=self.customer,
+            subscription=self.subscription,
+            value=Decimal("5"),
+            timestamp=boundary,
+            idempotency_key="period-boundary",
+        )
+
+        self.svc._update_aggregation_sync(event)
+
+        event.refresh_from_db()
+        self.assertEqual(event.aggregation.billing_cycle, next_cycle)
 
 
 class TestApplyEventToAggregation(TestCase):
@@ -512,8 +588,11 @@ class TestApplyEventToAggregation(TestCase):
         meter = _make_meter(aggregation_type=agg_type)
         agg = _make_aggregation(meter, self.customer, self.billing_cycle, self.subscription)
         event = UsageEvent.objects.create(
-            meter=meter, customer=self.customer, value=value,
-            timestamp=timezone.now(), idempotency_key=f"evt-{uuid.uuid4().hex[:8]}",
+            meter=meter,
+            customer=self.customer,
+            value=value,
+            timestamp=timezone.now(),
+            idempotency_key=f"evt-{uuid.uuid4().hex[:8]}",
         )
         return event, agg
 
@@ -556,7 +635,9 @@ class TestApplyEventToAggregation(TestCase):
         agg.last_value_at = timezone.now() + timedelta(hours=1)
         agg.save()
         event = UsageEvent.objects.create(
-            meter=meter, customer=self.customer, value=Decimal("5"),
+            meter=meter,
+            customer=self.customer,
+            value=Decimal("5"),
             timestamp=timezone.now() - timedelta(hours=1),
             idempotency_key=f"evt-{uuid.uuid4().hex[:8]}",
         )
@@ -586,6 +667,7 @@ class TestCheckThresholdsAsync(TestCase):
 # AggregationService
 # ============================================================================
 
+
 class TestAggregationService(TestCase):
     def setUp(self):
         self.currency = _make_currency()
@@ -598,8 +680,13 @@ class TestAggregationService(TestCase):
 
     def test_process_pending_events(self):
         _event = UsageEvent.objects.create(
-            meter=self.meter, customer=self.customer, subscription=self.subscription,
-            value=Decimal("5"), timestamp=timezone.now(), idempotency_key="p1", is_processed=False,
+            meter=self.meter,
+            customer=self.customer,
+            subscription=self.subscription,
+            value=Decimal("5"),
+            timestamp=timezone.now(),
+            idempotency_key="p1",
+            is_processed=False,
         )
         with patch.object(MeteringService, "_update_aggregation_sync"):
             processed, errors = self.svc.process_pending_events()
@@ -608,8 +695,12 @@ class TestAggregationService(TestCase):
 
     def test_process_pending_with_filters(self):
         _event = UsageEvent.objects.create(
-            meter=self.meter, customer=self.customer, value=Decimal("5"),
-            timestamp=timezone.now(), idempotency_key="p2", is_processed=False,
+            meter=self.meter,
+            customer=self.customer,
+            value=Decimal("5"),
+            timestamp=timezone.now(),
+            idempotency_key="p2",
+            is_processed=False,
         )
         with patch.object(MeteringService, "_update_aggregation_sync"):
             processed, _errors = self.svc.process_pending_events(
@@ -619,8 +710,12 @@ class TestAggregationService(TestCase):
 
     def test_process_pending_error(self):
         _event = UsageEvent.objects.create(
-            meter=self.meter, customer=self.customer, value=Decimal("5"),
-            timestamp=timezone.now(), idempotency_key="p3", is_processed=False,
+            meter=self.meter,
+            customer=self.customer,
+            value=Decimal("5"),
+            timestamp=timezone.now(),
+            idempotency_key="p3",
+            is_processed=False,
         )
         with patch.object(MeteringService, "_update_aggregation_sync", side_effect=Exception("boom")):
             _processed, errors = self.svc.process_pending_events()
@@ -629,9 +724,18 @@ class TestAggregationService(TestCase):
     @patch("apps.billing.metering_service.AuditService.log_simple_event")
     def test_close_billing_cycle(self, mock_audit):
         _agg = _make_aggregation(self.meter, self.customer, self.billing_cycle, self.subscription)
-        with patch.object(AggregationService, "process_pending_events", return_value=(0, 0)):
+        with (
+            patch.object(AggregationService, "process_pending_events", return_value=(0, 0)) as process_pending,
+            patch.object(
+                BillingCycle.objects,
+                "select_for_update",
+                wraps=BillingCycle.objects.select_for_update,
+            ) as lock_cycle,
+        ):
             result = self.svc.close_billing_cycle(str(self.billing_cycle.id))
         assert result.is_ok()
+        process_pending.assert_called_once_with(billing_cycle_id=str(self.billing_cycle.id))
+        lock_cycle.assert_called()
         self.billing_cycle.refresh_from_db()
         assert self.billing_cycle.status == "closed"
 
@@ -640,6 +744,15 @@ class TestAggregationService(TestCase):
         assert result.is_err()
         assert "not found" in result.error
 
+    def test_close_billing_cycle_stops_when_pending_events_fail(self):
+        with patch.object(AggregationService, "process_pending_events", return_value=(0, 1)):
+            result = self.svc.close_billing_cycle(str(self.billing_cycle.id))
+
+        self.assertTrue(result.is_err())
+        self.assertIn("pending usage", result.unwrap_err().lower())
+        self.billing_cycle.refresh_from_db()
+        self.assertEqual(self.billing_cycle.status, "active")
+
     def test_close_billing_cycle_bad_status(self):
         force_status(self.billing_cycle, "closed")
         result = self.svc.close_billing_cycle(str(self.billing_cycle.id))
@@ -647,16 +760,28 @@ class TestAggregationService(TestCase):
         assert "cannot be closed" in result.error
 
     def test_get_customer_usage_summary(self):
-        _agg = _make_aggregation(self.meter, self.customer, self.billing_cycle, self.subscription,
-                                 total_value=Decimal("100"), billable_value=Decimal("100"),
-                                 charge_cents=500)
+        _agg = _make_aggregation(
+            self.meter,
+            self.customer,
+            self.billing_cycle,
+            self.subscription,
+            total_value=Decimal("100"),
+            billable_value=Decimal("100"),
+            charge_cents=500,
+        )
         summary = self.svc.get_customer_usage_summary(str(self.customer.id))
         assert self.meter.name in summary["meters"]
         assert summary["total_charge_cents"] == 500
 
     def test_get_customer_usage_summary_with_dates(self):
-        _agg = _make_aggregation(self.meter, self.customer, self.billing_cycle, self.subscription,
-                                 total_value=Decimal("50"), charge_cents=200)
+        _agg = _make_aggregation(
+            self.meter,
+            self.customer,
+            self.billing_cycle,
+            self.subscription,
+            total_value=Decimal("50"),
+            charge_cents=200,
+        )
         start = timezone.now() - timedelta(days=30)
         end = timezone.now() + timedelta(days=30)
         summary = self.svc.get_customer_usage_summary(str(self.customer.id), start, end)
@@ -666,6 +791,7 @@ class TestAggregationService(TestCase):
 # ============================================================================
 # RatingEngine
 # ============================================================================
+
 
 class TestRatingEngine(TestCase):
     def setUp(self):
@@ -691,8 +817,15 @@ class TestRatingEngine(TestCase):
 
     @patch("apps.billing.metering_service.AuditService.log_simple_event")
     def test_rate_aggregation_no_overage(self, mock_audit):
-        agg = _make_aggregation(self.meter, self.customer, self.billing_cycle, self.subscription,
-                                total_value=Decimal("5"))
+        SubscriptionItem.objects.create(
+            subscription=self.subscription,
+            product=self.product,
+            unit_price_cents=50,
+            meta={"meter_name": self.meter.name, "included_quantity": "10"},
+        )
+        agg = _make_aggregation(
+            self.meter, self.customer, self.billing_cycle, self.subscription, total_value=Decimal("5")
+        )
         result = self.engine.rate_aggregation(str(agg.id))
         assert result.is_ok()
         agg.refresh_from_db()
@@ -702,14 +835,23 @@ class TestRatingEngine(TestCase):
     @patch("apps.billing.metering_service.AuditService.log_simple_event")
     def test_rate_aggregation_with_pricing_tier(self, mock_audit):
         PricingTier.objects.create(
-            name="Default", meter=self.meter, pricing_model="per_unit",
-            currency=self.currency, unit_price_cents=100, is_active=True, is_default=True,
+            name="Default",
+            meter=self.meter,
+            pricing_model="per_unit",
+            currency=self.currency,
+            unit_price_cents=100,
+            is_active=True,
+            is_default=True,
         )
-        agg = _make_aggregation(self.meter, self.customer, self.billing_cycle, self.subscription,
-                                total_value=Decimal("10"))
+        agg = _make_aggregation(
+            self.meter, self.customer, self.billing_cycle, self.subscription, total_value=Decimal("10")
+        )
         # Create sub item to set included_quantity=0 so full value is overage
         SubscriptionItem.objects.create(
-            subscription=self.subscription, product=self.product, unit_price_cents=100, meta={}
+            subscription=self.subscription,
+            product=self.product,
+            unit_price_cents=100,
+            meta={"meter_name": self.meter.name},
         )
         result = self.engine.rate_aggregation(str(agg.id))
         assert result.is_ok()
@@ -719,25 +861,197 @@ class TestRatingEngine(TestCase):
     @patch("apps.billing.metering_service.AuditService.log_simple_event")
     def test_rate_aggregation_with_unit_price_from_sub_item(self, mock_audit):
         """When sub_item has effective_price_cents but no pricing tier."""
-        agg = _make_aggregation(self.meter, self.customer, self.billing_cycle, self.subscription,
-                                total_value=Decimal("10"))
+        agg = _make_aggregation(
+            self.meter, self.customer, self.billing_cycle, self.subscription, total_value=Decimal("10")
+        )
         SubscriptionItem.objects.create(
-            subscription=self.subscription, product=self.product, unit_price_cents=50, meta={}
+            subscription=self.subscription,
+            product=self.product,
+            unit_price_cents=50,
+            meta={"meter_name": self.meter.name},
         )
         result = self.engine.rate_aggregation(str(agg.id))
         assert result.is_ok()
+
+    def test_rate_aggregation_missing_price_fails_closed(self):
+        agg = _make_aggregation(
+            self.meter,
+            self.customer,
+            self.billing_cycle,
+            self.subscription,
+            total_value=Decimal("10"),
+            status="pending_rating",
+        )
+
+        result = self.engine.rate_aggregation(str(agg.id))
+
+        assert result.is_err()
+        assert "pricing" in result.unwrap_err().lower()
+        agg.refresh_from_db()
+        assert agg.status == "pending_rating"
+        assert agg.charge_calculated_at is None
+
+    def test_default_tier_must_match_subscription_currency(self):
+        other_currency = _make_currency()
+        PricingTier.objects.create(
+            name="Wrong currency",
+            meter=self.meter,
+            pricing_model="per_unit",
+            currency=other_currency,
+            unit_price_cents=200,
+            is_active=True,
+            is_default=True,
+        )
+        agg = _make_aggregation(
+            self.meter,
+            self.customer,
+            self.billing_cycle,
+            self.subscription,
+            total_value=Decimal("5"),
+            status="pending_rating",
+        )
+
+        result = self.engine.rate_aggregation(str(agg.id))
+
+        assert result.is_err()
+        agg.refresh_from_db()
+        assert agg.status == "pending_rating"
+
+    def test_expired_default_tier_is_not_used_for_a_new_billing_period(self):
+        PricingTier.objects.create(
+            name="Expired default",
+            meter=self.meter,
+            pricing_model="per_unit",
+            currency=self.currency,
+            unit_price_cents=200,
+            is_active=True,
+            is_default=True,
+            valid_until=self.billing_cycle.period_start,
+        )
+        agg = _make_aggregation(
+            self.meter,
+            self.customer,
+            self.billing_cycle,
+            self.subscription,
+            total_value=Decimal("5"),
+            status="pending_rating",
+        )
+
+        result = self.engine.rate_aggregation(str(agg.id))
+
+        assert result.is_err()
+        assert "pricing" in result.unwrap_err().lower()
+        agg.refresh_from_db()
+        assert agg.status == "pending_rating"
+
+    def test_overlapping_effective_default_tiers_fail_closed(self):
+        for name, price in (("Default A", 100), ("Default B", 200)):
+            PricingTier.objects.create(
+                name=name,
+                meter=self.meter,
+                pricing_model="per_unit",
+                currency=self.currency,
+                unit_price_cents=price,
+                is_active=True,
+                is_default=True,
+            )
+        agg = _make_aggregation(
+            self.meter,
+            self.customer,
+            self.billing_cycle,
+            self.subscription,
+            total_value=Decimal("5"),
+            status="pending_rating",
+        )
+
+        result = self.engine.rate_aggregation(str(agg.id))
+
+        assert result.is_err()
+        assert "ambiguous" in result.unwrap_err().lower()
+        agg.refresh_from_db()
+        assert agg.status == "pending_rating"
+
+    def test_invalid_graduated_bracket_gap_fails_closed(self):
+        tier = PricingTier.objects.create(
+            name="Gapped graduated pricing",
+            meter=self.meter,
+            pricing_model="graduated",
+            currency=self.currency,
+            is_active=True,
+            is_default=True,
+        )
+        PricingTierBracket.objects.create(
+            pricing_tier=tier,
+            from_quantity=Decimal("0"),
+            to_quantity=Decimal("5"),
+            unit_price_cents=100,
+        )
+        PricingTierBracket.objects.create(
+            pricing_tier=tier,
+            from_quantity=Decimal("10"),
+            to_quantity=None,
+            unit_price_cents=50,
+        )
+        agg = _make_aggregation(
+            self.meter,
+            self.customer,
+            self.billing_cycle,
+            self.subscription,
+            total_value=Decimal("12"),
+            status="pending_rating",
+        )
+
+        result = self.engine.rate_aggregation(str(agg.id))
+
+        assert result.is_err()
+        assert "contiguous" in result.unwrap_err().lower()
+        agg.refresh_from_db()
+        assert agg.status == "pending_rating"
+
+    @patch("apps.billing.metering_service.AuditService.log_simple_event")
+    def test_rating_rounds_half_even_and_snapshots_effective_price(self, mock_audit):
+        tier = PricingTier.objects.create(
+            name="Fractional cents",
+            meter=self.meter,
+            pricing_model="per_unit",
+            currency=self.currency,
+            unit_price_cents=1,
+            is_active=True,
+            is_default=True,
+        )
+        agg = _make_aggregation(
+            self.meter,
+            self.customer,
+            self.billing_cycle,
+            self.subscription,
+            total_value=Decimal("1.5"),
+            status="pending_rating",
+        )
+
+        result = self.engine.rate_aggregation(str(agg.id))
+
+        assert result.is_ok()
+        agg.refresh_from_db()
+        assert agg.charge_cents == 2
+        assert agg.meta["rating"]["pricing_tier_id"] == str(tier.id)
+        assert agg.meta["rating"]["effective_at"] == self.billing_cycle.period_start.isoformat()
+        assert agg.meta["rating"]["unit_price_cents"] == 1
 
     @patch("apps.billing.metering_service.AuditService.log_simple_event")
     def test_rate_aggregation_default_tier_fallback(self, mock_audit):
         """When there's no sub_item pricing_tier, but a default PricingTier exists."""
         PricingTier.objects.create(
-            name="Default Fallback", meter=self.meter, pricing_model="per_unit",
-            currency=self.currency, unit_price_cents=200, minimum_charge_cents=0,
-            is_active=True, is_default=True,
+            name="Default Fallback",
+            meter=self.meter,
+            pricing_model="per_unit",
+            currency=self.currency,
+            unit_price_cents=200,
+            minimum_charge_cents=0,
+            is_active=True,
+            is_default=True,
         )
         # No subscription items
-        agg = _make_aggregation(self.meter, self.customer, self.billing_cycle, None,
-                                total_value=Decimal("5"))
+        agg = _make_aggregation(self.meter, self.customer, self.billing_cycle, None, total_value=Decimal("5"))
         result = self.engine.rate_aggregation(str(agg.id))
         assert result.is_ok()
 
@@ -775,9 +1089,14 @@ class TestRatingEngineTieredCharge(TestCase):
 
     def _make_tier(self, pricing_model, unit_price_cents=100, minimum_charge_cents=0):
         return PricingTier.objects.create(
-            name=f"Tier-{uuid.uuid4().hex[:6]}", meter=self.meter, pricing_model=pricing_model,
-            currency=self.currency, unit_price_cents=unit_price_cents,
-            minimum_charge_cents=minimum_charge_cents, is_active=True, is_default=True,
+            name=f"Tier-{uuid.uuid4().hex[:6]}",
+            meter=self.meter,
+            pricing_model=pricing_model,
+            currency=self.currency,
+            unit_price_cents=unit_price_cents,
+            minimum_charge_cents=minimum_charge_cents,
+            is_active=True,
+            is_default=True,
         )
 
     def test_per_unit(self):
@@ -800,8 +1119,11 @@ class TestRatingEngineTieredCharge(TestCase):
     def test_volume_with_bracket(self):
         tier = self._make_tier("volume")
         PricingTierBracket.objects.create(
-            pricing_tier=tier, from_quantity=Decimal("0"), to_quantity=Decimal("100"),
-            unit_price_cents=50, flat_fee_cents=0,
+            pricing_tier=tier,
+            from_quantity=Decimal("0"),
+            to_quantity=Decimal("100"),
+            unit_price_cents=50,
+            flat_fee_cents=0,
         )
         charge = self.engine._calculate_volume_charge(Decimal("10"), tier)
         assert charge == 500
@@ -814,8 +1136,11 @@ class TestRatingEngineTieredCharge(TestCase):
     def test_volume_unlimited_bracket(self):
         tier = self._make_tier("volume")
         PricingTierBracket.objects.create(
-            pricing_tier=tier, from_quantity=Decimal("0"), to_quantity=None,
-            unit_price_cents=30, flat_fee_cents=10,
+            pricing_tier=tier,
+            from_quantity=Decimal("0"),
+            to_quantity=None,
+            unit_price_cents=30,
+            flat_fee_cents=10,
         )
         charge = self.engine._calculate_volume_charge(Decimal("5"), tier)
         assert charge == 160  # 5*30 + 10
@@ -823,12 +1148,20 @@ class TestRatingEngineTieredCharge(TestCase):
     def test_graduated(self):
         tier = self._make_tier("graduated")
         PricingTierBracket.objects.create(
-            pricing_tier=tier, from_quantity=Decimal("0"), to_quantity=Decimal("5"),
-            unit_price_cents=100, flat_fee_cents=0, sort_order=0,
+            pricing_tier=tier,
+            from_quantity=Decimal("0"),
+            to_quantity=Decimal("5"),
+            unit_price_cents=100,
+            flat_fee_cents=0,
+            sort_order=0,
         )
         PricingTierBracket.objects.create(
-            pricing_tier=tier, from_quantity=Decimal("5"), to_quantity=None,
-            unit_price_cents=50, flat_fee_cents=0, sort_order=1,
+            pricing_tier=tier,
+            from_quantity=Decimal("5"),
+            to_quantity=None,
+            unit_price_cents=50,
+            flat_fee_cents=0,
+            sort_order=1,
         )
         charge = self.engine._calculate_graduated_charge(Decimal("8"), tier)
         # First bracket: min(8, 5-0=5) * 100 = 500; remaining=3
@@ -838,8 +1171,12 @@ class TestRatingEngineTieredCharge(TestCase):
     def test_package(self):
         tier = self._make_tier("package")
         PricingTierBracket.objects.create(
-            pricing_tier=tier, from_quantity=Decimal("0"), to_quantity=Decimal("100"),
-            unit_price_cents=0, flat_fee_cents=999, sort_order=0,
+            pricing_tier=tier,
+            from_quantity=Decimal("0"),
+            to_quantity=Decimal("100"),
+            unit_price_cents=0,
+            flat_fee_cents=999,
+            sort_order=0,
         )
         charge = self.engine._calculate_package_charge(Decimal("50"), tier)
         assert charge == 999
@@ -847,8 +1184,12 @@ class TestRatingEngineTieredCharge(TestCase):
     def test_package_no_matching_bracket(self):
         tier = self._make_tier("package", minimum_charge_cents=200)
         PricingTierBracket.objects.create(
-            pricing_tier=tier, from_quantity=Decimal("0"), to_quantity=Decimal("10"),
-            unit_price_cents=0, flat_fee_cents=100, sort_order=0,
+            pricing_tier=tier,
+            from_quantity=Decimal("0"),
+            to_quantity=Decimal("10"),
+            unit_price_cents=0,
+            flat_fee_cents=100,
+            sort_order=0,
         )
         charge = self.engine._calculate_package_charge(Decimal("50"), tier)
         assert charge == 200  # minimum
@@ -878,11 +1219,22 @@ class TestRateBillingCycle(TestCase):
 
     @patch("apps.billing.metering_service.AuditService.log_simple_event")
     def test_rate_cycle_success(self, mock_audit):
-        _agg = _make_aggregation(self.meter, self.customer, self.billing_cycle, self.subscription,
-                                 total_value=Decimal("10"), status="pending_rating")
+        _agg = _make_aggregation(
+            self.meter,
+            self.customer,
+            self.billing_cycle,
+            self.subscription,
+            total_value=Decimal("10"),
+            status="pending_rating",
+        )
         _tier = PricingTier.objects.create(
-            name="Default", meter=self.meter, pricing_model="per_unit",
-            currency=self.currency, unit_price_cents=100, is_active=True, is_default=True,
+            name="Default",
+            meter=self.meter,
+            pricing_model="per_unit",
+            currency=self.currency,
+            unit_price_cents=100,
+            is_active=True,
+            is_default=True,
         )
         result = self.engine.rate_billing_cycle(str(self.billing_cycle.id))
         assert result.is_ok()
@@ -891,17 +1243,24 @@ class TestRateBillingCycle(TestCase):
 
     @patch("apps.billing.metering_service.AuditService.log_simple_event")
     def test_rate_cycle_with_error(self, mock_audit):
-        _agg = _make_aggregation(self.meter, self.customer, self.billing_cycle, self.subscription,
-                                 total_value=Decimal("10"), status="pending_rating")
+        _agg = _make_aggregation(
+            self.meter,
+            self.customer,
+            self.billing_cycle,
+            self.subscription,
+            total_value=Decimal("10"),
+            status="pending_rating",
+        )
         with patch.object(RatingEngine, "rate_aggregation", return_value=Err("fail")):
             result = self.engine.rate_billing_cycle(str(self.billing_cycle.id))
-        assert result.is_ok()
-        assert result.unwrap()["error_count"] == 1
+        assert result.is_err()
+        assert "fail" in result.unwrap_err()
 
 
 # ============================================================================
 # UsageAlertService
 # ============================================================================
+
 
 class TestUsageAlertService(TestCase):
     def setUp(self):
@@ -915,11 +1274,20 @@ class TestUsageAlertService(TestCase):
 
     @patch("apps.billing.metering_service.AuditService.log_simple_event")
     def test_check_thresholds_percentage(self, mock_audit):
-        _agg = _make_aggregation(self.meter, self.customer, self.billing_cycle, self.subscription,
-                                 total_value=Decimal("90"), included_allowance=Decimal("100"))
+        _agg = _make_aggregation(
+            self.meter,
+            self.customer,
+            self.billing_cycle,
+            self.subscription,
+            total_value=Decimal("90"),
+            included_allowance=Decimal("100"),
+        )
         UsageThreshold.objects.create(
-            meter=self.meter, threshold_type="percentage", threshold_value=Decimal("80"),
-            is_active=True, notify_customer=True,
+            meter=self.meter,
+            threshold_type="percentage",
+            threshold_value=Decimal("80"),
+            is_active=True,
+            notify_customer=True,
         )
         with patch.object(UsageAlertService, "_schedule_alert_notification"):
             alerts = self.svc.check_thresholds(str(self.customer.id), str(self.meter.id))
@@ -927,11 +1295,15 @@ class TestUsageAlertService(TestCase):
 
     @patch("apps.billing.metering_service.AuditService.log_simple_event")
     def test_check_thresholds_absolute(self, mock_audit):
-        _agg = _make_aggregation(self.meter, self.customer, self.billing_cycle, self.subscription,
-                                 total_value=Decimal("50"))
+        _agg = _make_aggregation(
+            self.meter, self.customer, self.billing_cycle, self.subscription, total_value=Decimal("50")
+        )
         UsageThreshold.objects.create(
-            meter=self.meter, threshold_type="absolute", threshold_value=Decimal("40"),
-            is_active=True, notify_customer=True,
+            meter=self.meter,
+            threshold_type="absolute",
+            threshold_value=Decimal("40"),
+            is_active=True,
+            notify_customer=True,
         )
         with patch.object(UsageAlertService, "_schedule_alert_notification"):
             alerts = self.svc.check_thresholds(str(self.customer.id), str(self.meter.id))
@@ -947,16 +1319,28 @@ class TestUsageAlertService(TestCase):
 
     @patch("apps.billing.metering_service.AuditService.log_simple_event")
     def test_check_thresholds_duplicate_alert_skipped(self, mock_audit):
-        agg = _make_aggregation(self.meter, self.customer, self.billing_cycle, self.subscription,
-                                total_value=Decimal("90"), included_allowance=Decimal("100"))
+        agg = _make_aggregation(
+            self.meter,
+            self.customer,
+            self.billing_cycle,
+            self.subscription,
+            total_value=Decimal("90"),
+            included_allowance=Decimal("100"),
+        )
         threshold = UsageThreshold.objects.create(
-            meter=self.meter, threshold_type="percentage", threshold_value=Decimal("80"),
-            is_active=True, repeat_notification=False,
+            meter=self.meter,
+            threshold_type="percentage",
+            threshold_value=Decimal("80"),
+            is_active=True,
+            repeat_notification=False,
         )
         # Create existing alert
         UsageAlert.objects.create(
-            threshold=threshold, customer=self.customer, aggregation=agg,
-            usage_value=Decimal("85"), status="pending",
+            threshold=threshold,
+            customer=self.customer,
+            aggregation=agg,
+            usage_value=Decimal("85"),
+            status="pending",
         )
         with patch.object(UsageAlertService, "_schedule_alert_notification"):
             alerts = self.svc.check_thresholds(str(self.customer.id), str(self.meter.id))
@@ -964,25 +1348,46 @@ class TestUsageAlertService(TestCase):
 
     @patch("apps.billing.metering_service.AuditService.log_simple_event")
     def test_check_thresholds_repeat_notification(self, mock_audit):
-        agg = _make_aggregation(self.meter, self.customer, self.billing_cycle, self.subscription,
-                                total_value=Decimal("90"), included_allowance=Decimal("100"))
+        agg = _make_aggregation(
+            self.meter,
+            self.customer,
+            self.billing_cycle,
+            self.subscription,
+            total_value=Decimal("90"),
+            included_allowance=Decimal("100"),
+        )
         threshold = UsageThreshold.objects.create(
-            meter=self.meter, threshold_type="percentage", threshold_value=Decimal("80"),
-            is_active=True, repeat_notification=True,
+            meter=self.meter,
+            threshold_type="percentage",
+            threshold_value=Decimal("80"),
+            is_active=True,
+            repeat_notification=True,
         )
         UsageAlert.objects.create(
-            threshold=threshold, customer=self.customer, aggregation=agg,
-            usage_value=Decimal("85"), status="pending",
+            threshold=threshold,
+            customer=self.customer,
+            aggregation=agg,
+            usage_value=Decimal("85"),
+            status="pending",
         )
         with patch.object(UsageAlertService, "_schedule_alert_notification"):
             alerts = self.svc.check_thresholds(str(self.customer.id), str(self.meter.id))
         assert len(alerts) == 1
 
     def test_threshold_not_breached(self):
-        _agg = _make_aggregation(self.meter, self.customer, self.billing_cycle, self.subscription,
-                                 total_value=Decimal("10"), included_allowance=Decimal("100"))
+        _agg = _make_aggregation(
+            self.meter,
+            self.customer,
+            self.billing_cycle,
+            self.subscription,
+            total_value=Decimal("10"),
+            included_allowance=Decimal("100"),
+        )
         UsageThreshold.objects.create(
-            meter=self.meter, threshold_type="percentage", threshold_value=Decimal("80"), is_active=True,
+            meter=self.meter,
+            threshold_type="percentage",
+            threshold_value=Decimal("80"),
+            is_active=True,
         )
         alerts = self.svc.check_thresholds(str(self.customer.id), str(self.meter.id))
         assert len(alerts) == 0
@@ -1012,12 +1417,18 @@ class TestUsageAlertServiceNotification(TestCase):
     def test_send_alert_already_sent(self):
         agg = _make_aggregation(self.meter, self.customer, self.billing_cycle, self.subscription)
         threshold = UsageThreshold.objects.create(
-            meter=self.meter, threshold_type="absolute", threshold_value=Decimal("10"),
-            is_active=True, notify_customer=True,
+            meter=self.meter,
+            threshold_type="absolute",
+            threshold_value=Decimal("10"),
+            is_active=True,
+            notify_customer=True,
         )
         alert = UsageAlert.objects.create(
-            threshold=threshold, customer=self.customer, aggregation=agg,
-            usage_value=Decimal("15"), status="sent",
+            threshold=threshold,
+            customer=self.customer,
+            aggregation=agg,
+            usage_value=Decimal("15"),
+            status="sent",
         )
         result = self.svc.send_alert_notification(str(alert.id))
         assert result.is_ok()
@@ -1027,12 +1438,18 @@ class TestUsageAlertServiceNotification(TestCase):
         mock_send_email.return_value = MagicMock(success=True, error=None)
         agg = _make_aggregation(self.meter, self.customer, self.billing_cycle, self.subscription)
         threshold = UsageThreshold.objects.create(
-            meter=self.meter, threshold_type="absolute", threshold_value=Decimal("10"),
-            is_active=True, notify_customer=True,
+            meter=self.meter,
+            threshold_type="absolute",
+            threshold_value=Decimal("10"),
+            is_active=True,
+            notify_customer=True,
         )
         alert = UsageAlert.objects.create(
-            threshold=threshold, customer=self.customer, aggregation=agg,
-            usage_value=Decimal("15"), status="pending",
+            threshold=threshold,
+            customer=self.customer,
+            aggregation=agg,
+            usage_value=Decimal("15"),
+            status="pending",
         )
         result = self.svc.send_alert_notification(str(alert.id))
         assert result.is_ok()
@@ -1042,12 +1459,19 @@ class TestUsageAlertServiceNotification(TestCase):
     def test_send_alert_with_action_warn(self):
         agg = _make_aggregation(self.meter, self.customer, self.billing_cycle, self.subscription)
         threshold = UsageThreshold.objects.create(
-            meter=self.meter, threshold_type="absolute", threshold_value=Decimal("10"),
-            is_active=True, notify_customer=False, action_on_breach="warn",
+            meter=self.meter,
+            threshold_type="absolute",
+            threshold_value=Decimal("10"),
+            is_active=True,
+            notify_customer=False,
+            action_on_breach="warn",
         )
         alert = UsageAlert.objects.create(
-            threshold=threshold, customer=self.customer, aggregation=agg,
-            usage_value=Decimal("15"), status="pending",
+            threshold=threshold,
+            customer=self.customer,
+            aggregation=agg,
+            usage_value=Decimal("15"),
+            status="pending",
         )
         result = self.svc.send_alert_notification(str(alert.id))
         assert result.is_ok()
@@ -1059,12 +1483,19 @@ class TestUsageAlertServiceNotification(TestCase):
     def test_take_action_throttle(self, mock_suspend, mock_audit):
         agg = _make_aggregation(self.meter, self.customer, self.billing_cycle, self.subscription)
         threshold = UsageThreshold.objects.create(
-            meter=self.meter, threshold_type="absolute", threshold_value=Decimal("10"),
-            is_active=True, notify_customer=False, action_on_breach="throttle",
+            meter=self.meter,
+            threshold_type="absolute",
+            threshold_value=Decimal("10"),
+            is_active=True,
+            notify_customer=False,
+            action_on_breach="throttle",
         )
         alert = UsageAlert.objects.create(
-            threshold=threshold, customer=self.customer, aggregation=agg,
-            usage_value=Decimal("15"), status="pending",
+            threshold=threshold,
+            customer=self.customer,
+            aggregation=agg,
+            usage_value=Decimal("15"),
+            status="pending",
         )
         result = self.svc.send_alert_notification(str(alert.id))
         assert result.is_ok()
@@ -1077,12 +1508,19 @@ class TestUsageAlertServiceNotification(TestCase):
     def test_take_action_suspend(self, mock_suspend, mock_audit):
         agg = _make_aggregation(self.meter, self.customer, self.billing_cycle, self.subscription)
         threshold = UsageThreshold.objects.create(
-            meter=self.meter, threshold_type="absolute", threshold_value=Decimal("10"),
-            is_active=True, notify_customer=False, action_on_breach="suspend",
+            meter=self.meter,
+            threshold_type="absolute",
+            threshold_value=Decimal("10"),
+            is_active=True,
+            notify_customer=False,
+            action_on_breach="suspend",
         )
         alert = UsageAlert.objects.create(
-            threshold=threshold, customer=self.customer, aggregation=agg,
-            usage_value=Decimal("15"), status="pending",
+            threshold=threshold,
+            customer=self.customer,
+            aggregation=agg,
+            usage_value=Decimal("15"),
+            status="pending",
         )
         result = self.svc.send_alert_notification(str(alert.id))
         assert result.is_ok()
@@ -1094,12 +1532,19 @@ class TestUsageAlertServiceNotification(TestCase):
     def test_take_action_block_new(self, mock_audit):
         agg = _make_aggregation(self.meter, self.customer, self.billing_cycle, self.subscription)
         threshold = UsageThreshold.objects.create(
-            meter=self.meter, threshold_type="absolute", threshold_value=Decimal("10"),
-            is_active=True, notify_customer=False, action_on_breach="block_new",
+            meter=self.meter,
+            threshold_type="absolute",
+            threshold_value=Decimal("10"),
+            is_active=True,
+            notify_customer=False,
+            action_on_breach="block_new",
         )
         alert = UsageAlert.objects.create(
-            threshold=threshold, customer=self.customer, aggregation=agg,
-            usage_value=Decimal("15"), status="pending",
+            threshold=threshold,
+            customer=self.customer,
+            aggregation=agg,
+            usage_value=Decimal("15"),
+            status="pending",
         )
         result = self.svc.send_alert_notification(str(alert.id))
         assert result.is_ok()
@@ -1116,6 +1561,7 @@ class TestUsageAlertServiceNotification(TestCase):
 # StripeGateway tests (fully mocked — no real Stripe calls)
 # ============================================================================
 
+
 class TestStripeGateway(TestCase):
     """Test StripeGateway with all Stripe SDK calls mocked."""
 
@@ -1123,6 +1569,7 @@ class TestStripeGateway(TestCase):
         """Create a StripeGateway with mocked Stripe SDK and settings."""
         with patch("apps.billing.gateways.stripe_gateway.StripeGateway._initialize_stripe"):
             from apps.billing.gateways.stripe_gateway import StripeGateway  # noqa: PLC0415
+
             gw = StripeGateway.__new__(StripeGateway)
             gw.logger = logging.getLogger("test")
             gw._stripe = mock_stripe
@@ -1135,14 +1582,39 @@ class TestStripeGateway(TestCase):
 
     def test_create_payment_intent_success(self):
         mock_stripe = MagicMock()
-        mock_stripe.PaymentIntent.create.return_value = MagicMock(
-            id="pi_123", client_secret="secret_456"
-        )
+        mock_stripe.PaymentIntent.create.return_value = MagicMock(id="pi_123", client_secret="secret_456")
         gw = self._make_gateway(mock_stripe)
         result = gw.create_payment_intent("order-1", 2999, "RON", "cus_abc", {"key": "val"})
         assert result["success"] is True
         assert result["payment_intent_id"] == "pi_123"
         assert result["client_secret"] == "secret_456"
+
+    def test_create_payment_intent_forwards_idempotency_key(self):
+        mock_stripe = MagicMock()
+        mock_stripe.PaymentIntent.create.return_value = MagicMock(id="pi_idem", client_secret="secret_idem")
+        gw = self._make_gateway(mock_stripe)
+
+        result = gw.create_payment_intent("order-idem", 2999, idempotency_key="order:idem:stripe:1")
+
+        assert result["success"] is True
+        assert mock_stripe.PaymentIntent.create.call_args.kwargs["idempotency_key"] == "order:idem:stripe:1"
+
+    def test_create_payment_intent_preserves_gateway_owned_metadata(self):
+        mock_stripe = MagicMock()
+        mock_stripe.PaymentIntent.create.return_value = MagicMock(id="pi_meta", client_secret="secret_meta")
+        gw = self._make_gateway(mock_stripe)
+
+        result = gw.create_payment_intent(
+            "order-authoritative",
+            2999,
+            metadata={"praho_order_id": "spoofed", "platform": "spoofed", "vat_rate": "0%"},
+        )
+
+        assert result["success"] is True
+        gateway_metadata = mock_stripe.PaymentIntent.create.call_args.kwargs["metadata"]
+        assert gateway_metadata["praho_order_id"] == "order-authoritative"
+        assert gateway_metadata["platform"] == "PRAHO"
+        assert gateway_metadata["vat_rate"] == "21%"
 
     def test_create_payment_intent_no_customer(self):
         mock_stripe = MagicMock()
@@ -1192,49 +1664,6 @@ class TestStripeGateway(TestCase):
         gw = self._make_gateway(mock_stripe)
         result = gw.confirm_payment("pi_bad2")
         assert result["success"] is False
-
-    def test_create_subscription_success(self):
-        mock_stripe = MagicMock()
-        mock_stripe.Subscription.create.return_value = MagicMock(id="sub_123", status="active")
-        gw = self._make_gateway(mock_stripe)
-        result = gw.create_subscription("cus_1", "price_1", {"plan": "pro"})
-        assert result["success"] is True
-        assert result["subscription_id"] == "sub_123"
-
-    def test_create_subscription_stripe_error(self):
-        mock_stripe = MagicMock()
-        mock_stripe.error.StripeError = type("StripeError", (Exception,), {})
-        mock_stripe.Subscription.create.side_effect = mock_stripe.error.StripeError("invalid")
-        gw = self._make_gateway(mock_stripe)
-        result = gw.create_subscription("cus_1", "price_1")
-        assert result["success"] is False
-
-    def test_create_subscription_unexpected_error(self):
-        mock_stripe = MagicMock()
-        mock_stripe.error.StripeError = type("StripeError", (Exception,), {})
-        mock_stripe.Subscription.create.side_effect = RuntimeError("boom")
-        gw = self._make_gateway(mock_stripe)
-        result = gw.create_subscription("cus_1", "price_1")
-        assert result["success"] is False
-
-    def test_cancel_subscription_success(self):
-        mock_stripe = MagicMock()
-        gw = self._make_gateway(mock_stripe)
-        assert gw.cancel_subscription("sub_123") is True
-
-    def test_cancel_subscription_stripe_error(self):
-        mock_stripe = MagicMock()
-        mock_stripe.error.StripeError = type("StripeError", (Exception,), {})
-        mock_stripe.Subscription.cancel.side_effect = mock_stripe.error.StripeError("nope")
-        gw = self._make_gateway(mock_stripe)
-        assert gw.cancel_subscription("sub_bad") is False
-
-    def test_cancel_subscription_unexpected_error(self):
-        mock_stripe = MagicMock()
-        mock_stripe.error.StripeError = type("StripeError", (Exception,), {})
-        mock_stripe.Subscription.cancel.side_effect = RuntimeError("fail")
-        gw = self._make_gateway(mock_stripe)
-        assert gw.cancel_subscription("sub_bad2") is False
 
     def test_validate_configuration_success(self):
         mock_stripe = MagicMock()
@@ -1300,85 +1729,12 @@ class TestStripeGateway(TestCase):
         with patch("apps.settings.services.SettingsService.get_setting", side_effect=Exception("db error")):
             assert gw.validate_configuration() is False
 
-    # Webhook tests
-    def test_webhook_payment_intent_succeeded(self):
-        mock_stripe = MagicMock()
-        gw = self._make_gateway(mock_stripe)
-        ok, msg = gw.handle_webhook_event("payment_intent.succeeded", {"object": {"id": "pi_1"}})
-        assert ok is True
-        assert "succeeded" in msg
-
-    def test_webhook_payment_intent_failed(self):
-        mock_stripe = MagicMock()
-        gw = self._make_gateway(mock_stripe)
-        ok, msg = gw.handle_webhook_event("payment_intent.payment_failed", {"object": {"id": "pi_2"}})
-        assert ok is True
-        assert "failed" in msg
-
-    def test_webhook_payment_intent_other(self):
-        mock_stripe = MagicMock()
-        gw = self._make_gateway(mock_stripe)
-        ok, _msg = gw.handle_webhook_event("payment_intent.created", {"object": {"id": "pi_3"}})
-        assert ok is True
-
-    def test_webhook_invoice_succeeded(self):
-        mock_stripe = MagicMock()
-        gw = self._make_gateway(mock_stripe)
-        ok, _msg = gw.handle_webhook_event("invoice.payment_succeeded", {"object": {"id": "in_1"}})
-        assert ok is True
-
-    def test_webhook_invoice_failed(self):
-        mock_stripe = MagicMock()
-        gw = self._make_gateway(mock_stripe)
-        ok, _msg = gw.handle_webhook_event("invoice.payment_failed", {"object": {"id": "in_2"}})
-        assert ok is True
-
-    def test_webhook_invoice_other(self):
-        mock_stripe = MagicMock()
-        gw = self._make_gateway(mock_stripe)
-        ok, _msg = gw.handle_webhook_event("invoice.created", {"object": {"id": "in_3"}})
-        assert ok is True
-
-    def test_webhook_subscription_created(self):
-        mock_stripe = MagicMock()
-        gw = self._make_gateway(mock_stripe)
-        ok, _msg = gw.handle_webhook_event("customer.subscription.created", {"object": {"id": "sub_1"}})
-        assert ok is True
-
-    def test_webhook_subscription_deleted(self):
-        mock_stripe = MagicMock()
-        gw = self._make_gateway(mock_stripe)
-        ok, _msg = gw.handle_webhook_event("customer.subscription.deleted", {"object": {"id": "sub_2"}})
-        assert ok is True
-
-    def test_webhook_subscription_other(self):
-        mock_stripe = MagicMock()
-        gw = self._make_gateway(mock_stripe)
-        ok, _msg = gw.handle_webhook_event("customer.subscription.updated", {"object": {"id": "sub_3"}})
-        assert ok is True
-
-    def test_webhook_unhandled_type(self):
-        mock_stripe = MagicMock()
-        gw = self._make_gateway(mock_stripe)
-        ok, msg = gw.handle_webhook_event("charge.refunded", {})
-        assert ok is True
-        assert "Unhandled" in msg
-
-    def test_webhook_exception(self):
-        mock_stripe = MagicMock()
-        gw = self._make_gateway(mock_stripe)
-        # Force an exception in _handle_payment_intent_webhook
-        with patch.object(gw, "_handle_payment_intent_webhook", side_effect=RuntimeError("oops")):
-            ok, msg = gw.handle_webhook_event("payment_intent.succeeded", {})
-        assert ok is False
-        assert "oops" in msg
-
-
 class TestStripeGatewayInitialization(TestCase):
     """Test _initialize_stripe method."""
 
     def test_initialize_success(self):
         from apps.billing.gateways.stripe_gateway import StripeGateway  # noqa: PLC0415
+
         gw = StripeGateway.__new__(StripeGateway)
         gw.logger = logging.getLogger("test")
         gw._stripe = None
@@ -1393,6 +1749,7 @@ class TestStripeGatewayInitialization(TestCase):
 
     def test_initialize_no_api_key(self):
         from apps.billing.gateways.stripe_gateway import StripeGateway  # noqa: PLC0415
+
         gw = StripeGateway.__new__(StripeGateway)
         gw.logger = logging.getLogger("test")
         mock_stripe_mod = MagicMock()
@@ -1405,6 +1762,7 @@ class TestStripeGatewayInitialization(TestCase):
 
     def test_initialize_import_error(self):
         from apps.billing.gateways.stripe_gateway import StripeGateway  # noqa: PLC0415
+
         gw = StripeGateway.__new__(StripeGateway)
         gw.logger = logging.getLogger("test")
         with (

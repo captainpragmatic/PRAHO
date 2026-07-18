@@ -18,12 +18,13 @@ from rest_framework.test import APIRequestFactory
 
 from apps.billing.gateways.base import PaymentConfirmResult
 from apps.billing.invoice_models import InvoiceSequence
-from apps.billing.models import Currency, Invoice
+from apps.billing.models import Currency, Invoice, Payment
 from apps.billing.proforma_models import ProformaSequence
 from apps.billing.proforma_service import ProformaService
 from apps.customers.models import Customer
 from apps.orders.models import Order, OrderItem
 from apps.products.models import Product
+from apps.provisioning.models import ServicePlan
 from apps.users.models import User
 from tests.helpers.fsm_helpers import force_status
 
@@ -48,6 +49,13 @@ class TestC2ConfirmOrderIdempotency(TestCase):
             product_type="shared_hosting",
             is_active=True,
         )
+        self.service_plan = ServicePlan.objects.create(
+            name="C2 shared hosting",
+            plan_type="shared_hosting",
+            price_monthly=Decimal("100.00"),
+        )
+        self.product.default_service_plan = self.service_plan
+        self.product.save(update_fields=["default_service_plan"])
         self.user = User.objects.create_user(
             email="admin-c2@pragmatichost.com",
             password="testpass123",
@@ -93,6 +101,15 @@ class TestC2ConfirmOrderIdempotency(TestCase):
         order.payment_intent_id = "pi_test1234567890abcdef"
         order.payment_method = "card"
         order.save(update_fields=["payment_intent_id", "payment_method"])
+        Payment.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            amount_cents=order.total_cents,
+            payment_method="stripe",
+            gateway_txn_id=order.payment_intent_id,
+            proforma=proforma,
+            meta={"proforma_id": str(proforma.id)},
+        )
 
         return order, proforma
 
@@ -122,6 +139,7 @@ class TestC2ConfirmOrderIdempotency(TestCase):
             status="succeeded",
             error=None,
             amount_received=order.total_cents,
+            currency="ron",
         )
         mock_gateway = MagicMock()
         mock_gateway.confirm_payment.return_value = mock_result
@@ -149,6 +167,7 @@ class TestC2ConfirmOrderIdempotency(TestCase):
             status="succeeded",
             error=None,
             amount_received=order.total_cents,
+            currency="ron",
         )
         mock_gateway = MagicMock()
         mock_gateway.confirm_payment.return_value = mock_result
@@ -169,3 +188,39 @@ class TestC2ConfirmOrderIdempotency(TestCase):
             1,
             f"Expected at most 1 invoice for proforma {proforma.number}, got {invoice_count}",
         )
+
+    def test_payment_convergence_runs_before_phase_three_order_lock(self) -> None:
+        """Keep the Payment -> Proforma lock order out of the Order-locked phase."""
+        from apps.billing.payment_convergence import PaymentSuccessService  # noqa: PLC0415
+
+        order, _proforma = self._create_order_with_proforma()
+        mock_gateway = MagicMock()
+        mock_gateway.confirm_payment.return_value = PaymentConfirmResult(
+            success=True,
+            status="succeeded",
+            error=None,
+            amount_received=order.total_cents,
+            currency="ron",
+        )
+        real_converge = PaymentSuccessService.converge_gateway_success
+        order_lock_counts: list[int] = []
+
+        with (
+            patch.object(Order.objects, "select_for_update", wraps=Order.objects.select_for_update) as order_lock,
+            patch(
+                "apps.billing.gateways.base.PaymentGatewayFactory.create_gateway",
+                return_value=mock_gateway,
+            ),
+            patch.object(
+                PaymentSuccessService,
+                "converge_gateway_success",
+                side_effect=lambda *args, **kwargs: (
+                    order_lock_counts.append(order_lock.call_count),
+                    real_converge(*args, **kwargs),
+                )[1],
+            ),
+        ):
+            response = self._call_confirm_order(order, order.payment_intent_id)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(order_lock_counts, [1])

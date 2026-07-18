@@ -1,7 +1,8 @@
 {% load i18n %}
 {% load ui_components %}
-<button type="button" hx-post="{% url 'billing:sync_invoices' %}" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}' hx-swap="none" hx-on::after-request="if(event.detail.successful) window.location.reload();" class="inline-flex items-center gap-2 px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-sm text-slate-300 hover:bg-slate-600 hover:text-white transition-colors" title="{% trans 'Sync invoices from platform' %}">
-  {% icon "refresh" size="sm" css_class="sync-icon" %}
-  <span class="htmx-indicator"><svg class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg></span>
-  {% trans 'Sync' %}
-</button>
+{% url 'billing:recurring_payments' as automatic_payments_url %}
+{% trans 'Automatic payments' as automatic_payments_label %}
+{% button automatic_payments_label variant="info" size="sm" href=automatic_payments_url %}
+{% url 'billing:sync_invoices' as sync_url %}
+{% trans 'Sync' as sync_label %}
+{% button sync_label variant="secondary" size="sm" hx_post=sync_url hx_swap="none" attrs='hx-on::after-request="if(event.detail.successful) window.location.reload();"' %}

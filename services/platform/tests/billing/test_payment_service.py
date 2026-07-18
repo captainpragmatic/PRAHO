@@ -7,15 +7,18 @@ Covers all static methods with success, failure, and edge-case branches.
 from __future__ import annotations
 
 import uuid
+from datetime import timedelta
 from typing import Any
 from unittest.mock import MagicMock, patch
 
-from django.test import TestCase, override_settings
+from django.test import TestCase
+from django.utils import timezone
 
 from apps.billing.currency_models import Currency
-from apps.billing.gateways.base import PaymentConfirmResult, PaymentIntentResult, SubscriptionResult
+from apps.billing.gateways.base import PaymentConfirmResult, PaymentIntentResult
 from apps.billing.models import Payment
 from apps.billing.payment_service import PaymentService
+from apps.billing.proforma_models import ProformaInvoice
 from apps.orders.models import Order
 from tests.factories.billing_factories import create_currency, create_customer
 
@@ -33,30 +36,21 @@ def _pi_result(
     return PaymentIntentResult(success=success, payment_intent_id=pi_id, client_secret=client_secret, error=error)
 
 
-def _confirm_result(
-    success: bool = True, status: str = "succeeded", error: str | None = None
-) -> PaymentConfirmResult:
-    return PaymentConfirmResult(success=success, status=status, error=error)
-
-
-def _sub_result(
-    success: bool = True,
-    sub_id: str | None = "sub_abc",
-    status: str | None = "active",
-    error: str | None = None,
-) -> SubscriptionResult:
-    return SubscriptionResult(success=success, subscription_id=sub_id, status=status, error=error)
+def _confirm_result(success: bool = True, status: str = "succeeded", error: str | None = None) -> PaymentConfirmResult:
+    result = PaymentConfirmResult(success=success, status=status, error=error)
+    if success and status == "succeeded":
+        result["amount_received"] = 10_000
+        result["currency"] = "ron"
+    return result
 
 
 def _make_mock_gateway(
     pi_result: PaymentIntentResult | None = None,
     confirm_result: PaymentConfirmResult | None = None,
-    sub_result: SubscriptionResult | None = None,
 ) -> MagicMock:
     gw = MagicMock()
     gw.create_payment_intent.return_value = pi_result if pi_result is not None else _pi_result()
     gw.confirm_payment.return_value = confirm_result if confirm_result is not None else _confirm_result()
-    gw.create_subscription.return_value = sub_result if sub_result is not None else _sub_result()
     return gw
 
 
@@ -66,7 +60,7 @@ def _make_order(customer: Any, currency_code: str = "RON", total_cents: int = 15
         code=currency_code,
         defaults={"name": currency_code, "symbol": currency_code, "decimals": 2},
     )
-    return Order.objects.create(
+    order = Order.objects.create(
         customer=customer,
         currency=currency,
         total_cents=total_cents,
@@ -74,6 +68,17 @@ def _make_order(customer: Any, currency_code: str = "RON", total_cents: int = 15
         customer_email=customer.name.lower().replace(" ", "") + "@example.com",
         customer_name=customer.name,
     )
+    proforma = ProformaInvoice.objects.create(
+        customer=customer,
+        currency=currency,
+        number=f"PRO-PAY-{order.id}",
+        subtotal_cents=total_cents,
+        total_cents=total_cents,
+        valid_until=timezone.now() + timedelta(days=30),
+    )
+    order.proforma = proforma
+    order.save(update_fields=["proforma", "updated_at"])
+    return order
 
 
 # ---------------------------------------------------------------------------
@@ -115,7 +120,7 @@ class CreatePaymentIntentTests(TestCase):
         mock_create_gw.assert_not_called()
 
     @patch("apps.billing.payment_service.PaymentGatewayFactory.create_gateway")
-    def test_gateway_returns_failure_no_payment_created(self, mock_create_gw: MagicMock) -> None:
+    def test_gateway_failure_preserves_resumable_payment_attempt(self, mock_create_gw: MagicMock) -> None:
         mock_create_gw.return_value = _make_mock_gateway(
             pi_result=_pi_result(success=False, pi_id="", client_secret=None, error="Card declined")
         )
@@ -123,7 +128,9 @@ class CreatePaymentIntentTests(TestCase):
         result = PaymentService.create_payment_intent(str(self.order.id))
 
         self.assertFalse(result["success"])
-        self.assertEqual(Payment.objects.count(), 0)
+        payment = Payment.objects.get()
+        self.assertEqual(payment.status, "pending")
+        self.assertIsNone(payment.gateway_txn_id)
 
     @patch("apps.billing.payment_service.PaymentGatewayFactory.create_gateway")
     def test_generic_exception_returns_failure(self, mock_create_gw: MagicMock) -> None:
@@ -197,6 +204,19 @@ class CreatePaymentIntentDirectTests(TestCase):
         self.assertEqual(Payment.objects.count(), 0)
 
     @patch("apps.billing.payment_service.PaymentGatewayFactory.create_gateway")
+    def test_bank_transfer_cannot_enter_payment_intent_path(self, mock_create_gw: MagicMock) -> None:
+        result = PaymentService.create_payment_intent_direct(
+            order_id=str(self.order.id),
+            customer_id=str(self.customer.id),
+            gateway="bank",
+        )
+
+        self.assertFalse(result["success"])
+        self.assertIn("gateway", result["error"] or "")
+        self.assertFalse(Payment.objects.exists())
+        mock_create_gw.assert_not_called()
+
+    @patch("apps.billing.payment_service.PaymentGatewayFactory.create_gateway")
     def test_invalid_customer_id_returns_failure(self, mock_create_gw: MagicMock) -> None:
         mock_create_gw.return_value = _make_mock_gateway()
         missing_customer_id = str(uuid.uuid4())
@@ -213,7 +233,7 @@ class CreatePaymentIntentDirectTests(TestCase):
         self.assertEqual(Payment.objects.count(), 0)
 
     @patch("apps.billing.payment_service.PaymentGatewayFactory.create_gateway")
-    def test_gateway_failure_no_payment_created(self, mock_create_gw: MagicMock) -> None:
+    def test_gateway_failure_preserves_one_resumable_local_attempt(self, mock_create_gw: MagicMock) -> None:
         mock_create_gw.return_value = _make_mock_gateway(
             pi_result=_pi_result(success=False, pi_id="", client_secret=None, error="Stripe error")
         )
@@ -226,7 +246,29 @@ class CreatePaymentIntentDirectTests(TestCase):
         )
 
         self.assertFalse(result["success"])
-        self.assertEqual(Payment.objects.count(), 0)
+        payment = Payment.objects.get()
+        self.assertEqual(payment.status, "pending")
+        self.assertIsNone(payment.gateway_txn_id)
+        self.assertTrue(payment.idempotency_key)
+
+    @patch("apps.billing.payment_service.PaymentGatewayFactory.create_gateway")
+    def test_gateway_success_without_transaction_id_fails_closed(self, mock_create_gw: MagicMock) -> None:
+        mock_create_gw.return_value = _make_mock_gateway(
+            pi_result=_pi_result(success=True, pi_id="", client_secret="unexpected-secret", error=None)
+        )
+
+        result = PaymentService.create_payment_intent_direct(
+            order_id=str(self.order.id),
+            amount_cents=self.order.total_cents,
+            currency="RON",
+            customer_id=str(self.customer.id),
+        )
+
+        self.assertFalse(result["success"])
+        self.assertIn("transaction ID", result["error"] or "")
+        payment = Payment.objects.get()
+        self.assertEqual(payment.status, "pending")
+        self.assertIsNone(payment.gateway_txn_id)
 
     @patch("apps.billing.payment_service.PaymentGatewayFactory.create_gateway")
     def test_generic_exception_returns_failure(self, mock_create_gw: MagicMock) -> None:
@@ -263,7 +305,7 @@ class ConfirmPaymentTests(TestCase):
             gateway_txn_id="pi_confirm_test",
         )
 
-    @patch("apps.billing.payment_service.log_security_event")
+    @patch("apps.billing.payment_convergence.log_security_event")
     @patch("apps.billing.payment_service.PaymentGatewayFactory.create_gateway")
     def test_succeeded_status_updates_payment(self, mock_create_gw: MagicMock, mock_log: MagicMock) -> None:
         mock_create_gw.return_value = _make_mock_gateway(
@@ -322,7 +364,8 @@ class ConfirmPaymentTests(TestCase):
 
         result = PaymentService.confirm_payment("pi_nonexistent_999")
 
-        self.assertTrue(result["success"])
+        self.assertFalse(result["success"])
+        self.assertEqual(result["status"], "payment_not_found")
 
     @patch("apps.billing.payment_service.PaymentGatewayFactory.create_gateway")
     def test_generic_exception_returns_failure(self, mock_create_gw: MagicMock) -> None:
@@ -377,9 +420,7 @@ class ConfirmPaymentTests(TestCase):
 
         # Simulate a race condition: another process already transitioned this payment,
         # so the FSM method raises TransitionNotAllowed.
-        with patch.object(
-            type(self.payment), "succeed", side_effect=TransitionNotAllowed("blocked")
-        ):
+        with patch.object(type(self.payment), "succeed", side_effect=TransitionNotAllowed("blocked")):
             result = PaymentService.confirm_payment("pi_confirm_test")
 
         # Must surface the FSM conflict as a failure
@@ -401,9 +442,7 @@ class ConfirmPaymentTests(TestCase):
             confirm_result=_confirm_result(success=True, status="succeeded")
         )
 
-        with patch.object(
-            type(self.payment), "succeed", side_effect=ConcurrentTransition("concurrent write")
-        ):
+        with patch.object(type(self.payment), "succeed", side_effect=ConcurrentTransition("concurrent write")):
             result = PaymentService.confirm_payment("pi_confirm_test")
 
         # The handler must NOT re-raise — it returns a structured fsm_conflict result.
@@ -416,149 +455,8 @@ class ConfirmPaymentTests(TestCase):
 
 
 # ---------------------------------------------------------------------------
-# create_subscription
-# ---------------------------------------------------------------------------
-
-
-class CreateSubscriptionTests(TestCase):
-    """Tests for PaymentService.create_subscription."""
-
-    def setUp(self) -> None:
-        self.customer = create_customer("Subscription Co SRL")
-
-    @patch("apps.billing.payment_service.log_security_event")
-    @patch("apps.billing.payment_service.PaymentGatewayFactory.create_gateway")
-    def test_success_calls_gateway_and_logs(self, mock_create_gw: MagicMock, mock_log: MagicMock) -> None:
-        mock_create_gw.return_value = _make_mock_gateway()
-
-        result = PaymentService.create_subscription(
-            customer_id=str(self.customer.id),
-            price_id="price_monthly_ron",
-        )
-
-        self.assertTrue(result["success"])
-        self.assertEqual(result["subscription_id"], "sub_abc")
-        mock_log.assert_called_once()
-
-    @patch("apps.billing.payment_service.PaymentGatewayFactory.create_gateway")
-    def test_customer_does_not_exist_returns_failure(self, mock_create_gw: MagicMock) -> None:
-        missing_id = str(uuid.uuid4())
-
-        result = PaymentService.create_subscription(customer_id=missing_id, price_id="price_monthly_ron")
-
-        self.assertFalse(result["success"])
-        self.assertIn(missing_id, result["error"])
-        mock_create_gw.assert_not_called()
-
-    @patch("apps.billing.payment_service.PaymentGatewayFactory.create_gateway")
-    def test_generic_exception_returns_failure(self, mock_create_gw: MagicMock) -> None:
-        mock_create_gw.side_effect = Exception("Stripe API error")
-
-        result = PaymentService.create_subscription(
-            customer_id=str(self.customer.id),
-            price_id="price_monthly_ron",
-        )
-
-        self.assertFalse(result["success"])
-        self.assertIn("Subscription creation failed", result["error"])
-
-    @patch("apps.billing.payment_service.log_security_event")
-    @patch("apps.billing.payment_service.PaymentGatewayFactory.create_gateway")
-    def test_gateway_failure_no_log(self, mock_create_gw: MagicMock, mock_log: MagicMock) -> None:
-        mock_create_gw.return_value = _make_mock_gateway(
-            sub_result=_sub_result(success=False, sub_id=None, status=None, error="Stripe rejected")
-        )
-
-        result = PaymentService.create_subscription(
-            customer_id=str(self.customer.id),
-            price_id="price_monthly_ron",
-        )
-
-        self.assertFalse(result["success"])
-        mock_log.assert_not_called()
-
-
-# ---------------------------------------------------------------------------
 # handle_webhook_payment / _handle_stripe_payment_intent
 # REMOVED: These methods were deleted from PaymentService.
 # Stripe webhook handling is now in apps.integrations.webhooks.stripe.StripeWebhookProcessor.
 # Tests for the new handler live in tests/integrations/test_stripe_webhook.py.
 # ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# get_available_payment_methods
-# ---------------------------------------------------------------------------
-
-
-class GetAvailablePaymentMethodsTests(TestCase):
-    """Tests for PaymentService.get_available_payment_methods."""
-
-    def test_default_includes_stripe_card_only(self) -> None:
-        methods = PaymentService.get_available_payment_methods()
-
-        self.assertEqual(len(methods), 1)
-        self.assertEqual(methods[0]["gateway"], "stripe")
-        self.assertTrue(methods[0]["enabled"])
-
-    @override_settings(ENABLE_BANK_TRANSFER=True)
-    def test_with_bank_transfer_enabled_returns_two_methods(self) -> None:
-        methods = PaymentService.get_available_payment_methods()
-
-        gateways = {m["gateway"] for m in methods}
-        self.assertIn("stripe", gateways)
-        self.assertIn("bank", gateways)
-        self.assertEqual(len(methods), 2)
-
-    @override_settings(ENABLE_BANK_TRANSFER=False)
-    def test_with_bank_transfer_disabled_returns_one_method(self) -> None:
-        methods = PaymentService.get_available_payment_methods()
-
-        self.assertEqual(len(methods), 1)
-
-    def test_accepts_customer_id_parameter(self) -> None:
-        # customer_id is optional and currently unused; must not raise
-        methods = PaymentService.get_available_payment_methods(customer_id="some-uuid")
-
-        self.assertIsInstance(methods, list)
-
-    def test_stripe_supports_recurring(self) -> None:
-        methods = PaymentService.get_available_payment_methods()
-
-        stripe_method = next(m for m in methods if m["gateway"] == "stripe")
-        self.assertTrue(stripe_method["supports_recurring"])
-
-    @override_settings(ENABLE_BANK_TRANSFER=True)
-    def test_bank_transfer_does_not_support_recurring(self) -> None:
-        methods = PaymentService.get_available_payment_methods()
-
-        bank_method = next(m for m in methods if m["gateway"] == "bank")
-        self.assertFalse(bank_method["supports_recurring"])
-
-
-# ---------------------------------------------------------------------------
-# process_recurring_billing
-# ---------------------------------------------------------------------------
-
-
-class ProcessRecurringBillingTests(TestCase):
-    """Tests for PaymentService.process_recurring_billing."""
-
-    def test_stub_returns_empty_results(self) -> None:
-        results = PaymentService.process_recurring_billing()
-
-        self.assertIsInstance(results, dict)
-        self.assertEqual(results["processed"], 0)
-        self.assertEqual(results["succeeded"], 0)
-        self.assertEqual(results["failed"], 0)
-        self.assertEqual(results["suspended"], 0)
-        self.assertEqual(results["errors"], [])
-
-    def test_exception_appends_to_errors_and_returns(self) -> None:
-        with patch("apps.billing.payment_service.logger") as mock_logger:
-            mock_logger.info.side_effect = [None, Exception("Log failure")]
-
-            results = PaymentService.process_recurring_billing()
-
-        self.assertIsInstance(results, dict)
-        self.assertIn("errors", results)

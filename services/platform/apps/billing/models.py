@@ -9,7 +9,7 @@ Includes comprehensive usage-based billing system:
 - Subscription and billing cycle management
 - Tiered pricing support
 - Usage alerts and thresholds
-- Stripe Meter integration
+- PRAHO-owned usage rating and invoice integration
 
 This file serves as a re-export hub following ADR-0012 feature-based organization.
 """
@@ -41,6 +41,7 @@ from .metering_models import (
 )
 from .payment_models import CreditLedger, Payment, PaymentCollectionRun, PaymentRetryAttempt, PaymentRetryPolicy
 from .proforma_models import ProformaInvoice, ProformaLine, ProformaSequence
+from .recurring_models import RecurringPaymentAuthorization
 from .refund_models import Refund, RefundNote, RefundStatusHistory
 from .subscription_models import (
     PriceGrandfathering,
@@ -79,7 +80,7 @@ LAST_DAY_OF_DECEMBER = 31  # Last day of December
 # ===============================================================================
 
 # Expose all models in __all__ for explicit imports
-__all__ = [
+__all__ = [  # noqa: RUF022  # Grouped by billing domain for discoverability
     # Constants
     "DANGEROUS_FINANCIAL_PATTERNS",
     "DECEMBER",
@@ -125,6 +126,7 @@ __all__ = [
     "Refund",
     "RefundNote",
     "RefundStatusHistory",
+    "RecurringPaymentAuthorization",
     "Subscription",
     "SubscriptionChange",
     "SubscriptionItem",

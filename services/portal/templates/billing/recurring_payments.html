@@ -1,0 +1,185 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% load ui_components %}
+
+{% block title %}{% trans "Automatic payments" %} - PRAHO{% endblock %}
+
+{% block content %}
+<div class="max-w-5xl mx-auto px-4 py-8 space-y-8">
+  <div>
+    <h1 class="text-2xl font-semibold text-white">{% trans "Automatic payments" %}</h1>
+    <p class="mt-2 text-slate-300">
+      {% trans "Authorize a card once, then choose which subscriptions PRAHO may collect automatically." %}
+    </p>
+  </div>
+
+  {% if not overview.success %}
+    {% trans "Automatic-payment settings are temporarily unavailable." as fallback_error %}
+    {% if overview.error %}{% alert overview.error variant="danger" %}{% else %}{% alert fallback_error variant="danger" %}{% endif %}
+  {% else %}
+    <section class="rounded-xl border border-slate-700 bg-slate-800 p-6 space-y-5">
+      <div>
+        <h2 class="text-lg font-medium text-white">{% trans "Saved cards and authorization" %}</h2>
+        <p class="mt-1 text-sm text-slate-400">
+          {% trans "A card authorization is separate from each hosting subscription. You will not have to authorize every service individually." %}
+        </p>
+      </div>
+
+      {% for method in payment_methods %}
+        <div class="rounded-lg border border-slate-700 bg-slate-900/60 p-4" data-payment-method="{{ method.id }}">
+          <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <div class="font-medium text-white">{{ method.display_name }}</div>
+              <div class="text-sm text-slate-400">
+                {% trans "Card ending" %} {{ method.last_four }}
+              </div>
+              {% if method.authorization %}
+                {% trans "Authorized for recurring collection" as authorized_label %}
+                <div class="mt-2">{% badge authorized_label variant="success" size="sm" %}</div>
+              {% endif %}
+            </div>
+            {% if method.authorization %}
+              {% trans "Withdraw authorization" as withdraw_label %}
+              {% button withdraw_label variant="danger" size="sm" class_="withdraw-authorization" attrs=method.withdraw_attrs %}
+            {% else %}
+              {% trans "Authorize this card" as authorize_label %}
+              {% button authorize_label variant="primary" size="sm" class_="begin-authorization" attrs=method.begin_attrs %}
+            {% endif %}
+          </div>
+        </div>
+      {% empty %}
+        <p class="text-slate-400">{% trans "No saved Stripe cards are available. Add a card during checkout first." %}</p>
+      {% endfor %}
+
+      <div class="rounded-lg border border-slate-700 bg-slate-900/60 p-4 text-sm text-slate-300">
+        <p>{{ overview.terms_text }}</p>
+        <p class="mt-2 text-xs text-slate-500">
+          {% trans "Terms version" %} {{ overview.terms_version }}
+        </p>
+        {% trans "I accept these recurring-payment terms" as accept_terms_label %}
+        <div class="mt-4">
+          {% checkbox_field "recurring_terms" label=accept_terms_label html_id="recurring-terms" required=True %}
+        </div>
+      </div>
+    </section>
+
+    <section class="rounded-xl border border-slate-700 bg-slate-800 p-6 space-y-5">
+      <div>
+        <h2 class="text-lg font-medium text-white">{% trans "Subscription enrollment" %}</h2>
+        <p class="mt-1 text-sm text-slate-400">
+          {% trans "Turning automatic payment off does not cancel the service. Service cancellation remains an independent action." %}
+        </p>
+      </div>
+
+      {% for subscription in subscriptions %}
+        <div class="grid gap-4 rounded-lg border border-slate-700 bg-slate-900/60 p-4 sm:grid-cols-[1fr_auto] sm:items-center">
+          <div>
+            <div class="font-medium text-white">{{ subscription.name }}</div>
+            <div class="text-sm text-slate-400">
+              {{ subscription.number }} · {{ subscription.billing_cycle|title }} · {{ subscription.status|title }}
+            </div>
+          </div>
+          {% input_field subscription.control_name input_type="select" value=subscription.authorization_id options=subscription.authorization_options html_id=subscription.control_id css_class="subscription-authorization" %}
+        </div>
+      {% empty %}
+        <p class="text-slate-400">{% trans "No recurring subscriptions are available." %}</p>
+      {% endfor %}
+    </section>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block extra_js %}
+{% translate "Request failed" as js_request_failed %}
+{% translate "Please accept the recurring-payment terms first." as js_accept_terms %}
+{% translate "Withdraw this card authorization and stop future automatic collection for all subscriptions using it?" as js_withdraw_confirm %}
+{{ js_request_failed|force_escape|json_script:"recurring-request-failed" }}
+{{ js_accept_terms|force_escape|json_script:"recurring-accept-terms" }}
+{{ js_withdraw_confirm|force_escape|json_script:"recurring-withdraw-confirm" }}
+{# nosemgrep: missing-integrity — Stripe does not support SRI on js.stripe.com #}
+<script src="https://js.stripe.com/v3/"></script>
+<script nonce="{{ csp_nonce }}">
+  (() => {
+    const requestFailed = JSON.parse(document.getElementById('recurring-request-failed').textContent);
+    const acceptTerms = JSON.parse(document.getElementById('recurring-accept-terms').textContent);
+    const withdrawConfirm = JSON.parse(document.getElementById('recurring-withdraw-confirm').textContent);
+    const requestJson = async (url, payload) => {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken')},
+        body: JSON.stringify(payload)
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success) throw new Error(data.error || requestFailed);
+      return data;
+    };
+
+    document.querySelectorAll('.begin-authorization').forEach((button) => {
+      button.addEventListener('click', async () => {
+        if (!document.getElementById('recurring-terms').checked) {
+          showToast(acceptTerms, 'warning');
+          return;
+        }
+        button.disabled = true;
+        try {
+          const paymentMethodId = Number(button.dataset.paymentMethodId);
+          const prepared = await requestJson(
+            '{% url "billing:recurring_authorization_begin" %}',
+            {
+              payment_method_id: paymentMethodId,
+              terms_accepted: true,
+              terms_version: '{{ overview.terms_version|escapejs }}'
+            }
+          );
+          const stripe = Stripe(prepared.publishable_key);
+          const result = await stripe.confirmCardSetup(
+            prepared.client_secret,
+            {payment_method: prepared.payment_method_id}
+          );
+          if (result.error) throw new Error(result.error.message);
+          await requestJson('{% url "billing:recurring_authorization_complete" %}', {
+            payment_method_id: paymentMethodId,
+            setup_intent_id: result.setupIntent.id
+          });
+          window.location.reload();
+        } catch (error) {
+          showToast(error.message, 'error');
+          button.disabled = false;
+        }
+      });
+    });
+
+    document.querySelectorAll('.withdraw-authorization').forEach((button) => {
+      button.addEventListener('click', async () => {
+        if (!window.confirm(withdrawConfirm)) return;
+        try {
+          await requestJson(
+            '{% url "billing:recurring_authorization_withdraw" %}',
+            {authorization_id: button.dataset.authorizationId}
+          );
+          window.location.reload();
+        } catch (error) {
+          showToast(error.message, 'error');
+        }
+      });
+    });
+
+    document.querySelectorAll('.subscription-authorization').forEach((select) => {
+      select.addEventListener('change', async () => {
+        select.disabled = true;
+        try {
+          await requestJson('{% url "billing:subscription_auto_payment" %}', {
+            subscription_id: select.id.replace('subscription-', ''),
+            authorization_id: select.value || null,
+            enabled: Boolean(select.value)
+          });
+          window.location.reload();
+        } catch (error) {
+          showToast(error.message, 'error');
+          select.disabled = false;
+        }
+      });
+    });
+  })();
+</script>
+{% endblock %}

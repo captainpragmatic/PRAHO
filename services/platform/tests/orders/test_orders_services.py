@@ -4,12 +4,14 @@ Tests business logic, Romanian VAT compliance, and service layer functionality.
 """
 
 import uuid
+from datetime import datetime
+from decimal import Decimal
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 
-from apps.billing.models import Currency
+from apps.billing.models import BillingCycle, Currency, Subscription
 from apps.customers.models import Customer, CustomerTaxProfile
 from apps.orders.models import Order, OrderItem
 from apps.orders.services import (
@@ -18,9 +20,11 @@ from apps.orders.services import (
     OrderNumberingService,
     OrderQueryService,
     OrderService,
+    OrderServiceCreationService,
     StatusChangeData,
 )
 from apps.products.models import Product, ProductPrice
+from apps.provisioning.models import Service, ServicePlan
 from tests.helpers.fsm_helpers import force_status
 
 User = get_user_model()
@@ -33,48 +37,48 @@ class OrderCalculationServiceTestCase(TestCase):
         """Test 21% Romanian VAT calculation via calculate_order_totals"""
         # Test various amounts - Romania VAT is 21%
         test_cases = [
-            (10000, 2100),    # 100.00 RON → 21.00 RON VAT (21%)
-            (50000, 10500),   # 500.00 RON → 105.00 RON VAT (21%)
+            (10000, 2100),  # 100.00 RON → 21.00 RON VAT (21%)
+            (50000, 10500),  # 500.00 RON → 105.00 RON VAT (21%)
             (100000, 21000),  # 1000.00 RON → 210.00 RON VAT (21%)
-            (1, 0),           # 0.01 RON → 0.00 RON VAT (rounded down)
+            (1, 0),  # 0.01 RON → 0.00 RON VAT (rounded down)
         ]
 
         for amount_cents, expected_vat_cents in test_cases:
             with self.subTest(amount=amount_cents):
-                items = [{'quantity': 1, 'unit_price_cents': amount_cents}]
+                items = [{"quantity": 1, "unit_price_cents": amount_cents}]
                 totals = OrderCalculationService.calculate_order_totals(items)
-                self.assertEqual(totals['tax_cents'], expected_vat_cents)
+                self.assertEqual(totals["tax_cents"], expected_vat_cents)
 
     def test_order_totals_calculation(self):
         """Test complete order totals calculation"""
         items = [
             {
-                'quantity': 2,
-                'unit_price_cents': 5000,  # 50.00 RON each
+                "quantity": 2,
+                "unit_price_cents": 5000,  # 50.00 RON each
             },
             {
-                'quantity': 1,
-                'unit_price_cents': 10000,  # 100.00 RON
-            }
+                "quantity": 1,
+                "unit_price_cents": 10000,  # 100.00 RON
+            },
         ]
 
         totals = OrderCalculationService.calculate_order_totals(items)
 
         expected_subtotal = 20000  # 200.00 RON
-        expected_vat = 4200        # 42.00 RON (21% VAT)
-        expected_total = 24200     # 242.00 RON
+        expected_vat = 4200  # 42.00 RON (21% VAT)
+        expected_total = 24200  # 242.00 RON
 
-        self.assertEqual(totals['subtotal_cents'], expected_subtotal)
-        self.assertEqual(totals['tax_cents'], expected_vat)
-        self.assertEqual(totals['total_cents'], expected_total)
+        self.assertEqual(totals["subtotal_cents"], expected_subtotal)
+        self.assertEqual(totals["tax_cents"], expected_vat)
+        self.assertEqual(totals["total_cents"], expected_total)
 
     def test_zero_amount_calculation(self):
         """Test calculation with zero amounts"""
         totals = OrderCalculationService.calculate_order_totals([])
 
-        self.assertEqual(totals['subtotal_cents'], 0)
-        self.assertEqual(totals['tax_cents'], 0)
-        self.assertEqual(totals['total_cents'], 0)
+        self.assertEqual(totals["subtotal_cents"], 0)
+        self.assertEqual(totals["tax_cents"], 0)
+        self.assertEqual(totals["total_cents"], 0)
 
 
 class OrderNumberingServiceTestCase(TestCase):
@@ -82,24 +86,15 @@ class OrderNumberingServiceTestCase(TestCase):
 
     def setUp(self):
         """Set up test data"""
-        self.currency, _ = Currency.objects.get_or_create(
-            code="RON",
-            defaults={"symbol": "lei", "decimals": 2}
-        )
+        self.currency, _ = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei", "decimals": 2})
 
         self.customer = Customer.objects.create(
-            name="Test Company SRL",
-            customer_type="company",
-            status="active",
-            primary_email="test@company.ro"
+            name="Test Company SRL", customer_type="company", status="active", primary_email="test@company.ro"
         )
 
         # Create tax profile for the customer
         CustomerTaxProfile.objects.create(
-            customer=self.customer,
-            vat_number="RO12345678",
-            cui="RO12345678",
-            is_vat_payer=True
+            customer=self.customer, vat_number="RO12345678", cui="RO12345678", is_vat_payer=True
         )
 
     def test_first_order_number_generation(self):
@@ -107,11 +102,10 @@ class OrderNumberingServiceTestCase(TestCase):
         order_number = OrderNumberingService.generate_order_number(self.customer)
 
         # Should follow format: ORD-YYYY-CUSTOMER_ID_PREFIX-XXXX
-        from datetime import datetime
         current_year = str(datetime.now().year)
         self.assertTrue(order_number.startswith(f"ORD-{current_year}-"))
         self.assertTrue(order_number.endswith("-0001"))
-        self.assertIn(str(self.customer.pk).replace('-', '')[:8].upper(), order_number)
+        self.assertIn(str(self.customer.pk).replace("-", "")[:8].upper(), order_number)
 
     def test_sequential_order_numbers(self):
         """Test sequential order number generation"""
@@ -119,33 +113,27 @@ class OrderNumberingServiceTestCase(TestCase):
         order1 = Order.objects.create(
             customer=self.customer,
             order_number=OrderNumberingService.generate_order_number(self.customer),
-            currency=self.currency
+            currency=self.currency,
         )
 
         # Generate second order number
         order_number2 = OrderNumberingService.generate_order_number(self.customer)
 
         # Should be sequential - same base format but with incremented sequence
-        parts = order1.order_number.split('-')  # ['ORD', '2025', 'XXXXXXXX', '0001']
-        expected_parts = parts[:-1] + ['0002']  # Replace sequence with 0002
-        expected_number2 = '-'.join(expected_parts)
+        parts = order1.order_number.split("-")  # ['ORD', '2025', 'XXXXXXXX', '0001']
+        expected_parts = [*parts[:-1], "0002"]  # Replace sequence with 0002
+        expected_number2 = "-".join(expected_parts)
         self.assertEqual(order_number2, expected_number2)
 
     def test_order_number_uniqueness_per_customer(self):
         """Test that order numbers are unique per customer"""
         customer2 = Customer.objects.create(
-            name="Another Company SRL",
-            customer_type="company",
-            status="active",
-            primary_email="another@company.ro"
+            name="Another Company SRL", customer_type="company", status="active", primary_email="another@company.ro"
         )
 
         # Create tax profile for customer2
         CustomerTaxProfile.objects.create(
-            customer=customer2,
-            vat_number="RO87654321",
-            cui="RO87654321",
-            is_vat_payer=True
+            customer=customer2, vat_number="RO87654321", cui="RO87654321", is_vat_payer=True
         )
 
         number1 = OrderNumberingService.generate_order_number(self.customer)
@@ -162,24 +150,15 @@ class OrderServiceTestCase(TestCase):
 
     def setUp(self):
         """Set up test data"""
-        self.currency, _ = Currency.objects.get_or_create(
-            code="RON",
-            defaults={"symbol": "lei", "decimals": 2}
-        )
+        self.currency, _ = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei", "decimals": 2})
 
         self.customer = Customer.objects.create(
-            name="Test Company SRL",
-            customer_type="company",
-            status="active",
-            primary_email="test@company.ro"
+            name="Test Company SRL", customer_type="company", status="active", primary_email="test@company.ro"
         )
 
         # Create tax profile for the customer
         CustomerTaxProfile.objects.create(
-            customer=self.customer,
-            vat_number="RO12345678",
-            cui="RO12345678",
-            is_vat_payer=True
+            customer=self.customer, vat_number="RO12345678", cui="RO12345678", is_vat_payer=True
         )
 
         # Create test product
@@ -187,41 +166,37 @@ class OrderServiceTestCase(TestCase):
             slug="web-hosting-standard",
             name="Web Hosting Standard",
             description="Standard web hosting plan",
-            short_description="Basic hosting for small websites"
+            short_description="Basic hosting for small websites",
         )
 
-        self.user = User.objects.create_user(
-            email="admin@pragmatichost.com",
-            password="testpass123",
-            is_staff=True
-        )
+        self.user = User.objects.create_user(email="admin@pragmatichost.com", password="testpass123", is_staff=True)
 
     def test_successful_order_creation(self):
         """Test successful order creation with all components"""
         billing_address = {
-            'company_name': "Test Company SRL",
-            'contact_name': "Ion Popescu",
-            'email': "ion@company.ro",
-            'phone': "+40123456789",
-            'address_line1': "Str. Aviatorilor nr. 1",
-            'address_line2': "",
-            'city': "Bucuresti",
-            'county': "Bucuresti",
-            'postal_code': "010563",
-            'country': "Romania",
-            'fiscal_code': "RO12345678",
-            'registration_number': "J40/1234/2024",
-            'vat_number': "RO12345678"
+            "company_name": "Test Company SRL",
+            "contact_name": "Ion Popescu",
+            "email": "ion@company.ro",
+            "phone": "+40123456789",
+            "address_line1": "Str. Aviatorilor nr. 1",
+            "address_line2": "",
+            "city": "Bucuresti",
+            "county": "Bucuresti",
+            "postal_code": "010563",
+            "country": "Romania",
+            "fiscal_code": "RO12345678",
+            "registration_number": "J40/1234/2024",
+            "vat_number": "RO12345678",
         }
 
         items = [
             {
-                'product_id': self.product.id,
-                'service_id': None,
-                'quantity': 1,
-                'unit_price_cents': 10000,  # 100.00 RON
-                'description': "Web Hosting Plan",
-                'meta': {'plan': 'standard'}
+                "product_id": self.product.id,
+                "service_id": None,
+                "quantity": 1,
+                "unit_price_cents": 10000,  # 100.00 RON
+                "description": "Web Hosting Plan",
+                "meta": {"plan": "standard"},
             }
         ]
 
@@ -230,7 +205,7 @@ class OrderServiceTestCase(TestCase):
             items=items,
             billing_address=billing_address,
             currency=self.currency.code,
-            notes="Test order creation"
+            notes="Test order creation",
         )
 
         result = OrderService.create_order(order_data, self.user)
@@ -249,8 +224,8 @@ class OrderServiceTestCase(TestCase):
         self.assertEqual(order.total_cents, 12100)
 
         # Verify billing address
-        self.assertEqual(order.billing_address['company_name'], "Test Company SRL")
-        self.assertEqual(order.billing_address['fiscal_code'], "RO12345678")
+        self.assertEqual(order.billing_address["company_name"], "Test Company SRL")
+        self.assertEqual(order.billing_address["fiscal_code"], "RO12345678")
 
         # Verify order items created
         self.assertEqual(order.items.count(), 1)
@@ -279,18 +254,18 @@ class OrderServiceTestCase(TestCase):
             currency=self.currency,
             status="draft",
             billing_address={
-                'company_name': 'Test Company SRL',
-                'contact_name': 'Ion Popescu',
-                'email': 'ion@company.ro',
-                'phone': '+40123456789',
-                'address_line1': 'Str. Aviatorilor nr. 1',
-                'address_line2': '',
-                'city': 'Bucuresti',
-                'county': 'Bucuresti',
-                'postal_code': '010563',
-                'country': 'Romania',
-                'fiscal_code': 'RO12345678',
-            }
+                "company_name": "Test Company SRL",
+                "contact_name": "Ion Popescu",
+                "email": "ion@company.ro",
+                "phone": "+40123456789",
+                "address_line1": "Str. Aviatorilor nr. 1",
+                "address_line2": "",
+                "city": "Bucuresti",
+                "county": "Bucuresti",
+                "postal_code": "010563",
+                "country": "Romania",
+                "fiscal_code": "RO12345678",
+            },
         )
         # FSM: submit() (draft→awaiting_payment) requires at least one item on the order
         OrderItem.objects.create(
@@ -312,15 +287,15 @@ class OrderServiceTestCase(TestCase):
 
         # Update status
         status_data = StatusChangeData(
-            new_status="awaiting_payment",
-            notes="Order submitted for processing",
-            changed_by=self.user
+            new_status="awaiting_payment", notes="Order submitted for processing", changed_by=self.user
         )
 
         result = OrderService.update_order_status(order, status_data)
 
         # Verify success
-        self.assertTrue(result.is_ok(), f"Expected success, got error: {result.unwrap_err() if result.is_err() else 'N/A'}")
+        self.assertTrue(
+            result.is_ok(), f"Expected success, got error: {result.unwrap_err() if result.is_err() else 'N/A'}"
+        )
         updated_order = result.unwrap()
         self.assertEqual(updated_order.status, "awaiting_payment")
 
@@ -340,13 +315,13 @@ class OrderServiceTestCase(TestCase):
             customer=self.customer,
             order_number="ORD-2024-INVALID-0001",
             currency=self.currency,
-            status="completed"  # Terminal status
+            status="completed",  # Terminal status
         )
 
         status_data = StatusChangeData(
             new_status="draft",  # Invalid transition from completed
             notes="Trying invalid transition",
-            changed_by=self.user
+            changed_by=self.user,
         )
 
         result = OrderService.update_order_status(order, status_data)
@@ -355,8 +330,7 @@ class OrderServiceTestCase(TestCase):
         self.assertTrue(result.is_err())
         error_message = result.unwrap_err()  # type: ignore[union-attr]
         self.assertTrue(
-            "No transition from" in error_message
-            or "Invalid status transition" in error_message,
+            "No transition from" in error_message or "Invalid status transition" in error_message,
             f"Expected a transition error, got: {error_message}",
         )
 
@@ -393,14 +367,14 @@ class OrderServiceTestCase(TestCase):
                     currency=self.currency,
                     status=old_status,
                     billing_address={
-                        'contact_name': 'Test Contact',
-                        'email': 'test@company.ro',
-                        'address_line1': 'Test Street 1',
-                        'city': 'Bucuresti',
-                        'county': 'Bucuresti',
-                        'postal_code': '010001',
-                        'country': 'Romania',
-                    }
+                        "contact_name": "Test Contact",
+                        "email": "test@company.ro",
+                        "address_line1": "Test Street 1",
+                        "city": "Bucuresti",
+                        "county": "Bucuresti",
+                        "postal_code": "010001",
+                        "country": "Romania",
+                    },
                 )
 
                 # FSM: draft → awaiting_payment requires items + a current price (preflight validation)
@@ -428,9 +402,7 @@ class OrderServiceTestCase(TestCase):
                     )
 
                 status_data = StatusChangeData(
-                    new_status=new_status,
-                    notes=f"Transition from {old_status} to {new_status}",
-                    changed_by=self.user
+                    new_status=new_status, notes=f"Transition from {old_status} to {new_status}", changed_by=self.user
                 )
 
                 result = OrderService.update_order_status(order, status_data)
@@ -442,47 +414,29 @@ class OrderQueryServiceTestCase(TestCase):
 
     def setUp(self):
         """Set up test data"""
-        self.currency, _ = Currency.objects.get_or_create(
-            code="RON",
-            defaults={"symbol": "lei", "decimals": 2}
-        )
+        self.currency, _ = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei", "decimals": 2})
 
         self.customer = Customer.objects.create(
-            name="Test Company SRL",
-            customer_type="company",
-            status="active",
-            primary_email="test@company.ro"
+            name="Test Company SRL", customer_type="company", status="active", primary_email="test@company.ro"
         )
 
         # Create tax profile for the customer
         CustomerTaxProfile.objects.create(
-            customer=self.customer,
-            vat_number="RO12345678",
-            cui="RO12345678",
-            is_vat_payer=True
+            customer=self.customer, vat_number="RO12345678", cui="RO12345678", is_vat_payer=True
         )
 
         # Create a product for testing
         self.product = Product.objects.create(
-            slug="test-product",
-            name="Test Product",
-            product_type="hosting",
-            is_active=True
+            slug="test-product", name="Test Product", product_type="hosting", is_active=True
         )
 
         # Create test orders
         self.order1 = Order.objects.create(
-            customer=self.customer,
-            order_number="ORD-2024-QUERY-0001",
-            currency=self.currency,
-            status="draft"
+            customer=self.customer, order_number="ORD-2024-QUERY-0001", currency=self.currency, status="draft"
         )
 
         self.order2 = Order.objects.create(
-            customer=self.customer,
-            order_number="ORD-2024-QUERY-0002",
-            currency=self.currency,
-            status="completed"
+            customer=self.customer, order_number="ORD-2024-QUERY-0002", currency=self.currency, status="completed"
         )
 
     def test_get_orders_for_customer(self):
@@ -499,7 +453,7 @@ class OrderQueryServiceTestCase(TestCase):
 
     def test_get_orders_with_status_filter(self):
         """Test retrieving orders with status filtering"""
-        filters = {'status': 'completed'}
+        filters = {"status": "completed"}
         result = OrderQueryService.get_orders_for_customer(self.customer, filters)
 
         self.assertTrue(result.is_ok())
@@ -509,7 +463,7 @@ class OrderQueryServiceTestCase(TestCase):
 
     def test_get_orders_with_search_filter(self):
         """Test retrieving orders with search filtering"""
-        filters = {'search': 'QUERY-0001'}
+        filters = {"search": "QUERY-0001"}
         result = OrderQueryService.get_orders_for_customer(self.customer, filters)
 
         self.assertTrue(result.is_ok())
@@ -527,7 +481,7 @@ class OrderQueryServiceTestCase(TestCase):
             unit_price_cents=5000,
             line_total_cents=5000,
             product_name="Test Item",
-            product_type="hosting"
+            product_type="hosting",
         )
 
         result = OrderQueryService.get_order_with_items(self.order1.id, self.customer)
@@ -553,18 +507,12 @@ class OrderQueryServiceTestCase(TestCase):
     def test_get_order_wrong_customer(self):
         """Test retrieving order with wrong customer"""
         other_customer = Customer.objects.create(
-            name="Other Company SRL",
-            customer_type="company",
-            status="active",
-            primary_email="other@company.ro"
+            name="Other Company SRL", customer_type="company", status="active", primary_email="other@company.ro"
         )
 
         # Create tax profile for other_customer
         CustomerTaxProfile.objects.create(
-            customer=other_customer,
-            vat_number="RO11111111",
-            cui="RO11111111",
-            is_vat_payer=True
+            customer=other_customer, vat_number="RO11111111", cui="RO11111111", is_vat_payer=True
         )
 
         result = OrderQueryService.get_order_with_items(self.order1.id, other_customer)
@@ -584,34 +532,24 @@ class OrderServiceCreationTestCase(TestCase):
 
         # Create customer
         self.customer = Customer.objects.create(
-            name="Test Customer SRL",
-            customer_type="company",
-            status="active",
-            primary_email="test@customer.ro"
+            name="Test Customer SRL", customer_type="company", status="active", primary_email="test@customer.ro"
         )
 
         # Create tax profile
         CustomerTaxProfile.objects.create(
-            customer=self.customer,
-            vat_number="RO12345678",
-            cui="RO12345678",
-            is_vat_payer=True
+            customer=self.customer, vat_number="RO12345678", cui="RO12345678", is_vat_payer=True
         )
 
         # Create product with service plan
         self.product = Product.objects.create(
-            slug="test-hosting",
-            name="Test Hosting Package",
-            product_type="shared_hosting",
-            is_active=True
+            slug="test-hosting", name="Test Hosting Package", product_type="shared_hosting", is_active=True
         )
 
         # Create service plan
-        from apps.provisioning.models import ServicePlan
         self.service_plan = ServicePlan.objects.create(
             name="Basic Hosting Plan",
             plan_type="shared_hosting",
-            price_monthly=2999  # 29.99 RON
+            price_monthly=2999,  # 29.99 RON
         )
 
         # Link product to service plan
@@ -624,46 +562,40 @@ class OrderServiceCreationTestCase(TestCase):
             currency=self.currency,
             monthly_price_cents=2999,  # 29.99 RON - matches the order item price
             setup_cents=0,
-            is_active=True
+            is_active=True,
         )
 
     def test_complete_service_creation_flow(self):
         """Test the complete service creation flow: draft → pending → processing → completed"""
-        from apps.orders.services import (  # noqa: PLC0415
-            OrderCreateData,
-            OrderService,
-            OrderServiceCreationService,
-            StatusChangeData,
-        )
-        from apps.provisioning.models import Service  # noqa: PLC0415
-
         # Step 1: Create draft order
         order_data = OrderCreateData(
             customer=self.customer,
-            items=[{
-                'product_id': self.product.id,
-                'quantity': 1,
-                'unit_price_cents': 2999,
-                'setup_cents': 0,
-                'description': 'Test Hosting Package',
-                'meta': {'billing_cycle': 'monthly'}
-            }],
+            items=[
+                {
+                    "product_id": self.product.id,
+                    "quantity": 1,
+                    "unit_price_cents": 2999,
+                    "setup_cents": 0,
+                    "description": "Test Hosting Package",
+                    "meta": {"billing_cycle": "monthly"},
+                }
+            ],
             billing_address={
-                'company_name': 'Test Company',
-                'contact_name': 'Test Contact',
-                'email': 'test@customer.ro',
-                'phone': '+40712345678',
-                'address_line1': 'Test Street 123',
-                'address_line2': '',
-                'city': 'Bucharest',
-                'county': 'Bucharest',
-                'postal_code': '010001',
-                'country': 'RO',
-                'fiscal_code': 'RO12345678',
-                'registration_number': 'J40/123/2023',
-                'vat_number': 'RO12345678'
+                "company_name": "Test Company",
+                "contact_name": "Test Contact",
+                "email": "test@customer.ro",
+                "phone": "+40712345678",
+                "address_line1": "Test Street 123",
+                "address_line2": "",
+                "city": "Bucharest",
+                "county": "Bucharest",
+                "postal_code": "010001",
+                "country": "RO",
+                "fiscal_code": "RO12345678",
+                "registration_number": "J40/123/2023",
+                "vat_number": "RO12345678",
             },
-            currency="RON"
+            currency="RON",
         )
 
         result = OrderService.create_order(order_data)
@@ -671,17 +603,17 @@ class OrderServiceCreationTestCase(TestCase):
         order = result.unwrap()
 
         # Verify order is draft and no services exist yet
-        self.assertEqual(order.status, 'draft')
+        self.assertEqual(order.status, "draft")
         self.assertEqual(Service.objects.count(), 0)
 
         # Step 2: Move order to awaiting_payment (should create services)
-        status_data = StatusChangeData(new_status='awaiting_payment')
+        status_data = StatusChangeData(new_status="awaiting_payment")
         result = OrderService.update_order_status(order, status_data)
         self.assertTrue(result.is_ok())
 
         # Verify order status changed
         order.refresh_from_db()
-        self.assertEqual(order.status, 'awaiting_payment')
+        self.assertEqual(order.status, "awaiting_payment")
 
         # Manually trigger service creation (signals may not work in test environment)
         creation_result = OrderServiceCreationService.create_pending_services(order)
@@ -691,7 +623,7 @@ class OrderServiceCreationTestCase(TestCase):
         self.assertEqual(services.count(), 1)
 
         service = services.first()
-        self.assertEqual(service.status, 'pending')
+        self.assertEqual(service.status, "pending")
         self.assertEqual(service.service_plan, self.service_plan)
         self.assertIn(self.product.name, service.service_name)
 
@@ -700,23 +632,42 @@ class OrderServiceCreationTestCase(TestCase):
         self.assertEqual(order_item.service, service)
 
         # Step 3a: Move order to paid first
-        status_data = StatusChangeData(new_status='paid')
+        status_data = StatusChangeData(new_status="paid")
         result = OrderService.update_order_status(order, status_data)
         self.assertTrue(result.is_ok())
 
         # Step 3b: Then move to provisioning (should update services to provisioning)
-        status_data = StatusChangeData(new_status='provisioning')
+        status_data = StatusChangeData(new_status="provisioning")
         result = OrderService.update_order_status(order, status_data)
         self.assertTrue(result.is_ok())
+        order.refresh_from_db()
+        self.assertEqual(order.status, "provisioning")
 
         # Manually update services to provisioning (signals may not work in tests)
-        from apps.orders.services import OrderServiceCreationService
         update_result = OrderServiceCreationService.update_service_status_on_payment(order)
-        self.assertTrue(update_result.is_ok())
+        self.assertTrue(update_result.is_ok(), f"Recurring enrollment failed: {update_result}")
 
         # Verify service status updated to provisioning
         service.refresh_from_db()
-        self.assertEqual(service.status, 'provisioning')
+        self.assertEqual(service.status, "provisioning")
+
+        # A paid recurring order must enter PRAHO's renewal engine before
+        # provisioning completes; otherwise the service will never renew.
+        subscription = Subscription.objects.get(service=service)
+        self.assertEqual(subscription.customer, self.customer)
+        self.assertEqual(subscription.product, self.product)
+        self.assertEqual(subscription.billing_cycle, "monthly")
+        self.assertEqual(subscription.unit_price_cents, 2999)
+        self.assertEqual(subscription.status, "active")
+        service.refresh_from_db()
+        self.assertEqual(service.expires_at, subscription.current_period_end)
+        self.assertTrue(
+            BillingCycle.objects.filter(
+                subscription=subscription,
+                status="active",
+                collection_status="waived",
+            ).exists()
+        )
 
         # Step 4: Complete provisioning (should activate services)
         # Refresh order item to get latest service link
@@ -728,13 +679,351 @@ class OrderServiceCreationTestCase(TestCase):
 
         # Verify service status updated to active
         service.refresh_from_db()
-        self.assertEqual(service.status, 'active')
+        self.assertEqual(service.status, "active")
         self.assertIsNotNone(service.activated_at)
+
+    def test_unpaid_order_cannot_enroll_service_for_recurring_billing(self):
+        """The internal enrollment boundary must fail closed for unpaid orders."""
+        order = Order.objects.create(
+            order_number="ORD-UNPAID-0001",
+            customer=self.customer,
+            currency=self.currency,
+            status="awaiting_payment",
+            customer_email=self.customer.primary_email,
+            customer_name=self.customer.name,
+            billing_address={},
+        )
+        service = Service.objects.create(
+            customer=self.customer,
+            service_plan=self.service_plan,
+            currency=self.currency,
+            service_name="Unpaid hosting",
+            username="unpaid_hosting",
+            billing_cycle="monthly",
+            price=Decimal("29.99"),
+            status="pending",
+        )
+        OrderItem.objects.create(
+            order=order,
+            product=self.product,
+            product_name=self.product.name,
+            product_type=self.product.product_type,
+            quantity=1,
+            unit_price_cents=2999,
+            config={"billing_period": "monthly"},
+            service=service,
+        )
+
+        result = OrderServiceCreationService.update_service_status_on_payment(order)
+
+        self.assertTrue(result.is_err())
+        service.refresh_from_db()
+        self.assertEqual(service.status, "pending")
+        self.assertFalse(Subscription.objects.filter(service=service).exists())
+
+    def test_staff_approval_rolls_back_when_recurring_enrollment_fails(self):
+        """An order cannot enter provisioning without its required renewal subscription."""
+        from apps.common.types import Err  # noqa: PLC0415
+        from apps.provisioning.models import Service  # noqa: PLC0415
+
+        order = Order.objects.create(
+            order_number="ORD-REVIEW-ENROLL-FAIL",
+            customer=self.customer,
+            currency=self.currency,
+            status="in_review",
+            customer_email=self.customer.primary_email,
+            customer_name=self.customer.name,
+            billing_address={},
+        )
+        service = Service.objects.create(
+            customer=self.customer,
+            service_plan=self.service_plan,
+            currency=self.currency,
+            service_name="Review enrollment service",
+            username="review_enrollment_failure",
+            billing_cycle="monthly",
+            price=Decimal("29.99"),
+            status="pending",
+        )
+        OrderItem.objects.create(
+            order=order,
+            product=self.product,
+            product_name=self.product.name,
+            product_type=self.product.product_type,
+            quantity=1,
+            unit_price_cents=2999,
+            config={"billing_period": "monthly"},
+            service=service,
+        )
+
+        with patch(
+            "apps.billing.subscription_service.SubscriptionService.create_subscription",
+            return_value=Err("forced enrollment failure"),
+        ):
+            result = OrderService.update_order_status(order, StatusChangeData(new_status="provisioning"))
+
+        self.assertTrue(result.is_err())
+        order.refresh_from_db()
+        service.refresh_from_db()
+        self.assertEqual(order.status, "in_review")
+        self.assertEqual(service.status, "pending")
+
+    def test_auto_confirmation_rolls_back_when_recurring_enrollment_fails(self):
+        """Payment confirmation must remain retriable if subscription enrollment fails."""
+        from apps.common.types import Err  # noqa: PLC0415
+        from apps.orders.services import OrderPaymentConfirmationService  # noqa: PLC0415
+        from apps.provisioning.models import Service  # noqa: PLC0415
+
+        order = Order.objects.create(
+            order_number="ORD-AUTO-ENROLL-FAIL",
+            customer=self.customer,
+            currency=self.currency,
+            status="awaiting_payment",
+            total_cents=2999,
+            customer_email=self.customer.primary_email,
+            customer_name=self.customer.name,
+            billing_address={},
+        )
+        service = Service.objects.create(
+            customer=self.customer,
+            service_plan=self.service_plan,
+            currency=self.currency,
+            service_name="Automatic enrollment service",
+            username="auto_enrollment_failure",
+            billing_cycle="monthly",
+            price=Decimal("29.99"),
+            status="pending",
+        )
+        OrderItem.objects.create(
+            order=order,
+            product=self.product,
+            product_name=self.product.name,
+            product_type=self.product.product_type,
+            quantity=1,
+            unit_price_cents=2999,
+            config={"billing_period": "monthly"},
+            service=service,
+        )
+
+        with (
+            patch.object(OrderPaymentConfirmationService, "_get_review_threshold", return_value=500_000),
+            patch(
+                "apps.billing.subscription_service.SubscriptionService.create_subscription",
+                return_value=Err("forced enrollment failure"),
+            ),
+        ):
+            result = OrderPaymentConfirmationService.confirm_order(order)
+
+        self.assertTrue(result.is_err())
+        order.refresh_from_db()
+        service.refresh_from_db()
+        self.assertEqual(order.status, "awaiting_payment")
+        self.assertEqual(service.status, "pending")
+
+    def test_auto_confirmation_rolls_back_when_missing_service_cannot_be_created(self):
+        """A swallowed awaiting-payment signal failure must not orphan the paid service."""
+        from apps.common.types import Err  # noqa: PLC0415
+        from apps.orders.services import OrderPaymentConfirmationService, OrderServiceCreationService  # noqa: PLC0415
+
+        order = Order.objects.create(
+            order_number="ORD-MISSING-SERVICE-FAIL",
+            customer=self.customer,
+            currency=self.currency,
+            status="awaiting_payment",
+            total_cents=2999,
+            customer_email=self.customer.primary_email,
+            customer_name=self.customer.name,
+            billing_address={},
+        )
+        OrderItem.objects.create(
+            order=order,
+            product=self.product,
+            product_name=self.product.name,
+            product_type=self.product.product_type,
+            quantity=1,
+            unit_price_cents=2999,
+            config={"billing_period": "monthly"},
+        )
+
+        with (
+            patch.object(OrderPaymentConfirmationService, "_get_review_threshold", return_value=500_000),
+            patch.object(
+                OrderServiceCreationService,
+                "_get_service_plan_for_product",
+                return_value=Err("forced service mapping failure"),
+            ),
+        ):
+            result = OrderPaymentConfirmationService.confirm_order(order)
+
+        self.assertTrue(result.is_err())
+        order.refresh_from_db()
+        self.assertEqual(order.status, "awaiting_payment")
+        self.assertIsNone(order.items.get().service_id)
+
+    def test_auto_confirmation_repairs_a_missing_pending_service_before_enrollment(self):
+        """Payment confirmation self-heals a missed awaiting-payment service callback."""
+        from apps.billing.models import Subscription  # noqa: PLC0415
+        from apps.orders.services import OrderPaymentConfirmationService  # noqa: PLC0415
+
+        order = Order.objects.create(
+            order_number="ORD-MISSING-SERVICE-REPAIR",
+            customer=self.customer,
+            currency=self.currency,
+            status="awaiting_payment",
+            total_cents=2999,
+            customer_email=self.customer.primary_email,
+            customer_name=self.customer.name,
+            billing_address={},
+        )
+        item = OrderItem.objects.create(
+            order=order,
+            product=self.product,
+            product_name=self.product.name,
+            product_type=self.product.product_type,
+            quantity=1,
+            unit_price_cents=2999,
+            config={"billing_period": "monthly"},
+        )
+
+        with patch.object(OrderPaymentConfirmationService, "_get_review_threshold", return_value=500_000):
+            result = OrderPaymentConfirmationService.confirm_order(order)
+
+        self.assertTrue(result.is_ok())
+        order.refresh_from_db()
+        item.refresh_from_db()
+        self.assertEqual(order.status, "provisioning")
+        self.assertIsNotNone(item.service_id)
+        self.assertEqual(item.service.status, "provisioning")
+        self.assertTrue(Subscription.objects.filter(service_id=item.service_id, status="active").exists())
+
+    def test_service_creation_rolls_back_all_items_when_one_mapping_fails(self):
+        """A multi-item order cannot retain a partially created service set."""
+        from apps.common.types import Err, Ok  # noqa: PLC0415
+        from apps.orders.services import OrderServiceCreationService  # noqa: PLC0415
+        from apps.provisioning.models import Service  # noqa: PLC0415
+
+        order = Order.objects.create(
+            order_number="ORD-PARTIAL-SERVICE-ROLLBACK",
+            customer=self.customer,
+            currency=self.currency,
+            status="awaiting_payment",
+            customer_email=self.customer.primary_email,
+            customer_name=self.customer.name,
+            billing_address={},
+        )
+        first_item = OrderItem.objects.create(
+            order=order,
+            product=self.product,
+            product_name=self.product.name,
+            product_type=self.product.product_type,
+            quantity=1,
+            unit_price_cents=2999,
+            config={"billing_period": "monthly"},
+        )
+        second_item = OrderItem.objects.create(
+            order=order,
+            product=self.product,
+            product_name=f"{self.product.name} add-on",
+            product_type=self.product.product_type,
+            quantity=1,
+            unit_price_cents=500,
+            config={"billing_period": "monthly"},
+        )
+
+        with patch.object(
+            OrderServiceCreationService,
+            "_get_service_plan_for_product",
+            side_effect=[Ok(self.service_plan), Err("forced second mapping failure")],
+        ):
+            result = OrderServiceCreationService.create_pending_services(order)
+
+        self.assertTrue(result.is_err())
+        first_item.refresh_from_db()
+        second_item.refresh_from_db()
+        self.assertIsNone(first_item.service_id)
+        self.assertIsNone(second_item.service_id)
+        self.assertFalse(Service.objects.filter(customer=self.customer).exists())
+
+    def test_annual_paid_order_maps_snapshot_to_yearly_subscription(self):
+        """Service and subscription vocabularies must preserve an annual purchase."""
+        order = Order.objects.create(
+            order_number="ORD-ANNUAL-0001",
+            customer=self.customer,
+            currency=self.currency,
+            status="awaiting_payment",
+            customer_email=self.customer.primary_email,
+            customer_name=self.customer.name,
+            billing_address={},
+        )
+        OrderItem.objects.create(
+            order=order,
+            product=self.product,
+            product_name=self.product.name,
+            product_type=self.product.product_type,
+            quantity=1,
+            unit_price_cents=32_400,
+            config={"billing_period": "annual"},
+        )
+
+        created = OrderServiceCreationService.create_pending_services(order)
+        self.assertTrue(created.is_ok())
+        service = created.unwrap()[0]
+        self.assertEqual(service.billing_cycle, "annual")
+
+        force_status(order, "provisioning")
+        order.save(update_fields=["status"])
+        enrolled = OrderServiceCreationService.update_service_status_on_payment(order)
+
+        self.assertTrue(enrolled.is_ok())
+        subscription = Subscription.objects.get(service=service)
+        self.assertEqual(subscription.billing_cycle, "yearly")
+        self.assertEqual(subscription.unit_price_cents, 32_400)
+
+    def test_recurring_enrollment_locks_only_order_item_rows_across_nullable_service_join(self):
+        """PostgreSQL must not receive FOR UPDATE for the nullable service outer join."""
+        from django.db.models.query import QuerySet  # noqa: PLC0415
+
+        from apps.orders.services import OrderServiceCreationService  # noqa: PLC0415
+
+        order = Order.objects.create(
+            order_number="ORD-LOCK-SCOPE-0001",
+            customer=self.customer,
+            currency=self.currency,
+            status="awaiting_payment",
+            customer_email=self.customer.primary_email,
+            customer_name=self.customer.name,
+            billing_address={},
+        )
+        OrderItem.objects.create(
+            order=order,
+            product=self.product,
+            product_name=self.product.name,
+            product_type=self.product.product_type,
+            quantity=1,
+            unit_price_cents=2_999,
+            config={"billing_period": "monthly"},
+        )
+        original_select_for_update = QuerySet.select_for_update
+        order_item_lock_scopes: list[tuple[str, ...]] = []
+
+        def track_lock_scope(queryset, *args, **kwargs):
+            if queryset.model is OrderItem:
+                order_item_lock_scopes.append(kwargs.get("of", ()))
+            return original_select_for_update(queryset, *args, **kwargs)
+
+        with patch.object(QuerySet, "select_for_update", track_lock_scope):
+            created = OrderServiceCreationService.create_pending_services(order)
+            self.assertTrue(created.is_ok(), created)
+            force_status(order, "provisioning")
+            order.save(update_fields=["status"])
+            enrolled = OrderServiceCreationService.update_service_status_on_payment(order)
+
+        self.assertTrue(enrolled.is_ok(), enrolled)
+        self.assertGreaterEqual(len(order_item_lock_scopes), 2)
+        self.assertTrue(all(scope == ("self",) for scope in order_item_lock_scopes), order_item_lock_scopes)
 
     def test_service_creation_without_service_plan(self):
         """Test service creation when product has no default service plan"""
-        from apps.orders.services import OrderServiceCreationService
-
         # Remove service plan from product
         self.product.default_service_plan = None
         self.product.save()
@@ -742,30 +1031,32 @@ class OrderServiceCreationTestCase(TestCase):
         # Create draft order
         order_data = OrderCreateData(
             customer=self.customer,
-            items=[{
-                'product_id': self.product.id,
-                'quantity': 1,
-                'unit_price_cents': 2999,
-                'setup_cents': 0,
-                'description': 'Test Hosting Package',
-                'meta': {'billing_cycle': 'monthly'}
-            }],
+            items=[
+                {
+                    "product_id": self.product.id,
+                    "quantity": 1,
+                    "unit_price_cents": 2999,
+                    "setup_cents": 0,
+                    "description": "Test Hosting Package",
+                    "meta": {"billing_cycle": "monthly"},
+                }
+            ],
             billing_address={
-                'company_name': 'Test Company',
-                'contact_name': 'Test Contact',
-                'email': 'test@customer.ro',
-                'phone': '+40712345678',
-                'address_line1': 'Test Street 123',
-                'address_line2': '',
-                'city': 'Bucharest',
-                'county': 'Bucharest',
-                'postal_code': '010001',
-                'country': 'RO',
-                'fiscal_code': 'RO12345678',
-                'registration_number': 'J40/123/2023',
-                'vat_number': 'RO12345678'
+                "company_name": "Test Company",
+                "contact_name": "Test Contact",
+                "email": "test@customer.ro",
+                "phone": "+40712345678",
+                "address_line1": "Test Street 123",
+                "address_line2": "",
+                "city": "Bucharest",
+                "county": "Bucharest",
+                "postal_code": "010001",
+                "country": "RO",
+                "fiscal_code": "RO12345678",
+                "registration_number": "J40/123/2023",
+                "vat_number": "RO12345678",
             },
-            currency="RON"
+            currency="RON",
         )
 
         result = OrderService.create_order(order_data)
@@ -789,36 +1080,35 @@ class OrderServiceCreationTestCase(TestCase):
 
     def test_service_not_created_if_already_exists(self):
         """Test that services are not duplicated if they already exist for order items"""
-        from apps.orders.services import OrderServiceCreationService
-        from apps.provisioning.models import Service
-
         # Create order
         order_data = OrderCreateData(
             customer=self.customer,
-            items=[{
-                'product_id': self.product.id,
-                'quantity': 1,
-                'unit_price_cents': 2999,
-                'setup_cents': 0,
-                'description': 'Test Hosting Package',
-                'meta': {'billing_cycle': 'monthly'}
-            }],
+            items=[
+                {
+                    "product_id": self.product.id,
+                    "quantity": 1,
+                    "unit_price_cents": 2999,
+                    "setup_cents": 0,
+                    "description": "Test Hosting Package",
+                    "meta": {"billing_cycle": "monthly"},
+                }
+            ],
             billing_address={
-                'company_name': 'Test Company',
-                'contact_name': 'Test Contact',
-                'email': 'test@customer.ro',
-                'phone': '+40712345678',
-                'address_line1': 'Test Street 123',
-                'address_line2': '',
-                'city': 'Bucharest',
-                'county': 'Bucharest',
-                'postal_code': '010001',
-                'country': 'RO',
-                'fiscal_code': 'RO12345678',
-                'registration_number': 'J40/123/2023',
-                'vat_number': 'RO12345678'
+                "company_name": "Test Company",
+                "contact_name": "Test Contact",
+                "email": "test@customer.ro",
+                "phone": "+40712345678",
+                "address_line1": "Test Street 123",
+                "address_line2": "",
+                "city": "Bucharest",
+                "county": "Bucharest",
+                "postal_code": "010001",
+                "country": "RO",
+                "fiscal_code": "RO12345678",
+                "registration_number": "J40/123/2023",
+                "vat_number": "RO12345678",
             },
-            currency="RON"
+            currency="RON",
         )
 
         result = OrderService.create_order(order_data)
@@ -845,20 +1135,23 @@ class AuditTrailOnConfirmOrderTestCase(TestCase):
     """C6: confirm_order must call AuditService.log_simple_event('order_payment_confirmed')."""
 
     def setUp(self):
-        self.currency, _ = Currency.objects.get_or_create(
-            code="RON", defaults={"symbol": "lei", "decimals": 2}
-        )
+        self.currency, _ = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei", "decimals": 2})
         self.customer = Customer.objects.create(
-            name="Audit Trail Test SRL", customer_type="company",
-            status="active", primary_email="audit-trail@test.ro",
+            name="Audit Trail Test SRL",
+            customer_type="company",
+            status="active",
+            primary_email="audit-trail@test.ro",
         )
 
     def _create_order(self, total_cents: int = 12100) -> Order:
         order = Order.objects.create(
-            customer=self.customer, currency=self.currency,
+            customer=self.customer,
+            currency=self.currency,
             customer_email=self.customer.primary_email,
             customer_name=self.customer.name,
-            subtotal_cents=total_cents - 2100, tax_cents=2100, total_cents=total_cents,
+            subtotal_cents=total_cents - 2100,
+            tax_cents=2100,
+            total_cents=total_cents,
             billing_address={},
         )
         return order
@@ -882,8 +1175,11 @@ class AuditTrailOnConfirmOrderTestCase(TestCase):
         order = self._create_order(total_cents=12100)
         force_status(order, "awaiting_payment")
         invoice = Invoice.objects.create(
-            customer=self.customer, currency=self.currency,
-            subtotal_cents=10000, tax_cents=2100, total_cents=12100,
+            customer=self.customer,
+            currency=self.currency,
+            subtotal_cents=10000,
+            tax_cents=2100,
+            total_cents=12100,
         )
 
         result = OrderPaymentConfirmationService.confirm_order(order, invoice=invoice)
@@ -902,11 +1198,14 @@ class AuditTrailOnConfirmOrderTestCase(TestCase):
             audit_event,
             "AuditEvent with action='order_payment_confirmed' linked to Order was not created. "
             "The audit record must use AuditService.log_simple_event(content_object=order) — "
-            "not log_security_event() which hardcodes content_object=None."
+            "not log_security_event() which hardcodes content_object=None.",
         )
         # Verify invoice_id is in the metadata
-        self.assertIn("invoice_id", audit_event.metadata,
-                      "order_payment_confirmed audit event must include invoice_id in metadata")
+        self.assertIn(
+            "invoice_id",
+            audit_event.metadata,
+            "order_payment_confirmed audit event must include invoice_id in metadata",
+        )
         self.assertEqual(audit_event.metadata["invoice_id"], str(invoice.id))
 
 
@@ -924,9 +1223,7 @@ class ConfirmOrderAuditHistoryOrderTestCase(TestCase):
     """B-3: Both OrderStatusHistory records must be created in transition order."""
 
     def setUp(self) -> None:
-        self.currency, _ = Currency.objects.get_or_create(
-            code="RON", defaults={"symbol": "lei", "decimals": 2}
-        )
+        self.currency, _ = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei", "decimals": 2})
         self.customer = Customer.objects.create(
             name="History Order Test SRL",
             customer_type="company",
@@ -949,9 +1246,7 @@ class ConfirmOrderAuditHistoryOrderTestCase(TestCase):
         return order
 
     @patch("apps.orders.services.OrderPaymentConfirmationService._get_review_threshold")
-    def test_confirm_order_below_threshold_creates_two_history_records_in_order(
-        self, mock_threshold: object
-    ) -> None:
+    def test_confirm_order_below_threshold_creates_two_history_records_in_order(self, mock_threshold: object) -> None:
         """Below review threshold: must emit awaiting_payment→paid then paid→provisioning."""
         from apps.billing.models import Invoice  # noqa: PLC0415
         from apps.orders.models import OrderStatusHistory  # noqa: PLC0415
@@ -997,9 +1292,7 @@ class ConfirmOrderAuditHistoryOrderTestCase(TestCase):
         )
 
     @patch("apps.orders.services.OrderPaymentConfirmationService._get_review_threshold")
-    def test_confirm_order_above_threshold_creates_two_history_records_in_order(
-        self, mock_threshold: object
-    ) -> None:
+    def test_confirm_order_above_threshold_creates_two_history_records_in_order(self, mock_threshold: object) -> None:
         """Above review threshold: must emit awaiting_payment→paid then paid→in_review."""
         from apps.billing.models import Invoice  # noqa: PLC0415
         from apps.orders.models import OrderStatusHistory  # noqa: PLC0415
@@ -1042,9 +1335,7 @@ class ConfirmOrderAuditHistoryOrderTestCase(TestCase):
         )
 
     @patch("apps.orders.services.OrderPaymentConfirmationService._get_review_threshold")
-    def test_first_history_record_is_written_before_second_transition(
-        self, mock_threshold: object
-    ) -> None:
+    def test_first_history_record_is_written_before_second_transition(self, mock_threshold: object) -> None:
         """B-3 ordering guard: awaiting_payment→paid record must be persisted BEFORE
         start_provisioning() is called.
 
@@ -1080,9 +1371,7 @@ class ConfirmOrderAuditHistoryOrderTestCase(TestCase):
         # The first history record must describe awaiting_payment→paid,
         # not the post-transition state (which would be paid→provisioning).
         # If the records were reversed or the old_status were wrong, this assertion fails.
-        first_record = (
-            OrderStatusHistory.objects.filter(order=order).order_by("created_at").first()
-        )
+        first_record = OrderStatusHistory.objects.filter(order=order).order_by("created_at").first()
         self.assertIsNotNone(first_record, "No OrderStatusHistory records created")
         assert first_record is not None  # type narrowing
         self.assertEqual(
@@ -1115,9 +1404,7 @@ class ProformaReuseOnRetryTest(TestCase):
     """
 
     def setUp(self):
-        self.currency, _ = Currency.objects.get_or_create(
-            code="RON", defaults={"symbol": "lei", "decimals": 2}
-        )
+        self.currency, _ = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei", "decimals": 2})
         self.customer = Customer.objects.create(
             name="Proforma Reuse SRL",
             customer_type="company",
@@ -1131,6 +1418,7 @@ class ProformaReuseOnRetryTest(TestCase):
             is_active=True,
         )
         from apps.billing.proforma_models import ProformaSequence  # noqa: PLC0415
+
         ProformaSequence.objects.get_or_create(scope="default")
 
     def _create_draft_order(self):

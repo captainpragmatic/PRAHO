@@ -23,7 +23,6 @@ from apps.billing.metering_models import (
     UsageMeter,
 )
 from apps.billing.metering_tasks import (
-    advance_billing_cycles,
     check_all_usage_thresholds,
     check_usage_thresholds,
     check_usage_thresholds_async,
@@ -37,10 +36,6 @@ from apps.billing.metering_tasks import (
     run_billing_cycle_workflow,
     send_usage_alert_notification,
     send_usage_alert_notification_async,
-    sync_aggregation_to_stripe,
-    sync_aggregation_to_stripe_async,
-    sync_billing_cycle_to_stripe,
-    sync_pending_to_stripe,
     update_aggregation_for_event,
     update_aggregation_for_event_async,
 )
@@ -54,9 +49,7 @@ class UpdateAggregationForEventTestCase(TestCase):
 
     def setUp(self):
         """Set up test data."""
-        self.currency, _ = Currency.objects.get_or_create(
-            code="RON", defaults={"symbol": "lei", "decimals": 2}
-        )
+        self.currency, _ = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei", "decimals": 2})
         self.customer = Customer.objects.create(
             name="Test Customer",
             primary_email="test@example.com",
@@ -136,6 +129,24 @@ class UpdateAggregationForEventTestCase(TestCase):
         self.assertEqual(result["event_id"], str(event.id))
         mock_service._update_aggregation_sync.assert_called_once()
 
+    def test_missing_cycle_is_reported_as_failure_and_event_stays_pending(self):
+        self.billing_cycle.delete()
+        event = UsageEvent.objects.create(
+            meter=self.meter,
+            customer=self.customer,
+            subscription=self.subscription,
+            value=Decimal("10"),
+            is_processed=False,
+            timestamp=timezone.now(),
+        )
+
+        result = update_aggregation_for_event(str(event.id))
+
+        self.assertFalse(result["success"])
+        self.assertIn("billing cycle", result["error"].lower())
+        event.refresh_from_db()
+        self.assertFalse(event.is_processed)
+
 
 class ProcessPendingUsageEventsTestCase(TestCase):
     """Test process_pending_usage_events task."""
@@ -153,9 +164,7 @@ class ProcessPendingUsageEventsTestCase(TestCase):
         self.assertTrue(result["success"])
         self.assertEqual(result["processed"], 50)
         self.assertEqual(result["errors"], 2)
-        mock_service.process_pending_events.assert_called_once_with(
-            meter_id=None, limit=100
-        )
+        mock_service.process_pending_events.assert_called_once_with(meter_id=None, limit=100)
 
     @patch("apps.audit.services.AuditService")
     @patch("apps.billing.metering_service.AggregationService")
@@ -167,16 +176,12 @@ class ProcessPendingUsageEventsTestCase(TestCase):
 
         process_pending_usage_events(limit=50, meter_id="meter123")
 
-        mock_service.process_pending_events.assert_called_once_with(
-            meter_id="meter123", limit=50
-        )
+        mock_service.process_pending_events.assert_called_once_with(meter_id="meter123", limit=50)
 
     @patch("apps.billing.metering_service.AggregationService")
     def test_exception_handling(self, mock_service_class):
         """Test exception handling in batch processing."""
-        mock_service_class.return_value.process_pending_events.side_effect = (
-            Exception("Database error")
-        )
+        mock_service_class.return_value.process_pending_events.side_effect = Exception("Database error")
 
         result = process_pending_usage_events()
 
@@ -189,9 +194,7 @@ class BillingCycleTasksTestCase(TestCase):
 
     def setUp(self):
         """Set up test data."""
-        self.currency, _ = Currency.objects.get_or_create(
-            code="RON", defaults={"symbol": "lei", "decimals": 2}
-        )
+        self.currency, _ = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei", "decimals": 2})
         self.customer = Customer.objects.create(
             name="Test Customer",
             primary_email="test@example.com",
@@ -216,27 +219,10 @@ class BillingCycleTasksTestCase(TestCase):
             next_billing_date=now + timedelta(days=30),
         )
 
-    @patch("apps.audit.services.AuditService")
-    @patch("apps.billing.usage_invoice_service.BillingCycleManager")
-    def test_advance_billing_cycles(self, mock_manager_class, mock_audit):
-        """Test advancing billing cycles."""
-        mock_manager = MagicMock()
-        mock_manager.advance_all_subscriptions.return_value = (5, 1, ["Error 1"])
-        mock_manager_class.return_value = mock_manager
-
-        result = advance_billing_cycles()
-
-        self.assertTrue(result["success"])
-        self.assertEqual(result["created"], 5)
-        self.assertEqual(result["errors"], 1)
-        mock_manager.advance_all_subscriptions.assert_called_once()
-
-    @patch("apps.billing.usage_invoice_service.BillingCycleManager")
-    def test_close_expired_billing_cycles(self, mock_manager_class):
+    @patch("apps.billing.usage_invoice_service.UsageBillingService")
+    def test_close_expired_billing_cycles(self, mock_service_class):
         """Test closing expired billing cycles."""
-        mock_manager = MagicMock()
-        mock_manager.close_expired_cycles.return_value = (10, 0)
-        mock_manager_class.return_value = mock_manager
+        mock_service_class.close_expired_cycles.return_value = (10, 0)
 
         result = close_expired_billing_cycles()
 
@@ -244,12 +230,10 @@ class BillingCycleTasksTestCase(TestCase):
         self.assertEqual(result["closed"], 10)
         self.assertEqual(result["errors"], 0)
 
-    @patch("apps.billing.usage_invoice_service.BillingCycleManager")
-    def test_generate_pending_invoices(self, mock_manager_class):
+    @patch("apps.billing.usage_invoice_service.UsageBillingService")
+    def test_generate_pending_invoices(self, mock_service_class):
         """Test generating pending invoices."""
-        mock_manager = MagicMock()
-        mock_manager.generate_pending_invoices.return_value = (3, 0)
-        mock_manager_class.return_value = mock_manager
+        mock_service_class.generate_pending_invoices.return_value = (3, 0)
 
         result = generate_pending_invoices()
 
@@ -262,9 +246,7 @@ class RatePendingAggregationsTestCase(TestCase):
 
     def setUp(self):
         """Set up test data."""
-        self.currency, _ = Currency.objects.get_or_create(
-            code="RON", defaults={"symbol": "lei", "decimals": 2}
-        )
+        self.currency, _ = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei", "decimals": 2})
         self.customer = Customer.objects.create(
             name="Test Customer",
             primary_email="test@example.com",
@@ -339,7 +321,6 @@ class BillingWorkflowTestCase(TestCase):
     """Test run_billing_cycle_workflow task."""
 
     @patch("apps.audit.services.AuditService")
-    @patch("apps.billing.metering_tasks.advance_billing_cycles")
     @patch("apps.billing.metering_tasks.generate_pending_invoices")
     @patch("apps.billing.metering_tasks.rate_pending_aggregations")
     @patch("apps.billing.metering_tasks.close_expired_billing_cycles")
@@ -348,14 +329,12 @@ class BillingWorkflowTestCase(TestCase):
         mock_close,
         mock_rate,
         mock_generate,
-        mock_advance,
-        mock_audit
+        mock_audit,
     ):
         """Test complete billing cycle workflow."""
         mock_close.return_value = {"success": True, "closed": 5}
         mock_rate.return_value = {"success": True, "rated": 10}
         mock_generate.return_value = {"success": True, "generated": 3}
-        mock_advance.return_value = {"success": True, "created": 2}
 
         result = run_billing_cycle_workflow()
 
@@ -364,7 +343,6 @@ class BillingWorkflowTestCase(TestCase):
         mock_close.assert_called_once()
         mock_rate.assert_called_once()
         mock_generate.assert_called_once()
-        mock_advance.assert_called_once()
 
 
 class AlertTasksTestCase(TestCase):
@@ -372,9 +350,7 @@ class AlertTasksTestCase(TestCase):
 
     def setUp(self):
         """Set up test data."""
-        self.currency, _ = Currency.objects.get_or_create(
-            code="RON", defaults={"symbol": "lei", "decimals": 2}
-        )
+        self.currency, _ = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei", "decimals": 2})
         self.customer = Customer.objects.create(
             name="Test Customer",
             primary_email="test@example.com",
@@ -415,9 +391,7 @@ class AlertTasksTestCase(TestCase):
         mock_service_class.return_value = mock_service
 
         result = check_usage_thresholds(
-            customer_id=str(self.customer.id),
-            meter_id=str(self.meter.id),
-            subscription_id=str(self.subscription.id)
+            customer_id=str(self.customer.id), meter_id=str(self.meter.id), subscription_id=str(self.subscription.id)
         )
 
         self.assertTrue(result["success"])
@@ -441,12 +415,27 @@ class AlertTasksTestCase(TestCase):
 
     @patch("apps.billing.metering_service.UsageAlertService")
     def test_check_all_usage_thresholds(self, mock_service_class):
-        """Test checking all usage thresholds."""
-        # Create subscription item
+        """Scheduled threshold checks use aggregation meter IDs, never product IDs."""
         SubscriptionItem.objects.create(
             subscription=self.subscription,
             product=self.product,
             unit_price_cents=2999,
+        )
+        now = timezone.now()
+        billing_cycle = BillingCycle.objects.create(
+            subscription=self.subscription,
+            period_start=now,
+            period_end=now + timedelta(days=30),
+            status="active",
+        )
+        UsageAggregation.objects.create(
+            meter=self.meter,
+            customer=self.customer,
+            subscription=self.subscription,
+            billing_cycle=billing_cycle,
+            period_start=now,
+            period_end=now + timedelta(days=30),
+            status="accumulating",
         )
 
         mock_service = MagicMock()
@@ -457,128 +446,11 @@ class AlertTasksTestCase(TestCase):
 
         self.assertTrue(result["success"])
         self.assertEqual(result["subscriptions_checked"], 1)
-
-
-class StripeSyncTasksTestCase(TestCase):
-    """Test Stripe sync tasks."""
-
-    def setUp(self):
-        """Set up test data."""
-        self.currency, _ = Currency.objects.get_or_create(
-            code="RON", defaults={"symbol": "lei", "decimals": 2}
+        mock_service.check_thresholds.assert_called_once_with(
+            str(self.customer.id),
+            str(self.meter.id),
+            str(self.subscription.id),
         )
-        self.customer = Customer.objects.create(
-            name="Test Customer",
-            primary_email="test@example.com",
-            status="active",
-        )
-        self.meter = UsageMeter.objects.create(
-            name="api_requests",
-            display_name="API Requests",
-            aggregation_type="sum",
-            unit="requests",
-            stripe_meter_id="meter_abc",
-            stripe_meter_event_name="api_requests",
-        )
-        self.product = Product.objects.create(
-            slug="basic-stripe",
-            name="Basic",
-            product_type="shared_hosting",
-        )
-        now = timezone.now()
-        self.subscription = Subscription.objects.create(
-            customer=self.customer,
-            product=self.product,
-            currency=self.currency,
-            subscription_number="SUB-STRIPE-001",
-            status="active",
-            billing_cycle="monthly",
-            unit_price_cents=2999,
-            current_period_start=now,
-            current_period_end=now + timedelta(days=30),
-            next_billing_date=now + timedelta(days=30),
-            stripe_subscription_id="sub_abc123",
-        )
-        now = timezone.now()
-        self.billing_cycle = BillingCycle.objects.create(
-            subscription=self.subscription,
-            period_start=now,
-            period_end=now + timedelta(days=30),
-            status="active",
-        )
-        self.aggregation = UsageAggregation.objects.create(
-            meter=self.meter,
-            customer=self.customer,
-            subscription=self.subscription,
-            billing_cycle=self.billing_cycle,
-            period_start=now,
-            period_end=now + timedelta(days=30),
-            total_value=Decimal("100"),
-            billable_value=Decimal("100"),
-            status="rated",
-        )
-
-    @patch("apps.billing.stripe_metering.StripeUsageSyncService")
-    def test_sync_aggregation_to_stripe_success(self, mock_service_class):
-        """Test successful aggregation sync to Stripe."""
-        mock_service = MagicMock()
-        mock_result = MagicMock()
-        mock_result.is_ok.return_value = True
-        mock_result.unwrap.return_value = {"synced": True}
-        mock_service.sync_aggregation_to_stripe.return_value = mock_result
-        mock_service_class.return_value = mock_service
-
-        result = sync_aggregation_to_stripe(str(self.aggregation.id))
-
-        self.assertTrue(result["success"])
-        mock_service.sync_aggregation_to_stripe.assert_called_once_with(
-            str(self.aggregation.id)
-        )
-
-    @patch("apps.billing.stripe_metering.StripeUsageSyncService")
-    def test_sync_aggregation_to_stripe_error(self, mock_service_class):
-        """Test aggregation sync error handling."""
-        mock_service = MagicMock()
-        mock_result = MagicMock()
-        mock_result.is_ok.return_value = False
-        mock_result.unwrap_err.return_value = "Stripe API error"
-        mock_service.sync_aggregation_to_stripe.return_value = mock_result
-        mock_service_class.return_value = mock_service
-
-        result = sync_aggregation_to_stripe(str(self.aggregation.id))
-
-        self.assertFalse(result["success"])
-        self.assertIn("Stripe API error", result["error"])
-
-    @patch("apps.billing.stripe_metering.StripeUsageSyncService")
-    def test_sync_billing_cycle_to_stripe(self, mock_service_class):
-        """Test syncing entire billing cycle to Stripe."""
-        mock_service = MagicMock()
-        mock_result = MagicMock()
-        mock_result.is_ok.return_value = True
-        mock_result.unwrap.return_value = {"success_count": 5}
-        mock_service.sync_billing_cycle_to_stripe.return_value = mock_result
-        mock_service_class.return_value = mock_service
-
-        result = sync_billing_cycle_to_stripe(str(self.billing_cycle.id))
-
-        self.assertTrue(result["success"])
-        self.assertEqual(result["success_count"], 5)
-
-    @patch("apps.billing.stripe_metering.StripeUsageSyncService")
-    def test_sync_pending_to_stripe(self, mock_service_class):
-        """Test syncing all pending aggregations to Stripe."""
-        mock_service = MagicMock()
-        mock_result = MagicMock()
-        mock_result.is_ok.return_value = True
-        mock_result.unwrap.return_value = {}
-        mock_service.sync_aggregation_to_stripe.return_value = mock_result
-        mock_service_class.return_value = mock_service
-
-        result = sync_pending_to_stripe()
-
-        self.assertTrue(result["success"])
-        self.assertIn("synced", result)
 
 
 class VirtualminUsageCollectionTestCase(TestCase):
@@ -602,9 +474,7 @@ class VirtualminUsageCollectionTestCase(TestCase):
 
     @patch("apps.audit.services.AuditService")
     @patch("apps.provisioning.models.VirtualminAccount")
-    def test_collect_virtualmin_usage_success(
-        self, mock_account_model, mock_audit
-    ):
+    def test_collect_virtualmin_usage_success(self, mock_account_model, mock_audit):
         """Test successful Virtualmin usage collection."""
         # Create real meters
         UsageMeter.objects.create(
@@ -616,7 +486,7 @@ class VirtualminUsageCollectionTestCase(TestCase):
         UsageMeter.objects.create(
             name="bandwidth_gb",
             display_name="Bandwidth",
-            aggregation_type="sum",
+            aggregation_type="last",
             unit="gb",
         )
 
@@ -680,9 +550,7 @@ class AsyncWrapperTestCase(TestCase):
 
         self.assertEqual(result, "task_id_123")
         mock_async_task.assert_called_once_with(
-            "apps.billing.metering_tasks.update_aggregation_for_event",
-            "event123",
-            timeout=300
+            "apps.billing.metering_tasks.update_aggregation_for_event", "event123", timeout=300
         )
 
     @patch("apps.billing.metering_tasks.async_task")
@@ -694,11 +562,7 @@ class AsyncWrapperTestCase(TestCase):
 
         self.assertEqual(result, "task_id_456")
         mock_async_task.assert_called_once_with(
-            "apps.billing.metering_tasks.check_usage_thresholds",
-            "cust123",
-            "meter456",
-            "sub789",
-            timeout=300
+            "apps.billing.metering_tasks.check_usage_thresholds", "cust123", "meter456", "sub789", timeout=300
         )
 
     @patch("apps.billing.metering_tasks.async_task")
@@ -709,16 +573,6 @@ class AsyncWrapperTestCase(TestCase):
         result = send_usage_alert_notification_async("alert123")
 
         self.assertEqual(result, "task_id_789")
-        mock_async_task.assert_called_once()
-
-    @patch("apps.billing.metering_tasks.async_task")
-    def test_sync_aggregation_to_stripe_async(self, mock_async_task):
-        """Test async Stripe sync wrapper."""
-        mock_async_task.return_value = "task_id_stripe"
-
-        result = sync_aggregation_to_stripe_async("agg123")
-
-        self.assertEqual(result, "task_id_stripe")
         mock_async_task.assert_called_once()
 
 
@@ -733,8 +587,8 @@ class ScheduledTaskRegistrationTestCase(TestCase):
 
         register_scheduled_tasks()
 
-        # Verify 6 tasks are registered
-        self.assertEqual(mock_schedule.objects.update_or_create.call_count, 6)
+        # Only PRAHO-local usage tasks are registered.
+        self.assertEqual(mock_schedule.objects.update_or_create.call_count, 5)
 
         # Check that specific tasks are registered
         calls = mock_schedule.objects.update_or_create.call_args_list
@@ -743,7 +597,6 @@ class ScheduledTaskRegistrationTestCase(TestCase):
         self.assertIn("Process Pending Usage Events", task_names)
         self.assertIn("Run Billing Cycle Workflow", task_names)
         self.assertIn("Check All Usage Thresholds", task_names)
-        self.assertIn("Sync Pending to Stripe", task_names)
         self.assertIn("Collect Virtualmin Usage", task_names)
         self.assertIn("Collect Service Usage", task_names)
 
@@ -751,24 +604,10 @@ class ScheduledTaskRegistrationTestCase(TestCase):
 class TaskErrorHandlingTestCase(TestCase):
     """Test error handling across tasks."""
 
-    @patch("apps.billing.usage_invoice_service.BillingCycleManager")
-    def test_advance_billing_cycles_exception(self, mock_manager_class):
-        """Test exception handling in advance_billing_cycles."""
-        mock_manager_class.return_value.advance_all_subscriptions.side_effect = (
-            Exception("Database connection error")
-        )
-
-        result = advance_billing_cycles()
-
-        self.assertFalse(result["success"])
-        self.assertIn("Database connection error", result["error"])
-
-    @patch("apps.billing.usage_invoice_service.BillingCycleManager")
-    def test_close_expired_cycles_exception(self, mock_manager_class):
+    @patch("apps.billing.usage_invoice_service.UsageBillingService")
+    def test_close_expired_cycles_exception(self, mock_service_class):
         """Test exception handling in close_expired_billing_cycles."""
-        mock_manager_class.return_value.close_expired_cycles.side_effect = (
-            Exception("Lock timeout")
-        )
+        mock_service_class.close_expired_cycles.side_effect = Exception("Lock timeout")
 
         result = close_expired_billing_cycles()
 
@@ -778,23 +617,9 @@ class TaskErrorHandlingTestCase(TestCase):
     @patch("apps.billing.metering_service.UsageAlertService")
     def test_check_thresholds_exception(self, mock_service_class):
         """Test exception handling in check_usage_thresholds."""
-        mock_service_class.return_value.check_thresholds.side_effect = (
-            Exception("Service unavailable")
-        )
+        mock_service_class.return_value.check_thresholds.side_effect = Exception("Service unavailable")
 
         result = check_usage_thresholds("cust1", "meter1")
 
         self.assertFalse(result["success"])
         self.assertIn("Service unavailable", result["error"])
-
-    @patch("apps.billing.stripe_metering.StripeUsageSyncService")
-    def test_stripe_sync_exception(self, mock_service_class):
-        """Test exception handling in sync_aggregation_to_stripe."""
-        mock_service_class.return_value.sync_aggregation_to_stripe.side_effect = (
-            Exception("Stripe rate limit exceeded")
-        )
-
-        result = sync_aggregation_to_stripe("agg123")
-
-        self.assertFalse(result["success"])
-        self.assertIn("Stripe rate limit exceeded", result["error"])

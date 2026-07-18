@@ -78,16 +78,6 @@ class InvoiceViewServiceRateLimitTests(SimpleTestCase):
         result = self.service.get_proforma_detail("PF-001", 1, 1)
         self.assertIsNone(result)
 
-    def test_get_payment_methods_reraises_rate_limited(self) -> None:
-        self.service.api_client.get_payment_methods.side_effect = _rate_limited_error()
-        with self.assertRaises(PlatformAPIError):
-            self.service.get_payment_methods(1, 1)
-
-    def test_get_payment_methods_returns_empty_on_server_error(self) -> None:
-        self.service.api_client.get_payment_methods.side_effect = _server_error()
-        result = self.service.get_payment_methods(1, 1)
-        self.assertEqual(result, [])
-
     def test_request_refund_reraises_rate_limited(self) -> None:
         self.service.api_client.post.side_effect = _rate_limited_error()
         with self.assertRaises(PlatformAPIError):

@@ -20,7 +20,7 @@ from django.db import IntegrityError, transaction
 from django.test import TestCase
 from rest_framework.test import APIRequestFactory
 
-from apps.billing.models import Currency
+from apps.billing.models import Currency, Payment
 from apps.customers.models import Customer
 from apps.orders.models import Order, OrderStatusHistory
 from apps.orders.services import OrderNumberingService, StatusChangeData
@@ -341,7 +341,16 @@ def _make_pending_order_for_h9(customer: Customer, currency: Currency, **kwargs:
     # Create proforma so confirm_order can convert it
     from apps.billing.proforma_service import ProformaService  # noqa: PLC0415
 
-    ProformaService.create_from_order(order)
+    proforma = ProformaService.create_from_order(order).unwrap()
+    Payment.objects.create(
+        customer=customer,
+        currency=currency,
+        amount_cents=order.total_cents,
+        payment_method="stripe",
+        gateway_txn_id=order.payment_intent_id,
+        proforma=proforma,
+        meta={"proforma_id": str(proforma.id)},
+    )
     order.refresh_from_db()
     return order
 
@@ -379,9 +388,22 @@ class ConfirmOrderStatusHistoryTest(TestCase):
             payment_intent_id="pi_testH9history123456",
         )
         force_status(order, "awaiting_payment")
+        Payment.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            amount_cents=order.total_cents,
+            payment_method="stripe",
+            gateway_txn_id=order.payment_intent_id,
+        )
 
         mock_gateway = MagicMock()
-        mock_gateway.confirm_payment.return_value = {"success": True, "status": "succeeded", "error": None, "amount_received": 0}
+        mock_gateway.confirm_payment.return_value = {
+            "success": True,
+            "status": "succeeded",
+            "error": None,
+            "amount_received": 0,
+            "currency": "ron",
+        }
 
         with (
             patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)),
@@ -414,7 +436,13 @@ class ConfirmOrderStatusHistoryTest(TestCase):
         self.assertEqual(order.status, "awaiting_payment")
 
         mock_gateway = MagicMock()
-        mock_gateway.confirm_payment.return_value = {"success": True, "status": "succeeded", "error": None, "amount_received": 0}
+        mock_gateway.confirm_payment.return_value = {
+            "success": True,
+            "status": "succeeded",
+            "error": None,
+            "amount_received": 0,
+            "currency": "ron",
+        }
 
         with (
             patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)),
@@ -464,7 +492,11 @@ class ConfirmOrderStatusHistoryTest(TestCase):
 
         mock_gateway = MagicMock()
         mock_gateway.confirm_payment.return_value = {
-            "success": True, "status": "succeeded", "error": None, "amount_received": 0,
+            "success": True,
+            "status": "succeeded",
+            "error": None,
+            "amount_received": 0,
+            "currency": "ron",
         }
 
         with (
@@ -955,7 +987,13 @@ class ConfirmOrderErrorLeakageTest(TestCase):
 
         mock_invoice = MagicMock()
         mock_gateway = MagicMock()
-        mock_gateway.confirm_payment.return_value = {"success": True, "status": "succeeded", "error": None, "amount_received": 0}
+        mock_gateway.confirm_payment.return_value = {
+            "success": True,
+            "status": "succeeded",
+            "error": None,
+            "amount_received": 0,
+            "currency": "ron",
+        }
 
         with (
             patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)),

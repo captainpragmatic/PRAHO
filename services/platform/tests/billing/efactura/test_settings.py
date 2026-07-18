@@ -11,8 +11,10 @@ Tests cover:
 
 from datetime import timedelta
 from decimal import Decimal
+from io import StringIO
 from unittest.mock import patch
 
+from django.core.management import call_command
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
@@ -29,6 +31,7 @@ from apps.billing.efactura.settings import (
     VATCategory,
     VATRateConfig,
 )
+from apps.settings.models import SystemSetting
 
 
 class VATCategoryTestCase(TestCase):
@@ -258,13 +261,10 @@ class EFacturaSettingsTestCase(TestCase):
         self.assertEqual(self.settings.rate_limit_list_paginated_per_day, 100000)
         self.assertEqual(self.settings.rate_limit_download_per_message_day, 10)
 
-    def test_b2b_enabled_by_default(self):
-        """Test B2B is enabled by default (mandatory since 2024)."""
-        self.assertTrue(self.settings.b2b_enabled)
-
-    def test_b2c_disabled_by_default(self):
-        """Test B2C is disabled by default (until 2025)."""
-        self.assertFalse(self.settings.b2c_enabled)
+    def test_legal_submission_scope_is_not_customer_segment_configurable(self):
+        """B2B/B2C eligibility is law, not a feature flag or amount threshold."""
+        forbidden_fragments = ("b2b.enabled", "b2c.enabled", "minimum_amount_cents")
+        self.assertFalse(any(fragment in key for key in EFACTURA_DEFAULTS for fragment in forbidden_fragments))
 
     def test_archive_retention_years(self):
         """Test archive retention is 10 years (Romanian law)."""
@@ -428,3 +428,34 @@ class ConstantsTestCase(TestCase):
                         EFACTURA_DEFAULTS,
                         f"Missing default for {setting_key}",
                     )
+
+
+class EFacturaSettingsCommandTestCase(TestCase):
+    def test_discoverable_setup_command_does_not_restore_invalid_compliance_gates(self) -> None:
+        output = StringIO()
+
+        call_command("setup_efactura_settings", dry_run=True, force=False, stdout=output)
+
+        rendered = output.getvalue()
+        self.assertNotIn("efactura.b2b.enabled", rendered)
+        self.assertNotIn("efactura.b2c.enabled", rendered)
+
+    def test_setup_command_covers_every_runtime_efactura_setting(self) -> None:
+        output = StringIO()
+
+        call_command("setup_efactura_settings", dry_run=True, force=False, stdout=output)
+
+        rendered_keys = {
+            line.split(": ", maxsplit=1)[1].split(" = ", maxsplit=1)[0]
+            for line in output.getvalue().splitlines()
+            if line.startswith("[DRY-RUN]")
+        }
+        self.assertEqual(rendered_keys, set(EFACTURA_DEFAULTS))
+
+    def test_setup_command_persists_every_runtime_efactura_setting(self) -> None:
+        call_command("setup_efactura_settings", stdout=StringIO())
+
+        persisted_keys = set(
+            SystemSetting.objects.filter(key__startswith="efactura.").values_list("key", flat=True)
+        )
+        self.assertEqual(persisted_keys, set(EFACTURA_DEFAULTS))

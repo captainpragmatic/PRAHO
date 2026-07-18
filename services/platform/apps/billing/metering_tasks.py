@@ -7,7 +7,6 @@ This module provides scheduled and async tasks for:
 - Billing cycle management
 - Invoice generation
 - Alert notifications
-- Stripe synchronization
 - Usage data collection from Virtualmin
 """
 
@@ -132,47 +131,6 @@ def process_pending_usage_events(limit: int = 1000, meter_id: str | None = None)
 # ===============================================================================
 
 
-def advance_billing_cycles() -> dict[str, Any]:
-    """
-    Create new billing cycles for subscriptions that need them.
-
-    Should be run daily to ensure billing cycles are created ahead of time.
-    """
-    from .usage_invoice_service import (  # noqa: PLC0415  # Deferred: avoids circular import
-        BillingCycleManager,  # Deferred: django-q task  # Deferred: avoids circular import
-    )
-
-    logger.info("Advancing billing cycles")
-
-    try:
-        manager = BillingCycleManager()
-        created, errors, error_messages = manager.advance_all_subscriptions()
-
-        # Log the advancement
-        AuditService.log_simple_event(
-            event_type="billing_cycles_advanced",
-            user=None,
-            content_object=None,
-            description=f"Created {created} billing cycles, {errors} errors",
-            actor_type="system",
-            metadata={
-                "created_count": created,
-                "error_count": errors,
-                "errors": error_messages[:10],  # Limit logged errors
-            },
-        )
-
-        return {
-            "success": True,
-            "created": created,
-            "errors": errors,
-            "error_messages": error_messages,
-        }
-    except Exception as e:
-        logger.exception(f"Error advancing billing cycles: {e}")
-        return {"success": False, "error": str(e)}
-
-
 def close_expired_billing_cycles() -> dict[str, Any]:
     """
     Close billing cycles that have passed their end date.
@@ -180,14 +138,13 @@ def close_expired_billing_cycles() -> dict[str, Any]:
     Should be run hourly to ensure timely cycle closure.
     """
     from .usage_invoice_service import (  # noqa: PLC0415  # Deferred: avoids circular import
-        BillingCycleManager,  # Deferred: django-q task  # Deferred: avoids circular import
+        UsageBillingService,  # Deferred: django-q task  # Deferred: avoids circular import
     )
 
     logger.info("Closing expired billing cycles")
 
     try:
-        manager = BillingCycleManager()
-        closed, errors = manager.close_expired_cycles()
+        closed, errors = UsageBillingService.close_expired_cycles()
 
         return {
             "success": True,
@@ -250,14 +207,13 @@ def generate_pending_invoices() -> dict[str, Any]:
     Should be run after closing and rating cycles.
     """
     from .usage_invoice_service import (  # noqa: PLC0415  # Deferred: avoids circular import
-        BillingCycleManager,  # Deferred: django-q task  # Deferred: avoids circular import
+        UsageBillingService,  # Deferred: django-q task  # Deferred: avoids circular import
     )
 
     logger.info("Generating pending invoices")
 
     try:
-        manager = BillingCycleManager()
-        generated, errors = manager.generate_pending_invoices()
+        generated, errors = UsageBillingService.generate_pending_invoices()
 
         return {
             "success": True,
@@ -277,8 +233,6 @@ def run_billing_cycle_workflow() -> dict[str, Any]:
     1. Closes expired cycles
     2. Rates pending aggregations
     3. Generates invoices
-    4. Creates new cycles
-
     Should be run hourly.
     """
     logger.info("Running billing cycle workflow")
@@ -287,7 +241,6 @@ def run_billing_cycle_workflow() -> dict[str, Any]:
         "closed_cycles": None,
         "rated": None,
         "invoices": None,
-        "new_cycles": None,
     }
 
     try:
@@ -299,9 +252,6 @@ def run_billing_cycle_workflow() -> dict[str, Any]:
 
         # Step 3: Generate invoices
         results["invoices"] = generate_pending_invoices()
-
-        # Step 4: Create new cycles
-        results["new_cycles"] = advance_billing_cycles()
 
         # Log workflow completion
         AuditService.log_simple_event(
@@ -379,11 +329,11 @@ def check_all_usage_thresholds() -> dict[str, Any]:
 
     Should be run periodically (e.g., every 15 minutes).
     """
+    from .metering_models import (  # noqa: PLC0415  # Deferred: avoids circular import
+        UsageAggregation,  # Deferred: django-q task  # Deferred: avoids circular import
+    )
     from .metering_service import (  # noqa: PLC0415  # Deferred: avoids circular import
         UsageAlertService,  # Deferred: django-q task  # Deferred: avoids circular import
-    )
-    from .subscription_models import (  # noqa: PLC0415  # Deferred: avoids circular import
-        Subscription,  # Deferred: django-q task  # Deferred: avoids circular import
     )
 
     logger.info("Checking all usage thresholds")
@@ -392,128 +342,28 @@ def check_all_usage_thresholds() -> dict[str, Any]:
         service = UsageAlertService()
         total_alerts = 0
 
-        # Get all active subscriptions with metered items
-        active_subs = Subscription.objects.filter(status__in=("active", "trialing")).prefetch_related("items")
+        scopes = list(
+            UsageAggregation.objects.filter(
+                subscription__status__in=("active", "trialing"),
+                status__in=("accumulating", "pending_rating"),
+            )
+            .values_list("customer_id", "meter_id", "subscription_id")
+            .distinct()
+        )
+        subscription_ids: set[object] = set()
 
-        for subscription in active_subs:
-            for item in subscription.items.all():
-                alerts = service.check_thresholds(
-                    str(subscription.customer_id), str(item.product_id), str(subscription.id)
-                )
-                total_alerts += len(alerts)
+        for customer_id, meter_id, subscription_id in scopes:
+            alerts = service.check_thresholds(str(customer_id), str(meter_id), str(subscription_id))
+            total_alerts += len(alerts)
+            subscription_ids.add(subscription_id)
 
         return {
             "success": True,
             "alerts_created": total_alerts,
-            "subscriptions_checked": active_subs.count(),
+            "subscriptions_checked": len(subscription_ids),
         }
     except Exception as e:
         logger.exception(f"Error checking all thresholds: {e}")
-        return {"success": False, "error": str(e)}
-
-
-# ===============================================================================
-# STRIPE SYNC TASKS
-# ===============================================================================
-
-
-def sync_aggregation_to_stripe(aggregation_id: str) -> dict[str, Any]:
-    """
-    Sync a usage aggregation to Stripe.
-    """
-    from .stripe_metering import (  # noqa: PLC0415  # Deferred: avoids circular import
-        StripeUsageSyncService,  # Deferred: django-q task  # Deferred: avoids circular import
-    )
-
-    logger.info(f"Syncing aggregation {aggregation_id} to Stripe")
-
-    try:
-        service = StripeUsageSyncService()
-        result = service.sync_aggregation_to_stripe(aggregation_id)
-
-        if result.is_ok():
-            return {"success": True, **result.unwrap()}
-        else:
-            return {"success": False, "error": result.unwrap_err()}
-    except Exception as e:
-        logger.exception(f"Error syncing to Stripe: {e}")
-        return {"success": False, "error": str(e)}
-
-
-def sync_billing_cycle_to_stripe(billing_cycle_id: str) -> dict[str, Any]:
-    """
-    Sync all aggregations in a billing cycle to Stripe.
-    """
-    from .stripe_metering import (  # noqa: PLC0415  # Deferred: avoids circular import
-        StripeUsageSyncService,  # Deferred: django-q task  # Deferred: avoids circular import
-    )
-
-    logger.info(f"Syncing billing cycle {billing_cycle_id} to Stripe")
-
-    try:
-        service = StripeUsageSyncService()
-        result = service.sync_billing_cycle_to_stripe(billing_cycle_id)
-
-        if result.is_ok():
-            return {"success": True, **result.unwrap()}
-        else:
-            return {"success": False, "error": result.unwrap_err()}
-    except Exception as e:
-        logger.exception(f"Error syncing billing cycle to Stripe: {e}")
-        return {"success": False, "error": str(e)}
-
-
-def sync_pending_to_stripe() -> dict[str, Any]:
-    """
-    Sync all rated but unsynced aggregations to Stripe.
-
-    Should be run periodically (e.g., every hour).
-    """
-    from .metering_models import (  # noqa: PLC0415  # Deferred: avoids circular import
-        UsageAggregation,  # Deferred: django-q task  # Deferred: avoids circular import
-    )
-    from .stripe_metering import (  # noqa: PLC0415  # Deferred: avoids circular import
-        StripeUsageSyncService,  # Deferred: django-q task  # Deferred: avoids circular import
-    )
-
-    logger.info("Syncing pending aggregations to Stripe")
-
-    try:
-        service = StripeUsageSyncService()
-
-        # Find rated aggregations that haven't been synced
-        # Use select_related to avoid N+1 queries
-        pending_qs = (
-            UsageAggregation.objects.filter(
-                status="rated", stripe_synced_at__isnull=True, meter__stripe_meter_event_name__isnull=False
-            )
-            .exclude(meter__stripe_meter_event_name="")
-            .select_related("meter", "customer", "subscription")
-        )
-
-        # Get count before processing (single query)
-        total_pending = pending_qs.count()
-
-        # Process batch using configured batch size
-        batch = list(pending_qs[: billing_config.BATCH_SIZE_STRIPE_SYNC])
-        success_count = 0
-        error_count = 0
-
-        for agg in batch:
-            result = service.sync_aggregation_to_stripe(str(agg.id))
-            if result.is_ok():
-                success_count += 1
-            else:
-                error_count += 1
-
-        return {
-            "success": True,
-            "synced": success_count,
-            "errors": error_count,
-            "pending_remaining": max(0, total_pending - len(batch)),
-        }
-    except Exception as e:
-        logger.exception(f"Error syncing to Stripe: {e}")
         return {"success": False, "error": str(e)}
 
 
@@ -777,13 +627,6 @@ def send_usage_alert_notification_async(alert_id: str) -> str:
     return str(async_task("apps.billing.metering_tasks.send_usage_alert_notification", alert_id, timeout=TASK_TIMEOUT))
 
 
-def sync_aggregation_to_stripe_async(aggregation_id: str) -> str:
-    """Queue Stripe sync task."""
-    return str(
-        async_task("apps.billing.metering_tasks.sync_aggregation_to_stripe", aggregation_id, timeout=TASK_TIMEOUT)
-    )
-
-
 # ===============================================================================
 # SCHEDULED TASK REGISTRATION
 # ===============================================================================
@@ -814,11 +657,6 @@ def register_scheduled_tasks() -> None:
             "func": "apps.billing.metering_tasks.check_all_usage_thresholds",
             "schedule_type": Schedule.MINUTES,
             "minutes": 15,
-        },
-        {
-            "name": "Sync Pending to Stripe",
-            "func": "apps.billing.metering_tasks.sync_pending_to_stripe",
-            "schedule_type": Schedule.HOURLY,
         },
         {
             "name": "Collect Virtualmin Usage",

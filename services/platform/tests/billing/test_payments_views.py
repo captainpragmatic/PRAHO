@@ -87,7 +87,7 @@ class PaymentProcessingViewsTestCase(TestCase):
         """Test successful payment processing"""
         post_data = {
             'amount': '150.00',
-            'payment_method': 'stripe'
+            'payment_method': 'bank'
         }
 
         request = self.factory.post('/billing/invoices/1/pay/', post_data)

@@ -554,105 +554,6 @@ def _process_free_order(order: Order, order_result: dict[str, Any], results: dic
                 results["errors"].append(f"Free order provisioning trigger failed: {e}")
 
 
-def _check_service_availability() -> bool:
-    """Check if Service model is available."""
-    return Service is not None
-
-
-def _find_services_to_renew() -> Any:
-    """Find services that need renewal in the next 30 days."""
-    expiry_threshold = timezone.now() + timedelta(days=30)
-
-    return (
-        Service.objects.filter(
-            status="active",
-            expires_at__lte=expiry_threshold,
-            expires_at__gte=timezone.now(),  # Not already expired
-            auto_renew=True,
-        )
-        .select_related("customer", "plan")
-        .prefetch_related("orders")
-    )
-
-
-def _create_renewal_order_data(service: Any) -> dict[str, Any]:
-    """Create renewal order data structure."""
-    return {
-        "customer_id": service.customer.id,
-        "items": [
-            {
-                "product_type": "service_renewal",
-                "product_id": str(service.plan.id) if service.plan else None,
-                "quantity": 1,
-                "unit_price_cents": service.plan.price_cents if service.plan else 0,
-                "name": f"Service Renewal - {service.name}",
-                "meta": {
-                    "renewal_service_id": str(service.id),
-                    "original_expires_at": service.expires_at.isoformat(),
-                    "renewal_period": "1_year",
-                },
-            }
-        ],
-        "status": "awaiting_payment",
-        "meta": {"auto_renewal": True, "original_service_id": str(service.id)},
-    }
-
-
-def _create_renewal_invoice(renewal_order: Any, service: Any, results: dict[str, Any]) -> None:
-    """Create invoice for renewal order and handle auto-payment."""
-    if renewal_order.total_cents <= 0:
-        return
-
-    try:
-        invoice_service = InvoiceService()
-        invoice_result = invoice_service.create_from_order(renewal_order)
-
-        if invoice_result.is_ok():
-            invoice = invoice_result.unwrap()
-            renewal_order.invoice = invoice
-            renewal_order.save(update_fields=["invoice", "updated_at"])
-
-            # If customer has auto-pay enabled, attempt payment
-            if hasattr(service.customer, "auto_pay_enabled") and service.customer.auto_pay_enabled:
-                async_task("apps.billing.tasks.process_auto_payment", invoice.id, timeout=TASK_TIME_LIMIT)
-                results["auto_renewals_processed"] += 1
-                logger.info(
-                    f"💳 [RecurringOrders] Triggered auto-payment for renewal order {renewal_order.order_number}"
-                )
-        else:
-            error = invoice_result.unwrap_err()
-            logger.error(
-                f"🔥 [RecurringOrders] Failed to create invoice for renewal order {renewal_order.order_number}: {error}"
-            )
-            results["errors"].append(f"Invoice creation failed for renewal {renewal_order.order_number}: {error}")
-
-    except Exception as e:
-        logger.error(f"🔥 [RecurringOrders] Error creating invoice for renewal: {e}")
-        results["errors"].append(f"Invoice creation error: {e}")
-
-
-def _log_renewal_order_creation(renewal_order: Any, service: Any) -> None:
-    """Log renewal order creation event."""
-    AuditService.log_simple_event(
-        event_type="renewal_order_created",
-        user=None,
-        content_object=renewal_order,
-        description=f"Renewal order {renewal_order.order_number} created for service {service.name}",
-        actor_type="system",
-        metadata={
-            "order_id": str(renewal_order.id),
-            "order_number": renewal_order.order_number,
-            "service_id": str(service.id),
-            "customer_id": str(service.customer.id),
-            "expires_at": service.expires_at.isoformat(),
-            "renewal_amount_cents": renewal_order.total_cents,
-            "auto_payment_triggered": hasattr(service.customer, "auto_pay_enabled")
-            and service.customer.auto_pay_enabled,
-            "source_app": "orders",
-        },
-    )
-
-
 def sync_order_payment_status() -> dict[str, Any]:
     """
     Check payment gateway for status updates and sync with orders.
@@ -743,125 +644,6 @@ def sync_order_payment_status() -> dict[str, Any]:
         return {"success": False, "error": str(e), "results": results}
 
 
-def process_recurring_orders() -> dict[str, Any]:
-    """
-    Generate renewal orders for expiring services.
-
-    This task handles:
-    - Generate renewal orders for expiring services
-    - Create invoices for subscription services
-    - Handle automatic renewals
-    - Process payment for auto-renew orders
-
-    Runs daily at 1 AM to process renewals.
-
-    Returns:
-        Dictionary with recurring order processing results
-    """
-    logger.info("🔄 [RecurringOrders] Starting recurring order processing")
-
-    results: dict[str, Any] = {
-        "services_checked": 0,
-        "renewal_orders_created": 0,
-        "auto_renewals_processed": 0,
-        "renewal_failures": 0,
-        "created_orders": [],
-        "errors": [],
-    }
-
-    try:
-        # Prevent concurrent processing (atomic lock acquisition)
-        lock_key = "process_recurring_orders_lock"
-        if not cache.add(lock_key, True, 1800):
-            logger.info("⏭️ [RecurringOrders] Recurring order processing already running, skipping")
-            return {"success": True, "message": "Already running"}
-
-        try:
-            # Check if Service model is available
-            if not _check_service_availability():
-                return {"success": True, "message": "Service model not available", "results": results}
-
-            # Find services expiring in the next 30 days that need renewal
-            services_to_renew = _find_services_to_renew()
-
-            results["services_checked"] = services_to_renew.count()
-
-            for service in services_to_renew:
-                try:
-                    # Check if renewal order already exists
-                    existing_renewal = Order.objects.filter(
-                        customer=service.customer,
-                        status__in=["draft", "awaiting_payment", "paid", "provisioning"],
-                        items__meta__contains={"renewal_service_id": str(service.id)},
-                    ).exists()
-
-                    if existing_renewal:
-                        logger.debug(f"⏭️ [RecurringOrders] Renewal order already exists for service {service.id}")
-                        continue
-
-                    # Create renewal order
-                    order_service = OrderService()
-                    renewal_order_data = _create_renewal_order_data(service)
-
-                    create_result = order_service.create_order(renewal_order_data)  # type: ignore[arg-type]
-
-                    if create_result.is_ok():
-                        renewal_order = create_result.unwrap()
-                        results["renewal_orders_created"] += 1
-
-                        results["created_orders"].append(
-                            {
-                                "order_id": str(renewal_order.id),
-                                "order_number": renewal_order.order_number,
-                                "service_id": str(service.id),
-                                "customer_id": str(service.customer.id),
-                                "expires_at": service.expires_at.isoformat(),
-                                "total_cents": renewal_order.total_cents,
-                            }
-                        )
-
-                        # Create invoice for the renewal order
-                        _create_renewal_invoice(renewal_order, service, results)
-
-                        # Log renewal order creation
-                        _log_renewal_order_creation(renewal_order, service)
-
-                        logger.info(
-                            f"🔄 [RecurringOrders] Created renewal order {renewal_order.order_number} for service {service.id}"
-                        )
-
-                    else:
-                        error = create_result.unwrap_err()
-                        logger.error(
-                            f"🔥 [RecurringOrders] Failed to create renewal order for service {service.id}: {error}"
-                        )
-                        results["errors"].append(f"Service {service.id}: {error}")
-                        results["renewal_failures"] += 1
-
-                except Exception as e:
-                    logger.error(f"🔥 [RecurringOrders] Error processing service {service.id}: {e}")
-                    results["errors"].append(f"Service {service.id}: {e}")
-                    results["renewal_failures"] += 1
-
-            logger.info(
-                f"✅ [RecurringOrders] Recurring order processing completed: "
-                f"{results['services_checked']} services checked, "
-                f"{results['renewal_orders_created']} renewal orders created, "
-                f"{results['auto_renewals_processed']} auto-renewals processed"
-            )
-
-            return {"success": True, "results": results}
-
-        finally:
-            # Always release lock
-            cache.delete(lock_key)
-
-    except Exception as e:
-        logger.exception(f"💥 [RecurringOrders] Critical error in recurring order processing: {e}")
-        results["errors"].append(str(e))
-        return {"success": False, "error": str(e), "results": results}
-
-
 # ===============================================================================
 # TASK QUEUE WRAPPER FUNCTIONS
 # ===============================================================================
@@ -875,11 +657,6 @@ def process_pending_orders_async() -> str:
 def sync_order_payment_status_async() -> str:
     """Queue payment status synchronization task."""
     return async_task("apps.orders.tasks.sync_order_payment_status", timeout=TASK_TIME_LIMIT)
-
-
-def process_recurring_orders_async() -> str:
-    """Queue recurring order processing task."""
-    return async_task("apps.orders.tasks.process_recurring_orders", timeout=TASK_TIME_LIMIT)
 
 
 # ===============================================================================
@@ -897,9 +674,9 @@ def setup_order_scheduled_tasks() -> dict[str, str]:
 
     # Check for existing tasks first
     existing_tasks = list(
-        ScheduleModel.objects.filter(
-            name__in=["order-process-pending", "order-sync-payment-status", "order-process-recurring"]
-        ).values_list("name", flat=True)
+        ScheduleModel.objects.filter(name__in=["order-process-pending", "order-sync-payment-status"]).values_list(
+            "name", flat=True
+        )
     )
 
     # Process pending orders every 5 minutes
@@ -927,19 +704,6 @@ def setup_order_scheduled_tasks() -> dict[str, str]:
         tasks_created["sync_payments"] = "created"
     else:
         tasks_created["sync_payments"] = "already_exists"
-
-    # Process recurring orders daily at 1 AM
-    if "order-process-recurring" not in existing_tasks:
-        schedule(
-            "apps.orders.tasks.process_recurring_orders",
-            schedule_type=Schedule.CRON,
-            cron="0 1 * * *",  # 1 AM daily
-            name="order-process-recurring",
-            cluster="praho-cluster",
-        )
-        tasks_created["process_recurring"] = "created"
-    else:
-        tasks_created["process_recurring"] = "already_exists"
 
     logger.info(f"✅ [OrderTasks] Scheduled tasks setup: {tasks_created}")
     return tasks_created

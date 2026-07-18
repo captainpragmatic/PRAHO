@@ -237,7 +237,9 @@ def calculate_cart_totals(  # noqa: PLR0912, PLR0915  # Complexity: multi-step b
                     "product_slug": product.slug,
                     "billing_period": item_data.get("billing_period", "monthly"),
                     "quantity": item_data["quantity"],
-                    "unit_price_cents": int(product_price.effective_monthly_price_cents),
+                    "unit_price_cents": int(
+                        product_price.get_price_cents_for_period(item_data.get("billing_period", "monthly"))
+                    ),
                     "setup_cents": int(product_price.setup_cents),
                     "description": product.name,
                     "meta": item_data.get("config", {}),
@@ -423,7 +425,7 @@ def preflight_order(  # noqa: PLR0911, PLR0915  # Complexity: multi-step busines
                     )
 
                 quantity = int(cart_item.get("quantity", 1))
-                unit_price_cents = int(price.effective_monthly_price_cents)
+                unit_price_cents = int(price.get_price_cents_for_period(cart_item["billing_period"]))
                 setup_cents = int(price.setup_cents or 0)
 
                 # Calculate line total
@@ -726,7 +728,7 @@ def create_order(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-
                     "product_id": product.id,
                     "service_id": None,  # Not used for new orders
                     "quantity": item_data["quantity"],
-                    "unit_price_cents": int(price.effective_monthly_price_cents),
+                    "unit_price_cents": int(price.get_price_cents_for_period(billing_period)),
                     "setup_cents": int(price.setup_cents),
                     "billing_period": billing_period,
                     "description": product.name,
@@ -1128,6 +1130,43 @@ def confirm_order(request: Request, customer: Customer, order_id: str) -> Respon
                     status=status.HTTP_502_BAD_GATEWAY,
                 )
 
+        # Converge the Payment before taking the Phase 3 Order lock. Proforma
+        # conversion locks Proforma -> Payment, so retaining Order -> Payment
+        # here would invert the webhook path and permit a financial deadlock.
+        from apps.billing.payment_convergence import PaymentSuccessService  # noqa: PLC0415
+
+        payment_convergence = PaymentSuccessService.converge_gateway_success(
+            pi_to_verify,
+            {
+                "amount_received": payment_result.get("amount_received"),
+                "currency": payment_result.get("currency"),
+                "customer_id": payment_result.get("customer_id"),
+                "payment_method_id": payment_result.get("payment_method_id"),
+                "metadata": payment_result.get("metadata"),
+            },
+        )
+        if payment_convergence.is_err():
+            logger.error(
+                "🔥 [API] Local payment convergence failed for order %s: %s",
+                order_number_for_log,
+                payment_convergence.unwrap_err(),
+            )
+            return Response(
+                {"success": False, "error": "Payment record could not be verified"},
+                status=status.HTTP_409_CONFLICT,
+            )
+        verified_payment = payment_convergence.unwrap()
+        if verified_payment.customer_id != customer.id:
+            logger.critical(
+                "🔥 [API] Payment %s customer does not match order %s",
+                verified_payment.id,
+                order_number_for_log,
+            )
+            return Response(
+                {"success": False, "error": "Payment record does not match this order"},
+                status=status.HTTP_409_CONFLICT,
+            )
+
         # Phase 3: Re-acquire lock, re-check idempotency, confirm status.
         # A concurrent request may have confirmed the order between phases 1 and 3;
         # the re-check ensures we never double-confirm.
@@ -1161,15 +1200,13 @@ def confirm_order(request: Request, customer: Customer, order_id: str) -> Respon
                 confirm_result = OrderPaymentConfirmationService.confirm_order(order, invoice=order.invoice)
             elif order.proforma:
                 # Webhook hasn't arrived yet — convert proforma ourselves (idempotent).
-                from apps.billing.payment_models import Payment  # noqa: PLC0415
                 from apps.billing.proforma_service import ProformaPaymentService  # noqa: PLC0415
 
-                existing_payment = Payment.objects.filter(gateway_txn_id=pi_to_verify, customer=customer).first()
                 convert_result = ProformaPaymentService.record_payment_and_convert(
                     proforma_id=str(order.proforma.id),
                     amount_cents=order.total_cents,
                     payment_method="stripe",
-                    existing_payment=existing_payment,
+                    existing_payment=verified_payment,
                 )
                 if convert_result.is_ok():
                     invoice = convert_result.unwrap()
