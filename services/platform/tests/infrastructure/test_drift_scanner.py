@@ -9,9 +9,8 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 from django.test import TestCase
-from django.utils import timezone
 
-from apps.common.types import Err, Ok
+from apps.common.types import Ok
 from apps.infrastructure.cloud_gateway import ServerInfo
 from apps.infrastructure.drift_scanner import DriftScannerService
 from apps.infrastructure.models import (
@@ -256,6 +255,7 @@ class TestAutoResolution(DriftScannerTestBase):
         remediations = DriftRemediationRequest.objects.filter(deployment=self.deployment)
         self.assertTrue(remediations.exists())
         self.assertEqual(remediations.first().status, "pending_approval")
+        self.assertEqual(remediations.first().action_type, "apply_desired")
 
     @patch("apps.infrastructure.drift_scanner.get_provider_token")
     @patch("apps.infrastructure.drift_scanner.get_cloud_gateway")
@@ -271,6 +271,8 @@ class TestAutoResolution(DriftScannerTestBase):
 
         remediations = DriftRemediationRequest.objects.filter(deployment=self.deployment)
         self.assertTrue(remediations.exists())
+        # server_deleted has no automated fix — it must be routed to manual work
+        self.assertEqual(remediations.first().action_type, "manual_intervention")
 
 
 class TestScanDeployment(DriftScannerTestBase):

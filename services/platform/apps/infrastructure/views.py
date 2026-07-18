@@ -1501,17 +1501,10 @@ def drift_remediation_list(request: HttpRequest) -> HttpResponse:
 
 
 def _execute_remediation_async(request_pk: int) -> dict[str, Any]:
-    """Async task helper: execute an approved remediation."""
-    from apps.infrastructure.drift_remediation import (  # noqa: PLC0415  # Deferred: avoids circular import
-        get_drift_remediation_service,  # Circular: cross-app
-    )
+    """Deprecated shim for tasks queued before the move to tasks.execute_remediation_task."""
+    from apps.infrastructure.tasks import execute_remediation_task  # noqa: PLC0415  # Deferred: avoids circular import
 
-    req = DriftRemediationRequest.objects.select_related("deployment", "report").get(pk=request_pk)
-    service = get_drift_remediation_service()
-    result = service.execute_remediation(req)
-    if result.is_ok():
-        return {"status": "completed"}
-    return {"error": result.unwrap_err()}
+    return execute_remediation_task(request_pk)
 
 
 @login_required
@@ -1519,35 +1512,19 @@ def _execute_remediation_async(request_pk: int) -> dict[str, Any]:
 @require_POST
 def drift_remediation_approve(request: HttpRequest, pk: int) -> HttpResponse:
     """Approve a remediation request and queue execution asynchronously."""
-    from django_q.tasks import (  # noqa: PLC0415  # Deferred: avoids circular import
-        async_task,  # Deferred: django-q task  # Deferred: avoids circular import
+    from apps.infrastructure.drift_remediation import (  # noqa: PLC0415  # Deferred: avoids circular import
+        get_drift_remediation_service,  # Circular: cross-app
     )
 
     user = cast("User", request.user)
+    service = get_drift_remediation_service()
+    result = service.approve_remediation(pk, user)
 
-    # Validate the request exists and is approvable
-    req_obj = get_object_or_404(DriftRemediationRequest, pk=pk)
-    if req_obj.status != "pending_approval":
-        messages.error(request, _("Cannot approve request in status '%(status)s'.") % {"status": req_obj.status})
-        return redirect("infrastructure:drift_remediation_list")
+    if result.is_ok():
+        messages.success(request, _("Remediation approved. Execution queued."))
+    else:
+        messages.error(request, str(result.unwrap_err()))
 
-    # Wrap status change + task queueing in one transaction to prevent TOCTOU:
-    # if async_task() fails, the status change rolls back too.
-    with transaction.atomic():
-        req_obj.status = "approved"
-        req_obj.approved_by = user
-        req_obj.approved_at = timezone.now()
-        req_obj.save(update_fields=["status", "approved_by", "approved_at"])
-
-        # Queue the slow execution part (Django-Q2 writes to django_q_task table,
-        # so it participates in the same transaction)
-        async_task(
-            _execute_remediation_async,
-            pk,
-            task_name=f"remediation_{pk}",
-        )
-
-    messages.success(request, _("Remediation approved. Execution queued."))
     return redirect("infrastructure:drift_remediation_list")
 
 

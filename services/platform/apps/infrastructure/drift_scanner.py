@@ -358,12 +358,17 @@ class DriftScannerService:
 
     def _create_remediation_request(self, report: DriftReport) -> DriftRemediationRequest:
         """Create pending approval request for HIGH/CRITICAL drift."""
+        from apps.infrastructure.drift_remediation import (  # noqa: PLC0415  # Deferred: avoids circular import
+            AUTO_FIXABLE_FIELDS,  # Circular: cross-app
+        )
+
         requires_restart = report.field_name in ("server_type",)
+        action_type = "apply_desired" if report.field_name in AUTO_FIXABLE_FIELDS else "manual_intervention"
 
         request = DriftRemediationRequest.objects.create(
             report=report,
             deployment=report.deployment,
-            action_type="apply_desired",
+            action_type=action_type,
             action_details={
                 "field_name": report.field_name,
                 "expected_value": report.expected_value,

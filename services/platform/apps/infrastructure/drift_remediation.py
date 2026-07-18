@@ -96,6 +96,11 @@ def _get_verify_poll_interval() -> int:
 # Snapshot expiry in days
 SNAPSHOT_EXPIRY_DAYS = 7
 
+# Drift fields with a real automated fix. Everything else must be routed to
+# manual intervention — an "apply" for them would be a no-op falsely reported
+# as remediated (#224 defect 2).
+AUTO_FIXABLE_FIELDS = frozenset({"server_type", "server_status"})
+
 
 class DriftRemediationService:
     """Handles the remediation workflow: approve, reject, schedule, execute, rollback."""
@@ -105,34 +110,48 @@ class DriftRemediationService:
         request_id: int,
         user: User,
     ) -> Result[DriftRemediationRequest, str]:
-        """Set status=approved, trigger execution."""
-        with transaction.atomic():
-            try:
-                req = DriftRemediationRequest.objects.select_for_update().get(pk=request_id)
-            except DriftRemediationRequest.DoesNotExist:
-                return Err(f"Remediation request {request_id} not found")
+        """Approve and queue execution asynchronously (single owner of this transition)."""
+        from django_q.tasks import async_task  # noqa: PLC0415  # Deferred: avoids circular import
 
-            if req.status not in ("pending_approval",):
+        try:
+            req = DriftRemediationRequest.objects.select_related("deployment", "report").get(pk=request_id)
+        except DriftRemediationRequest.DoesNotExist:
+            return Err(f"Remediation request {request_id} not found")
+
+        if req.action_type != "apply_desired":
+            return Err("This drift has no automated fix — resolve it manually and re-scan, or accept the drift")
+
+        # Status flip + task enqueue in one transaction (django-q2 writes to the
+        # django_q table, so a failed enqueue rolls the approval back too). The
+        # conditional update is the portable claim: a concurrent accept/reject
+        # loses cleanly instead of double-transitioning.
+        now = timezone.now()
+        with transaction.atomic():
+            updated = DriftRemediationRequest.objects.filter(pk=request_id, status="pending_approval").update(
+                status="approved",
+                approved_by=user,
+                approved_at=now,
+                execution_claimed_at=now,
+            )
+            if not updated:
+                req.refresh_from_db()
                 return Err(f"Cannot approve request in status '{req.status}'")
 
-            req.status = "approved"
-            req.approved_by = user
-            req.approved_at = timezone.now()
-            req.save(update_fields=["status", "approved_by", "approved_at"])
+            async_task(
+                "apps.infrastructure.tasks.execute_remediation_task",
+                request_id,
+                task_name=f"remediation_{request_id}",
+            )
 
-        logger.info(f"✅ [DriftRemediation] Request {request_id} approved by {user.email}")
+        logger.info(f"✅ [DriftRemediation] Request {request_id} approved by {user.email}, execution queued")
 
+        req.refresh_from_db()
         try:
             InfrastructureAuditService.log_drift_remediation_approved(
                 req.deployment, req, user, InfrastructureAuditContext(user=user)
             )
         except Exception as e:
             logger.warning(f"⚠️ [DriftRemediation] Failed to log audit for approval: {e}")
-
-        # Trigger execution
-        exec_result = self.execute_remediation(req)
-        if exec_result.is_err():
-            return Err(f"Approved but execution failed: {exec_result.unwrap_err()}")
 
         return Ok(req)
 
@@ -179,6 +198,9 @@ class DriftRemediationService:
 
         if req.status not in ("pending_approval", "approved"):
             return Err(f"Cannot schedule request in status '{req.status}'")
+
+        if req.action_type != "apply_desired":
+            return Err("This drift has no automated fix — scheduling it would execute a no-op")
 
         req.status = "scheduled"
         req.scheduled_for = scheduled_for
@@ -232,7 +254,7 @@ class DriftRemediationService:
 
         return Ok(req)
 
-    def execute_remediation(  # Complexity: drift scan  # noqa: PLR0915  # Complexity: multi-step business logic
+    def execute_remediation(  # noqa: PLR0911  # Multi-step workflow: each gate exits early
         self,
         request: DriftRemediationRequest,
     ) -> Result[bool, str]:
@@ -257,6 +279,18 @@ class DriftRemediationService:
             request.started_at = timezone.now()
             request.save(update_fields=["status", "started_at"])
 
+        # Pre-flight: refuse work that has no automated fix BEFORE any snapshot,
+        # so legacy/manual requests fail fast instead of no-op'ing into a
+        # false "remediated" (and a pointless destructive rollback on failure).
+        details = request.action_details or {}
+        field_name = details.get("field_name", "")
+        if request.action_type != "apply_desired" or field_name not in AUTO_FIXABLE_FIELDS:
+            self._mark_failed(
+                request,
+                f"No automated fix available for field '{field_name or 'unknown'}' — manual intervention required",
+            )
+            return Err(f"No automated fix available for field '{field_name or 'unknown'}'")
+
         # Step 1: Take snapshot
         snapshot_result = self._take_snapshot(deployment)
         if snapshot_result.is_err():
@@ -275,50 +309,21 @@ class DriftRemediationService:
 
         apply_result = self._apply_remediation(request, gateway)
         if apply_result.is_err():
-            logger.error(f"🔥 [DriftRemediation] Apply failed, rolling back: {apply_result.unwrap_err()}")
-            rollback_result = self._rollback(deployment, snapshot.provider_snapshot_id)
-            if rollback_result.is_err():
-                logger.error(f"🔥 [DriftRemediation] Rollback failed: {rollback_result.unwrap_err()}")
-                self._mark_rollback_failed(request, f"Apply failed and rollback failed: {rollback_result.unwrap_err()}")
-            else:
-                self._mark_rolled_back(request, f"Apply failed (rolled back): {apply_result.unwrap_err()}")
-
-            try:
-                InfrastructureAuditService.log_drift_rollback_triggered(
-                    deployment, snapshot, InfrastructureAuditContext()
-                )
-            except Exception as e:
-                logger.warning(f"⚠️ [DriftRemediation] Failed to log audit for rollback after apply failure: {e}")
-
-            return Err(apply_result.unwrap_err())
+            return self._rollback_after_failure(
+                request, deployment, snapshot, "Apply failed", apply_result.unwrap_err()
+            )
 
         # Step 3: Verify the remediated state (provider outcome + reachability)
-        details = request.action_details or {}
         health_result = self._verify_remediation(
             deployment,
             gateway,
-            details.get("field_name", ""),
+            field_name,
             details.get("expected_value", ""),
         )
         if health_result.is_err():
-            logger.error(f"🔥 [DriftRemediation] Health check failed, rolling back: {health_result.unwrap_err()}")
-            rollback_result = self._rollback(deployment, snapshot.provider_snapshot_id)
-            if rollback_result.is_err():
-                logger.error(f"🔥 [DriftRemediation] Rollback failed: {rollback_result.unwrap_err()}")
-                self._mark_rollback_failed(
-                    request, f"Health check failed and rollback failed: {rollback_result.unwrap_err()}"
-                )
-            else:
-                self._mark_rolled_back(request, f"Health check failed (rolled back): {health_result.unwrap_err()}")
-
-            try:
-                InfrastructureAuditService.log_drift_rollback_triggered(
-                    deployment, snapshot, InfrastructureAuditContext()
-                )
-            except Exception as e:
-                logger.warning(f"⚠️ [DriftRemediation] Failed to log audit for rollback after health check failure: {e}")
-
-            return Err(health_result.unwrap_err())
+            return self._rollback_after_failure(
+                request, deployment, snapshot, "Health check failed", health_result.unwrap_err()
+            )
 
         # Step 4: Mark complete
         request.status = "completed"
@@ -342,6 +347,30 @@ class DriftRemediationService:
             logger.warning(f"⚠️ [DriftRemediation] Failed to log audit for completion: {e}")
 
         return Ok(True)
+
+    def _rollback_after_failure(
+        self,
+        request: DriftRemediationRequest,
+        deployment: NodeDeployment,
+        snapshot: DriftSnapshot,
+        stage: str,
+        error: str,
+    ) -> Result[bool, str]:
+        """Shared apply/verify failure path: restore the snapshot, mark, audit."""
+        logger.error(f"🔥 [DriftRemediation] {stage}, rolling back: {error}")
+        rollback_result = self._rollback(deployment, snapshot.provider_snapshot_id)
+        if rollback_result.is_err():
+            logger.error(f"🔥 [DriftRemediation] Rollback failed: {rollback_result.unwrap_err()}")
+            self._mark_rollback_failed(request, f"{stage} and rollback failed: {rollback_result.unwrap_err()}")
+        else:
+            self._mark_rolled_back(request, f"{stage} (rolled back): {error}")
+
+        try:
+            InfrastructureAuditService.log_drift_rollback_triggered(deployment, snapshot, InfrastructureAuditContext())
+        except Exception as e:
+            logger.warning(f"⚠️ [DriftRemediation] Failed to log audit for rollback after {stage.lower()}: {e}")
+
+        return Err(error)
 
     def _take_snapshot(
         self,
@@ -392,8 +421,9 @@ class DriftRemediationService:
                 return Err(f"Power on failed: {result.unwrap_err()}")
             return Ok(True)
 
-        # For other field types, no automated fix available
-        return Ok(True)
+        # Defense-in-depth: execute_remediation pre-flights fixability, so an
+        # unknown field reaching this point is a bug — never report success.
+        return Err(f"No automated fix available for field '{field_name}'")
 
     def _verify_remediation(
         self,

@@ -114,17 +114,50 @@ class DriftRemediationTestBase(TestCase):
 class TestApproveReject(DriftRemediationTestBase):
     """Tests for approve/reject workflows."""
 
+    @patch("django_q.tasks.async_task", return_value="task-123")
     @patch("apps.infrastructure.drift_remediation.DriftRemediationService.execute_remediation")
-    def test_approve_flow(self, mock_execute):
-        """Approving should set status=approved and trigger execution."""
-        mock_execute.return_value = Ok(True)
-
+    def test_approve_flow(self, mock_execute, mock_async):
+        """Approving sets status=approved and queues execution, never runs it inline."""
         result = self.service.approve_remediation(self.remediation_request.pk, self.admin)
         self.assertTrue(result.is_ok())
 
         self.remediation_request.refresh_from_db()
+        self.assertEqual(self.remediation_request.status, "approved")
         self.assertEqual(self.remediation_request.approved_by, self.admin)
         self.assertIsNotNone(self.remediation_request.approved_at)
+        self.assertIsNotNone(self.remediation_request.execution_claimed_at)
+
+        mock_execute.assert_not_called()
+        mock_async.assert_called_once_with(
+            "apps.infrastructure.tasks.execute_remediation_task",
+            self.remediation_request.pk,
+            task_name=f"remediation_{self.remediation_request.pk}",
+        )
+
+    @patch("django_q.tasks.async_task", return_value="task-123")
+    def test_approve_manual_intervention_rejected(self, mock_async):
+        """Manual-intervention requests cannot be approved for execution."""
+        self.remediation_request.action_type = "manual_intervention"
+        self.remediation_request.save(update_fields=["action_type"])
+
+        result = self.service.approve_remediation(self.remediation_request.pk, self.admin)
+        self.assertTrue(result.is_err())
+        self.assertIn("no automated fix", result.unwrap_err())
+        mock_async.assert_not_called()
+
+        self.remediation_request.refresh_from_db()
+        self.assertEqual(self.remediation_request.status, "pending_approval")
+
+    def test_schedule_manual_intervention_rejected(self):
+        """Manual-intervention requests cannot be scheduled either."""
+        self.remediation_request.action_type = "manual_intervention"
+        self.remediation_request.save(update_fields=["action_type"])
+
+        result = self.service.schedule_remediation(
+            self.remediation_request.pk, self.admin, timezone.now() + timedelta(hours=2)
+        )
+        self.assertTrue(result.is_err())
+        self.assertIn("no automated fix", result.unwrap_err())
 
     def test_reject_flow(self):
         """Rejecting should set status=rejected with reason."""
@@ -311,6 +344,41 @@ class TestExecuteRemediation(DriftRemediationTestBase):
         """server_type changes should have requires_restart=True."""
         self.assertTrue(self.remediation_request.requires_restart)
 
+    @patch("apps.infrastructure.drift_remediation.DriftRemediationService._take_snapshot")
+    def test_execute_fails_fast_for_unfixable_field_without_snapshot(self, mock_snapshot):
+        """Unfixable fields must fail before any snapshot — no no-op 'remediated', no rollback."""
+        self.remediation_request.status = "approved"
+        self.remediation_request.action_details = {
+            "field_name": "ipv4_address",
+            "expected_value": "1.2.3.4",
+            "actual_value": "5.6.7.8",
+        }
+        self.remediation_request.save(update_fields=["status", "action_details"])
+
+        result = self.service.execute_remediation(self.remediation_request)
+
+        self.assertTrue(result.is_err())
+        self.assertIn("No automated fix", result.unwrap_err())
+        mock_snapshot.assert_not_called()
+
+        self.remediation_request.refresh_from_db()
+        self.assertEqual(self.remediation_request.status, "failed")
+        self.assertIn("manual intervention required", self.remediation_request.error_message)
+
+    @patch("apps.infrastructure.drift_remediation.DriftRemediationService._take_snapshot")
+    def test_execute_fails_fast_for_manual_action_type(self, mock_snapshot):
+        """manual_intervention requests are never executable, whatever the field."""
+        self.remediation_request.status = "approved"
+        self.remediation_request.action_type = "manual_intervention"
+        self.remediation_request.save(update_fields=["status", "action_type"])
+
+        result = self.service.execute_remediation(self.remediation_request)
+
+        self.assertTrue(result.is_err())
+        mock_snapshot.assert_not_called()
+        self.remediation_request.refresh_from_db()
+        self.assertEqual(self.remediation_request.status, "failed")
+
 
 class TestCleanupSnapshots(DriftRemediationTestBase):
     """Tests for snapshot cleanup."""
@@ -473,11 +541,9 @@ class TestVerifyRemediation(DriftRemediationTestBase):
 class TestAuditEvents(DriftRemediationTestBase):
     """Tests for audit event logging."""
 
+    @patch("django_q.tasks.async_task", return_value="task-123")
     @patch("apps.infrastructure.drift_remediation.InfrastructureAuditService.log_drift_remediation_approved")
-    @patch("apps.infrastructure.drift_remediation.DriftRemediationService.execute_remediation")
-    def test_audit_events_logged(self, mock_execute, mock_audit):
+    def test_audit_events_logged(self, mock_audit, mock_async):
         """Audit events should be logged on approval."""
-        mock_execute.return_value = Ok(True)
-
         self.service.approve_remediation(self.remediation_request.pk, self.admin)
         mock_audit.assert_called_once()

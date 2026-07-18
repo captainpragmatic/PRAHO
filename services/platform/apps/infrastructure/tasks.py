@@ -1687,6 +1687,22 @@ def run_drift_scan_task() -> dict[str, Any]:
         cache.delete(_DRIFT_SCAN_LOCK_ID)
 
 
+def execute_remediation_task(request_pk: int) -> dict[str, Any]:
+    """One-off task: execute a single approved remediation request."""
+    from apps.infrastructure.drift_remediation import (  # noqa: PLC0415  # Deferred: avoids circular import
+        get_drift_remediation_service,  # Circular: cross-app
+    )
+    from apps.infrastructure.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+        DriftRemediationRequest,  # Circular: cross-app  # Deferred: avoids circular import
+    )
+
+    req = DriftRemediationRequest.objects.select_related("deployment", "report").get(pk=request_pk)
+    result = get_drift_remediation_service().execute_remediation(req)
+    if result.is_ok():
+        return {"status": "completed"}
+    return {"error": result.unwrap_err()}
+
+
 def apply_scheduled_remediations_task() -> dict[str, Any]:
     """Scheduled every 5 min. Finds requests with status=scheduled and scheduled_for <= now."""
 
