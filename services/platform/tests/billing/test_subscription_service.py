@@ -31,7 +31,7 @@ from apps.billing.subscription_service import (
 )
 from apps.common.types import Err
 from apps.customers.models import Customer
-from apps.products.models import Product
+from apps.products.models import Product, ProductPrice
 
 # =============================================================================
 # HELPERS
@@ -58,12 +58,26 @@ def make_customer(suffix: str = "") -> Customer:
 
 
 def make_product(price_cents: int = 2999, suffix: str = "") -> Product:
+    """Create a product with a real list price.
+
+    `price_cents` used to be accepted and silently ignored — no ProductPrice was created. The
+    subscription code read the (nonexistent) `product.price_cents` and resolved 0, so these
+    fixtures agreed with the bug and it went unnoticed (#209). The list price lives on
+    ProductPrice, so create one.
+    """
     uid = uuid.uuid4().hex[:8]
-    return Product.objects.create(
+    product = Product.objects.create(
         slug=f"basic-plan-{uid}{suffix}",
         name=f"Basic Plan {uid}",
         product_type="hosting",
     )
+    ProductPrice.objects.create(
+        product=product,
+        currency=make_currency(),
+        monthly_price_cents=price_cents,
+        is_active=True,
+    )
+    return product
 
 
 def make_subscription(  # noqa: PLR0913
@@ -426,22 +440,27 @@ class SubscriptionServiceChangeTestCase(TestCase):
     @patch("apps.billing.subscription_service.log_security_event")
     @patch("apps.billing.subscription_models.log_security_event")
     def test_change_subscription_upgrade(self, mock_model_log: MagicMock, mock_log: MagicMock) -> None:
-        """Changing to higher-priced product creates upgrade change."""
+        """Changing billing cycle creates a billing_cycle_change priced from the catalog.
+
+        This previously used "quarterly" with a comment noting the price resolved to 0 — the #209
+        defect, worked around rather than reported. ProductPrice defines no quarterly price, so
+        that cycle is now rejected outright; "yearly" is a real priceable cycle and lets the test
+        assert the price it was always meant to.
+        """
         sub = self._make_active_sub(price_cents=2000)
-        # premium product needs a price on subscription itself for comparison
-        # The service uses getattr(new_product, 'price_cents', 0) which is 0 for this product
-        # So we test billing_cycle_change instead which is more deterministic
         result = SubscriptionService.change_subscription(
             subscription=sub,
             data={
-                "new_billing_cycle": "quarterly",
+                "new_billing_cycle": "yearly",
                 "apply_immediately": True,
             },
         )
-        self.assertTrue(result.is_ok())
+        self.assertTrue(result.is_ok(), f"change failed: {result}")
         change = result.unwrap()
         self.assertIsInstance(change, SubscriptionChange)
         self.assertEqual(change.change_type, "billing_cycle_change")
+        # Priced from the catalog rather than the 0 the old code resolved.
+        self.assertGreater(change.new_price_cents, 0)
 
     @patch("apps.billing.subscription_service.log_security_event")
     @patch("apps.billing.subscription_models.log_security_event")
@@ -1055,7 +1074,15 @@ class RecurringBillingServiceBillingCycleTestCase(TestCase):
         self, mock_vat: MagicMock, mock_model_log: MagicMock, mock_log: MagicMock,
         mock_create_intent: MagicMock, mock_confirm: MagicMock,
     ) -> None:
-        """Subscription with payment method attempts payment."""
+        """Subscription with a payment method attempts payment — and currently cannot be charged.
+
+        This asserted payments_succeeded >= 1 while mocking PaymentService, so it never exercised
+        the real call. That call passed str(invoice.id) as `order_id`: Invoice is integer-keyed
+        and Order is UUID-keyed, so it raised `ValidationError: "N" is not a valid UUID` and every
+        renewal payment failed (#209). Charging a subscription invoice needs an invoice-based
+        payment intent, which does not exist yet — so the attempt is now recorded as a clean
+        failure instead of a UUID parse error.
+        """
         sub = make_subscription(
             self.customer, self.product, self.currency,
             status="active", days_until_end=-1, unit_price_cents=2999,
@@ -1066,7 +1093,8 @@ class RecurringBillingServiceBillingCycleTestCase(TestCase):
 
         result = RecurringBillingService.run_billing_cycle()
         self.assertGreaterEqual(result["payments_attempted"], 1)
-        self.assertGreaterEqual(result["payments_succeeded"], 1)
+        self.assertGreaterEqual(result["payments_failed"], 1)
+        self.assertEqual(result["payments_succeeded"], 0)
 
     @patch("apps.billing.subscription_service.log_security_event")
     def test_run_billing_cycle_result_structure(self, mock_log: MagicMock) -> None:
