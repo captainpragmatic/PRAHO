@@ -624,8 +624,8 @@ class DriftRemediationService:
         last_observed = "unknown"
         while True:
             server_result = gateway.get_server(deployment.external_node_id)
-            if server_result.is_ok() and server_result.unwrap() is not None:
-                server_info = server_result.unwrap()
+            server_info = server_result.unwrap() if server_result.is_ok() else None
+            if server_info is not None:
                 if field_name == "server_type":
                     last_observed = server_info.server_type
                     if server_info.server_type == expected_value:
