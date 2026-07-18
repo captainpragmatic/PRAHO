@@ -73,7 +73,33 @@ def _resolve_subscription_unit_price_cents(product: Any, currency: Any, billing_
     if price is None:
         return Err(f"No active {getattr(currency, 'code', currency)} price for product {product}")
 
-    return Ok(price.get_price_cents_for_period(period))
+    cents = price.get_price_cents_for_period(period)
+    if not cents or cents <= 0:
+        # A zero/None period price means "unset" on ProductPrice, not a real list price —
+        # returning it as Ok would recreate the billed-zero defect this fix removes (#209).
+        return Err(
+            f"Product {product} has no usable {period} list price in "
+            f"{getattr(currency, 'code', currency)}; pass custom_price_cents"
+        )
+    return Ok(cents)
+
+
+def _determine_change_unit_price_cents(
+    subscription: Subscription,
+    data: SubscriptionChangeData,
+    new_product: Any,
+    new_billing_cycle: str,
+) -> Result[int, str]:
+    """Unit price for a subscription change.
+
+    Only a product or billing-cycle change re-resolves the catalog. Quantity-only changes
+    keep the subscription's negotiated unit price: re-resolving would silently reprice
+    grandfathered or custom-priced subscriptions and make quarterly/custom cycles (which
+    have no list price) unchangeable.
+    """
+    if data.get("new_product_id") or new_billing_cycle != subscription.billing_cycle:
+        return _resolve_subscription_unit_price_cents(new_product, subscription.currency, new_billing_cycle)
+    return Ok(subscription.effective_price_cents)
 
 
 def _build_customer_vat_info(customer: Any) -> CustomerVATInfo:
@@ -319,7 +345,7 @@ class SubscriptionService:
                     currency = Currency.objects.create(code="RON", name="Romanian Leu", symbol="lei")
 
                 # Determine price
-                if data.get("custom_price_cents"):
+                if data.get("custom_price_cents") is not None:
                     unit_price_cents = data["custom_price_cents"]
                 else:
                     price_result = _resolve_subscription_unit_price_cents(
@@ -427,8 +453,8 @@ class SubscriptionService:
 
                 new_quantity = data.get("new_quantity", subscription.quantity)
                 new_billing_cycle = data.get("new_billing_cycle", subscription.billing_cycle)
-                new_price_result = _resolve_subscription_unit_price_cents(
-                    new_product, subscription.currency, new_billing_cycle
+                new_price_result = _determine_change_unit_price_cents(
+                    subscription, data, new_product, new_billing_cycle
                 )
                 if new_price_result.is_err():
                     return Err(new_price_result.unwrap_err())
@@ -850,7 +876,7 @@ class RecurringBillingService:
         # to bill. cancel(at_period_end=True) only raises a flag — nothing else in the codebase
         # ever completes the cancellation — so without this they stay "active" and get billed
         # again on every run, forever, past the date the customer cancelled (#209).
-        RecurringBillingService._finalize_period_end_cancellations(billing_date, result)
+        RecurringBillingService._finalize_period_end_cancellations(billing_date, result, dry_run=dry_run)
 
         # Find subscriptions due for billing
         due_subscriptions = Subscription.objects.filter(
@@ -861,6 +887,16 @@ class RecurringBillingService:
         for subscription in due_subscriptions:
             try:
                 result["subscriptions_processed"] += 1
+
+                # A zero-priced subscription is broken state (pre-fix rows priced at 0, or a
+                # deleted list price), not a billable obligation: creating 0-cent invoices
+                # forever would hide it. Surface it and skip.
+                if subscription.total_price_cents <= 0:
+                    result["errors"].append(
+                        f"Subscription {subscription.subscription_number} has a zero price; "
+                        f"set its pricing (or cancel it) before it can be billed"
+                    )
+                    continue
 
                 if dry_run:
                     result["total_billed_cents"] += subscription.total_price_cents
@@ -926,13 +962,16 @@ class RecurringBillingService:
         return result
 
     @staticmethod
-    def _finalize_period_end_cancellations(billing_date: Any, result: Any) -> None:
+    def _finalize_period_end_cancellations(billing_date: Any, result: Any, dry_run: bool = False) -> None:
         """Complete cancellations the customer scheduled for the end of their billing period.
 
         `cancel(at_period_end=True)` only raises the cancel_at_period_end flag and leaves the
         subscription "active" so it keeps serving until the period the customer paid for runs
         out. Nothing else completes that cancellation, so once the period ends the subscription
         was simply billed again — and again on every subsequent run (#209).
+
+        A dry run must not mutate: this performs a real FSM transition and a permanent
+        ended_at write, and a preview that cancels live subscriptions is not a preview.
         """
         expiring = Subscription.objects.filter(
             status="active",
@@ -941,6 +980,11 @@ class RecurringBillingService:
         )
 
         for subscription in expiring:
+            if dry_run:
+                logger.info(
+                    f"🔍 [Billing] Dry run: would cancel subscription {subscription.id} at end of its billing period"
+                )
+                continue
             try:
                 with transaction.atomic():
                     subscription._cancel_now()
@@ -949,6 +993,12 @@ class RecurringBillingService:
                 logger.info(f"🚫 [Billing] Cancelled subscription {subscription.id} at end of its billing period")
             except TransitionNotAllowed as e:
                 logger.error(f"🔥 [Billing] Cannot cancel subscription {subscription.id} at period end: {e}")
+                result["errors"].append(f"Subscription {subscription.id}: period-end cancellation failed: {e}")
+            except Exception as e:
+                # One bad row (a ValidationError from save(), a DB blip) must not abort the
+                # entire billing run before due_subscriptions is even queried — that would
+                # silently skip the whole day's invoicing for every other customer.
+                logger.exception(f"🔥 [Billing] Period-end cancellation failed for subscription {subscription.id}")
                 result["errors"].append(f"Subscription {subscription.id}: period-end cancellation failed: {e}")
 
     @staticmethod
