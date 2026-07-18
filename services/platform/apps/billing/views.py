@@ -42,6 +42,7 @@ from django.views.decorators.http import require_http_methods, require_POST
 from django_fsm import TransitionNotAllowed
 
 from apps.api.secure_auth import get_authenticated_customer
+from apps.billing.efactura.settings import ro_local_date
 from apps.billing.pdf_generators import RomanianInvoicePDFGenerator, RomanianProformaPDFGenerator
 from apps.common.constants import DEFAULT_PAGE_SIZE
 from apps.common.decorators import billing_staff_required, can_edit_proforma, staff_rate_limit, staff_required
@@ -992,7 +993,10 @@ def _process_proforma_line_items(proforma: ProformaInvoice, request_data: dict[s
                 sort_order=line_counter,
                 unit_code="C62",
                 tax_category_code=tax_category,
-                period_start=proforma.created_at.date() if proforma.created_at else None,
+                # Romanian calendar day, not the UTC one: this DateField reaches the e-Factura
+                # InvoicePeriod verbatim (#220, #286). period_end needs no conversion — Django's
+                # DateField coercion already casts aware datetimes via the default timezone.
+                period_start=ro_local_date(proforma.created_at) if proforma.created_at else None,
                 period_end=proforma.valid_until,
             )
 
