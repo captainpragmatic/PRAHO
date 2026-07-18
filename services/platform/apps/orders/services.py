@@ -447,6 +447,10 @@ class OrderService:
                 OrderItem.objects.create(
                     order=order,
                     product_id=product_id,
+                    # OrderItemData.service_id was accepted but silently dropped here, so
+                    # renewal items never linked back to their Service and renewal history
+                    # was invisible on Service.order_items (#223).
+                    service_id=item_data.get("service_id"),
                     quantity=item_data["quantity"],
                     unit_price_cents=item_data["unit_price_cents"],
                     setup_cents=int(item_data.get("setup_cents", 0)),

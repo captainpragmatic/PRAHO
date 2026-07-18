@@ -14,7 +14,7 @@ from django.test import TestCase
 from django.utils import timezone
 
 from apps.billing.models import Currency
-from apps.customers.models import Customer
+from apps.customers.models import Customer, CustomerAddress
 from apps.orders.models import Order, OrderItem
 from apps.orders.tasks import (
     _create_renewal_order_data,
@@ -22,7 +22,7 @@ from apps.orders.tasks import (
     _resolve_renewal_product_id,
     process_recurring_orders,
 )
-from apps.products.models import Product
+from apps.products.models import Product, ProductPrice
 from apps.provisioning.models import Server, Service, ServicePlan
 from tests.helpers.fsm_helpers import force_status
 
@@ -70,6 +70,25 @@ class RecurringOrdersTaskTestCase(TestCase):
             product_type="shared_hosting",
             is_active=True,
             is_public=True,
+        )
+        # The renewal order is promoted to awaiting_payment, and preflight validation
+        # requires a complete billing address and a current product price for the order
+        # currency — a renewal must clear the same bar as a customer-placed order.
+        CustomerAddress.objects.create(
+            customer=self.customer,
+            address_line1="Str. Exemplu 1",
+            city="Bucharest",
+            county="Bucharest",
+            postal_code="010101",
+            country="România",
+            is_billing=True,
+            is_current=True,
+        )
+        ProductPrice.objects.create(
+            product=self.product,
+            currency=self.currency,
+            monthly_price_cents=2999,
+            is_active=True,
         )
 
     def _service(self, **overrides):
@@ -250,6 +269,18 @@ class RecurringOrdersTaskTestCase(TestCase):
         self.assertEqual(renewal_item.unit_price_cents, 2999)
         self.assertEqual(renewal_item.product_id, self.product.id)
         self.assertEqual(renewal_item.order.meta["auto_renewal"], True)
+
+        # #293 review CRITICAL: a renewal left in draft is a dead end — no proforma (ADR-0038
+        # Phase B hangs off awaiting_payment), no processor ever picks it up, and the guard
+        # then blocks all future attempts. The order must come out submitted for payment,
+        # with the proforma the customer actually pays.
+        renewal_order = renewal_item.order
+        self.assertEqual(renewal_order.status, "awaiting_payment")
+        self.assertIsNotNone(renewal_order.proforma)
+
+        # The renewal item must link back to the Service: create_order used to drop
+        # service_id silently, so renewal history was invisible on Service.order_items.
+        self.assertEqual(renewal_item.service_id, service.id)
 
     def test_process_recurring_orders_is_idempotent(self):
         """A second run must not double-bill a service that already has a renewal order.
