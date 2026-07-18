@@ -1712,6 +1712,9 @@ def apply_scheduled_remediations_task() -> dict[str, Any]:
     """
     from django_q.tasks import async_task  # noqa: PLC0415  # Deferred: avoids circular import
 
+    from apps.infrastructure.drift_remediation import (  # noqa: PLC0415  # Deferred: avoids circular import
+        EXECUTION_TASK_TIMEOUT_SECONDS,  # Circular: cross-app
+    )
     from apps.infrastructure.models import (  # noqa: PLC0415  # Deferred: avoids circular import
         DriftRemediationRequest,  # Circular: cross-app  # Deferred: avoids circular import
     )
@@ -1734,6 +1737,7 @@ def apply_scheduled_remediations_task() -> dict[str, Any]:
                     "apps.infrastructure.tasks.execute_remediation_task",
                     pk,
                     task_name=f"remediation_{pk}",
+                    timeout=EXECUTION_TASK_TIMEOUT_SECONDS,
                 )
                 claimed += 1
 
@@ -1759,6 +1763,7 @@ def recover_stale_remediations_task() -> dict[str, Any]:
     from django_q.tasks import async_task  # noqa: PLC0415  # Deferred: avoids circular import
 
     from apps.infrastructure.drift_remediation import (  # noqa: PLC0415  # Deferred: avoids circular import
+        EXECUTION_TASK_TIMEOUT_SECONDS,  # Circular: cross-app
         get_drift_remediation_service,  # Circular: cross-app
         get_stale_after_minutes,  # Circular: cross-app
     )
@@ -1809,6 +1814,7 @@ def recover_stale_remediations_task() -> dict[str, Any]:
                     "apps.infrastructure.tasks.execute_remediation_task",
                     req.pk,
                     task_name=f"remediation_{req.pk}",
+                    timeout=EXECUTION_TASK_TIMEOUT_SECONDS,
                 )
                 requeued += 1
         except Exception as e:

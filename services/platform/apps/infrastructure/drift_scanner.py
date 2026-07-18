@@ -480,7 +480,9 @@ class DriftScannerService:
             return (
                 details.get("expected_value", ""),
                 details.get("actual_value", ""),
-                details.get("severity", ""),
+                # Legacy requests predate the severity key — treat a missing
+                # key as matching so they are not churned for that alone
+                details.get("severity", report.severity),
             )
 
         current = (report.expected_value, report.actual_value, report.severity)

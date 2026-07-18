@@ -17,7 +17,7 @@ from django_q.models import Schedule
 from apps.common.types import Err, Ok
 from apps.infrastructure.apps import InfrastructureConfig
 from apps.infrastructure.cloud_gateway import ServerInfo
-from apps.infrastructure.drift_remediation import DriftRemediationService
+from apps.infrastructure.drift_remediation import EXECUTION_TASK_TIMEOUT_SECONDS, DriftRemediationService
 from apps.infrastructure.models import (
     CloudProvider,
     DriftCheck,
@@ -165,6 +165,7 @@ class TestApproveReject(DriftRemediationTestBase):
             "apps.infrastructure.tasks.execute_remediation_task",
             self.remediation_request.pk,
             task_name=f"remediation_{self.remediation_request.pk}",
+            timeout=EXECUTION_TASK_TIMEOUT_SECONDS,
         )
 
     @patch("django_q.tasks.async_task", return_value="task-123")
@@ -860,6 +861,7 @@ class TestRecoverStaleRemediations(DriftRemediationTestBase):
             "apps.infrastructure.tasks.execute_remediation_task",
             self.remediation_request.pk,
             task_name=f"remediation_{self.remediation_request.pk}",
+            timeout=EXECUTION_TASK_TIMEOUT_SECONDS,
         )
         self.assertEqual(result["requeued_count"], 1)
 
@@ -909,6 +911,7 @@ class TestApplyScheduledRemediations(DriftRemediationTestBase):
             "apps.infrastructure.tasks.execute_remediation_task",
             self.remediation_request.pk,
             task_name=f"remediation_{self.remediation_request.pk}",
+            timeout=EXECUTION_TASK_TIMEOUT_SECONDS,
         )
         self.assertEqual(result, {"claimed": 1, "due": 1})
 

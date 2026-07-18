@@ -97,7 +97,13 @@ def _get_verify_poll_interval() -> int:
     )
 
 
-# 6x the django-q2 hard worker kill (300s): a live execution can never be
+# Per-task timeout for remediation execution: the apply stage alone can poll
+# the provider for ~5 min (e.g. hcloud resize), and verification needs its own
+# budget after that — the 300s cluster default would kill a successful resize
+# mid-verification. Passed to async_task at every enqueue site.
+EXECUTION_TASK_TIMEOUT_SECONDS = 900
+
+# Well above the longest possible live execution: a live run can never be
 # mistaken for a crashed one.
 _DEFAULT_STALE_AFTER_MINUTES = 30
 
@@ -111,12 +117,9 @@ def get_stale_after_minutes() -> int:
     """
     import math  # noqa: PLC0415  # Stdlib, local to keep module imports lean
 
-    from django.conf import settings as django_settings  # noqa: PLC0415  # Deferred: settings access
-
     from apps.settings.services import SettingsService  # noqa: PLC0415  # Deferred: avoids circular import
 
-    q_timeout = int((getattr(django_settings, "Q_CLUSTER", None) or {}).get("timeout") or 300)
-    floor_minutes = math.ceil((q_timeout + _get_verify_max_wait()) / 60) + 1
+    floor_minutes = math.ceil(EXECUTION_TASK_TIMEOUT_SECONDS / 60) + 1
     configured = SettingsService.get_integer_setting(
         "infrastructure.remediation_stale_after_minutes", _DEFAULT_STALE_AFTER_MINUTES
     )
@@ -171,6 +174,7 @@ class DriftRemediationService:
                 "apps.infrastructure.tasks.execute_remediation_task",
                 request_id,
                 task_name=f"remediation_{request_id}",
+                timeout=EXECUTION_TASK_TIMEOUT_SECONDS,
             )
 
         logger.info(f"✅ [DriftRemediation] Request {request_id} approved by {user.email}, execution queued")
@@ -317,11 +321,18 @@ class DriftRemediationService:
                 req.refresh_from_db()
                 return Err(f"Cannot accept drift for request in status '{req.status}'")
 
-            report.resolved = True
-            report.resolved_at = timezone.now()
-            report.resolved_by = user
-            report.resolution_type = "accepted"
-            report.save(update_fields=["resolved", "resolved_at", "resolved_by", "resolution_type"])
+            finalized = DriftReport.objects.filter(pk=report.pk, resolved=False).update(
+                resolved=True,
+                resolved_at=timezone.now(),
+                resolved_by=user,
+                resolution_type="accepted",
+            )
+            if not finalized:
+                # A concurrent heal won — the drift is gone; do not overwrite
+                # its resolution or keep our deployment write
+                transaction.set_rollback(True)
+                return Err("Drift was resolved in the meantime — nothing left to accept")
+            report.refresh_from_db()
 
         req.refresh_from_db()
         logger.info(f"✅ [DriftRemediation] Drift accepted for {req.deployment.hostname} by {user.email}")
