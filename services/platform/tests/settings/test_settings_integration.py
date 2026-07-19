@@ -18,10 +18,13 @@ See also: test_billing_terms.py for the original billing-term integration tests.
 from __future__ import annotations
 
 from decimal import Decimal
+from unittest.mock import patch
 
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db import transaction
 from django.test import TestCase
 
+from apps.settings.models import SystemSetting
 from apps.settings.services import SettingsService
 from apps.tickets.monitoring import SecurityEventTracker
 from apps.tickets.security import TicketAttachmentSecurityScanner
@@ -129,6 +132,55 @@ class BillingSettingsIntegration(TestCase):
         )
 
         self.assertEqual(_get_max_payment_amount_cents(), 50_000_000)
+
+
+class SettingsCacheInvalidationTests(TestCase):
+    """Settings cache invalidation must happen after the database commit."""
+
+    def test_set_setting_defers_cache_delete_until_commit(self) -> None:
+        SystemSetting.objects.create(
+            key="billing.recurring_auto_collection_enabled",
+            name="Recurring auto-collection enabled",
+            description="Global recurring collection switch",
+            value=True,
+            default_value=False,
+            data_type="boolean",
+        )
+
+        with (
+            patch("apps.settings.services.cache.delete") as mock_cache_delete,
+            self.captureOnCommitCallbacks(execute=True) as callbacks,
+        ):
+            SettingsService.set_setting("billing.recurring_auto_collection_enabled", False)
+            mock_cache_delete.assert_not_called()
+
+        self.assertEqual(len(callbacks), 1)
+        mock_cache_delete.assert_called_once_with(
+            SettingsService._get_cache_key("billing.recurring_auto_collection_enabled"),
+            version=SettingsService.CACHE_VERSION,
+        )
+
+    def test_rolled_back_setting_update_does_not_invalidate_cache(self) -> None:
+        SystemSetting.objects.create(
+            key="billing.recurring_auto_collection_enabled",
+            name="Recurring auto-collection enabled",
+            description="Global recurring collection switch",
+            value=True,
+            default_value=False,
+            data_type="boolean",
+        )
+
+        with (
+            patch("apps.settings.services.cache.delete") as mock_cache_delete,
+            self.captureOnCommitCallbacks(execute=True) as callbacks,
+            self.assertRaises(RuntimeError),
+            transaction.atomic(),
+        ):
+            SettingsService.set_setting("billing.recurring_auto_collection_enabled", False)
+            raise RuntimeError("force rollback")
+
+        self.assertEqual(callbacks, [])
+        mock_cache_delete.assert_not_called()
 
 
 # ── Users ─────────────────────────────────────────────────────────────────────

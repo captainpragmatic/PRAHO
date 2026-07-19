@@ -434,10 +434,6 @@ class SettingsService:
                 setting.value = json_value
                 setting.save()
 
-                # Clear cache for this setting
-                cache_key = cls._get_cache_key(key)
-                cache.delete(cache_key, version=cls.CACHE_VERSION)
-
             logger.info("⚡ [Settings] Updated %s = %s", key, value)
 
         except Exception as e:
@@ -551,9 +547,6 @@ class SettingsService:
                 setting.value = json_value
                 setting.full_clean()  # Validate
                 setting.save(update_fields=["value", "updated_at"])
-
-            # Clear cache
-            cls._clear_setting_cache(key)
 
             # Log the change
             logger.info(

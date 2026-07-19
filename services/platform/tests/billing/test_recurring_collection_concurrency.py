@@ -57,7 +57,7 @@ class RecurringCollectionPostgresConcurrencyTests(_SubscriptionInvoicePaymentFix
     def _charge_invoice(
         self,
         gateway_called: threading.Event,
-        submission_boundary_reached: threading.Event | None = None,
+        gateway_initialization_started: threading.Event | None = None,
         reservation_started: threading.Event | None = None,
     ) -> PaymentIntentResult:
         gateway = MagicMock()
@@ -69,8 +69,8 @@ class RecurringCollectionPostgresConcurrencyTests(_SubscriptionInvoicePaymentFix
         gateway.create_off_session_payment_intent.side_effect = submit_charge
 
         def create_gateway(_gateway_name: str) -> MagicMock:
-            if submission_boundary_reached is not None:
-                submission_boundary_reached.set()
+            if gateway_initialization_started is not None:
+                gateway_initialization_started.set()
             return gateway
 
         original_payment_save = Payment.save
@@ -233,7 +233,7 @@ class RecurringCollectionPostgresConcurrencyTests(_SubscriptionInvoicePaymentFix
     def test_global_disable_started_first_prevents_gateway_submission(self) -> None:
         setting_locked = threading.Event()
         release_setting = threading.Event()
-        submission_boundary_reached = threading.Event()
+        gateway_initialization_started = threading.Event()
         gateway_called = threading.Event()
         original_save = SystemSetting.save
 
@@ -250,7 +250,7 @@ class RecurringCollectionPostgresConcurrencyTests(_SubscriptionInvoicePaymentFix
         def charge() -> PaymentIntentResult:
             return self._charge_invoice(
                 gateway_called,
-                submission_boundary_reached=submission_boundary_reached,
+                gateway_initialization_started=gateway_initialization_started,
             )
 
         with (
@@ -261,7 +261,7 @@ class RecurringCollectionPostgresConcurrencyTests(_SubscriptionInvoicePaymentFix
             self.assertTrue(setting_locked.wait(timeout=5), "Kill switch update never acquired its database lock")
             charge_future = executor.submit(self._in_separate_connection, charge)
             self.assertTrue(
-                submission_boundary_reached.wait(timeout=5), "Charge never reached its submission boundary"
+                gateway_initialization_started.wait(timeout=5), "Charge never started gateway initialization"
             )
             try:
                 self.assertFalse(
