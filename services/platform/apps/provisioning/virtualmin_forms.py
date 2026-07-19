@@ -10,6 +10,7 @@ from django import forms
 from django.core.exceptions import ValidationError
 from django.utils.translation import gettext_lazy as _
 
+from apps.common.outbound_http import OutboundSecurityError, normalize_tls_cert_fingerprint
 from apps.ui.widgets import (
     PRAHOCheckboxWidget,
     PRAHOPasswordWidget,
@@ -43,6 +44,7 @@ class VirtualminServerForm(forms.ModelForm):  # type: ignore[type-arg]
             "api_username",
             "use_ssl",
             "ssl_verify",
+            "ssl_cert_fingerprint",
             "status",
             "max_domains",
             "max_disk_gb",
@@ -55,6 +57,9 @@ class VirtualminServerForm(forms.ModelForm):  # type: ignore[type-arg]
             "api_username": PRAHOTextWidget(attrs={"placeholder": "webmin_api_user"}),
             "use_ssl": PRAHOCheckboxWidget(),
             "ssl_verify": PRAHOCheckboxWidget(),
+            "ssl_cert_fingerprint": PRAHOTextWidget(
+                attrs={"placeholder": "SHA-256 certificate fingerprint (required for private CAs)"}
+            ),
             "status": PRAHOSelectWidget(),
             "max_domains": PRAHOTextWidget(attrs={"placeholder": "100", "type": "number"}),
             "max_disk_gb": PRAHOTextWidget(attrs={"placeholder": "1000", "type": "number"}),
@@ -102,6 +107,29 @@ class VirtualminServerForm(forms.ModelForm):  # type: ignore[type-arg]
                 raise ValidationError(_("Password validation failed: %(error)s") % {"error": e.message}) from e
 
         return password
+
+    def clean(self) -> dict[str, Any]:
+        """Require HTTPS and a certificate pin whenever CA verification is disabled."""
+        cleaned_data = super().clean() or {}
+        use_ssl = bool(cleaned_data.get("use_ssl"))
+        ssl_verify = bool(cleaned_data.get("ssl_verify"))
+        fingerprint = cast(str, cleaned_data.get("ssl_cert_fingerprint", ""))
+
+        if not use_ssl:
+            self.add_error("use_ssl", _("Virtualmin API connections require HTTPS."))
+
+        if not ssl_verify and not fingerprint:
+            self.add_error(
+                "ssl_cert_fingerprint",
+                _("A SHA-256 certificate fingerprint is required when CA verification is disabled."),
+            )
+        elif fingerprint:
+            try:
+                cleaned_data["ssl_cert_fingerprint"] = normalize_tls_cert_fingerprint(fingerprint)
+            except OutboundSecurityError as exc:
+                self.add_error("ssl_cert_fingerprint", ValidationError(str(exc)))
+
+        return cleaned_data
 
     def save(self, commit: bool = True) -> VirtualminServer:
         """Save server and handle password encryption."""

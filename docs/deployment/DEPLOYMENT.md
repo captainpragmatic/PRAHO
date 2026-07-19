@@ -5,6 +5,7 @@ This guide covers all deployment scenarios for PRAHO, from native single-server 
 ## Table of Contents
 
 - [Choosing a Deployment Method](#choosing-a-deployment-method)
+- [Managed-node SSH Trust](#managed-node-ssh-trust)
 - [Deployment Options](#deployment-options)
   - [Option 1: Native Single Server](#option-1-native-single-server)
   - [Option 2: Docker Single Server](#option-2-docker-single-server)
@@ -17,6 +18,20 @@ This guide covers all deployment scenarios for PRAHO, from native single-server 
 - [Makefile Commands](#makefile-commands)
 - [Environment Variables](#environment-variables)
 - [Troubleshooting](#troubleshooting)
+
+---
+
+## Managed-node SSH Trust
+
+PRAHO rejects unknown SSH host keys for node validation, Virtualmin fallback access, pooled SSH connections, and Ansible maintenance. Before enabling infrastructure automation, provision a `known_hosts` file for the operating-system account that runs Platform and its Django-Q workers.
+
+Obtain each host key or fingerprint through a trusted out-of-band channel, such as the cloud-provider console. Do not trust an unverified `ssh-keyscan` result by itself. Add entries for every address PRAHO uses to connect (normally both the node hostname and its public IP), then set:
+
+```dotenv
+PRAHO_SSH_KNOWN_HOSTS_PATH=/etc/praho/known_hosts
+```
+
+The file must be readable by the Platform and worker processes. Container deployments must mount the same file read-only into the container at the configured path. A missing file, unknown host, or changed key intentionally blocks the operation; verify rotations out of band and update the trust file before retrying.
 
 ---
 

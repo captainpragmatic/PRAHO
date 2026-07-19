@@ -8,6 +8,7 @@ ACL authentication potentially being "fixed" by Virtualmin updates.
 from __future__ import annotations
 
 import logging
+import shlex
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
@@ -19,10 +20,12 @@ from django.conf import settings
 from django.core.cache import cache
 from django.utils import timezone
 
+from apps.common.ssh import configure_strict_host_key_checking
 from apps.common.types import Err, Ok, Result
 
-from .virtualmin_gateway import VirtualminConfig, VirtualminGateway
+from .virtualmin_gateway import VirtualminAPIError, VirtualminAuthError, VirtualminConfig, VirtualminGateway
 from .virtualmin_models import VirtualminServer
+from .virtualmin_validators import VirtualminValidator
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +83,13 @@ class AuthMethod(Enum):
     SSH_SUDO = "ssh_sudo"
 
 
+class AuthMethodUnavailableError(Exception):
+    """An explicitly configured fallback method is unavailable on this installation."""
+
+
+AuthFailure = str | VirtualminAPIError | AuthMethodUnavailableError
+
+
 @dataclass
 class AuthResult:
     """Result of authentication attempt"""
@@ -132,6 +142,11 @@ class VirtualminAuthenticationManager:
             Result with command output or error
         """
         start_time = timezone.now()
+        try:
+            program = VirtualminValidator.validate_virtualmin_program(program)
+            parameters = VirtualminValidator.validate_virtualmin_params(parameters)
+        except Exception as exc:
+            return Err(f"Virtualmin command validation failed: {exc}")
 
         # Determine authentication method to try
         methods_to_try = [force_method] if force_method else self._get_auth_method_priority()
@@ -153,27 +168,34 @@ class VirtualminAuthenticationManager:
                         f"✅ [Virtualmin Auth] {method.value} succeeded for {program} in {execution_time:.0f}ms"
                     )
 
-                    return result
+                    return Ok(result.unwrap())
                 else:
-                    error_msg = result.unwrap_err()
+                    error = result.unwrap_err()
+                    error_msg = str(error)
                     last_error = f"{method.value}: {error_msg}"
                     logger.warning(f"❌ [Virtualmin Auth] {method.value} failed: {error_msg}")
 
-                    # Mark this method as failed
-                    self._cache_failed_auth_method(method, error_msg)
+                    if isinstance(error, VirtualminAuthError):
+                        self._cache_failed_auth_method(method, error_msg)
+                        continue
+                    if isinstance(error, AuthMethodUnavailableError):
+                        continue
+                    return Err(last_error)
 
             except Exception as e:
                 last_error = f"{method.value}: {e!s}"
                 logger.error(f"🔥 [Virtualmin Auth] {method.value} exception: {e}")
-                self._cache_failed_auth_method(method, str(e))
+                return Err(last_error)
 
         # All methods failed
         logger.error(f"🚨 [Virtualmin Auth] ALL methods failed for {program}: {last_error}")
         return Err(f"All authentication methods failed. Last error: {last_error}")
 
-    def _execute_with_method(self, method: AuthMethod, program: str, parameters: dict[str, Any]) -> Result[Any, str]:
+    def _execute_with_method(
+        self, method: AuthMethod, program: str, parameters: dict[str, Any]
+    ) -> Result[Any, AuthFailure]:
         """Execute command with specific authentication method."""
-        handlers: dict[AuthMethod, Callable[[str, dict[str, Any]], Result[Any, str]]] = {
+        handlers: dict[AuthMethod, Callable[[str, dict[str, Any]], Result[Any, AuthFailure]]] = {
             AuthMethod.ACL: self._execute_acl_auth,
             AuthMethod.MASTER_PROXY: self._execute_master_proxy,
             AuthMethod.SSH_SUDO: self._execute_ssh_sudo,
@@ -183,7 +205,7 @@ class VirtualminAuthenticationManager:
             return Err(f"Unknown auth method: {method}")
         return handler(program, parameters)
 
-    def _execute_acl_auth(self, program: str, parameters: dict[str, Any]) -> Result[Any, str]:
+    def _execute_acl_auth(self, program: str, parameters: dict[str, Any]) -> Result[Any, AuthFailure]:
         """Execute using current ACL user authentication"""
         try:
             # Use existing gateway with ACL credentials
@@ -194,18 +216,21 @@ class VirtualminAuthenticationManager:
                 port=self.server.api_port,
                 use_ssl=self.server.use_ssl,
                 verify_ssl=self.server.ssl_verify,
+                cert_fingerprint=self.server.ssl_cert_fingerprint,
                 timeout=30,
             )
 
             gateway = VirtualminGateway(config)
             result = gateway.call(program, parameters)
             if result.is_err():
-                return Err(str(result.unwrap_err()))
+                return Err(result.unwrap_err())
             return Ok(result.unwrap())
+        except VirtualminAPIError as e:
+            return Err(e)
         except Exception as e:
-            return Err(f"ACL authentication failed: {e!s}")
+            return Err(VirtualminAPIError(f"ACL request failed: {e!s}", self.server.hostname, program))
 
-    def _execute_master_proxy(self, program: str, parameters: dict[str, Any]) -> Result[Any, str]:
+    def _execute_master_proxy(self, program: str, parameters: dict[str, Any]) -> Result[Any, AuthFailure]:
         """Execute using master admin credentials via proxy service"""
         try:
             # Get master admin credentials from environment
@@ -213,7 +238,7 @@ class VirtualminAuthenticationManager:
             master_password = getattr(settings, "VIRTUALMIN_MASTER_PASSWORD", None)
 
             if not master_username or not master_password:
-                return Err("Master admin credentials not configured")
+                return Err(AuthMethodUnavailableError("Master admin credentials not configured"))
 
             # Use master credentials with same gateway
             config = VirtualminConfig.from_credentials(
@@ -223,6 +248,7 @@ class VirtualminAuthenticationManager:
                 port=self.server.api_port,
                 use_ssl=self.server.use_ssl,
                 verify_ssl=self.server.ssl_verify,
+                cert_fingerprint=self.server.ssl_cert_fingerprint,
                 timeout=30,
             )
 
@@ -236,11 +262,13 @@ class VirtualminAuthenticationManager:
                 )
                 return Ok(result.unwrap())
 
-            return Err(str(result.unwrap_err()))
+            return Err(result.unwrap_err())
+        except VirtualminAPIError as e:
+            return Err(e)
         except Exception as e:
-            return Err(f"Master proxy authentication failed: {e!s}")
+            return Err(VirtualminAPIError(f"Master proxy request failed: {e!s}", self.server.hostname, program))
 
-    def _execute_ssh_sudo(self, program: str, parameters: dict[str, Any]) -> Result[Any, str]:
+    def _execute_ssh_sudo(self, program: str, parameters: dict[str, Any]) -> Result[Any, AuthFailure]:
         """Execute using SSH + sudo to virtualmin CLI"""
         try:
             # Build virtualmin CLI command
@@ -253,13 +281,13 @@ class VirtualminAuthenticationManager:
                 elif value is not None and value is not False:
                     cmd_parts.extend([f"--{key}", str(value)])
 
-            command = " ".join(cmd_parts)
+            command = shlex.join(["sudo", *cmd_parts])
 
             # Execute via SSH
-            ssh_result = self._execute_ssh_command(f"sudo {command}")
+            ssh_result = self._execute_ssh_command(command)
 
             if ssh_result.is_err():
-                return ssh_result
+                return Err(ssh_result.unwrap_err())
 
             output = ssh_result.unwrap()
 
@@ -305,7 +333,7 @@ class VirtualminAuthenticationManager:
 
         try:
             self._ssh_client = paramiko.SSHClient()
-            self._ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            configure_strict_host_key_checking(self._ssh_client)
 
             # Get SSH credentials from settings
             ssh_username = getattr(settings, "VIRTUALMIN_SSH_USERNAME", "virtualmin-praho")
@@ -401,7 +429,7 @@ class VirtualminAuthenticationManager:
                         success=True, method=method, response_time_ms=int(execution_time)
                     )
                 else:
-                    results[method.value] = AuthResult(success=False, method=method, error=result.unwrap_err())
+                    results[method.value] = AuthResult(success=False, method=method, error=str(result.unwrap_err()))
 
             except Exception as e:
                 results[method.value] = AuthResult(success=False, method=method, error=str(e))

@@ -33,6 +33,7 @@ from apps.infrastructure.cloud_gateway import (
     ServerCreateResult,
     get_cloud_gateway,
 )
+from apps.infrastructure.maintenance import resolve_maintenance_playbooks
 from apps.infrastructure.provider_config import (
     run_provider_command,
 )
@@ -660,7 +661,11 @@ class NodeDeploymentService:
                 logger.warning(f"No external_node_id for {deployment.hostname}, skipping cloud deletion")
 
             # Clean up SSH key from vault
-            self._ssh_manager.revoke_deployment_key(deployment, user=user)
+            key_delete_result = self._ssh_manager.delete_deployment_key(deployment, user=user)
+            if key_delete_result.is_err():
+                error_msg = f"SSH key revocation failed: {key_delete_result.unwrap_err()}"
+                self._mark_failed(deployment, error_msg, stage="destroying", audit_ctx=audit_ctx)
+                return Err(error_msg)
 
             # Mark as destroyed
             deployment.destroyed_at = timezone.now()
@@ -868,7 +873,7 @@ class NodeDeploymentService:
                 logger.warning(f"[Upgrade:{deployment.hostname}] Failed to log audit: upgrade failed")
             return Err(f"Upgrade failed: {e}")
 
-    def run_maintenance(  # Complexity: deployment orchestration  # noqa: C901  # Complexity: multi-step business logic
+    def run_maintenance(  # Complexity: deployment orchestration  # noqa: C901, PLR0911  # Complexity: multi-step business logic
         self,
         deployment: NodeDeployment,
         playbooks: list[str] | None = None,
@@ -897,9 +902,11 @@ class NodeDeploymentService:
         if not deployment.ipv4_address:
             return Err("Deployment has no IP address")
 
-        # Default to hardening playbook
-        if not playbooks:
-            playbooks = ["virtualmin_harden.yml"]
+        actions = playbooks or ["security"]
+        try:
+            playbooks = resolve_maintenance_playbooks(deployment.panel_type.panel_type, actions)
+        except ValueError as exc:
+            return Err(str(exc))
 
         logger.info(f"[Maintenance:{deployment.hostname}] Running playbooks: {playbooks}")
 

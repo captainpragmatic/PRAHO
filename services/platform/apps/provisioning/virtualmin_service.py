@@ -95,7 +95,7 @@ class VirtualminProvisioningService:
             config = VirtualminConfig(
                 server=target_server,
                 timeout=config_data["timeout"],
-                verify_ssl=config_data.get("ssl_verify", target_server.ssl_verify),
+                verify_ssl=target_server.ssl_verify,
                 cert_fingerprint=target_server.ssl_cert_fingerprint or config_data.get("pinned_cert_sha256", ""),
             )
 

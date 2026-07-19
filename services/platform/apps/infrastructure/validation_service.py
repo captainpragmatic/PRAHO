@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 import paramiko
 
 from apps.common.outbound_http import OutboundPolicy, OutboundSecurityError, safe_urlopen
+from apps.common.ssh import configure_strict_host_key_checking
 from apps.common.types import Err, Ok, Result
 from apps.infrastructure.ssh_key_manager import get_ssh_key_manager
 
@@ -196,9 +197,7 @@ class NodeValidationService:
 
             # Create SSH client
             client = paramiko.SSHClient()
-            client.set_missing_host_key_policy(
-                paramiko.AutoAddPolicy()  # noqa: S507  # Intentional: auto-trust for infra validation
-            )  # Intentional: auto-trust for infra validation  # Intentional: auto-trust for infra validation
+            configure_strict_host_key_checking(client)
 
             # Load private key
 

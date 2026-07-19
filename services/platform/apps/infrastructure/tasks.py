@@ -736,7 +736,7 @@ def maintenance_task(
         }
 
     ansible_results = result.unwrap()
-    playbook_names = playbooks or ["update"]
+    playbook_names = playbooks or ["security"]
 
     NodeDeploymentLog.objects.create(
         deployment=deployment,

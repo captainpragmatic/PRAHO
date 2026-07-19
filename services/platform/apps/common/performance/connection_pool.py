@@ -18,6 +18,8 @@ from contextlib import contextmanager
 from typing import Any, ClassVar
 from urllib.parse import urlparse
 
+from django.conf import settings
+
 logger = logging.getLogger(__name__)
 
 # Try to import requests with urllib3 for connection pooling
@@ -399,7 +401,11 @@ class SSHConnectionPool:
 
             # Create new connection
             client = self._paramiko.SSHClient()
-            client.set_missing_host_key_policy(self._paramiko.AutoAddPolicy())
+            client.load_system_host_keys()
+            known_hosts_path = str(getattr(settings, "PRAHO_SSH_KNOWN_HOSTS_PATH", "")).strip()
+            if known_hosts_path:
+                client.load_host_keys(known_hosts_path)
+            client.set_missing_host_key_policy(self._paramiko.RejectPolicy())
 
             connect_kwargs: dict[str, Any] = {
                 "hostname": hostname,

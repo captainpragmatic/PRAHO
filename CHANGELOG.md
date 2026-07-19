@@ -31,6 +31,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **e-Factura EN16931/CIUS-RO XML compliance** — completed the UBL 2.1 builder for ANAF Schematron conformance: EU cross-border B2B encoded as reverse charge (AE, VATEX-EU-AE, rate 0, all lines coherent per BR-AE-1) with deterministic tax-category derivation; corrected VATEX exemption codes (S/Z emit neither BT-120 nor BT-121; BT-121 only with a valid VATEX code); per-line and credit-note VAT rate clamped to 0 for non-standard categories; credit-note unit code from the line. Document-level allowance/charge totals reconciled in UBL element order with consistent TaxExclusive/TaxInclusive/Payable and a netted breakdown TaxableAmount (BR-CO-13/15/16/17), and allowance/charge metadata validated against malformed amounts (#158, #160)
 
+### Security
+
+- **Virtualmin and infrastructure control plane** — Virtualmin credentials now require HTTPS and either CA verification or a SHA-256 certificate pin enforced during the TLS handshake; all SSH and Ansible paths reject unknown host keys from a shared operator-provisioned trust file; root maintenance accepts only fixed semantic actions and elevated deploy permission; authentication fallbacks escalate only on typed authentication failures; rate limiting uses atomic fixed-window slot claims; and SSH key generation and revocation are audited and fail closed during node destruction (#327)
+
 ---
 
 ## [0.28.0] - 2026-06-14

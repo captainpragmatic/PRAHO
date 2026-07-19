@@ -406,6 +406,7 @@ STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET")
 # ✅ Virtualmin settings migrated to Settings UI!
 # Visit: /app/settings/dashboard/ → Provisioning & Infrastructure
 # Credentials are stored in the encrypted credential vault.
+PRAHO_SSH_KNOWN_HOSTS_PATH = os.environ.get("PRAHO_SSH_KNOWN_HOSTS_PATH", "")
 
 # e-Factura API settings
 EFACTURA_API_URL = os.environ.get("EFACTURA_API_URL")

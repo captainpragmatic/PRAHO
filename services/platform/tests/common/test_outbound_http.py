@@ -21,6 +21,8 @@ from apps.common.outbound_http import (
     _log_dns_fallback,
     clear_internal_service_policy_cache,
     get_internal_service_policy,
+    safe_request,
+    safe_urlopen,
     validate_and_resolve,
 )
 
@@ -457,6 +459,66 @@ class TestDNSFallback(TestCase):
         mock_logger.error.assert_called_once()
         call_args = mock_logger.error.call_args
         self.assertIn("Audit logging failed", call_args[0][0])
+
+
+class TestTLSFingerprintPinning(TestCase):
+    """Certificate pins must be enforced by urllib3 before HTTP bytes are sent."""
+
+    def test_pinned_adapter_passes_sha256_fingerprint_to_connection_pool(self):
+        fingerprint = "ab" * 32
+
+        adapter = PinnedIPAdapter(
+            pinned_ip=MOCK_PUBLIC_IP,
+            hostname="virtualmin.example.com",
+            port=10000,
+            tls_cert_fingerprint=fingerprint,
+        )
+
+        self.assertEqual(adapter.poolmanager.connection_pool_kw["assert_fingerprint"], fingerprint)
+
+    @patch("apps.common.outbound_http.requests.Session.send")
+    @patch("apps.common.outbound_http.validate_and_resolve")
+    def test_invalid_sha256_fingerprint_is_rejected_before_send(
+        self,
+        mock_validate: MagicMock,
+        mock_send: MagicMock,
+    ) -> None:
+        mock_validate.return_value = ResolvedTarget(
+            original_url="https://virtualmin.example.com:10000/remote.cgi",
+            scheme="https",
+            hostname="virtualmin.example.com",
+            port=10000,
+            path="/remote.cgi",
+            pinned_ips=[MOCK_PUBLIC_IP],
+        )
+        policy = OutboundPolicy(name="virtualmin", tls_cert_fingerprint="not-a-sha256-fingerprint")
+
+        with self.assertRaises(OutboundSecurityError):
+            safe_request("GET", mock_validate.return_value.original_url, policy=policy)
+
+        mock_send.assert_not_called()
+
+    @patch("apps.common.outbound_http.urllib.request.urlopen")
+    @patch("apps.common.outbound_http.validate_and_resolve")
+    def test_urlopen_rejects_fingerprint_policy_it_cannot_enforce(
+        self,
+        mock_validate: MagicMock,
+        mock_urlopen: MagicMock,
+    ) -> None:
+        mock_validate.return_value = ResolvedTarget(
+            original_url="https://virtualmin.example.com:10000/",
+            scheme="https",
+            hostname="virtualmin.example.com",
+            port=10000,
+            path="/",
+            pinned_ips=[MOCK_PUBLIC_IP],
+        )
+        policy = OutboundPolicy(name="fingerprinted", tls_cert_fingerprint="ab" * 32)
+
+        with self.assertRaises(OutboundSecurityError):
+            safe_urlopen(mock_validate.return_value.original_url, policy=policy)
+
+        mock_urlopen.assert_not_called()
 
 
 class TestInternalServicePolicy(TestCase):
