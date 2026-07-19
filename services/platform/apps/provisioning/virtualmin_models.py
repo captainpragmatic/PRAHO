@@ -73,6 +73,10 @@ class VirtualminServer(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="active", verbose_name=_("Status"))
     last_health_check = models.DateTimeField(null=True, blank=True)
     health_check_error = models.TextField(blank=True)
+    # Consecutive failed health checks; only a sustained streak may auto-fail
+    # the server, and only auto-failed servers are ever auto-recovered.
+    consecutive_health_failures = models.PositiveIntegerField(default=0)
+    failed_by_health_check = models.BooleanField(default=False)
 
     # Load balancing and placement
     weight = models.PositiveIntegerField(
@@ -581,6 +585,10 @@ class VirtualminProvisioningJob(models.Model):
     retry_count = models.PositiveIntegerField(default=0)
     max_retries = models.PositiveIntegerField(default=3)
     next_retry_at = models.DateTimeField(null=True, blank=True)
+    # Leased-claim marker: set when the retry sweep claims this job; a pending
+    # job whose lease expired (process death before/after enqueue) is
+    # recovered back to failed by the sweep.
+    claimed_at = models.DateTimeField(null=True, blank=True)
 
     # Rollback tracking
     rollback_executed = models.BooleanField(
