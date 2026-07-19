@@ -1155,13 +1155,14 @@ class VirtualminProvisioningService:
 
             if drift_detected:
                 # Log drift for audit
-                VirtualminDriftRecord.objects.create(  # type: ignore[misc]
-                    account=account,
+                VirtualminDriftRecord.objects.create(
+                    domain=account.domain,
+                    server=account.server,
                     drift_type="status_mismatch",
+                    description="; ".join(drift_detected),
                     praho_state={"status": account.status, "domain": account.domain},
                     virtualmin_state=virtualmin_data,
-                    drift_description="; ".join(drift_detected),
-                    resolution_action="logged_for_review",
+                    resolution_status="pending",
                 )
 
                 logger.warning(f"🔍 [VirtualminService] Drift detected for {account.domain}: {drift_detected}")
@@ -1229,13 +1230,16 @@ class VirtualminProvisioningService:
                     actions_taken.append("suspended_domain")
 
             # Log enforcement action
-            VirtualminDriftRecord.objects.create(  # type: ignore[misc]
-                account=account,
-                drift_type="praho_state_enforced",
+            # "praho_state_enforced" is not a DRIFT_TYPE_CHOICES value — the
+            # drift itself is a status mismatch; enforcement is the resolution.
+            VirtualminDriftRecord.objects.create(
+                domain=account.domain,
+                server=account.server,
+                drift_type="status_mismatch",
+                description=f"Enforced PRAHO state: {actions_taken}",
                 praho_state=sync_data["praho_state"],
                 virtualmin_state=sync_data["virtualmin_state"],
-                drift_description=f"Enforced PRAHO state: {actions_taken}",
-                resolution_action="praho_state_enforced",
+                resolution_status="auto_fixed",
             )
 
             logger.warning(f"🚨 [VirtualminService] Enforced PRAHO state for {account.domain}: {actions_taken}")

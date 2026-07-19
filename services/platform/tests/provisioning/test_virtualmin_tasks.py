@@ -22,6 +22,7 @@ from apps.customers.models import Customer
 from apps.provisioning.models import Service, ServicePlan
 from apps.provisioning.virtualmin_models import (
     VirtualminAccount,
+    VirtualminDriftRecord,
     VirtualminProvisioningJob,
     VirtualminServer,
 )
@@ -335,3 +336,58 @@ class TestCreateAccountPreflight(VirtualminTaskTestBase):
         self.assertTrue(result.is_err())
         self.assertIn("not found on server", result.unwrap_err())
         self.assertEqual(len(mock_gateway.get_calls("create-domain")), 0)
+
+
+class TestDriftRecords(VirtualminTaskTestBase):
+    """#325 defect 5: drift writes used nonexistent model fields and crashed
+    with TypeError exactly when drift existed."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.account.status = "suspended"  # PRAHO says suspended...
+        self.account.save(update_fields=["status"])
+
+    def _sync(self, mock_gateway):
+        with patch(
+            "apps.provisioning.virtualmin_service.VirtualminGateway",
+            return_value=mock_gateway,
+        ):
+            service = VirtualminProvisioningService(self.server)
+            return service.sync_account_from_virtualmin(self.account)
+
+    def test_status_mismatch_persists_valid_drift_record(self):
+        mock_gateway = MockVirtualminGateway()
+        mock_gateway.seed_domain(self.account.domain, enabled=True)  # ...Virtualmin says active
+
+        result = self._sync(mock_gateway)
+
+        self.assertTrue(result.is_ok(), result)
+        record = VirtualminDriftRecord.objects.get(domain=self.account.domain)
+        self.assertEqual(record.server, self.server)
+        self.assertIn(
+            record.drift_type,
+            [choice[0] for choice in VirtualminDriftRecord.DRIFT_TYPE_CHOICES],
+        )
+        self.assertEqual(record.resolution_status, "pending")
+        self.assertTrue(record.description)
+
+    def test_enforce_praho_state_persists_valid_drift_record(self):
+        mock_gateway = MockVirtualminGateway()
+        mock_gateway.seed_domain(self.account.domain, enabled=True)
+
+        with patch(
+            "apps.provisioning.virtualmin_service.VirtualminGateway",
+            return_value=mock_gateway,
+        ):
+            service = VirtualminProvisioningService(self.server)
+            result = service.enforce_praho_state(self.account, force=True)
+
+        self.assertTrue(result.is_ok(), result)
+        record = VirtualminDriftRecord.objects.filter(domain=self.account.domain).latest("detected_at")
+        self.assertIn(
+            record.drift_type,
+            [choice[0] for choice in VirtualminDriftRecord.DRIFT_TYPE_CHOICES],
+        )
+        # PRAHO won: Virtualmin was forced to match, drift auto-fixed
+        self.assertEqual(record.resolution_status, "auto_fixed")
+        self.assertFalse(mock_gateway.get_domain_state(self.account.domain).enabled)
