@@ -14,7 +14,8 @@ from datetime import timedelta
 from decimal import Decimal
 from unittest.mock import patch
 
-from django.test import TestCase
+from django.db import transaction
+from django.test import TestCase, override_settings
 from django.utils import timezone
 from django_q.models import Schedule
 
@@ -36,10 +37,16 @@ from apps.provisioning.virtualmin_tasks import (
     health_check_virtualmin_servers,
     process_failed_virtualmin_jobs,
     provision_virtualmin_account_async,
+    reconcile_virtualmin_service_state,
     retry_virtualmin_job,
     setup_virtualmin_scheduled_tasks,
 )
+from tests.helpers.fsm_helpers import force_status
 from tests.mocks.virtualmin_mock import MockVirtualminGateway
+
+
+class _BoomError(Exception):
+    pass
 
 
 class VirtualminTaskTestBase(TestCase):
@@ -501,3 +508,104 @@ class TestServerHealthModel(VirtualminTaskTestBase):
         row = Schedule.objects.get(name="virtualmin-health-check")
         self.assertEqual(row.schedule_type, "I")
         self.assertEqual(row.minutes, 10)
+
+
+class TestServiceReconciliation(VirtualminTaskTestBase):
+    """#325 defects 4+7: Service lifecycle now converges Virtualmin state via
+    an idempotent reconcile task queued on_commit from a dedicated handler."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.account.status = "active"
+        self.account.save(update_fields=["status"])
+
+    def _reconcile(self, mock_gateway):
+        with patch(
+            "apps.provisioning.virtualmin_service.VirtualminGateway",
+            return_value=mock_gateway,
+        ):
+            return reconcile_virtualmin_service_state(str(self.service.id))
+
+    @patch("apps.provisioning.virtualmin_tasks.reconcile_virtualmin_service_state_async", return_value="t-1")
+    def test_suspension_enqueues_reconcile_on_commit(self, mock_reconcile):
+        """The dunning/suspend path finally reaches Virtualmin — via on_commit,
+        so a rolled-back suspension never dispatches."""
+        with self.captureOnCommitCallbacks(execute=True):
+            self.service.suspend(reason="payment_overdue")
+            self.service.save(update_fields=["status", "suspended_at", "suspension_reason", "updated_at"])
+
+        mock_reconcile.assert_called_once_with(str(self.service.id))
+
+    @patch("apps.provisioning.virtualmin_tasks.reconcile_virtualmin_service_state_async", return_value="t-1")
+    def test_rollback_produces_no_enqueue(self, mock_reconcile):
+
+        with self.assertRaises(_BoomError), self.captureOnCommitCallbacks(execute=True), transaction.atomic():
+            self.service.suspend(reason="payment_overdue")
+            self.service.save(update_fields=["status", "suspended_at", "suspension_reason", "updated_at"])
+            raise _BoomError
+
+        mock_reconcile.assert_not_called()
+
+    @patch("apps.provisioning.virtualmin_tasks.reconcile_virtualmin_service_state_async", return_value="t-1")
+    def test_fires_with_audit_signals_disabled(self, mock_reconcile):
+        """Business propagation must not be silenced by the audit kill flag
+        (the old trigger lived inside the audit handler and was)."""
+        with override_settings(DISABLE_AUDIT_SIGNALS=True), self.captureOnCommitCallbacks(execute=True):
+            self.service.suspend(reason="payment_overdue")
+            self.service.save(update_fields=["status", "suspended_at", "suspension_reason", "updated_at"])
+
+        mock_reconcile.assert_called_once()
+
+    def test_reconcile_suspends_account_for_suspended_service(self):
+        force_status(self.service, "suspended")
+        mock_gateway = MockVirtualminGateway()
+        mock_gateway.seed_domain(self.account.domain)
+
+        result = self._reconcile(mock_gateway)
+
+        self.assertEqual(result["action"], "suspended")
+        self.account.refresh_from_db()
+        self.assertEqual(self.account.status, "suspended")
+
+    def test_reconcile_unsuspends_account_for_active_service(self):
+        """Dunning recovery used to be silently absorbed by the provisioning
+        trigger's existing-account early-exit."""
+        self.account.status = "suspended"
+        self.account.save(update_fields=["status"])
+        mock_gateway = MockVirtualminGateway()
+        mock_gateway.seed_domain(self.account.domain, enabled=False)
+
+        result = self._reconcile(mock_gateway)
+
+        self.assertEqual(result["action"], "unsuspended")
+        self.account.refresh_from_db()
+        self.assertEqual(self.account.status, "active")
+
+    def test_reconcile_terminated_service_suspends_never_deletes(self):
+        force_status(self.service, "terminated")
+        mock_gateway = MockVirtualminGateway()
+        mock_gateway.seed_domain(self.account.domain)
+
+        result = self._reconcile(mock_gateway)
+
+        self.assertEqual(result["action"], "suspended")
+        self.assertEqual(len(mock_gateway.get_calls("delete-domain")), 0)
+        self.account.refresh_from_db()
+        self.assertEqual(self.account.status, "suspended")
+
+    def test_reconcile_noop_when_states_match(self):
+        result = self._reconcile(MockVirtualminGateway())
+        self.assertEqual(result["action"], "noop")
+
+    @patch("apps.provisioning.signals._trigger_automatic_virtualmin_provisioning")
+    def test_kill_switch_gates_auto_provisioning(self, mock_trigger):
+        self.account.delete()
+
+        with override_settings(VIRTUALMIN_AUTO_PROVISIONING_ENABLED=False):
+            result = self._reconcile(MockVirtualminGateway())
+        self.assertEqual(result["action"], "kill_switch_disabled")
+        mock_trigger.assert_not_called()
+
+        result = self._reconcile(MockVirtualminGateway())
+        self.assertEqual(result["action"], "provisioning_triggered")
+        mock_trigger.assert_called_once()

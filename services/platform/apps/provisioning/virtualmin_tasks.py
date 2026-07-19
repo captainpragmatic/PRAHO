@@ -572,6 +572,10 @@ def _handle_successful_provisioning_secure(
     account: Any, service: Service, correlation_id: str, safe_log_ctx: dict[str, Any]
 ) -> dict[str, Any]:
     """Handle successful provisioning with enhanced security and audit logging."""
+    # Converge once more after creation: a termination that landed while the
+    # gateway was working must not leave a live account for a dead Service.
+    service_id = str(service.id)
+    transaction.on_commit(lambda: reconcile_virtualmin_service_state_async(service_id))
     try:
         # Enhanced audit logging with security metadata
         AuditService.log_event(
@@ -849,6 +853,68 @@ def _handle_critical_provisioning_error(
         "correlation_id": correlation_id,
     }
     return _handle_critical_provisioning_error_secure(error, domain, service_id, correlation_id, safe_log_ctx)
+
+
+def reconcile_virtualmin_service_state(  # noqa: PLR0911  # Convergence matrix: one exit per state pair
+    service_id: str,
+) -> dict[str, Any]:
+    """
+    Idempotent convergence: read the COMMITTED Service + account state and
+    make Virtualmin match it (#325 defect 4 — suspension/termination never
+    propagated; reactivation was silently absorbed).
+
+    active + no account      -> auto-provision (kill-switch gated, ADR-0019)
+    active + suspended acct  -> unsuspend
+    suspended/terminated/expired + active acct -> suspend (never delete —
+    deletion stays protected/manual)
+    """
+    from apps.provisioning.virtualmin_service import (  # noqa: PLC0415  # Deferred: avoids circular import
+        VirtualminProvisioningService,  # Circular: cross-app
+    )
+
+    service = Service.objects.filter(pk=service_id).first()
+    if service is None:
+        return {"success": False, "error": f"Service {service_id} not found"}
+
+    account = VirtualminAccount.objects.filter(service=service).select_related("server").first()
+
+    if service.status == "active":
+        if account is None:
+            if not getattr(settings, "VIRTUALMIN_AUTO_PROVISIONING_ENABLED", True):
+                logger.info(f"⏭️ [VirtualminTask] Auto-provisioning disabled — skipping {service_id}")
+                return {"success": True, "action": "kill_switch_disabled"}
+            from apps.provisioning.signals import (  # noqa: PLC0415  # Deferred: avoids circular import
+                _trigger_automatic_virtualmin_provisioning,  # Circular: cross-app
+            )
+
+            _trigger_automatic_virtualmin_provisioning(service)
+            return {"success": True, "action": "provisioning_triggered"}
+        if account.status == "suspended":
+            result = VirtualminProvisioningService(account.server).unsuspend_account(account)
+            if result.is_err():
+                return {"success": False, "action": "unsuspend", "error": str(result.unwrap_err())}
+            return {"success": True, "action": "unsuspended"}
+        return {"success": True, "action": "noop"}
+
+    if service.status in ("suspended", "terminated", "expired"):
+        if account is not None and account.status == "active":
+            reason = service.suspension_reason or f"service_{service.status}"
+            result = VirtualminProvisioningService(account.server).suspend_account(account, reason)
+            if result.is_err():
+                return {"success": False, "action": "suspend", "error": str(result.unwrap_err())}
+            return {"success": True, "action": "suspended"}
+        return {"success": True, "action": "noop"}
+
+    return {"success": True, "action": "noop"}
+
+
+def reconcile_virtualmin_service_state_async(service_id: str) -> str:
+    """Queue Virtualmin state reconciliation for a service."""
+    return async_task(
+        "apps.provisioning.virtualmin_tasks.reconcile_virtualmin_service_state",
+        service_id,
+        timeout=TASK_SOFT_TIME_LIMIT,
+    )
 
 
 def suspend_virtualmin_account(account_id: str, reason: str = "") -> dict[str, Any]:
