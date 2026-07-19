@@ -516,8 +516,6 @@ class PortalServiceHMACMiddleware:
     _BILLING_API_PREFIXES = (
         "/billing/create-payment-intent/",
         "/billing/confirm-payment/",
-        "/billing/create-subscription/",
-        "/billing/payment-methods/",
         "/billing/stripe-config/",
         "/billing/process-refund/",
     )

@@ -1,8 +1,9 @@
 """
 B2C (Business-to-Consumer) support for e-Factura.
 
-From January 2025, B2C invoices are mandatory for Romanian e-Factura.
-B2C invoices use CNP (Cod Numeric Personal) instead of CUI for buyers.
+From January 2025, B2C invoices are mandatory for Romanian e-Factura. A supplied
+CNP may identify the consumer; from June 2026, consumers who do not supply a
+fiscal identifier are represented with 13 zero digits.
 
 This module provides:
 - CNP validation
@@ -16,6 +17,7 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from apps.billing.fiscal_identity import normalize_business_tax_id, normalize_country_code, validated_cnp_or_empty
 from apps.common.cnp_validator import CNPValidationResult, CNPValidator
 
 from .settings import efactura_settings
@@ -49,9 +51,8 @@ class B2CDetector:
     Detect and validate B2C invoices.
 
     B2C invoices are identified by:
-    - No tax ID (CUI) on the buyer
+    - No business tax ID (CUI) on the buyer
     - Romanian buyer country
-    - Amount above minimum threshold
     """
 
     def __init__(self, settings: Any = None):
@@ -74,10 +75,9 @@ class B2CDetector:
             B2CInvoiceInfo with detection results
         """
         # Get invoice attributes
-        bill_to_country = getattr(invoice, "bill_to_country", None)
-        bill_to_tax_id = getattr(invoice, "bill_to_tax_id", None)
+        bill_to_country = normalize_country_code(getattr(invoice, "bill_to_country", None))
+        bill_to_tax_id = normalize_business_tax_id(getattr(invoice, "bill_to_tax_id", None))
         bill_to_name = getattr(invoice, "bill_to_name", "")
-        total_cents = getattr(invoice, "total_cents", 0)
 
         # Not B2C if has tax ID (CUI)
         if bill_to_tax_id:
@@ -87,31 +87,16 @@ class B2CDetector:
         if bill_to_country != "RO":
             return B2CInvoiceInfo(is_b2c=False)
 
-        # Check if B2C e-Factura is enabled
-        if not self._settings.b2c_enabled:
-            return B2CInvoiceInfo(
-                is_b2c=True,
-                customer_name=bill_to_name,
-                requires_efactura=False,
-            )
-
-        # Check minimum amount
-        minimum = self._settings.b2c_minimum_amount_cents
-        if minimum > 0 and total_cents < minimum:
-            return B2CInvoiceInfo(
-                is_b2c=True,
-                customer_name=bill_to_name,
-                requires_efactura=False,
-            )
-
         # Validate CNP if provided
         validation_result = None
+        canonical_cnp = ""
         if customer_identifier:
             validation_result = CNPValidator.validate(customer_identifier)
+            canonical_cnp = validated_cnp_or_empty(customer_identifier)
 
         return B2CInvoiceInfo(
             is_b2c=True,
-            customer_cnp=customer_identifier if validation_result and validation_result.is_valid else None,
+            customer_cnp=canonical_cnp or None,
             customer_name=bill_to_name,
             requires_efactura=True,
             validation_result=validation_result,
@@ -134,7 +119,7 @@ class B2CXMLBuilder:
     """
 
     B2C_SCHEME_ID = "RO:CNP"
-    ANAF_TEST_CNP = "0000000000000"  # For testing in sandbox
+    ANAF_TEST_CNP = "0000000000000"  # Statutory identifier when the B2C buyer supplies no fiscal ID
 
     @classmethod
     def get_buyer_identification(
@@ -154,9 +139,10 @@ class B2CXMLBuilder:
         Returns:
             Dictionary with buyer identification info for XML builder
         """
-        # In test environment, ANAF accepts all zeros CNP
-        if is_test_environment and not cnp:
-            cnp = cls.ANAF_TEST_CNP
+        # Since 1 June 2026, Romanian B2C invoices use thirteen zero digits
+        # when the buyer supplies no fiscal identifier. This applies in both
+        # production and sandbox; it is not a synthetic test-only identity.
+        cnp = validated_cnp_or_empty(cnp) or cls.ANAF_TEST_CNP
 
         return {
             "identifier": cnp or "",
@@ -182,12 +168,9 @@ class B2CXMLBuilder:
         Returns:
             Tuple of (is_valid, error_message)
         """
-        if is_test_environment:
+        if is_test_environment or not cnp:
             # Test environment accepts any CNP including all zeros
             return True, ""
-
-        if not cnp:
-            return False, "CNP is required for B2C e-Factura submission"
 
         result = CNPValidator.validate(cnp)
         if not result.is_valid:

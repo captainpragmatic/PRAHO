@@ -486,6 +486,14 @@ class Service(ConcurrentTransitionMixin, models.Model):
     def expire(self) -> None:
         """Mark service as expired."""
 
+    @transition(field=status, source="expired", target="active")
+    def restore_from_expiration(self) -> None:
+        """Restore an expired service when its still-paid subscription is reactivated."""
+        if not self.activated_at:
+            self.activated_at = timezone.now()
+        self.suspended_at = None
+        self.suspension_reason = ""
+
     @transition(field=status, source="failed", target="pending")
     def retry(self) -> None:
         """Retry failed provisioning."""

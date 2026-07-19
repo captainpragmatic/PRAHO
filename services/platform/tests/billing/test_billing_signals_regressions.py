@@ -3,6 +3,7 @@ Comprehensive tests for apps/billing/signals.py to maximize coverage.
 Tests signal handlers, helper functions, and business logic utilities.
 """
 
+import hashlib
 import uuid
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -21,13 +22,14 @@ from apps.billing.models import (
     PaymentRetryAttempt,
     PriceGrandfathering,
     ProformaInvoice,
+    RecurringPaymentAuthorization,
     Refund,
     Subscription,
     TaxRule,
     VATValidation,
 )
+from apps.billing.recurring_authorization_service import RecurringPaymentAuthorizationService
 from apps.billing.signals import (
-    E_FACTURA_MINIMUM_AMOUNT,
     LARGE_REFUND_THRESHOLD_CENTS,
     _activate_payment_services,
     _activate_pending_services,
@@ -88,6 +90,7 @@ from apps.billing.signals import (
     _update_customer_payment_history,
     _update_customer_vat_status,
 )
+from apps.customers.models import CustomerPaymentMethod
 from tests.factories.billing_factories import (
     CustomerFactory,
     InvoiceFactory,
@@ -224,9 +227,7 @@ class TestSubscriptionLifecycleSignals(TestCase):
 
         self.customer = CustomerFactory()
         self.currency = _get_or_create_currency("EUR")
-        self.product = Product.objects.create(
-            name="Test Product", slug="test-product", product_type="hosting"
-        )
+        self.product = Product.objects.create(name="Test Product", slug="test-product", product_type="hosting")
 
     @patch("apps.billing.signals._log_billing_model_event")
     def test_subscription_created(self, mock_log):
@@ -287,14 +288,53 @@ class TestSubscriptionLifecycleSignals(TestCase):
         assert call_kwargs["event_type"] == "subscription_model_deleted"
 
 
+class TestRecurringPaymentAuthorizationLifecycleSignals(TestCase):
+    def setUp(self):
+        self.customer = CustomerFactory()
+        self.payment_method = CustomerPaymentMethod.objects.create(
+            customer=self.customer,
+            method_type="stripe_card",
+            stripe_customer_id="cus_audit_mandate",
+            stripe_payment_method_id="pm_audit_mandate",
+            display_name="Visa 4242",
+            last_four="4242",
+            is_active=True,
+        )
+
+    def _create_authorization(self) -> RecurringPaymentAuthorization:
+        return RecurringPaymentAuthorization.objects.create(
+            customer=self.customer,
+            payment_method=self.payment_method,
+            terms_version=RecurringPaymentAuthorizationService.TERMS_VERSION,
+            terms_text=RecurringPaymentAuthorizationService.TERMS_TEXT,
+            terms_text_hash=hashlib.sha256(RecurringPaymentAuthorizationService.TERMS_TEXT.encode("utf-8")).hexdigest(),
+            granted_by_role="owner",
+        )
+
+    @patch("apps.billing.signals._log_billing_model_event")
+    def test_created(self, mock_log):
+        self._create_authorization()
+
+        call_kwargs = mock_log.call_args_list[-1][1]
+        assert call_kwargs["event_type"] == "recurring_payment_authorization_created"
+
+    @patch("apps.billing.signals._log_billing_model_event")
+    def test_deleted(self, mock_log):
+        authorization = self._create_authorization()
+        mock_log.reset_mock()
+
+        authorization.delete()
+
+        call_kwargs = mock_log.call_args_list[-1][1]
+        assert call_kwargs["event_type"] == "recurring_payment_authorization_deleted"
+
+
 class TestPriceGrandfatheringLifecycleSignals(TestCase):
     def setUp(self):
         from apps.products.models import Product  # noqa: PLC0415
 
         self.customer = CustomerFactory()
-        self.product = Product.objects.create(
-            name="GF Product", slug="gf-product", product_type="hosting"
-        )
+        self.product = Product.objects.create(name="GF Product", slug="gf-product", product_type="hosting")
 
     @patch("apps.billing.signals._log_billing_model_event")
     def test_created(self, mock_log):
@@ -567,6 +607,23 @@ class TestInvoiceCreatedOrUpdatedSignal(TestCase):
             status="issued",
             efactura_sent=False,
         )
+        mock_efactura.assert_called_once_with(invoice)
+
+    @patch("apps.billing.signals._trigger_efactura_submission")
+    def test_draft_to_issued_queues_exactly_one_efactura_submission(self, mock_efactura):
+        invoice = InvoiceFactory(
+            customer=self.customer,
+            currency=self.currency,
+            number="INV-SIG-ISSUE-ONCE",
+            status="draft",
+            bill_to_country="RO",
+            efactura_sent=False,
+        )
+        mock_efactura.reset_mock()
+
+        invoice.issue()
+        invoice.save()
+
         mock_efactura.assert_called_once_with(invoice)
 
     @override_settings(DISABLE_AUDIT_SIGNALS=True)
@@ -1146,7 +1203,9 @@ class TestHandleInvoiceRefundCompletion(TestCase):
     @patch("apps.billing.signals._handle_efactura_refund_reporting")
     @patch("apps.billing.signals._update_customer_invoice_history")
     @patch("apps.billing.signals._send_invoice_refund_confirmation")
-    def test_small_refund_no_finance_notification(self, mock_email, mock_history, mock_efactura, mock_metrics, mock_finance, mock_sec):  # noqa: PLR0913
+    def test_small_refund_no_finance_notification(  # noqa: PLR0913
+        self, mock_email, mock_history, mock_efactura, mock_metrics, mock_finance, mock_sec
+    ):
         invoice = MagicMock()
         invoice.total_cents = 100  # Below threshold
         invoice.number = "INV-REF-002"
@@ -1589,7 +1648,7 @@ class TestEmailFunctions(TestCase):
 
 
 class TestRequiresEfacturaSubmission(TestCase):
-    def test_romanian_with_tax_id_above_minimum(self):
+    def test_romanian_b2b_invoice_requires_submission(self):
         invoice = MagicMock()
         invoice.bill_to_country = "RO"
         invoice.bill_to_tax_id = "RO12345678"
@@ -1603,19 +1662,25 @@ class TestRequiresEfacturaSubmission(TestCase):
         invoice.total = Decimal("150")
         assert _requires_efactura_submission(invoice) is False
 
-    def test_no_tax_id(self):
+    def test_romanian_b2c_invoice_requires_submission(self):
         invoice = MagicMock()
         invoice.bill_to_country = "RO"
         invoice.bill_to_tax_id = ""
         invoice.total = Decimal("150")
-        assert _requires_efactura_submission(invoice) is False
+        assert _requires_efactura_submission(invoice) is True
 
-    def test_below_minimum(self):
+    def test_lowercase_romanian_country_code_requires_submission(self):
+        invoice = MagicMock()
+        invoice.bill_to_country = "ro"
+
+        assert _requires_efactura_submission(invoice) is True
+
+    def test_small_romanian_invoice_requires_submission(self):
         invoice = MagicMock()
         invoice.bill_to_country = "RO"
         invoice.bill_to_tax_id = "RO12345678"
         invoice.total = Decimal("50")
-        assert _requires_efactura_submission(invoice) is False
+        assert _requires_efactura_submission(invoice) is True
 
 
 class TestTriggerEfacturaSubmission(TestCase):
@@ -1624,7 +1689,11 @@ class TestTriggerEfacturaSubmission(TestCase):
         mock_queue.return_value = "task-123"
         invoice = MagicMock()
         invoice.id = uuid.uuid4()
-        _trigger_efactura_submission(invoice)
+        with self.captureOnCommitCallbacks(execute=True) as callbacks:
+            _trigger_efactura_submission(invoice)
+            mock_queue.assert_not_called()
+
+        assert len(callbacks) == 1
         mock_queue.assert_called_once()
 
     @patch("apps.billing.efactura.tasks.queue_efactura_submission")
@@ -1632,12 +1701,32 @@ class TestTriggerEfacturaSubmission(TestCase):
         mock_queue.return_value = None
         invoice = MagicMock()
         invoice.id = uuid.uuid4()
-        _trigger_efactura_submission(invoice)
+        with self.captureOnCommitCallbacks(execute=True):
+            _trigger_efactura_submission(invoice)
+
+    @patch("apps.billing.efactura.tasks.queue_efactura_submission")
+    def test_rolled_back_invoice_does_not_queue(self, mock_queue):
+        invoice = MagicMock()
+        invoice.id = uuid.uuid4()
+
+        with (
+            self.captureOnCommitCallbacks(execute=True) as callbacks,
+            self.assertRaises(RuntimeError),
+            transaction.atomic(),
+        ):
+            _trigger_efactura_submission(invoice)
+            raise RuntimeError("roll back invoice issue")
+
+        assert callbacks == []
+        mock_queue.assert_not_called()
 
     def test_import_error(self):
         invoice = MagicMock()
-        with patch.dict("sys.modules", {"apps.billing.efactura.tasks": None}):
-            # ImportError should be caught
+        # ImportError should be caught when the transaction callback executes.
+        with (
+            patch.dict("sys.modules", {"apps.billing.efactura.tasks": None}),
+            self.captureOnCommitCallbacks(execute=True),
+        ):
             _trigger_efactura_submission(invoice)
 
 
@@ -1863,7 +1952,9 @@ class TestHandleEfacturaRefundReporting(TestCase):
         efactura_doc.status = "accepted"
         invoice.efactura_document = efactura_doc
 
-        with patch("apps.billing.signals.EFacturaStatus" if False else "apps.billing.efactura.models.EFacturaStatus") as mock_status:
+        with patch(
+            "apps.billing.signals.EFacturaStatus" if False else "apps.billing.efactura.models.EFacturaStatus"
+        ) as mock_status:
             mock_status.ACCEPTED.value = "accepted"
             _handle_efactura_refund_reporting(invoice)
             mock_audit.log_compliance_event.assert_called_once()
@@ -2025,8 +2116,8 @@ class TestPaymentHandlersOnCommitDeferred(TestCase):
         payment.currency.code = "RON"
 
         with self.assertRaises(RuntimeError), transaction.atomic():
-                _handle_payment_success(payment)
-                raise RuntimeError("Force rollback")
+            _handle_payment_success(payment)
+            raise RuntimeError("Force rollback")
 
         # on_commit callbacks should NOT have fired
         mock_email.assert_not_called()
@@ -2044,8 +2135,8 @@ class TestPaymentHandlersOnCommitDeferred(TestCase):
         payment.currency.code = "RON"
 
         with self.assertRaises(RuntimeError), transaction.atomic():
-                _handle_payment_failure(payment)
-                raise RuntimeError("Force rollback")
+            _handle_payment_failure(payment)
+            raise RuntimeError("Force rollback")
 
         mock_email.assert_not_called()
         mock_retry.assert_not_called()
@@ -2059,8 +2150,8 @@ class TestPaymentHandlersOnCommitDeferred(TestCase):
         payment.currency.code = "RON"
 
         with self.assertRaises(RuntimeError), transaction.atomic():
-                _handle_payment_refund(payment)
-                raise RuntimeError("Force rollback")
+            _handle_payment_refund(payment)
+            raise RuntimeError("Force rollback")
 
         mock_email.assert_not_called()
 
@@ -2104,7 +2195,6 @@ class TestInvoicePaidConfirmOrderFailureLogging(TestCase):
 class TestConstants(TestCase):
     def test_constants_exist(self):
         assert LARGE_REFUND_THRESHOLD_CENTS == 50000
-        assert E_FACTURA_MINIMUM_AMOUNT == 100
 
 
 # ===============================================================================
@@ -2183,12 +2273,13 @@ class RefundServiceSuspensionAuditTrailTest(TestCase):
         mock_invoice.number = "INV-REFUND-AUDT"
 
         mock_service = MagicMock()
-        mock_service.id = uuid.uuid4()
+        mock_service.id = 123
         mock_service.status = "active"
         mock_service.suspend.side_effect = Exception("Virtualmin down during suspend")
 
         mock_item = MagicMock()
         mock_item.service = mock_service
+        mock_item.service_id = mock_service.id
 
         mock_order = MagicMock()
 
@@ -2205,8 +2296,10 @@ class RefundServiceSuspensionAuditTrailTest(TestCase):
         with (
             patch("apps.orders.signals.Order.objects") as mock_qs,
             patch("apps.orders.signals.log_security_event", side_effect=capture_security_event),
+            patch("apps.provisioning.models.Service.objects.select_for_update") as mock_service_lock,
         ):
             mock_qs.filter.return_value = [mock_order]
+            mock_service_lock.return_value.get.return_value = mock_service
             _handle_invoice_refunded(sender=None, invoice=mock_invoice, refund_type="full")
 
         # Must have captured at least one security event
@@ -2217,8 +2310,7 @@ class RefundServiceSuspensionAuditTrailTest(TestCase):
 
         # The action in the security event must be "suspension_failed", NOT "flagged_for_review"
         refund_events = [
-            data for event_type, data in captured_security_events
-            if event_type == "invoice_refund_service_action"
+            data for event_type, data in captured_security_events if event_type == "invoice_refund_service_action"
         ]
         self.assertTrue(
             len(refund_events) > 0,
@@ -2251,9 +2343,7 @@ class ProformaLinkedOrderSkippedBySyncTest(TestCase):
     """
 
     def setUp(self):
-        self.currency, _ = Currency.objects.get_or_create(
-            code="RON", defaults={"symbol": "lei", "decimals": 2}
-        )
+        self.currency, _ = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei", "decimals": 2})
         self.customer = CustomerFactory()
 
     def test_proforma_linked_order_is_skipped_by_invoice_paid_sync(self):
@@ -2310,13 +2400,9 @@ class ProformaLinkedOrderSkippedBySyncTest(TestCase):
         # those are handled by the proforma_payment_received signal instead.
         if mock_confirm.called:
             called_orders = [
-                call.args[0] if call.args else call.kwargs.get("order")
-                for call in mock_confirm.call_args_list
+                call.args[0] if call.args else call.kwargs.get("order") for call in mock_confirm.call_args_list
             ]
-            proforma_linked = [
-                o for o in called_orders
-                if o is not None and getattr(o, "proforma_id", None)
-            ]
+            proforma_linked = [o for o in called_orders if o is not None and getattr(o, "proforma_id", None)]
             self.assertEqual(
                 len(proforma_linked),
                 0,

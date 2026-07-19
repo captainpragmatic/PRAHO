@@ -48,7 +48,7 @@ class CustomerEditFormFieldTests(TestCase):
         self.assertIn("payment_terms", form.fields)
         self.assertIn("credit_limit", form.fields)
         self.assertIn("preferred_currency", form.fields)
-        self.assertIn("auto_payment_enabled", form.fields)
+        self.assertNotIn("auto_payment_enabled", form.fields)
 
 
 class CustomerEditBreadcrumbTests(TestCase):

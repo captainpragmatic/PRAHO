@@ -279,24 +279,6 @@ class InvoiceViewService:
             logger.error(f"🔥 [Proforma PDF] Error retrieving PDF for proforma {proforma_number}: {e}")
             raise e
 
-    def get_payment_methods(self, customer_id: int, user_id: int) -> list[dict[str, Any]]:
-        """Get available payment methods for a customer from Platform API"""
-        try:
-            response = self.api_client.get_payment_methods(customer_id=str(customer_id), user_id=str(user_id))
-
-            if not response.get("success"):
-                logger.error(f"🔥 [Payment Methods API] Failed to fetch: {response}")
-                return []
-
-            methods: list[dict[str, Any]] = response.get("payment_methods", [])
-            logger.info(f"✅ [Payment Methods API] Retrieved {len(methods)} methods for customer {customer_id}")
-            return methods
-
-        except Exception as e:
-            logger.error(f"🔥 [Payment Methods API] Error for customer {customer_id}: {e}")
-            _raise_if_rate_limited(e)
-            return []
-
     def request_refund(
         self,
         invoice_number: str,
@@ -347,6 +329,102 @@ class InvoiceViewService:
             "total_amount_due": 0,
             "recent_invoices": [],
         }
+
+
+class RecurringPaymentsService:
+    """Portal boundary for customer-managed PRAHO recurring payments."""
+
+    def __init__(self) -> None:
+        self.api_client = PlatformAPIClient()
+
+    def _post(self, endpoint: str, *, customer_id: int, user_id: int, data: dict[str, Any]) -> dict[str, Any]:
+        try:
+            return self.api_client.post(
+                endpoint,
+                data={"customer_id": customer_id, **data},
+                user_id=user_id,
+            )
+        except Exception as error:
+            _raise_if_rate_limited(error)
+            logger.error("Recurring-payment API call failed for customer %s: %s", customer_id, error)
+            return {"success": False, "error": "Recurring-payment service is temporarily unavailable"}
+
+    def overview(self, *, customer_id: int, user_id: int) -> dict[str, Any]:
+        return self._post(
+            "/billing/recurring-payments/",
+            customer_id=customer_id,
+            user_id=user_id,
+            data={"action": "recurring_payment_overview"},
+        )
+
+    def begin_authorization(
+        self,
+        *,
+        customer_id: int,
+        user_id: int,
+        payment_method_id: int,
+        terms_accepted: bool,
+        terms_version: str,
+    ) -> dict[str, Any]:
+        return self._post(
+            "/billing/recurring-payments/authorize/begin/",
+            customer_id=customer_id,
+            user_id=user_id,
+            data={
+                "action": "begin_recurring_authorization",
+                "payment_method_id": payment_method_id,
+                "terms_accepted": terms_accepted,
+                "terms_version": terms_version,
+            },
+        )
+
+    def complete_authorization(
+        self,
+        *,
+        customer_id: int,
+        user_id: int,
+        payment_method_id: int,
+        setup_intent_id: str,
+    ) -> dict[str, Any]:
+        return self._post(
+            "/billing/recurring-payments/authorize/complete/",
+            customer_id=customer_id,
+            user_id=user_id,
+            data={
+                "action": "complete_recurring_authorization",
+                "payment_method_id": payment_method_id,
+                "setup_intent_id": setup_intent_id,
+            },
+        )
+
+    def withdraw_authorization(self, *, customer_id: int, user_id: int, authorization_id: str) -> dict[str, Any]:
+        return self._post(
+            "/billing/recurring-payments/authorize/withdraw/",
+            customer_id=customer_id,
+            user_id=user_id,
+            data={"action": "withdraw_recurring_authorization", "authorization_id": authorization_id},
+        )
+
+    def set_subscription_auto_payment(
+        self,
+        *,
+        customer_id: int,
+        user_id: int,
+        subscription_id: str,
+        authorization_id: str | None,
+        enabled: bool,
+    ) -> dict[str, Any]:
+        return self._post(
+            "/billing/recurring-payments/subscriptions/auto-payment/",
+            customer_id=customer_id,
+            user_id=user_id,
+            data={
+                "action": "set_subscription_auto_payment",
+                "subscription_id": subscription_id,
+                "authorization_id": authorization_id,
+                "enabled": enabled,
+            },
+        )
 
 
 class BillingDataSyncService:

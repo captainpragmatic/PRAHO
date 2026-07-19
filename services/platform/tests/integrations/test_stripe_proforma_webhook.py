@@ -61,6 +61,7 @@ class StripeProformaWebhookTest(TestCase):
                     "id": stripe_payment_id,
                     "payment_method": "pm_test",
                     "amount_received": 12100,
+                    "currency": "ron",
                 },
             },
         }
@@ -95,6 +96,39 @@ class StripeProformaWebhookTest(TestCase):
 
         # No proforma → no conversion attempt
         self.assertIsNone(payment.proforma)
+
+    @patch("apps.notifications.services.NotificationService.send_admin_alert")
+    def test_dispute_event_uses_payment_intent_id_to_mark_payment_disputed(self, mock_alert):
+        payment = Payment.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            amount_cents=12100,
+            payment_method="stripe",
+            gateway_txn_id="pi_disputed_payment",
+        )
+        payment.succeed()
+        payment.save(update_fields=["status", "updated_at"])
+        payload = {
+            "data": {
+                "object": {
+                    "id": "dp_test_dispute",
+                    "payment_intent": "pi_disputed_payment",
+                    "charge": "ch_test_dispute",
+                    "amount": 12100,
+                    "currency": "ron",
+                    "reason": "fraudulent",
+                }
+            }
+        }
+
+        accepted, message = self._get_processor().handle_charge_event("charge.dispute.created", payload)
+
+        self.assertTrue(accepted, message)
+        payment.refresh_from_db()
+        self.assertEqual(payment.status, "disputed")
+        self.assertEqual(payment.meta["dispute_id"], "dp_test_dispute")
+        self.assertEqual(payment.meta["dispute_charge_id"], "ch_test_dispute")
+        mock_alert.assert_called_once()
 
     @patch("apps.billing.proforma_service.ProformaPaymentService.record_payment_and_convert")
     def test_retry_after_conversion_failure_still_attempts_conversion(self, mock_convert):

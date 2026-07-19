@@ -249,7 +249,6 @@ class CustomerBillingProfileForm(forms.ModelForm):
             "payment_terms",
             "credit_limit",
             "preferred_currency",
-            "auto_payment_enabled",
         )
 
         widgets: ClassVar[dict[str, forms.Widget]] = {
@@ -959,15 +958,6 @@ class CustomerEditForm(forms.Form):
             }
         ),
     )
-    auto_payment_enabled = forms.BooleanField(
-        required=False,
-        label=_("Auto-payment Enabled"),
-        help_text=_("Enable automatic payment processing"),
-        widget=forms.CheckboxInput(
-            attrs={"class": "rounded border-slate-600 bg-slate-700 text-blue-600 focus:ring-blue-500"}
-        ),
-    )
-
     # Primary Address Information
     address_line1 = forms.CharField(
         max_length=200,
@@ -1179,7 +1169,6 @@ class CustomerEditForm(forms.Form):
                         "payment_terms": billing_profile.payment_terms,
                         "credit_limit": billing_profile.credit_limit,
                         "preferred_currency": billing_profile.preferred_currency,
-                        "auto_payment_enabled": billing_profile.auto_payment_enabled,
                     }
                 )
 
@@ -1390,7 +1379,6 @@ class CustomerEditForm(forms.Form):
             billing_profile.payment_terms = data["payment_terms"]
             billing_profile.credit_limit = data["credit_limit"]
             billing_profile.preferred_currency = data["preferred_currency"]
-            billing_profile.auto_payment_enabled = data["auto_payment_enabled"]
             billing_profile.save()
 
             # Update or create primary address

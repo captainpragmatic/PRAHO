@@ -8,7 +8,7 @@ Targets the 158 untested lines (59% → 90%+), covering:
 - Subscription.is_trialing, will_cancel_at_period_end, days_until_renewal, cycle_days
 - Full lifecycle: activate, start_trial, convert_trial, cancel, pause, resume, renew
 - mark_payment_failed, record_payment, apply_grandfathered_price
-- SubscriptionChange.proration_amount, calculate_proration, apply
+- SubscriptionChange.proration_amount historical representation
 - PriceGrandfathering properties and expire()
 - SubscriptionItem.effective_price_cents, line_total_cents
 - get_subscription_grace_period_days, get_max_payment_retry_attempts
@@ -17,7 +17,7 @@ Targets the 158 untested lines (59% → 90%+), covering:
 from __future__ import annotations
 
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
@@ -438,6 +438,19 @@ class SubscriptionActivateTestCase(TestCase):
         self.assertEqual(sub.started_at, original_started_at)
 
     @patch("apps.billing.subscription_models.log_security_event")
+    def test_activate_uses_calendar_month_and_preserves_anchor(self, _mock_log: MagicMock) -> None:
+        activation_at = datetime(2026, 1, 31, 12, 0, tzinfo=timezone.get_current_timezone())
+        sub = self._create_subscription(status="pending")
+
+        with patch("apps.billing.subscription_models.timezone.now", return_value=activation_at):
+            sub.activate()
+        sub.refresh_from_db()
+
+        self.assertEqual(sub.current_period_start, activation_at)
+        self.assertEqual(sub.current_period_end, datetime(2026, 2, 28, 12, 0, tzinfo=activation_at.tzinfo))
+        self.assertEqual(sub.billing_anchor_day, 31)
+
+    @patch("apps.billing.subscription_models.log_security_event")
     def test_activate_with_user_passes_email(self, mock_log: MagicMock) -> None:
         """activate(user=...) passes user.email to log_security_event."""
         sub = self._create_subscription(status="pending")
@@ -497,7 +510,7 @@ class SubscriptionStartTrialTestCase(TestCase):
 
 
 class SubscriptionConvertTrialTestCase(TestCase):
-    """Tests for Subscription.convert_trial()."""
+    """A trial cannot become paid without verified payment convergence."""
 
     def setUp(self) -> None:
         self.currency = _make_currency()
@@ -520,20 +533,17 @@ class SubscriptionConvertTrialTestCase(TestCase):
             trial_end=now + timedelta(days=14),
         )
 
-    @patch("apps.billing.subscription_models.log_security_event")
-    def test_convert_trial_activates_and_marks_converted(self, mock_log: MagicMock) -> None:
-        """convert_trial() on a trialing subscription activates it and sets trial_converted=True."""
+    def test_convert_trial_fails_closed_without_verified_payment(self) -> None:
         sub = self._make_trialing_sub()
-        sub.convert_trial()
+
+        with self.assertRaisesMessage(ValidationError, "PaymentSuccessService"):
+            sub.convert_trial()
+
         sub.refresh_from_db()
+        self.assertEqual(sub.status, "trialing")
+        self.assertFalse(sub.trial_converted)
 
-        self.assertEqual(sub.status, "active")
-        self.assertTrue(sub.trial_converted)
-        mock_log.assert_called()
-
-    @patch("apps.billing.subscription_models.log_security_event")
-    def test_convert_trial_raises_if_not_trialing(self, _mock_log: MagicMock) -> None:
-        """convert_trial() on a non-trialing subscription must raise ValidationError."""
+    def test_convert_trial_fails_closed_for_non_trialing_subscription(self) -> None:
         now = timezone.now()
         sub = Subscription.objects.create(
             customer=self.customer,
@@ -547,7 +557,7 @@ class SubscriptionConvertTrialTestCase(TestCase):
             next_billing_date=now + timedelta(days=30),
             status="active",
         )
-        with self.assertRaises(ValidationError):
+        with self.assertRaisesMessage(ValidationError, "PaymentSuccessService"):
             sub.convert_trial()
 
 
@@ -658,18 +668,40 @@ class SubscriptionPauseTestCase(TestCase):
         self.assertEqual(sub.resume_at, future_date)
         self.assertEqual(sub.status, "paused")
 
+    @patch("apps.billing.subscription_models.log_security_event")
+    def test_resume_shifts_every_renewal_schedule_by_paused_duration(self, _mock_log: MagicMock) -> None:
+        sub = self._make_active_sub()
+        pause_at = timezone.now()
+        paused_duration = timedelta(days=3)
+        sub.next_proforma_at = pause_at + timedelta(days=14)
+        sub.next_charge_at = pause_at + timedelta(days=21)
+        sub.save(update_fields=["next_proforma_at", "next_charge_at", "updated_at"])
+        original_period_end = sub.current_period_end
+        original_billing_date = sub.next_billing_date
+        original_proforma_at = sub.next_proforma_at
+        original_charge_at = sub.next_charge_at
+
+        with patch("apps.billing.subscription_models.timezone.now", return_value=pause_at):
+            sub.pause()
+        with patch("apps.billing.subscription_models.timezone.now", return_value=pause_at + paused_duration):
+            sub.resume()
+        sub.refresh_from_db()
+
+        self.assertEqual(sub.current_period_end, original_period_end + paused_duration)
+        self.assertEqual(sub.next_billing_date, original_billing_date + paused_duration)
+        self.assertEqual(sub.next_proforma_at, original_proforma_at + paused_duration)
+        self.assertEqual(sub.next_charge_at, original_charge_at + paused_duration)
+
 
 class SubscriptionRenewTestCase(TestCase):
-    """Tests for Subscription.renew()."""
+    """A period cannot advance without verified payment convergence."""
 
     def setUp(self) -> None:
         self.currency = _make_currency()
         self.customer = _make_customer("renew")
         self.product = _make_product("renew")
 
-    @patch("apps.billing.subscription_models.log_security_event")
-    def test_renew_advances_period_and_resets_failures(self, mock_log: MagicMock) -> None:
-        """renew() advances current_period dates by cycle_days and resets failed_payment_count."""
+    def test_renew_fails_closed_without_verified_payment(self) -> None:
         now = timezone.now()
         period_start = now
         period_end = now + timedelta(days=30)
@@ -688,16 +720,15 @@ class SubscriptionRenewTestCase(TestCase):
             grace_period_ends_at=now + timedelta(days=3),
         )
 
-        sub.renew()
+        with self.assertRaisesMessage(ValidationError, "PaymentSuccessService"):
+            sub.renew()
         sub.refresh_from_db()
 
-        self.assertEqual(sub.current_period_start, period_end)
-        expected_new_end = period_end + timedelta(days=30)
-        self.assertEqual(sub.current_period_end, expected_new_end)
-        self.assertEqual(sub.next_billing_date, expected_new_end)
-        self.assertEqual(sub.failed_payment_count, 0)
-        self.assertIsNone(sub.grace_period_ends_at)
-        mock_log.assert_called()
+        self.assertEqual(sub.current_period_start, period_start)
+        self.assertEqual(sub.current_period_end, period_end)
+        self.assertEqual(sub.next_billing_date, period_end)
+        self.assertEqual(sub.failed_payment_count, 3)
+        self.assertIsNotNone(sub.grace_period_ends_at)
 
 
 class SubscriptionMarkPaymentFailedTestCase(TestCase):
@@ -735,14 +766,14 @@ class SubscriptionMarkPaymentFailedTestCase(TestCase):
         mock_log.assert_called()
 
     @patch("apps.billing.subscription_models.log_security_event")
-    def test_mark_payment_failed_enters_past_due_on_first_failure(self, _mock_log: MagicMock) -> None:
-        """First mark_payment_failed() on an active subscription sets status='past_due'."""
+    def test_mark_payment_failed_preserves_paid_entitlement_before_period_end(self, _mock_log: MagicMock) -> None:
+        """An early collection failure cannot start grace before paid-through expiry."""
         sub = self._make_active_sub()
         sub.mark_payment_failed()
         sub.refresh_from_db()
 
-        self.assertEqual(sub.status, "past_due")
-        self.assertIsNotNone(sub.grace_period_ends_at)
+        self.assertEqual(sub.status, "active")
+        self.assertIsNone(sub.grace_period_ends_at)
 
     @patch("apps.billing.subscription_models.log_security_event")
     def test_mark_payment_failed_subsequent_does_not_change_status(self, _mock_log: MagicMock) -> None:
@@ -768,7 +799,7 @@ class SubscriptionMarkPaymentFailedTestCase(TestCase):
 
 
 class SubscriptionRecordPaymentTestCase(TestCase):
-    """Tests for Subscription.record_payment()."""
+    """A model call cannot assert an unverified payment."""
 
     def setUp(self) -> None:
         self.currency = _make_currency()
@@ -792,40 +823,21 @@ class SubscriptionRecordPaymentTestCase(TestCase):
         defaults.update(kwargs)
         return Subscription.objects.create(**defaults)
 
-    @patch("apps.billing.subscription_models.log_security_event")
-    def test_record_payment_resets_failures_and_grace(self, mock_log: MagicMock) -> None:
-        """record_payment() resets failed_payment_count=0 and grace_period_ends_at=None."""
+    def test_record_payment_fails_closed_and_preserves_dunning_state(self) -> None:
         sub = self._make_sub(
             status="past_due",
             failed_payment_count=3,
             grace_period_ends_at=timezone.now() + timedelta(days=2),
         )
-        sub.record_payment(amount_cents=1000)
+        with self.assertRaisesMessage(ValidationError, "PaymentSuccessService"):
+            sub.record_payment(amount_cents=1000)
         sub.refresh_from_db()
 
-        self.assertEqual(sub.failed_payment_count, 0)
-        self.assertIsNone(sub.grace_period_ends_at)
-        self.assertEqual(sub.last_payment_amount_cents, 1000)
-        self.assertIsNotNone(sub.last_payment_date)
-        mock_log.assert_called()
-
-    @patch("apps.billing.subscription_models.log_security_event")
-    def test_record_payment_returns_past_due_to_active(self, _mock_log: MagicMock) -> None:
-        """record_payment() transitions status from 'past_due' back to 'active'."""
-        sub = self._make_sub(status="past_due", failed_payment_count=2)
-        sub.record_payment(amount_cents=2000)
-        sub.refresh_from_db()
-
-        self.assertEqual(sub.status, "active")
-
-    @patch("apps.billing.subscription_models.log_security_event")
-    def test_record_payment_keeps_active_status(self, _mock_log: MagicMock) -> None:
-        """record_payment() on an already-active subscription does not change status."""
-        sub = self._make_sub(status="active")
-        sub.record_payment(amount_cents=500)
-        sub.refresh_from_db()
-
-        self.assertEqual(sub.status, "active")
+        self.assertEqual(sub.status, "past_due")
+        self.assertEqual(sub.failed_payment_count, 3)
+        self.assertIsNotNone(sub.grace_period_ends_at)
+        self.assertIsNone(sub.last_payment_amount_cents)
+        self.assertIsNone(sub.last_payment_date)
 
 
 class SubscriptionApplyGrandfatheredPriceTestCase(TestCase):
@@ -926,182 +938,6 @@ class SubscriptionChangePropertiesTestCase(SubscriptionModelTestBase):
             proration_amount_cents=-300,
         )
         self.assertEqual(change.proration_amount, Decimal("-3.00"))
-
-
-class SubscriptionChangeCalculateProrationTestCase(SubscriptionModelTestBase):
-    """Tests for SubscriptionChange.calculate_proration()."""
-
-    def _make_change(self, **kwargs: object) -> SubscriptionChange:
-        sub = self._create_subscription()
-        defaults: dict[str, object] = {
-            "subscription": sub,
-            "change_type": "upgrade",
-            "old_product": self.product,
-            "new_product": self.product,
-            "old_price_cents": 1000,
-            "new_price_cents": 2000,
-            "old_quantity": 1,
-            "new_quantity": 1,
-            "old_billing_cycle": "monthly",
-            "new_billing_cycle": "monthly",
-            "effective_date": timezone.now(),
-            "prorate": True,
-        }
-        defaults.update(kwargs)
-        return SubscriptionChange(**defaults)
-
-    @patch("apps.billing.subscription_models.log_security_event")
-    def test_calculate_proration_no_prorate_zeros_everything(self, _mock_log: MagicMock) -> None:
-        """calculate_proration() with prorate=False sets all amounts to zero."""
-        change = self._make_change(prorate=False)
-        change.calculate_proration()
-
-        self.assertEqual(change.proration_amount_cents, 0)
-        self.assertEqual(change.unused_credit_cents, 0)
-        self.assertEqual(change.new_charge_cents, 0)
-
-    @patch("apps.billing.subscription_models.log_security_event")
-    def test_calculate_proration_with_prorate_true(self, _mock_log: MagicMock) -> None:
-        """calculate_proration() with prorate=True computes non-zero amounts for future period."""
-        change = self._make_change(prorate=True)
-        change.calculate_proration()
-
-        # With a future period, should have positive credit and charge
-        # (upgrade: new > old, so proration_amount_cents >= 0)
-        self.assertGreaterEqual(change.proration_amount_cents, 0)
-        # unused_credit from old plan
-        self.assertGreaterEqual(change.unused_credit_cents, 0)
-        # new charge from new plan
-        self.assertGreaterEqual(change.new_charge_cents, 0)
-        self.assertEqual(
-            change.proration_amount_cents,
-            change.new_charge_cents - change.unused_credit_cents,
-        )
-
-    @patch("apps.billing.subscription_models.log_security_event")
-    def test_calculate_proration_expired_period_gives_zero_days(self, _mock_log: MagicMock) -> None:
-        """calculate_proration() with a past period_end results in 0 days remaining (0 amounts)."""
-        # Create a subscription whose period has already ended
-        now = timezone.now()
-        sub = Subscription.objects.create(
-            customer=self.customer,
-            product=self.product,
-            currency=self.currency,
-            billing_cycle="monthly",
-            unit_price_cents=1000,
-            quantity=1,
-            current_period_start=now - timedelta(days=60),
-            current_period_end=now - timedelta(days=30),
-            next_billing_date=now - timedelta(days=30),
-            status="active",
-        )
-        change = SubscriptionChange(
-            subscription=sub,
-            change_type="upgrade",
-            old_product=self.product,
-            new_product=self.product,
-            old_price_cents=1000,
-            new_price_cents=2000,
-            old_quantity=1,
-            new_quantity=1,
-            old_billing_cycle="monthly",
-            new_billing_cycle="monthly",
-            effective_date=timezone.now(),
-            prorate=True,
-        )
-        change.calculate_proration()
-
-        # Past period → days_remaining=0 → all amounts should be 0
-        self.assertEqual(change.unused_credit_cents, 0)
-        self.assertEqual(change.new_charge_cents, 0)
-        self.assertEqual(change.proration_amount_cents, 0)
-
-
-class SubscriptionChangeApplyTestCase(TestCase):
-    """Tests for SubscriptionChange.apply()."""
-
-    def setUp(self) -> None:
-        self.currency = _make_currency()
-        self.customer = _make_customer("apply")
-        self.product = _make_product("apply")
-        self.new_product = _make_product("apply-new")
-
-    def _make_sub(self) -> Subscription:
-        now = timezone.now()
-        return Subscription.objects.create(
-            customer=self.customer,
-            product=self.product,
-            currency=self.currency,
-            billing_cycle="monthly",
-            unit_price_cents=1000,
-            quantity=1,
-            current_period_start=now,
-            current_period_end=now + timedelta(days=30),
-            next_billing_date=now + timedelta(days=30),
-            status="active",
-        )
-
-    def _make_pending_change(self, sub: Subscription) -> SubscriptionChange:
-        return SubscriptionChange.objects.create(
-            subscription=sub,
-            change_type="upgrade",
-            old_product=self.product,
-            new_product=self.new_product,
-            old_price_cents=1000,
-            new_price_cents=2000,
-            old_quantity=1,
-            new_quantity=2,
-            old_billing_cycle="monthly",
-            new_billing_cycle="monthly",
-            effective_date=timezone.now(),
-            status="pending",
-        )
-
-    @patch("apps.billing.subscription_models.log_security_event")
-    def test_apply_updates_subscription_and_marks_applied(self, mock_log: MagicMock) -> None:
-        """apply() updates subscription fields and sets change status='applied'."""
-        sub = self._make_sub()
-        change = self._make_pending_change(sub)
-        change.apply()
-
-        sub.refresh_from_db()
-        change.refresh_from_db()
-
-        self.assertEqual(sub.product, self.new_product)
-        self.assertEqual(sub.unit_price_cents, 2000)
-        self.assertEqual(sub.quantity, 2)
-        self.assertEqual(sub.billing_cycle, "monthly")
-        self.assertEqual(change.status, "applied")
-        self.assertIsNotNone(change.applied_at)
-        mock_log.assert_called()
-
-    @patch("apps.billing.subscription_models.log_security_event")
-    def test_apply_raises_if_not_pending(self, _mock_log: MagicMock) -> None:
-        """apply() on a non-pending change raises ValidationError."""
-        sub = self._make_sub()
-        change = self._make_pending_change(sub)
-        change.status = "applied"
-        change.save()
-
-        with self.assertRaises(ValidationError) as ctx:
-            change.apply()
-        self.assertIn("applied", str(ctx.exception).lower())
-
-    @patch("apps.billing.subscription_models.log_security_event")
-    def test_apply_raises_on_cancelled_status(self, _mock_log: MagicMock) -> None:
-        """apply() on a 'cancelled' change raises ValidationError."""
-        sub = self._make_sub()
-        change = self._make_pending_change(sub)
-        change.status = "cancelled"
-        change.save()
-
-        with self.assertRaises(ValidationError):
-            change.apply()
-
-
-# ===============================================================================
-# PRICE GRANDFATHERING MODEL
-# ===============================================================================
 
 
 class PriceGrandfatheringTestCase(TestCase):

@@ -163,7 +163,20 @@ class ProformaService:
             # Extract bill_to from order billing_address JSON
             billing_addr = order.billing_address or {}
             bill_to_name = billing_addr.get("company_name", "") or order.customer_name
-            bill_to_country = billing_addr.get("country", "RO") or "RO"
+            from apps.billing.fiscal_identity import (  # noqa: PLC0415
+                billing_country_code,
+                get_customer_fiscal_identity,
+                normalize_business_tax_id,
+            )
+
+            bill_to_country = billing_country_code(billing_addr.get("country"))
+
+            fiscal_identity = get_customer_fiscal_identity(order.customer)
+            business_tax_id = (
+                normalize_business_tax_id(billing_addr.get("vat_number", ""))
+                or normalize_business_tax_id(billing_addr.get("vat_id", ""))
+                or fiscal_identity.business_tax_id
+            )
 
             # Set currency explicitly from order (F10: never rely on defaults)
             currency = order.currency
@@ -177,7 +190,11 @@ class ProformaService:
             taxable_subtotal = max(0, int(order.subtotal_cents) - discount_cents)
             vat_result = TaxService.calculate_vat_for_document(
                 subtotal_cents=taxable_subtotal,
-                customer_info=_build_customer_vat_info(order.customer, order_id=str(order.id)),
+                customer_info=_build_customer_vat_info(
+                    order.customer,
+                    order_id=str(order.id),
+                    country=bill_to_country,
+                ),
             )
 
             # Create proforma — status stays "draft" (email sending is separate)
@@ -194,7 +211,8 @@ class ProformaService:
                 bill_to_country=bill_to_country,
                 bill_to_city=billing_addr.get("city", ""),
                 bill_to_address1=billing_addr.get("address_line1", "") or billing_addr.get("line1", ""),
-                bill_to_tax_id=billing_addr.get("vat_number", "") or billing_addr.get("vat_id", ""),
+                bill_to_tax_id=business_tax_id,
+                bill_to_cnp=fiscal_identity.cnp if not business_tax_id else "",
                 discount_cents=discount_cents,
                 meta={"order_id": str(order.id), "order_number": order.order_number},
             )
@@ -328,6 +346,8 @@ class ProformaPaymentService:
         valid_methods = frozenset({"bank", "stripe", "cash", "other"})
         if payment_method not in valid_methods:
             return Err(f"Invalid payment method: {payment_method}")
+        if payment_method == "stripe" and existing_payment is None:
+            return Err("Stripe conversion requires a verified existing payment")
 
         try:
             # Lock proforma first (F4: consistent lock ordering prevents deadlock)
@@ -377,14 +397,34 @@ class ProformaPaymentService:
         # H2 fix: Payment is kept in its initial state until proforma→invoice conversion
         # succeeds. If conversion fails, the atomic transaction rolls back the payment too.
         if existing_payment:
+            existing_payment = Payment.objects.select_for_update(of=("self",)).get(pk=existing_payment.pk)
             # C5: Guard against cross-customer payment linking
             if existing_payment.customer_id != proforma.customer_id:
                 return Err("Payment customer does not match proforma customer")
+            if existing_payment.payment_method != payment_method:
+                return Err("Existing payment method does not match requested conversion method")
+            if existing_payment.amount_cents != amount_cents or existing_payment.currency_id != proforma.currency_id:
+                return Err("Existing payment amount or currency does not match proforma")
+            if payment_method == "stripe":
+                payment_meta = existing_payment.meta or {}
+                if (
+                    existing_payment.status != "succeeded"
+                    or not existing_payment.gateway_txn_id
+                    or payment_meta.get("stripe_amount_received") != amount_cents
+                    or str(payment_meta.get("stripe_currency", "")).upper() != proforma.currency.code.upper()
+                ):
+                    return Err("Stripe conversion requires a verified succeeded existing payment")
             # Stripe path: update existing payment with proforma link
             payment = existing_payment
             payment.proforma = proforma
             payment.save(update_fields=["proforma", "updated_at"])
         else:
+            if Payment.objects.filter(
+                proforma=proforma,
+                payment_method="stripe",
+                status="pending",
+            ).exists():
+                return Err("Proforma has an unresolved automatic card payment")
             # Bank transfer / admin path: create payment record (status stays "pending" for now)
             payment = Payment.objects.create(
                 customer=proforma.customer,
@@ -456,6 +496,13 @@ class ProformaPaymentService:
                 invoice.number,
                 invoice.status,
             )
+
+        from apps.billing.payment_convergence import PaymentSuccessService  # noqa: PLC0415
+
+        convergence = PaymentSuccessService.converge_local_paid_document(payment.id)
+        if convergence.is_err():
+            transaction.set_rollback(True)
+            return Err(f"Paid document convergence failed: {convergence.unwrap_err()}")
 
         # Link orders to the new invoice
         from apps.audit.services import AuditService  # noqa: PLC0415

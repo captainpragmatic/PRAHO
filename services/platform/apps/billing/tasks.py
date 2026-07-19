@@ -7,16 +7,16 @@ generation, payment processing, and dunning workflows.
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
+    from apps.billing.gateways.base import PaymentConfirmResult
     from apps.customers.profile_models import CustomerTaxProfile
 
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
-from django_fsm import TransitionNotAllowed
 from django_q.tasks import async_task
 
 from apps.audit.services import AuditService
@@ -29,6 +29,7 @@ _DEFAULT_TASK_RETRY_DELAY = 300  # 5 minutes
 _DEFAULT_TASK_MAX_RETRIES = 3
 TASK_SOFT_TIME_LIMIT = 300  # 5 minutes
 TASK_TIME_LIMIT = 600  # 10 minutes
+PAYMENT_RETRY_LEASE_TIMEOUT = timedelta(seconds=TASK_TIME_LIMIT * 2)
 
 
 def _get_task_retry_delay() -> int:
@@ -66,18 +67,16 @@ def submit_efactura(invoice_id: str) -> dict[str, Any]:
     """
     logger.info(f"🏛️ [e-Factura] Starting submission for invoice {invoice_id}")
 
-    from apps.billing.efactura_service import (  # noqa: PLC0415
-        EFacturaSubmissionService,
-    )
+    from apps.billing.efactura.service import EFacturaService  # noqa: PLC0415
 
     try:
         invoice = Invoice.objects.get(id=invoice_id)
 
-        # Submit via real EFacturaSubmissionService
-        service = EFacturaSubmissionService()
+        # Submit through the canonical document lifecycle and endpoint router.
+        service = EFacturaService()
         submission_result = service.submit_invoice(invoice)
         if not submission_result.success:
-            logger.error(f"🔥 [e-Factura] Submission failed for {invoice.number}: {submission_result.message}")
+            logger.error(f"🔥 [e-Factura] Submission failed for {invoice.number}: {submission_result.error_message}")
         else:
             logger.info(f"✅ [e-Factura] Submitted invoice {invoice.number} to ANAF")
             invoice.meta = {**(invoice.meta or {}), "efactura_submitted": True}
@@ -97,6 +96,14 @@ def submit_efactura(invoice_id: str) -> dict[str, Any]:
                 "source_app": "billing",
             },
         )
+
+        if not submission_result.success:
+            return {
+                "success": False,
+                "invoice_id": str(invoice.id),
+                "invoice_number": invoice.number,
+                "error": submission_result.error_message,
+            }
 
         return {
             "success": True,
@@ -138,7 +145,7 @@ def schedule_payment_reminders(invoice_id: str) -> dict[str, Any]:
             }
 
         # Schedule 3 reminders: 7 days before, 1 day before, on due date
-        if not invoice.due_date:
+        if not invoice.due_at:
             logger.info(f"📅 [Reminders] No due date for invoice {invoice.number}, skipping reminders")
             return {"success": True, "invoice_id": str(invoice.id), "message": "No due date set"}
 
@@ -149,18 +156,14 @@ def schedule_payment_reminders(invoice_id: str) -> dict[str, Any]:
         ]
         scheduled_count = 0
         for label, offset in reminder_offsets:
-            reminder_date = (
-                timezone.make_aware(timezone.datetime.combine(invoice.due_date + offset, timezone.datetime.min.time()))
-                if not isinstance(invoice.due_date + offset, timezone.datetime)
-                else invoice.due_date + offset
-            )
-            if reminder_date > timezone.now():
+            reminder_at = invoice.due_at + offset
+            if reminder_at > timezone.now():
                 task_name = f"payment_reminder_{invoice.id}_{label}"
                 async_task(
                     "apps.billing.tasks._send_payment_reminder",
                     str(invoice.id),
                     task_name=task_name,
-                    schedule=reminder_date,
+                    schedule=reminder_at,
                     timeout=TASK_SOFT_TIME_LIMIT,
                 )
                 scheduled_count += 1
@@ -177,7 +180,7 @@ def schedule_payment_reminders(invoice_id: str) -> dict[str, Any]:
                 "invoice_id": str(invoice.id),
                 "invoice_number": invoice.number,
                 "customer_id": str(invoice.customer.id),
-                "due_date": invoice.due_date.isoformat() if invoice.due_date else None,
+                "due_at": invoice.due_at.isoformat(),
                 "source_app": "billing",
             },
         )
@@ -281,6 +284,12 @@ def start_dunning_process(invoice_id: str) -> dict[str, Any]:
                 "invoice_id": str(invoice.id),
                 "message": "No dunning needed for non-overdue invoice",
             }
+        if invoice.due_at is None or invoice.due_at > timezone.now():
+            return {
+                "success": True,
+                "invoice_id": str(invoice.id),
+                "message": "No dunning needed before the invoice due date",
+            }
 
         # Find customer's retry policy and create first retry attempt
         # Send dunning email
@@ -294,12 +303,14 @@ def start_dunning_process(invoice_id: str) -> dict[str, Any]:
             if policy:
                 next_date = policy.get_next_retry_date(timezone.now(), 0)
                 if next_date:
-                    PaymentRetryAttempt.objects.create(
+                    PaymentRetryAttempt.objects.get_or_create(
                         payment=payment,
-                        policy=policy,
                         attempt_number=1,
-                        scheduled_at=next_date,
-                        status="pending",
+                        defaults={
+                            "policy": policy,
+                            "scheduled_at": next_date,
+                            "status": "pending",
+                        },
                     )
                     logger.info(f"⚠️ [Dunning] Scheduled retry for invoice {invoice.number} at {next_date}")
         else:
@@ -316,7 +327,7 @@ def start_dunning_process(invoice_id: str) -> dict[str, Any]:
                 "invoice_id": str(invoice.id),
                 "invoice_number": invoice.number,
                 "customer_id": str(invoice.customer.id),
-                "days_overdue": (timezone.now().date() - invoice.due_date).days if invoice.due_date else 0,
+                "days_overdue": max(0, (timezone.now().date() - invoice.due_at.date()).days),
                 "source_app": "billing",
             },
         )
@@ -541,56 +552,45 @@ def _update_tax_profile_vies(
 
 
 def process_auto_payment(invoice_id: str) -> dict[str, Any]:
-    """
-    Process automatic payment for an invoice.
-
-    Args:
-        invoice_id: Invoice UUID to process payment for
-
-    Returns:
-        Dictionary with payment result
-    """
+    """Create one authorized off-session attempt for an issued recurring invoice."""
     logger.info(f"💳 [AutoPay] Processing automatic payment for invoice {invoice_id}")
 
     from apps.billing.payment_service import PaymentService  # noqa: PLC0415  # Deferred: avoids circular import
 
     try:
+        from django.db.models import Q  # noqa: PLC0415
+
+        from apps.billing.metering_models import BillingCycle  # noqa: PLC0415
+
         invoice = Invoice.objects.get(id=invoice_id)
 
-        if invoice.status != "issued":
-            logger.info(f"💳 [AutoPay] Invoice {invoice.number} is not issued/pending, skipping auto-payment")
+        if invoice.status not in {"issued", "overdue"}:
+            logger.info(f"💳 [AutoPay] Invoice {invoice.number} is not payable, skipping auto-payment")
             return {
                 "success": True,
                 "invoice_id": str(invoice.id),
                 "message": "No auto-payment needed for non-pending invoice",
             }
 
-        # Process payment using customer's stored payment method
-        result = (
-            PaymentService.create_payment_intent(
-                order_id=str(invoice.meta.get("order_id", "")),
-                gateway="stripe",
-                metadata={"invoice_id": str(invoice.id), "auto_payment": True},
-            )
-            if invoice.meta and invoice.meta.get("order_id")
-            else None
+        cycles = list(
+            BillingCycle.objects.filter(Q(invoice=invoice) | Q(usage_invoice=invoice))
+            .select_related("subscription__saved_payment_method")
+            .order_by("subscription_id", "id")
         )
+        payment_method_ids = {
+            cycle.subscription.saved_payment_method.stripe_payment_method_id
+            for cycle in cycles
+            if cycle.subscription.saved_payment_method is not None
+        }
+        if not cycles or len(payment_method_ids) != 1:
+            return {"success": False, "error": "Invoice has no single authorized recurring payment method"}
 
-        # Determine outcome
-        outcome = "skipped"
-        if result and result.get("success"):
-            payment_intent_id = result.get("payment_intent_id", "")
-            confirm = PaymentService.confirm_payment(payment_intent_id, gateway="stripe")
-            if confirm.get("success") and confirm.get("status") == "succeeded":
-                logger.info(f"💳 [AutoPay] Payment succeeded for invoice {invoice.number}")
-                invoice.update_status_from_payments()
-                outcome = "success"
-            else:
-                logger.warning(f"⚠️ [AutoPay] Payment confirmation pending for invoice {invoice.number}")
-                outcome = "pending"
-        else:
-            logger.info(f"💳 [AutoPay] No order linked or payment failed for invoice {invoice.number}")
-            outcome = "failed"
+        payment_method_id = payment_method_ids.pop()
+        result = PaymentService.create_payment_intent_for_invoice(
+            invoice_id=invoice.id,
+            payment_method_id=payment_method_id,
+        )
+        outcome = "created" if result.get("success") else "failed"
 
         # Log with outcome
         AuditService.log_simple_event(
@@ -610,10 +610,11 @@ def process_auto_payment(invoice_id: str) -> dict[str, Any]:
         )
 
         return {
-            "success": True,
+            "success": bool(result.get("success")),
             "invoice_id": str(invoice.id),
             "invoice_number": invoice.number,
-            "message": "Auto-payment processed",
+            "message": "Auto-payment attempt created" if result.get("success") else "Auto-payment attempt failed",
+            "error": result.get("error"),
         }
 
     except Invoice.DoesNotExist:
@@ -685,61 +686,57 @@ def process_auto_payment_async(invoice_id: str) -> str:
 
 
 def run_daily_billing() -> dict[str, Any]:
-    """
-    Daily scheduled task to process subscription renewals.
-
-    This task should be scheduled to run daily (e.g., at 00:00 UTC).
-    It processes all subscriptions due for billing and generates invoices.
-
-    Schedule in Django-Q2:
-        Schedule.objects.create(
-            func='apps.billing.tasks.run_daily_billing',
-            schedule_type=Schedule.DAILY,
-            repeats=-1,  # Repeat forever
-            next_run=timezone.now().replace(hour=0, minute=0, second=0)
-        )
-
-    Returns:
-        Dictionary with billing run statistics
-    """
-    from apps.billing.subscription_service import (  # noqa: PLC0415  # Deferred: avoids circular import
-        RecurringBillingService,  # Deferred: django-q task  # Deferred: avoids circular import
-    )
+    """Prepare due PRAHO proformas, then collect the automatic-payment groups."""
+    from apps.billing.recurring_billing import RecurringBillingOrchestrator  # noqa: PLC0415
+    from apps.billing.subscription_service import SubscriptionLifecycleService  # noqa: PLC0415
 
     logger.info("📅 [Billing] Starting daily billing run")
 
     try:
-        result = RecurringBillingService.run_billing_cycle()
+        cancellations_finalized = SubscriptionLifecycleService.finalize_period_end_cancellations()
+        preparation = RecurringBillingOrchestrator.prepare_due_proformas()
+        collection = RecurringBillingOrchestrator.collect_due_proformas()
+        renewals_marked_overdue = RecurringBillingOrchestrator.mark_overdue_renewals()
+        errors = [*preparation["errors"], *collection["errors"]]
+        result = {
+            "cancellations_finalized": cancellations_finalized,
+            "preparation": preparation,
+            "collection": collection,
+            "renewals_marked_overdue": renewals_marked_overdue,
+            "errors": errors,
+        }
 
         logger.info(
-            f"📅 [Billing] Daily billing completed: "
-            f"{result['subscriptions_processed']} subscriptions, "
-            f"{result['invoices_created']} invoices, "
-            f"{result['payments_succeeded']}/{result['payments_attempted']} payments succeeded"
+            "📅 [Billing] Daily billing completed: %s subscriptions checked, %s proformas created, %s payments created",
+            preparation["subscriptions_checked"],
+            preparation["proformas_created"],
+            collection["payments_created"],
         )
 
-        # Log the run
         AuditService.log_simple_event(
             event_type="daily_billing_completed",
             user=None,
-            description=f"Daily billing run completed: {result['invoices_created']} invoices created",
+            description=(
+                f"Daily billing run completed: {preparation['proformas_created']} proformas prepared, "
+                f"{collection['payments_created']} payments created"
+            ),
             actor_type="system",
             metadata={
-                "subscriptions_processed": result["subscriptions_processed"],
-                "invoices_created": result["invoices_created"],
-                "payments_attempted": result["payments_attempted"],
-                "payments_succeeded": result["payments_succeeded"],
-                "payments_failed": result["payments_failed"],
-                "total_billed_cents": result["total_billed_cents"],
-                "errors": result["errors"][:10],  # Limit errors in metadata
+                "preparation": preparation,
+                "collection": collection,
+                "renewals_marked_overdue": renewals_marked_overdue,
+                "errors": errors[:10],
                 "source_app": "billing",
             },
         )
 
         return {
-            "success": True,
+            "success": not errors,
             "result": result,
-            "message": f"Daily billing completed: {result['invoices_created']} invoices created",
+            "message": (
+                f"Daily billing completed: {preparation['proformas_created']} proformas prepared, "
+                f"{collection['payments_created']} payments created"
+            ),
         }
 
     except Exception as e:
@@ -749,10 +746,10 @@ def run_daily_billing() -> dict[str, Any]:
 
 def process_expired_trials() -> dict[str, Any]:
     """
-    Process expired trial subscriptions.
+    Cancel expired trials whose first paid renewal did not settle.
 
-    Converts trials with payment methods to paid subscriptions,
-    cancels trials without payment methods.
+    A trial converts only through successful payment convergence; merely having
+    a saved card is never enough to activate paid service.
 
     Should run daily, after run_daily_billing.
 
@@ -760,13 +757,13 @@ def process_expired_trials() -> dict[str, Any]:
         Dictionary with processing result
     """
     from apps.billing.subscription_service import (  # noqa: PLC0415  # Deferred: avoids circular import
-        RecurringBillingService,  # Deferred: django-q task  # Deferred: avoids circular import
+        SubscriptionLifecycleService,  # Deferred: django-q task  # Deferred: avoids circular import
     )
 
     logger.info("⏰ [Trials] Processing expired trials")
 
     try:
-        count = RecurringBillingService.handle_expired_trials()
+        count = SubscriptionLifecycleService.handle_expired_trials()
 
         logger.info(f"⏰ [Trials] Processed {count} expired trials")
 
@@ -805,13 +802,13 @@ def process_grace_period_expirations() -> dict[str, Any]:
         Dictionary with processing result
     """
     from apps.billing.subscription_service import (  # noqa: PLC0415  # Deferred: avoids circular import
-        RecurringBillingService,  # Deferred: django-q task  # Deferred: avoids circular import
+        SubscriptionLifecycleService,  # Deferred: django-q task  # Deferred: avoids circular import
     )
 
     logger.info("⚠️ [Grace] Processing expired grace periods")
 
     try:
-        count = RecurringBillingService.handle_grace_period_expirations()
+        count = SubscriptionLifecycleService.handle_grace_period_expirations()
 
         logger.info(f"⚠️ [Grace] Processed {count} grace period expirations")
 
@@ -902,21 +899,167 @@ def _schedule_next_retry(retry: Any, retry_model: Any) -> None:
     if retry.policy and retry.attempt_number < retry.policy.max_attempts:
         next_retry_date = retry.policy.get_next_retry_date(timezone.now(), retry.attempt_number)
         if next_retry_date:
-            retry_model.objects.create(
+            retry_model.objects.get_or_create(
                 payment=retry.payment,
-                policy=retry.policy,
                 attempt_number=retry.attempt_number + 1,
-                scheduled_at=next_retry_date,
-                status="pending",
+                defaults={
+                    "policy": retry.policy,
+                    "scheduled_at": next_retry_date,
+                    "status": "pending",
+                },
             )
 
 
-def run_payment_collection() -> dict[str, Any]:  # noqa: PLR0915
+def _retry_collection_target(original_payment: Any) -> tuple[Any, int | None, Any]:
+    """Resolve the mandate-bound method and PRAHO document for a retry."""
+    from django.db.models import Q  # noqa: PLC0415
+
+    from apps.billing.metering_models import BillingCycle  # noqa: PLC0415
+    from apps.billing.payment_service import PaymentService  # noqa: PLC0415
+
+    if original_payment.invoice_id is not None:
+        cycle = (
+            BillingCycle.objects.filter(
+                Q(invoice_id=original_payment.invoice_id) | Q(usage_invoice_id=original_payment.invoice_id)
+            )
+            .select_related("subscription__saved_payment_method")
+            .order_by("subscription_id")
+            .first()
+        )
+        saved_method = cycle.subscription.saved_payment_method if cycle is not None else None
+        return saved_method, original_payment.invoice_id, PaymentService.create_payment_intent_for_invoice
+
+    if original_payment.proforma_id is not None:
+        cycle = (
+            original_payment.proforma.billing_cycles.select_related("subscription__saved_payment_method")
+            .order_by("subscription_id")
+            .first()
+        )
+        saved_method = cycle.subscription.saved_payment_method if cycle is not None else None
+        return saved_method, original_payment.proforma_id, PaymentService.create_payment_intent_for_proforma
+
+    return None, None, None
+
+
+def _find_retry_result_payment(original_payment: Any, intent_result: Any) -> Any:
+    """Find only the newly created PRAHO Payment attempt."""
+    gateway_txn_id = intent_result.get("payment_intent_id", "")
+    if not gateway_txn_id:
+        return None
+    return (
+        original_payment.__class__.objects.filter(gateway_txn_id=gateway_txn_id).exclude(id=original_payment.id).first()
+    )
+
+
+def _claim_payment_retry(retry_id: Any, retry_model: Any) -> bool:
+    """Atomically claim one due retry so overlapping workers cannot double-charge it."""
+    return (
+        retry_model.objects.filter(id=retry_id, status="pending").update(
+            status="processing",
+            executed_at=timezone.now(),
+        )
+        == 1
+    )
+
+
+def _reclaim_stale_payment_retries(retry_model: Any, *, now: datetime) -> int:
+    """Release claims older than two task timeouts for idempotent resumption."""
+    reclaimed = retry_model.objects.filter(
+        status="processing",
+        executed_at__lt=now - PAYMENT_RETRY_LEASE_TIMEOUT,
+    ).update(
+        status="pending",
+        executed_at=None,
+        updated_at=now,
+    )
+    if reclaimed:
+        logger.warning("Reclaimed %s stale payment retry claim(s)", reclaimed)
+    return int(reclaimed)
+
+
+def _execute_payment_retry(retry: Any, retry_model: Any) -> int | None:
+    """Execute one retry and return recovered cents, or None on failure."""
+    from apps.billing.payment_service import PaymentService  # noqa: PLC0415
+
+    original_payment = retry.payment
+    logger.info(f"💳 [Collection] Retrying payment {retry.payment_id} (attempt {retry.attempt_number})")
+
+    if retry.result_payment_id is not None:
+        result_payment = retry.result_payment
+        if result_payment.status == "succeeded":
+            retry.status = "success"
+            retry.failure_reason = ""
+            retry.save(update_fields=["status", "failure_reason", "updated_at"])
+            return int(result_payment.amount_cents)
+        if result_payment.status == "failed":
+            retry.status = "failed"
+            retry.failure_reason = str(result_payment.meta.get("gateway_error") or "Payment declined")
+            _schedule_next_retry(retry, retry_model)
+            retry.save(update_fields=["status", "failure_reason", "updated_at"])
+            return None
+
+    if original_payment.status != "failed":
+        intent_result: Any = {
+            "success": False,
+            "error": "Only failed payments are eligible for a new retry attempt",
+        }
+    else:
+        saved_method, document_id, create_intent = _retry_collection_target(original_payment)
+        payment_method_id = getattr(saved_method, "stripe_payment_method_id", "")
+        if create_intent is None or document_id is None or not payment_method_id:
+            intent_result = {"success": False, "error": "No authorized recurring payment method"}
+        else:
+            intent_result = create_intent(
+                document_id,
+                payment_method_id,
+                gateway=original_payment.payment_method or "stripe",
+                retry_attempt_id=retry.id,
+            )
+
+    gateway_txn_id = intent_result.get("payment_intent_id", "")
+    retry.refresh_from_db(fields=["result_payment"])
+    result_payment = retry.result_payment or _find_retry_result_payment(original_payment, intent_result)
+    if result_payment is not None and retry.result_payment_id is None:
+        retry.result_payment = result_payment
+        # Persist ownership before confirmation. A definitive failure converges
+        # synchronously and must see that the collection worker owns this retry
+        # chain, otherwise it could seed a competing attempt for result_payment.
+        retry.save(update_fields=["result_payment", "updated_at"])
+
+    confirm_result: PaymentConfirmResult = {"success": False, "status": "failed", "error": None}
+    if intent_result.get("success", False) and gateway_txn_id and result_payment is not None:
+        confirm_result = PaymentService.confirm_payment(
+            gateway_txn_id,
+            gateway=original_payment.payment_method or "stripe",
+            customer_id=original_payment.customer_id,
+        )
+
+    if (
+        confirm_result.get("success", False)
+        and confirm_result.get("status") == "succeeded"
+        and result_payment is not None
+    ):
+        result_payment.refresh_from_db()
+        retry.status = "success"
+        retry.failure_reason = ""
+        retry.save()
+        return int(result_payment.amount_cents)
+
+    retry.status = "failed"
+    retry.failure_reason = str(
+        confirm_result.get("error") or intent_result.get("error") or confirm_result.get("status") or "Payment declined"
+    )
+    _schedule_next_retry(retry, retry_model)
+    retry.save()
+    return None
+
+
+def run_payment_collection() -> dict[str, Any]:
     """
     Run payment collection for failed payments.
 
     Processes retry attempts for subscriptions with failed payments.
-    Should run multiple times daily (e.g., every 4 hours).
+    Runs every 15 minutes through the canonical billing scheduler.
 
     Returns:
         Dictionary with collection result
@@ -925,7 +1068,6 @@ def run_payment_collection() -> dict[str, Any]:  # noqa: PLR0915
         PaymentCollectionRun,
         PaymentRetryAttempt,
     )
-    from apps.billing.payment_service import PaymentService  # noqa: PLC0415  # Deferred: avoids circular import
 
     logger.info("💳 [Collection] Starting payment collection run")
 
@@ -935,10 +1077,13 @@ def run_payment_collection() -> dict[str, Any]:  # noqa: PLR0915
             run_type="automatic",
         )
 
+        now = timezone.now()
+        _reclaim_stale_payment_retries(PaymentRetryAttempt, now=now)
+
         # Find pending retry attempts that are due
         due_retries = PaymentRetryAttempt.objects.filter(
             status="pending",
-            scheduled_at__lte=timezone.now(),
+            scheduled_at__lte=now,
         ).select_related("payment", "payment__customer", "payment__invoice", "policy")
 
         run.total_scheduled = due_retries.count()
@@ -948,56 +1093,26 @@ def run_payment_collection() -> dict[str, Any]:  # noqa: PLR0915
         failed = 0
 
         for retry in due_retries:
+            if not _claim_payment_retry(retry.id, PaymentRetryAttempt):
+                continue
+            retry.refresh_from_db()
+            run.total_processed += 1
             try:
-                run.total_processed += 1
-                retry.status = "processing"
-                retry.executed_at = timezone.now()
-                retry.save(update_fields=["status", "executed_at"])
-
-                # Attempt payment via Stripe gateway
-                logger.info(f"💳 [Collection] Retrying payment {retry.payment_id} (attempt {retry.attempt_number})")
-
-                # Re-attempt payment using stored gateway transaction ID
-                success = False
-                if retry.payment.gateway_txn_id:
-                    confirm_result = PaymentService.confirm_payment(
-                        retry.payment.gateway_txn_id,
-                        gateway=retry.payment.payment_method or "stripe",
-                    )
-                    success = confirm_result.get("success", False) and confirm_result.get("status") == "succeeded"
-
-                if success:
-                    # Update payment status via FSM transition
-                    try:
-                        retry.payment.succeed()
-                        retry.payment.save(update_fields=["status", "updated_at"])
-                        retry.status = "success"
-                        retry.failure_reason = ""
-                        successful += 1
-                        total_recovered_cents += retry.payment.amount_cents
-                    except TransitionNotAllowed:
-                        retry.status = "failed"
-                        retry.failure_reason = f"Payment cannot transition to succeeded from {retry.payment.status}"
-                        failed += 1
-                        logger.warning(
-                            f"⚠️ [Collection] Payment {retry.payment_id} cannot transition to succeeded "
-                            f"from {retry.payment.status}"
-                        )
-
-                else:
-                    retry.status = "failed"
-                    retry.failure_reason = "Payment declined"
-                    failed += 1
-                    _schedule_next_retry(retry, PaymentRetryAttempt)
-
-                retry.save()
-
-            except Exception as e:
-                logger.error(f"Error processing retry {retry.id}: {e}")
+                recovered_cents = _execute_payment_retry(retry, PaymentRetryAttempt)
+            except Exception as exc:
+                logger.error(f"Error processing retry {retry.id}: {exc}")
                 retry.status = "failed"
-                retry.failure_reason = str(e)
+                retry.failure_reason = str(exc)
                 retry.save()
+                _schedule_next_retry(retry, PaymentRetryAttempt)
                 failed += 1
+                continue
+
+            if recovered_cents is None:
+                failed += 1
+            else:
+                successful += 1
+                total_recovered_cents += recovered_cents
 
         # Complete collection run
         run.total_successful = successful
@@ -1059,6 +1174,64 @@ def notify_expiring_grandfathering_async(days_ahead: int = 30) -> str:
 def run_payment_collection_async() -> str:
     """Queue payment collection task."""
     return async_task("apps.billing.tasks.run_payment_collection", timeout=TASK_TIME_LIMIT * 2)
+
+
+def setup_billing_scheduled_tasks() -> dict[str, str]:
+    """Register the single PRAHO renewal path plus local usage processing."""
+    from django_q.models import Schedule  # noqa: PLC0415
+
+    from apps.billing.metering_tasks import register_scheduled_tasks  # noqa: PLC0415
+    from apps.billing.recurring_billing import unmanaged_auto_renew_service_count  # noqa: PLC0415
+
+    unmanaged_services = unmanaged_auto_renew_service_count()
+    if unmanaged_services:
+        raise RuntimeError(
+            f"{unmanaged_services} active auto-renew services have no PRAHO subscription; "
+            "link or migrate them before replacing the renewal scheduler"
+        )
+
+    # Remove the retired order-based renewal engine from installations that ran
+    # an older setup command. No code path remains behind this schedule.
+    Schedule.objects.filter(name__in=["order-process-recurring", "Sync Pending to Stripe"]).delete()
+
+    schedule_definitions = (
+        (
+            "billing-recurring-orchestrator",
+            "apps.billing.tasks.run_daily_billing",
+            "15 * * * *",
+        ),
+        (
+            "billing-expired-trials",
+            "apps.billing.tasks.process_expired_trials",
+            "30 0 * * *",
+        ),
+        (
+            "billing-grace-expirations",
+            "apps.billing.tasks.process_grace_period_expirations",
+            "0 1 * * *",
+        ),
+        (
+            "billing-payment-retries",
+            "apps.billing.tasks.run_payment_collection",
+            "*/15 * * * *",
+        ),
+    )
+    results: dict[str, str] = {}
+    for name, func, cron in schedule_definitions:
+        _schedule, created = Schedule.objects.update_or_create(
+            name=name,
+            defaults={
+                "func": func,
+                "schedule_type": Schedule.CRON,
+                "cron": cron,
+                "repeats": -1,
+            },
+        )
+        results[name] = "created" if created else "already_exists"
+
+    register_scheduled_tasks()
+    results["local-usage-workflow"] = "configured"
+    return results
 
 
 def reverify_expired_vat_validations() -> dict[str, Any]:

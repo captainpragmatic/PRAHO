@@ -24,6 +24,7 @@ from apps.billing.validators import (
     validate_financial_json,
     validate_financial_text_field,
 )
+from apps.common.cnp_validator import validate_cnp
 from apps.common.financial_arithmetic import calculate_document_totals, calculate_line_totals
 from apps.common.validators import log_security_event
 
@@ -130,6 +131,12 @@ class ProformaInvoice(models.Model):
     # Billing address snapshot
     bill_to_name = models.CharField(max_length=255, default="")
     bill_to_tax_id = models.CharField(max_length=50, blank=True)
+    bill_to_cnp = models.CharField(
+        max_length=13,
+        blank=True,
+        validators=[validate_cnp],
+        help_text=_("Romanian personal fiscal identifier snapshotted when the proforma is created"),
+    )
     bill_to_registration_number = models.CharField(max_length=50, blank=True)  # Nr. Reg. Com. / J number
     bill_to_email = models.EmailField(blank=True)
     bill_to_address1 = models.CharField(max_length=255, blank=True)
@@ -174,6 +181,10 @@ class ProformaInvoice(models.Model):
             models.CheckConstraint(
                 condition=models.Q(status__in=["draft", "sent", "accepted", "expired", "converted"]),
                 name="proformainvoice_status_valid_values",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(bill_to_tax_id="") | models.Q(bill_to_cnp=""),
+                name="proforma_one_fiscal_id",
             ),
         ]
 
@@ -332,6 +343,13 @@ class ProformaLine(models.Model):
     proforma = models.ForeignKey(ProformaInvoice, on_delete=models.CASCADE, related_name="lines")
     kind = models.CharField(max_length=20, choices=KIND_CHOICES)
     service = models.ForeignKey("provisioning.Service", on_delete=models.SET_NULL, null=True, blank=True)
+    billing_cycle = models.ForeignKey(
+        "billing.BillingCycle",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="proforma_lines",
+    )
 
     description = models.CharField(max_length=500)
     quantity = models.DecimalField(max_digits=12, decimal_places=3, default=Decimal("1.000"))
@@ -359,7 +377,10 @@ class ProformaLine(models.Model):
 
     class Meta:
         db_table = "billing_proforma_lines"
-        indexes = (models.Index(fields=["service"]),)
+        indexes = (
+            models.Index(fields=["service"]),
+            models.Index(fields=["billing_cycle"]),
+        )
         constraints: ClassVar[list[models.BaseConstraint]] = [
             models.CheckConstraint(
                 condition=models.Q(unit_price_cents__gte=0),

@@ -332,6 +332,11 @@ class UBLInvoiceBuilderTestCase(TestCase):
         self.assertIsNotNone(name)
         self.assertEqual(name.text, "Customer SRL")
 
+        # ANAF BR-RO-120 requires the Romanian buyer fiscal identifier in BT-47.
+        legal_identifier = customer.find(f".//{{{NAMESPACES['cac']}}}PartyLegalEntity/{{{NAMESPACES['cbc']}}}CompanyID")
+        self.assertIsNotNone(legal_identifier)
+        self.assertEqual(legal_identifier.text, "87654321")
+
     def test_build_contains_tax_total(self):
         """Test that TaxTotal is present and correct."""
         builder = UBLInvoiceBuilder(self.invoice)
@@ -430,15 +435,29 @@ class UBLInvoiceBuilderTestCase(TestCase):
         """Build invoice XML and return the parsed doc for the given tax profile."""
 
         invoice = InvoiceFactory(
-            customer=CustomerFactory(), currency=self.currency, number="INV-CAT-XML",
-            bill_to_name="Customer", bill_to_country=bill_to_country, bill_to_tax_id=bill_to_tax_id,
-            bill_to_street="Street 1", bill_to_city="City", bill_to_postal_code="010101",
-            status="issued", issued_at=timezone.now(), due_at=timezone.now() + timezone.timedelta(days=30),
-            subtotal_cents=100000, tax_total_cents=tax_total_cents, total_cents=100000 + tax_total_cents,
+            customer=CustomerFactory(),
+            currency=self.currency,
+            number="INV-CAT-XML",
+            bill_to_name="Customer",
+            bill_to_country=bill_to_country,
+            bill_to_tax_id=bill_to_tax_id,
+            bill_to_street="Street 1",
+            bill_to_city="City",
+            bill_to_postal_code="010101",
+            status="issued",
+            issued_at=timezone.now(),
+            due_at=timezone.now() + timezone.timedelta(days=30),
+            subtotal_cents=100000,
+            tax_total_cents=tax_total_cents,
+            total_cents=100000 + tax_total_cents,
         )
         InvoiceLineFactory(
-            invoice=invoice, description="Web Hosting", unit_price_cents=100000,
-            quantity=1, tax_rate=Decimal("0.1900"), tax_category_code="S",
+            invoice=invoice,
+            description="Web Hosting",
+            unit_price_cents=100000,
+            quantity=1,
+            tax_rate=Decimal("0.1900"),
+            tax_category_code="S",
         )
         return etree.fromstring(UBLInvoiceBuilder(invoice).build().encode())
 
@@ -477,9 +496,7 @@ class UBLInvoiceBuilderTestCase(TestCase):
 
     def test_out_of_scope_emits_vatex_o(self):
         """Non-RO customer without a VAT ID on a zero-tax invoice is O (VATEX-EU-O)."""
-        cat = self._doc_tax_category(
-            self._build_doc_for(bill_to_country="US", bill_to_tax_id="", tax_total_cents=0)
-        )
+        cat = self._doc_tax_category(self._build_doc_for(bill_to_country="US", bill_to_tax_id="", tax_total_cents=0))
         self.assertEqual(cat.find(f"{{{NAMESPACES['cbc']}}}ID").text, "O")
         self.assertEqual(cat.find(f"{{{NAMESPACES['cbc']}}}TaxExemptionReasonCode").text, "VATEX-EU-O")
 
@@ -493,7 +510,9 @@ class UBLInvoiceBuilderTestCase(TestCase):
             self.assertEqual(cat.find(f"{{{NAMESPACES['cbc']}}}ID").text, "AE")
             self.assertEqual(cat.find(f"{{{NAMESPACES['cbc']}}}Percent").text, "0.00")
 
-    def _build_invoice_with_meta(self, *, meta, bill_to_country="DE", bill_to_tax_id="DE123456789", subtotal_cents=100000, tax_total_cents=0):
+    def _build_invoice_with_meta(
+        self, *, meta, bill_to_country="DE", bill_to_tax_id="DE123456789", subtotal_cents=100000, tax_total_cents=0
+    ):
         """Build an invoice doc with in-memory `meta` (allowances/charges).
 
         The Invoice model has no `meta` field, so the document-level allowance/charge
@@ -501,24 +520,35 @@ class UBLInvoiceBuilderTestCase(TestCase):
         Defaults model an AE (EU reverse-charge, tax 0) invoice; total = subtotal + tax.
         """
         invoice = InvoiceFactory(
-            customer=CustomerFactory(), currency=self.currency, number="INV-LMT-META",
-            bill_to_name="Customer", bill_to_country=bill_to_country, bill_to_tax_id=bill_to_tax_id,
-            bill_to_street="Street 1", bill_to_city="City", bill_to_postal_code="010101",
-            status="issued", issued_at=timezone.now(), due_at=timezone.now() + timezone.timedelta(days=30),
-            subtotal_cents=subtotal_cents, tax_total_cents=tax_total_cents,
+            customer=CustomerFactory(),
+            currency=self.currency,
+            number="INV-LMT-META",
+            bill_to_name="Customer",
+            bill_to_country=bill_to_country,
+            bill_to_tax_id=bill_to_tax_id,
+            bill_to_street="Street 1",
+            bill_to_city="City",
+            bill_to_postal_code="010101",
+            status="issued",
+            issued_at=timezone.now(),
+            due_at=timezone.now() + timezone.timedelta(days=30),
+            subtotal_cents=subtotal_cents,
+            tax_total_cents=tax_total_cents,
             total_cents=subtotal_cents + tax_total_cents,
         )
         InvoiceLineFactory(
-            invoice=invoice, description="Web Hosting", unit_price_cents=subtotal_cents,
-            quantity=1, tax_rate=Decimal("0.1900"), tax_category_code="S",
+            invoice=invoice,
+            description="Web Hosting",
+            unit_price_cents=subtotal_cents,
+            quantity=1,
+            tax_rate=Decimal("0.1900"),
+            tax_category_code="S",
         )
         invoice.meta = meta
         return etree.fromstring(UBLInvoiceBuilder(invoice).build().encode())
 
     def _lmt_amount(self, doc, name):
-        return doc.find(
-            f".//{{{NAMESPACES['cac']}}}LegalMonetaryTotal/{{{NAMESPACES['cbc']}}}{name}"
-        ).text
+        return doc.find(f".//{{{NAMESPACES['cac']}}}LegalMonetaryTotal/{{{NAMESPACES['cbc']}}}{name}").text
 
     def test_doc_allowance_reconciles_totals_and_orders_elements(self):
         """BR-CO-13/15 + UBL order: a document-level allowance nets TaxExclusiveAmount,
@@ -565,19 +595,40 @@ class UBLInvoiceBuilderTestCase(TestCase):
         # G=1000.00 goods + S=200.00 setup = 1200.00 gross; D=100.00 discount;
         # net = 1100.00; tax = 19% of net = 209.00; total = 1309.00.
         invoice = InvoiceFactory(
-            customer=CustomerFactory(), currency=self.currency, number="INV-SETUP-DISC",
-            bill_to_name="Customer SRL", bill_to_country="RO", bill_to_tax_id="RO87654321",
-            bill_to_street="Street 1", bill_to_city="Cluj", bill_to_postal_code="400001",
-            status="issued", issued_at=timezone.now(), due_at=timezone.now() + timezone.timedelta(days=30),
-            subtotal_cents=110000, tax_total_cents=20900, total_cents=130900, discount_cents=10000,
+            customer=CustomerFactory(),
+            currency=self.currency,
+            number="INV-SETUP-DISC",
+            bill_to_name="Customer SRL",
+            bill_to_country="RO",
+            bill_to_tax_id="RO87654321",
+            bill_to_street="Street 1",
+            bill_to_city="Cluj",
+            bill_to_postal_code="400001",
+            status="issued",
+            issued_at=timezone.now(),
+            due_at=timezone.now() + timezone.timedelta(days=30),
+            subtotal_cents=110000,
+            tax_total_cents=20900,
+            total_cents=130900,
+            discount_cents=10000,
         )
         InvoiceLineFactory(
-            invoice=invoice, kind="service", description="Web Hosting",
-            unit_price_cents=100000, quantity=1, tax_rate=Decimal("0.1900"), tax_category_code="S",
+            invoice=invoice,
+            kind="service",
+            description="Web Hosting",
+            unit_price_cents=100000,
+            quantity=1,
+            tax_rate=Decimal("0.1900"),
+            tax_category_code="S",
         )
         InvoiceLineFactory(
-            invoice=invoice, kind="setup", description="Setup fee — Web Hosting",
-            unit_price_cents=20000, quantity=1, tax_rate=Decimal("0.1900"), tax_category_code="S",
+            invoice=invoice,
+            kind="setup",
+            description="Setup fee — Web Hosting",
+            unit_price_cents=20000,
+            quantity=1,
+            tax_rate=Decimal("0.1900"),
+            tax_category_code="S",
         )
 
         doc = etree.fromstring(UBLInvoiceBuilder(invoice).build().encode())
@@ -605,14 +656,17 @@ class UBLInvoiceBuilderTestCase(TestCase):
         """A malformed amount_cents (None / non-numeric) is skipped (logged), not a
         crash; valid sibling entries still emit and total correctly."""
         doc = self._build_invoice_with_meta(
-            meta={"allowances": [
-                {"amount_cents": None, "reason": "broken"},
-                {"amount_cents": "not-a-number", "reason": "also broken"},
-                {"amount_cents": 5000, "reason": "valid"},
-            ]},
+            meta={
+                "allowances": [
+                    {"amount_cents": None, "reason": "broken"},
+                    {"amount_cents": "not-a-number", "reason": "also broken"},
+                    {"amount_cents": 5000, "reason": "valid"},
+                ]
+            },
         )
         allowances = [
-            ac for ac in doc.findall(f".//{{{NAMESPACES['cac']}}}AllowanceCharge")
+            ac
+            for ac in doc.findall(f".//{{{NAMESPACES['cac']}}}AllowanceCharge")
             if ac.find(f"{{{NAMESPACES['cbc']}}}ChargeIndicator").text == "false"
         ]
         self.assertEqual(len(allowances), 1)
@@ -624,15 +678,30 @@ class UBLInvoiceBuilderTestCase(TestCase):
         totals reconcile — BT-106 = Σ line gross, TaxExclusive = TaxableAmount = net,
         TaxAmount = net*rate, and BT-106 = Σ line BT-131 (BR-CO-10/13/17)."""
         invoice = InvoiceFactory(
-            customer=CustomerFactory(), currency=self.currency, number="INV-DOCDISC",
-            bill_to_name="Customer", bill_to_country="RO", bill_to_tax_id="RO12345678",
-            bill_to_street="Street 1", bill_to_city="City", bill_to_postal_code="010101",
-            status="issued", issued_at=timezone.now(), due_at=timezone.now() + timezone.timedelta(days=30),
-            subtotal_cents=90000, tax_total_cents=17100, total_cents=107100, discount_cents=10000,
+            customer=CustomerFactory(),
+            currency=self.currency,
+            number="INV-DOCDISC",
+            bill_to_name="Customer",
+            bill_to_country="RO",
+            bill_to_tax_id="RO12345678",
+            bill_to_street="Street 1",
+            bill_to_city="City",
+            bill_to_postal_code="010101",
+            status="issued",
+            issued_at=timezone.now(),
+            due_at=timezone.now() + timezone.timedelta(days=30),
+            subtotal_cents=90000,
+            tax_total_cents=17100,
+            total_cents=107100,
+            discount_cents=10000,
         )
         InvoiceLineFactory(
-            invoice=invoice, description="Web Hosting", unit_price_cents=100000,
-            quantity=1, tax_rate=Decimal("0.1900"), tax_category_code="S",
+            invoice=invoice,
+            description="Web Hosting",
+            unit_price_cents=100000,
+            quantity=1,
+            tax_rate=Decimal("0.1900"),
+            tax_category_code="S",
         )
         doc = etree.fromstring(UBLInvoiceBuilder(invoice).build().encode())
 
@@ -661,15 +730,30 @@ class UBLInvoiceBuilderTestCase(TestCase):
         before the field existed) still emits a reconciled e-Factura — the discount is
         derived from Σ(line gross) - subtotal, so no ledger backfill is required."""
         invoice = InvoiceFactory(
-            customer=CustomerFactory(), currency=self.currency, number="INV-LEGACY-DISC",
-            bill_to_name="Customer", bill_to_country="RO", bill_to_tax_id="RO12345678",
-            bill_to_street="Street 1", bill_to_city="City", bill_to_postal_code="010101",
-            status="issued", issued_at=timezone.now(), due_at=timezone.now() + timezone.timedelta(days=30),
-            subtotal_cents=90000, tax_total_cents=17100, total_cents=107100, discount_cents=0,
+            customer=CustomerFactory(),
+            currency=self.currency,
+            number="INV-LEGACY-DISC",
+            bill_to_name="Customer",
+            bill_to_country="RO",
+            bill_to_tax_id="RO12345678",
+            bill_to_street="Street 1",
+            bill_to_city="City",
+            bill_to_postal_code="010101",
+            status="issued",
+            issued_at=timezone.now(),
+            due_at=timezone.now() + timezone.timedelta(days=30),
+            subtotal_cents=90000,
+            tax_total_cents=17100,
+            total_cents=107100,
+            discount_cents=0,
         )
         InvoiceLineFactory(
-            invoice=invoice, description="Web Hosting", unit_price_cents=100000,
-            quantity=1, tax_rate=Decimal("0.1900"), tax_category_code="S",
+            invoice=invoice,
+            description="Web Hosting",
+            unit_price_cents=100000,
+            quantity=1,
+            tax_rate=Decimal("0.1900"),
+            tax_category_code="S",
         )
         doc = etree.fromstring(UBLInvoiceBuilder(invoice).build().encode())
         # derived discount = 1000 - 900 = 100 → reconciles to net 900 (not inflated to 1000)
@@ -683,19 +767,36 @@ class UBLInvoiceBuilderTestCase(TestCase):
         from apps.billing.payment_models import Payment  # noqa: PLC0415
 
         invoice = InvoiceFactory(
-            customer=CustomerFactory(), currency=self.currency, number="INV-PREPAID",
-            bill_to_name="Customer", bill_to_country="RO", bill_to_tax_id="RO12345678",
-            bill_to_street="Street 1", bill_to_city="City", bill_to_postal_code="010101",
-            status="issued", issued_at=timezone.now(), due_at=timezone.now() + timezone.timedelta(days=30),
-            subtotal_cents=100000, tax_total_cents=19000, total_cents=119000,
+            customer=CustomerFactory(),
+            currency=self.currency,
+            number="INV-PREPAID",
+            bill_to_name="Customer",
+            bill_to_country="RO",
+            bill_to_tax_id="RO12345678",
+            bill_to_street="Street 1",
+            bill_to_city="City",
+            bill_to_postal_code="010101",
+            status="issued",
+            issued_at=timezone.now(),
+            due_at=timezone.now() + timezone.timedelta(days=30),
+            subtotal_cents=100000,
+            tax_total_cents=19000,
+            total_cents=119000,
         )
         InvoiceLineFactory(
-            invoice=invoice, description="Web Hosting", unit_price_cents=100000,
-            quantity=1, tax_rate=Decimal("0.1900"), tax_category_code="S",
+            invoice=invoice,
+            description="Web Hosting",
+            unit_price_cents=100000,
+            quantity=1,
+            tax_rate=Decimal("0.1900"),
+            tax_category_code="S",
         )
         Payment.objects.create(
-            customer=invoice.customer, invoice=invoice, currency=self.currency,
-            amount_cents=50000, status="succeeded",
+            customer=invoice.customer,
+            invoice=invoice,
+            currency=self.currency,
+            amount_cents=50000,
+            status="succeeded",
         )
         doc = etree.fromstring(UBLInvoiceBuilder(invoice).build().encode())
         self.assertEqual(self._lmt_amount(doc, "PrepaidAmount"), "500.00")
@@ -704,15 +805,29 @@ class UBLInvoiceBuilderTestCase(TestCase):
     def test_payable_amount_omits_prepaid_when_unpaid(self):
         """An unpaid invoice emits no PrepaidAmount; PayableAmount is the full TaxInclusive."""
         invoice = InvoiceFactory(
-            customer=CustomerFactory(), currency=self.currency, number="INV-UNPAID",
-            bill_to_name="Customer", bill_to_country="RO", bill_to_tax_id="RO12345678",
-            bill_to_street="Street 1", bill_to_city="City", bill_to_postal_code="010101",
-            status="issued", issued_at=timezone.now(), due_at=timezone.now() + timezone.timedelta(days=30),
-            subtotal_cents=100000, tax_total_cents=19000, total_cents=119000,
+            customer=CustomerFactory(),
+            currency=self.currency,
+            number="INV-UNPAID",
+            bill_to_name="Customer",
+            bill_to_country="RO",
+            bill_to_tax_id="RO12345678",
+            bill_to_street="Street 1",
+            bill_to_city="City",
+            bill_to_postal_code="010101",
+            status="issued",
+            issued_at=timezone.now(),
+            due_at=timezone.now() + timezone.timedelta(days=30),
+            subtotal_cents=100000,
+            tax_total_cents=19000,
+            total_cents=119000,
         )
         InvoiceLineFactory(
-            invoice=invoice, description="Web Hosting", unit_price_cents=100000,
-            quantity=1, tax_rate=Decimal("0.1900"), tax_category_code="S",
+            invoice=invoice,
+            description="Web Hosting",
+            unit_price_cents=100000,
+            quantity=1,
+            tax_rate=Decimal("0.1900"),
+            tax_category_code="S",
         )
         doc = etree.fromstring(UBLInvoiceBuilder(invoice).build().encode())
         lmt = doc.find(f".//{{{NAMESPACES['cac']}}}LegalMonetaryTotal")
@@ -725,16 +840,30 @@ class UBLInvoiceBuilderTestCase(TestCase):
         the line amount as unit_price*qty and rounding could differ from the cents-truncated
         line subtotal by 0.01 — which ANAF rejects. Both must derive from the same value."""
         invoice = InvoiceFactory(
-            customer=CustomerFactory(), currency=self.currency, number="INV-FRACQTY",
-            bill_to_name="Customer", bill_to_country="RO", bill_to_tax_id="RO12345678",
-            bill_to_street="Street 1", bill_to_city="City", bill_to_postal_code="010101",
-            status="issued", issued_at=timezone.now(), due_at=timezone.now() + timezone.timedelta(days=30),
+            customer=CustomerFactory(),
+            currency=self.currency,
+            number="INV-FRACQTY",
+            bill_to_name="Customer",
+            bill_to_country="RO",
+            bill_to_tax_id="RO12345678",
+            bill_to_street="Street 1",
+            bill_to_city="City",
+            bill_to_postal_code="010101",
+            status="issued",
+            issued_at=timezone.now(),
+            due_at=timezone.now() + timezone.timedelta(days=30),
             # line.subtotal_cents = int(0.333 * 10005) = 3331 (33.31); header matches it (no discount)
-            subtotal_cents=3331, tax_total_cents=633, total_cents=3964,
+            subtotal_cents=3331,
+            tax_total_cents=633,
+            total_cents=3964,
         )
         InvoiceLineFactory(
-            invoice=invoice, description="Metered service", unit_price_cents=10005,
-            quantity=Decimal("0.333"), tax_rate=Decimal("0.1900"), tax_category_code="S",
+            invoice=invoice,
+            description="Metered service",
+            unit_price_cents=10005,
+            quantity=Decimal("0.333"),
+            tax_rate=Decimal("0.1900"),
+            tax_category_code="S",
         )
         doc = etree.fromstring(UBLInvoiceBuilder(invoice).build().encode())
         lines = doc.findall(f".//{{{NAMESPACES['cac']}}}InvoiceLine")
@@ -753,16 +882,30 @@ class UBLInvoiceBuilderTestCase(TestCase):
         from unittest.mock import patch  # noqa: PLC0415
 
         invoice = InvoiceFactory(
-            customer=CustomerFactory(), currency=self.currency, number="INV-PREPAID-CAP",
-            bill_to_name="Customer", bill_to_country="RO", bill_to_tax_id="RO12345678",
-            bill_to_street="Street 1", bill_to_city="City", bill_to_postal_code="010101",
-            status="issued", issued_at=timezone.now(), due_at=timezone.now() + timezone.timedelta(days=30),
+            customer=CustomerFactory(),
+            currency=self.currency,
+            number="INV-PREPAID-CAP",
+            bill_to_name="Customer",
+            bill_to_country="RO",
+            bill_to_tax_id="RO12345678",
+            bill_to_street="Street 1",
+            bill_to_city="City",
+            bill_to_postal_code="010101",
+            status="issued",
+            issued_at=timezone.now(),
+            due_at=timezone.now() + timezone.timedelta(days=30),
             # Stored header (1190.00) diverges above the single line's gross (500.00).
-            subtotal_cents=100000, tax_total_cents=19000, total_cents=119000,
+            subtotal_cents=100000,
+            tax_total_cents=19000,
+            total_cents=119000,
         )
         InvoiceLineFactory(
-            invoice=invoice, description="Web Hosting", unit_price_cents=50000,
-            quantity=1, tax_rate=Decimal("0.1900"), tax_category_code="S",
+            invoice=invoice,
+            description="Web Hosting",
+            unit_price_cents=50000,
+            quantity=1,
+            tax_rate=Decimal("0.1900"),
+            tax_category_code="S",
         )
         # Fully paid → prepaid derives from stored total_cents (1190.00), but the XML
         # tax-inclusive is line-derived (500 net + 190 tax = 690.00).
@@ -770,8 +913,8 @@ class UBLInvoiceBuilderTestCase(TestCase):
             doc = etree.fromstring(UBLInvoiceBuilder(invoice).build().encode())
         prepaid = Decimal(self._lmt_amount(doc, "PrepaidAmount"))
         tax_inclusive = Decimal(self._lmt_amount(doc, "TaxInclusiveAmount"))
-        self.assertLessEqual(prepaid, tax_inclusive)          # BR-CO-16
-        self.assertEqual(prepaid, tax_inclusive)              # capped exactly
+        self.assertLessEqual(prepaid, tax_inclusive)  # BR-CO-16
+        self.assertEqual(prepaid, tax_inclusive)  # capped exactly
         self.assertEqual(self._lmt_amount(doc, "PayableAmount"), "0.00")
 
     def test_multi_rate_invoice_is_rejected(self):
@@ -779,16 +922,38 @@ class UBLInvoiceBuilderTestCase(TestCase):
         be rejected — the builder emits ONE TaxSubtotal and cannot faithfully represent mixed rates,
         so a multi-rate document would produce a VAT breakdown that fails ANAF arithmetic."""
         invoice = InvoiceFactory(
-            customer=CustomerFactory(), currency=self.currency, number="INV-MULTIRATE",
-            bill_to_name="Customer", bill_to_country="RO", bill_to_tax_id="RO12345678",
-            bill_to_street="Street 1", bill_to_city="City", bill_to_postal_code="010101",
-            status="issued", issued_at=timezone.now(), due_at=timezone.now() + timezone.timedelta(days=30),
-            subtotal_cents=15000, tax_total_cents=2550, total_cents=17550,
+            customer=CustomerFactory(),
+            currency=self.currency,
+            number="INV-MULTIRATE",
+            bill_to_name="Customer",
+            bill_to_country="RO",
+            bill_to_tax_id="RO12345678",
+            bill_to_street="Street 1",
+            bill_to_city="City",
+            bill_to_postal_code="010101",
+            status="issued",
+            issued_at=timezone.now(),
+            due_at=timezone.now() + timezone.timedelta(days=30),
+            subtotal_cents=15000,
+            tax_total_cents=2550,
+            total_cents=17550,
         )
-        InvoiceLineFactory(invoice=invoice, description="Standard", unit_price_cents=10000,
-                           quantity=1, tax_rate=Decimal("0.1900"), tax_category_code="S")
-        InvoiceLineFactory(invoice=invoice, description="Reduced", unit_price_cents=5000,
-                           quantity=1, tax_rate=Decimal("0.0900"), tax_category_code="S")
+        InvoiceLineFactory(
+            invoice=invoice,
+            description="Standard",
+            unit_price_cents=10000,
+            quantity=1,
+            tax_rate=Decimal("0.1900"),
+            tax_category_code="S",
+        )
+        InvoiceLineFactory(
+            invoice=invoice,
+            description="Reduced",
+            unit_price_cents=5000,
+            quantity=1,
+            tax_rate=Decimal("0.0900"),
+            tax_category_code="S",
+        )
         with self.assertRaises(XMLBuilderError):
             UBLInvoiceBuilder(invoice).build()
 
@@ -841,21 +1006,33 @@ class UBLInvoiceBuilderTestCase(TestCase):
         normalizes 'card' to 'stripe' before storage), so they are no longer special-cased
         in PAYMENT_MEANS_CODES and fall back to credit transfer (30)."""
         invoice = InvoiceFactory(
-            customer=CustomerFactory(), currency=self.currency, number="INV-PM-CARD",
-            bill_to_name="Customer", bill_to_country="RO", bill_to_tax_id="RO12345678",
-            bill_to_street="Street 1", bill_to_city="City", bill_to_postal_code="010101",
-            status="issued", issued_at=timezone.now(), due_at=timezone.now() + timezone.timedelta(days=30),
-            subtotal_cents=100000, tax_total_cents=19000, total_cents=119000,
+            customer=CustomerFactory(),
+            currency=self.currency,
+            number="INV-PM-CARD",
+            bill_to_name="Customer",
+            bill_to_country="RO",
+            bill_to_tax_id="RO12345678",
+            bill_to_street="Street 1",
+            bill_to_city="City",
+            bill_to_postal_code="010101",
+            status="issued",
+            issued_at=timezone.now(),
+            due_at=timezone.now() + timezone.timedelta(days=30),
+            subtotal_cents=100000,
+            tax_total_cents=19000,
+            total_cents=119000,
             meta={"payment_method": "card"},
         )
         InvoiceLineFactory(
-            invoice=invoice, description="Web Hosting", unit_price_cents=100000,
-            quantity=1, tax_rate=Decimal("0.1900"), tax_category_code="S",
+            invoice=invoice,
+            description="Web Hosting",
+            unit_price_cents=100000,
+            quantity=1,
+            tax_rate=Decimal("0.1900"),
+            tax_category_code="S",
         )
         doc = etree.fromstring(UBLInvoiceBuilder(invoice).build().encode())
-        code = doc.find(
-            f".//{{{NAMESPACES['cac']}}}PaymentMeans//{{{NAMESPACES['cbc']}}}PaymentMeansCode"
-        )
+        code = doc.find(f".//{{{NAMESPACES['cac']}}}PaymentMeans//{{{NAMESPACES['cbc']}}}PaymentMeansCode")
         self.assertEqual(code.text, "30")
 
     def test_validation_error_missing_invoice_number(self):
@@ -888,16 +1065,82 @@ class UBLInvoiceBuilderTestCase(TestCase):
 
         self.assertIn("Customer name is required", str(context.exception))
 
-    def test_validation_error_missing_tax_id_for_romanian_b2b(self):
-        """Test that validation fails for missing tax ID in Romanian B2B."""
+    def test_romanian_b2c_without_fiscal_id_uses_thirteen_zero_digits(self):
         self.invoice.bill_to_country = "RO"
         self.invoice.bill_to_tax_id = ""
 
-        builder = UBLInvoiceBuilder(self.invoice)
-        with self.assertRaises(XMLBuilderError) as context:
-            builder.build()
+        xml = UBLInvoiceBuilder(self.invoice).build()
+        doc = etree.fromstring(xml.encode())
+        customer = doc.find(f".//{{{NAMESPACES['cac']}}}AccountingCustomerParty")
+        assert customer is not None
+        identifier = customer.find(f".//{{{NAMESPACES['cac']}}}PartyIdentification/{{{NAMESPACES['cbc']}}}ID")
 
-        self.assertIn("Romanian B2B invoice requires customer tax ID", str(context.exception))
+        assert identifier is not None
+        self.assertEqual(identifier.text, "0000000000000")
+        self.assertEqual(identifier.get("schemeID"), "RO:CNP")
+        legal_identifier = customer.find(f".//{{{NAMESPACES['cac']}}}PartyLegalEntity/{{{NAMESPACES['cbc']}}}CompanyID")
+        self.assertIsNotNone(legal_identifier)
+        self.assertEqual(legal_identifier.text, "0000000000000")
+
+    def test_romanian_b2c_with_supplied_cnp_uses_immutable_invoice_snapshot(self):
+        self.invoice.bill_to_country = "RO"
+        self.invoice.bill_to_tax_id = ""
+        self.invoice.bill_to_cnp = "1850101123451"
+
+        doc = etree.fromstring(UBLInvoiceBuilder(self.invoice).build().encode())
+        identifier = doc.find(
+            f".//{{{NAMESPACES['cac']}}}AccountingCustomerParty/"
+            f"{{{NAMESPACES['cac']}}}Party/"
+            f"{{{NAMESPACES['cac']}}}PartyIdentification/"
+            f"{{{NAMESPACES['cbc']}}}ID"
+        )
+
+        self.assertIsNotNone(identifier)
+        self.assertEqual(identifier.text, "1850101123451")
+        self.assertEqual(identifier.get("schemeID"), "RO:CNP")
+        legal_identifier = doc.find(
+            f".//{{{NAMESPACES['cac']}}}AccountingCustomerParty/"
+            f"{{{NAMESPACES['cac']}}}Party/"
+            f"{{{NAMESPACES['cac']}}}PartyLegalEntity/"
+            f"{{{NAMESPACES['cbc']}}}CompanyID"
+        )
+        self.assertIsNotNone(legal_identifier)
+        self.assertEqual(legal_identifier.text, "1850101123451")
+
+    def test_romanian_b2c_invalid_cnp_uses_statutory_identifier_for_both_buyer_fields(self):
+        self.invoice.bill_to_country = "RO"
+        self.invoice.bill_to_tax_id = ""
+        self.invoice.bill_to_cnp = "1850101123456"
+
+        doc = etree.fromstring(UBLInvoiceBuilder(self.invoice).build().encode())
+        customer = doc.find(f".//{{{NAMESPACES['cac']}}}AccountingCustomerParty")
+        assert customer is not None
+        identifier = customer.find(f".//{{{NAMESPACES['cac']}}}PartyIdentification/{{{NAMESPACES['cbc']}}}ID")
+        legal_identifier = customer.find(f".//{{{NAMESPACES['cac']}}}PartyLegalEntity/{{{NAMESPACES['cbc']}}}CompanyID")
+
+        self.assertIsNotNone(identifier)
+        self.assertEqual(identifier.text, "0000000000000")
+        self.assertEqual(identifier.get("schemeID"), "RO:CNP")
+        self.assertIsNotNone(legal_identifier)
+        self.assertEqual(legal_identifier.text, "0000000000000")
+
+    def test_lowercase_romanian_country_code_is_normalized_in_b2b_xml(self):
+        self.invoice.bill_to_country = "ro"
+        self.invoice.bill_to_tax_id = "RO87654321"
+
+        doc = etree.fromstring(UBLInvoiceBuilder(self.invoice).build().encode())
+        customer = doc.find(f".//{{{NAMESPACES['cac']}}}AccountingCustomerParty")
+        assert customer is not None
+        country_code = customer.find(
+            f".//{{{NAMESPACES['cac']}}}PostalAddress/"
+            f"{{{NAMESPACES['cac']}}}Country/{{{NAMESPACES['cbc']}}}IdentificationCode"
+        )
+        identifier = customer.find(f".//{{{NAMESPACES['cac']}}}PartyIdentification/{{{NAMESPACES['cbc']}}}ID")
+
+        self.assertIsNotNone(country_code)
+        self.assertEqual(country_code.text, "RO")
+        self.assertIsNotNone(identifier)
+        self.assertEqual(identifier.get("schemeID"), "RO:CUI")
 
     @override_settings(COMPANY_NAME="")
     def test_validation_error_missing_supplier_config(self):
@@ -1002,14 +1245,26 @@ class UBLCreditNoteBuilderTestCase(TestCase):
         """#188: a discounted credit note emits a BG-20 AllowanceCharge and reconciles —
         BT-106 = Σ line gross, TaxExclusive = TaxableAmount = net, Σ line = BT-106."""
         cn = InvoiceFactory(
-            customer=self.customer, currency=self.currency, number="CN-DISC-001",
-            bill_to_name="Customer SRL", bill_to_country="RO", bill_to_tax_id="RO87654321",
-            status="issued", issued_at=timezone.now(),
-            subtotal_cents=90000, tax_total_cents=17100, total_cents=107100, discount_cents=10000,
+            customer=self.customer,
+            currency=self.currency,
+            number="CN-DISC-001",
+            bill_to_name="Customer SRL",
+            bill_to_country="RO",
+            bill_to_tax_id="RO87654321",
+            status="issued",
+            issued_at=timezone.now(),
+            subtotal_cents=90000,
+            tax_total_cents=17100,
+            total_cents=107100,
+            discount_cents=10000,
         )
         InvoiceLineFactory(
-            invoice=cn, description="Refund", unit_price_cents=100000, quantity=1,
-            tax_rate=Decimal("0.1900"), tax_category_code="S",
+            invoice=cn,
+            description="Refund",
+            unit_price_cents=100000,
+            quantity=1,
+            tax_rate=Decimal("0.1900"),
+            tax_category_code="S",
         )
         doc = etree.fromstring(UBLCreditNoteBuilder(cn, self.original_invoice).build().encode())
 
@@ -1066,6 +1321,48 @@ class UBLCreditNoteBuilderTestCase(TestCase):
         type_code = doc.find(f".//{{{NAMESPACES['cbc']}}}CreditNoteTypeCode")
         self.assertIsNotNone(type_code)
         self.assertEqual(type_code.text, "381")
+
+    def test_romanian_consumer_without_fiscal_identifier_uses_statutory_placeholder(self):
+        credit_note = InvoiceFactory(
+            customer=self.customer,
+            currency=self.currency,
+            number="CN-B2C-001",
+            bill_to_name="Romanian Consumer",
+            bill_to_country="RO",
+            bill_to_tax_id="",
+            status="issued",
+            issued_at=timezone.now(),
+            subtotal_cents=50000,
+            tax_total_cents=9500,
+            total_cents=59500,
+        )
+        InvoiceLineFactory(
+            invoice=credit_note,
+            description="Consumer refund",
+            unit_price_cents=50000,
+            quantity=1,
+            tax_rate=Decimal("0.1900"),
+        )
+
+        doc = etree.fromstring(UBLCreditNoteBuilder(credit_note, self.original_invoice).build().encode())
+        buyer_id = doc.find(
+            f".//{{{NAMESPACES['cac']}}}AccountingCustomerParty/"
+            f"{{{NAMESPACES['cac']}}}Party/"
+            f"{{{NAMESPACES['cac']}}}PartyIdentification/"
+            f"{{{NAMESPACES['cbc']}}}ID"
+        )
+
+        self.assertIsNotNone(buyer_id)
+        self.assertEqual(buyer_id.text, "0000000000000")
+        self.assertEqual(buyer_id.get("schemeID"), "RO:CNP")
+        legal_identifier = doc.find(
+            f".//{{{NAMESPACES['cac']}}}AccountingCustomerParty/"
+            f"{{{NAMESPACES['cac']}}}Party/"
+            f"{{{NAMESPACES['cac']}}}PartyLegalEntity/"
+            f"{{{NAMESPACES['cbc']}}}CompanyID"
+        )
+        self.assertIsNotNone(legal_identifier)
+        self.assertEqual(legal_identifier.text, "0000000000000")
 
     def test_validation_error_missing_original_invoice(self):
         """Test that validation fails without original invoice reference."""

@@ -715,11 +715,69 @@ class ProcessPaymentViewTest(BillingViewsTestBase):
         self.client.force_login(self.staff_user)
         response = self.client.post(
             f"/billing/invoices/{invoice.pk}/pay/",
-            {"amount": "100.00", "payment_method": "stripe"},
+            {"amount": "100.00", "payment_method": "bank"},
         )
         self.assertEqual(response.status_code, 200)
         invoice.refresh_from_db()
         self.assertEqual(invoice.status, "paid")
+        payment = invoice.payments.get()
+        self.assertEqual(payment.status, "succeeded")
+        self.assertEqual(payment.payment_method, "bank")
+
+    def test_process_payment_rejects_unverified_gateway_method(self):
+        invoice = self._create_invoice(total_cents=10000)
+        self.client.force_login(self.staff_user)
+
+        response = self.client.post(
+            f"/billing/invoices/{invoice.pk}/pay/",
+            {"amount": "100.00", "payment_method": "stripe"},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(invoice.payments.exists())
+
+    def test_process_payment_rejects_unresolved_automatic_card_attempt(self):
+        from apps.billing.payment_models import Payment  # noqa: PLC0415
+
+        invoice = self._create_invoice(total_cents=10000)
+        pending = Payment.objects.create(
+            invoice=invoice,
+            customer=self.customer,
+            payment_method="stripe",
+            amount_cents=invoice.total_cents,
+            currency=self.currency,
+            meta={"source": "recurring_billing"},
+        )
+        self.client.force_login(self.staff_user)
+
+        response = self.client.post(
+            f"/billing/invoices/{invoice.pk}/pay/",
+            {"amount": "100.00", "payment_method": "bank"},
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("automatic card payment", response.json()["error"].lower())
+        self.assertEqual(invoice.payments.count(), 1)
+        pending.refresh_from_db()
+        self.assertEqual(pending.status, "pending")
+
+    def test_process_payment_routes_offline_success_through_local_convergence(self):
+        invoice = self._create_invoice(total_cents=10000)
+        convergence_result = MagicMock()
+        convergence_result.is_err.return_value = False
+        self.client.force_login(self.staff_user)
+
+        with patch(
+            "apps.billing.payment_convergence.PaymentSuccessService.converge_local_paid_document",
+            return_value=convergence_result,
+        ) as converge:
+            response = self.client.post(
+                f"/billing/invoices/{invoice.pk}/pay/",
+                {"amount": "100.00", "payment_method": "bank"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        converge.assert_called_once_with(invoice.payments.get().id)
 
     def test_process_payment_invalid_method_rejected(self):
         """Invalid payment methods are now rejected with 400 (strict allowlist)."""
@@ -757,7 +815,7 @@ class ProcessProformaPaymentViewTest(BillingViewsTestBase):
         self.client.force_login(self.staff_user)
         response = self.client.post(
             f"/billing/proformas/{proforma.pk}/pay/",
-            {"amount": "100.00", "payment_method": "stripe"},
+            {"amount": "100.00", "payment_method": "bank"},
         )
         self.assertEqual(response.status_code, 302)
 
@@ -1292,6 +1350,21 @@ class ApiCreatePaymentIntentTest(BillingViewsTestBase):
         )
         self.assertEqual(response.status_code, 400)
 
+    @patch("apps.billing.views.PaymentService.create_payment_intent_direct")
+    def test_create_intent_rejects_bank_transfer_gateway(self, mock_create):
+        response = self._post_json(
+            "/billing/create-payment-intent/",
+            {
+                "order_id": "order-123",
+                "amount_cents": 5000,
+                "customer_id": self.customer.pk,
+                "gateway": "bank",
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        mock_create.assert_not_called()
+
     def test_create_intent_invalid_json(self):
         response = self.client.post(
             "/billing/create-payment-intent/",
@@ -1332,6 +1405,21 @@ class ApiCreatePaymentIntentTest(BillingViewsTestBase):
             {"order_id": "order-123", "amount_cents": "5000", "customer_id": self.customer.pk},
         )
         self.assertEqual(response.status_code, 400)
+
+    @patch("apps.billing.views.PaymentService.create_payment_intent_direct")
+    def test_create_intent_rejects_non_object_metadata(self, mock_create):
+        response = self._post_json(
+            "/billing/create-payment-intent/",
+            {
+                "order_id": "order-123",
+                "amount_cents": 5000,
+                "customer_id": self.customer.pk,
+                "metadata": "not-an-object",
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        mock_create.assert_not_called()
 
 
 class ApiConfirmPaymentTest(BillingViewsTestBase):
@@ -1401,80 +1489,6 @@ class ApiConfirmPaymentTest(BillingViewsTestBase):
             {"payment_intent_id": 123, "gateway": "stripe", "customer_id": self.customer.pk},
         )
         self.assertEqual(response.status_code, 400)
-
-
-class ApiCreateSubscriptionTest(BillingViewsTestBase):
-    """Tests for api_create_subscription."""
-
-    def _post_json(self, url, data):
-        return self.client.post(url, json.dumps(data), content_type="application/json")
-
-    @patch("apps.billing.views.PaymentService.create_subscription")
-    def test_create_subscription_success(self, mock_create):
-        mock_create.return_value = {
-            "success": True,
-            "subscription_id": "sub_test123",
-            "status": "active",
-        }
-        response = self._post_json(
-            "/billing/create-subscription/",
-            {"customer_id": str(self.customer.pk), "price_id": "price_test123"},
-        )
-        self.assertEqual(response.status_code, 200)
-        data = response.json()
-        self.assertTrue(data["success"])
-
-    @patch("apps.billing.views.PaymentService.create_subscription")
-    def test_create_subscription_failure(self, mock_create):
-        mock_create.return_value = {"success": False, "error": "Invalid price"}
-        response = self._post_json(
-            "/billing/create-subscription/",
-            {"customer_id": str(self.customer.pk), "price_id": "price_test123"},
-        )
-        self.assertEqual(response.status_code, 400)
-
-    def test_create_subscription_missing_fields(self):
-        response = self._post_json("/billing/create-subscription/", {"customer_id": "123"})
-        self.assertEqual(response.status_code, 400)
-
-    def test_create_subscription_invalid_json(self):
-        response = self.client.post(
-            "/billing/create-subscription/",
-            "not json",
-            content_type="application/json",
-        )
-        self.assertEqual(response.status_code, 400)
-
-    @patch("apps.billing.views.PaymentService.create_subscription")
-    def test_create_subscription_exception(self, mock_create):
-        mock_create.side_effect = Exception("Unexpected")
-        response = self._post_json(
-            "/billing/create-subscription/",
-            {"customer_id": str(self.customer.pk), "price_id": "price_test123"},
-        )
-        self.assertEqual(response.status_code, 500)
-
-
-class ApiPaymentMethodsTest(BillingViewsTestBase):
-    """Tests for api_payment_methods."""
-
-    @patch("apps.billing.views.PaymentService.get_available_payment_methods")
-    def test_payment_methods_success(self, mock_get):
-        mock_get.return_value = [{"type": "card", "last4": "4242"}]
-        response = self.client.get(f"/billing/payment-methods/{self.customer.pk}/")
-        self.assertEqual(response.status_code, 200)
-        data = response.json()
-        self.assertTrue(data["success"])
-
-    @patch("apps.billing.views.PaymentService.get_available_payment_methods")
-    def test_payment_methods_exception(self, mock_get):
-        mock_get.side_effect = Exception("Stripe error")
-        response = self.client.get(f"/billing/payment-methods/{self.customer.pk}/")
-        self.assertEqual(response.status_code, 500)
-
-    def test_payment_methods_post_not_allowed(self):
-        response = self.client.post(f"/billing/payment-methods/{self.customer.pk}/")
-        self.assertEqual(response.status_code, 405)
 
 
 class ApiProcessRefundTest(BillingViewsTestBase):
@@ -1808,7 +1822,7 @@ class ProcessProformaPaymentAllowlistTest(BillingViewsTestBase):
         """All allowed payment methods must not be rejected at the allowlist gate."""
         proforma = self._create_proforma()
         self.client.force_login(self.staff_user)
-        allowed = ["bank_transfer", "bank", "card", "stripe", "cash", "other"]
+        allowed = ["bank_transfer", "bank", "cash", "other"]
         for method in allowed:
             with self.subTest(method=method):
                 # View will call the service and redirect (302) — may succeed or fail
@@ -1822,6 +1836,22 @@ class ProcessProformaPaymentAllowlistTest(BillingViewsTestBase):
                     400,
                     f"Allowed method '{method}' was rejected by the allowlist gate.",
                 )
+
+    def test_gateway_methods_are_rejected_before_manual_conversion(self) -> None:
+        proforma = self._create_proforma()
+        self.client.force_login(self.staff_user)
+
+        for method in ("card", "stripe"):
+            with self.subTest(method=method):
+                with patch(
+                    "apps.billing.proforma_service.ProformaPaymentService.record_payment_and_convert"
+                ) as mock_service:
+                    response = self.client.post(
+                        f"/billing/proformas/{proforma.pk}/pay/",
+                        {"payment_method": method},
+                    )
+                self.assertEqual(response.status_code, 400)
+                mock_service.assert_not_called()
 
     def test_case_insensitive_rejection(self) -> None:
         """Casing must not bypass the allowlist (e.g. 'Evil_Method' is still rejected)."""
