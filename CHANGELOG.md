@@ -33,7 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
-- **Virtualmin and infrastructure control plane** — Virtualmin credentials now require HTTPS and either CA verification or a SHA-256 certificate pin enforced during the TLS handshake; all SSH and Ansible paths reject unknown host keys from a shared operator-provisioned trust file; root maintenance accepts only fixed semantic actions and elevated deploy permission; authentication fallbacks escalate only on typed authentication failures; rate limiting uses atomic fixed-window slot claims; and SSH key generation and revocation are audited and fail closed during node destruction (#327)
+- **Virtualmin and infrastructure control plane** — Virtualmin credentials now require HTTPS and either CA verification or a SHA-256 certificate pin enforced during the TLS handshake; auto-registered and existing self-signed nodes obtain their pins through verified SSH rather than network trust-on-first-use; all SSH and Ansible paths reject unknown host keys from a shared operator-provisioned trust file; root maintenance accepts only fixed semantic actions and elevated deploy permission; authentication fallbacks escalate only on typed authentication failures and preserve retry-safety metadata; rate limiting uses atomic fixed-window slot claims; and SSH key generation and revocation are audited and fail closed during node destruction (#327)
 
 ---
 

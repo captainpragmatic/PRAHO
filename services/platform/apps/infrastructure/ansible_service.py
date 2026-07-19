@@ -273,14 +273,14 @@ class AnsibleService:
         ansible_env = {
             **os.environ,
             "ANSIBLE_HOST_KEY_CHECKING": "True",
+            "ANSIBLE_SSH_COMMON_ARGS": "-o StrictHostKeyChecking=yes",
             "ANSIBLE_STDOUT_CALLBACK": "yaml",
             "ANSIBLE_FORCE_COLOR": "0",
         }
         known_hosts_path = str(getattr(settings, "PRAHO_SSH_KNOWN_HOSTS_PATH", "")).strip()
         if known_hosts_path:
-            existing_ssh_args = ansible_env.get("ANSIBLE_SSH_COMMON_ARGS", "")
             known_hosts_arg = f"-o UserKnownHostsFile={shlex.quote(known_hosts_path)}"
-            ansible_env["ANSIBLE_SSH_COMMON_ARGS"] = f"{existing_ssh_args} {known_hosts_arg}".strip()
+            ansible_env["ANSIBLE_SSH_COMMON_ARGS"] = f"{ansible_env['ANSIBLE_SSH_COMMON_ARGS']} {known_hosts_arg}"
         return ansible_env
 
     def _generate_inventory(self, deployment: NodeDeployment) -> Path:

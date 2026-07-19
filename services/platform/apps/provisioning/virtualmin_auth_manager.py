@@ -13,7 +13,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 from types import TracebackType
-from typing import Any
+from typing import Any, cast
 
 import paramiko
 from django.conf import settings
@@ -21,7 +21,7 @@ from django.core.cache import cache
 from django.utils import timezone
 
 from apps.common.ssh import configure_strict_host_key_checking
-from apps.common.types import Err, Ok, Result
+from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 
 from .virtualmin_gateway import VirtualminAPIError, VirtualminAuthError, VirtualminConfig, VirtualminGateway
 from .virtualmin_models import VirtualminServer
@@ -152,6 +152,7 @@ class VirtualminAuthenticationManager:
         methods_to_try = [force_method] if force_method else self._get_auth_method_priority()
 
         last_error = ""
+        last_retriability = Retriability.UNKNOWN
 
         for method in methods_to_try:
             logger.info(f"🔐 [Virtualmin Auth] Trying {method.value} for {program} on {self.server.hostname}")
@@ -172,6 +173,7 @@ class VirtualminAuthenticationManager:
                 else:
                     error = result.unwrap_err()
                     error_msg = str(error)
+                    last_retriability = retriability_of(result)
                     last_error = f"{method.value}: {error_msg}"
                     logger.warning(f"❌ [Virtualmin Auth] {method.value} failed: {error_msg}")
 
@@ -180,7 +182,7 @@ class VirtualminAuthenticationManager:
                         continue
                     if isinstance(error, AuthMethodUnavailableError):
                         continue
-                    return Err(last_error)
+                    return Err(last_error, retriability=last_retriability)
 
             except Exception as e:
                 last_error = f"{method.value}: {e!s}"
@@ -189,7 +191,10 @@ class VirtualminAuthenticationManager:
 
         # All methods failed
         logger.error(f"🚨 [Virtualmin Auth] ALL methods failed for {program}: {last_error}")
-        return Err(f"All authentication methods failed. Last error: {last_error}")
+        return Err(
+            f"All authentication methods failed. Last error: {last_error}",
+            retriability=last_retriability,
+        )
 
     def _execute_with_method(
         self, method: AuthMethod, program: str, parameters: dict[str, Any]
@@ -222,9 +227,7 @@ class VirtualminAuthenticationManager:
 
             gateway = VirtualminGateway(config)
             result = gateway.call(program, parameters)
-            if result.is_err():
-                return Err(result.unwrap_err())
-            return Ok(result.unwrap())
+            return cast(Result[Any, AuthFailure], result)
         except VirtualminAPIError as e:
             return Err(e)
         except Exception as e:
@@ -260,9 +263,8 @@ class VirtualminAuthenticationManager:
                     f"🚨 [Security] Using master admin credentials for {program} "
                     f"on {self.server.hostname} - ACL auth appears broken!"
                 )
-                return Ok(result.unwrap())
 
-            return Err(result.unwrap_err())
+            return cast(Result[Any, AuthFailure], result)
         except VirtualminAPIError as e:
             return Err(e)
         except Exception as e:

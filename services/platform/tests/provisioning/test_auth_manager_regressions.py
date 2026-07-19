@@ -14,7 +14,7 @@ from unittest.mock import MagicMock, call, patch
 import paramiko
 from django.test import TestCase, override_settings
 
-from apps.common.types import Err, Ok
+from apps.common.types import Err, Ok, Retriability, retriability_of
 from apps.provisioning.virtualmin_auth_manager import (
     AuthMethod,
     VirtualminAuthenticationManager,
@@ -99,6 +99,24 @@ class ExecuteWithMethodDispatchTests(TestCase):
         self.assertTrue(result.is_err())
         mock_execute.assert_called_once_with(AuthMethod.ACL, "create-domain", {})
 
+    @patch.object(VirtualminAuthenticationManager, "_get_auth_method_priority")
+    @patch.object(VirtualminAuthenticationManager, "_execute_with_method")
+    def test_non_authentication_error_preserves_retriability(
+        self,
+        mock_execute: MagicMock,
+        mock_priority: MagicMock,
+    ) -> None:
+        mock_priority.return_value = [AuthMethod.ACL]
+        mock_execute.return_value = Err(
+            VirtualminAPIError("rate limited"),
+            retriability=Retriability.RETRIABLE,
+        )
+
+        result = self.manager.execute_virtualmin_command("create-domain", {})
+
+        self.assertTrue(result.is_err())
+        self.assertEqual(retriability_of(result), Retriability.RETRIABLE)
+
     @patch.object(VirtualminAuthenticationManager, "_cache_working_auth_method")
     @patch.object(VirtualminAuthenticationManager, "_cache_failed_auth_method")
     @patch.object(VirtualminAuthenticationManager, "_get_auth_method_priority")
@@ -132,6 +150,29 @@ class ExecuteWithMethodDispatchTests(TestCase):
 
         self.assertTrue(result.is_err())
         self.assertIsInstance(result.unwrap_err(), VirtualminAuthError)
+
+    @patch("apps.provisioning.virtualmin_auth_manager.VirtualminGateway.call")
+    def test_acl_preserves_gateway_retriability(self, mock_call: MagicMock) -> None:
+        mock_call.return_value = Err(
+            VirtualminAPIError("rate limited"),
+            retriability=Retriability.RETRIABLE,
+        )
+
+        result = self.manager._execute_acl_auth("list-domains", {})
+
+        self.assertEqual(retriability_of(result), Retriability.RETRIABLE)
+
+    @override_settings(VIRTUALMIN_MASTER_USERNAME="root", VIRTUALMIN_MASTER_PASSWORD="secret")
+    @patch("apps.provisioning.virtualmin_auth_manager.VirtualminGateway.call")
+    def test_master_proxy_preserves_gateway_retriability(self, mock_call: MagicMock) -> None:
+        mock_call.return_value = Err(
+            VirtualminAPIError("rate limited"),
+            retriability=Retriability.RETRIABLE,
+        )
+
+        result = self.manager._execute_master_proxy("list-domains", {})
+
+        self.assertEqual(retriability_of(result), Retriability.RETRIABLE)
 
     @override_settings(VIRTUALMIN_SSH_PASSWORD="test-password")
     @patch("apps.provisioning.virtualmin_auth_manager.paramiko.SSHClient")

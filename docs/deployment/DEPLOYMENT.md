@@ -33,6 +33,15 @@ PRAHO_SSH_KNOWN_HOSTS_PATH=/etc/praho/known_hosts
 
 The file must be readable by the Platform and worker processes. Container deployments must mount the same file read-only into the container at the configured path. A missing file, unknown host, or changed key intentionally blocks the operation; verify rotations out of band and update the trust file before retrying.
 
+Newly deployed self-signed Virtualmin nodes have the certificate actually served on port 10000 measured through this trusted SSH channel and pinned automatically. Before enabling provisioning after upgrading an installation with existing unpinned self-signed nodes, run:
+
+```bash
+python manage.py pin_virtualmin_certificates --dry-run
+python manage.py pin_virtualmin_certificates
+```
+
+The command fails closed for records without a linked deployment or without verified SSH host-key trust. Resolve those records and rerun the command; do not obtain their initial certificate pin over an unverified network connection.
+
 ---
 
 ## Choosing a Deployment Method

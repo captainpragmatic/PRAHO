@@ -9,7 +9,7 @@ import paramiko
 from django.test import SimpleTestCase, TestCase, override_settings
 
 from apps.common.performance.connection_pool import SSHConnectionPool
-from apps.common.types import Ok
+from apps.common.types import Err, Ok
 from apps.infrastructure.ansible_service import ANSIBLE_BASE_PATH, AnsibleService
 from apps.infrastructure.ssh_key_manager import SSHKeyManager, SSHKeyPair
 from apps.infrastructure.validation_service import NodeValidationService
@@ -55,6 +55,23 @@ class AnsiblePlaybookBoundaryTests(SimpleTestCase):
             "UserKnownHostsFile=/etc/praho/known_hosts",
             mock_run.call_args.kwargs["env"]["ANSIBLE_SSH_COMMON_ARGS"],
         )
+
+    @patch.dict(
+        "os.environ",
+        {
+            "ANSIBLE_SSH_COMMON_ARGS": (
+                "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/var/lib/praho/untrusted-known-hosts"
+            )
+        },
+    )
+    @override_settings(PRAHO_SSH_KNOWN_HOSTS_PATH="/etc/praho/known_hosts")
+    def test_ansible_environment_cannot_weaken_host_key_checking(self) -> None:
+        ansible_env = AnsibleService._build_ansible_env()
+
+        self.assertNotIn("StrictHostKeyChecking=no", ansible_env["ANSIBLE_SSH_COMMON_ARGS"])
+        self.assertNotIn("/var/lib/praho/untrusted-known-hosts", ansible_env["ANSIBLE_SSH_COMMON_ARGS"])
+        self.assertIn("StrictHostKeyChecking=yes", ansible_env["ANSIBLE_SSH_COMMON_ARGS"])
+        self.assertIn("UserKnownHostsFile=/etc/praho/known_hosts", ansible_env["ANSIBLE_SSH_COMMON_ARGS"])
 
     def test_repository_ansible_config_does_not_disable_host_key_checking(self) -> None:
         config = (ANSIBLE_BASE_PATH / "ansible.cfg").read_text()
@@ -109,6 +126,44 @@ class InfrastructureSSHTrustTests(SimpleTestCase):
         client.load_system_host_keys.assert_called_once_with()
         client.load_host_keys.assert_called_once_with("/etc/praho/known_hosts")
         client.set_missing_host_key_policy.assert_called_once_with(pool._paramiko.RejectPolicy.return_value)
+
+    @patch("apps.infrastructure.validation_service.paramiko.Ed25519Key.from_private_key")
+    @patch("apps.infrastructure.validation_service.paramiko.SSHClient")
+    def test_webmin_certificate_pin_is_read_over_trusted_ssh(
+        self,
+        mock_client_class: MagicMock,
+        _mock_private_key: MagicMock,
+    ) -> None:
+        service = object.__new__(NodeValidationService)
+        service.timeout = 10
+        service._ssh_manager = MagicMock()
+        service._ssh_manager.get_deployment_key.return_value = Ok(MagicMock(private_key="private-key"))
+        deployment = MagicMock(ipv4_address="203.0.113.10")
+        client = mock_client_class.return_value
+        stdout = MagicMock()
+        stdout.read.return_value = b"sha256 Fingerprint=" + b"AA:" * 31 + b"BB\n"
+        stdout.channel.recv_exit_status.return_value = 0
+        client.exec_command.return_value = (MagicMock(), stdout, MagicMock())
+
+        result = service.get_webmin_certificate_fingerprint(deployment)
+
+        self.assertTrue(result.is_ok(), result.unwrap_err() if result.is_err() else "")
+        self.assertEqual(result.unwrap(), "aa" * 31 + "bb")
+        client.exec_command.assert_called_once_with(
+            "openssl s_client -connect 127.0.0.1:10000 </dev/null 2>/dev/null "
+            "| openssl x509 -noout -fingerprint -sha256",
+            timeout=10,
+        )
+        client.close.assert_called_once_with()
+
+    def test_webmin_certificate_pin_fails_closed_without_node_address(self) -> None:
+        service = object.__new__(NodeValidationService)
+        service.timeout = 10
+        service._ssh_manager = MagicMock()
+
+        result = service.get_webmin_certificate_fingerprint(MagicMock(ipv4_address=None))
+
+        self.assertEqual(result, Err("Node has no IP address assigned"))
 
 
 class SSHKeyLifecycleAuditTests(TestCase):
