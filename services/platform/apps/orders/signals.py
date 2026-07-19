@@ -274,7 +274,10 @@ def _handle_order_cancellation(order: Order, old_status: str) -> None:  # noqa: 
     """
     try:
         with transaction.atomic():
+            from apps.billing.recurring_locking import lock_recurring_collection_customer  # noqa: PLC0415
             from apps.provisioning.models import Service  # noqa: PLC0415
+
+            lock_recurring_collection_customer(order.customer_id)
 
             # D3: Handle services linked to cancelled order items.
             # H6 fix: Only hard-delete services in "pending" status (never provisioned).
@@ -871,7 +874,10 @@ def _handle_invoice_refunded(sender: Any, invoice: Any, refund_type: str, **kwar
             # select_for_update(of=("self",)) to prevent TOCTOU race conditions.
             # Lock order items and then their Service rows in a consistent order.
             with transaction.atomic():
+                from apps.billing.recurring_locking import lock_recurring_collection_customer  # noqa: PLC0415
                 from apps.provisioning.models import Service  # noqa: PLC0415
+
+                lock_recurring_collection_customer(order.customer_id)
 
                 items_with_services = (
                     order.items.select_for_update(of=("self",)).filter(service__isnull=False).select_related("service")

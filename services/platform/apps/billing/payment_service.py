@@ -6,6 +6,7 @@ Gateway-agnostic payment orchestration with Romanian compliance.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from typing import Any
 from uuid import UUID
 
@@ -25,6 +26,7 @@ from .models import Invoice, Payment
 from .payment_convergence import PaymentSuccessService, converge_recurring_payment_failure
 from .payment_models import TERMINAL_PAYMENT_STATUSES, PaymentRetryAttempt
 from .recurring_billing import RecurringCollectionGate
+from .recurring_locking import recurring_charge_submission_boundary
 
 # Order statuses that permit a new payment intent to be created (H18).
 _PAYABLE_ORDER_STATUSES: frozenset[str] = frozenset({"draft", "awaiting_payment"})
@@ -79,6 +81,41 @@ def _abandon_unbound_payment_reservation(payment: Payment, reason: str) -> None:
                 "critical_financial_operation": True,
             },
         )
+
+
+def _submit_recurring_charge_under_revocation_lock(
+    *,
+    customer_id: int,
+    payment: Payment,
+    revalidate: Callable[[], str | None],
+    submit: Callable[[], PaymentIntentResult],
+) -> tuple[PaymentIntentResult, bool]:
+    """Order revocation and gateway submission, returning whether submission was attempted."""
+    with recurring_charge_submission_boundary(customer_id) as boundary_error:
+        if boundary_error is not None:
+            _abandon_unbound_payment_reservation(payment, boundary_error)
+            return (
+                PaymentIntentResult(
+                    success=False,
+                    payment_intent_id="",
+                    client_secret=None,
+                    error=boundary_error,
+                ),
+                False,
+            )
+
+        reservation_error = revalidate()
+        if reservation_error is not None:
+            return (
+                PaymentIntentResult(
+                    success=False,
+                    payment_intent_id="",
+                    client_secret=None,
+                    error=reservation_error,
+                ),
+                False,
+            )
+        return submit(), True
 
 
 def _revalidate_invoice_payment_reservation(
@@ -885,32 +922,32 @@ class PaymentService:
                 )
 
             payment_gateway = PaymentGatewayFactory.create_gateway(gateway)
-            reservation_error = _revalidate_invoice_payment_reservation(
-                invoice_id=invoice.id,
-                payment_id=payment.id,
-                expected_amount_cents=remaining_amount_cents,
-                expected_currency_id=invoice.currency_id,
-                expected_saved_method_id=saved_method.id,
-            )
-            if reservation_error is not None:
-                return PaymentIntentResult(
-                    success=False,
-                    payment_intent_id="",
-                    client_secret=None,
-                    error=reservation_error,
-                )
+            payment_id = payment.id
             # Attempt-scoped: lets webhook recovery bind ONLY to this exact attempt.
-            gateway_metadata["payment_attempt"] = str(payment.id)
-            result = payment_gateway.create_off_session_payment_intent(
-                document_id=str(invoice.id),
-                document_type="invoice",
-                amount_cents=remaining_amount_cents,
-                currency=resolved_currency,
-                customer_id=saved_method.stripe_customer_id,
-                payment_method_id=saved_method.stripe_payment_method_id,
-                metadata=gateway_metadata,
-                idempotency_key=idempotency_key,
+            gateway_metadata["payment_attempt"] = str(payment_id)
+            result, submitted = _submit_recurring_charge_under_revocation_lock(
+                customer_id=invoice.customer_id,
+                payment=payment,
+                revalidate=lambda: _revalidate_invoice_payment_reservation(
+                    invoice_id=invoice.id,
+                    payment_id=payment_id,
+                    expected_amount_cents=remaining_amount_cents,
+                    expected_currency_id=invoice.currency_id,
+                    expected_saved_method_id=saved_method.id,
+                ),
+                submit=lambda: payment_gateway.create_off_session_payment_intent(
+                    document_id=str(invoice.id),
+                    document_type="invoice",
+                    amount_cents=remaining_amount_cents,
+                    currency=resolved_currency,
+                    customer_id=saved_method.stripe_customer_id,
+                    payment_method_id=saved_method.stripe_payment_method_id,
+                    metadata=gateway_metadata,
+                    idempotency_key=idempotency_key,
+                ),
             )
+            if not submitted:
+                return result
             if not result.get("success", False):
                 if not result.get("retryable", False):
                     _mark_invoice_payment_attempt_failed(
@@ -1173,32 +1210,32 @@ class PaymentService:
                 "source": "recurring_billing",
             }
             payment_gateway = PaymentGatewayFactory.create_gateway(gateway)
-            reservation_error = _revalidate_proforma_payment_reservation(
-                proforma_id=proforma.id,
-                payment_id=payment.id,
-                expected_amount_cents=proforma.total_cents,
-                expected_currency_id=proforma.currency_id,
-                expected_saved_method_id=saved_method.id,
-            )
-            if reservation_error is not None:
-                return PaymentIntentResult(
-                    success=False,
-                    payment_intent_id="",
-                    client_secret=None,
-                    error=reservation_error,
-                )
+            payment_id = payment.id
             # Attempt-scoped: lets webhook recovery bind ONLY to this exact attempt.
-            gateway_metadata["payment_attempt"] = str(payment.id)
-            result = payment_gateway.create_off_session_payment_intent(
-                document_id=str(proforma.id),
-                document_type="proforma",
-                amount_cents=proforma.total_cents,
-                currency=proforma.currency.code,
-                customer_id=saved_method.stripe_customer_id,
-                payment_method_id=saved_method.stripe_payment_method_id,
-                metadata=gateway_metadata,
-                idempotency_key=idempotency_key,
+            gateway_metadata["payment_attempt"] = str(payment_id)
+            result, submitted = _submit_recurring_charge_under_revocation_lock(
+                customer_id=proforma.customer_id,
+                payment=payment,
+                revalidate=lambda: _revalidate_proforma_payment_reservation(
+                    proforma_id=proforma.id,
+                    payment_id=payment_id,
+                    expected_amount_cents=proforma.total_cents,
+                    expected_currency_id=proforma.currency_id,
+                    expected_saved_method_id=saved_method.id,
+                ),
+                submit=lambda: payment_gateway.create_off_session_payment_intent(
+                    document_id=str(proforma.id),
+                    document_type="proforma",
+                    amount_cents=proforma.total_cents,
+                    currency=proforma.currency.code,
+                    customer_id=saved_method.stripe_customer_id,
+                    payment_method_id=saved_method.stripe_payment_method_id,
+                    metadata=gateway_metadata,
+                    idempotency_key=idempotency_key,
+                ),
             )
+            if not submitted:
+                return result
             if not result.get("success", False):
                 if not result.get("retryable", False):
                     _mark_invoice_payment_attempt_failed(

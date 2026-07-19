@@ -140,6 +140,7 @@ jobs:
         PYTHONPATH="$PWD" "$UV_PROJECT_ENVIRONMENT/bin/python" manage.py test \
           tests.billing.test_payment_intent_security.DirectPaymentIntentPostgresConcurrencyTests \
           tests.promotions.test_order_discount_concurrency.PromotionOrderPostgresConcurrencyTests \
+          tests.billing.test_recurring_collection_concurrency.RecurringCollectionPostgresConcurrencyTests \
           --settings=config.settings.ci --verbosity=2
 
     - name: Platform tests with coverage (no failfast — complete picture)

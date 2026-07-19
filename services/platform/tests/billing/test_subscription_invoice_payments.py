@@ -49,8 +49,8 @@ def _intent_result(
     )
 
 
-class SubscriptionInvoicePaymentTestCase(TestCase):
-    """Exercise the real invoice, Payment, and recurring-billing path."""
+class _SubscriptionInvoicePaymentFixture:
+    """Shared invoice-native recurring-billing fixture."""
 
     def setUp(self) -> None:
         self.currency, _ = Currency.objects.get_or_create(
@@ -230,6 +230,10 @@ class SubscriptionInvoicePaymentTestCase(TestCase):
             payment_authorization=self.authorization,
             auto_payment_enabled=True,
         )
+
+
+class SubscriptionInvoicePaymentTestCase(_SubscriptionInvoicePaymentFixture, TestCase):
+    """Exercise the real invoice, Payment, and recurring-billing path."""
 
     def test_due_aligned_services_share_one_cycle_linked_proforma_idempotently(self) -> None:
         now = timezone.now()
