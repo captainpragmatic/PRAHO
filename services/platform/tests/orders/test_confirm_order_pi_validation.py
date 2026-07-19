@@ -14,6 +14,7 @@ from rest_framework.test import APIRequestFactory
 
 from apps.billing.gateways.base import PaymentConfirmResult
 from apps.billing.models import Currency
+from apps.billing.payment_models import Payment
 from apps.customers.models import Customer
 from apps.orders.models import Order
 from apps.users.models import User
@@ -47,6 +48,17 @@ def _make_pending_order(customer: Customer, currency: Currency, **kwargs: object
         customer_name=customer.company_name,
         status="awaiting_payment",
         **kwargs,
+    )
+
+
+def _create_local_payment(order: Order) -> Payment:
+    """Mirror the Payment row created with a production Stripe PaymentIntent."""
+    return Payment.objects.create(
+        customer=order.customer,
+        currency=order.currency,
+        amount_cents=order.total_cents,
+        payment_method="stripe",
+        gateway_txn_id=order.payment_intent_id,
     )
 
 
@@ -114,10 +126,17 @@ class ConfirmOrderPaymentIntentValidationTest(TestCase):
             payment_method="card",
             payment_intent_id="pi_validXYZ1234567890",
         )
+        _create_local_payment(order)
         request = self._make_request({"payment_intent_id": "pi_validXYZ1234567890", "payment_status": "succeeded"})
 
         mock_gateway = MagicMock()
-        mock_gateway.confirm_payment.return_value = PaymentConfirmResult(success=True, status="succeeded", error=None, amount_received=0)
+        mock_gateway.confirm_payment.return_value = PaymentConfirmResult(
+            success=True,
+            status="succeeded",
+            error=None,
+            amount_received=0,
+            currency="ron",
+        )
 
         with patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)), \
              patch("apps.api.orders.views._provision_confirmed_order_item"), \
@@ -210,11 +229,16 @@ class ConfirmOrderAmountVerificationTest(TestCase):
             payment_intent_id="pi_amountMatch123456789",
             total_cents=0,
         )
+        _create_local_payment(order)
         request = self._make_request({"payment_intent_id": "pi_amountMatch123456789", "payment_status": "succeeded"})
 
         mock_gateway = MagicMock()
         mock_gateway.confirm_payment.return_value = {
-            "success": True, "status": "succeeded", "error": None, "amount_received": 0,
+            "success": True,
+            "status": "succeeded",
+            "error": None,
+            "amount_received": 0,
+            "currency": "ron",
         }
 
         with (

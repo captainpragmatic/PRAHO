@@ -21,6 +21,7 @@ from apps.billing.proforma_models import ProformaInvoice, ProformaSequence
 from apps.customers.models import Customer
 from apps.orders.models import Order, OrderItem
 from apps.products.models import Product
+from apps.provisioning.models import ServicePlan
 from apps.users.models import User
 from tests.helpers.fsm_helpers import force_status
 
@@ -45,6 +46,13 @@ class ProformaLifecycleTestBase(TestCase):
             product_type="shared_hosting",
             is_active=True,
         )
+        self.service_plan = ServicePlan.objects.create(
+            name="Shared Hosting Basic",
+            plan_type="shared_hosting",
+            price_monthly=Decimal("100.00"),
+        )
+        self.product.default_service_plan = self.service_plan
+        self.product.save(update_fields=["default_service_plan"])
         self.user = User.objects.create_user(
             email="admin@pragmatichost.com",
             password="testpass123",
@@ -209,6 +217,76 @@ class TestCreateFromOrder(ProformaLifecycleTestBase):
 
         self.assertEqual(proforma.bill_to_name, "Acme SRL")
         self.assertEqual(proforma.bill_to_country, "RO")
+
+    def test_order_billing_snapshot_normalizes_country_name_and_blank_tax_id(self):
+        from apps.billing.proforma_service import ProformaService  # noqa: PLC0415
+
+        order = self._create_order_with_items(
+            billing_address={
+                "company_name": "Ion Popescu",
+                "country": "România",
+                "vat_number": "   ",
+                "city": "Bucharest",
+            }
+        )
+        force_status(order, "awaiting_payment")
+
+        proforma = ProformaService.create_from_order(order).unwrap()
+
+        self.assertEqual(proforma.bill_to_country, "RO")
+        self.assertEqual(proforma.bill_to_tax_id, "")
+
+    def test_order_billing_snapshot_normalizes_foreign_country_name(self):
+        from apps.billing.proforma_service import ProformaService  # noqa: PLC0415
+
+        order = self._create_order_with_items(
+            billing_address={
+                "company_name": "Example GmbH",
+                "country": "Germany",
+                "city": "Berlin",
+            }
+        )
+        force_status(order, "awaiting_payment")
+
+        proforma = ProformaService.create_from_order(order).unwrap()
+
+        self.assertEqual(proforma.bill_to_country, "DE")
+
+    def test_order_billing_snapshot_rejects_unknown_nonblank_country(self):
+        from apps.billing.proforma_service import ProformaService  # noqa: PLC0415
+
+        order = self._create_order_with_items(
+            billing_address={
+                "company_name": "Unknown Company",
+                "country": "Not a country",
+                "city": "Nowhere",
+            }
+        )
+        force_status(order, "awaiting_payment")
+
+        result = ProformaService.create_from_order(order)
+
+        self.assertTrue(result.is_err())
+        self.assertIn("Unknown billing country", result.unwrap_err())
+        self.assertFalse(ProformaInvoice.objects.filter(orders=order).exists())
+
+    def test_individual_cnp_is_snapshotted_on_proforma(self):
+        from apps.billing.proforma_service import ProformaService  # noqa: PLC0415
+        from apps.customers.models import CustomerTaxProfile  # noqa: PLC0415
+
+        self.customer.customer_type = "individual"
+        self.customer.company_name = ""
+        self.customer.save(update_fields=["customer_type", "company_name"])
+        CustomerTaxProfile.objects.create(customer=self.customer, cnp="1850101123451")
+        order = self._create_order_with_items(
+            billing_address={"company_name": "", "country": "RO", "city": "Bucharest"}
+        )
+        force_status(order, "awaiting_payment")
+
+        proforma = ProformaService.create_from_order(order).unwrap()
+
+        self.assertEqual(proforma.bill_to_cnp, "1850101123451")
+        self.assertEqual(proforma.bill_to_tax_id, "")
 
     def test_discount_preserved_in_proforma_totals(self):
         """Proforma total_cents reflects discount — regression guard for recalculate_totals overwrite."""
@@ -375,6 +453,26 @@ class TestRecordPaymentAndConvert(ProformaLifecycleTestBase):
         invoice = result.unwrap()
         self.assertEqual(invoice.bill_to_registration_number, "J40/555/2023")
 
+    def test_conversion_copies_cnp_snapshot_to_invoice(self):
+        from apps.billing.proforma_service import ProformaPaymentService  # noqa: PLC0415
+
+        proforma = self._create_sent_proforma()
+        proforma.bill_to_cnp = "1850101123451"
+        proforma.bill_to_tax_id = ""
+        proforma.save(update_fields=["bill_to_cnp", "bill_to_tax_id"])
+
+        result = ProformaPaymentService.record_payment_and_convert(
+            proforma_id=str(proforma.id),
+            amount_cents=proforma.total_cents,
+            payment_method="bank",
+            created_by=self.user,
+        )
+
+        self.assertTrue(result.is_ok(), f"Expected Ok, got: {result}")
+        invoice = result.unwrap()
+        self.assertEqual(invoice.bill_to_cnp, "1850101123451")
+        self.assertEqual(invoice.bill_to_tax_id, "")
+
     def test_rejects_partial_payment(self):
         """Only full payment accepted (amount must equal proforma total)."""
         from apps.billing.proforma_service import ProformaPaymentService  # noqa: PLC0415
@@ -387,6 +485,109 @@ class TestRecordPaymentAndConvert(ProformaLifecycleTestBase):
             payment_method="bank",
         )
         self.assertTrue(result.is_err())
+
+    def test_rejects_unverified_stripe_payment_without_existing_gateway_attempt(self):
+        from apps.billing.payment_models import Payment  # noqa: PLC0415
+        from apps.billing.proforma_service import ProformaPaymentService  # noqa: PLC0415
+
+        proforma = self._create_sent_proforma()
+
+        result = ProformaPaymentService.record_payment_and_convert(
+            proforma_id=str(proforma.id),
+            amount_cents=proforma.total_cents,
+            payment_method="stripe",
+        )
+
+        self.assertTrue(result.is_err())
+        self.assertIn("verified existing payment", result.unwrap_err().lower())
+        proforma.refresh_from_db()
+        self.assertEqual(proforma.status, "sent")
+        self.assertFalse(Payment.objects.filter(proforma=proforma).exists())
+
+    def test_accepts_only_a_verified_succeeded_existing_stripe_payment(self):
+        from apps.billing.payment_models import Payment  # noqa: PLC0415
+        from apps.billing.proforma_service import ProformaPaymentService  # noqa: PLC0415
+
+        proforma = self._create_sent_proforma()
+        payment = Payment.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            amount_cents=proforma.total_cents,
+            payment_method="stripe",
+            gateway_txn_id="pi_verified_proforma",
+            meta={
+                "stripe_amount_received": proforma.total_cents,
+                "stripe_currency": self.currency.code.lower(),
+            },
+        )
+        payment.succeed()
+        payment.save(update_fields=["status", "updated_at"])
+
+        result = ProformaPaymentService.record_payment_and_convert(
+            proforma_id=str(proforma.id),
+            amount_cents=proforma.total_cents,
+            payment_method="stripe",
+            existing_payment=payment,
+        )
+
+        self.assertTrue(result.is_ok(), result.unwrap_err() if result.is_err() else "")
+        payment.refresh_from_db()
+        self.assertEqual(payment.invoice_id, result.unwrap().id)
+
+    def test_rejects_pending_existing_stripe_payment(self):
+        from apps.billing.payment_models import Payment  # noqa: PLC0415
+        from apps.billing.proforma_service import ProformaPaymentService  # noqa: PLC0415
+
+        proforma = self._create_sent_proforma()
+        payment = Payment.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            amount_cents=proforma.total_cents,
+            payment_method="stripe",
+            gateway_txn_id="pi_pending_proforma",
+            meta={
+                "stripe_amount_received": proforma.total_cents,
+                "stripe_currency": self.currency.code.lower(),
+            },
+        )
+
+        result = ProformaPaymentService.record_payment_and_convert(
+            proforma_id=str(proforma.id),
+            amount_cents=proforma.total_cents,
+            payment_method="stripe",
+            existing_payment=payment,
+        )
+
+        self.assertTrue(result.is_err())
+        self.assertIn("verified succeeded", result.unwrap_err().lower())
+
+    def test_bank_conversion_rejects_unresolved_automatic_card_attempt(self):
+        from apps.billing.payment_models import Payment  # noqa: PLC0415
+        from apps.billing.proforma_service import ProformaPaymentService  # noqa: PLC0415
+
+        proforma = self._create_sent_proforma()
+        pending = Payment.objects.create(
+            proforma=proforma,
+            customer=self.customer,
+            payment_method="stripe",
+            amount_cents=proforma.total_cents,
+            currency=self.currency,
+            meta={"source": "recurring_billing"},
+        )
+
+        result = ProformaPaymentService.record_payment_and_convert(
+            proforma_id=str(proforma.id),
+            amount_cents=proforma.total_cents,
+            payment_method="bank",
+            created_by=self.user,
+        )
+
+        self.assertTrue(result.is_err())
+        self.assertIn("automatic card payment", result.unwrap_err().lower())
+        proforma.refresh_from_db()
+        self.assertEqual(proforma.status, "sent")
+        pending.refresh_from_db()
+        self.assertEqual(pending.status, "pending")
 
     def test_rejects_expired_proforma(self):
         """Cannot record payment on expired proforma."""

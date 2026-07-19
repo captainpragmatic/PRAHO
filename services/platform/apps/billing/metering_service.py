@@ -6,7 +6,7 @@ This service provides:
 - Event ingestion with idempotency
 - Usage aggregation by billing period
 - Rating engine for charge calculation
-- Stripe Meter integration
+- PRAHO-owned local usage rating and billing-cycle integration
 - Alert threshold checking
 """
 
@@ -15,12 +15,12 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from decimal import Decimal, InvalidOperation
-from typing import Any
+from decimal import ROUND_HALF_EVEN, Decimal, InvalidOperation
+from typing import Any, cast
 
 from django.core.cache import cache as django_cache
 from django.db import IntegrityError, transaction
-from django.db.models import F, Q
+from django.db.models import F, Q, Sum
 from django.utils import timezone
 
 from apps.audit.services import AuditService
@@ -33,7 +33,6 @@ from apps.provisioning.provisioning_service import ProvisioningService
 from . import config as billing_config
 from .metering_models import (
     BillingCycle,
-    PricingTier,
     PricingTierBracket,
     UsageAggregation,
     UsageAlert,
@@ -44,6 +43,7 @@ from .metering_models import (
 from .subscription_models import Subscription, SubscriptionItem
 
 logger = logging.getLogger(__name__)
+_PENDING_EVENT_BATCH_SIZE = 1000
 
 
 def _parse_decimal(value: Any) -> Decimal:
@@ -77,7 +77,7 @@ def _get_subscription_item_for_meter(subscription: Any, meter: Any) -> Any | Non
         | Q(product__name=meter.display_name)
     )
 
-    return candidates.first() or items.first()
+    return candidates.first()
 
 
 def _get_allowance_from_subscription_item(sub_item: Any | None) -> Decimal:
@@ -142,7 +142,6 @@ class MeteringService:
     - Ingesting usage events with idempotency
     - Real-time aggregation updates
     - Threshold checking and alerting
-    - Stripe Meter event synchronization
     """
 
     def record_event(  # noqa: C901, PLR0911, PLR0912  # Complexity: multi-step business logic
@@ -162,6 +161,16 @@ class MeteringService:
 
             if not meter.is_active:
                 return Err(f"Meter is inactive: {event_data.meter_name}")
+            if not isinstance(event_data.value, Decimal) or not event_data.value.is_finite() or event_data.value < 0:
+                return Err("Usage event value must be a finite non-negative decimal")
+
+            # Keyed on the meter's own semantic category, meter-wide: a cumulative snapshot
+            # (storage/bandwidth gauges) summed across readings overbills by construction, no
+            # matter what the meter is named or which source fed it — the earlier name+source
+            # allowlist let a differently-named cumulative meter (or another source) bypass
+            # the guard with the default "sum" aggregation.
+            if meter.category in {"storage", "bandwidth"} and meter.aggregation_type not in {"last", "max"}:
+                return Err(f"Cumulative {meter.category} meter '{meter.name}' must use last or max aggregation")
 
             # Get customer
             try:
@@ -190,13 +199,19 @@ class MeteringService:
                 try:
                     subscription = Subscription.objects.get(id=event_data.subscription_id)
                 except Subscription.DoesNotExist:
-                    logger.warning(f"Subscription not found: {event_data.subscription_id}")
+                    return Err(f"Subscription not found: {event_data.subscription_id}")
+                if subscription.customer_id != customer.id:
+                    return Err("Subscription does not belong to the usage-event customer")
 
             if event_data.service_id:
                 try:
                     service = Service.objects.get(id=event_data.service_id)
                 except Service.DoesNotExist:
-                    logger.warning(f"Service not found: {event_data.service_id}")
+                    return Err(f"Service not found: {event_data.service_id}")
+                if service.customer_id != customer.id:
+                    return Err("Service does not belong to the usage-event customer")
+                if subscription is not None and subscription.service_id != service.id:
+                    return Err("Service does not belong to the selected subscription")
 
             # Create the event with idempotency using database constraint
             # This is race-condition-safe: we try to insert and catch duplicate
@@ -281,33 +296,42 @@ class MeteringService:
             self._update_aggregation_sync(event)
 
     def _update_aggregation_sync(self, event: Any) -> None:
-        """Synchronously update aggregation for an event"""
-        try:
-            # Find the billing cycle for this event
-            subscription = event.subscription
-            if not subscription:
-                # Try to find active subscription for customer
-                subscription = Subscription.objects.filter(
-                    customer=event.customer, status__in=["active", "trialing"]
-                ).first()
+        """Apply one event exactly once to the cycle containing its timestamp."""
+        with transaction.atomic():
+            locked_event = (
+                UsageEvent.objects.select_for_update(of=("self",))
+                .select_related("meter", "customer", "subscription", "service")
+                .get(pk=event.pk)
+            )
+            if locked_event.is_processed:
+                return
 
-            if not subscription:
-                logger.warning(
-                    f"No subscription found for customer {event.customer.id}, "
-                    "event will be aggregated when subscription is created"
+            subscription = self._resolve_event_subscription(locked_event)
+            cycles = list(
+                BillingCycle.objects.select_for_update(of=("self",))
+                .filter(
+                    subscription=subscription,
+                    period_start__lte=locked_event.timestamp,
+                    period_end__gt=locked_event.timestamp,
+                    status__in=["active", "closing"],
                 )
-                return
+                .order_by("period_start", "id")[:2]
+            )
+            if not cycles:
+                raise ValueError(
+                    f"No eligible billing cycle covers event {locked_event.id} "
+                    f"for subscription {subscription.subscription_number}"
+                )
+            if len(cycles) > 1:
+                raise ValueError(
+                    f"Ambiguous billing cycles cover event {locked_event.id} "
+                    f"for subscription {subscription.subscription_number}"
+                )
+            billing_cycle = cycles[0]
 
-            # Get or create billing cycle
-            billing_cycle = subscription.get_current_billing_cycle()
-            if not billing_cycle:
-                logger.warning(f"No billing cycle found for subscription {subscription.id}")
-                return
-
-            # Get or create aggregation
             aggregation, _created = UsageAggregation.objects.get_or_create(
-                meter=event.meter,
-                customer=event.customer,
+                meter=locked_event.meter,
+                customer=locked_event.customer,
                 billing_cycle=billing_cycle,
                 defaults={
                     "subscription": subscription,
@@ -316,18 +340,43 @@ class MeteringService:
                     "status": "accumulating",
                 },
             )
+            self._apply_event_to_aggregation(locked_event, aggregation)
 
-            # Update aggregation
-            self._apply_event_to_aggregation(event, aggregation)
+            locked_event.subscription = subscription
+            locked_event.is_processed = True
+            locked_event.processed_at = timezone.now()
+            locked_event.aggregation = aggregation
+            locked_event.save(update_fields=["subscription", "is_processed", "processed_at", "aggregation"])
 
-            # Mark event as processed
-            event.is_processed = True
-            event.processed_at = timezone.now()
-            event.aggregation = aggregation
-            event.save(update_fields=["is_processed", "processed_at", "aggregation"])
+    @staticmethod
+    def _resolve_event_subscription(event: Any) -> Subscription:
+        """Resolve one active subscription without guessing across services."""
+        eligible_statuses = ["active", "trialing", "past_due"]
+        if event.subscription_id:
+            subscription = cast(Subscription, event.subscription)
+            if subscription.customer_id != event.customer_id:
+                raise ValueError("Usage event subscription customer does not match the event customer")
+            if subscription.status not in eligible_statuses:
+                raise ValueError(f"Usage event subscription is not eligible in status '{subscription.status}'")
+            return subscription
 
-        except Exception as e:
-            logger.exception(f"Error updating aggregation: {e}")
+        candidates = Subscription.objects.filter(
+            customer_id=event.customer_id,
+            status__in=eligible_statuses,
+            billing_cycles__period_start__lte=event.timestamp,
+            billing_cycles__period_end__gt=event.timestamp,
+            billing_cycles__status__in=["active", "closing", "closed"],
+        )
+        if event.service_id:
+            candidates = candidates.filter(service_id=event.service_id)
+        resolved = list(candidates.distinct().order_by("id")[:2])
+        if not resolved:
+            raise ValueError(f"No eligible subscription found for usage event {event.id}")
+        if len(resolved) > 1:
+            raise ValueError(
+                f"Usage event {event.id} matches multiple subscriptions; provide subscription_id or service_id"
+            )
+        return resolved[0]
 
     def _apply_event_to_aggregation(self, event: Any, aggregation: Any) -> None:
         """Apply an event to an aggregation based on meter type"""
@@ -386,7 +435,11 @@ class AggregationService:
     """
 
     def process_pending_events(
-        self, meter_id: str | None = None, customer_id: str | None = None, limit: int = 1000
+        self,
+        meter_id: str | None = None,
+        customer_id: str | None = None,
+        billing_cycle_id: str | None = None,
+        limit: int = _PENDING_EVENT_BATCH_SIZE,
     ) -> tuple[int, int]:
         """
         Process pending usage events into aggregations.
@@ -399,6 +452,22 @@ class AggregationService:
             query = query.filter(meter_id=meter_id)  # type: ignore[misc]
         if customer_id:
             query = query.filter(customer_id=customer_id)
+        if billing_cycle_id:
+            try:
+                cycle = BillingCycle.objects.select_related("subscription").get(id=billing_cycle_id)
+            except BillingCycle.DoesNotExist:
+                return 0, 1
+            subscription = cycle.subscription
+            event_scope = Q(subscription_id=subscription.id)
+            if subscription.service_id is not None:
+                event_scope |= Q(subscription__isnull=True, service_id=subscription.service_id)
+            event_scope |= Q(subscription__isnull=True, service__isnull=True)
+            query = query.filter(
+                event_scope,
+                customer_id=subscription.customer_id,
+                timestamp__gte=cycle.period_start,
+                timestamp__lt=cycle.period_end,
+            )
 
         events = query.select_related("meter", "customer", "subscription")[:limit]
 
@@ -425,13 +494,27 @@ class AggregationService:
             billing_cycle = BillingCycle.objects.get(id=billing_cycle_id)
         except BillingCycle.DoesNotExist:
             return Err(f"Billing cycle not found: {billing_cycle_id}")
-
         if billing_cycle.status not in ("active", "closing"):
             return Err(f"Billing cycle cannot be closed: status is {billing_cycle.status}")
 
+        # Process first to preserve the event -> cycle lock order used by normal
+        # aggregation workers. The locked recheck below prevents closing while
+        # any eligible event is still pending.
+        while True:
+            processed, processing_errors = self.process_pending_events(billing_cycle_id=str(billing_cycle.id))
+            if processing_errors:
+                return Err(f"Cannot close billing cycle while {processing_errors} pending usage event(s) failed")
+            if processed < _PENDING_EVENT_BATCH_SIZE:
+                break
+
         with transaction.atomic():
-            # Process any remaining pending events
-            self.process_pending_events(customer_id=str(billing_cycle.subscription.customer_id))
+            billing_cycle = (
+                BillingCycle.objects.select_for_update(of=("self",))
+                .select_related("subscription")
+                .get(pk=billing_cycle.pk)
+            )
+            if billing_cycle.status not in ("active", "closing"):
+                return Err(f"Billing cycle cannot be closed: status is {billing_cycle.status}")
 
             # Bulk-update aggregations to pending_rating (intentional for performance — UsageAggregation is not FSM-protected)
             UsageAggregation.objects.filter(
@@ -514,13 +597,18 @@ class RatingEngine:
     - Overage calculation
     """
 
-    def rate_aggregation(self, aggregation_id: str) -> Result[Any, str]:
+    @transaction.atomic
+    def rate_aggregation(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Fail-closed rating validation
+        self, aggregation_id: str
+    ) -> Result[Any, str]:
         """
         Calculate charges for a usage aggregation.
         """
         try:
-            aggregation = UsageAggregation.objects.select_related("meter", "subscription", "billing_cycle").get(
-                id=aggregation_id
+            aggregation = (
+                UsageAggregation.objects.select_for_update(of=("self",))
+                .select_related("meter", "subscription", "billing_cycle__subscription__currency")
+                .get(id=aggregation_id)
             )
         except UsageAggregation.DoesNotExist:
             return Err(f"Aggregation not found: {aggregation_id}")
@@ -529,24 +617,42 @@ class RatingEngine:
             return Err(f"Aggregation already rated or finalized: {aggregation.status}")
 
         meter = aggregation.meter
-        subscription = aggregation.subscription
+        subscription = aggregation.billing_cycle.subscription
+        if aggregation.subscription_id not in {None, subscription.id}:
+            return Err("Aggregation subscription does not match its billing cycle")
+        if aggregation.customer_id != subscription.customer_id:
+            return Err("Aggregation customer does not match its billing cycle subscription")
 
         # Get included allowance from subscription item
         included_quantity = Decimal("0")
         pricing_tier = None
         unit_price_cents = None
 
-        if subscription:
-            sub_item = _get_subscription_item_for_meter(subscription, meter)
+        sub_item = _get_subscription_item_for_meter(subscription, meter)
 
-            if sub_item:
-                included_quantity = _get_allowance_from_subscription_item(sub_item)
-                pricing_tier = meter.pricing_tiers.filter(is_active=True, is_default=True).first()
-                unit_price_cents = sub_item.effective_price_cents
+        if sub_item:
+            included_quantity = _get_allowance_from_subscription_item(sub_item)
+            unit_price_cents = sub_item.effective_price_cents
 
-            service_plan = getattr(subscription.product, "default_service_plan", None)
-            if included_quantity <= 0:
-                included_quantity = _get_allowance_from_service_plan(meter, service_plan)
+        effective_at = aggregation.billing_cycle.period_start
+        effective_tiers = list(
+            meter.pricing_tiers.filter(
+                Q(valid_from__isnull=True) | Q(valid_from__lte=effective_at),
+                Q(valid_until__isnull=True) | Q(valid_until__gt=effective_at),
+                is_active=True,
+                is_default=True,
+                currency_id=subscription.currency_id,
+            ).order_by("id")[:2]
+        )
+        if len(effective_tiers) > 1:
+            return Err(
+                f"Ambiguous active {subscription.currency.code} pricing for meter {meter.name} "
+                f"at {effective_at.isoformat()}"
+            )
+        pricing_tier = effective_tiers[0] if effective_tiers else None
+        service_plan = getattr(subscription.product, "default_service_plan", None)
+        if included_quantity <= 0:
+            included_quantity = _get_allowance_from_service_plan(meter, service_plan)
 
         # Calculate billable value after rounding
         billable_value = self._apply_rounding(aggregation.total_value, meter.rounding_mode, meter.rounding_increment)
@@ -556,90 +662,126 @@ class RatingEngine:
 
         # Calculate charge
         charge_cents = 0
+        rating_snapshot: dict[str, Any] = {
+            "effective_at": effective_at.isoformat(),
+            "billable_value": str(billable_value),
+            "included_allowance": str(included_quantity),
+            "overage_value": str(overage_value),
+        }
 
         if overage_value > 0 and meter.is_billable:
             if pricing_tier:
+                pricing_error = self._validate_pricing_configuration(pricing_tier)
+                if pricing_error:
+                    return Err(f"Invalid pricing for meter {meter.name}: {pricing_error}")
                 charge_cents = self._calculate_tiered_charge(
                     overage_value,
                     pricing_tier,
                 )
+                rating_snapshot.update(self._pricing_snapshot(pricing_tier))
             elif unit_price_cents is not None:
-                charge_cents = int(overage_value * unit_price_cents)
+                if unit_price_cents < 0:
+                    return Err(f"Invalid negative subscription-item pricing for meter {meter.name}")
+                charge_cents = self._round_cents(overage_value * Decimal(unit_price_cents))
+                rating_snapshot.update(
+                    {
+                        "source": "subscription_item",
+                        "unit_price_cents": unit_price_cents,
+                    }
+                )
             else:
-                # Try to find default pricing tier
-                default_tier = PricingTier.objects.filter(meter=meter, is_default=True, is_active=True).first()
-                if default_tier:
-                    charge_cents = self._calculate_tiered_charge(overage_value, default_tier)
+                return Err(f"No active {subscription.currency.code} pricing configured for meter {meter.name}")
+        elif pricing_tier:
+            rating_snapshot.update(self._pricing_snapshot(pricing_tier))
+        elif unit_price_cents is not None:
+            rating_snapshot.update(
+                {
+                    "source": "subscription_item",
+                    "unit_price_cents": unit_price_cents,
+                }
+            )
 
         # Update aggregation
-        with transaction.atomic():
-            aggregation.billable_value = billable_value
-            aggregation.included_allowance = included_quantity
-            aggregation.overage_value = overage_value
-            aggregation.charge_cents = charge_cents
-            aggregation.charge_calculated_at = timezone.now()
-            aggregation.rate()
-            aggregation.save()
+        aggregation.billable_value = billable_value
+        aggregation.included_allowance = included_quantity
+        aggregation.overage_value = overage_value
+        aggregation.charge_cents = charge_cents
+        aggregation.charge_calculated_at = timezone.now()
+        aggregation.meta = {**(aggregation.meta or {}), "rating": rating_snapshot}
+        aggregation.rate()
+        aggregation.save()
 
-            # Log the rating
-            AuditService.log_simple_event(
-                event_type="usage_aggregation_rated",
-                user=None,
-                content_object=aggregation,
-                description=(
-                    f"Usage rated: {meter.name} = {billable_value} ({overage_value} overage) = {charge_cents} cents"
-                ),
-                actor_type="system",
-                metadata={
-                    "aggregation_id": str(aggregation.id),
-                    "meter_name": meter.name,
-                    "total_value": str(aggregation.total_value),
-                    "billable_value": str(billable_value),
-                    "included_quantity": str(included_quantity),
-                    "overage_value": str(overage_value),
-                    "charge_cents": charge_cents,
-                },
-            )
+        # Log the rating
+        AuditService.log_simple_event(
+            event_type="usage_aggregation_rated",
+            user=None,
+            content_object=aggregation,
+            description=(
+                f"Usage rated: {meter.name} = {billable_value} ({overage_value} overage) = {charge_cents} cents"
+            ),
+            actor_type="system",
+            metadata={
+                "aggregation_id": str(aggregation.id),
+                "meter_name": meter.name,
+                "total_value": str(aggregation.total_value),
+                "billable_value": str(billable_value),
+                "included_quantity": str(included_quantity),
+                "overage_value": str(overage_value),
+                "charge_cents": charge_cents,
+            },
+        )
 
         return Ok(aggregation)
 
+    @transaction.atomic
     def rate_billing_cycle(self, billing_cycle_id: str) -> Result[Any, str]:
         """
         Rate all aggregations for a billing cycle.
         """
         try:
-            billing_cycle = BillingCycle.objects.get(id=billing_cycle_id)
+            billing_cycle = BillingCycle.objects.select_for_update(of=("self",)).get(id=billing_cycle_id)
         except BillingCycle.DoesNotExist:
             return Err(f"Billing cycle not found: {billing_cycle_id}")
 
-        aggregations = UsageAggregation.objects.filter(
-            billing_cycle=billing_cycle, status__in=("accumulating", "pending_rating")
+        aggregations = (
+            UsageAggregation.objects.select_for_update(of=("self",))
+            .filter(
+                billing_cycle=billing_cycle,
+                status__in=("accumulating", "pending_rating"),
+            )
+            .order_by("id")
         )
 
-        total_usage_charge = 0
         rated_count = 0
-        error_count = 0
 
         for agg in aggregations:
             result = self.rate_aggregation(str(agg.id))
             if result.is_ok():
                 rated_count += 1
-                total_usage_charge += result.unwrap().charge_cents
             else:
-                error_count += 1
-                logger.error(f"Error rating aggregation {agg.id}: {result.unwrap_err()}")
+                error = result.unwrap_err()
+                logger.error(f"Error rating aggregation {agg.id}: {error}")
+                transaction.set_rollback(True)
+                return Err(f"Failed to rate aggregation {agg.id}: {error}")
 
-        # Update billing cycle totals
-        with transaction.atomic():
-            billing_cycle.usage_charge_cents = total_usage_charge
-            billing_cycle.total_cents = (
-                billing_cycle.base_charge_cents
-                + billing_cycle.usage_charge_cents
-                - billing_cycle.discount_cents
-                - billing_cycle.credit_applied_cents
-                + billing_cycle.tax_cents
-            )
-            billing_cycle.save()
+        # Recompute from the complete rated snapshot. A retried run may process
+        # only the aggregations that failed previously; summing only this run
+        # would silently discard charges already rated successfully.
+        total_usage_charge = (
+            UsageAggregation.objects.filter(billing_cycle=billing_cycle, status="rated").aggregate(
+                total=Sum("charge_cents")
+            )["total"]
+            or 0
+        )
+        billing_cycle.usage_charge_cents = total_usage_charge
+        billing_cycle.total_cents = (
+            billing_cycle.base_charge_cents
+            + billing_cycle.usage_charge_cents
+            - billing_cycle.discount_cents
+            - billing_cycle.credit_applied_cents
+            + billing_cycle.tax_cents
+        )
+        billing_cycle.save()
 
         logger.info(
             f"Rated billing cycle {billing_cycle_id}: "
@@ -650,7 +792,7 @@ class RatingEngine:
             {
                 "billing_cycle_id": str(billing_cycle_id),
                 "rated_count": rated_count,
-                "error_count": error_count,
+                "error_count": 0,
                 "total_usage_charge_cents": total_usage_charge,
             }
         )
@@ -681,10 +823,75 @@ class RatingEngine:
     def _get_pricing_brackets(self, pricing_tier: Any) -> Any:
         return PricingTierBracket.objects.filter(pricing_tier=pricing_tier).order_by("from_quantity")
 
+    @staticmethod
+    def _round_cents(amount: Decimal) -> int:
+        """Round a non-negative fractional-cent amount using PRAHO's money policy."""
+        return int(amount.quantize(Decimal("1"), rounding=ROUND_HALF_EVEN))
+
+    def _validate_pricing_configuration(  # noqa: C901, PLR0911, PLR0912  # Distinct pricing rejection reasons
+        self, pricing_tier: Any
+    ) -> str | None:
+        """Reject incomplete price schedules instead of silently undercharging."""
+        if pricing_tier.minimum_charge_cents < 0:
+            return "minimum charge cannot be negative"
+        if pricing_tier.pricing_model == "per_unit":
+            if pricing_tier.unit_price_cents is None:
+                return "per-unit pricing requires a unit price"
+            if pricing_tier.unit_price_cents < 0:
+                return "unit price cannot be negative"
+            return None
+        if pricing_tier.pricing_model not in {"volume", "graduated", "package"}:
+            return f"unsupported pricing model {pricing_tier.pricing_model!r}"
+
+        brackets = list(self._get_pricing_brackets(pricing_tier))
+        if not brackets:
+            return f"{pricing_tier.pricing_model} pricing requires brackets"
+
+        expected_from = Decimal("0")
+        for index, bracket in enumerate(brackets):
+            if bracket.from_quantity != expected_from:
+                return "pricing brackets must be contiguous and begin at zero"
+            if bracket.from_quantity < 0:
+                return "pricing bracket start cannot be negative"
+            if bracket.unit_price_cents < 0 or bracket.flat_fee_cents < 0:
+                return "pricing bracket charges cannot be negative"
+            if bracket.to_quantity is None:
+                if index != len(brackets) - 1:
+                    return "an unlimited pricing bracket must be last"
+                continue
+            if bracket.to_quantity <= bracket.from_quantity:
+                return "pricing bracket end must be greater than its start"
+            expected_from = bracket.to_quantity
+
+        if brackets[-1].to_quantity is not None:
+            return "pricing brackets must end with an unlimited bracket"
+        return None
+
+    def _pricing_snapshot(self, pricing_tier: Any) -> dict[str, Any]:
+        """Return the exact configuration used to rate an aggregation."""
+        return {
+            "source": "pricing_tier",
+            "pricing_tier_id": str(pricing_tier.id),
+            "pricing_tier_name": pricing_tier.name,
+            "pricing_model": pricing_tier.pricing_model,
+            "currency": pricing_tier.currency.code,
+            "unit_price_cents": pricing_tier.unit_price_cents,
+            "minimum_charge_cents": pricing_tier.minimum_charge_cents,
+            "brackets": [
+                {
+                    "from_quantity": str(bracket.from_quantity),
+                    "to_quantity": str(bracket.to_quantity) if bracket.to_quantity is not None else None,
+                    "unit_price_cents": bracket.unit_price_cents,
+                    "flat_fee_cents": bracket.flat_fee_cents,
+                }
+                for bracket in self._get_pricing_brackets(pricing_tier)
+            ],
+        }
+
     def _calculate_per_unit_charge(self, quantity: Decimal, pricing_tier: Any) -> int:
-        if not pricing_tier.unit_price_cents:
+        if pricing_tier.unit_price_cents is None:
             return int(pricing_tier.minimum_charge_cents)
-        charge = int(quantity * pricing_tier.unit_price_cents)
+        charge = self._round_cents(quantity * Decimal(pricing_tier.unit_price_cents))
         return max(charge, int(pricing_tier.minimum_charge_cents))
 
     def _calculate_volume_charge(self, quantity: Decimal, pricing_tier: Any) -> int:
@@ -692,19 +899,20 @@ class RatingEngine:
             (
                 bracket
                 for bracket in self._get_pricing_brackets(pricing_tier)
-                if quantity >= bracket.from_quantity
-                and (bracket.to_quantity is None or quantity <= bracket.to_quantity)
+                if quantity >= bracket.from_quantity and (bracket.to_quantity is None or quantity < bracket.to_quantity)
             ),
             None,
         )
         if not applicable_bracket:
             return int(pricing_tier.minimum_charge_cents)
 
-        charge = int(quantity * applicable_bracket.unit_price_cents) + int(applicable_bracket.flat_fee_cents)
+        charge = self._round_cents(
+            quantity * Decimal(applicable_bracket.unit_price_cents) + Decimal(applicable_bracket.flat_fee_cents)
+        )
         return max(charge, int(pricing_tier.minimum_charge_cents))
 
     def _calculate_graduated_charge(self, quantity: Decimal, pricing_tier: Any) -> int:
-        total_charge = 0
+        total_charge = Decimal("0")
         remaining_quantity = quantity
 
         for bracket in self._get_pricing_brackets(pricing_tier):
@@ -713,14 +921,14 @@ class RatingEngine:
 
             bracket_size = bracket.to_quantity - bracket.from_quantity if bracket.to_quantity else remaining_quantity
             quantity_in_bracket = min(remaining_quantity, bracket_size)
-            total_charge += int(quantity_in_bracket * bracket.unit_price_cents) + int(bracket.flat_fee_cents)
+            total_charge += quantity_in_bracket * Decimal(bracket.unit_price_cents) + Decimal(bracket.flat_fee_cents)
             remaining_quantity -= quantity_in_bracket
 
-        return max(total_charge, int(pricing_tier.minimum_charge_cents))
+        return max(self._round_cents(total_charge), int(pricing_tier.minimum_charge_cents))
 
     def _calculate_package_charge(self, quantity: Decimal, pricing_tier: Any) -> int:
         for bracket in self._get_pricing_brackets(pricing_tier):
-            if bracket.to_quantity is None or quantity <= bracket.to_quantity:
+            if quantity >= bracket.from_quantity and (bracket.to_quantity is None or quantity < bracket.to_quantity):
                 return int(bracket.flat_fee_cents)
         return int(pricing_tier.minimum_charge_cents)
 

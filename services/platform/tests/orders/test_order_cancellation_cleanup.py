@@ -28,16 +28,18 @@ class ServiceDeletionOnCancelTest(TestCase):
     """Test service cleanup when orders are cancelled."""
 
     def setUp(self):
-        self.currency, _ = Currency.objects.get_or_create(
-            code="RON", defaults={"symbol": "lei", "decimals": 2}
-        )
+        self.currency, _ = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei", "decimals": 2})
         self.customer = Customer.objects.create(
-            name="Cancel Test SRL", customer_type="company",
-            status="active", primary_email="cancel@test.ro",
+            name="Cancel Test SRL",
+            customer_type="company",
+            status="active",
+            primary_email="cancel@test.ro",
         )
         self.product = Product.objects.create(
-            name="Hosting Plan", slug="hosting-plan",
-            product_type="shared_hosting", is_active=True,
+            name="Hosting Plan",
+            slug="hosting-plan",
+            product_type="shared_hosting",
+            is_active=True,
         )
 
     def _create_order_with_service(self, order_status="awaiting_payment"):
@@ -45,35 +47,46 @@ class ServiceDeletionOnCancelTest(TestCase):
         from apps.provisioning.models import Service, ServicePlan  # noqa: PLC0415
 
         order = Order.objects.create(
-            customer=self.customer, currency=self.currency,
+            customer=self.customer,
+            currency=self.currency,
             customer_email=self.customer.primary_email,
             customer_name=self.customer.name,
-            subtotal_cents=10000, tax_cents=2100, total_cents=12100,
+            subtotal_cents=10000,
+            tax_cents=2100,
+            total_cents=12100,
             billing_address={},
         )
         force_status(order, order_status)
 
         # Create service plan and service
         plan, _ = ServicePlan.objects.get_or_create(
-            name="Test Plan", defaults={
-                "plan_type": "shared_hosting", "is_active": True,
+            name="Test Plan",
+            defaults={
+                "plan_type": "shared_hosting",
+                "is_active": True,
                 "price_monthly": Decimal("50.00"),
-            }
+            },
         )
         service = Service.objects.create(
-            customer=self.customer, service_plan=plan,
-            currency=self.currency, service_name="Test Service",
-            username="test_user", billing_cycle="monthly",
+            customer=self.customer,
+            service_plan=plan,
+            currency=self.currency,
+            service_name="Test Service",
+            username="test_user",
+            billing_cycle="monthly",
             price=Decimal("100.00"),
         )
 
         item = OrderItem.objects.create(
-            order=order, product=self.product,
+            order=order,
+            product=self.product,
             product_name=self.product.name,
             product_type=self.product.product_type,
-            quantity=1, unit_price_cents=10000,
+            quantity=1,
+            unit_price_cents=10000,
             tax_rate=Decimal("0.2100"),
-            tax_cents=2100, line_total_cents=12100,
+            tax_cents=2100,
+            line_total_cents=12100,
             service=service,
         )
         return order, item, service
@@ -105,9 +118,7 @@ class ServiceDeletionOnCancelTest(TestCase):
         order, item, _service = self._create_order_with_service("awaiting_payment")
 
         with self.captureOnCommitCallbacks(execute=True):
-            OrderService.update_order_status(
-                order, StatusChangeData(new_status="cancelled", notes="Test")
-            )
+            OrderService.update_order_status(order, StatusChangeData(new_status="cancelled", notes="Test"))
 
         item.refresh_from_db()
         self.assertIsNone(item.service)
@@ -119,18 +130,21 @@ class ProformaExpiryOnCancelTest(TestCase):
     """C2: proforma.expire_proforma() → expire() rename + draft handling."""
 
     def setUp(self):
-        self.currency, _ = Currency.objects.get_or_create(
-            code="RON", defaults={"symbol": "lei", "decimals": 2}
-        )
+        self.currency, _ = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei", "decimals": 2})
         self.customer = Customer.objects.create(
-            name="Proforma Expiry SRL", customer_type="company",
-            status="active", primary_email="proforma-expiry@test.ro",
+            name="Proforma Expiry SRL",
+            customer_type="company",
+            status="active",
+            primary_email="proforma-expiry@test.ro",
         )
         self.product = Product.objects.create(
-            name="Expiry Plan", slug="expiry-plan",
-            product_type="shared_hosting", is_active=True,
+            name="Expiry Plan",
+            slug="expiry-plan",
+            product_type="shared_hosting",
+            is_active=True,
         )
         from apps.billing.proforma_models import ProformaSequence  # noqa: PLC0415
+
         ProformaSequence.objects.get_or_create(scope="default")
 
     def _create_order_with_proforma(self, proforma_status: str) -> tuple:
@@ -142,18 +156,24 @@ class ProformaExpiryOnCancelTest(TestCase):
         from apps.billing.proforma_models import ProformaInvoice  # noqa: PLC0415
 
         order = Order.objects.create(
-            customer=self.customer, currency=self.currency,
+            customer=self.customer,
+            currency=self.currency,
             customer_email=self.customer.primary_email,
             customer_name=self.customer.name,
-            subtotal_cents=10000, tax_cents=2100, total_cents=12100,
+            subtotal_cents=10000,
+            tax_cents=2100,
+            total_cents=12100,
             billing_address={},
         )
         force_status(order, "awaiting_payment")
 
         proforma = ProformaInvoice.objects.create(
-            customer=self.customer, currency=self.currency,
+            customer=self.customer,
+            currency=self.currency,
             number=f"PRO-C2-{proforma_status[:4].upper()}",
-            subtotal_cents=10000, tax_cents=2100, total_cents=12100,
+            subtotal_cents=10000,
+            tax_cents=2100,
+            total_cents=12100,
             valid_until=timezone.now() + timedelta(days=7),
         )
         if proforma_status == "sent":
@@ -180,8 +200,7 @@ class ProformaExpiryOnCancelTest(TestCase):
         self.assertTrue(result.is_ok())
         proforma.refresh_from_db()
         self.assertEqual(
-            proforma.status, "expired",
-            f"Sent proforma should be expired on order cancel, got: {proforma.status}"
+            proforma.status, "expired", f"Sent proforma should be expired on order cancel, got: {proforma.status}"
         )
 
     def test_cancel_order_with_draft_proforma_expires_or_deletes_it(self):
@@ -202,13 +221,14 @@ class ProformaExpiryOnCancelTest(TestCase):
 
         self.assertTrue(result.is_ok())
         from apps.billing.proforma_models import ProformaInvoice  # noqa: PLC0415
+
         # F17 fix: Draft proformas must be hard-deleted on order cancellation
         # (they were never sent to the customer so no customer-visible record exists).
         # assertFalse(exists()) is a definitive check — the conditional version could
         # pass vacuously if the draft is left in place.
         self.assertFalse(
             ProformaInvoice.objects.filter(id=proforma_id).exists(),
-            "Draft proforma must be deleted (not left in 'draft' state) after order cancellation"
+            "Draft proforma must be deleted (not left in 'draft' state) after order cancellation",
         )
 
 
@@ -216,18 +236,21 @@ class ProformaCleanupAtomicityTest(TestCase):
     """C4 review fix: Proforma cleanup runs inside the same atomic block as service cleanup."""
 
     def setUp(self):
-        self.currency, _ = Currency.objects.get_or_create(
-            code="RON", defaults={"symbol": "lei", "decimals": 2}
-        )
+        self.currency, _ = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei", "decimals": 2})
         self.customer = Customer.objects.create(
-            name="Atomic Cleanup SRL", customer_type="company",
-            status="active", primary_email="atomic@test.ro",
+            name="Atomic Cleanup SRL",
+            customer_type="company",
+            status="active",
+            primary_email="atomic@test.ro",
         )
         self.product = Product.objects.create(
-            name="Atomic Plan", slug="atomic-plan",
-            product_type="shared_hosting", is_active=True,
+            name="Atomic Plan",
+            slug="atomic-plan",
+            product_type="shared_hosting",
+            is_active=True,
         )
         from apps.billing.proforma_models import ProformaSequence  # noqa: PLC0415
+
         ProformaSequence.objects.get_or_create(scope="default")
 
     def test_sent_proforma_expired_when_order_cancelled(self):
@@ -240,18 +263,32 @@ class ProformaCleanupAtomicityTest(TestCase):
         from tests.helpers.fsm_helpers import force_status  # noqa: PLC0415
 
         order = Order.objects.create(
-            customer=self.customer, currency=self.currency,
-            customer_email="atomic@test.ro", customer_name="Atomic Cleanup SRL",
-            subtotal_cents=10000, tax_cents=2100, total_cents=12100, billing_address={},
+            customer=self.customer,
+            currency=self.currency,
+            customer_email="atomic@test.ro",
+            customer_name="Atomic Cleanup SRL",
+            subtotal_cents=10000,
+            tax_cents=2100,
+            total_cents=12100,
+            billing_address={},
         )
         OrderItem.objects.create(
-            order=order, product=self.product, product_name=self.product.name,
-            product_type=self.product.product_type, quantity=1,
-            unit_price_cents=10000, tax_rate=Decimal("0.2100"), tax_cents=2100, line_total_cents=12100,
+            order=order,
+            product=self.product,
+            product_name=self.product.name,
+            product_type=self.product.product_type,
+            quantity=1,
+            unit_price_cents=10000,
+            tax_rate=Decimal("0.2100"),
+            tax_cents=2100,
+            line_total_cents=12100,
         )
         proforma = ProformaInvoice.objects.create(
-            customer=self.customer, currency=self.currency,
-            subtotal_cents=10000, tax_cents=2100, total_cents=12100,
+            customer=self.customer,
+            currency=self.currency,
+            subtotal_cents=10000,
+            tax_cents=2100,
+            total_cents=12100,
             valid_until=timezone.now() + timedelta(days=14),
         )
         force_status(proforma, "sent")
@@ -266,22 +303,19 @@ class ProformaCleanupAtomicityTest(TestCase):
 
         self.assertTrue(result.is_ok())
         proforma.refresh_from_db()
-        self.assertEqual(
-            proforma.status, "expired",
-            "Sent proforma must be expired atomically during cancellation"
-        )
+        self.assertEqual(proforma.status, "expired", "Sent proforma must be expired atomically during cancellation")
 
 
 class AuditFailureDoesNotBlockOnCommit(TestCase):
     """M1 review fix: Audit logging failure must not prevent on_commit callbacks."""
 
     def setUp(self):
-        self.currency, _ = Currency.objects.get_or_create(
-            code="RON", defaults={"symbol": "lei", "decimals": 2}
-        )
+        self.currency, _ = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei", "decimals": 2})
         self.customer = Customer.objects.create(
-            name="Audit Test SRL", customer_type="company",
-            status="active", primary_email="audit@test.ro",
+            name="Audit Test SRL",
+            customer_type="company",
+            status="active",
+            primary_email="audit@test.ro",
         )
 
     @patch("apps.orders.signals.OrdersAuditService.log_order_event", side_effect=Exception("Audit DB down"))
@@ -289,9 +323,14 @@ class AuditFailureDoesNotBlockOnCommit(TestCase):
     def test_email_sent_even_if_audit_fails(self, mock_email, mock_audit):
         """Order creation email fires even when audit logging raises."""
         order = Order.objects.create(
-            customer=self.customer, currency=self.currency,
-            customer_email="audit@test.ro", customer_name="Audit Test SRL",
-            subtotal_cents=10000, tax_cents=2100, total_cents=12100, billing_address={},
+            customer=self.customer,
+            currency=self.currency,
+            customer_email="audit@test.ro",
+            customer_name="Audit Test SRL",
+            subtotal_cents=10000,
+            tax_cents=2100,
+            total_cents=12100,
+            billing_address={},
         )
 
         # on_commit fires when the test transaction commits (captureOnCommitCallbacks)
@@ -314,32 +353,39 @@ class ProformaExpiryErrorLoggingTest(TestCase):
     """Task 2.1: except Exception in proforma expiry must use logger.error + exc_info=True."""
 
     def setUp(self):
-        self.currency, _ = Currency.objects.get_or_create(
-            code="RON", defaults={"symbol": "lei", "decimals": 2}
-        )
+        self.currency, _ = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei", "decimals": 2})
         self.customer = Customer.objects.create(
-            name="Expiry Logging SRL", customer_type="company",
-            status="active", primary_email="expiry-log@test.ro",
+            name="Expiry Logging SRL",
+            customer_type="company",
+            status="active",
+            primary_email="expiry-log@test.ro",
         )
         from apps.billing.proforma_models import ProformaSequence  # noqa: PLC0415
+
         ProformaSequence.objects.get_or_create(scope="default")
 
     def _create_order_with_sent_proforma(self) -> tuple:
         from apps.billing.proforma_models import ProformaInvoice  # noqa: PLC0415
 
         order = Order.objects.create(
-            customer=self.customer, currency=self.currency,
+            customer=self.customer,
+            currency=self.currency,
             customer_email=self.customer.primary_email,
             customer_name=self.customer.name,
-            subtotal_cents=10000, tax_cents=2100, total_cents=12100,
+            subtotal_cents=10000,
+            tax_cents=2100,
+            total_cents=12100,
             billing_address={},
         )
         force_status(order, "awaiting_payment")
 
         proforma = ProformaInvoice.objects.create(
-            customer=self.customer, currency=self.currency,
+            customer=self.customer,
+            currency=self.currency,
             number="PRO-ERRLOG-SENT",
-            subtotal_cents=10000, tax_cents=2100, total_cents=12100,
+            subtotal_cents=10000,
+            tax_cents=2100,
+            total_cents=12100,
             valid_until=timezone.now() + timedelta(days=7),
         )
         proforma.send_proforma()
@@ -363,9 +409,7 @@ class ProformaExpiryErrorLoggingTest(TestCase):
             self.assertLogs("apps.orders.signals", level="ERROR") as log_ctx,
             self.captureOnCommitCallbacks(execute=True),
         ):
-            OrderService.update_order_status(
-                order, StatusChangeData(new_status="cancelled", notes="2.1 test")
-            )
+            OrderService.update_order_status(order, StatusChangeData(new_status="cancelled", notes="2.1 test"))
 
         # Must log at ERROR level (not WARNING)
         error_records = [msg for msg in log_ctx.output if "ERROR" in msg]
@@ -413,10 +457,14 @@ class ProformaExpiryErrorLoggingTest(TestCase):
 
         # The critical property: exc_info must be set (not None and not (None, None, None))
         proforma_error_records = [
-            r for r in error_records
+            r
+            for r in error_records
             if "proforma" in r.getMessage().lower() or mock_order.order_number in r.getMessage()
         ]
-        self.assertTrue(len(proforma_error_records) > 0, f"No proforma-related error record found. Records: {[(r.levelname, r.getMessage()) for r in error_records]}")
+        self.assertTrue(
+            len(proforma_error_records) > 0,
+            f"No proforma-related error record found. Records: {[(r.levelname, r.getMessage()) for r in error_records]}",
+        )
 
         record = proforma_error_records[0]
         self.assertIsNotNone(
@@ -497,9 +545,7 @@ class InvoiceRefundedSignalTest(TestCase):
     """
 
     def setUp(self):
-        self.currency, _ = Currency.objects.get_or_create(
-            code="RON", defaults={"symbol": "lei", "decimals": 2}
-        )
+        self.currency, _ = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei", "decimals": 2})
         self.customer = Customer.objects.create(
             name="Refund Signal SRL",
             customer_type="company",
@@ -575,8 +621,23 @@ class InvoiceRefundedSignalTest(TestCase):
         service transitions from 'active' to 'suspended'.
         """
         from apps.billing.models import Invoice  # noqa: PLC0415
+        from apps.billing.subscription_models import Subscription  # noqa: PLC0415
 
         order, _item, service = self._create_order_with_active_service()
+        now = timezone.now()
+        subscription = Subscription.objects.create(
+            customer=self.customer,
+            product=self.product,
+            service=service,
+            currency=self.currency,
+            status="active",
+            billing_cycle="monthly",
+            unit_price_cents=10_000,
+            quantity=1,
+            current_period_start=now - timedelta(days=30),
+            current_period_end=now,
+            next_billing_date=now,
+        )
 
         # Create a paid invoice linked to the order
         invoice = Invoice.objects.create(
@@ -593,11 +654,17 @@ class InvoiceRefundedSignalTest(TestCase):
         self._emit_invoice_refunded(invoice, refund_type="full")
 
         service.refresh_from_db()
+        subscription.refresh_from_db()
         self.assertEqual(
             service.status,
             "suspended",
             f"Full refund must suspend active service, got: {service.status}",
         )
+        self.assertIsNotNone(service.suspended_at)
+        self.assertEqual(service.suspension_reason, f"Full refund on invoice {invoice.number}")
+        self.assertFalse(service.auto_renew)
+        self.assertEqual(subscription.status, "cancelled")
+        self.assertFalse(subscription.auto_payment_enabled)
 
     def test_partial_refund_logs_warning_and_does_not_suspend(self):
         """Task 5.1b: Partial refund → no suspension, info log about manual review."""
@@ -676,9 +743,7 @@ class ServiceSuspensionOnCancellationTest(TestCase):
     """
 
     def setUp(self):
-        self.currency, _ = Currency.objects.get_or_create(
-            code="RON", defaults={"symbol": "lei", "decimals": 2}
-        )
+        self.currency, _ = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei", "decimals": 2})
         self.customer = Customer.objects.create(
             name="Suspension Cancel SRL",
             customer_type="company",
@@ -790,3 +855,39 @@ class ServiceSuspensionOnCancellationTest(TestCase):
             "suspended",
             f"Active service must be suspended on order cancellation, got: {service_after.status}",
         )
+        self.assertIsNotNone(service_after.suspended_at)
+        self.assertEqual(service_after.suspension_reason, f"Order {order.order_number} cancelled")
+
+    def test_active_service_subscription_is_cancelled_with_its_order(self):
+        """A cancelled paid order must not leave its service eligible for renewal."""
+        from apps.billing.subscription_models import Subscription  # noqa: PLC0415
+
+        order, _item, service = self._create_order_with_service_in_status("active")
+        now = timezone.now()
+        subscription = Subscription.objects.create(
+            customer=self.customer,
+            product=self.product,
+            service=service,
+            currency=self.currency,
+            status="active",
+            billing_cycle="monthly",
+            unit_price_cents=10_000,
+            quantity=1,
+            current_period_start=now - timedelta(days=30),
+            current_period_end=now,
+            next_billing_date=now,
+        )
+
+        with self.captureOnCommitCallbacks(execute=True):
+            result = OrderService.update_order_status(
+                order,
+                StatusChangeData(new_status="cancelled", notes="cancel recurring service"),
+            )
+
+        self.assertTrue(result.is_ok(), f"update_order_status failed: {result}")
+        subscription.refresh_from_db()
+        service.refresh_from_db()
+        self.assertEqual(subscription.status, "cancelled")
+        self.assertFalse(subscription.cancel_at_period_end)
+        self.assertFalse(subscription.auto_payment_enabled)
+        self.assertFalse(service.auto_renew)

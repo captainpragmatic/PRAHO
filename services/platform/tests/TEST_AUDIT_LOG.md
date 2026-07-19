@@ -45,14 +45,13 @@
 | audit/test_uuid_serialization.py | audit.services (AuditJSONEncoder, serialize_metadata) — UUID/datetime/Decimal serialization in audit metadata |
 | billing/test_billing_audit_and_workflow_regressions.py | billing.efactura.audit.EFacturaAuditService + billing.management.commands.setup_tax_rules + billing.metering_tasks — e-Factura audit, tax rules, metering task scheduling |
 | billing/test_billing_models_regressions.py | billing.models (Currency, FXRate, InvoiceSequence, ProformaSequence, TaxRule, VATValidation, PaymentRetryPolicy) — model validation, constraints, cascade |
-| billing/test_billing_refund_and_efactura_regressions.py | billing.services (Invoice.amount_due, update_status_from_payments), billing.gateways.stripe_gateway, billing.efactura_service, billing.refund_service — refund+efactura integration |
+| billing/test_billing_refund_and_efactura_regressions.py | billing.services (Invoice.amount_due, update_status_from_payments), billing.gateways.stripe_gateway, billing.refund_service — refund and gateway regressions |
 | billing/test_billing_signals.py | billing.signals — minimal signal handler coverage (2 tests: Invoice/Payment post_save) |
 | billing/test_billing_signals_regressions.py | billing.signals — comprehensive signal handler coverage (50+ handlers: invoice issued, payment success, cache invalidation) |
-| billing/test_billing_tasks.py | billing.tasks — Celery tasks (daily billing, auto payment, expired trials, payment reminders). NOTE: documents due_date→due_at bug |
+| billing/test_billing_tasks.py | billing.tasks — Django-Q2 tasks (daily recurring billing, invoice auto payment, expired trials, dunning, payment reminders) |
 | billing/test_billing_views_regressions.py | billing.views — HTTP view handlers for invoices, payments, proformas |
 | billing/test_creditledger.py | billing.models.CreditLedger — customer credit accounting, overpayment conversion, chargeback handling |
 | billing/test_currencies.py | billing.models (Currency, FXRate) — DUPLICATE of test_billing_models_regressions.py |
-| billing/test_efactura_service.py | billing.efactura_service (EFacturaXMLGenerator, EFacturaSubmissionService) — XML generation, submission, status checking |
 | billing/test_efactura_views.py | billing.views (efactura_dashboard, document_detail, submit, retry) — minimal view tests (status codes only) |
 | billing/test_invoice_service.py | billing.invoice_service (BillingAnalyticsService, generate_invoice_pdf, send_invoice_email, generate_vat_summary) |
 | billing/test_invoices_models.py | billing.models (Invoice, InvoiceLine) — model CRUD, FSM transitions (issue, mark_as_paid, mark_partially_refunded) |
@@ -60,9 +59,9 @@
 | billing/test_metering_enforcement.py | billing.metering_service.UsageAlertService._take_threshold_action() — throttle, suspend, block_new, warn actions |
 | billing/test_metering_gateway_regressions.py | billing.metering_service — regression edge cases, Result Ok/Err, decimal parsing, allowance helpers |
 | billing/test_metering_models.py | billing metering models (UsageMeter, UsageEvent, BillingCycle, UsageAggregation, PricingTier, UsageThreshold, UsageAlert) |
-| billing/test_metering_services.py | billing.metering_service (MeteringService, RatingEngine, UsageAlertService, BillingCycleManager, UsageInvoiceService) |
-| billing/test_metering_tasks.py | billing.metering_tasks — background tasks (event processing, cycle workflows, alert checking, Stripe sync, Virtualmin collection) |
-| billing/test_payment_service.py | billing.payment_service.PaymentService — intent creation, confirmation, subscription creation, available methods |
+| billing/test_metering_services.py | billing.metering_service + billing.usage_invoice_service (MeteringService, RatingEngine, UsageAlertService, UsageInvoiceService) |
+| billing/test_metering_tasks.py | billing.metering_tasks — local background tasks (event processing, cycle workflows, alert checking, Virtualmin/service collection) |
+| billing/test_payment_service.py | billing.payment_service.PaymentService — order, proforma, and invoice PaymentIntent creation and confirmation |
 | billing/test_payments_allocation.py | Invoice payment allocation — partial/multiple payment reduces remaining amount |
 | billing/test_payments_models.py | billing.models (Payment) — CRUD, status/method choices, Invoice-Payment relationships, indexing |
 | billing/test_payments_refunds.py | billing.refund_service (RefundService, RefundQueryService) — full/partial refunds, eligibility, statistics, audit trail |
@@ -76,12 +75,11 @@
 | billing/test_sequences.py | billing.models (InvoiceSequence, ProformaSequence) — creation, uniqueness, get_next_number, padding format |
 | billing/test_sequences_concurrency.py | billing.models.InvoiceSequence — sequential access only (NOT true concurrency despite name) |
 | billing/test_services.py | billing.refund_service (RefundService, RefundQueryService) — SIGNIFICANT OVERLAP with test_refund_service_regressions.py |
-| billing/test_stripe_metering.py | billing.stripe_metering (StripeMeterService, StripeMeterEventService, StripeUsageSyncService) — meter CRUD, usage reporting, webhook handling |
 | billing/test_subscription_models_regressions.py | billing.subscription_models — lifecycle (activate, trial, cancel, pause, resume, renew), proration, grandfathering, retries (66KB) |
 | billing/test_subscription_resume.py | billing.subscription_models.Subscription.resume() — period extension, validation, edge cases |
-| billing/test_subscription_service.py | billing.subscription_service (ProrationService, SubscriptionService, GrandfatheringService, RecurringBillingService) (60KB) |
+| billing/test_subscription_service.py | billing.subscription_service (ProrationService, SubscriptionService, GrandfatheringService, SubscriptionLifecycleService) |
 | billing/test_tax_configuration.py | billing.config (VAT helpers), billing.tax_models.TaxRule, billing.services.TaxService, orders.vat_rules.OrderVATCalculator |
-| billing/test_usage_billing_redteam.py | billing.config + metering_models + metering_service + stripe_metering — red team: config validation, idempotency, overflow, negative usage |
+| billing/test_usage_billing_redteam.py | billing.config + metering_models + metering_service — red team: config validation, idempotency, overflow, negative usage |
 | billing/test_validators_financial.py | billing.validators — financial amount/JSON/text validation, dangerous patterns, sensitive keys |
 | billing/test_webhooks.py | integrations.webhooks.stripe.StripeWebhookProcessor — event extraction, signature verification (minimal: 4 tests) |
 | billing/efactura/test_b2c.py | billing.efactura.b2c (CNPValidator, B2CDetector, B2CXMLBuilder) — Romanian personal ID validation, B2C detection |
@@ -487,7 +485,7 @@
 - **Dead tests**: 🔴 `test_invoice_send_success` (L365) is a **placeholder** — only asserts `self.assertTrue(True)`, never calls the view. DELETE or implement.
 
 ##### test_billing_tasks.py — 🟡 minor
-- **Dead/legacy**: ⚠️ Module docstring documents a known **production bug**: `invoice.due_date` should be `invoice.due_at`. Tests lock in broken behavior (tasks return error dict on AttributeError caught by generic except handler).
+- **Resolved (2026-07)**: reminder and dunning tasks use `invoice.due_at`; the tests now prove successful behavior instead of preserving the former `due_date` failure.
 - **Speed**: ⚠️ Uses TransactionTestCase but could be TestCase. Creates 10+ Payment objects in setUp — should use setUpTestData for read-only tests.
 
 ##### test_sequences_concurrency.py — 🟡 minor
@@ -517,8 +515,8 @@
 ##### test_creditledger.py — 🟢 clean
 - Well-structured, comprehensive model tests with aggregation queries, good integration scenarios
 
-##### test_efactura_service.py — 🟢 clean
-- Excellent XML structure validation with namespace handling, comprehensive header/line item/tax tests
+##### test_efactura_service.py — removed
+- The duplicate submission engine and its overlapping tests were removed; canonical coverage lives under `billing/efactura/`.
 
 ##### test_security.py — 🟢 clean
 - Strong security coverage: JSON validation, sensitive key detection, XSS blocking, SSRF protection, amount limits
@@ -534,8 +532,8 @@
 
 #### CRITICAL FINDINGS — billing/efactura/
 
-##### efactura/test_service.py — 🟡 minor
-- **Duplicates**: ⚠️ Potential HIGH overlap with parent `billing/test_efactura_service.py` — both test `EFacturaService` submission/status workflows
+##### efactura/test_service.py — 🟢 canonical
+- Owns submission/status lifecycle coverage after removal of the duplicate parent service tests.
 
 ##### efactura/test_xsd_validator.py — 🟡 minor
 - **Duplicates**: ⚠️ Overlap with `efactura/test_security.py` which already tests XXE, billion laughs, null bytes against XSDValidator
@@ -570,10 +568,10 @@
 3. **DEDUPLICATE**: `test_services.py` and `test_refund_service_regressions.py` share ~20+ duplicate tests. Keep regressions for edge cases, consolidate happy-path into one file.
 4. **FIX MOCK TARGETS**: 15+ refund tests across `test_services.py` and `test_refund_service_regressions.py` patch at wrong location (`apps.orders.models.Order.objects` vs `apps.billing.refund_service.Order`)
 5. **MERGE**: `test_sequences_concurrency.py` into `test_sequences.py` — "concurrency" file doesn't test concurrency
-6. **OVERLAP CHECK**: `billing/efactura/test_service.py` vs `billing/test_efactura_service.py` — likely 30-50% overlap
+6. **RESOLVED (2026-07)**: removed duplicate `billing/test_efactura_service.py`; canonical coverage remains in `billing/efactura/test_service.py`
 7. **OVERLAP CHECK**: `billing/efactura/test_xsd_validator.py` vs `billing/efactura/test_security.py` — XXE/attack tests in both
 8. **PLACEHOLDER**: `test_invoices_views.py:test_invoice_send_success` — DELETE (asserts True, never calls view)
-9. **PRODUCTION BUG**: `test_billing_tasks.py` documents `invoice.due_date` should be `invoice.due_at` — tests lock in broken behavior
+9. **RESOLVED (2026-07)**: `billing/tasks.py` and its tests now use `invoice.due_at`
 10. **DEAD TESTS**: 4 tests in efactura/ have no-op assertions (conditional pass, empty test body)
 
 ### billing/ Summary
@@ -587,7 +585,7 @@
 | Dead tests | 6 (1 placeholder, 1 empty, 4 no-op assertions in efactura/) |
 | Mock issues | 15+ (wrong patch target in refund tests, testing mocks not code) |
 | Speed optimizations | 5 (TransactionTestCase downgrades, setUpTestData, split large files) |
-| Production bug documented | 1 (due_date→due_at in billing.tasks) |
+| Production bug documented | 0 (the due_date→due_at defect was resolved in 2026-07) |
 
 ### common/ (31 files) — 🟢 EXCELLENT
 
@@ -740,7 +738,7 @@ Mostly clean with a few issues:
 | **Dead tests** | **~15** (placeholders, no-op assertions, always-skipped index tests, removed-but-kept code) |
 | **Mock issues** | **~20** (15+ wrong patch targets in refund tests, 3 testing-mock-not-code, 2 broad mocks) |
 | **Speed optimizations** | **~10** (TransactionTestCase downgrades, setUpTestData migrations, large file splits) |
-| **Production bugs documented** | **1** (billing.tasks due_date→due_at) |
+| **Production bugs documented** | **0 unresolved** (billing.tasks due_date→due_at resolved in 2026-07) |
 | **Weak assertions (assertTrue(True))** | **4** (provisioning services, auth views, session management, invoices views) |
 | **Print statements to remove** | **10+** (performance/test_n1_query_optimization.py) |
 
@@ -754,5 +752,5 @@ Mostly clean with a few issues:
 6. **REMOVE** `audit/test_audit_signals.py:TestAuditServiceCategorization` — duplicated by test_audit_categorization.py
 7. **FIX** 4 placeholder `self.assertTrue(True)` assertions — implement real checks or delete
 8. **MERGE** `billing/test_sequences_concurrency.py` into `test_sequences.py` — doesn't test concurrency
-9. **FIX** production bug: `billing/tasks.py` uses `invoice.due_date` instead of `invoice.due_at`
+9. **DONE (2026-07)**: fixed `billing/tasks.py` to use `invoice.due_at`
 10. **REMOVE** dead code: `provisioning/test_cross_app_integration.py:_removed_test_*` and audit index tests that always skip

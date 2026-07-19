@@ -11,7 +11,7 @@ Tests cover:
 """
 
 import time
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from django.test import TestCase
 
@@ -257,8 +257,13 @@ class EFacturaMetricsSetInfoTestCase(TestCase):
     def test_set_info(self):
         """Test set_info updates info metric."""
         metrics = EFacturaMetrics()
+        metrics.info = MagicMock()
         metrics.set_info()
-        # Should not raise any errors
+        info = metrics.info.info.call_args.args[0]
+        self.assertEqual(info["b2b_in_scope"], "True")
+        self.assertEqual(info["b2c_in_scope"], "True")
+        self.assertNotIn("b2b_enabled", info)
+        self.assertNotIn("b2c_enabled", info)
 
 
 class TimedOperationDecoratorTestCase(TestCase):

@@ -281,7 +281,7 @@ class OrderSessionSecurityTestCase(SimpleTestCase):
 
         # Add different items to each cart
         cart1.add_item('product1', 1, 'monthly')
-        cart2.add_item('product2', 2, 'yearly')
+        cart2.add_item('product2', 2, 'annual')
 
         # Verify isolation
         self.assertEqual(len(cart1.get_items()), 1)

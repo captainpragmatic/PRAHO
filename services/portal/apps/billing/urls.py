@@ -21,7 +21,27 @@ urlpatterns = [
     path("dashboard-widget/", views.billing_dashboard_widget, name="dashboard_widget"),
     path("sync/", views.sync_invoices_action, name="sync_invoices"),
     # Payment methods
-    path("payment-methods/", views.payment_methods_view, name="payment_methods"),
+    path("automatic-payments/", views.recurring_payments_view, name="recurring_payments"),
+    path(
+        "automatic-payments/authorize/begin/",
+        views.recurring_authorization_begin,
+        name="recurring_authorization_begin",
+    ),
+    path(
+        "automatic-payments/authorize/complete/",
+        views.recurring_authorization_complete,
+        name="recurring_authorization_complete",
+    ),
+    path(
+        "automatic-payments/authorize/withdraw/",
+        views.recurring_authorization_withdraw,
+        name="recurring_authorization_withdraw",
+    ),
+    path(
+        "automatic-payments/subscriptions/toggle/",
+        views.subscription_auto_payment,
+        name="subscription_auto_payment",
+    ),
     # Refund request
     path("invoices/<str:invoice_number>/refund/", views.request_refund_view, name="request_refund"),
 ]

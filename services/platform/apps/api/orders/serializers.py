@@ -22,7 +22,9 @@ MAX_METADATA_BYTES = 4096
 class ProductPriceSerializer(serializers.ModelSerializer):
     """Slim pricing info for product lists with sealed price tokens (Simplified Model)"""
 
-    monthly_price = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+    monthly_price = serializers.DecimalField(
+        source="effective_monthly_price", max_digits=10, decimal_places=2, read_only=True
+    )
     semiannual_price = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
     annual_price = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
     setup_fee = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)

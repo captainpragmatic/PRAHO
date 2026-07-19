@@ -1,10 +1,9 @@
 """
 Subscription Service for PRAHO Platform
-Business logic for subscription management, proration, and recurring billing.
+Business logic for subscription lifecycle and recurring billing.
 
 Provides:
 - Subscription creation and lifecycle management
-- Mid-cycle upgrades/downgrades with proration
 - Price grandfathering when product prices change
 - Recurring billing invoice generation
 - Trial management
@@ -14,14 +13,12 @@ from __future__ import annotations
 
 import logging
 from datetime import timedelta
-from decimal import Decimal
 from typing import TYPE_CHECKING, Any, TypedDict
 
 from django.db import transaction
 from django.utils import timezone
 from django_fsm import TransitionNotAllowed
 
-from apps.common.tax_service import CustomerVATInfo, TaxService
 from apps.common.types import Err, Ok, Result
 
 if TYPE_CHECKING:
@@ -29,11 +26,9 @@ if TYPE_CHECKING:
     from apps.products.models import Product
     from apps.users.models import User
 
-from .invoice_models import Invoice, InvoiceLine, InvoiceSequence
 from .subscription_models import (
     PriceGrandfathering,
     Subscription,
-    SubscriptionChange,
 )
 from .validators import log_security_event
 
@@ -74,9 +69,15 @@ def _resolve_subscription_unit_price_cents(product: Any, currency: Any, billing_
         return Err(f"No active {getattr(currency, 'code', currency)} price for product {product}")
 
     cents = price.get_price_cents_for_period(period)
-    if not cents or cents <= 0:
-        # A zero/None period price means "unset" on ProductPrice, not a real list price —
+    has_active_free_promotion = (
+        price.promo_price_cents == 0
+        and price.promo_valid_until is not None
+        and timezone.now() <= price.promo_valid_until
+    )
+    if cents <= 0 and not has_active_free_promotion:
+        # A bare zero period price means "unset" on ProductPrice, not a real list price —
         # returning it as Ok would recreate the billed-zero defect this fix removes (#209).
+        # An explicit, unexpired zero-cent promotion is intentional and remains valid.
         return Err(
             f"Product {product} has no usable {period} list price in "
             f"{getattr(currency, 'code', currency)}; pass custom_price_cents"
@@ -84,52 +85,82 @@ def _resolve_subscription_unit_price_cents(product: Any, currency: Any, billing_
     return Ok(cents)
 
 
-def _determine_change_unit_price_cents(
-    subscription: Subscription,
-    data: SubscriptionChangeData,
-    new_product: Any,
-    new_billing_cycle: str,
-) -> Result[int, str]:
-    """Unit price for a subscription change.
-
-    Only a product or billing-cycle change re-resolves the catalog. Quantity-only changes
-    keep the subscription's negotiated unit price: re-resolving would silently reprice
-    grandfathered or custom-priced subscriptions and make quarterly/custom cycles (which
-    have no list price) unchangeable.
-    """
-    if data.get("new_product_id") or new_billing_cycle != subscription.billing_cycle:
-        return _resolve_subscription_unit_price_cents(new_product, subscription.currency, new_billing_cycle)
-    return Ok(subscription.effective_price_cents)
-
-
-def _build_customer_vat_info(customer: Any) -> CustomerVATInfo:
-    """Build customer VAT context for TaxService.calculate_vat_for_document()."""
-    info: CustomerVATInfo = {
-        "country": (getattr(customer, "country", None) or "RO"),
-        "is_business": bool(getattr(customer, "company_name", "")),
-        "vat_number": None,
-        "customer_id": str(getattr(customer, "id", "")),
-        "order_id": None,
-    }
-    try:
-        tax_profile = customer.tax_profile
-    except Exception:
-        return info
-
-    info["vat_number"] = getattr(tax_profile, "vat_number", None)
-    info["is_vat_payer"] = bool(getattr(tax_profile, "is_vat_payer", False))
-    info["reverse_charge_eligible"] = bool(getattr(tax_profile, "reverse_charge_eligible", False))
-    vat_rate_override = getattr(tax_profile, "vat_rate", None)
-    if vat_rate_override is not None:
-        info["custom_vat_rate"] = vat_rate_override
-    return info
-
-
 def get_max_payment_retries() -> int:
     """Get max payment retries from SettingsService (runtime)."""
     from apps.settings.services import SettingsService  # noqa: PLC0415  # Deferred: avoids circular import
 
     return SettingsService.get_integer_setting("billing.max_payment_retries", _DEFAULT_MAX_PAYMENT_RETRIES)
+
+
+class _SubscriptionCreationError(ValueError):
+    """Expected, customer-safe subscription creation failure."""
+
+
+def _resolve_creation_currency(currency_code: str) -> Any:
+    from .currency_models import Currency  # noqa: PLC0415
+
+    try:
+        return Currency.objects.get(code=currency_code)
+    except Currency.DoesNotExist:
+        if currency_code != "RON":
+            raise _SubscriptionCreationError(f"Currency {currency_code} does not exist") from None
+        return Currency.objects.create(code="RON", name="Romanian Leu", symbol="lei")
+
+
+def _resolve_creation_service(customer: Any, product: Any, currency: Any, service_id: str | None) -> tuple[Any, Any]:
+    if not service_id:
+        return None, None
+
+    from apps.provisioning.models import Service  # noqa: PLC0415
+
+    try:
+        service = Service.objects.select_for_update().get(pk=service_id)
+    except Service.DoesNotExist:
+        raise _SubscriptionCreationError(f"Service {service_id} does not exist") from None
+    if service.customer_id != customer.id:
+        raise _SubscriptionCreationError("Service and subscription customer do not match")
+    if service.currency_id != currency.id:
+        raise _SubscriptionCreationError("Service and subscription currency do not match")
+
+    existing = Subscription.objects.filter(service=service).first()
+    if existing is not None and (existing.customer_id != customer.id or existing.product_id != product.id):
+        raise _SubscriptionCreationError("Service is already linked to a different subscription")
+    return service, existing
+
+
+def _resolve_creation_price(product: Any, currency: Any, data: SubscriptionCreateData) -> int:
+    custom_price_cents = data.get("custom_price_cents")
+    if custom_price_cents is not None:
+        if custom_price_cents < 0:
+            raise _SubscriptionCreationError("custom_price_cents cannot be negative")
+        return custom_price_cents
+
+    price_result = _resolve_subscription_unit_price_cents(product, currency, data.get("billing_cycle", "monthly"))
+    if price_result.is_err():
+        raise _SubscriptionCreationError(price_result.unwrap_err())
+    return price_result.unwrap()
+
+
+def _validate_idempotent_creation_terms(
+    existing: Subscription,
+    *,
+    billing_cycle: str,
+    quantity: int,
+    unit_price_cents: int,
+    custom_cycle_days: int | None,
+) -> None:
+    """Accept a service-enrollment retry only when its financial terms are identical."""
+    requested_terms = {
+        "billing_cycle": billing_cycle,
+        "quantity": quantity,
+        "unit_price_cents": unit_price_cents,
+        "custom_cycle_days": custom_cycle_days,
+    }
+    mismatches = [field for field, value in requested_terms.items() if getattr(existing, field) != value]
+    if mismatches:
+        raise _SubscriptionCreationError(
+            "Existing subscription does not match requested service enrollment terms: " + ", ".join(mismatches)
+        )
 
 
 # ===============================================================================
@@ -145,158 +176,12 @@ class SubscriptionCreateData(TypedDict, total=False):
     billing_cycle: str
     quantity: int
     trial_days: int
-    payment_method_id: str
+    custom_cycle_days: int
     apply_grandfathering: bool
     custom_price_cents: int
+    currency_code: str
+    service_id: str
     metadata: dict[str, Any]
-
-
-class SubscriptionChangeData(TypedDict, total=False):
-    """Data for changing a subscription."""
-
-    new_product_id: str
-    new_quantity: int
-    new_billing_cycle: str
-    prorate: bool
-    apply_immediately: bool
-    reason: str
-
-
-class ProrationResult(TypedDict):
-    """Result of proration calculation."""
-
-    unused_credit_cents: int
-    new_charge_cents: int
-    proration_amount_cents: int
-    days_remaining: int
-    days_in_period: int
-    old_daily_rate_cents: int
-    new_daily_rate_cents: int
-
-
-class BillingRunResult(TypedDict):
-    """Result of a billing run."""
-
-    subscriptions_processed: int
-    invoices_created: int
-    payments_attempted: int
-    payments_succeeded: int
-    payments_failed: int
-    total_billed_cents: int
-    errors: list[str]
-
-
-# ===============================================================================
-# PRORATION SERVICE
-# ===============================================================================
-
-
-class ProrationService:
-    """
-    Service for calculating proration amounts for subscription changes.
-
-    Proration ensures fair billing when customers upgrade or downgrade mid-cycle:
-    - Upgrade: Customer gets credit for unused portion and is charged for new plan
-    - Downgrade: Customer gets credit for unused portion, new charge is lower
-    """
-
-    @staticmethod
-    def calculate_proration(  # subscription fields  # noqa: PLR0913  # Business logic parameters
-        old_price_cents: int,
-        new_price_cents: int,
-        old_quantity: int,
-        new_quantity: int,
-        days_remaining: int,
-        days_in_period: int,
-    ) -> ProrationResult:
-        """
-        Calculate proration for a mid-cycle subscription change.
-
-        Args:
-            old_price_cents: Current unit price in cents
-            new_price_cents: New unit price in cents
-            old_quantity: Current quantity
-            new_quantity: New quantity
-            days_remaining: Days left in current period
-            days_in_period: Total days in billing period
-
-        Returns:
-            ProrationResult with calculated amounts
-        """
-        if days_in_period <= 0:
-            days_in_period = 30  # Fallback to monthly
-
-        # Calculate daily rates
-        old_total = old_price_cents * old_quantity
-        new_total = new_price_cents * new_quantity
-
-        old_daily_rate = old_total / days_in_period
-        new_daily_rate = new_total / days_in_period
-
-        # Calculate unused credit (what customer already paid but won't use)
-        unused_credit_cents = int(old_daily_rate * days_remaining)
-
-        # Calculate new charge (what customer owes for new plan remainder)
-        new_charge_cents = int(new_daily_rate * days_remaining)
-
-        # Net proration (positive = customer pays, negative = credit)
-        proration_amount_cents = new_charge_cents - unused_credit_cents
-
-        return ProrationResult(
-            unused_credit_cents=unused_credit_cents,
-            new_charge_cents=new_charge_cents,
-            proration_amount_cents=proration_amount_cents,
-            days_remaining=days_remaining,
-            days_in_period=days_in_period,
-            old_daily_rate_cents=int(old_daily_rate),
-            new_daily_rate_cents=int(new_daily_rate),
-        )
-
-    @staticmethod
-    def calculate_subscription_proration(
-        subscription: Subscription,
-        new_price_cents: int,
-        new_quantity: int = 1,
-    ) -> ProrationResult:
-        """
-        Calculate proration for a specific subscription change.
-
-        Args:
-            subscription: The subscription being changed
-            new_price_cents: New unit price in cents
-            new_quantity: New quantity (defaults to 1)
-
-        Returns:
-            ProrationResult with calculated amounts
-        """
-        now = timezone.now()
-
-        # Calculate days remaining
-        days_remaining = 0 if subscription.current_period_end <= now else (subscription.current_period_end - now).days
-
-        return ProrationService.calculate_proration(
-            old_price_cents=subscription.effective_price_cents,
-            new_price_cents=new_price_cents,
-            old_quantity=subscription.quantity,
-            new_quantity=new_quantity,
-            days_remaining=days_remaining,
-            days_in_period=subscription.cycle_days,
-        )
-
-    @staticmethod
-    def calculate_upgrade_credit(
-        subscription: Subscription,
-    ) -> int:
-        """Calculate credit for unused portion of current plan."""
-        now = timezone.now()
-
-        if subscription.current_period_end <= now:
-            return 0
-
-        days_remaining = (subscription.current_period_end - now).days
-        daily_rate = (subscription.effective_price_cents * subscription.quantity) / subscription.cycle_days
-
-        return int(daily_rate * days_remaining)
 
 
 # ===============================================================================
@@ -310,7 +195,6 @@ class SubscriptionService:
 
     Handles:
     - Subscription creation and activation
-    - Plan changes with proration
     - Cancellation and pausing
     - Trial management
     """
@@ -336,24 +220,40 @@ class SubscriptionService:
         """
         try:
             with transaction.atomic():
-                from .currency_models import Currency  # noqa: PLC0415  # Deferred: avoids circular import
+                from .recurring_billing import (  # noqa: PLC0415  # Deferred: avoids circular import
+                    fixed_renewal_schedule,
+                    next_billing_period_end,
+                )
 
-                # Get or create default currency
-                try:
-                    currency = Currency.objects.get(code="RON")
-                except Currency.DoesNotExist:
-                    currency = Currency.objects.create(code="RON", name="Romanian Leu", symbol="lei")
-
-                # Determine price
-                if data.get("custom_price_cents") is not None:
-                    unit_price_cents = data["custom_price_cents"]
-                else:
-                    price_result = _resolve_subscription_unit_price_cents(
-                        product, currency, data.get("billing_cycle", "monthly")
+                if "payment_method_id" in data:
+                    raise _SubscriptionCreationError(
+                        "A raw gateway payment method cannot authorize recurring charges; "
+                        "create a recurring-payment authorization and enroll the subscription separately"
                     )
-                    if price_result.is_err():
-                        return Err(price_result.unwrap_err())
-                    unit_price_cents = price_result.unwrap()
+
+                # Customer-initiated subscriptions default to RON. Order-backed
+                # subscriptions must retain the paid order's currency snapshot.
+                currency_code = data.get("currency_code", "RON").upper()
+                currency = _resolve_creation_currency(currency_code)
+                service, existing = _resolve_creation_service(
+                    customer,
+                    product,
+                    currency,
+                    data.get("service_id"),
+                )
+                billing_cycle = data.get("billing_cycle", "monthly")
+                quantity = data.get("quantity", 1)
+                custom_cycle_days = data.get("custom_cycle_days")
+                unit_price_cents = _resolve_creation_price(product, currency, data)
+                if existing is not None:
+                    _validate_idempotent_creation_terms(
+                        existing,
+                        billing_cycle=billing_cycle,
+                        quantity=quantity,
+                        unit_price_cents=unit_price_cents,
+                        custom_cycle_days=custom_cycle_days,
+                    )
+                    return Ok(existing)
 
                 # Check for grandfathering
                 locked_price_cents = None
@@ -369,18 +269,21 @@ class SubscriptionService:
                         locked_price_reason = grandfathering.reason
 
                 now = timezone.now()
-                billing_cycle = data.get("billing_cycle", "monthly")
-                quantity = data.get("quantity", 1)
-
-                # Calculate cycle days
-                from .subscription_models import BILLING_CYCLE_DAYS  # noqa: PLC0415  # Deferred: avoids circular import
-
-                cycle_days = BILLING_CYCLE_DAYS.get(billing_cycle, 30)
+                trial_days = data.get("trial_days", 0)
+                if trial_days < 0:
+                    raise _SubscriptionCreationError("trial_days cannot be negative")
+                initial_period_end = next_billing_period_end(
+                    now,
+                    billing_cycle,
+                    anchor_day=now.day,
+                    custom_cycle_days=custom_cycle_days,
+                )
 
                 # Create subscription
                 subscription = Subscription.objects.create(
                     customer=customer,
                     product=product,
+                    service=service,
                     currency=currency,
                     billing_cycle=billing_cycle,
                     quantity=quantity,
@@ -388,20 +291,60 @@ class SubscriptionService:
                     locked_price_cents=locked_price_cents,
                     locked_price_reason=locked_price_reason,
                     current_period_start=now,
-                    current_period_end=now + timedelta(days=cycle_days),
-                    next_billing_date=now + timedelta(days=cycle_days),
-                    payment_method_id=data.get("payment_method_id", ""),
+                    current_period_end=initial_period_end,
+                    next_billing_date=initial_period_end,
+                    billing_anchor_day=now.day,
+                    custom_cycle_days=custom_cycle_days,
                     meta=data.get("metadata", {}),
                     status="pending",
                     created_by=user,
                 )
 
                 # Handle trial period
-                trial_days = data.get("trial_days", 0)
                 if trial_days > 0:
                     subscription.start_trial(trial_days, user)  # fsm-bypass: start_trial() calls self.save() internally
                 else:
                     subscription.activate(user)  # fsm-bypass: activate() calls self.save() internally
+
+                    subscription.current_period_end = next_billing_period_end(
+                        subscription.current_period_start,
+                        billing_cycle,
+                        anchor_day=subscription.billing_anchor_day,
+                        custom_cycle_days=custom_cycle_days,
+                    )
+
+                next_proforma_at, next_charge_at = fixed_renewal_schedule(subscription.current_period_end)
+                subscription.next_proforma_at = next_proforma_at
+                subscription.next_charge_at = next_charge_at
+                subscription.next_billing_date = next_proforma_at
+                subscription.save(
+                    update_fields=[
+                        "current_period_end",
+                        "next_proforma_at",
+                        "next_charge_at",
+                        "next_billing_date",
+                        "updated_at",
+                    ]
+                )
+                if service is not None and (
+                    service.expires_at is None or service.expires_at < subscription.current_period_end
+                ):
+                    service.expires_at = subscription.current_period_end
+                    service.save(update_fields=["expires_at", "updated_at"])
+
+                from .metering_models import BillingCycle  # noqa: PLC0415
+
+                initial_cycle = BillingCycle.objects.create(
+                    subscription=subscription,
+                    period_start=subscription.current_period_start,
+                    period_end=subscription.current_period_end,
+                    collection_status="waived",
+                    base_charge_cents=0,
+                    total_cents=0,
+                    meta={"source": "initial_subscription_entitlement"},
+                )
+                initial_cycle.activate()
+                initial_cycle.save(update_fields=["status", "updated_at"])
 
                 log_security_event(
                     event_type="subscription_created",
@@ -421,177 +364,11 @@ class SubscriptionService:
 
                 return Ok(subscription)
 
+        except _SubscriptionCreationError as e:
+            return Err(str(e))
         except Exception as e:
             logger.exception(f"Failed to create subscription: {e}")
             return Err(f"Failed to create subscription: {e}")
-
-    @staticmethod
-    def change_subscription(
-        subscription: Subscription,
-        data: SubscriptionChangeData,
-        user: User | None = None,
-    ) -> Result[SubscriptionChange, str]:
-        """
-        Change a subscription (upgrade, downgrade, quantity change).
-
-        Args:
-            subscription: Subscription to change
-            data: Change details
-            user: User making the change (for audit)
-
-        Returns:
-            Result with SubscriptionChange record or error message
-        """
-        try:
-            with transaction.atomic():
-                # Determine new values
-                new_product = subscription.product
-                if data.get("new_product_id"):
-                    from apps.products.models import Product  # noqa: PLC0415  # Deferred: avoids circular import
-
-                    new_product = Product.objects.get(id=data["new_product_id"])
-
-                new_quantity = data.get("new_quantity", subscription.quantity)
-                new_billing_cycle = data.get("new_billing_cycle", subscription.billing_cycle)
-                new_price_result = _determine_change_unit_price_cents(
-                    subscription, data, new_product, new_billing_cycle
-                )
-                if new_price_result.is_err():
-                    return Err(new_price_result.unwrap_err())
-                new_price_cents = new_price_result.unwrap()
-
-                # Determine change type
-                if data.get("new_product_id") and new_price_cents > subscription.effective_price_cents:
-                    change_type = "upgrade"
-                elif data.get("new_product_id") and new_price_cents < subscription.effective_price_cents:
-                    change_type = "downgrade"
-                elif new_quantity > subscription.quantity:
-                    change_type = "quantity_increase"
-                elif new_quantity < subscription.quantity:
-                    change_type = "quantity_decrease"
-                elif new_billing_cycle != subscription.billing_cycle:
-                    change_type = "billing_cycle_change"
-                else:
-                    change_type = "price_change"
-
-                # Create change record
-                change = SubscriptionChange.objects.create(
-                    subscription=subscription,
-                    change_type=change_type,
-                    old_product=subscription.product,
-                    old_price_cents=subscription.effective_price_cents,
-                    old_quantity=subscription.quantity,
-                    old_billing_cycle=subscription.billing_cycle,
-                    new_product=new_product,
-                    new_price_cents=new_price_cents,
-                    new_quantity=new_quantity,
-                    new_billing_cycle=new_billing_cycle,
-                    prorate=data.get("prorate", True),
-                    apply_immediately=data.get("apply_immediately", True),
-                    effective_date=timezone.now()
-                    if data.get("apply_immediately", True)
-                    else subscription.current_period_end,
-                    reason=data.get("reason", ""),
-                    created_by=user,
-                )
-
-                # Calculate proration
-                change.calculate_proration()
-                change.save()
-
-                # Apply immediately if requested
-                if data.get("apply_immediately", True):
-                    change.apply(user)
-
-                    # Create proration invoice if there's a charge
-                    if change.proration_amount_cents > 0:
-                        SubscriptionService._create_proration_invoice(subscription, change, user)
-
-                log_security_event(
-                    event_type="subscription_change_created",
-                    details={
-                        "subscription_id": str(subscription.id),
-                        "change_id": str(change.id),
-                        "change_type": change_type,
-                        "proration_amount_cents": change.proration_amount_cents,
-                        "apply_immediately": data.get("apply_immediately", True),
-                        "critical_financial_operation": True,
-                    },
-                    user_email=user.email if user else None,
-                )
-
-                return Ok(change)
-
-        except Exception as e:
-            logger.exception(f"Failed to change subscription: {e}")
-            return Err(f"Failed to change subscription: {e}")
-
-    @staticmethod
-    def _create_proration_invoice(
-        subscription: Subscription,
-        change: SubscriptionChange,
-        user: User | None = None,
-    ) -> Invoice:
-        """Create an invoice for proration charges."""
-        # Get sequence
-        sequence, _ = InvoiceSequence.objects.get_or_create(scope="default")
-
-        from .currency_models import Currency  # noqa: PLC0415  # Deferred: avoids circular import
-
-        # Get currency
-        try:
-            currency = Currency.objects.get(code="RON")
-        except Currency.DoesNotExist:
-            currency = Currency.objects.create(code="RON", name="Romanian Leu", symbol="lei")
-
-        subtotal_cents = change.proration_amount_cents
-        vat_result = TaxService.calculate_vat_for_document(
-            subtotal_cents=subtotal_cents,
-            customer_info=_build_customer_vat_info(subscription.customer),
-        )
-        tax_cents = vat_result.vat_cents
-        total_cents = vat_result.total_cents
-
-        # Create invoice as draft, then issue via FSM
-        invoice = Invoice.objects.create(
-            customer=subscription.customer,
-            number=sequence.get_next_number("INV"),
-            currency=currency,
-            subtotal_cents=subtotal_cents,
-            tax_cents=tax_cents,
-            total_cents=total_cents,
-            due_at=timezone.now() + timedelta(days=7),
-            bill_to_name=subscription.customer.get_billing_name(),
-            bill_to_email=subscription.customer.primary_email or "",
-            bill_to_country="RO",
-            meta={
-                "subscription_id": str(subscription.id),
-                "change_id": str(change.id),
-                "type": "proration",
-            },
-            created_by=user,
-        )
-
-        # Create invoice line
-        InvoiceLine.objects.create(
-            invoice=invoice,
-            kind="service",
-            description=f"Proration: {change.change_type.replace('_', ' ').title()} - {subscription.product.name}",
-            quantity=Decimal("1"),
-            unit_price_cents=subtotal_cents,
-            tax_rate=(vat_result.vat_rate / Decimal("100")),
-            line_total_cents=total_cents,
-        )
-
-        # Issue via FSM transition — sets issued_at and locked_at
-        invoice.issue()
-        invoice.save()
-
-        # Link change to invoice
-        change.invoice = invoice
-        change.save(update_fields=["invoice"])
-
-        return invoice
 
     @staticmethod
     def cancel_subscription(
@@ -615,13 +392,25 @@ class SubscriptionService:
             Result with updated subscription or error
         """
         try:
-            subscription.cancel(
-                reason=reason,
-                at_period_end=at_period_end,
-                feedback=feedback,
-                user=user,
-            )
-            return Ok(subscription)
+            with transaction.atomic():
+                locked_subscription = Subscription.objects.select_for_update(of=("self",)).get(pk=subscription.pk)
+                locked_subscription.cancel(
+                    reason=reason,
+                    at_period_end=at_period_end,
+                    feedback=feedback,
+                    user=user,
+                )
+                if not at_period_end and locked_subscription.service_id:
+                    from apps.provisioning.models import Service  # noqa: PLC0415
+
+                    service = Service.objects.select_for_update(of=("self",)).get(pk=locked_subscription.service_id)
+                    service.auto_renew = False
+                    update_fields = ["auto_renew", "updated_at"]
+                    if service.status in {"active", "suspended"}:
+                        service.expire()
+                        update_fields.append("status")
+                    service.save(update_fields=update_fields)
+            return Ok(locked_subscription)
         except Exception as e:
             logger.exception(f"Failed to cancel subscription: {e}")
             return Err(f"Failed to cancel subscription: {e}")
@@ -637,30 +426,54 @@ class SubscriptionService:
         Only works if subscription is cancelled but period hasn't ended.
         """
         try:
-            if subscription.status != "cancelled" and not subscription.cancel_at_period_end:
-                return Err("Subscription is not cancelled")
-
             with transaction.atomic():
+                locked_subscription = (
+                    Subscription.objects.select_for_update(of=("self",))
+                    .select_related("service")
+                    .get(pk=subscription.pk)
+                )
+                if locked_subscription.status != "cancelled" and not locked_subscription.cancel_at_period_end:
+                    return Err("Subscription is not cancelled")
+                if locked_subscription.current_period_end <= timezone.now():
+                    return Err("Subscription cannot be reactivated because its paid period has ended")
+
+                service = None
+                if locked_subscription.service_id:
+                    from apps.provisioning.models import Service  # noqa: PLC0415
+
+                    service = Service.objects.select_for_update(of=("self",)).get(pk=locked_subscription.service_id)
+                    if service.status not in {"active", "suspended", "expired"}:
+                        return Err(f"Linked service status {service.status} does not allow subscription reactivation")
+
                 # Use FSM transition for cancelled → active; for cancel_at_period_end
                 # the status is still active/other, so just clear the flag.
-                if subscription.status == "cancelled":
-                    subscription._reactivate_now()
-                subscription.cancel_at_period_end = False
-                subscription.cancelled_at = None
-                subscription.cancellation_reason = ""
-                subscription.cancellation_feedback = ""
-                subscription.save()
+                if locked_subscription.status == "cancelled":
+                    locked_subscription._reactivate_now()
+                locked_subscription.cancel_at_period_end = False
+                locked_subscription.cancelled_at = None
+                locked_subscription.ended_at = None
+                locked_subscription.cancellation_reason = ""
+                locked_subscription.cancellation_feedback = ""
+                locked_subscription.save()
+
+                if service is not None:
+                    service.auto_renew = True
+                    service_update_fields = ["auto_renew", "updated_at"]
+                    if service.status == "expired":
+                        service.restore_from_expiration()
+                        service_update_fields.extend(["status", "activated_at", "suspended_at", "suspension_reason"])
+                    service.save(update_fields=service_update_fields)
 
                 log_security_event(
                     event_type="subscription_reactivated",
                     details={
-                        "subscription_id": str(subscription.id),
-                        "subscription_number": subscription.subscription_number,
+                        "subscription_id": str(locked_subscription.id),
+                        "subscription_number": locked_subscription.subscription_number,
                     },
                     user_email=user.email if user else None,
                 )
 
-                return Ok(subscription)
+                return Ok(locked_subscription)
 
         except Exception as e:
             logger.exception(f"Failed to reactivate subscription: {e}")
@@ -772,29 +585,38 @@ class GrandfatheringService:
     ) -> Result[bool, str]:
         """Expire a specific customer's grandfathering for a product."""
         try:
-            grandfathering = PriceGrandfathering.objects.filter(
-                customer=customer,
-                product=product,
-                is_active=True,
-            ).first()
+            with transaction.atomic():
+                grandfathering = (
+                    PriceGrandfathering.objects.select_for_update()
+                    .filter(
+                        customer=customer,
+                        product=product,
+                        is_active=True,
+                    )
+                    .first()
+                )
 
-            if not grandfathering:
-                return Err("No active grandfathering found")
+                if not grandfathering:
+                    return Err("No active grandfathering found")
 
-            grandfathering.expire(user)
-
-            # Update subscription
-            sub = Subscription.objects.filter(
-                customer=customer,
-                product=product,
-                status__in=["active", "trialing"],
-            ).first()
-
-            if sub:
-                sub.locked_price_cents = None
-                sub.locked_price_reason = ""
-                sub.locked_price_expires_at = None
-                sub.save()
+                subscriptions = list(
+                    Subscription.objects.select_for_update(of=("self",))
+                    .filter(customer=customer, product=product)
+                    .order_by("id")
+                )
+                grandfathering.expire(user)
+                for subscription in subscriptions:
+                    subscription.locked_price_cents = None
+                    subscription.locked_price_reason = ""
+                    subscription.locked_price_expires_at = None
+                    subscription.save(
+                        update_fields=[
+                            "locked_price_cents",
+                            "locked_price_reason",
+                            "locked_price_expires_at",
+                            "updated_at",
+                        ]
+                    )
 
             return Ok(True)
 
@@ -830,338 +652,148 @@ class GrandfatheringService:
 
 
 # ===============================================================================
-# RECURRING BILLING SERVICE
+# SUBSCRIPTION LIFECYCLE SERVICE
 # ===============================================================================
 
 
-class RecurringBillingService:
-    """
-    Service for processing recurring billing.
-
-    Handles:
-    - Daily billing runs for subscriptions due for renewal
-    - Invoice generation
-    - Payment processing
-    - Failed payment handling
-    """
+class SubscriptionLifecycleService:
+    """Non-renewal lifecycle handling around the single recurring orchestrator."""
 
     @staticmethod
-    def run_billing_cycle(
-        billing_date: Any = None,
-        dry_run: bool = False,
-    ) -> BillingRunResult:
-        """
-        Process all subscriptions due for billing.
-
-        Args:
-            billing_date: Date to run billing for (defaults to today)
-            dry_run: If True, don't actually create invoices or charge
-
-        Returns:
-            BillingRunResult with statistics
-        """
-        billing_date = billing_date or timezone.now()
-
-        result = BillingRunResult(
-            subscriptions_processed=0,
-            invoices_created=0,
-            payments_attempted=0,
-            payments_succeeded=0,
-            payments_failed=0,
-            total_billed_cents=0,
-            errors=[],
-        )
-
-        # Retire subscriptions the customer cancelled for end-of-period before selecting anything
-        # to bill. cancel(at_period_end=True) only raises a flag — nothing else in the codebase
-        # ever completes the cancellation — so without this they stay "active" and get billed
-        # again on every run, forever, past the date the customer cancelled (#209).
-        RecurringBillingService._finalize_period_end_cancellations(billing_date, result, dry_run=dry_run)
-
-        # Find subscriptions due for billing
-        due_subscriptions = Subscription.objects.filter(
-            status="active",
-            next_billing_date__lte=billing_date,
-        ).select_related("customer", "product", "currency")
-
-        for subscription in due_subscriptions:
-            try:
-                result["subscriptions_processed"] += 1
-
-                # A zero-priced subscription is broken state (pre-fix rows priced at 0, or a
-                # deleted list price), not a billable obligation: creating 0-cent invoices
-                # forever would hide it. Surface it and skip.
-                if subscription.total_price_cents <= 0:
-                    result["errors"].append(
-                        f"Subscription {subscription.subscription_number} has a zero price; "
-                        f"set its pricing (or cancel it) before it can be billed"
-                    )
-                    continue
-
-                if dry_run:
-                    result["total_billed_cents"] += subscription.total_price_cents
-                    continue
-
-                # Generate invoice
-                invoice_result = RecurringBillingService._generate_renewal_invoice(subscription)
-
-                if invoice_result.is_ok():
-                    invoice = invoice_result.unwrap()
-                    result["invoices_created"] += 1
-                    result["total_billed_cents"] += invoice.total_cents
-
-                    # Attempt payment
-                    if subscription.payment_method_id:
-                        result["payments_attempted"] += 1
-                        payment_result = RecurringBillingService._process_payment(subscription, invoice)
-
-                        if payment_result.is_ok():
-                            result["payments_succeeded"] += 1
-                            subscription.record_payment(invoice.total_cents)
-                            subscription.renew()
-                        else:
-                            result["payments_failed"] += 1
-                            subscription.mark_payment_failed()
-                            result["errors"].append(
-                                f"Payment failed for {subscription.subscription_number}: {payment_result.error}"  # type: ignore[union-attr]
-                            )
-                    else:
-                        # No payment method, just renew (manual payment expected)
-                        subscription.renew()
-
-                else:
-                    result["errors"].append(
-                        f"Invoice generation failed for {subscription.subscription_number}: {invoice_result.error}"  # type: ignore[union-attr]
-                    )
-
-            except TransitionNotAllowed:
-                msg = (
-                    f"Subscription {subscription.subscription_number} cannot transition "
-                    f"from status '{subscription.status}' during billing cycle"
-                )
-                logger.warning(f"⚠️ [BillingCycle] {msg}")
-                result["errors"].append(msg)
-            except Exception as e:
-                logger.exception(f"Error processing subscription {subscription.id}: {e}")
-                result["errors"].append(f"Error for {subscription.subscription_number}: {e}")
-
-        log_security_event(
-            event_type="billing_cycle_completed",
-            details={
-                "billing_date": billing_date.isoformat() if hasattr(billing_date, "isoformat") else str(billing_date),
-                "subscriptions_processed": result["subscriptions_processed"],
-                "invoices_created": result["invoices_created"],
-                "payments_succeeded": result["payments_succeeded"],
-                "payments_failed": result["payments_failed"],
-                "total_billed_cents": result["total_billed_cents"],
-                "dry_run": dry_run,
-                "critical_financial_operation": True,
-            },
-        )
-
-        return result
-
-    @staticmethod
-    def _finalize_period_end_cancellations(billing_date: Any, result: Any, dry_run: bool = False) -> None:
-        """Complete cancellations the customer scheduled for the end of their billing period.
-
-        `cancel(at_period_end=True)` only raises the cancel_at_period_end flag and leaves the
-        subscription "active" so it keeps serving until the period the customer paid for runs
-        out. Nothing else completes that cancellation, so once the period ends the subscription
-        was simply billed again — and again on every subsequent run (#209).
-
-        A dry run must not mutate: this performs a real FSM transition and a permanent
-        ended_at write, and a preview that cancels live subscriptions is not a preview.
-        """
-        expiring = Subscription.objects.filter(
-            status="active",
+    def finalize_period_end_cancellations(as_of: Any = None) -> int:
+        """Complete cancellations once the customer's paid-through period ends."""
+        run_at = as_of or timezone.now()
+        finalized = 0
+        subscription_ids = Subscription.objects.filter(
+            status__in=["active", "trialing", "past_due", "paused"],
             cancel_at_period_end=True,
-            current_period_end__lte=billing_date,
-        )
-
-        for subscription in expiring:
-            if dry_run:
-                logger.info(
-                    f"🔍 [Billing] Dry run: would cancel subscription {subscription.id} at end of its billing period"
-                )
-                continue
+            current_period_end__lte=run_at,
+        ).values_list("id", flat=True)
+        for subscription_id in subscription_ids:
             try:
                 with transaction.atomic():
+                    subscription = Subscription.objects.select_for_update(of=("self",)).get(id=subscription_id)
+                    if (
+                        subscription.status not in {"active", "trialing", "past_due", "paused"}
+                        or not subscription.cancel_at_period_end
+                        or subscription.current_period_end > run_at
+                    ):
+                        continue
                     subscription._cancel_now()
-                    subscription.ended_at = timezone.now()
+                    subscription.ended_at = run_at
                     subscription.save()
-                logger.info(f"🚫 [Billing] Cancelled subscription {subscription.id} at end of its billing period")
-            except TransitionNotAllowed as e:
-                logger.error(f"🔥 [Billing] Cannot cancel subscription {subscription.id} at period end: {e}")
-                result["errors"].append(f"Subscription {subscription.id}: period-end cancellation failed: {e}")
-            except Exception as e:
-                # One bad row (a ValidationError from save(), a DB blip) must not abort the
-                # entire billing run before due_subscriptions is even queried — that would
-                # silently skip the whole day's invoicing for every other customer.
-                logger.exception(f"🔥 [Billing] Period-end cancellation failed for subscription {subscription.id}")
-                result["errors"].append(f"Subscription {subscription.id}: period-end cancellation failed: {e}")
+                    if subscription.service_id is not None:
+                        from apps.provisioning.models import Service  # noqa: PLC0415
+
+                        service = Service.objects.select_for_update(of=("self",)).get(id=subscription.service_id)
+                        service.auto_renew = False
+                        update_fields = ["auto_renew", "updated_at"]
+                        if service.status in {"active", "suspended"}:
+                            service.expire()
+                            update_fields.append("status")
+                        service.save(update_fields=update_fields)
+                finalized += 1
+            except TransitionNotAllowed:
+                logger.warning(
+                    "Subscription %s could not finalize period-end cancellation because its state changed",
+                    subscription_id,
+                )
+        return finalized
 
     @staticmethod
-    def _generate_renewal_invoice(subscription: Subscription) -> Result[Invoice, str]:
-        """Generate a renewal invoice for a subscription."""
-        try:
-            sequence, _ = InvoiceSequence.objects.get_or_create(scope="default")
-
-            subtotal_cents = subscription.total_price_cents
-            vat_result = TaxService.calculate_vat_for_document(
-                subtotal_cents=subtotal_cents,
-                customer_info=_build_customer_vat_info(subscription.customer),
-            )
-            tax_cents = vat_result.vat_cents
-            total_cents = vat_result.total_cents
-
-            # Create invoice as draft, then issue via FSM
-            invoice = Invoice.objects.create(
-                customer=subscription.customer,
-                number=sequence.get_next_number("INV"),
-                currency=subscription.currency,
-                subtotal_cents=subtotal_cents,
-                tax_cents=tax_cents,
-                total_cents=total_cents,
-                due_at=timezone.now() + timedelta(days=14),
-                bill_to_name=subscription.customer.get_billing_name(),
-                bill_to_email=subscription.customer.primary_email or "",
-                bill_to_country="RO",
-                meta={
-                    "subscription_id": str(subscription.id),
-                    "subscription_number": subscription.subscription_number,
-                    "billing_period_start": subscription.current_period_start.isoformat(),
-                    "billing_period_end": subscription.current_period_end.isoformat(),
-                    "type": "recurring",
-                },
-            )
-
-            # Create invoice line
-            period_desc = f"{subscription.current_period_start.strftime('%Y-%m-%d')} to {subscription.current_period_end.strftime('%Y-%m-%d')}"
-            InvoiceLine.objects.create(
-                invoice=invoice,
-                kind="service",
-                description=f"{subscription.product.name} - {subscription.billing_cycle.title()} ({period_desc})",
-                quantity=Decimal(subscription.quantity),
-                unit_price_cents=subscription.effective_price_cents,
-                tax_rate=(vat_result.vat_rate / Decimal("100")),
-                line_total_cents=total_cents,
-            )
-
-            # Issue via FSM transition — sets issued_at and locked_at
-            invoice.issue()
-            invoice.save()
-
-            return Ok(invoice)
-
-        except Exception as e:
-            logger.exception(f"Failed to generate renewal invoice: {e}")
-            return Err(f"Failed to generate invoice: {e}")
-
-    @staticmethod
-    def _process_payment(subscription: Subscription, invoice: Invoice) -> Result[bool, str]:
-        """Process payment for a subscription invoice via Stripe."""
-        if not subscription.payment_method_id:
-            return Err("No payment method on file")
-
-        logger.info(
-            f"💳 [Payment] Processing payment for invoice {invoice.number} "
-            f"via payment method {subscription.payment_method_id}"
-        )
-
-        # This path passed str(invoice.id) as `order_id`. Invoice is integer-keyed and Order is
-        # UUID-keyed, so the lookup raised `ValidationError: "N" is not a valid UUID`, which the
-        # broad except below turned into a cryptic renewal failure for every subscriber (#209).
-        #
-        # There is no correct value to pass: Invoice has no order FK — a subscription invoice has
-        # no order — and both PaymentService intent APIs are order-centric. Charging a
-        # subscription invoice needs an invoice-based payment intent, which does not exist yet
-        # (tracked separately). Fail explicitly so dunning records a real, actionable error
-        # instead of a UUID parse failure.
-        logger.error(
-            f"🔥 [Payment] Cannot charge subscription invoice {invoice.number}: "
-            f"no invoice-based payment intent API exists"
-        )
-        return Err(
-            "Subscription renewal payment is not implemented: charging a subscription invoice "
-            "requires an invoice-based payment intent; the order-based API cannot be used because "
-            "a subscription invoice has no order (see #209)"
-        )
-
-    @staticmethod
-    def handle_expired_trials() -> int:
-        """
-        Process expired trials - convert or cancel.
-
-        Returns count of trials processed.
-        """
-        now = timezone.now()
+    def handle_expired_trials(as_of: Any = None) -> int:
+        """Cancel trials that reached expiry without a successfully paid renewal."""
+        run_at = as_of or timezone.now()
         count = 0
-
-        expired_trials = Subscription.objects.filter(
+        subscription_ids = Subscription.objects.filter(
             status="trialing",
-            trial_end__lte=now,
-        )
+            trial_end__lte=run_at,
+        ).values_list("id", flat=True)
 
-        for subscription in expired_trials:
+        for subscription_id in subscription_ids:
             try:
-                if subscription.payment_method_id:
-                    # Has payment method - convert to paid
-                    subscription.convert_trial()
-                else:
-                    # No payment method - cancel
-                    subscription.cancel(
-                        reason="non_payment",
-                        at_period_end=False,
-                    )
+                with transaction.atomic():
+                    subscription = Subscription.objects.select_for_update(of=("self",)).get(id=subscription_id)
+                    if (
+                        subscription.status != "trialing"
+                        or subscription.trial_end is None
+                        or subscription.trial_end > run_at
+                    ):
+                        continue
+                    subscription.cancel(reason="non_payment", at_period_end=False)
+                    subscription.ended_at = run_at
+                    subscription.save(update_fields=["ended_at", "updated_at"])
+                    if subscription.service_id is not None:
+                        from apps.provisioning.models import Service  # noqa: PLC0415
+
+                        service = Service.objects.select_for_update(of=("self",)).get(id=subscription.service_id)
+                        if service.status in {"active", "suspended"}:
+                            service.expire()
+                        service.auto_renew = False
+                        service.save(update_fields=["status", "auto_renew", "updated_at"])
                 count += 1
-            except Exception as e:
-                logger.exception(f"Error processing expired trial {subscription.id}: {e}")
+            except Exception:
+                logger.exception("Error expiring unpaid trial %s", subscription_id)
 
         return count
 
     @staticmethod
-    def handle_grace_period_expirations() -> int:
-        """
-        Handle subscriptions with expired grace periods.
-
-        Returns count of subscriptions suspended.
-        """
-        now = timezone.now()
+    def handle_grace_period_expirations(as_of: Any = None) -> int:
+        """Pause or cancel subscriptions whose explicit dunning grace has elapsed."""
+        run_at = as_of or timezone.now()
         count = 0
+        retry_limit = get_max_payment_retries()
+        subscription_ids = Subscription.objects.filter(
+            status__in=["past_due", "paused"],
+            grace_period_ends_at__lte=run_at,
+        ).values_list("id", flat=True)
 
-        expired_grace = Subscription.objects.filter(
-            status="past_due",
-            grace_period_ends_at__lte=now,
-        )
-
-        for subscription in expired_grace:
+        for subscription_id in subscription_ids:
             try:
-                if subscription.failed_payment_count >= MAX_PAYMENT_RETRIES:
-                    # Max retries exceeded - cancel
-                    subscription.cancel(
-                        reason="non_payment",
-                        at_period_end=False,
-                    )
-                else:
-                    # Suspend services but keep subscription — use FSM transition.
-                    subscription._pause_now()
-                    subscription.paused_at = now
-                    subscription.save()
+                with transaction.atomic():
+                    subscription = Subscription.objects.select_for_update(of=("self",)).get(id=subscription_id)
+                    if (
+                        subscription.status not in {"past_due", "paused"}
+                        or subscription.grace_period_ends_at is None
+                        or subscription.grace_period_ends_at > run_at
+                    ):
+                        continue
+                    cancelled = subscription.failed_payment_count >= retry_limit
+                    if cancelled:
+                        subscription.cancel(reason="non_payment", at_period_end=False)
+                    elif subscription.status == "past_due":
+                        subscription._pause_now()
+                        subscription.paused_at = run_at
+                        subscription.save()
+                    else:
+                        continue
+                    if subscription.service_id is not None:
+                        from apps.provisioning.models import Service  # noqa: PLC0415
 
+                        service = Service.objects.select_for_update(of=("self",)).get(id=subscription.service_id)
+                        service_update_fields = []
+                        if cancelled:
+                            service.auto_renew = False
+                            service_update_fields.append("auto_renew")
+                        if service.status == "active":
+                            service.suspend(reason="payment_overdue")
+                            service_update_fields.extend(["status", "suspended_at", "suspension_reason"])
+                        if service_update_fields:
+                            service_update_fields.append("updated_at")
+                            service.save(update_fields=service_update_fields)
                 count += 1
-
                 log_security_event(
-                    event_type="subscription_suspended_nonpayment",
+                    event_type=(
+                        "subscription_cancelled_nonpayment" if cancelled else "subscription_suspended_nonpayment"
+                    ),
                     details={
                         "subscription_id": str(subscription.id),
                         "subscription_number": subscription.subscription_number,
                         "failed_payment_count": subscription.failed_payment_count,
                     },
                 )
-
-            except Exception as e:
-                logger.exception(f"Error handling grace expiration for {subscription.id}: {e}")
+            except Exception:
+                logger.exception("Error handling grace expiration for %s", subscription_id)
 
         return count
 
@@ -1171,12 +803,8 @@ class RecurringBillingService:
 # ===============================================================================
 
 __all__ = [
-    "BillingRunResult",
     "GrandfatheringService",
-    "ProrationResult",
-    "ProrationService",
-    "RecurringBillingService",
-    "SubscriptionChangeData",
     "SubscriptionCreateData",
+    "SubscriptionLifecycleService",
     "SubscriptionService",
 ]

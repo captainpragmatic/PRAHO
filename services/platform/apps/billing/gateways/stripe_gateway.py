@@ -15,7 +15,8 @@ from .base import (
     PaymentGatewayFactory,
     PaymentIntentResult,
     RefundResult,
-    SubscriptionResult,
+    SetupIntentResult,
+    SetupIntentStatusResult,
 )
 
 logger = logging.getLogger(__name__)
@@ -30,11 +31,8 @@ class StripeGateway(BasePaymentGateway):
     """
     💳 Stripe payment gateway implementation
 
-    Features:
-    - Payment Intent creation with Romanian VAT support
-    - Subscription management for recurring billing
-    - Webhook event processing
-    - PCI compliant payment handling
+    Features payment intents, refunds, and webhook handling. PRAHO owns the
+    recurring billing schedule and uses off-session PaymentIntents to collect it.
     """
 
     def __init__(self) -> None:
@@ -112,7 +110,7 @@ class StripeGateway(BasePaymentGateway):
             self.logger.error(f"❌ Stripe configuration invalid: {e}")
             return False
 
-    def create_payment_intent(  # noqa: PLR0913
+    def create_payment_intent(  # noqa: PLR0913  # Mirrors the typed immediate-payment gateway contract
         self,
         order_id: str,
         amount_cents: int,
@@ -160,6 +158,8 @@ class StripeGateway(BasePaymentGateway):
                 payment_intent_params["idempotency_key"] = idempotency_key
 
             # Create payment intent
+            if idempotency_key:
+                payment_intent_params["idempotency_key"] = idempotency_key
             payment_intent = self._stripe.PaymentIntent.create(**payment_intent_params)
 
             self.logger.info(
@@ -202,6 +202,16 @@ class StripeGateway(BasePaymentGateway):
             amount = getattr(payment_intent, "amount_received", None)
             if amount is not None:
                 result["amount_received"] = amount
+            currency = getattr(payment_intent, "currency", None)
+            if currency is not None:
+                result["currency"] = str(currency)
+            customer = getattr(payment_intent, "customer", None)
+            result["customer_id"] = getattr(customer, "id", customer)
+            payment_method = getattr(payment_intent, "payment_method", None)
+            result["payment_method_id"] = getattr(payment_method, "id", payment_method)
+            metadata = getattr(payment_intent, "metadata", None)
+            if metadata is not None:
+                result["metadata"] = dict(metadata)
             return result
 
         except self._stripe.error.StripeError as e:
@@ -211,52 +221,184 @@ class StripeGateway(BasePaymentGateway):
             self.logger.error(f"🔥 Unexpected error confirming payment: {e}")
             return PaymentConfirmResult(success=False, status="error", error=f"Unexpected error: {e}")
 
-    def create_subscription(
-        self, customer_id: str, price_id: str, metadata: dict[str, Any] | None = None
-    ) -> SubscriptionResult:
-        """
-        Create Stripe subscription for recurring billing
-
-        Args:
-            customer_id: Stripe customer ID
-            price_id: Stripe price ID (from Stripe Dashboard or API)
-            metadata: Additional metadata
-
-        Returns:
-            SubscriptionResult with subscription details
-        """
+    def create_setup_intent(
+        self,
+        *,
+        customer_id: str,
+        payment_method_id: str,
+        metadata: dict[str, Any],
+    ) -> SetupIntentResult:
+        """Create an unconfirmed card SetupIntent for browser-driven SCA."""
         try:
-            subscription_params = {
-                "customer": customer_id,
-                "items": [{"price": price_id}],
-                "payment_behavior": "default_incomplete",
-                "payment_settings": {"save_default_payment_method": "on_subscription"},
-                "expand": ["latest_invoice.payment_intent"],
-                "metadata": {"platform": "PRAHO", **(metadata or {})},
-            }
-
-            subscription = self._stripe.Subscription.create(**subscription_params)
-
-            self.logger.info(
-                f"✅ Created Stripe subscription {subscription.id} for customer {customer_id} (price: {price_id})"
+            setup_intent = self._stripe.SetupIntent.create(
+                customer=customer_id,
+                payment_method=payment_method_id,
+                payment_method_types=["card"],
+                usage="off_session",
+                metadata=metadata,
             )
-
-            return SubscriptionResult(
-                success=True, subscription_id=subscription.id, status=subscription.status, error=None
+            return SetupIntentResult(
+                success=True,
+                setup_intent_id=setup_intent.id,
+                client_secret=setup_intent.client_secret,
+                error=None,
             )
-
         except self._stripe.error.StripeError as e:
-            self.logger.error(f"🔥 Stripe subscription creation failed: {e}")
-            return SubscriptionResult(success=False, subscription_id=None, status=None, error=str(e))
+            self.logger.warning("Stripe SetupIntent creation failed for customer %s: %s", customer_id, e)
+            return SetupIntentResult(success=False, setup_intent_id="", client_secret=None, error=str(e))
         except Exception as e:
-            self.logger.error(f"🔥 Unexpected error creating subscription: {e}")
-            return SubscriptionResult(success=False, subscription_id=None, status=None, error=f"Unexpected error: {e}")
+            self.logger.error("Unexpected SetupIntent creation error for customer %s: %s", customer_id, e)
+            return SetupIntentResult(
+                success=False,
+                setup_intent_id="",
+                client_secret=None,
+                error=f"Unexpected error: {e}",
+            )
+
+    def retrieve_setup_intent(self, setup_intent_id: str) -> SetupIntentStatusResult:
+        """Retrieve processor facts after the browser completes card setup."""
+        try:
+            setup_intent = self._stripe.SetupIntent.retrieve(setup_intent_id)
+            customer = getattr(setup_intent, "customer", None)
+            payment_method = getattr(setup_intent, "payment_method", None)
+            return SetupIntentStatusResult(
+                success=True,
+                setup_intent_id=str(setup_intent.id),
+                status=str(setup_intent.status),
+                customer_id=getattr(customer, "id", customer),
+                payment_method_id=getattr(payment_method, "id", payment_method),
+                usage=str(getattr(setup_intent, "usage", "")),
+                metadata=dict(getattr(setup_intent, "metadata", {}) or {}),
+                error=None,
+            )
+        except self._stripe.error.StripeError as e:
+            self.logger.warning("Stripe SetupIntent retrieval failed for %s: %s", setup_intent_id, e)
+            return SetupIntentStatusResult(
+                success=False,
+                setup_intent_id=setup_intent_id,
+                status="error",
+                customer_id=None,
+                payment_method_id=None,
+                usage="",
+                metadata={},
+                error=str(e),
+            )
+        except Exception as e:
+            self.logger.error("Unexpected SetupIntent retrieval error for %s: %s", setup_intent_id, e)
+            return SetupIntentStatusResult(
+                success=False,
+                setup_intent_id=setup_intent_id,
+                status="error",
+                customer_id=None,
+                payment_method_id=None,
+                usage="",
+                metadata={},
+                error=f"Unexpected error: {e}",
+            )
+
+    def create_off_session_payment_intent(  # noqa: PLR0913
+        self,
+        document_id: str,
+        document_type: str,
+        amount_cents: int,
+        currency: str,
+        customer_id: str,
+        payment_method_id: str,
+        metadata: dict[str, Any] | None = None,
+        *,
+        idempotency_key: str,
+    ) -> PaymentIntentResult:
+        """Charge a saved Stripe PaymentMethod for a PRAHO billing document.
+
+        Stripe requires the Customer and PaymentMethod together with
+        off_session and confirm enabled for a server-side renewal attempt.
+        The stable idempotency key prevents duplicate remote intents if PRAHO
+        retries after a timeout or before persisting the local row.
+        """
+        if document_type not in {"invoice", "proforma"}:
+            return PaymentIntentResult(
+                success=False,
+                payment_intent_id="",
+                client_secret=None,
+                error=f"Unsupported billing document type: {document_type}",
+            )
+        try:
+            payment_intent = self._stripe.PaymentIntent.create(
+                amount=amount_cents,
+                currency=currency.lower(),
+                customer=customer_id,
+                payment_method=payment_method_id,
+                off_session=True,
+                confirm=True,
+                metadata={
+                    **(metadata or {}),
+                    f"praho_{document_type}_id": document_id,
+                    "platform": "PRAHO",
+                },
+                statement_descriptor_suffix="PRAHO",
+                idempotency_key=idempotency_key,
+            )
+            self.logger.info(
+                "✅ Created off-session Stripe PaymentIntent %s for %s %s (%s %s)",
+                payment_intent.id,
+                document_type,
+                document_id,
+                amount_cents,
+                currency,
+            )
+            return PaymentIntentResult(
+                success=True,
+                payment_intent_id=payment_intent.id,
+                client_secret=payment_intent.client_secret,
+                error=None,
+            )
+        except (
+            self._stripe.error.APIConnectionError,
+            self._stripe.error.APIError,
+            self._stripe.error.RateLimitError,
+        ) as e:
+            self.logger.warning("⚠️ Transient off-session Stripe error for %s %s: %s", document_type, document_id, e)
+            return PaymentIntentResult(
+                success=False,
+                payment_intent_id="",
+                client_secret=None,
+                error=str(e),
+                retryable=True,
+            )
+        except self._stripe.error.StripeError as e:
+            self.logger.warning("❌ Off-session Stripe payment failed for %s %s: %s", document_type, document_id, e)
+            # A decline still CREATES the PaymentIntent before failing it. Discarding its ID
+            # orphans the failure webhook Stripe will deliver for it — which can then be
+            # recovered onto a LATER retry attempt's pending payment, recording a genuinely
+            # successful charge as failed. Surface the ID so the caller persists it.
+            declined_intent = getattr(getattr(e, "error", None), "payment_intent", None)
+            declined_intent_id = (
+                declined_intent.get("id", "")
+                if isinstance(declined_intent, dict)
+                else getattr(declined_intent, "id", "") or ""
+            )
+            return PaymentIntentResult(
+                success=False,
+                payment_intent_id=declined_intent_id or "",
+                client_secret=None,
+                error=str(e),
+            )
+        except Exception as e:
+            self.logger.error("🔥 Unexpected off-session payment error for %s %s: %s", document_type, document_id, e)
+            return PaymentIntentResult(
+                success=False,
+                payment_intent_id="",
+                client_secret=None,
+                error=f"Unexpected error: {e}",
+            )
 
     def refund_payment(
         self,
         gateway_txn_id: str,
         amount_cents: int | None = None,
         reason: str = "requested_by_customer",
+        *,
+        idempotency_key: str | None = None,
     ) -> RefundResult:
         """
         Create a Stripe Refund for a PaymentIntent.
@@ -273,6 +415,11 @@ class StripeGateway(BasePaymentGateway):
             params: dict[str, Any] = {"payment_intent": gateway_txn_id, "reason": reason}
             if amount_cents is not None:
                 params["amount"] = amount_cents
+            if idempotency_key:
+                # A retry after an uncertain outcome (timeout) must replay the SAME refund,
+                # not create a second one — the key is derived from the payment's ledger
+                # state, so it is stable across retries of the same logical refund.
+                params["idempotency_key"] = idempotency_key
 
             refund = self._stripe.Refund.create(**params)
 
@@ -296,105 +443,6 @@ class StripeGateway(BasePaymentGateway):
             return RefundResult(
                 success=False, refund_id=None, amount_refunded_cents=0, status="error", error=f"Unexpected error: {e}"
             )
-
-    def cancel_subscription(self, subscription_id: str) -> bool:
-        """
-        Cancel Stripe subscription
-
-        Args:
-            subscription_id: Stripe subscription ID
-
-        Returns:
-            True if cancelled successfully
-        """
-        try:
-            self._stripe.Subscription.cancel(subscription_id)
-
-            self.logger.info(f"✅ Cancelled Stripe subscription {subscription_id}")
-            return True
-
-        except self._stripe.error.StripeError as e:
-            self.logger.error(f"🔥 Failed to cancel subscription {subscription_id}: {e}")
-            return False
-        except Exception as e:
-            self.logger.error(f"🔥 Unexpected error cancelling subscription: {e}")
-            return False
-
-    def handle_webhook_event(self, event_type: str, event_data: dict[str, Any]) -> tuple[bool, str]:
-        """
-        Handle Stripe webhook events
-
-        This method provides basic event handling. The existing webhook processor
-        in apps.integrations.webhooks.stripe provides more comprehensive handling.
-
-        Args:
-            event_type: Stripe event type (e.g., 'payment_intent.succeeded')
-            event_data: Event payload data
-
-        Returns:
-            (success, message) tuple
-        """
-        try:
-            if event_type.startswith("payment_intent."):
-                return self._handle_payment_intent_webhook(event_type, event_data)
-            elif event_type.startswith("invoice."):
-                return self._handle_invoice_webhook(event_type, event_data)
-            elif event_type.startswith("customer.subscription."):
-                return self._handle_subscription_webhook(event_type, event_data)
-            else:
-                self.logger.info(f"⏭️ Unhandled webhook event type: {event_type}")
-                return True, f"Unhandled event type: {event_type}"
-
-        except Exception as e:
-            self.logger.error(f"🔥 Error handling webhook event {event_type}: {e}")
-            return False, f"Error: {e}"
-
-    def _handle_payment_intent_webhook(self, event_type: str, event_data: dict[str, Any]) -> tuple[bool, str]:
-        """Handle payment_intent.* webhook events"""
-        payment_intent = event_data.get("object", {})
-        payment_intent_id = payment_intent.get("id")
-
-        if event_type == "payment_intent.succeeded":
-            self.logger.info(f"💰 Payment succeeded: {payment_intent_id}")
-            # Update payment status in database would happen here
-            # This is handled by the existing webhook processor
-            return True, f"Payment succeeded: {payment_intent_id}"
-
-        elif event_type == "payment_intent.payment_failed":
-            self.logger.warning(f"❌ Payment failed: {payment_intent_id}")
-            return True, f"Payment failed: {payment_intent_id}"
-
-        return True, f"Payment intent event: {event_type}"
-
-    def _handle_invoice_webhook(self, event_type: str, event_data: dict[str, Any]) -> tuple[bool, str]:
-        """Handle invoice.* webhook events"""
-        invoice = event_data.get("object", {})
-        invoice_id = invoice.get("id")
-
-        if event_type == "invoice.payment_succeeded":
-            self.logger.info(f"🧾 Invoice payment succeeded: {invoice_id}")
-            return True, f"Invoice payment succeeded: {invoice_id}"
-
-        elif event_type == "invoice.payment_failed":
-            self.logger.warning(f"📋 Invoice payment failed: {invoice_id}")
-            return True, f"Invoice payment failed: {invoice_id}"
-
-        return True, f"Invoice event: {event_type}"
-
-    def _handle_subscription_webhook(self, event_type: str, event_data: dict[str, Any]) -> tuple[bool, str]:
-        """Handle customer.subscription.* webhook events"""
-        subscription = event_data.get("object", {})
-        subscription_id = subscription.get("id")
-
-        if event_type == "customer.subscription.created":
-            self.logger.info(f"🔄 Subscription created: {subscription_id}")
-            return True, f"Subscription created: {subscription_id}"
-
-        elif event_type == "customer.subscription.deleted":
-            self.logger.info(f"🗑️ Subscription cancelled: {subscription_id}")
-            return True, f"Subscription cancelled: {subscription_id}"
-
-        return True, f"Subscription event: {event_type}"
 
 
 # ===============================================================================

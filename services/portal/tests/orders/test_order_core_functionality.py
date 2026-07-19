@@ -174,14 +174,15 @@ class TestOrderInputValidation(SimpleTestCase):
         """Test billing period validation"""
 
         # Valid billing periods
-        valid_periods = ['monthly', 'quarterly', 'semiannual', 'annual', 'biennial', 'triennial']
+        valid_periods = ['monthly', 'semiannual', 'annual']
         for period in valid_periods:
             result = OrderInputValidator.validate_billing_period(period)
             self.assertEqual(result, period)
 
-        # Invalid billing period should raise error
-        with self.assertRaises(Exception):
-            OrderInputValidator.validate_billing_period('invalid')
+        # Periods without ProductPrice support must fail at the portal boundary.
+        for period in ['quarterly', 'yearly', 'biennial', 'triennial', 'invalid']:
+            with self.subTest(period=period), self.assertRaises(ValidationError):
+                OrderInputValidator.validate_billing_period(period)
 
 
 class TestOrderServiceIntegration(SimpleTestCase):

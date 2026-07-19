@@ -4,12 +4,8 @@ Comprehensive tests for apps/billing/tasks.py.
 Covers all core task functions, async wrappers, and recurring billing tasks
 to achieve 90%+ coverage of the tasks module.
 
-NOTE: tasks.py references ``invoice.due_date`` in a few places, but the
-Invoice model only exposes ``due_at``.  Those code paths therefore trigger
-an AttributeError that is caught by the generic ``except Exception`` handler,
-returning ``{"success": False, ...}``.  The relevant tests assert the
-*actual* behaviour (failure) rather than the intended behaviour, so that
-the suite reflects reality and will catch if the bug is later fixed.
+The suite pins the single PRAHO-owned renewal orchestrator plus reminder,
+dunning, retry, and non-renewal lifecycle task boundaries.
 """
 
 from __future__ import annotations
@@ -76,12 +72,10 @@ from ._billing_service_task_cases import (
     InvoiceRefundViewTests,
     PaymentCollectionRetryTests,
     PaymentRetryServiceTests,
-    ProcessRecurringBillingTests,
     ProformaConversionServiceTests,
     ProformaModelConvertTests,
     SendPaymentReminderHelperTests,
     SubmitEfacturaTaskTests,
-    SubscriptionProcessPaymentTests,
     UsageAlertEmailTests,
 )
 
@@ -95,12 +89,10 @@ _IMPORTED_TASK_CASES = (
     InvoiceRefundViewTests,
     PaymentCollectionRetryTests,
     PaymentRetryServiceTests,
-    ProcessRecurringBillingTests,
     ProformaConversionServiceTests,
     ProformaModelConvertTests,
     SendPaymentReminderHelperTests,
     SubmitEfacturaTaskTests,
-    SubscriptionProcessPaymentTests,
     UsageAlertEmailTests,
 )
 
@@ -187,9 +179,11 @@ class GetTaskMaxRetriesTests(TestCase):
 class SubmitEfacturaTests(TestCase):
     """Tests for submit_efactura()."""
 
+    @patch("apps.billing.efactura.service.EFacturaService")
     @patch("apps.audit.services.AuditService.log_simple_event")
-    def test_success(self, mock_audit: MagicMock) -> None:
+    def test_success(self, mock_audit: MagicMock, mock_service: MagicMock) -> None:
         invoice = _make_invoice(status="issued")
+        mock_service.return_value.submit_invoice.return_value = MagicMock(success=True, error_message="")
         result = submit_efactura(str(invoice.id))
 
         self.assertTrue(result["success"])
@@ -230,33 +224,28 @@ class SubmitEfacturaTests(TestCase):
 
 
 class SchedulePaymentRemindersTests(TestCase):
-    """Tests for schedule_payment_reminders().
+    """Tests for schedule_payment_reminders()."""
 
-    NOTE: The current task code references ``invoice.due_date`` in metadata
-    construction (line 134 of tasks.py), but the Invoice model only has
-    ``due_at``.  This causes an AttributeError caught by the generic handler,
-    so the issued-invoice success paths currently return ``success=False``.
-    Tests reflect this reality.
-    """
-
+    @patch("apps.billing.tasks.async_task")
     @patch("apps.audit.services.AuditService.log_simple_event")
-    def test_issued_invoice_raises_attribute_error_on_due_date(
-        self, mock_audit: MagicMock
+    def test_issued_invoice_schedules_three_future_reminders(
+        self,
+        mock_audit: MagicMock,
+        mock_async: MagicMock,
     ) -> None:
-        """tasks.py uses invoice.due_date which does not exist → caught exception."""
-        invoice = _make_invoice(status="issued")
+        invoice = _make_invoice(status="issued", due_days=14)
         result = schedule_payment_reminders(str(invoice.id))
 
-        # AttributeError is caught by generic handler → success=False
-        self.assertFalse(result["success"])
-        self.assertIn("due_date", result["error"])
+        self.assertTrue(result["success"], result)
+        self.assertEqual(mock_async.call_count, 3)
+        last_call = _last_audit_call_kwargs(mock_audit)
+        self.assertEqual(last_call["metadata"]["due_at"], invoice.due_at.isoformat())
 
     @patch("apps.audit.services.AuditService.log_simple_event")
     def test_skips_non_pending_invoice(self, mock_audit: MagicMock) -> None:
         invoice = _make_invoice(status="paid")
         result = schedule_payment_reminders(str(invoice.id))
 
-        # The early-return path fires before the due_date bug
         self.assertTrue(result["success"])
         self.assertIn("non-pending", result["message"])
 
@@ -319,38 +308,40 @@ class CancelPaymentRemindersTests(TestCase):
 
 
 class StartDunningProcessTests(TestCase):
-    """Tests for start_dunning_process().
+    """Tests for start_dunning_process()."""
 
-    NOTE: tasks.py accesses ``invoice.due_date`` for metadata (does not exist
-    on Invoice; only ``due_at`` exists).  The overdue/issued paths therefore
-    hit the AttributeError which is caught by the generic handler.
-    """
-
+    @patch("apps.notifications.services.EmailService.send_payment_reminder")
     @patch("apps.audit.services.AuditService.log_simple_event")
-    def test_overdue_invoice_raises_attribute_error_on_due_date(
-        self, mock_audit: MagicMock
+    def test_overdue_invoice_starts_email_dunning_with_due_at(
+        self,
+        mock_audit: MagicMock,
+        mock_email: MagicMock,
     ) -> None:
         invoice = _make_invoice(status="overdue", due_days=-10)
         result = start_dunning_process(str(invoice.id))
 
-        self.assertFalse(result["success"])
-        self.assertIn("due_date", result["error"])
+        self.assertTrue(result["success"], result)
+        mock_email.assert_called_once_with(invoice)
+        last_call = _last_audit_call_kwargs(mock_audit)
+        self.assertEqual(last_call["metadata"]["days_overdue"], 10)
 
+    @patch("apps.notifications.services.EmailService.send_payment_reminder")
     @patch("apps.audit.services.AuditService.log_simple_event")
-    def test_issued_invoice_raises_attribute_error_on_due_date(
-        self, mock_audit: MagicMock
+    def test_issued_overdue_invoice_starts_dunning(
+        self,
+        mock_audit: MagicMock,
+        _mock_email: MagicMock,
     ) -> None:
         invoice = _make_invoice(status="issued", due_days=-1)
         result = start_dunning_process(str(invoice.id))
 
-        self.assertFalse(result["success"])
+        self.assertTrue(result["success"], result)
 
     @patch("apps.audit.services.AuditService.log_simple_event")
     def test_skips_paid_invoice(self, mock_audit: MagicMock) -> None:
         invoice = _make_invoice(status="paid")
         result = start_dunning_process(str(invoice.id))
 
-        # Early-return path fires before the due_date bug
         self.assertTrue(result["success"])
         self.assertIn("non-overdue", result["message"])
 
@@ -463,16 +454,14 @@ class ProcessAutoPaymentTests(TestCase):
     """Tests for process_auto_payment()."""
 
     @patch("apps.audit.services.AuditService.log_simple_event")
-    def test_success_for_issued_invoice(self, mock_audit: MagicMock) -> None:
+    def test_rejects_issued_invoice_without_recurring_authority(self, mock_audit: MagicMock) -> None:
         invoice = _make_invoice(status="issued")
+        mock_audit.reset_mock()
         result = process_auto_payment(str(invoice.id))
 
-        self.assertTrue(result["success"])
-        self.assertIn("Auto-payment", result["message"])
-        # The implementation emits auto_payment_{outcome}; without an order_id
-        # linked the outcome is "failed" (no payment intent created).
-        last_call = _last_audit_call_kwargs(mock_audit)
-        self.assertTrue(last_call["event_type"].startswith("auto_payment_"))
+        self.assertFalse(result["success"])
+        self.assertIn("authorized recurring payment method", result["error"])
+        mock_audit.assert_not_called()
 
     @patch("apps.audit.services.AuditService.log_simple_event")
     def test_skips_non_pending_invoice(self, mock_audit: MagicMock) -> None:
@@ -489,15 +478,9 @@ class ProcessAutoPaymentTests(TestCase):
 
         self.assertFalse(result["success"])
 
-    @patch("apps.audit.services.AuditService.log_simple_event")
-    def test_generic_exception_returns_error(self, mock_audit: MagicMock) -> None:
-        def _raise_on_autopay(*args: object, **kwargs: object) -> None:
-            if str(kwargs.get("event_type", "")).startswith("auto_payment_"):
-                raise RuntimeError("payment gateway down")
-
-        mock_audit.side_effect = _raise_on_autopay
-        invoice = _make_invoice(status="issued")
-        result = process_auto_payment(str(invoice.id))
+    @patch("apps.billing.tasks.Invoice.objects.get", side_effect=RuntimeError("payment gateway down"))
+    def test_generic_exception_returns_error(self, _mock_get: MagicMock) -> None:
+        result = process_auto_payment(str(uuid.uuid4()))
 
         self.assertFalse(result["success"])
         self.assertIn("payment gateway down", result["error"])
@@ -636,13 +619,16 @@ class AsyncWrapperTests(TestCase):
 # run_daily_billing tests
 # ---------------------------------------------------------------------------
 
-_BILLING_RUN_RESULT: dict[str, object] = {
-    "subscriptions_processed": 5,
-    "invoices_created": 3,
-    "payments_attempted": 3,
-    "payments_succeeded": 2,
+_PREPARATION_RESULT: dict[str, object] = {
+    "subscriptions_checked": 5,
+    "cycles_prepared": 3,
+    "proformas_created": 3,
+    "errors": [],
+}
+_COLLECTION_RESULT: dict[str, object] = {
+    "proformas_checked": 3,
+    "payments_created": 2,
     "payments_failed": 1,
-    "total_billed_cents": 150000,
     "errors": [],
 }
 
@@ -652,24 +638,45 @@ class RunDailyBillingTests(TestCase):
 
     @patch("apps.audit.services.AuditService.log_simple_event")
     @patch(
-        "apps.billing.subscription_service.RecurringBillingService.run_billing_cycle",
-        return_value=_BILLING_RUN_RESULT,
+        "apps.billing.recurring_billing.RecurringBillingOrchestrator.mark_overdue_renewals",
+        return_value=4,
     )
-    def test_success(self, mock_cycle: MagicMock, mock_audit: MagicMock) -> None:
+    @patch("apps.billing.recurring_billing.RecurringBillingOrchestrator.collect_due_proformas")
+    @patch("apps.billing.recurring_billing.RecurringBillingOrchestrator.prepare_due_proformas")
+    @patch(
+        "apps.billing.subscription_service.SubscriptionLifecycleService.finalize_period_end_cancellations",
+        return_value=2,
+    )
+    def test_success(
+        self,
+        mock_finalize: MagicMock,
+        mock_prepare: MagicMock,
+        mock_collect: MagicMock,
+        mock_mark_overdue: MagicMock,
+        mock_audit: MagicMock,
+    ) -> None:
+        mock_prepare.return_value = _PREPARATION_RESULT
+        mock_collect.return_value = _COLLECTION_RESULT
         result = run_daily_billing()
 
         self.assertTrue(result["success"])
-        self.assertEqual(result["result"], _BILLING_RUN_RESULT)
-        self.assertIn("3 invoices", result["message"])
-        mock_cycle.assert_called_once()
+        self.assertEqual(result["result"]["preparation"], _PREPARATION_RESULT)
+        self.assertEqual(result["result"]["collection"], _COLLECTION_RESULT)
+        self.assertEqual(result["result"]["cancellations_finalized"], 2)
+        self.assertEqual(result["result"]["renewals_marked_overdue"], 4)
+        self.assertIn("3 proformas", result["message"])
+        mock_finalize.assert_called_once_with()
+        mock_prepare.assert_called_once_with()
+        mock_collect.assert_called_once_with()
+        mock_mark_overdue.assert_called_once_with()
         last_call = _last_audit_call_kwargs(mock_audit)
         self.assertEqual(last_call["event_type"], "daily_billing_completed")
 
     @patch(
-        "apps.billing.subscription_service.RecurringBillingService.run_billing_cycle",
+        "apps.billing.recurring_billing.RecurringBillingOrchestrator.prepare_due_proformas",
         side_effect=RuntimeError("DB connection lost"),
     )
-    def test_exception_returns_error(self, mock_cycle: MagicMock) -> None:
+    def test_exception_returns_error(self, mock_prepare: MagicMock) -> None:
         result = run_daily_billing()
 
         self.assertFalse(result["success"])
@@ -677,14 +684,23 @@ class RunDailyBillingTests(TestCase):
 
     @patch("apps.audit.services.AuditService.log_simple_event")
     @patch(
-        "apps.billing.subscription_service.RecurringBillingService.run_billing_cycle",
-        return_value={**_BILLING_RUN_RESULT, "errors": ["err"] * 20},
+        "apps.billing.recurring_billing.RecurringBillingOrchestrator.mark_overdue_renewals",
+        return_value=0,
     )
+    @patch("apps.billing.recurring_billing.RecurringBillingOrchestrator.collect_due_proformas")
+    @patch("apps.billing.recurring_billing.RecurringBillingOrchestrator.prepare_due_proformas")
     def test_errors_truncated_to_10_in_metadata(
-        self, mock_cycle: MagicMock, mock_audit: MagicMock
+        self,
+        mock_prepare: MagicMock,
+        mock_collect: MagicMock,
+        _mock_mark_overdue: MagicMock,
+        mock_audit: MagicMock,
     ) -> None:
-        run_daily_billing()
+        mock_prepare.return_value = {**_PREPARATION_RESULT, "errors": ["err"] * 20}
+        mock_collect.return_value = _COLLECTION_RESULT
+        result = run_daily_billing()
 
+        self.assertFalse(result["success"])
         last_call = _last_audit_call_kwargs(mock_audit)
         self.assertLessEqual(len(last_call["metadata"]["errors"]), 10)
 
@@ -699,7 +715,7 @@ class ProcessExpiredTrialsTests(TestCase):
 
     @patch("apps.audit.services.AuditService.log_simple_event")
     @patch(
-        "apps.billing.subscription_service.RecurringBillingService.handle_expired_trials",
+        "apps.billing.subscription_service.SubscriptionLifecycleService.handle_expired_trials",
         return_value=4,
     )
     def test_success(self, mock_handle: MagicMock, mock_audit: MagicMock) -> None:
@@ -713,7 +729,7 @@ class ProcessExpiredTrialsTests(TestCase):
         self.assertEqual(last_call["metadata"]["trials_processed"], 4)
 
     @patch(
-        "apps.billing.subscription_service.RecurringBillingService.handle_expired_trials",
+        "apps.billing.subscription_service.SubscriptionLifecycleService.handle_expired_trials",
         side_effect=Exception("service unavailable"),
     )
     def test_exception_returns_error(self, mock_handle: MagicMock) -> None:
@@ -724,7 +740,7 @@ class ProcessExpiredTrialsTests(TestCase):
 
     @patch("apps.audit.services.AuditService.log_simple_event")
     @patch(
-        "apps.billing.subscription_service.RecurringBillingService.handle_expired_trials",
+        "apps.billing.subscription_service.SubscriptionLifecycleService.handle_expired_trials",
         return_value=0,
     )
     def test_zero_trials_processed(self, mock_handle: MagicMock, mock_audit: MagicMock) -> None:
@@ -744,7 +760,7 @@ class ProcessGracePeriodExpirationsTests(TestCase):
 
     @patch("apps.audit.services.AuditService.log_simple_event")
     @patch(
-        "apps.billing.subscription_service.RecurringBillingService.handle_grace_period_expirations",
+        "apps.billing.subscription_service.SubscriptionLifecycleService.handle_grace_period_expirations",
         return_value=2,
     )
     def test_success(self, mock_handle: MagicMock, mock_audit: MagicMock) -> None:
@@ -757,7 +773,7 @@ class ProcessGracePeriodExpirationsTests(TestCase):
         self.assertEqual(last_call["event_type"], "grace_periods_processed")
 
     @patch(
-        "apps.billing.subscription_service.RecurringBillingService.handle_grace_period_expirations",
+        "apps.billing.subscription_service.SubscriptionLifecycleService.handle_grace_period_expirations",
         side_effect=Exception("timeout"),
     )
     def test_exception_returns_error(self, mock_handle: MagicMock) -> None:
@@ -768,7 +784,7 @@ class ProcessGracePeriodExpirationsTests(TestCase):
 
     @patch("apps.audit.services.AuditService.log_simple_event")
     @patch(
-        "apps.billing.subscription_service.RecurringBillingService.handle_grace_period_expirations",
+        "apps.billing.subscription_service.SubscriptionLifecycleService.handle_grace_period_expirations",
         return_value=0,
     )
     def test_zero_expirations(self, mock_handle: MagicMock, mock_audit: MagicMock) -> None:
@@ -1071,6 +1087,38 @@ class RunPaymentCollectionTests(TestCase):
         run = PaymentCollectionRun.objects.get(id=result["run_id"])
         self.assertEqual(run.total_scheduled, 1)
 
+    @patch("apps.billing.tasks._execute_payment_retry")
+    @patch("apps.billing.tasks._claim_payment_retry", return_value=False)
+    def test_retry_lost_to_another_worker_is_not_charged_twice(
+        self,
+        _mock_claim: MagicMock,
+        mock_execute: MagicMock,
+    ) -> None:
+        customer = create_customer()
+        currency = create_currency()
+        invoice = create_invoice(customer=customer, currency=currency)
+        payment = create_payment(
+            PaymentCreationRequest(
+                customer=customer,
+                invoice=invoice,
+                currency=currency,
+                status="failed",
+            )
+        )
+        PaymentRetryAttempt.objects.create(
+            payment=payment,
+            policy=_make_retry_policy(),
+            attempt_number=1,
+            scheduled_at=timezone.now() - timedelta(minutes=1),
+            status="pending",
+        )
+
+        result = run_payment_collection()
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["total_processed"], 0)
+        mock_execute.assert_not_called()
+
     @patch("apps.billing.payment_service.PaymentService.confirm_payment")
     def test_collection_does_not_count_success_when_fsm_transition_fails(self, mock_confirm_payment: MagicMock) -> None:
         """A failed payment cannot transition to succeeded, so run metrics must not report a recovery."""
@@ -1111,8 +1159,10 @@ class RunPaymentCollectionTests(TestCase):
         self.assertEqual(payment.status, "failed")
 
     @patch("apps.billing.payment_service.PaymentService.confirm_payment")
-    def test_collection_succeeds_for_pending_payment(self, mock_confirm_payment: MagicMock) -> None:
-        """A pending payment should transition to succeeded and count as a successful recovery."""
+    def test_collection_does_not_reconfirm_original_pending_payment(
+        self, mock_confirm_payment: MagicMock
+    ) -> None:
+        """A retry without an authorized subscription method must fail closed."""
         mock_confirm_payment.return_value = {"success": True, "status": "succeeded"}
 
         customer = create_customer()
@@ -1142,11 +1192,13 @@ class RunPaymentCollectionTests(TestCase):
         result = run_payment_collection()
 
         run = PaymentCollectionRun.objects.get(id=result["run_id"])
-        self.assertEqual(run.total_successful, 1)
-        self.assertEqual(result["successful"], 1)
+        self.assertEqual(run.total_successful, 0)
+        self.assertEqual(result["successful"], 0)
+        self.assertEqual(result["failed"], 1)
+        mock_confirm_payment.assert_not_called()
 
         payment.refresh_from_db()
-        self.assertEqual(payment.status, "succeeded")
+        self.assertEqual(payment.status, "pending")
 
     @patch("apps.billing.payment_models.PaymentCollectionRun.objects.create")
     def test_outer_exception_returns_error(self, mock_create: MagicMock) -> None:

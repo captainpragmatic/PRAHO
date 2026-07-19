@@ -96,10 +96,6 @@ class BillingStaffSessionBypassTests(TestCase):
         response = self._make_staff_request("/billing/confirm-payment/")
         self.assertEqual(response.status_code, 401)
 
-    def test_staff_cannot_access_create_subscription_without_hmac(self) -> None:
-        response = self._make_staff_request("/billing/create-subscription/")
-        self.assertEqual(response.status_code, 401)
-
     def test_staff_cannot_access_stripe_config_without_hmac(self) -> None:
         response = self._make_staff_request("/billing/stripe-config/")
         self.assertEqual(response.status_code, 401)

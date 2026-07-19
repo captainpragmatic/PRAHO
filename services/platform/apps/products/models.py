@@ -448,17 +448,18 @@ class ProductPrice(models.Model):
         return Decimal(self.setup_cents) / 100
 
     def get_price_for_period(self, billing_period: str) -> Decimal:
-        """Calculate price for a specific billing period with discounts applied"""
+        """Calculate the promotion-aware price for a billing period with discounts applied."""
+        effective_monthly_price = self.effective_monthly_price
         if billing_period == "monthly":
-            return self.monthly_price
+            return effective_monthly_price
         elif billing_period == "semiannual":
-            base_price = self.monthly_price * 6
+            base_price = effective_monthly_price * 6
             if self.semiannual_discount_percent > 0:
                 discount_amount = base_price * (self.semiannual_discount_percent / 100)
                 return base_price - discount_amount
             return base_price
         elif billing_period == "annual":
-            base_price = self.monthly_price * 12
+            base_price = effective_monthly_price * 12
             if self.annual_discount_percent > 0:
                 discount_amount = base_price * (self.annual_discount_percent / 100)
                 return base_price - discount_amount
@@ -493,7 +494,7 @@ class ProductPrice(models.Model):
     @property
     def effective_monthly_price_cents(self) -> int:
         """Get effective monthly price considering promotions"""
-        if self.promo_price_cents and self.promo_valid_until and timezone.now() <= self.promo_valid_until:
+        if self.promo_price_cents is not None and self.promo_valid_until and timezone.now() <= self.promo_valid_until:
             return self.promo_price_cents
         return self.monthly_price_cents
 

@@ -33,6 +33,33 @@ Handles order lifecycle, Romanian VAT compliance, and integration with billing/p
 UserModel = get_user_model()
 logger = logging.getLogger(__name__)
 
+_ORDER_PERIOD_ALIASES = {"semi_annual": "semiannual", "yearly": "annual"}
+_ORDER_PERIOD_TO_SERVICE_CYCLE = {
+    "monthly": "monthly",
+    "quarterly": "quarterly",
+    "semiannual": "semi_annual",
+    "annual": "annual",
+    # Service requires a cycle value even when the item is explicitly one-time.
+    "once": "monthly",
+}
+_ORDER_PERIOD_TO_SUBSCRIPTION_CYCLE = {
+    "monthly": "monthly",
+    "quarterly": "quarterly",
+    "semiannual": "semi_annual",
+    "annual": "yearly",
+}
+
+
+def _order_item_billing_period(item: Any) -> str:
+    """Return the canonical paid billing-period snapshot for an order item."""
+    config = item.config if isinstance(item.config, dict) else {}
+    period = str(config.get("billing_period") or config.get("billing_cycle") or "monthly")
+    period = _ORDER_PERIOD_ALIASES.get(period, period)
+    if period not in _ORDER_PERIOD_TO_SERVICE_CYCLE:
+        raise ValueError(f"Unsupported order item billing period: {period}")
+    return period
+
+
 # ===============================================================================
 # ORDER SERVICE PARAMETER OBJECTS
 # ===============================================================================
@@ -59,6 +86,7 @@ class OrderItemData(TypedDict, total=False):
     quantity: int
     unit_price_cents: int
     setup_cents: int
+    billing_period: str
     description: str
     meta: dict[str, Any]
 
@@ -366,7 +394,11 @@ class OrderService:
                 idempotency_key=data.idempotency_key,
                 # Customer snapshot fields
                 customer_email=data.customer.primary_email,
-                customer_name=data.customer.name,
+                # The snapshot is what invoices bill from now on: capture the LEGAL billing
+                # identity (registered/trading name first, per Customer.get_billing_name),
+                # not the internal label — an individual/PFA with a registered trading name
+                # must be invoiced under it (#211).
+                customer_name=data.customer.get_billing_name(),
                 customer_company=data.customer.company_name or "",
                 customer_vat_id=getattr(data.customer.tax_profile, "vat_number", "")
                 if hasattr(data.customer, "tax_profile")
@@ -449,6 +481,14 @@ class OrderService:
                 # on Service.order_items (#223). Stringified because django-stubs' FK-id
                 # setter union does not include UUID; Django adapts it back at the DB layer.
                 service_id = item_data.get("service_id")
+                billing_period = item_data.get("billing_period", "monthly")
+                if billing_period not in OrderItem.BILLING_PERIOD_CHOICES:
+                    raise ValueError(f"Unsupported order item billing period: {billing_period}")
+
+                # OrderItem stores the period in config. Override any client-supplied config value
+                # with the validated top-level field so the amount and persisted period cannot diverge.
+                item_config = dict(item_data.get("meta") or {})
+                item_config["billing_period"] = billing_period
                 OrderItem.objects.create(
                     order=order,
                     product_id=product_id,
@@ -461,7 +501,7 @@ class OrderService:
                     line_total_cents=line_total_cents,
                     product_name=item_data["description"],
                     product_type="hosting",  # Default type
-                    config=item_data.get("meta", {}),
+                    config=item_config,
                 )
 
             # After creating items, ensure order totals are consistent with item data (includes setup fees)
@@ -500,10 +540,25 @@ class OrderService:
 
     @staticmethod
     @transaction.atomic
-    def update_order_status(order: Order, status_data: StatusChangeData) -> Result[Order, str]:  # noqa: PLR0911
+    def update_order_status(  # noqa: C901, PLR0911, PLR0912  # Explicit FSM, billing, and provisioning guards
+        order: Order, status_data: StatusChangeData
+    ) -> Result[Order, str]:
         """Update order status via FSM transition with validation and audit trail."""
         try:
+            from .models import Order as OrderModel  # noqa: PLC0415
+
+            order = OrderModel.objects.select_for_update(of=("self",)).get(pk=order.pk)
             old_status = order.status
+
+            if status_data.new_status == "cancelled" and order.proforma_id is not None:
+                from apps.billing.payment_models import Payment  # noqa: PLC0415
+
+                if Payment.objects.filter(
+                    proforma_id=order.proforma_id,
+                    payment_method="stripe",
+                    status="pending",
+                ).exists():
+                    return Err("Order has an unresolved card payment and cannot be cancelled")
 
             # Enforce preflight validation on draft → awaiting_payment
             if old_status == "draft" and status_data.new_status == "awaiting_payment":
@@ -544,6 +599,14 @@ class OrderService:
                 return Err(f"Concurrent modification on order {order.order_number} — please retry")
             except TransitionNotAllowed:
                 return Err(f"Invalid status transition from {old_status} to {status_data.new_status}")
+
+            if status_data.new_status == "provisioning":
+                enrollment = OrderServiceCreationService.update_service_status_on_payment(order)
+                if enrollment.is_err():
+                    transaction.set_rollback(True)
+                    return Err(
+                        f"Cannot transition to provisioning: recurring enrollment failed: {enrollment.unwrap_err()}"
+                    )
 
             # Phase B: Create proforma when order transitions to awaiting_payment.
             # Per F3: MUST be inside the same transaction, NOT in on_commit callback.
@@ -662,19 +725,20 @@ class OrderServiceCreationService:
 
             logger.info(f"🔧 [ServiceCreation] Creating pending services for order {order.order_number}")
 
-            for item in order.items.all():
+            items = order.items.select_for_update(of=("self",)).select_related("product")
+            for item in items:
                 # Skip if service already exists for this item
-                if item.service:
+                if item.service_id:
                     logger.info(f"🔧 [ServiceCreation] Service already exists for item {item.id}, skipping")
                     continue
 
                 # Map product to service plan
                 service_plan_result = OrderServiceCreationService._get_service_plan_for_product(item.product)
                 if service_plan_result.is_err():
-                    logger.warning(
-                        f"⚠️ [ServiceCreation] Could not map product to service plan: {service_plan_result.error}"  # type: ignore[union-attr]
-                    )
-                    continue
+                    error = service_plan_result.unwrap_err()
+                    logger.error("🔥 [ServiceCreation] Could not map product to service plan: %s", error)
+                    transaction.set_rollback(True)
+                    return Err(f"Could not map product to service plan: {error}")
 
                 service_plan = service_plan_result.unwrap()
 
@@ -683,10 +747,10 @@ class OrderServiceCreationService:
                 if item.domain_name:
                     service_name = f"{item.product_name} - {item.domain_name}"
 
-                # Extract billing cycle from item config or use monthly as default
-                billing_cycle = item.config.get("billing_cycle", "monthly")
-                if billing_cycle not in ["monthly", "quarterly", "annual"]:
-                    billing_cycle = "monthly"
+                # create_order validates the top-level period and forces it into config,
+                # so the config-derived read below is server-authoritative for new orders.
+                billing_period = _order_item_billing_period(item)
+                billing_cycle = _ORDER_PERIOD_TO_SERVICE_CYCLE[billing_period]
 
                 # Generate unique username (will be updated during provisioning) (#130/M7)
                 username = f"tmp_{uuid.uuid4().hex[:12]}"
@@ -701,6 +765,7 @@ class OrderServiceCreationService:
                     username=username,  # Temporary unique username
                     billing_cycle=billing_cycle,
                     price=item.unit_price,  # Already converted from cents by property
+                    auto_renew=billing_period != "once",
                     status="pending",  # Key status - visible to customer
                     # Link to order for tracking
                     admin_notes=f"Created from order {order.order_number}",
@@ -742,6 +807,7 @@ class OrderServiceCreationService:
             logger.exception(
                 f"🔥 [ServiceCreation] Failed to create pending services for order {order.order_number}: {e}"
             )
+            transaction.set_rollback(True)
             return Err(f"Failed to create pending services: {e}")
 
     @staticmethod
@@ -817,15 +883,74 @@ class OrderServiceCreationService:
         Returns:
             Result containing list of updated services or error message
         """
+        if order.status != "provisioning":
+            return Err(
+                f"Cannot enroll services for order {order.order_number} from status {order.status}; "
+                "payment confirmation and review approval are required"
+            )
+
         try:
             with transaction.atomic():
-                service_ids = (
-                    order.items.exclude(service_id__isnull=True).values_list("service_id", flat=True).distinct()
-                )
-                services = Service.objects.select_for_update(of=("self",)).filter(pk__in=service_ids).order_by("pk")
+                from apps.billing.subscription_service import SubscriptionService  # noqa: PLC0415
+
                 updated_services = []
 
-                for service in services:
+                items_query = order.items.select_for_update(of=("self",)).select_related("product")
+                items = list(items_query)
+                if any(item.service_id is None for item in items):
+                    creation_result = OrderServiceCreationService.create_pending_services(order)
+                    if creation_result.is_err():
+                        raise ValueError(
+                            f"Cannot create missing services for paid order: {creation_result.unwrap_err()}"
+                        )
+                    # QuerySet evaluation above cached the pre-creation rows. Clone it so
+                    # the newly linked services are read back under the same row locks.
+                    items = list(items_query.all())
+
+                # #294: lock every service in ONE statement ordered by pk. Locking per item
+                # in iteration order can deadlock against paths that lock the same rows in
+                # pk order (the recurring-collection and renewal paths do).
+                service_pks = sorted({item.service_id for item in items if item.service_id is not None})
+                locked_services = {
+                    service.pk: service
+                    for service in Service.objects.select_for_update(of=("self",))
+                    .select_related("currency")
+                    .filter(pk__in=service_pks)
+                    .order_by("pk")
+                }
+
+                for item in items:
+                    if item.service_id is None:
+                        raise ValueError(f"Paid order item {item.id} has no service")
+                    service = locked_services[item.service_id]
+                    if service.status not in {"pending", "provisioning"}:
+                        raise ValueError(f"Service {service.id} cannot enter provisioning from status {service.status}")
+
+                    billing_period = _order_item_billing_period(item)
+                    if billing_period != "once":
+                        subscription_result = SubscriptionService.create_subscription(
+                            customer=order.customer,
+                            product=item.product,
+                            data={
+                                "billing_cycle": _ORDER_PERIOD_TO_SUBSCRIPTION_CYCLE[billing_period],
+                                "quantity": item.quantity,
+                                "custom_price_cents": item.unit_price_cents,
+                                "currency_code": service.currency.code,
+                                "service_id": str(service.id),
+                                "metadata": {
+                                    "source": "paid_order_item",
+                                    "initial_order_id": str(order.id),
+                                    "initial_order_item_id": str(item.id),
+                                    "initial_invoice_id": str(order.invoice_id) if order.invoice_id else None,
+                                },
+                            },
+                        )
+                        if subscription_result.is_err():
+                            raise ValueError(
+                                f"Cannot enroll service {service.id} for recurring billing: "
+                                f"{subscription_result.unwrap_err()}"
+                            )
+
                     if service.status == "pending":
                         service.start_provisioning()
                         service.save(update_fields=["status"])
@@ -839,6 +964,9 @@ class OrderServiceCreationService:
                             "reason": "payment_confirmed",
                         }
 
+                        # #294: emit the (non-monetary) status audit only after commit — a
+                        # failure in audit emission must never roll back the financial
+                        # transaction, and a rolled-back transaction must not emit audits.
                         def log_committed_transition(details: dict[str, str] = event_details) -> None:
                             logger.info(
                                 "🔄 [ServiceCreation] Updated service %s status to provisioning",
@@ -872,7 +1000,9 @@ class OrderPaymentConfirmationService:
 
     @staticmethod
     @transaction.atomic
-    def confirm_order(order: Order, invoice: Invoice | None = None) -> Result[Order, str]:
+    def confirm_order(  # noqa: PLR0911  # Each lifecycle rejection must remain explicit and fail closed
+        order: Order, invoice: Invoice | None = None
+    ) -> Result[Order, str]:
         """Confirm an order after payment. Atomic double-transition (F5).
 
         Why atomic: mark_paid() + start_provisioning() must both succeed or both fail.
@@ -937,6 +1067,10 @@ class OrderPaymentConfirmationService:
                 # Below threshold → auto-advance to provisioning
                 order.start_provisioning()
                 order.save()
+                enrollment = OrderServiceCreationService.update_service_status_on_payment(order)
+                if enrollment.is_err():
+                    transaction.set_rollback(True)
+                    return Err(f"Cannot confirm order: recurring enrollment failed: {enrollment.unwrap_err()}")
                 OrderService._create_status_history(
                     order, "paid", "provisioning", "Auto-provisioning (below review threshold)", None
                 )

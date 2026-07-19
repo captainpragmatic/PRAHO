@@ -628,34 +628,12 @@ class TestProcessPendingUsageEvents(TestCase):
         assert result["success"] is False
 
 
-class TestAdvanceBillingCycles(TestCase):
-    def test_success(self) -> None:
-        from apps.billing.metering_tasks import advance_billing_cycles  # noqa: PLC0415
-
-        with (
-            patch("apps.billing.usage_invoice_service.BillingCycleManager") as mock_cls,
-            patch("apps.billing.metering_tasks.AuditService"),
-        ):
-            mock_cls.return_value.advance_all_subscriptions.return_value = (5, 1, ["err1"])
-            result = advance_billing_cycles()
-        assert result["success"] is True
-        assert result["created"] == 5
-
-    def test_exception(self) -> None:
-        from apps.billing.metering_tasks import advance_billing_cycles  # noqa: PLC0415
-
-        with patch("apps.billing.usage_invoice_service.BillingCycleManager") as mock_cls:
-            mock_cls.return_value.advance_all_subscriptions.side_effect = RuntimeError("boom")
-            result = advance_billing_cycles()
-        assert result["success"] is False
-
-
 class TestCloseExpiredBillingCycles(TestCase):
     def test_success(self) -> None:
         from apps.billing.metering_tasks import close_expired_billing_cycles  # noqa: PLC0415
 
-        with patch("apps.billing.usage_invoice_service.BillingCycleManager") as mock_cls:
-            mock_cls.return_value.close_expired_cycles.return_value = (3, 0)
+        with patch("apps.billing.usage_invoice_service.UsageBillingService") as mock_cls:
+            mock_cls.close_expired_cycles.return_value = (3, 0)
             result = close_expired_billing_cycles()
         assert result["success"] is True
         assert result["closed"] == 3
@@ -663,8 +641,8 @@ class TestCloseExpiredBillingCycles(TestCase):
     def test_exception(self) -> None:
         from apps.billing.metering_tasks import close_expired_billing_cycles  # noqa: PLC0415
 
-        with patch("apps.billing.usage_invoice_service.BillingCycleManager") as mock_cls:
-            mock_cls.return_value.close_expired_cycles.side_effect = RuntimeError("boom")
+        with patch("apps.billing.usage_invoice_service.UsageBillingService") as mock_cls:
+            mock_cls.close_expired_cycles.side_effect = RuntimeError("boom")
             result = close_expired_billing_cycles()
         assert result["success"] is False
 
@@ -731,8 +709,8 @@ class TestGeneratePendingInvoices(TestCase):
     def test_success(self) -> None:
         from apps.billing.metering_tasks import generate_pending_invoices  # noqa: PLC0415
 
-        with patch("apps.billing.usage_invoice_service.BillingCycleManager") as mock_cls:
-            mock_cls.return_value.generate_pending_invoices.return_value = (4, 1)
+        with patch("apps.billing.usage_invoice_service.UsageBillingService") as mock_cls:
+            mock_cls.generate_pending_invoices.return_value = (4, 1)
             result = generate_pending_invoices()
         assert result["success"] is True
         assert result["generated"] == 4
@@ -740,8 +718,8 @@ class TestGeneratePendingInvoices(TestCase):
     def test_exception(self) -> None:
         from apps.billing.metering_tasks import generate_pending_invoices  # noqa: PLC0415
 
-        with patch("apps.billing.usage_invoice_service.BillingCycleManager") as mock_cls:
-            mock_cls.return_value.generate_pending_invoices.side_effect = RuntimeError("boom")
+        with patch("apps.billing.usage_invoice_service.UsageBillingService") as mock_cls:
+            mock_cls.generate_pending_invoices.side_effect = RuntimeError("boom")
             result = generate_pending_invoices()
         assert result["success"] is False
 
@@ -754,7 +732,6 @@ class TestRunBillingCycleWorkflow(TestCase):
             patch("apps.billing.metering_tasks.close_expired_billing_cycles", return_value={"success": True}),
             patch("apps.billing.metering_tasks.rate_pending_aggregations", return_value={"success": True}),
             patch("apps.billing.metering_tasks.generate_pending_invoices", return_value={"success": True}),
-            patch("apps.billing.metering_tasks.advance_billing_cycles", return_value={"success": True}),
             patch("apps.billing.metering_tasks.AuditService"),
         ):
             result = run_billing_cycle_workflow()
@@ -857,129 +834,6 @@ class TestCheckAllUsageThresholds(TestCase):
         with patch("apps.billing.metering_service.UsageAlertService") as mock_cls:
             mock_cls.side_effect = RuntimeError("boom")
             result = check_all_usage_thresholds()
-        assert result["success"] is False
-
-
-class TestSyncAggregationToStripe(TestCase):
-    def test_success(self) -> None:
-        from apps.billing.metering_tasks import sync_aggregation_to_stripe  # noqa: PLC0415
-
-        mock_result = MagicMock()
-        mock_result.is_ok.return_value = True
-        mock_result.unwrap.return_value = {"synced": True}
-
-        with patch("apps.billing.stripe_metering.StripeUsageSyncService") as mock_cls:
-            mock_cls.return_value.sync_aggregation_to_stripe.return_value = mock_result
-            result = sync_aggregation_to_stripe("agg-1")
-        assert result["success"] is True
-
-    def test_failure(self) -> None:
-        from apps.billing.metering_tasks import sync_aggregation_to_stripe  # noqa: PLC0415
-
-        mock_result = MagicMock()
-        mock_result.is_ok.return_value = False
-        mock_result.error = "stripe error"
-
-        with patch("apps.billing.stripe_metering.StripeUsageSyncService") as mock_cls:
-            mock_cls.return_value.sync_aggregation_to_stripe.return_value = mock_result
-            result = sync_aggregation_to_stripe("agg-1")
-        assert result["success"] is False
-
-    def test_exception(self) -> None:
-        from apps.billing.metering_tasks import sync_aggregation_to_stripe  # noqa: PLC0415
-
-        with patch("apps.billing.stripe_metering.StripeUsageSyncService") as mock_cls:
-            mock_cls.return_value.sync_aggregation_to_stripe.side_effect = RuntimeError("boom")
-            result = sync_aggregation_to_stripe("agg-1")
-        assert result["success"] is False
-
-
-class TestSyncBillingCycleToStripe(TestCase):
-    def test_success(self) -> None:
-        from apps.billing.metering_tasks import sync_billing_cycle_to_stripe  # noqa: PLC0415
-
-        mock_result = MagicMock()
-        mock_result.is_ok.return_value = True
-        mock_result.unwrap.return_value = {"count": 5}
-
-        with patch("apps.billing.stripe_metering.StripeUsageSyncService") as mock_cls:
-            mock_cls.return_value.sync_billing_cycle_to_stripe.return_value = mock_result
-            result = sync_billing_cycle_to_stripe("cycle-1")
-        assert result["success"] is True
-
-    def test_failure(self) -> None:
-        from apps.billing.metering_tasks import sync_billing_cycle_to_stripe  # noqa: PLC0415
-
-        mock_result = MagicMock()
-        mock_result.is_ok.return_value = False
-        mock_result.error = "stripe error"
-
-        with patch("apps.billing.stripe_metering.StripeUsageSyncService") as mock_cls:
-            mock_cls.return_value.sync_billing_cycle_to_stripe.return_value = mock_result
-            result = sync_billing_cycle_to_stripe("cycle-1")
-        assert result["success"] is False
-
-    def test_exception(self) -> None:
-        from apps.billing.metering_tasks import sync_billing_cycle_to_stripe  # noqa: PLC0415
-
-        with patch("apps.billing.stripe_metering.StripeUsageSyncService") as mock_cls:
-            mock_cls.return_value.sync_billing_cycle_to_stripe.side_effect = RuntimeError("boom")
-            result = sync_billing_cycle_to_stripe("cycle-1")
-        assert result["success"] is False
-
-
-class TestSyncPendingToStripe(TestCase):
-    def test_success(self) -> None:
-        from apps.billing.metering_tasks import sync_pending_to_stripe  # noqa: PLC0415
-
-        mock_agg = MagicMock()
-        mock_agg.id = uuid.uuid4()
-
-        ok_result = MagicMock()
-        ok_result.is_ok.return_value = True
-
-        mock_qs = MagicMock()
-        mock_qs.count.return_value = 2
-        mock_qs.__getitem__ = lambda self, key: [mock_agg, mock_agg]
-
-        with (
-            patch("apps.billing.stripe_metering.StripeUsageSyncService") as mock_svc,
-            patch("apps.billing.metering_models.UsageAggregation") as mock_model,
-        ):
-            mock_model.objects.filter.return_value.exclude.return_value.select_related.return_value = mock_qs
-            mock_svc.return_value.sync_aggregation_to_stripe.return_value = ok_result
-            result = sync_pending_to_stripe()
-        assert result["success"] is True
-
-    def test_with_errors(self) -> None:
-        from apps.billing.metering_tasks import sync_pending_to_stripe  # noqa: PLC0415
-
-        mock_agg = MagicMock()
-        mock_agg.id = uuid.uuid4()
-
-        err_result = MagicMock()
-        err_result.is_ok.return_value = False
-
-        mock_qs = MagicMock()
-        mock_qs.count.return_value = 1
-        mock_qs.__getitem__ = lambda self, key: [mock_agg]
-
-        with (
-            patch("apps.billing.stripe_metering.StripeUsageSyncService") as mock_svc,
-            patch("apps.billing.metering_models.UsageAggregation") as mock_model,
-        ):
-            mock_model.objects.filter.return_value.exclude.return_value.select_related.return_value = mock_qs
-            mock_svc.return_value.sync_aggregation_to_stripe.return_value = err_result
-            result = sync_pending_to_stripe()
-        assert result["success"] is True
-        assert result["errors"] == 1
-
-    def test_exception(self) -> None:
-        from apps.billing.metering_tasks import sync_pending_to_stripe  # noqa: PLC0415
-
-        with patch("apps.billing.stripe_metering.StripeUsageSyncService") as mock_cls:
-            mock_cls.side_effect = RuntimeError("boom")
-            result = sync_pending_to_stripe()
         assert result["success"] is False
 
 
@@ -1242,13 +1096,6 @@ class TestAsyncWrappers(TestCase):
             result = send_usage_alert_notification_async("alert-1")
         assert result == "task-789"
 
-    def test_sync_aggregation_to_stripe_async(self) -> None:
-        from apps.billing.metering_tasks import sync_aggregation_to_stripe_async  # noqa: PLC0415
-
-        with patch("apps.billing.metering_tasks.async_task", return_value="task-abc"):
-            result = sync_aggregation_to_stripe_async("agg-1")
-        assert result == "task-abc"
-
 
 class TestRegisterScheduledTasks(TestCase):
     def test_registers_all_tasks(self) -> None:
@@ -1258,4 +1105,4 @@ class TestRegisterScheduledTasks(TestCase):
             mock_schedule.MINUTES = 1
             mock_schedule.HOURLY = 2
             register_scheduled_tasks()
-        assert mock_schedule.objects.update_or_create.call_count == 6
+        assert mock_schedule.objects.update_or_create.call_count == 5

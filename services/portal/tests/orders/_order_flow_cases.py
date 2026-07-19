@@ -418,7 +418,7 @@ class TestProductTypeInCartItem(SimpleTestCase):
         mock_cls.return_value = self._make_api_mock("domain")
 
         cart = GDPRCompliantCartSession(self.session)
-        cart.add_item(product_slug="domain-registration", quantity=1, billing_period="yearly")
+        cart.add_item(product_slug="domain-registration", quantity=1, billing_period="annual")
 
         items = cart.get_items()
         self.assertIn("product_type", items[0])

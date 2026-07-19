@@ -30,6 +30,7 @@ class PaymentIntentResult(TypedDict):
     payment_intent_id: str
     client_secret: str | None
     error: str | None
+    retryable: NotRequired[bool]
 
 
 class PaymentConfirmResult(TypedDict):
@@ -39,14 +40,31 @@ class PaymentConfirmResult(TypedDict):
     status: str  # succeeded, failed, requires_action, etc.
     error: str | None
     amount_received: NotRequired[int]
+    currency: NotRequired[str]
+    customer_id: NotRequired[str | None]
+    payment_method_id: NotRequired[str | None]
+    metadata: NotRequired[dict[str, Any]]
 
 
-class SubscriptionResult(TypedDict):
-    """Result from subscription creation"""
+class SetupIntentResult(TypedDict):
+    """Result from preparing a customer-present saved-card authorization."""
 
     success: bool
-    subscription_id: str | None
-    status: str | None
+    setup_intent_id: str
+    client_secret: str | None
+    error: str | None
+
+
+class SetupIntentStatusResult(TypedDict):
+    """Server-retrieved SetupIntent facts used to activate a local mandate."""
+
+    success: bool
+    setup_intent_id: str
+    status: str
+    customer_id: str | None
+    payment_method_id: str | None
+    usage: str
+    metadata: dict[str, Any]
     error: str | None
 
 
@@ -69,11 +87,8 @@ class BasePaymentGateway(ABC):
     """
     🏛️ Abstract base class for all payment gateways
 
-    Provides unified interface for:
-    - Payment intent creation and confirmation
-    - Subscription management
-    - Payment method handling
-    - Webhook event processing
+    Provides a payment-processing boundary for intents, refunds, and webhooks.
+    PRAHO owns subscriptions, billing schedules, and entitlement state.
     """
 
     def __init__(self) -> None:
@@ -85,7 +100,7 @@ class BasePaymentGateway(ABC):
         """Gateway identifier (e.g., 'stripe', 'paypal')"""
 
     @abstractmethod
-    def create_payment_intent(  # noqa: PLR0913
+    def create_payment_intent(  # noqa: PLR0913  # Explicit gateway payment fields plus idempotency contract
         self,
         order_id: str,
         amount_cents: int,
@@ -104,11 +119,40 @@ class BasePaymentGateway(ABC):
             currency: ISO currency code (default: RON)
             customer_id: Gateway customer ID (optional)
             metadata: Additional metadata
-            idempotency_key: Stable gateway retry key (optional)
+            idempotency_key: Stable gateway key for one PRAHO payment attempt
 
         Returns:
             PaymentIntentResult with success status and client_secret
         """
+
+    @abstractmethod
+    def create_off_session_payment_intent(  # noqa: PLR0913
+        self,
+        document_id: str,
+        document_type: str,
+        amount_cents: int,
+        currency: str,
+        customer_id: str,
+        payment_method_id: str,
+        metadata: dict[str, Any] | None = None,
+        *,
+        idempotency_key: str,
+    ) -> PaymentIntentResult:
+        """Create and confirm a saved-method payment for a typed PRAHO document."""
+
+    @abstractmethod
+    def create_setup_intent(
+        self,
+        *,
+        customer_id: str,
+        payment_method_id: str,
+        metadata: dict[str, Any],
+    ) -> SetupIntentResult:
+        """Prepare customer-present authentication for future off-session charges."""
+
+    @abstractmethod
+    def retrieve_setup_intent(self, setup_intent_id: str) -> SetupIntentStatusResult:
+        """Retrieve authoritative setup facts from the payment processor."""
 
     @abstractmethod
     def confirm_payment(self, payment_intent_id: str) -> PaymentConfirmResult:
@@ -123,39 +167,13 @@ class BasePaymentGateway(ABC):
         """
 
     @abstractmethod
-    def create_subscription(
-        self, customer_id: str, price_id: str, metadata: dict[str, Any] | None = None
-    ) -> SubscriptionResult:
-        """
-        Create recurring subscription
-
-        Args:
-            customer_id: Gateway customer ID
-            price_id: Gateway price/plan ID
-            metadata: Additional metadata
-
-        Returns:
-            SubscriptionResult with subscription details
-        """
-
-    @abstractmethod
-    def cancel_subscription(self, subscription_id: str) -> bool:
-        """
-        Cancel recurring subscription
-
-        Args:
-            subscription_id: Gateway subscription ID
-
-        Returns:
-            True if cancelled successfully
-        """
-
-    @abstractmethod
     def refund_payment(
         self,
         gateway_txn_id: str,
         amount_cents: int | None = None,
         reason: str = "requested_by_customer",
+        *,
+        idempotency_key: str | None = None,
     ) -> RefundResult:
         """
         Refund a payment via the gateway.
@@ -167,19 +185,6 @@ class BasePaymentGateway(ABC):
 
         Returns:
             RefundResult with success status and refund details
-        """
-
-    @abstractmethod
-    def handle_webhook_event(self, event_type: str, event_data: dict[str, Any]) -> tuple[bool, str]:
-        """
-        Process webhook event from payment gateway
-
-        Args:
-            event_type: Event type identifier
-            event_data: Event payload data
-
-        Returns:
-            (success, message) tuple
         """
 
     def validate_configuration(self) -> bool:

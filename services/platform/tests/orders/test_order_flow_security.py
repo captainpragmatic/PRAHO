@@ -18,6 +18,7 @@ from rest_framework.test import APIRequestFactory
 from apps.api.orders.views import confirm_order
 from apps.billing.gateways.base import PaymentConfirmResult
 from apps.billing.models import Currency
+from apps.billing.payment_models import Payment
 from apps.common.context_processors import csp_nonce
 from apps.common.middleware import CSPNonceMiddleware, SecurityHeadersMiddleware
 from apps.customers.models import Customer
@@ -60,6 +61,17 @@ def _make_pending_order(customer: Customer, currency: Currency, **kwargs: object
     )
 
 
+def _create_local_payment(order: Order) -> Payment:
+    """Mirror the Payment row created with a production Stripe PaymentIntent."""
+    return Payment.objects.create(
+        customer=order.customer,
+        currency=order.currency,
+        amount_cents=order.total_cents,
+        payment_method="stripe",
+        gateway_txn_id=order.payment_intent_id,
+    )
+
+
 # ===============================================================================
 # H11: STRIPE PAYMENTINTENT SERVER-SIDE VERIFICATION
 # ===============================================================================
@@ -92,6 +104,7 @@ class StripePaymentVerificationTest(TestCase):
             payment_method="card",
             payment_intent_id="pi_testVerifyOK1234567",
         )
+        _create_local_payment(order)
         request = self._make_request({
             "payment_intent_id": "pi_testVerifyOK1234567",
             "payment_status": "succeeded",
@@ -99,7 +112,7 @@ class StripePaymentVerificationTest(TestCase):
 
         mock_gateway = MagicMock()
         mock_gateway.confirm_payment.return_value = PaymentConfirmResult(
-            success=True, status="succeeded", error=None, amount_received=0,
+            success=True, status="succeeded", error=None, amount_received=0, currency="ron",
         )
 
         with (
@@ -223,6 +236,7 @@ class StripePaymentVerificationTest(TestCase):
             payment_method="card",
             payment_intent_id="pi_concurrencyRaceTest1",
         )
+        _create_local_payment(order)
         request = self._make_request({
             "payment_intent_id": "pi_concurrencyRaceTest1",
             "payment_status": "succeeded",
@@ -230,14 +244,20 @@ class StripePaymentVerificationTest(TestCase):
 
         mock_gateway = MagicMock()
         mock_gateway.confirm_payment.return_value = PaymentConfirmResult(
-            success=True, status="succeeded", error=None, amount_received=0,
+            success=True, status="succeeded", error=None, amount_received=0, currency="ron",
         )
 
         def confirm_order_between_phases(*args: object, **kwargs: object) -> PaymentConfirmResult:
             """Side effect: simulate concurrent confirmation during Phase 2 Stripe call."""
             # While Phase 2 is calling Stripe, another request marks the order as paid
             Order.objects.filter(id=order.id).update(status="paid")  # fsm-bypass: simulate concurrent request in test
-            return PaymentConfirmResult(success=True, status="succeeded", error=None, amount_received=0)
+            return PaymentConfirmResult(
+                success=True,
+                status="succeeded",
+                error=None,
+                amount_received=0,
+                currency="ron",
+            )
 
         mock_gateway.confirm_payment.side_effect = confirm_order_between_phases
 
