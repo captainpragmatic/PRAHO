@@ -9,6 +9,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 from django.core.cache import cache
+from django.db import IntegrityError
 from django.test import TestCase, override_settings
 
 from apps.common.types import Ok
@@ -24,6 +25,7 @@ from apps.infrastructure.models import (
     NodeSize,
     PanelType,
 )
+from apps.infrastructure.tasks import execute_remediation_task
 
 
 class DriftScannerTestBase(TestCase):
@@ -444,3 +446,135 @@ class TestScanDeployment(DriftScannerTestBase):
         result = self.scanner.scan_deployment(self.deployment)
         self.assertTrue(result.is_err())
         self.assertIn("Cannot scan", result.unwrap_err())
+
+
+class TestApprovalIntegrityAndDedupRaces(DriftScannerTestBase):
+    """Approval-gated writes and dedup catch-paths must survive real races."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.check = DriftCheck.objects.create(
+            deployment=self.deployment,
+            check_type="cloud",
+            status="completed",
+        )
+        self.report = DriftReport.objects.create(
+            drift_check=self.check,
+            deployment=self.deployment,
+            severity="high",
+            category="server_state",
+            field_name="server_type",
+            expected_value="cpx21",
+            actual_value="cpx41",
+        )
+
+    def _pending_request(self, **overrides) -> DriftRemediationRequest:
+        details = {
+            "field_name": "server_type",
+            "expected_value": "cpx21",
+            "actual_value": "cpx31",
+            "severity": "high",
+        }
+        params = {
+            "report": self.report,
+            "deployment": self.deployment,
+            "action_type": "apply_desired",
+            "action_details": details,
+            "requires_approval": True,
+            "status": "pending_approval",
+        }
+        params.update(overrides)
+        return DriftRemediationRequest.objects.create(**params)
+
+    def test_pending_fingerprint_sync_loses_to_concurrent_approval(self) -> None:
+        """The CAS must refuse to overwrite a row that left pending_approval
+        between the scanner's read and its write — an unconditional save would
+        execute values the approving human never saw."""
+        request = self._pending_request()
+        stale_instance = DriftRemediationRequest.objects.get(pk=request.pk)
+        approved_details = dict(stale_instance.action_details)
+        DriftRemediationRequest.objects.filter(pk=request.pk).update(status="approved")
+
+        won = self.scanner._sync_pending_fingerprint(stale_instance, self.report)
+
+        self.assertFalse(won)
+        request.refresh_from_db()
+        self.assertEqual(request.action_details, approved_details)
+        self.assertEqual(request.status, "approved")
+
+    def test_pending_fingerprint_sync_wins_when_genuinely_pending(self) -> None:
+        request = self._pending_request()
+
+        won = self.scanner._sync_pending_fingerprint(request, self.report)
+
+        self.assertTrue(won)
+        request.refresh_from_db()
+        self.assertEqual(request.action_details["actual_value"], "cpx41")
+
+    def test_lost_fingerprint_race_supersedes_and_remints(self) -> None:
+        """When the sync loses because the row is now approved with stale
+        values, the scanner must retire that approval and mint a fresh
+        pending request for the current drift."""
+        request = self._pending_request()
+
+        def approve_then_lose(req, report):
+            DriftRemediationRequest.objects.filter(pk=request.pk).update(status="approved")
+            return False
+
+        with patch.object(DriftScannerService, "_sync_pending_fingerprint", side_effect=approve_then_lose):
+            self.scanner._ensure_remediation_request(self.report)
+
+        request.refresh_from_db()
+        self.assertEqual(request.status, "superseded")
+        fresh = self.report.remediation_requests.get(status="pending_approval")
+        self.assertEqual(fresh.action_details["actual_value"], "cpx41")
+
+    def test_report_create_race_falls_back_to_concurrent_winner(self) -> None:
+        """A concurrent scan winning the report-create race must be refreshed,
+        not crash the loser — delete this except-path and this test errors."""
+        winner = DriftReport.objects.create(
+            drift_check=self.check,
+            deployment=self.deployment,
+            severity="high",
+            category="network",
+            field_name="ipv4_address",
+            expected_value="1.2.3.4",
+            actual_value="5.6.7.8",
+            occurrence_count=1,
+        )
+        with patch(
+            "apps.infrastructure.drift_scanner.DriftReport.objects.create",
+            side_effect=IntegrityError("uniq_open_report_per_field"),
+        ):
+            outcome = self.scanner._record_drift(
+                self.check, self.deployment, "ipv4_address", "critical", "network", "1.2.3.4", "5.6.7.8"
+            )
+
+        self.assertEqual(outcome.report.pk, winner.pk)
+        winner.refresh_from_db()
+        self.assertEqual(winner.occurrence_count, 2)
+        self.assertEqual(
+            DriftReport.objects.filter(deployment=self.deployment, field_name="ipv4_address", resolved=False).count(),
+            1,
+        )
+
+    def test_request_mint_race_returns_concurrent_winner(self) -> None:
+        """A concurrent scan winning the request-mint race must not crash the
+        loser or duplicate the open request."""
+        winner = self._pending_request()
+        with patch(
+            "apps.infrastructure.drift_scanner.DriftRemediationRequest.objects.create",
+            side_effect=IntegrityError("uniq_open_request_per_report"),
+        ):
+            self.scanner._ensure_remediation_request(self.report)
+
+        self.assertEqual(self.report.remediation_requests.count(), 1)
+        self.assertEqual(self.report.remediation_requests.get().pk, winner.pk)
+
+
+class TestExecuteTaskGuards(DriftScannerTestBase):
+    def test_execute_remediation_task_handles_missing_request(self) -> None:
+        """A vanished request must be reported, not crash the worker."""
+        outcome = execute_remediation_task(987654321)
+
+        self.assertEqual(outcome, {"status": "missing"})

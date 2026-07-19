@@ -493,15 +493,18 @@ class DriftScannerService:
             if fingerprint(req) == current:
                 return  # an accurate open request already exists
             if req.status == "pending_approval":
-                # Drift evolved before approval — update in place, no new row
-                req.action_details = {
-                    "field_name": report.field_name,
-                    "expected_value": report.expected_value,
-                    "actual_value": report.actual_value,
-                    "severity": report.severity,
-                }
-                req.save(update_fields=["action_details"])
-                return
+                # Drift evolved before approval — update in place, no new row.
+                # CAS: a human may approve between our read and this write; an
+                # unconditional save would smuggle values into an approved
+                # request that nobody reviewed.
+                if self._sync_pending_fingerprint(req, report):
+                    return
+                req.refresh_from_db(fields=["status"])
+                if req.status == "in_progress":
+                    return  # claimed mid-race; claim-time validation guards execution
+                if req.status not in ("approved", "scheduled"):
+                    continue  # left the open set mid-race — nothing to align
+                # fall through: now approved/scheduled against outdated values
             # approved/scheduled against outdated values: retire and re-mint.
             # These carried a human approval — audit their retirement.
             retired = DriftRemediationRequest.objects.filter(pk=req.pk, status=req.status).update(status="superseded")
@@ -553,6 +556,24 @@ class DriftScannerService:
             InfrastructureAuditService.log_drift_auto_resolved(report.deployment, report, InfrastructureAuditContext())
         except Exception:
             logger.warning(f"⚠️ [DriftScanner] Failed to log audit for auto-resolve: {report}")
+
+    def _sync_pending_fingerprint(self, req: DriftRemediationRequest, report: DriftReport) -> bool:
+        """Align a still-pending request with the report's current drift.
+
+        Conditional on status: returns False when the row left pending_approval
+        between the read and this write (approval race) — the caller must
+        re-evaluate instead of overwriting a human-reviewed request.
+        """
+        fresh_details = {
+            "field_name": report.field_name,
+            "expected_value": report.expected_value,
+            "actual_value": report.actual_value,
+            "severity": report.severity,
+        }
+        updated = DriftRemediationRequest.objects.filter(pk=req.pk, status="pending_approval").update(
+            action_details=fresh_details
+        )
+        return bool(updated)
 
     def _create_remediation_request(self, report: DriftReport) -> DriftRemediationRequest:
         """Create pending approval request for HIGH/CRITICAL drift."""

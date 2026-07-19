@@ -1696,7 +1696,11 @@ def execute_remediation_task(request_pk: int) -> dict[str, Any]:
         DriftRemediationRequest,  # Circular: cross-app  # Deferred: avoids circular import
     )
 
-    req = DriftRemediationRequest.objects.select_related("deployment", "report").get(pk=request_pk)
+    try:
+        req = DriftRemediationRequest.objects.select_related("deployment", "report").get(pk=request_pk)
+    except DriftRemediationRequest.DoesNotExist:
+        logger.warning(f"⚠️ [DriftTasks] Remediation request {request_pk} no longer exists — nothing to execute")
+        return {"status": "missing"}
     result = get_drift_remediation_service().execute_remediation(req)
     if result.is_ok():
         return {"status": "completed"}

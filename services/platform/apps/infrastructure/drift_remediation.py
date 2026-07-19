@@ -101,7 +101,11 @@ def _get_verify_poll_interval() -> int:
 # the provider for ~5 min (e.g. hcloud resize), and verification needs its own
 # budget after that — the 300s cluster default would kill a successful resize
 # mid-verification. Passed to async_task at every enqueue site.
-EXECUTION_TASK_TIMEOUT_SECONDS = 900
+# Snapshot creation, the apply mutation, and a snapshot restore are EACH bounded
+# near 300s by provider action polling, and verification adds its own ~150s
+# budget. The task timeout must cover the worst-case sequence (snapshot + apply
+# + verify + restore) with margin, or django-q2 kills the worker MID-RESTORE.
+EXECUTION_TASK_TIMEOUT_SECONDS = 1500
 
 # Well above the longest possible live execution: a live run can never be
 # mistaken for a crashed one.
@@ -317,8 +321,10 @@ class DriftRemediationService:
                 completed_at=timezone.now(),
             )
             if not updated:
-                transaction.set_rollback(True)
+                # Refresh BEFORE flagging rollback: a query on a needs_rollback
+                # connection raises TransactionManagementError.
                 req.refresh_from_db()
+                transaction.set_rollback(True)
                 return Err(f"Cannot accept drift for request in status '{req.status}'")
 
             finalized = DriftReport.objects.filter(pk=report.pk, resolved=False).update(
@@ -432,9 +438,17 @@ class DriftRemediationService:
 
         apply_result = self._apply_remediation(request, gateway)
         if apply_result.is_err():
-            return self._rollback_after_failure(
-                request, deployment, snapshot, "Apply failed", apply_result.unwrap_err()
+            failure = self._resolve_apply_failure(
+                request,
+                deployment,
+                snapshot,
+                gateway,
+                field_name,
+                details.get("expected_value", ""),
+                apply_result.unwrap_err(),
             )
+            if failure is not None:
+                return failure
 
         # Step 3: Verify the remediated state (provider outcome + reachability)
         health_result = self._verify_remediation(
@@ -444,19 +458,17 @@ class DriftRemediationService:
             details.get("expected_value", ""),
         )
         if health_result.is_err():
+            # Err means the provider was OBSERVED in the wrong state — the only
+            # verification outcome that justifies a destructive restore.
             return self._rollback_after_failure(
                 request, deployment, snapshot, "Health check failed", health_result.unwrap_err()
             )
-        if health_result.unwrap() is False:
-            # Provider confirmed the fix but the server never answered SSH:
-            # restoring the snapshot would be a destructive response to an
-            # inconclusive signal — hand it to staff instead.
-            msg = (
-                f"Provider confirms the remediation of '{field_name}' but {deployment.hostname} "
-                "is unreachable on port 22 — manual check required"
-            )
-            self._mark_failed(request, msg)
-            return Err(msg)
+        inconclusive = health_result.unwrap()
+        if inconclusive is not None:
+            # Inconclusive (SSH silent, or provider unobservable): restoring the
+            # snapshot would be a destructive response to ambiguity — staff check.
+            self._mark_failed(request, inconclusive)
+            return Err(inconclusive)
 
         # Step 4: Mark complete (CAS — a reaped/externally-transitioned row is
         # never overwritten, and its report stays open for the next scan)
@@ -472,12 +484,18 @@ class DriftRemediationService:
             return Err(f"Request was externally transitioned to '{request.status}' during execution")
         request.refresh_from_db()
 
-        # Mark the associated report as resolved
+        # Mark the associated report as resolved — conditionally: a scan may
+        # have healed it mid-execution, and "remediated" must not overwrite
+        # that independent resolution.
         report = request.report
-        report.resolved = True
-        report.resolved_at = timezone.now()
-        report.resolution_type = "remediated"
-        report.save(update_fields=["resolved", "resolved_at", "resolution_type"])
+        resolved_now = DriftReport.objects.filter(pk=report.pk, resolved=False).update(
+            resolved=True, resolved_at=timezone.now(), resolution_type="remediated"
+        )
+        if not resolved_now:
+            logger.info(
+                f"✅ [DriftRemediation] Report {report.pk} was already resolved externally — "
+                "keeping its resolution; request completion stands"
+            )
 
         logger.info(f"✅ [DriftRemediation] Remediation completed for {deployment.hostname}")
 
@@ -588,7 +606,23 @@ class DriftRemediationService:
         stage: str,
         error: str,
     ) -> Result[bool, str]:
-        """Shared apply/verify failure path: restore the snapshot, mark, audit."""
+        """Shared apply/verify failure path: restore the snapshot, mark, audit.
+
+        Last-moment preconditions: the claim-time checks are a snapshot in
+        time, not a guard at the destructive action. Re-validate NOW that the
+        drift is still unresolved and this request still owns the execution.
+        """
+        still_in_progress = DriftRemediationRequest.objects.filter(pk=request.pk, status="in_progress").exists()
+        report_healed = DriftReport.objects.filter(pk=request.report_id, resolved=True).exists()
+        if report_healed or not still_in_progress:
+            if report_healed and still_in_progress:
+                msg = f"{stage}: {error} — snapshot restore skipped: drift was resolved externally during execution"
+                self._mark_failed(request, msg)
+            else:
+                msg = f"{stage}: {error} — snapshot restore skipped: request no longer owns this execution"
+                logger.warning(f"⚠️ [DriftRemediation] {msg} (request {request.pk})")
+            return Err(msg)
+
         logger.error(f"🔥 [DriftRemediation] {stage}, rolling back: {error}")
         rollback_result = self._rollback(deployment, snapshot.provider_snapshot_id)
         if rollback_result.is_err():
@@ -663,7 +697,7 @@ class DriftRemediationService:
         gateway: CloudProviderGateway,
         field_name: str,
         expected_value: str,
-    ) -> Result[bool, str]:
+    ) -> Result[str | None, str]:
         """
         Verify the remediated STATE, not just liveness: poll the provider until the
         drifted field reports the expected value, then confirm SSH reachability.
@@ -686,6 +720,10 @@ class DriftRemediationService:
         if outcome_result.is_err():
             return outcome_result
 
+        unobservable = outcome_result.unwrap()
+        if unobservable is not None:
+            return Ok(unobservable)
+
         if not deployment.ipv4_address:
             # IPv6-only / address-less deployments cannot be probed; the
             # provider outcome is confirmed, which is all we can verify.
@@ -693,13 +731,74 @@ class DriftRemediationService:
                 f"⚠️ [DriftRemediation] {deployment.hostname} has no IPv4 address — "
                 "skipping reachability probe after confirmed provider outcome"
             )
-            return Ok(True)
+            return Ok(None)
 
         health_result = self._verify_health(deployment, deadline)
         if health_result.is_err():
-            return Ok(False)
+            return Ok(
+                f"Provider confirms the remediation of '{field_name}' but {deployment.hostname} "
+                "is unreachable on port 22 — manual check required"
+            )
 
-        return Ok(True)
+        return Ok(None)
+
+    def _resolve_apply_failure(  # noqa: PLR0913  # Destructive-decision context: every parameter is load-bearing
+        self,
+        request: DriftRemediationRequest,
+        deployment: NodeDeployment,
+        snapshot: DriftSnapshot,
+        gateway: CloudProviderGateway,
+        field_name: str,
+        expected_value: str,
+        error: str,
+    ) -> Result[bool, str] | None:
+        """Decide what a failed apply actually means before anything destructive.
+
+        An apply Err is NOT proof the mutation failed: the provider may have
+        accepted the action while our polling of it errored. Observe actual
+        state once — None means the apply in fact landed and the caller should
+        continue to verification.
+        """
+        observed = self._observe_field_once(gateway, deployment, field_name, expected_value)
+        if observed is None:
+            msg = (
+                f"Apply failed and the provider state of '{field_name}' is unobservable — "
+                f"manual intervention required (no destructive restore on ambiguity): {error}"
+            )
+            self._mark_failed(request, msg)
+            return Err(msg)
+        if observed is False:
+            return self._rollback_after_failure(request, deployment, snapshot, "Apply failed", error)
+        logger.warning(
+            f"⚠️ [DriftRemediation] Apply reported an error but the provider already shows the "
+            f"expected state for '{field_name}' on {deployment.hostname} — continuing to "
+            f"verification: {error}"
+        )
+        return None
+
+    def _observe_field_once(
+        self,
+        gateway: CloudProviderGateway,
+        deployment: NodeDeployment,
+        field_name: str,
+        expected_value: str,
+    ) -> bool | None:
+        """One provider observation: True = matches, False = observed mismatched, None = unobservable."""
+        server_result = gateway.get_server(deployment.external_node_id)
+        if server_result.is_err():
+            logger.warning(
+                f"⚠️ [DriftRemediation] Cannot observe provider state for {deployment.hostname}: "
+                f"{server_result.unwrap_err()}"
+            )
+            return None
+        server_info = server_result.unwrap()
+        if server_info is None:
+            return None
+        if field_name == "server_type":
+            return bool(server_info.server_type == expected_value)
+        if field_name == "server_status":
+            return bool(server_info.status == "running")
+        return None
 
     def _await_provider_outcome(
         self,
@@ -708,27 +807,47 @@ class DriftRemediationService:
         field_name: str,
         expected_value: str,
         deadline: float,
-    ) -> Result[bool, str]:
-        """Poll gateway.get_server() until the remediated field matches expectations."""
-        if field_name not in ("server_type", "server_status"):
-            return Ok(True)
+    ) -> Result[str | None, str]:
+        """Poll gateway.get_server() until the remediated field matches expectations.
 
+        Ok(None): confirmed. Ok(message): provider NEVER observed — ambiguity,
+        no restore. Err: provider observed in the wrong state — restore justified.
+        """
+        if field_name not in ("server_type", "server_status"):
+            return Ok(None)
+
+        observed_any = False
         last_observed = "unknown"
+        last_error = ""
         while True:
             server_result = gateway.get_server(deployment.external_node_id)
-            server_info = server_result.unwrap() if server_result.is_ok() else None
+            if server_result.is_err():
+                last_error = str(server_result.unwrap_err())
+                logger.warning(
+                    f"⚠️ [DriftRemediation] get_server failed during verification of {deployment.hostname}: {last_error}"
+                )
+                server_info = None
+            else:
+                server_info = server_result.unwrap()
             if server_info is not None:
+                observed_any = True
                 if field_name == "server_type":
                     last_observed = server_info.server_type
                     if server_info.server_type == expected_value:
-                        return Ok(True)
+                        return Ok(None)
                 else:
                     last_observed = server_info.status
                     if server_info.status == "running":
-                        return Ok(True)
+                        return Ok(None)
 
             remaining = deadline - _monotonic()
             if remaining <= 0:
+                if not observed_any:
+                    return Ok(
+                        f"Provider state of '{field_name}' on {deployment.hostname} could not be "
+                        f"observed during verification (last error: {last_error or 'none'}) — "
+                        "manual check required"
+                    )
                 return Err(
                     f"Remediation of '{field_name}' on {deployment.hostname} not confirmed by provider "
                     f"(last observed: {last_observed})"

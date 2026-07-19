@@ -9,6 +9,7 @@ from __future__ import annotations
 from datetime import timedelta
 from unittest.mock import MagicMock, patch
 
+from django.conf import settings as django_settings
 from django.test import TestCase
 from django.utils import timezone
 from django.utils.module_loading import import_string
@@ -361,7 +362,7 @@ class TestExecuteRemediation(DriftRemediationTestBase):
         mock_gw = MagicMock()
         mock_gw.resize.return_value = Ok(True)
         mock_gateway.return_value = mock_gw
-        mock_health.return_value = Ok(True)
+        mock_health.return_value = Ok(None)
 
         self.remediation_request.status = "approved"
         self.remediation_request.save(update_fields=["status"])
@@ -429,6 +430,17 @@ class TestExecuteRemediation(DriftRemediationTestBase):
 
         mock_gw = MagicMock()
         mock_gw.resize.return_value = Err("Resize failed")
+        # New contract: apply-Err alone no longer restores — the provider must
+        # be OBSERVED in the wrong state for the rollback to stay justified.
+        mock_gw.get_server.return_value = Ok(
+            ServerInfo(
+                server_id="12345",
+                name="prd-sha-het-de-fsn1-001",
+                status="running",
+                ipv4_address="1.2.3.4",
+                server_type="cpx41",
+            )
+        )
         mock_gateway.return_value = mock_gw
         mock_rollback.return_value = Ok(True)
 
@@ -611,7 +623,7 @@ class TestReviewHardening(DriftRemediationTestBase):
         mock_gw = MagicMock()
         mock_gw.resize.return_value = Ok(True)
         mock_gateway.return_value = mock_gw
-        mock_verify.return_value = Ok(True)
+        mock_verify.return_value = Ok(None)
 
         outcome = task(self.remediation_request.pk)
 
@@ -750,7 +762,7 @@ class TestExecutionClaim(DriftRemediationTestBase):
         mock_gw = MagicMock()
         mock_gw.resize.return_value = Ok(True)
         mock_gateway.return_value = mock_gw
-        mock_verify.return_value = Ok(True)
+        mock_verify.return_value = Ok(None)
 
         result = self.service.execute_remediation(self.remediation_request)
 
@@ -779,7 +791,7 @@ class TestExecutionClaim(DriftRemediationTestBase):
 
         def _reap_then_ok(*args, **kwargs):
             DriftRemediationRequest.objects.filter(pk=self.remediation_request.pk).update(status="failed")
-            return Ok(True)
+            return Ok(None)
 
         mock_verify.side_effect = _reap_then_ok
 
@@ -1026,7 +1038,9 @@ class TestVerifyRemediation(DriftRemediationTestBase):
         result = self.service._verify_remediation(self.deployment, gateway, "server_status", "running")
 
         self.assertTrue(result.is_ok())
-        self.assertFalse(result.unwrap())
+        inconclusive = result.unwrap()
+        self.assertIsNotNone(inconclusive)
+        self.assertIn("manual check required", inconclusive)
 
     @patch("apps.infrastructure.drift_remediation.socket.create_connection")
     def test_ipv6_only_deployment_skips_reachability_probe(self, mock_conn, _settings):
@@ -1039,14 +1053,14 @@ class TestVerifyRemediation(DriftRemediationTestBase):
         result = self.service._verify_remediation(self.deployment, gateway, "server_status", "running")
 
         self.assertTrue(result.is_ok())
-        self.assertTrue(result.unwrap())
+        self.assertIsNone(result.unwrap())
         mock_conn.assert_not_called()
 
     @patch("apps.infrastructure.drift_remediation.DriftRemediationService._rollback")
     @patch("apps.infrastructure.drift_remediation.DriftRemediationService._get_gateway")
     @patch("apps.infrastructure.drift_remediation.DriftRemediationService._take_snapshot")
     def test_inconclusive_verification_fails_without_rollback(self, mock_snapshot, mock_gateway, mock_rollback, _settings):
-        """Ok(False) from verification marks the request failed and never restores the snapshot."""
+        """An inconclusive verification marks the request failed and never restores the snapshot."""
         self.remediation_request.status = "approved"
         self.remediation_request.save(update_fields=["status"])
         snapshot = DriftSnapshot.objects.create(
@@ -1062,7 +1076,7 @@ class TestVerifyRemediation(DriftRemediationTestBase):
 
         with patch(
             "apps.infrastructure.drift_remediation.DriftRemediationService._verify_remediation",
-            return_value=Ok(False),
+            return_value=Ok("Provider confirms the remediation but the server is silent — manual check required"),
         ):
             result = self.service.execute_remediation(self.remediation_request)
 
@@ -1092,3 +1106,240 @@ class TestAuditEvents(DriftRemediationTestBase):
         """Audit events should be logged on approval."""
         self.service.approve_remediation(self.remediation_request.pk, self.admin)
         mock_audit.assert_called_once()
+
+
+class TestDestructivePathPreconditions(DriftRemediationTestBase):
+    """The destructive restore must re-validate its justification at the moment it acts.
+
+    Snapshot restore is a full rebuild: it may only run when the provider was
+    OBSERVED in the wrong state — never on ambiguity (API unreachable, polling
+    hiccups) and never after the drift healed or the request left in_progress.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.clock = _FakeClock()
+        for p in (
+            patch("apps.infrastructure.drift_remediation._monotonic", self.clock.monotonic),
+            patch("apps.infrastructure.drift_remediation._sleep", self.clock.sleep),
+        ):
+            p.start()
+            self.addCleanup(p.stop)
+        self.snapshot = DriftSnapshot.objects.create(
+            deployment=self.deployment,
+            provider_snapshot_id="snap-pre",
+            snapshot_type="pre_remediation",
+            status="available",
+        )
+
+    def _approve(self) -> None:
+        self.remediation_request.status = "approved"
+        self.remediation_request.save(update_fields=["status"])
+
+    def _server(self, server_type: str) -> ServerInfo:
+        return ServerInfo(
+            server_id="12345",
+            name=self.deployment.hostname,
+            status="running",
+            ipv4_address="1.2.3.4",
+            server_type=server_type,
+        )
+
+    @patch("apps.infrastructure.drift_remediation.socket.create_connection")
+    @patch.object(DriftRemediationService, "_rollback")
+    @patch.object(DriftRemediationService, "_apply_remediation")
+    @patch.object(DriftRemediationService, "_get_gateway")
+    @patch.object(DriftRemediationService, "_take_snapshot")
+    def test_apply_error_with_provider_confirmed_state_does_not_restore(
+        self, mock_snapshot, mock_gateway, mock_apply, mock_rollback, mock_conn
+    ):
+        """Apply reported Err but the provider shows the expected state: the
+        mutation landed — verification must continue, not a snapshot rebuild."""
+        mock_snapshot.return_value = Ok(self.snapshot)
+        gw = MagicMock()
+        gw.get_server.return_value = Ok(self._server("cpx21"))
+        mock_gateway.return_value = gw
+        mock_apply.return_value = Err("action polling timed out")
+        self._approve()
+
+        result = self.service.execute_remediation(self.remediation_request)
+
+        self.assertTrue(result.is_ok(), result.unwrap_err() if result.is_err() else "")
+        mock_rollback.assert_not_called()
+        self.remediation_request.refresh_from_db()
+        self.assertEqual(self.remediation_request.status, "completed")
+
+    @patch("apps.infrastructure.drift_remediation.socket.create_connection")
+    @patch.object(DriftRemediationService, "_rollback")
+    @patch.object(DriftRemediationService, "_apply_remediation")
+    @patch.object(DriftRemediationService, "_get_gateway")
+    @patch.object(DriftRemediationService, "_take_snapshot")
+    def test_apply_error_with_unobservable_provider_marks_manual(
+        self, mock_snapshot, mock_gateway, mock_apply, mock_rollback, mock_conn
+    ):
+        """Apply Err + provider unobservable = total ambiguity: hand to staff,
+        never rebuild a server whose true state is unknown."""
+        mock_snapshot.return_value = Ok(self.snapshot)
+        gw = MagicMock()
+        gw.get_server.return_value = Err("provider API unavailable")
+        mock_gateway.return_value = gw
+        mock_apply.return_value = Err("action polling timed out")
+        self._approve()
+
+        result = self.service.execute_remediation(self.remediation_request)
+
+        self.assertTrue(result.is_err())
+        mock_rollback.assert_not_called()
+        self.remediation_request.refresh_from_db()
+        self.assertEqual(self.remediation_request.status, "failed")
+        self.assertIn("manual", (self.remediation_request.error_message or "").lower())
+
+    @patch("apps.infrastructure.drift_remediation.socket.create_connection")
+    @patch.object(DriftRemediationService, "_rollback")
+    @patch.object(DriftRemediationService, "_apply_remediation")
+    @patch.object(DriftRemediationService, "_get_gateway")
+    @patch.object(DriftRemediationService, "_take_snapshot")
+    def test_apply_error_with_provider_showing_wrong_state_still_restores(
+        self, mock_snapshot, mock_gateway, mock_apply, mock_rollback, mock_conn
+    ):
+        """Provider OBSERVED wrong after a failed apply — restore stays justified."""
+        mock_snapshot.return_value = Ok(self.snapshot)
+        gw = MagicMock()
+        gw.get_server.return_value = Ok(self._server("cpx41"))
+        mock_gateway.return_value = gw
+        mock_apply.return_value = Err("change_type rejected")
+        mock_rollback.return_value = Ok(True)
+        self._approve()
+
+        result = self.service.execute_remediation(self.remediation_request)
+
+        self.assertTrue(result.is_err())
+        mock_rollback.assert_called_once()
+        self.remediation_request.refresh_from_db()
+        self.assertEqual(self.remediation_request.status, "rolled_back")
+
+    @patch("apps.infrastructure.drift_remediation.socket.create_connection")
+    @patch.object(DriftRemediationService, "_rollback")
+    @patch.object(DriftRemediationService, "_apply_remediation")
+    @patch.object(DriftRemediationService, "_get_gateway")
+    @patch.object(DriftRemediationService, "_take_snapshot")
+    def test_verification_never_observing_provider_marks_manual_not_restore(
+        self, mock_snapshot, mock_gateway, mock_apply, mock_rollback, mock_conn
+    ):
+        """The provider API erroring through the whole verify window is
+        ambiguity, not confirmation of failure — no rebuild on the unknown."""
+        mock_snapshot.return_value = Ok(self.snapshot)
+        gw = MagicMock()
+        gw.get_server.return_value = Err("api down")
+        mock_gateway.return_value = gw
+        mock_apply.return_value = Ok(True)
+        self._approve()
+
+        result = self.service.execute_remediation(self.remediation_request)
+
+        self.assertTrue(result.is_err())
+        mock_rollback.assert_not_called()
+        self.remediation_request.refresh_from_db()
+        self.assertEqual(self.remediation_request.status, "failed")
+        self.assertIn("manual", (self.remediation_request.error_message or "").lower())
+
+    @patch.object(DriftRemediationService, "_rollback")
+    def test_restore_skipped_when_report_healed_during_execution(self, mock_rollback):
+        """Drift healed while the worker executed: restoring would undo
+        independently-confirmed-correct state."""
+        self.remediation_request.status = "in_progress"
+        self.remediation_request.save(update_fields=["status"])
+        DriftReport.objects.filter(pk=self.report.pk).update(
+            resolved=True, resolved_at=timezone.now(), resolution_type="healed"
+        )
+
+        result = self.service._rollback_after_failure(
+            self.remediation_request, self.deployment, self.snapshot, "Health check failed", "boom"
+        )
+
+        self.assertTrue(result.is_err())
+        mock_rollback.assert_not_called()
+        self.report.refresh_from_db()
+        self.assertEqual(self.report.resolution_type, "healed")
+        self.remediation_request.refresh_from_db()
+        self.assertEqual(self.remediation_request.status, "failed")
+
+    @patch.object(DriftRemediationService, "_rollback")
+    def test_restore_skipped_when_request_externally_transitioned(self, mock_rollback):
+        """A request the reaper (or staff) already moved out of in_progress no
+        longer owns the deployment — it must not fire a restore."""
+        self.remediation_request.status = "failed"
+        self.remediation_request.save(update_fields=["status"])
+
+        result = self.service._rollback_after_failure(
+            self.remediation_request, self.deployment, self.snapshot, "Apply failed", "boom"
+        )
+
+        self.assertTrue(result.is_err())
+        mock_rollback.assert_not_called()
+        self.remediation_request.refresh_from_db()
+        self.assertEqual(self.remediation_request.status, "failed")
+
+    @patch("apps.infrastructure.drift_remediation.socket.create_connection")
+    @patch.object(DriftRemediationService, "_rollback")
+    @patch.object(DriftRemediationService, "_get_gateway")
+    @patch.object(DriftRemediationService, "_take_snapshot")
+    def test_completion_preserves_concurrent_heal_resolution(
+        self, mock_snapshot, mock_gateway, mock_rollback, mock_conn
+    ):
+        """A scan healing the report mid-execution must not be overwritten to
+        'remediated' by the completion path."""
+        mock_snapshot.return_value = Ok(self.snapshot)
+        gw = MagicMock()
+        gw.resize.return_value = Ok(True)
+
+        def get_server_heals(_node_id):
+            DriftReport.objects.filter(pk=self.report.pk, resolved=False).update(
+                resolved=True, resolved_at=timezone.now(), resolution_type="healed"
+            )
+            return Ok(self._server("cpx21"))
+
+        gw.get_server.side_effect = get_server_heals
+        mock_gateway.return_value = gw
+        self._approve()
+
+        result = self.service.execute_remediation(self.remediation_request)
+
+        self.assertTrue(result.is_ok(), result.unwrap_err() if result.is_err() else "")
+        mock_rollback.assert_not_called()
+        self.remediation_request.refresh_from_db()
+        self.assertEqual(self.remediation_request.status, "completed")
+        self.report.refresh_from_db()
+        self.assertEqual(self.report.resolution_type, "healed")
+
+    def test_queue_retry_exceeds_execution_task_timeout(self):
+        """django-q2 must not redeliver a task that is still legitimately running."""
+        self.assertGreater(int(django_settings.Q_CLUSTER["retry"]), EXECUTION_TASK_TIMEOUT_SECONDS)
+
+    def test_execution_budget_covers_all_provider_stages(self):
+        """Snapshot, apply, and restore are each bounded near 300s by provider
+        action polling; verify adds its own budget. The task timeout must cover
+        the worst-case sequence or django-q2 kills the worker MID-RESTORE."""
+        provider_action_bound = 300
+        verify_budget_bound = 150
+        margin = 60
+        self.assertGreaterEqual(
+            EXECUTION_TASK_TIMEOUT_SECONDS, 3 * provider_action_bound + verify_budget_bound + margin
+        )
+
+
+class TestAcceptDriftRaceDiagnostics(DriftRemediationTestBase):
+    def test_accept_losing_status_race_returns_err_not_transaction_error(self) -> None:
+        """After set_rollback the connection refuses queries — the diagnostic
+        refresh must happen BEFORE the flag or the caller gets a
+        TransactionManagementError instead of the intended Err."""
+
+        def flip_status_then_sync(_deployment, _report):
+            DriftRemediationRequest.objects.filter(pk=self.remediation_request.pk).update(status="approved")
+            return Ok(True)
+
+        with patch.object(DriftRemediationService, "_sync_accepted_value", side_effect=flip_status_then_sync):
+            result = self.service.accept_drift(self.remediation_request.pk, self.admin)
+
+        self.assertTrue(result.is_err())
+        self.assertIn("approved", result.unwrap_err())
