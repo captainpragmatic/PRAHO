@@ -25,15 +25,27 @@ def lock_recurring_collection_customer(customer_id: int) -> Customer:
 @contextmanager
 def recurring_charge_submission_boundary(customer_id: int) -> Iterator[str | None]:
     """Serialize the final authorization check and gateway submission with revocation."""
+    # Serialize against an in-flight kill-switch flip with a SHORT locked read
+    # that COMMITS before the gateway round-trip. A disable already holding the
+    # setting-row lock still blocks this charge from starting (the FOR UPDATE
+    # read waits behind it, then observes the committed disable), but the lock
+    # is released before the customer lock and the Stripe call — so one hung
+    # gateway call can neither stall the kill switch for operators nor serialize
+    # every other customer's recurring charge behind this single global row.
     with transaction.atomic():
         setting = (
             SystemSetting.objects.select_for_update(of=("self",))
             .filter(key=RECURRING_AUTO_COLLECTION_SETTING_KEY)
             .first()
         )
-        if setting is None or setting.get_typed_value() is not True:
-            yield "Recurring automatic collection is disabled"
-            return
+        collection_enabled = setting is not None and setting.get_typed_value() is True
+    if not collection_enabled:
+        yield "Recurring automatic collection is disabled"
+        return
 
+    # Per-customer serialization against revocation is preserved here and DOES
+    # span the gateway call (the #316 fix): a revocation for this customer waits
+    # for the in-flight charge, by policy.
+    with transaction.atomic():
         lock_recurring_collection_customer(customer_id)
         yield None

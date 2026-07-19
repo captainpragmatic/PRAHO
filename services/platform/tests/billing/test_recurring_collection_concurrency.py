@@ -380,3 +380,48 @@ class RecurringCollectionPostgresConcurrencyTests(_SubscriptionInvoicePaymentFix
         self.assertTrue(withdrawal_result.is_ok(), withdrawal_result)
         self.authorization.refresh_from_db()
         self.assertEqual(self.authorization.status, "withdrawn")
+
+    def test_kill_switch_row_is_not_locked_across_the_gateway_call(self) -> None:
+        """W1: the global kill-switch row must be released before the gateway
+        round-trip. While a charge is mid-Stripe-call (its boundary held), a
+        second connection must still be able to lock the setting row — otherwise
+        one hung gateway call serializes every customer's charge and blocks the
+        kill switch itself."""
+        gateway_called = threading.Event()
+        release_charge = threading.Event()
+
+        def charge_holding_boundary() -> PaymentIntentResult:
+            gateway = MagicMock()
+
+            def submit_charge(**_kwargs: object) -> PaymentIntentResult:
+                gateway_called.set()
+                if not release_charge.wait(timeout=10):
+                    raise AssertionError("Timed out releasing held charge")
+                return _intent_result(payment_intent_id=f"pi_hold_{uuid.uuid4().hex[:8]}")
+
+            gateway.create_off_session_payment_intent.side_effect = submit_charge
+            with patch(
+                "apps.billing.payment_service.PaymentGatewayFactory.create_gateway",
+                return_value=gateway,
+            ):
+                return PaymentService.create_payment_intent_for_invoice(
+                    invoice_id=self.invoice.id,
+                    payment_method_id=self.payment_method.stripe_payment_method_id,
+                )
+
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            charge_future = executor.submit(self._in_separate_connection, charge_holding_boundary)
+            self.assertTrue(gateway_called.wait(timeout=5), "Charge never reached the gateway call")
+            try:
+                # nowait raises immediately if the row is still locked by the
+                # in-flight charge's boundary — pre-fix (FOR UPDATE held across
+                # the gateway call) this fails; post-fix it succeeds.
+                with transaction.atomic():
+                    SystemSetting.objects.select_for_update(nowait=True).get(
+                        key="billing.recurring_auto_collection_enabled"
+                    )
+            finally:
+                release_charge.set()
+            charge_result = charge_future.result(timeout=10)
+
+        self.assertTrue(charge_result["success"], charge_result)
