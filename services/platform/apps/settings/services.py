@@ -310,6 +310,10 @@ class SettingsService:
         "infrastructure.network_probe_timeout_seconds": 10,
         "infrastructure.consecutive_failure_threshold": 3,
         "infrastructure.vultr_poll_timeout_seconds": 300,
+        "infrastructure.remediation_boot_grace_seconds": 30,
+        "infrastructure.remediation_verify_max_wait_seconds": 150,
+        "infrastructure.remediation_verify_poll_interval_seconds": 10,
+        "infrastructure.remediation_stale_after_minutes": 30,
         # ── System Configuration ────────────────────────────────────────
         "system.maintenance_mode": False,
         "system.backup_retention_days": 30,

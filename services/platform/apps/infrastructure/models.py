@@ -895,7 +895,16 @@ class DriftReport(models.Model):
         ("remediated", _("Remediated")),
         ("accepted", _("Accepted")),
         ("ignored", _("Ignored")),
+        ("superseded", _("Superseded")),
+        ("healed", _("Healed Externally")),
     ]
+
+    # Fields whose accepted actual value can be durably written back to PRAHO's
+    # records (accepting anything else would just re-mint the same drift on the
+    # next scan).
+    ACCEPTABLE_DRIFT_FIELDS: ClassVar[frozenset[str]] = frozenset(
+        {"ipv4_address", "ipv6_address", "server_type", "server_status"}
+    )
 
     drift_check = models.ForeignKey(
         "DriftCheck",
@@ -927,6 +936,8 @@ class DriftReport(models.Model):
     resolution_type = models.CharField(
         max_length=20, choices=RESOLUTION_CHOICES, blank=True, verbose_name=_("Resolution Type")
     )
+    last_seen_at = models.DateTimeField(null=True, blank=True, verbose_name=_("Last Seen At"))
+    occurrence_count = models.PositiveIntegerField(default=1, verbose_name=_("Occurrence Count"))
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -938,9 +949,27 @@ class DriftReport(models.Model):
             models.Index(fields=["deployment", "severity", "-created_at"]),
             models.Index(fields=["resolved", "severity"]),
         ]
+        constraints = [
+            # The scanner refreshes the single open report per drifting field
+            # instead of minting duplicates every 15 minutes.
+            models.UniqueConstraint(
+                fields=["deployment", "field_name"],
+                condition=models.Q(resolved=False),
+                name="uniq_open_drift_report_per_field",
+            ),
+        ]
 
     def __str__(self) -> str:
         return f"DriftReport({self.deployment.hostname}, {self.field_name}, {self.severity})"
+
+    @property
+    def is_acceptable(self) -> bool:
+        """Whether accepting this drift performs a durable write (see ACCEPTABLE_DRIFT_FIELDS)."""
+        if self.field_name == "server_status":
+            # Only a genuinely powered-off server can be accepted as stopped;
+            # transitional/unknown provider states have no durable write.
+            return (self.actual_value or "").strip() in ("off", "stopped")
+        return self.field_name in self.ACCEPTABLE_DRIFT_FIELDS
 
 
 class DriftRemediationRequest(models.Model):
@@ -949,6 +978,7 @@ class DriftRemediationRequest(models.Model):
     ACTION_TYPE_CHOICES: ClassVar[list[tuple[str, str | _StrPromise]]] = [
         ("apply_desired", _("Apply Desired State")),
         ("accept_actual", _("Accept Actual State")),
+        ("manual_intervention", _("Manual Intervention")),
         ("schedule", _("Schedule")),
         ("ignore", _("Ignore")),
     ]
@@ -962,7 +992,12 @@ class DriftRemediationRequest(models.Model):
         ("failed", _("Failed")),
         ("rolled_back", _("Rolled Back")),
         ("rollback_failed", _("Rollback Failed")),
+        ("superseded", _("Superseded")),
     ]
+
+    # Statuses that count as "open" work for dedup purposes: while one of these
+    # exists for a report, the scanner must not mint another request.
+    OPEN_STATUSES: ClassVar[tuple[str, ...]] = ("pending_approval", "approved", "scheduled", "in_progress")
 
     report = models.ForeignKey(
         "DriftReport",
@@ -1003,6 +1038,7 @@ class DriftRemediationRequest(models.Model):
     rejected_reason = models.TextField(blank=True, verbose_name=_("Rejected Reason"))
     scheduled_for = models.DateTimeField(null=True, blank=True, verbose_name=_("Scheduled For"))
     snapshot_id = models.CharField(max_length=100, blank=True, verbose_name=_("Snapshot ID"))
+    execution_claimed_at = models.DateTimeField(null=True, blank=True, verbose_name=_("Execution Claimed At"))
     started_at = models.DateTimeField(null=True, blank=True, verbose_name=_("Started At"))
     completed_at = models.DateTimeField(null=True, blank=True, verbose_name=_("Completed At"))
     error_message = models.TextField(blank=True, verbose_name=_("Error Message"))
@@ -1017,6 +1053,22 @@ class DriftRemediationRequest(models.Model):
             models.Index(fields=["status", "-created_at"]),
             models.Index(fields=["deployment", "status"]),
             models.Index(fields=["scheduled_for"]),
+        ]
+        constraints = [
+            # One open request per report: concurrent scanners cannot
+            # double-mint approval work (check-then-create is not enough).
+            models.UniqueConstraint(
+                fields=["report"],
+                condition=models.Q(status__in=("pending_approval", "approved", "scheduled", "in_progress")),
+                name="uniq_open_request_per_report",
+            ),
+            # One execution per deployment, enforced by the database — the
+            # cross-backend backstop for the conditional-update claim.
+            models.UniqueConstraint(
+                fields=["deployment"],
+                condition=models.Q(status="in_progress"),
+                name="uniq_in_progress_remediation_per_deployment",
+            ),
         ]
 
     def __str__(self) -> str:

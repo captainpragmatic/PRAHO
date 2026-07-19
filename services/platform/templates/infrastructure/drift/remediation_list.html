@@ -45,17 +45,21 @@
                         </div>
                         <div class="flex items-center space-x-2">
                             {% if req.status == "pending_approval" %}
+                            {% if req.action_type == "apply_desired" %}
                             <form method="post" action="{% url 'infrastructure:drift_remediation_approve' req.pk %}">
                                 {% csrf_token %}
                                 {% trans "Approve this remediation?" as confirm_approve %}
                                 {% trans "Approve" as approve_btn %}{% button approve_btn variant="success" type="submit" size="sm" attrs="onclick=\"return confirm('{{ confirm_approve|escapejs }}')\"" %}
                             </form>
+                            {% endif %}
+                            {% if req.report.is_acceptable %}
                             <form method="post" action="{% url 'infrastructure:drift_remediation_accept' req.pk %}">
                                 {% csrf_token %}
                                 <button type="submit" class="px-3 py-1 bg-slate-600 hover:bg-slate-500 text-white text-sm rounded transition-colors">
                                     {% trans "Accept" %}
                                 </button>
                             </form>
+                            {% endif %}
                             <form method="post" action="{% url 'infrastructure:drift_remediation_reject' req.pk %}">
                                 {% csrf_token %}
                                 <input type="hidden" name="reason" value="Rejected by admin">

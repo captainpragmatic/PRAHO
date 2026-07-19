@@ -588,7 +588,7 @@ configure_rate_limiting(globals(), enabled=True)
 Q_CLUSTER_BASE = {
     "name": "praho-cluster",
     "timeout": 300,  # 5 minutes
-    "retry": 600,  # 10 minutes retry delay
+    "retry": 1800,  # Must exceed the longest per-task timeout override (drift EXECUTION_TASK_TIMEOUT_SECONDS=1500) or q2 redelivers a still-running task
     "save_limit": 1000,  # Keep last 1000 task results
     "catch_up": False,  # Don't run missed scheduled tasks
     "orm": "default",  # Use PostgreSQL database backend

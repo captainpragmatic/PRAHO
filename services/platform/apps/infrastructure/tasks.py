@@ -1687,11 +1687,37 @@ def run_drift_scan_task() -> dict[str, Any]:
         cache.delete(_DRIFT_SCAN_LOCK_ID)
 
 
-def apply_scheduled_remediations_task() -> dict[str, Any]:
-    """Scheduled every 5 min. Finds requests with status=scheduled and scheduled_for <= now."""
-
+def execute_remediation_task(request_pk: int) -> dict[str, Any]:
+    """One-off task: execute a single approved remediation request."""
     from apps.infrastructure.drift_remediation import (  # noqa: PLC0415  # Deferred: avoids circular import
         get_drift_remediation_service,  # Circular: cross-app
+    )
+    from apps.infrastructure.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+        DriftRemediationRequest,  # Circular: cross-app  # Deferred: avoids circular import
+    )
+
+    try:
+        req = DriftRemediationRequest.objects.select_related("deployment", "report").get(pk=request_pk)
+    except DriftRemediationRequest.DoesNotExist:
+        logger.warning(f"⚠️ [DriftTasks] Remediation request {request_pk} no longer exists — nothing to execute")
+        return {"status": "missing"}
+    result = get_drift_remediation_service().execute_remediation(req)
+    if result.is_ok():
+        return {"status": "completed"}
+    return {"error": result.unwrap_err()}
+
+
+def apply_scheduled_remediations_task() -> dict[str, Any]:
+    """
+    Scheduled every 5 min. Claims each due scheduled request individually
+    (conditional update, so concurrent workers cannot double-claim) and hands
+    it its own execution task — a serial in-task batch would blow through the
+    300s django-q2 worker timeout and strand the rest of the batch approved.
+    """
+    from django_q.tasks import async_task  # noqa: PLC0415  # Deferred: avoids circular import
+
+    from apps.infrastructure.drift_remediation import (  # noqa: PLC0415  # Deferred: avoids circular import
+        EXECUTION_TASK_TIMEOUT_SECONDS,  # Circular: cross-app
     )
     from apps.infrastructure.models import (  # noqa: PLC0415  # Deferred: avoids circular import
         DriftRemediationRequest,  # Circular: cross-app  # Deferred: avoids circular import
@@ -1700,36 +1726,129 @@ def apply_scheduled_remediations_task() -> dict[str, Any]:
     logger.info("🚀 [Task:scheduled_remediations] Checking for due scheduled remediations")
 
     now = timezone.now()
+    due_pks = list(
+        DriftRemediationRequest.objects.filter(status="scheduled", scheduled_for__lte=now).values_list("pk", flat=True)
+    )
 
-    # Atomic claim: lock and update status to prevent concurrent workers from double-executing
-    with transaction.atomic():
-        due_pks = list(
-            DriftRemediationRequest.objects.select_for_update()
-            .filter(status="scheduled", scheduled_for__lte=now)
-            .values_list("pk", flat=True)
-        )
-        if due_pks:
-            DriftRemediationRequest.objects.filter(pk__in=due_pks).update(status="approved")
-
-    service = get_drift_remediation_service()
-    applied = 0
-    failed = 0
-
+    claimed = 0
     for pk in due_pks:
-        try:
-            req = DriftRemediationRequest.objects.select_related("deployment", "report").get(pk=pk)
-            result = service.execute_remediation(req)
-            if result.is_ok():
-                applied += 1
-            else:
-                failed += 1
-                logger.warning(f"⚠️ [Task:scheduled_remediations] Failed: {result.unwrap_err()}")
-        except Exception as e:
-            failed += 1
-            logger.error(f"🔥 [Task:scheduled_remediations] Error: {e}")
+        with transaction.atomic():
+            updated = DriftRemediationRequest.objects.filter(pk=pk, status="scheduled").update(
+                status="approved", execution_claimed_at=now
+            )
+            if updated:
+                async_task(
+                    "apps.infrastructure.tasks.execute_remediation_task",
+                    pk,
+                    task_name=f"remediation_{pk}",
+                    timeout=EXECUTION_TASK_TIMEOUT_SECONDS,
+                )
+                claimed += 1
 
-    logger.info(f"✅ [Task:scheduled_remediations] Applied: {applied}, Failed: {failed}")
-    return {"applied": applied, "failed": failed}
+    logger.info(f"✅ [Task:scheduled_remediations] Claimed and queued: {claimed}/{len(due_pks)}")
+    return {"claimed": claimed, "due": len(due_pks)}
+
+
+def recover_stale_remediations_task() -> dict[str, Any]:
+    """
+    Scheduled every 15 min. Recovers remediation state stranded by crashes or
+    queue loss so a deployment can never be blocked forever (#224 defect 3):
+
+    1. in_progress older than the stale threshold (or without started_at)
+       -> failed; the report stays open, so the next scan can re-request.
+    2. approved that never started within the threshold (queue backlog, guard
+       loser, lost task) -> re-enqueued, not failed: the claim into execution
+       is a conditional update, so a duplicate task is harmless.
+    3. Open drift on deployments that left scan scope (stopped/destroyed/...)
+       -> superseded; the scanner skips those deployments, so nothing else
+       would ever close their reports and requests.
+    """
+    from django.db.models import Q  # noqa: PLC0415  # Deferred: local to task
+    from django_q.tasks import async_task  # noqa: PLC0415  # Deferred: avoids circular import
+
+    from apps.infrastructure.drift_remediation import (  # noqa: PLC0415  # Deferred: avoids circular import
+        EXECUTION_TASK_TIMEOUT_SECONDS,  # Circular: cross-app
+        get_drift_remediation_service,  # Circular: cross-app
+        get_stale_after_minutes,  # Circular: cross-app
+    )
+    from apps.infrastructure.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+        DriftRemediationRequest,  # Circular: cross-app  # Deferred: avoids circular import
+        DriftReport,  # Circular: cross-app  # Deferred: avoids circular import
+    )
+
+    logger.info("🚀 [Task:recover_stale_remediations] Sweeping stranded remediation state")
+
+    now = timezone.now()
+    cutoff = now - timedelta(minutes=get_stale_after_minutes())
+    service = get_drift_remediation_service()
+    recovered = 0
+    requeued = 0
+    errors: list[str] = []
+
+    # 1. Crashed executions
+    stale_in_progress = DriftRemediationRequest.objects.select_related("deployment").filter(
+        Q(started_at__lt=cutoff) | Q(started_at__isnull=True), status="in_progress"
+    )
+    for req in stale_in_progress:
+        try:
+            age_ref = req.started_at or req.created_at
+            age_hours = (now - age_ref).total_seconds() / 3600
+            service._mark_failed(
+                req,
+                f"Remediation stuck in progress for {age_hours:.1f}h — auto-recovered (worker crash suspected)",
+            )
+            recovered += 1
+        except Exception as e:
+            errors.append(f"request {req.pk}: {e}")
+            logger.error(f"🔥 [Task:recover_stale_remediations] Error recovering request {req.pk}: {e}")
+
+    # 2. Orphaned approvals: re-drive, don't discard human approval
+    liveness = Q(execution_claimed_at__lt=cutoff) | (
+        Q(execution_claimed_at__isnull=True)
+        & (Q(approved_at__lt=cutoff) | Q(approved_at__isnull=True, created_at__lt=cutoff))
+    )
+    orphaned = DriftRemediationRequest.objects.filter(liveness, status="approved", started_at__isnull=True)
+    for req in orphaned:
+        try:
+            updated = DriftRemediationRequest.objects.filter(pk=req.pk, status="approved").update(
+                execution_claimed_at=now
+            )
+            if updated:
+                async_task(
+                    "apps.infrastructure.tasks.execute_remediation_task",
+                    req.pk,
+                    task_name=f"remediation_{req.pk}",
+                    timeout=EXECUTION_TASK_TIMEOUT_SECONDS,
+                )
+                requeued += 1
+        except Exception as e:
+            errors.append(f"request {req.pk}: {e}")
+            logger.error(f"🔥 [Task:recover_stale_remediations] Error re-queueing request {req.pk}: {e}")
+
+    # 3. Drift bookkeeping for deployments outside scan scope
+    swept_reports = (
+        DriftReport.objects.filter(resolved=False)
+        .exclude(deployment__status="completed")
+        .update(resolved=True, resolved_at=now, resolution_type="superseded")
+    )
+    swept_requests = (
+        DriftRemediationRequest.objects.filter(status__in=("pending_approval", "approved", "scheduled"))
+        .exclude(deployment__status="completed")
+        .update(status="superseded")
+    )
+
+    logger.info(
+        f"✅ [Task:recover_stale_remediations] Recovered: {recovered}, re-queued: {requeued}, "
+        f"swept: {swept_reports} reports / {swept_requests} requests, errors: {len(errors)}"
+    )
+    return {
+        "success": len(errors) == 0,
+        "recovered_count": recovered,
+        "requeued_count": requeued,
+        "swept_reports": swept_reports,
+        "swept_requests": swept_requests,
+        "errors": errors,
+    }
 
 
 def check_remediation_health_task() -> dict[str, Any]:
