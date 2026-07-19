@@ -27,6 +27,7 @@ from .security_utils import IdempotencyManager
 from .virtualmin_backup_service import BackupConfig, RestoreConfig
 from .virtualmin_gateway import VirtualminConfig, VirtualminGateway, get_virtualmin_config
 from .virtualmin_models import (
+    HEALTH_AUTO_FAIL_THRESHOLD,
     VirtualminAccount,
     VirtualminDriftRecord,
     VirtualminProvisioningJob,
@@ -1277,21 +1278,47 @@ class VirtualminServerManagementService:
             if result.is_ok():
                 health_data = result.unwrap()
 
-                # Update server health status
+                # Success: stamp the (success-only) timestamp, clear the error
+                # and streak, and auto-recover a server WE auto-failed —
+                # operator-set "failed" is never touched by health checks.
                 server.last_health_check = timezone.now()
                 server.health_check_error = ""
-                server.save(update_fields=["last_health_check", "health_check_error", "updated_at"])
+                server.consecutive_health_failures = 0
+                update_fields = [
+                    "last_health_check",
+                    "health_check_error",
+                    "consecutive_health_failures",
+                    "updated_at",
+                ]
+                if server.status == "failed" and server.failed_by_health_check:
+                    server.status = "active"
+                    server.failed_by_health_check = False
+                    update_fields += ["status", "failed_by_health_check"]
+                    logger.info(f"✅ [ServerManagement] Auto-recovered {server.hostname} to active")
+                server.save(update_fields=update_fields)
 
                 logger.info(f"✅ [ServerManagement] Health check passed for {server.hostname}")
                 return Ok(health_data)
             else:
                 error_msg = result.unwrap_err()
 
-                # Update server with error and mark as failed
-                server.last_health_check = timezone.now()
-                server.health_check_error = error_msg
-                server.status = "failed"
-                server.save(update_fields=["last_health_check", "health_check_error", "status", "updated_at"])
+                # Failure: record the error and the streak. last_health_check
+                # is NOT stamped (it means "last verified"), and a single
+                # strike no longer evicts the server — only a sustained
+                # streak auto-fails it, reversibly.
+                VirtualminServer.objects.filter(pk=server.pk).update(
+                    health_check_error=error_msg,
+                    consecutive_health_failures=models.F("consecutive_health_failures") + 1,
+                )
+                server.refresh_from_db()
+                if server.status == "active" and server.consecutive_health_failures >= HEALTH_AUTO_FAIL_THRESHOLD:
+                    server.status = "failed"
+                    server.failed_by_health_check = True
+                    server.save(update_fields=["status", "failed_by_health_check", "updated_at"])
+                    logger.error(
+                        f"🔥 [ServerManagement] Auto-failed {server.hostname} after "
+                        f"{server.consecutive_health_failures} consecutive failed checks"
+                    )
 
                 logger.warning(f"⚠️ [ServerManagement] Health check failed for {server.hostname}: {error_msg}")
                 return Err(error_msg, retriability=retriability_of(result))

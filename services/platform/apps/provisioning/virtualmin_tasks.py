@@ -1003,11 +1003,16 @@ def health_check_virtualmin_servers() -> dict[str, Any]:
             logger.info("⏭️ [VirtualminTask] Health check already running, skipping")
             return {"success": True, "message": "Already running"}
 
-        # Set lock for 30 minutes
-        cache.set(lock_key, True, 1800)
+        # Lock must not outlive the 10-minute sweep cadence, or a crashed
+        # worker would silently skip sweeps until the stale lock expires.
+        cache.set(lock_key, True, 540)
 
         try:
-            servers = VirtualminServer.objects.filter(status="active")
+            # Auto-failed servers stay in the sweep so they can recover;
+            # operator-failed servers are left alone.
+            servers = VirtualminServer.objects.filter(
+                models.Q(status="active") | models.Q(status="failed", failed_by_health_check=True)
+            )
             results: dict[str, Any] = {
                 "total_servers": servers.count(),
                 "healthy_servers": 0,
@@ -1073,7 +1078,11 @@ def update_virtualmin_server_statistics() -> dict[str, Any]:
         cache.set(lock_key, True, 3600)
 
         try:
-            servers = VirtualminServer.objects.filter(status="active")
+            # Auto-failed servers stay in the sweep so they can recover;
+            # operator-failed servers are left alone.
+            servers = VirtualminServer.objects.filter(
+                models.Q(status="active") | models.Q(status="failed", failed_by_health_check=True)
+            )
             results: dict[str, Any] = {
                 "total_servers": servers.count(),
                 "updated_servers": 0,
@@ -1364,17 +1373,19 @@ def setup_virtualmin_scheduled_tasks() -> dict[str, str]:
         ).values_list("name", flat=True)
     )
 
-    # Health check every hour
-    if "virtualmin-health-check" not in existing_tasks:
-        schedule(
-            "apps.provisioning.virtualmin_tasks.health_check_virtualmin_servers",
-            schedule_type="H",
-            name="virtualmin-health-check",
-            cluster="praho-cluster",
-        )
-        tasks_created["health_check"] = "created"
-    else:
-        tasks_created["health_check"] = "already_exists"
+    # Health check every 10 minutes. UPSERT by name: skip-if-exists left
+    # deployed installations on the old hourly cadence forever, starving
+    # placement (is_healthy freshness << cadence).
+    _, created = ScheduleModel.objects.update_or_create(
+        name="virtualmin-health-check",
+        defaults={
+            "func": "apps.provisioning.virtualmin_tasks.health_check_virtualmin_servers",
+            "schedule_type": "I",
+            "minutes": 10,
+            "cluster": "praho-cluster",
+        },
+    )
+    tasks_created["health_check"] = "created" if created else "updated"
 
     # Statistics update every 6 hours
     if "virtualmin-statistics" not in existing_tasks:

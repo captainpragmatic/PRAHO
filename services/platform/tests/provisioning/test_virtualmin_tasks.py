@@ -16,6 +16,7 @@ from unittest.mock import patch
 
 from django.test import TestCase
 from django.utils import timezone
+from django_q.models import Schedule
 
 from apps.billing.models import Currency
 from apps.customers.models import Customer
@@ -26,11 +27,17 @@ from apps.provisioning.virtualmin_models import (
     VirtualminProvisioningJob,
     VirtualminServer,
 )
-from apps.provisioning.virtualmin_service import VirtualminAccountCreationData, VirtualminProvisioningService
+from apps.provisioning.virtualmin_service import (
+    VirtualminAccountCreationData,
+    VirtualminProvisioningService,
+    VirtualminServerManagementService,
+)
 from apps.provisioning.virtualmin_tasks import (
+    health_check_virtualmin_servers,
     process_failed_virtualmin_jobs,
     provision_virtualmin_account_async,
     retry_virtualmin_job,
+    setup_virtualmin_scheduled_tasks,
 )
 from tests.mocks.virtualmin_mock import MockVirtualminGateway
 
@@ -391,3 +398,106 @@ class TestDriftRecords(VirtualminTaskTestBase):
         # PRAHO won: Virtualmin was forced to match, drift auto-fixed
         self.assertEqual(record.resolution_status, "auto_fixed")
         self.assertFalse(mock_gateway.get_domain_state(self.account.domain).enabled)
+
+
+class TestServerHealthModel(VirtualminTaskTestBase):
+    """#325 defect 6: hourly checks vs 600s freshness starved placement
+    ~50 min/hour, and a single failed check permanently evicted a server."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.mgmt = VirtualminServerManagementService()
+
+    def _check(self, mock_gateway):
+        with patch(
+            "apps.provisioning.virtualmin_service.VirtualminGateway",
+            return_value=mock_gateway,
+        ):
+            return self.mgmt.health_check_server(self.server)
+
+    def test_server_checked_20_minutes_ago_is_placeable(self):
+        """The freshness window must cover the sweep cadence."""
+        self.server.last_health_check = timezone.now() - timedelta(minutes=20)
+        self.server.save(update_fields=["last_health_check"])
+        self.assertTrue(self.server.is_healthy)
+
+    def test_server_checked_26_minutes_ago_is_stale(self):
+        self.server.last_health_check = timezone.now() - timedelta(minutes=26)
+        self.server.save(update_fields=["last_health_check"])
+        self.assertFalse(self.server.is_healthy)
+
+    def test_single_failure_does_not_evict_but_blocks_placement(self):
+        """One transient failure: server stays active (still swept, can
+        recover) but is immediately non-placeable via the live error."""
+        self.server.last_health_check = timezone.now()
+        self.server.save(update_fields=["last_health_check"])
+
+        result = self._check(MockVirtualminGateway(fail_operations={"info": "Connection refused"}))
+
+        self.assertTrue(result.is_err())
+        self.server.refresh_from_db()
+        self.assertEqual(self.server.status, "active")  # not evicted
+        self.assertEqual(self.server.consecutive_health_failures, 1)
+        self.assertFalse(self.server.is_healthy)  # but not placeable
+        # last_health_check means "last VERIFIED" — failure must not stamp it
+        self.assertLess(
+            self.server.last_health_check, timezone.now() - timedelta(seconds=0)
+        )
+
+    def test_sustained_failures_auto_fail_at_threshold(self):
+        failing = MockVirtualminGateway(fail_operations={"info": "Connection refused"})
+        for _ in range(5):
+            self._check(failing)
+        self.server.refresh_from_db()
+        self.assertEqual(self.server.status, "active")  # 5th failure: not yet
+
+        self._check(failing)
+        self.server.refresh_from_db()
+        self.assertEqual(self.server.status, "failed")  # 6th: auto-failed
+        self.assertTrue(self.server.failed_by_health_check)
+
+    def test_auto_failed_server_recovers_on_success(self):
+        self.server.status = "failed"
+        self.server.failed_by_health_check = True
+        self.server.consecutive_health_failures = 6
+        self.server.save(update_fields=["status", "failed_by_health_check", "consecutive_health_failures"])
+
+        result = self._check(MockVirtualminGateway())
+
+        self.assertTrue(result.is_ok())
+        self.server.refresh_from_db()
+        self.assertEqual(self.server.status, "active")
+        self.assertFalse(self.server.failed_by_health_check)
+        self.assertEqual(self.server.consecutive_health_failures, 0)
+        self.assertTrue(self.server.is_healthy)
+
+    def test_operator_failed_server_is_never_swept_or_recovered(self):
+        self.server.status = "failed"  # operator-set: flag stays False
+        self.server.save(update_fields=["status"])
+
+        with patch(
+            "apps.provisioning.virtualmin_service.VirtualminServerManagementService.health_check_server"
+        ) as mock_check:
+            health_check_virtualmin_servers()
+
+        mock_check.assert_not_called()
+        self.server.refresh_from_db()
+        self.assertEqual(self.server.status, "failed")
+
+    def test_schedule_upgrade_replaces_deployed_hourly_row(self):
+        """Deployed installations kept the old hourly Schedule row forever —
+        setup must UPSERT, not skip-if-exists."""
+        Schedule.objects.update_or_create(
+            name="virtualmin-health-check",
+            defaults={
+                "func": "apps.provisioning.virtualmin_tasks.health_check_virtualmin_servers",
+                "schedule_type": "H",
+                "cluster": "praho-cluster",
+            },
+        )
+
+        setup_virtualmin_scheduled_tasks()
+
+        row = Schedule.objects.get(name="virtualmin-health-check")
+        self.assertEqual(row.schedule_type, "I")
+        self.assertEqual(row.minutes, 10)

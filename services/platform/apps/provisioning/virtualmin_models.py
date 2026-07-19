@@ -26,8 +26,12 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Health check constants
-HEALTH_CHECK_FRESH_SECONDS = 600  # 10 minutes
+# Health check constants. The sweep runs every 10 minutes; freshness covers
+# 2.5 cadences so a single missed sweep never blanks placement fleet-wide.
+HEALTH_CHECK_FRESH_SECONDS = 1500  # 25 minutes
+# Consecutive failed checks (~1h at 10-min cadence) before a server is
+# auto-failed; only auto-failed servers are auto-recovered.
+HEALTH_AUTO_FAIL_THRESHOLD = 6
 
 
 class VirtualminServer(models.Model):
@@ -150,11 +154,16 @@ class VirtualminServer(models.Model):
 
     @property
     def is_healthy(self) -> bool:
-        """Check if server is healthy"""
+        """Check if server is healthy: active, recently verified, no live error.
+
+        last_health_check is stamped on SUCCESS only — a just-failed server
+        must never look healthy merely because it was probed recently.
+        """
         if self.status != "active":
             return False
+        if self.health_check_error:
+            return False
 
-        # Check if health check is recent (within 10 minutes)
         if self.last_health_check:
             age = timezone.now() - self.last_health_check
             return age.total_seconds() < HEALTH_CHECK_FRESH_SECONDS
