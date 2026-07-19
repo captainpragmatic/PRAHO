@@ -25,6 +25,7 @@ from apps.provisioning.virtualmin_models import (
     VirtualminProvisioningJob,
     VirtualminServer,
 )
+from apps.provisioning.virtualmin_service import VirtualminAccountCreationData, VirtualminProvisioningService
 from apps.provisioning.virtualmin_tasks import (
     process_failed_virtualmin_jobs,
     provision_virtualmin_account_async,
@@ -262,3 +263,75 @@ class TestRetryJobExecution(VirtualminTaskTestBase):
         self.assertEqual(job.status, "completed")
         self.account.refresh_from_db()
         self.assertEqual(self.account.status, "suspended")
+
+
+class TestCreateAccountPreflight(VirtualminTaskTestBase):
+    """create_virtualmin_account pre-flight: #325 defect 2 — every creation
+    failed at 'self.health_check_server' (wrong class) and the conflict/
+    template checks read response keys the parser never produces."""
+
+    def _creation_data(self, domain: str = "new.example.com", template: str = "Default"):
+        service2 = Service.objects.create(
+            customer=self.customer,
+            service_plan=self.plan,
+            currency=self.currency,
+            service_name=domain,
+            domain=domain,
+            username="newuser",
+            billing_cycle="monthly",
+            price=Decimal("10.00"),
+            status="active",
+        )
+        return VirtualminAccountCreationData(
+            service=service2, domain=domain, template=template, server=self.server
+        )
+
+    def _create(self, mock_gateway, **kwargs):
+        with patch(
+            "apps.provisioning.virtualmin_service.VirtualminGateway",
+            return_value=mock_gateway,
+        ):
+            service = VirtualminProvisioningService(self.server)
+            return service.create_virtualmin_account(self._creation_data(**kwargs))
+
+    def test_create_account_happy_path(self):
+        """First-ever test of the create path: it must actually create."""
+        mock_gateway = MockVirtualminGateway()
+
+        result = self._create(mock_gateway)
+
+        self.assertTrue(result.is_ok(), result)
+        account = result.unwrap()
+        self.assertEqual(account.status, "active")
+        self.assertEqual(len(mock_gateway.get_calls("create-domain")), 1)
+        job = VirtualminProvisioningJob.objects.get(account=account, operation="create_domain")
+        self.assertEqual(job.status, "completed")
+
+    def test_create_blocked_when_connection_fails(self):
+        """A failed connection must block BEFORE any mutating call."""
+        mock_gateway = MockVirtualminGateway(fail_operations={"info": "Connection refused"})
+
+        result = self._create(mock_gateway)
+
+        self.assertTrue(result.is_err())
+        self.assertEqual(len(mock_gateway.get_calls("create-domain")), 0)
+
+    def test_create_blocked_on_remote_domain_conflict(self):
+        """A domain already on the server is a conflict, not a silent overwrite."""
+        mock_gateway = MockVirtualminGateway()
+        mock_gateway.seed_domain("new.example.com")
+
+        result = self._create(mock_gateway)
+
+        self.assertTrue(result.is_err())
+        self.assertIn("already exists on server", result.unwrap_err())
+        self.assertEqual(len(mock_gateway.get_calls("create-domain")), 0)
+
+    def test_create_blocked_on_missing_template(self):
+        mock_gateway = MockVirtualminGateway()
+
+        result = self._create(mock_gateway, template="NoSuchTemplate")
+
+        self.assertTrue(result.is_err())
+        self.assertIn("not found on server", result.unwrap_err())
+        self.assertEqual(len(mock_gateway.get_calls("create-domain")), 0)

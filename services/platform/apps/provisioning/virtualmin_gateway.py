@@ -1025,6 +1025,29 @@ class VirtualminGateway:
             return [line.strip() for line in raw_response.split("\n") if line.strip()]
         return []
 
+    def list_templates(self) -> Result[list[str], str]:
+        """List available server template names (normalized across formats)."""
+        result = self.call("list-templates", {"name-only": ""})
+        if result.is_err():
+            return Err(f"API call failed: {result.unwrap_err()}")
+        response = result.unwrap()
+        if not response.success:
+            return Err(f"Failed to list templates: {response.data.get('error', 'Unknown error')}")
+
+        data = response.data
+        if "templates" in data:
+            return Ok([t["name"] if isinstance(t, dict) else str(t) for t in data["templates"]])
+        if "data" in data:
+            names = []
+            for item in data["data"]:
+                if isinstance(item, dict) and "name" in item:
+                    line = item["name"].strip()
+                    if line and not line.startswith(("Template", "---")):
+                        names.append(line.split()[0])
+            return Ok(names)
+        raw = data.get("raw_response", "")
+        return Ok([line.strip() for line in raw.split("\n") if line.strip()])
+
     def ping_server(self) -> bool:
         """Ping server to check connectivity"""
         # Use test_connection method as ping

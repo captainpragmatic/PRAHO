@@ -338,30 +338,28 @@ class VirtualminProvisioningService:
         return Ok(None)
 
     def _check_domain_conflicts(self, account: VirtualminAccount, gateway: VirtualminGateway) -> Result[None, str]:
-        """Check for domain and username conflicts"""
-        # Verify domain doesn't already exist on server
-        domain_check = gateway.call("list-domains", {"domain": account.domain})
-        if domain_check.is_ok() and domain_check.unwrap().success:
-            domains = domain_check.unwrap().data.get("domains", [])
-            if any(d.get("domain") == account.domain for d in domains):
-                return Err(f"Domain {account.domain} already exists on server")
+        """Check for domain and username conflicts via the normalized listing
+        (raw response payloads never carried 'domains'/'users' keys — the old
+        checks always saw empty lists and could not detect a conflict)."""
+        listing = gateway.list_domains()
+        if listing.is_err():
+            # Listing failures are not conflicts; creation proceeds and the
+            # server itself rejects a genuine duplicate.
+            return Ok(None)
 
-        # Check if username conflicts exist
-        user_check = gateway.call("list-users", {"user": account.virtualmin_username})
-        if user_check.is_ok() and user_check.unwrap().success:
-            users = user_check.unwrap().data.get("users", [])
-            if any(u.get("user") == account.virtualmin_username for u in users):
-                return Err(f"Username {account.virtualmin_username} already exists on server")
+        domains = listing.unwrap()
+        if any(d.get("domain") == account.domain for d in domains):
+            return Err(f"Domain {account.domain} already exists on server")
+        if any(d.get("username") == account.virtualmin_username for d in domains):
+            return Err(f"Username {account.virtualmin_username} already exists on server")
 
         return Ok(None)
 
     def _check_template_availability(self, account: VirtualminAccount, gateway: VirtualminGateway) -> Result[None, str]:
-        """Check if required template exists"""
-        template_check = gateway.call("list-templates")
-        if template_check.is_ok() and template_check.unwrap().success:
-            templates = template_check.unwrap().data.get("templates", [])
-            if not any(t.get("name") == account.template_name for t in templates):
-                return Err(f"Template {account.template_name} not found on server")
+        """Check if required template exists (normalized listing)."""
+        template_check = gateway.list_templates()
+        if template_check.is_ok() and account.template_name not in template_check.unwrap():
+            return Err(f"Template {account.template_name} not found on server")
 
         return Ok(None)
 
@@ -379,8 +377,10 @@ class VirtualminProvisioningService:
         - User conflicts
         """
         try:
-            # 1. Server health check
-            health_result = self.health_check_server(account.server)  # type: ignore[attr-defined]
+            # 1. Server connectivity (the gateway is already bound to the
+            # target server; no status side effects, unlike the management
+            # service's health_check_server)
+            health_result = gateway.test_connection()
             if health_result.is_err():
                 return Err(f"Server health check failed: {health_result.unwrap_err()}")
 

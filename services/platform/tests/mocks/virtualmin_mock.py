@@ -94,12 +94,13 @@ class MockVirtualminGateway:
         # State
         self._domains: dict[str, MockDomain] = {}
         self._calls: list[CallRecord] = []
+        self.available_templates: list[str] = ["Default"]
 
     # ---------------------------------------------------------------
     # State management helpers (for test setup)
     # ---------------------------------------------------------------
 
-    def seed_domain(
+    def seed_domain(  # noqa: PLR0913  # Mock seeding convenience
         self,
         domain: str,
         username: str = "",
@@ -112,7 +113,7 @@ class MockVirtualminGateway:
         """Pre-populate a domain in mock state. Returns the MockDomain."""
         d = MockDomain(
             name=domain,
-            username=username or domain.split(".")[0],
+            username=username or domain.split(".", 1)[0],
             enabled=enabled,
             disk_usage_mb=disk_usage_mb,
             disk_quota_mb=disk_quota_mb,
@@ -251,6 +252,14 @@ class MockVirtualminGateway:
                 ])
             return Err(f"Failed to list domains: {response.data.get('error', 'Unknown')}")
         return Err(f"API call failed: {result.unwrap_err()}")
+
+    def list_templates(self) -> Result[list[str], str]:
+        """Normalized template listing (mirrors VirtualminGateway.list_templates)."""
+        if "list-templates" in self.fail_operations:
+            self._record_call("list-templates", {}, success=False)
+            return Err(self.fail_operations["list-templates"])
+        self._record_call("list-templates", {}, success=True)
+        return Ok(list(self.available_templates))
 
     def get_server_info(self) -> Result[dict[str, Any], str]:
         """Get mock server info."""
