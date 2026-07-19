@@ -968,7 +968,10 @@ class VirtualminProvisioningService:
             logger.info(f"✅ [VirtualminService] Retry converged existing remote domain {account.domain}")
             return Ok(True)
 
-        return self._execute_domain_creation(account, job)
+        creation_result = self._execute_domain_creation(account, job)
+        if creation_result.is_err():
+            return Err(creation_result.unwrap_err())
+        return Ok(True)
 
     def _execute_lifecycle_operation(
         self, account: VirtualminAccount, job: VirtualminProvisioningJob
