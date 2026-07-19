@@ -647,6 +647,49 @@ class VirtualminProvisioningJob(models.Model):
     def __str__(self) -> str:
         return f"{self.get_operation_display()} on {self.server.name} ({self.get_status_display()})"
 
+    @classmethod
+    def claim_for_retry(cls, job_id: Any, now: Any) -> bool:
+        """Leased claim: failed -> pending, consuming one attempt atomically."""
+        return bool(
+            cls.objects.filter(
+                pk=job_id,
+                status="failed",
+                retry_count__lt=models.F("max_retries"),
+                next_retry_at__lte=now,
+            ).update(status="pending", retry_count=models.F("retry_count") + 1, claimed_at=now)
+        )
+
+    @classmethod
+    def start_claimed(cls, job_id: Any, now: Any) -> bool:
+        """Fence at execution: pending -> running. 0 rows = stale duplicate delivery."""
+        return bool(cls.objects.filter(pk=job_id, status="pending").update(status="running", started_at=now))
+
+    @classmethod
+    def recover_expired_claims(cls, cutoff: Any, retry_at: Any) -> int:
+        """Claimed jobs (pending OR running) whose lease expired go back to failed."""
+        return cls.objects.filter(
+            models.Q(status="pending") | models.Q(status="running"),
+            claimed_at__isnull=False,
+            claimed_at__lt=cutoff,
+        ).update(status="failed", next_retry_at=retry_at)
+
+    @classmethod
+    def restore_after_enqueue_failure(cls, job_id: Any, retry_at: Any) -> int:
+        """Return a claimed-but-undispatched job to the failed pool."""
+        return cls.objects.filter(pk=job_id, status="pending").update(
+            status="failed", claimed_at=None, next_retry_at=retry_at
+        )
+
+    @classmethod
+    def terminalize(cls, job_id: Any) -> int:
+        """Opt a job out of the retry sweep permanently (existing convention)."""
+        return cls.objects.filter(pk=job_id).update(next_retry_at=None)
+
+    @classmethod
+    def record_dispatch(cls, job_id: Any, task_id: str) -> int:
+        """Persist the queue task id for the dispatched retry."""
+        return cls.objects.filter(pk=job_id).update(task_id=task_id)
+
     @property
     def can_retry(self) -> bool:
         """Check if job can be retried"""

@@ -680,7 +680,9 @@ class VirtualminGateway:
         """Validate server health before making requests"""
         # Only check if server is active, not if it's healthy
         # (is_healthy depends on recent health checks, creating a catch-22)
-        if self.server.status != "active":
+        # Auto-failed servers stay callable: the health sweep must be able to
+        # probe them, or auto-recovery is unreachable (the same catch-22).
+        if self.server.status != "active" and not self.server.failed_by_health_check:
             return Err(f"Server {self.server.hostname} is not active (status: {self.server.status})")
 
         return Ok(True)
@@ -1066,6 +1068,51 @@ class VirtualminGateway:
             raise RuntimeError(f"Virtualmin API call '{command}' failed: {error}")
         response = result.unwrap()
         return {"status": "ok", "command": command, "data": response.data}
+
+    def list_domains_with_owners(self) -> Result[list[dict[str, str]], str]:
+        """Full multiline listing normalized to [{'domain', 'username'}] rows."""
+        result = self.call("list-domains", {"multiline": ""})
+        if result.is_err():
+            return Err(f"Domain listing failed: {result.unwrap_err()}")
+        response = result.unwrap()
+        if not response.success:
+            return Err(f"Domain listing rejected: {response.data.get('error', 'Unknown error')}")
+
+        items = response.data.get("data", []) if isinstance(response.data, dict) else []
+        rows: list[dict[str, str]] = []
+        for item in items:
+            if isinstance(item, dict) and item.get("name"):
+                values = item.get("values", {}) or {}
+                username = values.get("Username", "")
+                if isinstance(username, list):
+                    username = username[0] if username else ""
+                rows.append({"domain": str(item["name"]), "username": str(username)})
+        return Ok(rows)
+
+    def get_domain_owner(self, domain: str) -> Result[str | None, str]:
+        """
+        Ownership probe: who owns this domain on the server?
+
+        Returns Ok(None) when the domain is absent, Ok(username) when present
+        with a parsed owner, Ok("") when present but the owner could not be
+        determined (callers must treat that as indeterminate, never adopt).
+        """
+        result = self.call("list-domains", {"domain": domain, "multiline": ""})
+        if result.is_err():
+            return Err(f"Ownership probe failed: {result.unwrap_err()}")
+        response = result.unwrap()
+        if not response.success:
+            return Err(f"Ownership probe rejected: {response.data.get('error', 'Unknown error')}")
+
+        items = response.data.get("data", []) if isinstance(response.data, dict) else []
+        for item in items:
+            if isinstance(item, dict) and item.get("name") == domain:
+                values = item.get("values", {}) or {}
+                username = values.get("Username", "")
+                if isinstance(username, list):
+                    username = username[0] if username else ""
+                return Ok(str(username))
+        return Ok(None)
 
     def get_domain_info(self, domain: str) -> Result[dict[str, Any], str]:
         """

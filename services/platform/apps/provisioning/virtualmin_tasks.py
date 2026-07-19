@@ -893,6 +893,7 @@ def reconcile_virtualmin_service_state(  # noqa: PLR0911  # Convergence matrix: 
             result = VirtualminProvisioningService(account.server).unsuspend_account(account)
             if result.is_err():
                 return {"success": False, "action": "unsuspend", "error": str(result.unwrap_err())}
+            _reconcile_again_if_state_moved(service, expected_status="active")
             return {"success": True, "action": "unsuspended"}
         return {"success": True, "action": "noop"}
 
@@ -902,10 +903,29 @@ def reconcile_virtualmin_service_state(  # noqa: PLR0911  # Convergence matrix: 
             result = VirtualminProvisioningService(account.server).suspend_account(account, reason)
             if result.is_err():
                 return {"success": False, "action": "suspend", "error": str(result.unwrap_err())}
+            _reconcile_again_if_state_moved(service, expected_status=service.status)
             return {"success": True, "action": "suspended"}
         return {"success": True, "action": "noop"}
 
     return {"success": True, "action": "noop"}
+
+
+def _reconcile_again_if_state_moved(service: Service, expected_status: str) -> None:
+    """
+    Snapshot-race guard: if the Service transitioned while our gateway call was
+    in flight (e.g. terminated mid-unsuspend), the state we just converged to
+    is already stale — queue one more reconcile to converge on the new truth.
+    """
+    current = Service.objects.filter(pk=service.pk).values_list("status", flat=True).first()
+    if current is None or current == expected_status:
+        return
+    # For the suspend branch expected_status is the snapshot status; any of the
+    # suspended-family statuses still map to the same converged account state.
+    suspend_family = ("suspended", "terminated", "expired")
+    if expected_status in suspend_family and current in suspend_family:
+        return
+    logger.info(f"🔄 [VirtualminTask] Service {service.pk} moved to '{current}' mid-reconcile — re-queuing")
+    reconcile_virtualmin_service_state_async(str(service.pk))
 
 
 def reconcile_virtualmin_service_state_async(service_id: str) -> str:
@@ -1200,7 +1220,7 @@ _RETRYABLE_OPERATIONS = ("create_domain", "suspend_domain", "unsuspend_domain", 
 
 # A claimed (pending) job whose retry task has not reconciled it within this
 # window is presumed lost to a process death and returned to the failed pool.
-_CLAIM_LEASE_MINUTES = 15
+_CLAIM_LEASE_MINUTES = 30
 
 
 def retry_virtualmin_job(job_id: str) -> dict[str, Any]:
@@ -1214,6 +1234,13 @@ def retry_virtualmin_job(job_id: str) -> dict[str, Any]:
     except VirtualminProvisioningJob.DoesNotExist:
         return {"success": False, "error": f"Job {job_id} not found"}
 
+    # Fence: only the claim owner may execute. A re-delivered or reclaimed
+    # duplicate finds the row no longer 'pending' and discards itself.
+    if not VirtualminProvisioningJob.start_claimed(job_id, timezone.now()):
+        logger.info(f"⏭️ [VirtualminTask] Discarding stale retry delivery for job {job_id}")
+        return {"success": False, "action": "stale_claim_discarded"}
+    job.refresh_from_db()
+
     service = VirtualminProvisioningService(job.server)
     result = service.retry_job(job)
     if result.is_ok():
@@ -1222,11 +1249,9 @@ def retry_virtualmin_job(job_id: str) -> dict[str, Any]:
 
 
 def _recover_expired_claims(now: Any) -> int:
-    """Pending jobs whose claim lease expired go back to the failed pool."""
+    """Claimed jobs (pending or running) whose lease expired return to the failed pool."""
     lease_cutoff = now - timedelta(minutes=_CLAIM_LEASE_MINUTES)
-    return VirtualminProvisioningJob.objects.filter(
-        status="pending", claimed_at__isnull=False, claimed_at__lt=lease_cutoff
-    ).update(status="failed", next_retry_at=now + timedelta(minutes=5))
+    return VirtualminProvisioningJob.recover_expired_claims(lease_cutoff, now + timedelta(minutes=5))
 
 
 def process_failed_virtualmin_jobs() -> dict[str, Any]:
@@ -1242,6 +1267,12 @@ def process_failed_virtualmin_jobs() -> dict[str, Any]:
         now = timezone.now()
         recovered_claims = _recover_expired_claims(now)
 
+        # Exhausted jobs opt out of future sweeps entirely (existing
+        # next_retry_at=None convention) instead of sitting armed forever.
+        exhausted = VirtualminProvisioningJob.objects.filter(
+            status="failed", retry_count__gte=models.F("max_retries"), next_retry_at__isnull=False
+        ).update(next_retry_at=None)
+
         retryable_jobs = VirtualminProvisioningJob.objects.filter(
             status="failed", retry_count__lt=models.F("max_retries"), next_retry_at__lte=now
         ).select_related("server", "account")
@@ -1251,6 +1282,7 @@ def process_failed_virtualmin_jobs() -> dict[str, Any]:
             "retried_jobs": 0,
             "skipped_jobs": 0,
             "recovered_claims": recovered_claims,
+            "exhausted_jobs": exhausted,
             "jobs": [],
         }
 
@@ -1259,20 +1291,14 @@ def process_failed_virtualmin_jobs() -> dict[str, Any]:
                 # Validate BEFORE claiming: unsupported/orphaned jobs are
                 # terminal, never counted as retried.
                 if job.operation not in _RETRYABLE_OPERATIONS or job.account is None:
-                    VirtualminProvisioningJob.objects.filter(pk=job.pk, status="failed").update(next_retry_at=None)
+                    VirtualminProvisioningJob.terminalize(job.pk)
                     results["skipped_jobs"] += 1
                     results["jobs"].append({"job_id": str(job.id), "operation": job.operation, "status": "terminal"})
                     continue
 
                 # Leased claim: concurrent sweeps lose cleanly; the attempt is
                 # consumed here so retries are bounded even if dispatch breaks.
-                claimed = VirtualminProvisioningJob.objects.filter(
-                    pk=job.pk,
-                    status="failed",
-                    retry_count__lt=models.F("max_retries"),
-                    next_retry_at__lte=now,
-                ).update(status="pending", retry_count=models.F("retry_count") + 1, claimed_at=now)
-                if not claimed:
+                if not VirtualminProvisioningJob.claim_for_retry(job.pk, now):
                     continue
 
                 try:
@@ -1281,14 +1307,11 @@ def process_failed_virtualmin_jobs() -> dict[str, Any]:
                         str(job.id),
                         timeout=TASK_TIME_LIMIT,
                     )
+                    VirtualminProvisioningJob.record_dispatch(job.pk, task_id)
                 except Exception as enqueue_error:
                     # Enqueue failed: return the job to the failed pool with a
                     # future retry window instead of stranding it pending.
-                    VirtualminProvisioningJob.objects.filter(pk=job.pk, status="pending").update(
-                        status="failed",
-                        claimed_at=None,
-                        next_retry_at=now + timedelta(minutes=5),
-                    )
+                    VirtualminProvisioningJob.restore_after_enqueue_failure(job.pk, now + timedelta(minutes=5))
                     results["skipped_jobs"] += 1
                     results["jobs"].append(
                         {

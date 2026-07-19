@@ -20,8 +20,10 @@ from django.utils import timezone
 from django_q.models import Schedule
 
 from apps.billing.models import Currency
+from apps.common.types import Ok
 from apps.customers.models import Customer
 from apps.provisioning.models import Service, ServicePlan
+from apps.provisioning.virtualmin_gateway import VirtualminConfig, VirtualminGateway
 from apps.provisioning.virtualmin_models import (
     VirtualminAccount,
     VirtualminDriftRecord,
@@ -187,7 +189,7 @@ class TestFailedJobSweep(VirtualminTaskTestBase):
         job = self._failed_job(
             status="pending",
             retry_count=1,
-            claimed_at=timezone.now() - timedelta(minutes=20),
+            claimed_at=timezone.now() - timedelta(minutes=31),  # past the 30-min lease
         )
 
         process_failed_virtualmin_jobs()
@@ -232,7 +234,8 @@ class TestRetryJobExecution(VirtualminTaskTestBase):
         complete the SAME job — never early-exit on 'account already exists',
         never re-create, never strand pending."""
         mock_gateway = MockVirtualminGateway()
-        mock_gateway.seed_domain(self.account.domain)  # remote create DID succeed
+        # Remote create DID succeed — seeded with OUR username (ownership probe)
+        mock_gateway.seed_domain(self.account.domain, username=self.account.virtualmin_username)
         job = self._failed_job(status="pending", retry_count=1, claimed_at=timezone.now())
         domains_before = self.server.current_domains
 
@@ -257,8 +260,9 @@ class TestRetryJobExecution(VirtualminTaskTestBase):
         fan-out: each account method creates its own job today)."""
         self.account.status = "active"
         self.account.save(update_fields=["status"])
+        force_status(self.service, "suspended")  # the suspend intent is still current
         mock_gateway = MockVirtualminGateway()
-        mock_gateway.seed_domain(self.account.domain)
+        mock_gateway.seed_domain(self.account.domain, username=self.account.virtualmin_username)
         job = self._failed_job(
             operation="suspend_domain", status="pending", retry_count=1, claimed_at=timezone.now()
         )
@@ -609,3 +613,164 @@ class TestServiceReconciliation(VirtualminTaskTestBase):
         result = self._reconcile(MockVirtualminGateway())
         self.assertEqual(result["action"], "provisioning_triggered")
         mock_trigger.assert_called_once()
+
+
+class TestReviewHardening325(VirtualminTaskTestBase):
+    """Regression tests for the adversarial-review findings on this branch."""
+
+    def test_create_retry_never_adopts_foreign_domain(self):
+        """Same name, different owner: terminal conflict, no adoption."""
+        mock_gateway = MockVirtualminGateway()
+        mock_gateway.seed_domain(self.account.domain, username="someoneelse")
+        job = self._failed_job(status="pending", retry_count=1, claimed_at=timezone.now())
+
+        with patch("apps.provisioning.virtualmin_service.VirtualminGateway", return_value=mock_gateway):
+            result = retry_virtualmin_job(str(job.id))
+
+        self.assertFalse(result["success"])
+        self.assertIn("owned by another account", result["error"])
+        job.refresh_from_db()
+        self.account.refresh_from_db()
+        self.assertIsNone(job.next_retry_at)  # terminal
+        self.assertNotEqual(self.account.status, "active")
+
+    def test_create_retry_probe_error_is_not_absence(self):
+        """An unreachable probe must not fall through to create-domain."""
+        mock_gateway = MockVirtualminGateway(fail_operations={"list-domains": "connection timeout"})
+        job = self._failed_job(status="pending", retry_count=1, claimed_at=timezone.now())
+
+        with patch("apps.provisioning.virtualmin_service.VirtualminGateway", return_value=mock_gateway):
+            result = retry_virtualmin_job(str(job.id))
+
+        self.assertFalse(result["success"])
+        self.assertEqual(len(mock_gateway.get_calls("create-domain")), 0)
+
+    def test_duplicate_retry_delivery_is_discarded(self):
+        """Only the claim owner executes; a re-delivered task self-discards."""
+        job = self._failed_job(status="running", retry_count=1, claimed_at=timezone.now())
+
+        result = retry_virtualmin_job(str(job.id))
+
+        self.assertEqual(result.get("action"), "stale_claim_discarded")
+
+    def test_running_job_with_expired_lease_is_recovered(self):
+        """A worker death after mark_started must not strand 'running' forever."""
+        job = self._failed_job(status="running", retry_count=1, claimed_at=timezone.now() - timedelta(minutes=31))
+
+        with patch("apps.provisioning.virtualmin_tasks.async_task", return_value="t-1"):
+            process_failed_virtualmin_jobs()
+
+        job.refresh_from_db()
+        self.assertEqual(job.status, "failed")
+
+    def test_exhausted_job_opts_out_of_future_sweeps(self):
+        job = self._failed_job(retry_count=3, max_retries=3)
+
+        with patch("apps.provisioning.virtualmin_tasks.async_task", return_value="t-1"):
+            process_failed_virtualmin_jobs()
+
+        job.refresh_from_db()
+        self.assertIsNone(job.next_retry_at)
+
+    def test_sweep_persists_dispatched_task_id(self):
+        job = self._failed_job()
+
+        with patch("apps.provisioning.virtualmin_tasks.async_task", return_value="task-xyz"):
+            process_failed_virtualmin_jobs()
+
+        job.refresh_from_db()
+        self.assertEqual(job.task_id, "task-xyz")
+
+    def test_stale_unsuspend_job_is_superseded_by_current_state(self):
+        """An old unsuspend retry must not re-enable hosting for a since-suspended service."""
+        self.account.status = "suspended"
+        self.account.save(update_fields=["status"])
+        force_status(self.service, "suspended")  # current desired state: suspended
+        job = self._failed_job(
+            operation="unsuspend_domain", status="pending", retry_count=1, claimed_at=timezone.now()
+        )
+
+        with (
+            patch("apps.provisioning.virtualmin_service.VirtualminGateway", return_value=MockVirtualminGateway()),
+            patch(
+                "apps.provisioning.virtualmin_tasks.reconcile_virtualmin_service_state_async", return_value="t-1"
+            ) as mock_reconcile,
+        ):
+            result = retry_virtualmin_job(str(job.id))
+
+        self.assertFalse(result["success"])
+        self.assertIn("superseded by current service state", result["error"])
+        job.refresh_from_db()
+        self.assertIsNone(job.next_retry_at)
+        mock_reconcile.assert_called_once()
+        self.account.refresh_from_db()
+        self.assertEqual(self.account.status, "suspended")  # hosting stayed off
+
+    def test_idempotency_cache_does_not_absorb_flip_flop(self):
+        """suspend -> unsuspend -> suspend within the TTL must execute for real."""
+        self.account.status = "active"
+        self.account.save(update_fields=["status"])
+        mock_gateway = MockVirtualminGateway()
+        mock_gateway.seed_domain(self.account.domain, username=self.account.virtualmin_username)
+
+        with patch("apps.provisioning.virtualmin_service.VirtualminGateway", return_value=mock_gateway):
+            service = VirtualminProvisioningService(self.server)
+            self.assertTrue(service.suspend_account(self.account, "payment_overdue").is_ok())
+            self.assertTrue(service.unsuspend_account(self.account).is_ok())
+            disable_calls_before = len(mock_gateway.get_calls("disable-domain"))
+            self.assertTrue(service.suspend_account(self.account, "payment_overdue").is_ok())
+
+        self.account.refresh_from_db()
+        self.assertEqual(self.account.status, "suspended")
+        self.assertEqual(len(mock_gateway.get_calls("disable-domain")), disable_calls_before + 1)
+
+    def test_unhealthy_payload_counts_as_failed_check(self):
+        """HTTP 200 + healthy:False must not reset the failure streak."""
+        with patch(
+            "apps.provisioning.virtualmin_service.VirtualminProvisioningService.test_server_connection",
+            return_value=Ok({"healthy": False, "server": "x"}),
+        ):
+            result = VirtualminServerManagementService().health_check_server(self.server)
+
+        self.assertTrue(result.is_err())
+        self.server.refresh_from_db()
+        self.assertEqual(self.server.consecutive_health_failures, 1)
+
+    def test_gateway_allows_probe_of_auto_failed_server(self):
+        """Auto-recovery is reachable: the gateway accepts auto-failed servers."""
+        self.server.status = "failed"
+        self.server.failed_by_health_check = True
+        self.server.save(update_fields=["status", "failed_by_health_check"])
+        gateway = VirtualminGateway(VirtualminConfig(server=self.server))
+        self.assertTrue(gateway._validate_server_health().is_ok())
+
+        self.server.failed_by_health_check = False
+        self.server.save(update_fields=["failed_by_health_check"])
+        gateway = VirtualminGateway(VirtualminConfig(server=self.server))
+        self.assertTrue(gateway._validate_server_health().is_err())
+
+    def test_preflight_blocks_username_conflict(self):
+        """The repaired conflict check sees owner usernames."""
+        mock_gateway = MockVirtualminGateway()
+        mock_gateway.seed_domain("other.example.com", username="newuser")
+        service2 = Service.objects.create(
+            customer=self.customer,
+            service_plan=self.plan,
+            currency=self.currency,
+            service_name="second.example.com",
+            domain="second.example.com",
+            username="newuser2",
+            billing_cycle="monthly",
+            price=Decimal("10.00"),
+            status="active",
+        )
+        creation = VirtualminAccountCreationData(
+            service=service2, domain="second.example.com", username="newuser", server=self.server
+        )
+
+        with patch("apps.provisioning.virtualmin_service.VirtualminGateway", return_value=mock_gateway):
+            result = VirtualminProvisioningService(self.server).create_virtualmin_account(creation)
+
+        self.assertTrue(result.is_err())
+        self.assertIn("already exists on server", result.unwrap_err())
+        self.assertEqual(len(mock_gateway.get_calls("create-domain")), 0)

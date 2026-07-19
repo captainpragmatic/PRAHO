@@ -271,6 +271,43 @@ class MockVirtualminGateway:
             return Err(f"Failed to get server info: {response.data.get('error', 'Unknown')}")
         return Err(f"API call failed: {result.unwrap_err()}")
 
+    def list_domains_with_owners(self) -> Result[list[dict[str, str]], str]:
+        """Mirror VirtualminGateway.list_domains_with_owners through call()."""
+        result = self.call("list-domains", {"multiline": ""})
+        if result.is_err():
+            return Err(f"Domain listing failed: {result.unwrap_err()}")
+        response = result.unwrap()
+        if not response.success:
+            return Err("Domain listing rejected")
+        items = response.data.get("data", []) if isinstance(response.data, dict) else []
+        rows: list[dict[str, str]] = []
+        for item in items:
+            if isinstance(item, dict) and item.get("name"):
+                values = item.get("values", {}) or {}
+                username = values.get("Username", "")
+                if isinstance(username, list):
+                    username = username[0] if username else ""
+                rows.append({"domain": str(item["name"]), "username": str(username)})
+        return Ok(rows)
+
+    def get_domain_owner(self, domain: str) -> Result[str | None, str]:
+        """Mirror VirtualminGateway.get_domain_owner through the mock's call()."""
+        result = self.call("list-domains", {"domain": domain, "multiline": ""})
+        if result.is_err():
+            return Err(f"Ownership probe failed: {result.unwrap_err()}")
+        response = result.unwrap()
+        if not response.success:
+            return Err("Ownership probe rejected")
+        items = response.data.get("data", []) if isinstance(response.data, dict) else []
+        for item in items:
+            if isinstance(item, dict) and item.get("name") == domain:
+                values = item.get("values", {}) or {}
+                username = values.get("Username", "")
+                if isinstance(username, list):
+                    username = username[0] if username else ""
+                return Ok(str(username))
+        return Ok(None)
+
     def get_domain_info(self, domain: str) -> Result[dict[str, Any], str]:
         """Get domain info from mock state."""
         d = self._domains.get(domain)
