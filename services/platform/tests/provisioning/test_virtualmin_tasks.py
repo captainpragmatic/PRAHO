@@ -774,3 +774,65 @@ class TestReviewHardening325(VirtualminTaskTestBase):
         self.assertTrue(result.is_err())
         self.assertIn("already exists on server", result.unwrap_err())
         self.assertEqual(len(mock_gateway.get_calls("create-domain")), 0)
+
+
+class TestPrReviewFixes331(VirtualminTaskTestBase):
+    """Regression tests for the PR #331 review comments."""
+
+    def test_preflight_blocks_unhealthy_connection_payload(self):
+        """An Ok({'healthy': False}) info response is a failed precondition —
+        provisioning must not proceed to conflict checks or create-domain."""
+        mock_gateway = MockVirtualminGateway()
+        service2 = Service.objects.create(
+            customer=self.customer,
+            service_plan=self.plan,
+            currency=self.currency,
+            service_name="unhealthy.example.com",
+            domain="unhealthy.example.com",
+            username="unhealthyu",
+            billing_cycle="monthly",
+            price=Decimal("10.00"),
+            status="active",
+        )
+        creation = VirtualminAccountCreationData(
+            service=service2, domain="unhealthy.example.com", server=self.server
+        )
+
+        with (
+            patch("apps.provisioning.virtualmin_service.VirtualminGateway", return_value=mock_gateway),
+            patch.object(mock_gateway, "test_connection", return_value=Ok({"healthy": False, "server": "x"})),
+        ):
+            result = VirtualminProvisioningService(self.server).create_virtualmin_account(creation)
+
+        self.assertTrue(result.is_err())
+        self.assertEqual(len(mock_gateway.get_calls("create-domain")), 0)
+
+    @patch("apps.provisioning.virtualmin_tasks.reconcile_virtualmin_service_state_async", return_value="t-1")
+    def test_bare_save_status_change_still_reconciles(self, mock_reconcile):
+        """A save() without update_fields (common Django) must not silently
+        skip reconciliation after a status transition."""
+        self.account.status = "active"
+        self.account.save(update_fields=["status"])
+
+        with self.captureOnCommitCallbacks(execute=True):
+            self.service.suspend(reason="payment_overdue")
+            self.service.save()  # no update_fields
+
+        mock_reconcile.assert_called_once_with(str(self.service.id))
+
+    def test_claim_and_recovery_maintain_operational_timestamps(self):
+        """QuerySet.update() paths must bump updated_at and clear claimed_at on recovery."""
+        job = self._failed_job()
+        before = job.updated_at
+
+        VirtualminProvisioningJob.claim_for_retry(job.pk, timezone.now())
+        job.refresh_from_db()
+        self.assertGreater(job.updated_at, before)
+        self.assertIsNotNone(job.claimed_at)
+
+        VirtualminProvisioningJob.recover_expired_claims(
+            timezone.now() + timedelta(minutes=1), timezone.now() + timedelta(minutes=5)
+        )
+        job.refresh_from_db()
+        self.assertEqual(job.status, "failed")
+        self.assertIsNone(job.claimed_at)  # recovered jobs no longer look claimed

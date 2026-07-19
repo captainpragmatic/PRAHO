@@ -349,7 +349,9 @@ def handle_service_virtualmin_reconciliation(
     hold open atomics, and work for a rolled-back transition must never run.
     """
     update_fields = kwargs.get("update_fields")
-    status_changed = created or (update_fields and "status" in update_fields)
+    # A bare save() (update_fields=None) cannot prove status did NOT change —
+    # reconciliation is idempotent and on_commit, so err on running it.
+    status_changed = created or update_fields is None or "status" in update_fields
     if not status_changed:
         return
 

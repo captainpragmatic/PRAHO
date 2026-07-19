@@ -365,7 +365,7 @@ class VirtualminProvisioningService:
 
         return Ok(None)
 
-    def _validate_provisioning_preconditions(
+    def _validate_provisioning_preconditions(  # noqa: PLR0911  # Pre-flight gate: one exit per precondition
         self, account: VirtualminAccount, gateway: VirtualminGateway
     ) -> Result[bool, str]:
         """
@@ -385,6 +385,10 @@ class VirtualminProvisioningService:
             health_result = gateway.test_connection()
             if health_result.is_err():
                 return Err(f"Server health check failed: {health_result.unwrap_err()}")
+            if not health_result.unwrap().get("healthy", True):
+                # HTTP-level success carrying an application-level failure —
+                # same gate as the health-management path.
+                return Err(f"Server reported unhealthy: {health_result.unwrap()}")
 
             # 2. Check server capacity and disk space
             capacity_result = self._check_server_capacity(account, health_result)
