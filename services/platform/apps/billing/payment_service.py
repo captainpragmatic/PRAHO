@@ -937,7 +937,10 @@ class PaymentService:
 
             retry_binding_error = _bind_retry_result_before_gateway(payment, retry_attempt_id)
             if retry_binding_error is not None:
-                _abandon_unbound_payment_reservation(payment, retry_binding_error)
+                # Resumed reservations may already carry a live intent — never fail
+                # them inline; a fresh one is provably pre-submit.
+                if not reservation_is_resumed:
+                    _abandon_unbound_payment_reservation(payment, retry_binding_error)
                 return PaymentIntentResult(
                     success=False,
                     payment_intent_id="",
@@ -1222,7 +1225,10 @@ class PaymentService:
 
             retry_binding_error = _bind_retry_result_before_gateway(payment, retry_attempt_id)
             if retry_binding_error is not None:
-                _abandon_unbound_payment_reservation(payment, retry_binding_error)
+                # Resumed reservations may already carry a live intent — never fail
+                # them inline; a fresh one is provably pre-submit.
+                if not reservation_is_resumed:
+                    _abandon_unbound_payment_reservation(payment, retry_binding_error)
                 return PaymentIntentResult(
                     success=False,
                     payment_intent_id="",

@@ -48,4 +48,13 @@ def recurring_charge_submission_boundary(customer_id: int) -> Iterator[str | Non
     # for the in-flight charge, by policy.
     with transaction.atomic():
         lock_recurring_collection_customer(customer_id)
+        # Re-read the switch AFTER acquiring the customer lock: a disable may have
+        # committed while this charge queued behind another worker on the customer
+        # lock. Without this, a pre-authorized worker would submit against an
+        # already-disabled switch. Latest committed value — no lock held across
+        # the gateway call.
+        setting = SystemSetting.objects.filter(key=RECURRING_AUTO_COLLECTION_SETTING_KEY).first()
+        if setting is None or setting.get_typed_value() is not True:
+            yield "Recurring automatic collection is disabled"
+            return
         yield None
