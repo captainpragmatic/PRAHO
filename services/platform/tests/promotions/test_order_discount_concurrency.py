@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
 from unittest import mock
 
-from django.db import close_old_connections, connection
+from django.db import close_old_connections, connection, transaction
 from django.test import TestCase, TransactionTestCase
 from django.utils import timezone
 
@@ -100,6 +101,51 @@ class PromotionOrderLockTestCase(TestCase):
         card.refresh_from_db()
         self.assertEqual(card.status, "active")
         self.assertEqual(card.current_balance_cents, 5000)
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.discount_cents, 0)
+
+    def test_future_dated_gift_card_is_refused(self) -> None:
+        """A card with valid_from in the future must not be redeemable today."""
+        card = GiftCard.objects.create(
+            code="FUTURE-GIFT",
+            initial_value_cents=5000,
+            current_balance_cents=5000,
+            currency=self.currency,
+            status="active",
+            valid_from=timezone.now() + timezone.timedelta(days=1),
+        )
+
+        result = GiftCardService.redeem_gift_card(
+            code=card.code, order=self.order, amount_cents=1000, customer=self.customer
+        )
+
+        self.assertFalse(result.success)
+        card.refresh_from_db()
+        self.assertEqual(card.current_balance_cents, 5000)
+
+    def test_gift_card_deleted_while_waiting_for_order_lock_is_refused_not_500(self) -> None:
+        """A card deleted in the lock-wait gap must yield a refusal, not DoesNotExist."""
+        card = GiftCard.objects.create(
+            code="VANISHING-GIFT",
+            initial_value_cents=5000,
+            current_balance_cents=5000,
+            currency=self.currency,
+            status="active",
+        )
+        original_lock = promotion_services._lock_order_for_discount_update
+
+        def delete_card_then_lock(order: Order) -> None:
+            GiftCard.objects.filter(pk=card.pk).delete()
+            original_lock(order)
+
+        with mock.patch.object(
+            promotion_services, "_lock_order_for_discount_update", side_effect=delete_card_then_lock
+        ):
+            result = GiftCardService.redeem_gift_card(
+                code=card.code, order=self.order, amount_cents=1000, customer=self.customer
+            )
+
+        self.assertFalse(result.success)
         self.order.refresh_from_db()
         self.assertEqual(self.order.discount_cents, 0)
 
@@ -257,3 +303,50 @@ class PromotionOrderPostgresConcurrencyTests(TransactionTestCase):
         self.card.refresh_from_db()
         self.assertEqual(self.order.discount_cents, 2000)
         self.assertEqual(self.card.current_balance_cents, 4000)
+
+    def test_promotion_blocks_until_order_lock_is_released(self) -> None:
+        """Prove serialization, not just final values: while another connection
+        holds the Order row lock, a promotion must NOT complete; it may finish
+        only after the lock is released. Fails if the lock refresh is ever
+        replaced with a plain (non-locking) refresh_from_db."""
+        if connection.vendor != "postgresql":
+            self.skipTest("PostgreSQL row-lock behavior required")
+
+        lock_held = threading.Event()
+        release_lock = threading.Event()
+
+        def hold_order_lock() -> None:
+            close_old_connections()
+            try:
+                with transaction.atomic():
+                    Order.objects.select_for_update().get(pk=self.order.pk)
+                    lock_held.set()
+                    release_lock.wait(timeout=10)
+            finally:
+                connection.close()
+
+        def apply_coupon() -> ApplyResult:
+            close_old_connections()
+            try:
+                lock_held.wait(timeout=10)
+                return CouponService.apply_coupon(
+                    code=self.coupon.code,
+                    order=Order.objects.get(pk=self.order.pk),
+                    customer=self.customer,
+                )
+            finally:
+                connection.close()
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            holder = executor.submit(hold_order_lock)
+            applier = executor.submit(apply_coupon)
+            self.assertTrue(lock_held.wait(timeout=10))
+            time.sleep(0.5)
+            self.assertFalse(applier.done(), "promotion completed while the Order row lock was held")
+            release_lock.set()
+            result = applier.result(timeout=10)
+            holder.result(timeout=10)
+
+        self.assertTrue(result.success)
+        self.order.refresh_from_db()
+        self.assertGreater(self.order.discount_cents, 0)

@@ -999,7 +999,11 @@ class GiftCardService:
         # coupon and card requests serialize without overwriting each other's value.
         _lock_order_for_discount_update(order)
 
-        gift_card = GiftCard.objects.select_for_update().get(code=code.upper().strip())
+        try:
+            gift_card = GiftCard.objects.select_for_update().get(code=code.upper().strip())
+        except GiftCard.DoesNotExist:
+            # Deleted between the unlocked validation and the locked lookup.
+            return ApplyResult(success=False, error_message="Invalid gift card code")
 
         # Re-validate on the locked row (mirrors the coupon path): the pre-lock check
         # raced any status change, and the Order lock above widens that window. Without

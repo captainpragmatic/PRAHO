@@ -1330,6 +1330,8 @@ class GiftCard(models.Model):
             return False
         if self.current_balance_cents <= 0:
             return False
+        if self.valid_from and timezone.now() < self.valid_from:
+            return False
         return not (self.valid_until and timezone.now() > self.valid_until)
 
     @classmethod
