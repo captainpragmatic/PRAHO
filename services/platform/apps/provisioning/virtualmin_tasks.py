@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Any, TypedDict
 
 from django.conf import settings
@@ -1118,18 +1119,54 @@ def update_virtualmin_server_statistics() -> dict[str, Any]:
         return {"success": False, "error": str(e)}
 
 
+# Operations retry_virtualmin_job knows how to recover; anything else found
+# failed is terminal for the sweep (backup/restore jobs opt out separately).
+_RETRYABLE_OPERATIONS = ("create_domain", "suspend_domain", "unsuspend_domain", "delete_domain")
+
+# A claimed (pending) job whose retry task has not reconciled it within this
+# window is presumed lost to a process death and returned to the failed pool.
+_CLAIM_LEASE_MINUTES = 15
+
+
+def retry_virtualmin_job(job_id: str) -> dict[str, Any]:
+    """One-off task: re-run a claimed failed job on its existing rows."""
+    from apps.provisioning.virtualmin_service import (  # noqa: PLC0415  # Deferred: avoids circular import
+        VirtualminProvisioningService,  # Circular: cross-app
+    )
+
+    try:
+        job = VirtualminProvisioningJob.objects.select_related("server", "account", "account__service").get(pk=job_id)
+    except VirtualminProvisioningJob.DoesNotExist:
+        return {"success": False, "error": f"Job {job_id} not found"}
+
+    service = VirtualminProvisioningService(job.server)
+    result = service.retry_job(job)
+    if result.is_ok():
+        return {"success": True, "job_id": job_id}
+    return {"success": False, "job_id": job_id, "error": str(result.unwrap_err())}
+
+
+def _recover_expired_claims(now: Any) -> int:
+    """Pending jobs whose claim lease expired go back to the failed pool."""
+    lease_cutoff = now - timedelta(minutes=_CLAIM_LEASE_MINUTES)
+    return VirtualminProvisioningJob.objects.filter(
+        status="pending", claimed_at__isnull=False, claimed_at__lt=lease_cutoff
+    ).update(status="failed", next_retry_at=now + timedelta(minutes=5))
+
+
 def process_failed_virtualmin_jobs() -> dict[str, Any]:
     """
-    Process failed Virtualmin jobs that can be retried.
-
-    Returns:
-        Dictionary with job processing results
+    Retry sweep with a leased-claim protocol: each due failed job is claimed by
+    a conditional update (attempt consumed at claim time, so a broken dispatch
+    can never rearm the same attempt forever), then handed its own
+    retry_virtualmin_job task which recovers on the EXISTING account+job rows.
     """
     logger.info("🔄 [VirtualminTask] Processing failed jobs")
 
     try:
-        # Get failed jobs that can be retried
         now = timezone.now()
+        recovered_claims = _recover_expired_claims(now)
+
         retryable_jobs = VirtualminProvisioningJob.objects.filter(
             status="failed", retry_count__lt=models.F("max_retries"), next_retry_at__lte=now
         ).select_related("server", "account")
@@ -1138,60 +1175,74 @@ def process_failed_virtualmin_jobs() -> dict[str, Any]:
             "total_jobs": retryable_jobs.count(),
             "retried_jobs": 0,
             "skipped_jobs": 0,
+            "recovered_claims": recovered_claims,
             "jobs": [],
         }
 
         for job in retryable_jobs[:50]:  # Limit to 50 jobs per run
             try:
-                # Schedule job for retry
-                job.schedule_retry()
+                # Validate BEFORE claiming: unsupported/orphaned jobs are
+                # terminal, never counted as retried.
+                if job.operation not in _RETRYABLE_OPERATIONS or job.account is None:
+                    VirtualminProvisioningJob.objects.filter(pk=job.pk, status="failed").update(next_retry_at=None)
+                    results["skipped_jobs"] += 1
+                    results["jobs"].append({"job_id": str(job.id), "operation": job.operation, "status": "terminal"})
+                    continue
 
-                # Trigger appropriate task based on operation
-                if job.operation == "create_domain" and job.account:
-                    async_task(
-                        "apps.provisioning.virtualmin_tasks.provision_virtualmin_account",
-                        str(job.account.service.id),
-                        job.account.domain,
-                        job.account.virtualmin_username,
-                        server_id=str(job.server.id),
+                # Leased claim: concurrent sweeps lose cleanly; the attempt is
+                # consumed here so retries are bounded even if dispatch breaks.
+                claimed = VirtualminProvisioningJob.objects.filter(
+                    pk=job.pk,
+                    status="failed",
+                    retry_count__lt=models.F("max_retries"),
+                    next_retry_at__lte=now,
+                ).update(status="pending", retry_count=models.F("retry_count") + 1, claimed_at=now)
+                if not claimed:
+                    continue
+
+                try:
+                    task_id = async_task(
+                        "apps.provisioning.virtualmin_tasks.retry_virtualmin_job",
+                        str(job.id),
                         timeout=TASK_TIME_LIMIT,
                     )
-                elif job.operation == "suspend_domain" and job.account:
-                    async_task(
-                        "apps.provisioning.virtualmin_tasks.suspend_virtualmin_account",
-                        str(job.account.id),
-                        job.parameters.get("reason", ""),
-                        timeout=TASK_TIME_LIMIT,
+                except Exception as enqueue_error:
+                    # Enqueue failed: return the job to the failed pool with a
+                    # future retry window instead of stranding it pending.
+                    VirtualminProvisioningJob.objects.filter(pk=job.pk, status="pending").update(
+                        status="failed",
+                        claimed_at=None,
+                        next_retry_at=now + timedelta(minutes=5),
                     )
-                elif job.operation == "unsuspend_domain" and job.account:
-                    async_task(
-                        "apps.provisioning.virtualmin_tasks.unsuspend_virtualmin_account",
-                        str(job.account.id),
-                        timeout=TASK_TIME_LIMIT,
+                    results["skipped_jobs"] += 1
+                    results["jobs"].append(
+                        {
+                            "job_id": str(job.id),
+                            "operation": job.operation,
+                            "status": "enqueue_failed",
+                            "error": str(enqueue_error),
+                        }
                     )
-                elif job.operation == "delete_domain" and job.account:
-                    async_task(
-                        "apps.provisioning.virtualmin_tasks.delete_virtualmin_account",
-                        str(job.account.id),
-                        timeout=TASK_TIME_LIMIT,
-                    )
+                    logger.warning(f"⚠️ [VirtualminTask] Failed to enqueue retry for job {job.id}: {enqueue_error}")
+                    continue
 
                 results["retried_jobs"] += 1
-                results["jobs"].append({"job_id": str(job.id), "operation": job.operation, "status": "retried"})
-
-                logger.info(f"🔄 [VirtualminTask] Retried job {job.id} ({job.operation})")
+                results["jobs"].append(
+                    {"job_id": str(job.id), "operation": job.operation, "status": "retried", "task_id": task_id}
+                )
+                logger.info(f"🔄 [VirtualminTask] Claimed and dispatched retry for job {job.id} ({job.operation})")
 
             except Exception as e:
                 results["skipped_jobs"] += 1
                 results["jobs"].append(
                     {"job_id": str(job.id), "operation": job.operation, "status": "skipped", "error": str(e)}
                 )
-
                 logger.warning(f"⚠️ [VirtualminTask] Failed to retry job {job.id}: {e}")
 
         logger.info(
             f"✅ [VirtualminTask] Job processing completed: "
-            f"{results['retried_jobs']} retried, {results['skipped_jobs']} skipped"
+            f"{results['retried_jobs']} retried, {results['skipped_jobs']} skipped, "
+            f"{recovered_claims} expired claims recovered"
         )
 
         return {"success": True, "results": results}
@@ -1244,11 +1295,13 @@ def provision_virtualmin_account_async(params: VirtualminProvisioningParams | Se
             safe_params = sanitize_log_parameters(dict(params))
             logger.info(f"🚀 [VirtualminTask] Scheduling provisioning task: {safe_params}")
 
+        # NOTE: no `retry=` — django-q2 1.9.0 has no such option; it would leak
+        # into the task kwargs and TypeError on every dequeue. Retries are
+        # DB-driven via VirtualminProvisioningJob + process_failed_virtualmin_jobs.
         return async_task(
             "apps.provisioning.virtualmin_tasks.provision_virtualmin_account",
             params,
             timeout=TASK_TIME_LIMIT,
-            retry=TASK_MAX_RETRIES,
         )
 
     except Exception as e:

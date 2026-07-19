@@ -64,6 +64,7 @@ NON_FSM_SERVICE_FILES = frozenset(
     {
         "billing/tasks.py",
         "provisioning/virtualmin_service.py",
+        "provisioning/virtualmin_tasks.py",  # VirtualminProvisioningJob leased-claim conditional updates (non-FSM model)
         "provisioning/virtualmin_views.py",
     }
 )

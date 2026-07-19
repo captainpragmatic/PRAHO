@@ -920,6 +920,99 @@ class VirtualminProvisioningService:
             logger.exception(f"Error deleting account {account.domain}: {e}")
             return Err(str(e))
 
+    def retry_job(self, job: VirtualminProvisioningJob) -> Result[bool, str]:
+        """
+        Re-run a failed job on its EXISTING account and job rows.
+
+        A fresh create is a structural no-op for create_domain (the account row
+        survives failure with status='error', so the existing-account check
+        early-exits), and calling the public suspend/unsuspend/delete methods
+        would mint a NEW job each — exponential fan-out under the retry sweep.
+        """
+        account = job.account
+        if account is None:
+            return Err("Job has no account to retry against")
+
+        if job.operation == "create_domain":
+            return self._retry_create_domain(account, job)
+        if job.operation in ("suspend_domain", "unsuspend_domain", "delete_domain"):
+            return self._execute_lifecycle_operation(account, job)
+        return Err(f"Unsupported retry operation '{job.operation}'")
+
+    def _retry_create_domain(self, account: VirtualminAccount, job: VirtualminProvisioningJob) -> Result[bool, str]:
+        """
+        Convergent create retry: a timed-out-but-remotely-successful
+        create-domain must finalize local state, never re-create or rotate
+        credentials; an absent remote domain re-runs creation on the same rows.
+        """
+        gateway = self._get_gateway(account.server)
+        probe = gateway.get_domain_info(account.domain)
+        if probe.is_ok() and probe.unwrap():
+            # Remote domain exists on OUR server for OUR account row: the
+            # original create succeeded past the response. Finalize in place.
+            previously_active = account.status == "active"
+            account.status = "active"
+            account.status_message = ""
+            if account.provisioned_at is None:
+                account.provisioned_at = timezone.now()
+            account.save(update_fields=["status", "status_message", "provisioned_at", "updated_at"])
+
+            if not previously_active:
+                # Exactly-once: the failed original never incremented
+                VirtualminServer.objects.filter(pk=account.server_id).update(
+                    current_domains=models.F("current_domains") + 1
+                )
+
+            job.mark_completed({"recovered": "remote domain already present"})
+            logger.info(f"✅ [VirtualminService] Retry converged existing remote domain {account.domain}")
+            return Ok(True)
+
+        return self._execute_domain_creation(account, job)
+
+    def _execute_lifecycle_operation(
+        self, account: VirtualminAccount, job: VirtualminProvisioningJob
+    ) -> Result[bool, str]:
+        """Run suspend/unsuspend/delete against the gateway reusing the SAME job."""
+        operations = {
+            "suspend_domain": ("disable-domain", "suspended"),
+            "unsuspend_domain": ("enable-domain", "active"),
+            "delete_domain": ("delete-domain", "terminated"),
+        }
+        program, target_status = operations[job.operation]
+
+        if job.operation == "delete_domain" and account.protected_from_deletion:
+            job.mark_failed("Account is protected from deletion")
+            job.next_retry_at = None  # terminal — retrying cannot help
+            job.save(update_fields=["next_retry_at", "updated_at"])
+            return Err("Account is protected from deletion")
+
+        if account.status == target_status:
+            job.mark_completed({"idempotent": f"account already {target_status}"})
+            return Ok(True)
+
+        job.mark_started()
+        gateway = self._get_gateway(account.server)
+        result = gateway.call(program, {"domain": account.domain}, correlation_id=job.correlation_id)
+
+        if result.is_err():
+            error_msg = str(result.unwrap_err())
+            job.mark_failed(error_msg)
+            return Err(error_msg, retriability=retriability_of(result))
+
+        response = result.unwrap()
+        if not response.success:
+            error_msg = response.data.get("error", f"{program} failed")
+            job.mark_failed(error_msg, response.data)
+            return Err(error_msg)
+
+        account.status = target_status
+        reason = (job.parameters or {}).get("reason", "")
+        account.status_message = reason
+        account.save(update_fields=["status", "status_message", "updated_at"])
+        job.mark_completed(response.data)
+        logger.info(f"✅ [VirtualminService] Retry completed {job.operation} for {account.domain}")
+        return Ok(True)
+
     def _select_best_server(self) -> Result[VirtualminServer, str]:
         """
         Select best available server for new domain.
