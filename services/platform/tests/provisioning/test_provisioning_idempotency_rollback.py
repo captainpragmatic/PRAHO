@@ -11,12 +11,11 @@ Comprehensive tests for Virtualmin provisioning idempotency and rollback mechani
 """
 
 from decimal import Decimal
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from django.test import TestCase
 
 from apps.billing.models import Currency
-from apps.common.types import Err, Ok
 from apps.customers.models import Customer
 from apps.provisioning.models import Service, ServicePlan
 from apps.provisioning.security_utils import IdempotencyManager
@@ -511,7 +510,7 @@ class RollbackMechanismTest(TestCase):
         self.assertEqual(rollback_details["failed_operations"], 0)
 
         # Verify domain was actually removed from mock state
-        self.assertIsNone(mock_gw.get_domain_state("test.example.com"))
+        self.assertIsNone(mock_gw.domain_state_of("test.example.com"))
         # Verify call was logged
         self.assertEqual(len(mock_gw.get_calls("delete-domain")), 1)
 

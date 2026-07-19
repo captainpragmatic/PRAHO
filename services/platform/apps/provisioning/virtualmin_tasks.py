@@ -928,6 +928,39 @@ def _reconcile_again_if_state_moved(service: Service, expected_status: str) -> N
     reconcile_virtualmin_service_state_async(str(service.pk))
 
 
+def reconcile_divergent_services_task() -> dict[str, Any]:
+    """
+    Durable backstop (every 15 min): a lost reconcile enqueue (broker down at
+    on_commit time) must not leave Service and Virtualmin divergent forever.
+    Finds the divergence signatures directly and re-queues reconciliation.
+    """
+    suspended_family = ("suspended", "terminated", "expired")
+
+    divergent_ids: set[str] = set()
+    # (a) suspended-family Service with a live account
+    for sid in VirtualminAccount.objects.filter(status="active", service__status__in=suspended_family).values_list(
+        "service_id", flat=True
+    )[:50]:
+        divergent_ids.add(str(sid))
+    # (b) active Service with a suspended account
+    for sid in VirtualminAccount.objects.filter(status="suspended", service__status="active").values_list(
+        "service_id", flat=True
+    )[:50]:
+        divergent_ids.add(str(sid))
+
+    queued = 0
+    for service_id in divergent_ids:
+        try:
+            reconcile_virtualmin_service_state_async(service_id)
+            queued += 1
+        except Exception as e:
+            logger.warning(f"⚠️ [VirtualminTask] Failed to queue divergence reconcile for {service_id}: {e}")
+
+    if queued:
+        logger.info(f"🔄 [VirtualminTask] Divergence backstop queued {queued} reconciliations")
+    return {"success": True, "queued": queued}
+
+
 def reconcile_virtualmin_service_state_async(service_id: str) -> str:
     """Queue Virtualmin state reconciliation for a service."""
     return async_task(
@@ -1223,7 +1256,7 @@ _RETRYABLE_OPERATIONS = ("create_domain", "suspend_domain", "unsuspend_domain", 
 _CLAIM_LEASE_MINUTES = 30
 
 
-def retry_virtualmin_job(job_id: str) -> dict[str, Any]:
+def retry_virtualmin_job(job_id: str, claim_nonce: str = "") -> dict[str, Any]:
     """One-off task: re-run a claimed failed job on its existing rows."""
     from apps.provisioning.virtualmin_service import (  # noqa: PLC0415  # Deferred: avoids circular import
         VirtualminProvisioningService,  # Circular: cross-app
@@ -1234,9 +1267,10 @@ def retry_virtualmin_job(job_id: str) -> dict[str, Any]:
     except VirtualminProvisioningJob.DoesNotExist:
         return {"success": False, "error": f"Job {job_id} not found"}
 
-    # Fence: only the claim owner may execute. A re-delivered or reclaimed
-    # duplicate finds the row no longer 'pending' and discards itself.
-    if not VirtualminProvisioningJob.start_claimed(job_id, timezone.now()):
+    # Fence: only the owner of THIS claim may execute. A re-delivered task, or
+    # one whose claim was recovered and re-issued, finds the row not pending
+    # (or carrying a different claim nonce) and discards itself.
+    if not VirtualminProvisioningJob.start_claimed(job_id, timezone.now(), claim_nonce or None):
         logger.info(f"⏭️ [VirtualminTask] Discarding stale retry delivery for job {job_id}")
         return {"success": False, "action": "stale_claim_discarded"}
     job.refresh_from_db()
@@ -1273,9 +1307,13 @@ def process_failed_virtualmin_jobs() -> dict[str, Any]:
             status="failed", retry_count__gte=models.F("max_retries"), next_retry_at__isnull=False
         ).update(next_retry_at=None)
 
-        retryable_jobs = VirtualminProvisioningJob.objects.filter(
-            status="failed", retry_count__lt=models.F("max_retries"), next_retry_at__lte=now
-        ).select_related("server", "account")
+        retryable_jobs = (
+            VirtualminProvisioningJob.objects.filter(
+                status="failed", retry_count__lt=models.F("max_retries"), next_retry_at__lte=now
+            )
+            .select_related("server", "account")
+            .order_by("next_retry_at", "pk")  # deterministic fairness under the 50-job cap
+        )
 
         results: dict[str, Any] = {
             "total_jobs": retryable_jobs.count(),
@@ -1305,6 +1343,7 @@ def process_failed_virtualmin_jobs() -> dict[str, Any]:
                     task_id = async_task(
                         "apps.provisioning.virtualmin_tasks.retry_virtualmin_job",
                         str(job.id),
+                        now.isoformat(),  # claim nonce: only this claim's task may run the job
                         timeout=TASK_TIME_LIMIT,
                     )
                     VirtualminProvisioningJob.record_dispatch(job.pk, task_id)
@@ -1475,6 +1514,19 @@ def setup_virtualmin_scheduled_tasks() -> dict[str, str]:
         },
     )
     tasks_created["health_check"] = "created" if created else "updated"
+
+    # Divergence backstop every 15 minutes (durable recovery for lost
+    # reconcile enqueues)
+    _, created = ScheduleModel.objects.update_or_create(
+        name="virtualmin-reconcile-divergence",
+        defaults={
+            "func": "apps.provisioning.virtualmin_tasks.reconcile_divergent_services_task",
+            "schedule_type": "I",
+            "minutes": 15,
+            "cluster": "praho-cluster",
+        },
+    )
+    tasks_created["reconcile_divergence"] = "created" if created else "updated"
 
     # Statistics update every 6 hours
     if "virtualmin-statistics" not in existing_tasks:

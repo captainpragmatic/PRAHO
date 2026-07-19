@@ -478,7 +478,7 @@ def sanitize_log_parameters(params: dict[str, Any]) -> dict[str, Any]:
     sanitized = {}
 
     for key, value in params.items():
-        if key in {"password", "api_password", "secret", "token", "key"}:
+        if key in {"pass", "password", "api_password", "secret", "token", "key"}:
             sanitized[key] = "***REDACTED***"
         elif key in {"encrypted_password", "encrypted_payload"}:
             sanitized[key] = f"***ENCRYPTED({len(str(value))} bytes)***"

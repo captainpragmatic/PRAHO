@@ -23,6 +23,8 @@ from apps.billing.models import Currency
 from apps.common.types import Ok
 from apps.customers.models import Customer
 from apps.provisioning.models import Service, ServicePlan
+from apps.provisioning.signals import handle_service_virtualmin_reconciliation
+from apps.provisioning.tasks import queue_service_provisioning
 from apps.provisioning.virtualmin_gateway import VirtualminConfig, VirtualminGateway
 from apps.provisioning.virtualmin_models import (
     VirtualminAccount,
@@ -39,6 +41,7 @@ from apps.provisioning.virtualmin_tasks import (
     health_check_virtualmin_servers,
     process_failed_virtualmin_jobs,
     provision_virtualmin_account_async,
+    reconcile_divergent_services_task,
     reconcile_virtualmin_service_state,
     retry_virtualmin_job,
     setup_virtualmin_scheduled_tasks,
@@ -208,6 +211,8 @@ class TestFailedJobSweep(VirtualminTaskTestBase):
         mock_async.assert_not_called()
         job.refresh_from_db()
         self.assertEqual(job.status, "failed")
+        # Terminalized: opted out of every future sweep, not just this one
+        self.assertIsNone(job.next_retry_at)
 
     @patch("apps.provisioning.virtualmin_tasks.async_task", return_value="task-123")
     def test_missing_account_job_is_terminal_not_retried(self, mock_async):
@@ -408,7 +413,7 @@ class TestDriftRecords(VirtualminTaskTestBase):
         )
         # PRAHO won: Virtualmin was forced to match, drift auto-fixed
         self.assertEqual(record.resolution_status, "auto_fixed")
-        self.assertFalse(mock_gateway.get_domain_state(self.account.domain).enabled)
+        self.assertFalse(mock_gateway.domain_state_of(self.account.domain).enabled)
 
 
 class TestServerHealthModel(VirtualminTaskTestBase):
@@ -742,12 +747,14 @@ class TestReviewHardening325(VirtualminTaskTestBase):
         self.server.failed_by_health_check = True
         self.server.save(update_fields=["status", "failed_by_health_check"])
         gateway = VirtualminGateway(VirtualminConfig(server=self.server))
-        self.assertTrue(gateway._validate_server_health().is_ok())
+        # Health probe allowed; mutating programs stay blocked until recovery
+        self.assertTrue(gateway._validate_server_health("info").is_ok())
+        self.assertTrue(gateway._validate_server_health("create-domain").is_err())
 
         self.server.failed_by_health_check = False
         self.server.save(update_fields=["failed_by_health_check"])
         gateway = VirtualminGateway(VirtualminConfig(server=self.server))
-        self.assertTrue(gateway._validate_server_health().is_err())
+        self.assertTrue(gateway._validate_server_health("info").is_err())
 
     def test_preflight_blocks_username_conflict(self):
         """The repaired conflict check sees owner usernames."""
@@ -836,3 +843,83 @@ class TestPrReviewFixes331(VirtualminTaskTestBase):
         job.refresh_from_db()
         self.assertEqual(job.status, "failed")
         self.assertIsNone(job.claimed_at)  # recovered jobs no longer look claimed
+
+
+class TestAtoZReviewFixes(VirtualminTaskTestBase):
+    """Regression tests for the full-PR review findings."""
+
+    @patch("apps.provisioning.virtualmin_tasks.reconcile_virtualmin_service_state_async", return_value="t-1")
+    def test_lifecycle_retry_requeues_reconcile_when_service_moved_mid_call(self, mock_reconcile):
+        """TOCTOU: Service transitions while the gateway call is in flight —
+        the retry records the real remote result and re-queues convergence."""
+        self.account.status = "active"
+        self.account.save(update_fields=["status"])
+        force_status(self.service, "suspended")
+        mock_gateway = MockVirtualminGateway()
+        mock_gateway.seed_domain(self.account.domain, username=self.account.virtualmin_username)
+        job = self._failed_job(
+            operation="suspend_domain", status="pending", retry_count=1, claimed_at=timezone.now()
+        )
+        nonce = job.claimed_at.isoformat()
+
+        original_call = mock_gateway.call
+
+        def call_and_flip(program, params=None, **kw):
+            result = original_call(program, params, **kw)
+            if program == "disable-domain":
+                force_status(self.service, "active")  # moved mid-flight
+            return result
+
+        with (
+            patch("apps.provisioning.virtualmin_service.VirtualminGateway", return_value=mock_gateway),
+            patch.object(mock_gateway, "call", side_effect=call_and_flip),
+        ):
+            result = retry_virtualmin_job(str(job.id), nonce)
+
+        self.assertTrue(result["success"], result)
+        self.account.refresh_from_db()
+        self.assertEqual(self.account.status, "suspended")  # real remote result recorded
+        mock_reconcile.assert_called_once_with(str(self.service.id))  # convergence queued
+
+    @patch("apps.provisioning.tasks.async_task", return_value="task-123")
+    def test_service_provisioning_wrapper_does_not_leak_retry_kwarg(self, mock_async):
+        """The second wrapper (apps.provisioning.tasks) carried the same
+        invalid retry= leak, previously absorbed only by **kwargs."""
+        queue_service_provisioning(self.service)
+
+        mock_async.assert_called_once()
+        _, kwargs = mock_async.call_args
+        self.assertNotIn("retry", kwargs)
+
+    @patch("apps.provisioning.virtualmin_tasks.reconcile_virtualmin_service_state_async", return_value="t-1")
+    def test_divergence_backstop_requeues_lost_reconciles(self, mock_reconcile):
+        """A lost on_commit enqueue self-heals via the periodic backstop."""
+        self.account.status = "active"
+        self.account.save(update_fields=["status"])
+        force_status(self.service, "suspended")  # divergent: suspended service, live hosting
+
+        result = reconcile_divergent_services_task()
+
+        self.assertEqual(result["queued"], 1)
+        mock_reconcile.assert_called_once_with(str(self.service.id))
+
+    @patch("apps.provisioning.virtualmin_tasks.reconcile_virtualmin_service_state_async", return_value="t-1")
+    def test_raw_fixture_load_does_not_trigger_reconciliation(self, mock_reconcile):
+        """loaddata (post_save raw=True) must never enqueue real provisioning."""
+        with self.captureOnCommitCallbacks(execute=True):
+            handle_service_virtualmin_reconciliation(
+                sender=Service, instance=self.service, created=False, raw=True, update_fields=None
+            )
+
+        mock_reconcile.assert_not_called()
+
+    def test_stale_nonce_delivery_discarded_after_reclaim(self):
+        """A delivery carrying an old claim nonce cannot steal a new claim."""
+        job = self._failed_job(status="pending", retry_count=1, claimed_at=timezone.now())
+        old_nonce = (timezone.now() - timedelta(minutes=45)).isoformat()
+
+        result = retry_virtualmin_job(str(job.id), old_nonce)
+
+        self.assertEqual(result.get("action"), "stale_claim_discarded")
+        job.refresh_from_db()
+        self.assertEqual(job.status, "pending")  # the rightful claim untouched

@@ -123,8 +123,8 @@ class MockVirtualminGateway:
         self._domains[domain] = d
         return d
 
-    def get_domain_state(self, domain: str) -> MockDomain | None:
-        """Inspect mock state for assertions."""
+    def domain_state_of(self, domain: str) -> MockDomain | None:
+        """Inspect raw mock state for assertions (test helper, not gateway API)."""
         return self._domains.get(domain)
 
     @property
@@ -270,6 +270,33 @@ class MockVirtualminGateway:
                 return Ok(response.data)
             return Err(f"Failed to get server info: {response.data.get('error', 'Unknown')}")
         return Err(f"API call failed: {result.unwrap_err()}")
+
+    def get_domain_state(self, domain: str) -> Result[dict[str, Any], str]:
+        """Mirror VirtualminGateway.get_domain_state through call()."""
+        result = self.call("list-domains", {"domain": domain, "multiline": ""})
+        if result.is_err():
+            return Err(f"Domain state probe failed: {result.unwrap_err()}")
+        response = result.unwrap()
+        if not response.success:
+            return Err("Domain state probe rejected")
+        items = response.data.get("data", []) if isinstance(response.data, dict) else []
+        for item in items:
+            if isinstance(item, dict) and item.get("name") == domain:
+                values = item.get("values", {}) or {}
+                status = values.get("Status", "")
+                if isinstance(status, list):
+                    status = status[0] if status else ""
+                username = values.get("Username", "")
+                if isinstance(username, list):
+                    username = username[0] if username else ""
+                return Ok(
+                    {
+                        "exists": True,
+                        "enabled": (str(status).lower().startswith("enable")) if status else None,
+                        "owner": str(username),
+                    }
+                )
+        return Ok({"exists": False, "enabled": None, "owner": ""})
 
     def list_domains_with_owners(self) -> Result[list[dict[str, str]], str]:
         """Mirror VirtualminGateway.list_domains_with_owners through call()."""

@@ -660,8 +660,14 @@ class VirtualminProvisioningJob(models.Model):
         )
 
     @classmethod
-    def start_claimed(cls, job_id: Any, now: Any) -> bool:
-        """Fence at execution: pending -> running. 0 rows = stale duplicate delivery."""
+    def start_claimed(cls, job_id: Any, now: Any, claim_nonce: str | None = None) -> bool:
+        """Fence at execution: pending -> running, optionally bound to the
+        claim nonce (claimed_at isoformat) so a delivery from a recovered and
+        re-issued claim cannot steal the new claim. 0 rows = stale delivery."""
+        if claim_nonce:
+            claimed_at = cls.objects.filter(pk=job_id).values_list("claimed_at", flat=True).first()
+            if claimed_at is None or claimed_at.isoformat() != claim_nonce:
+                return False
         return bool(
             cls.objects.filter(pk=job_id, status="pending").update(status="running", started_at=now, updated_at=now)
         )

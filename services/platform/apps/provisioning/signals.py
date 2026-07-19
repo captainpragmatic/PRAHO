@@ -348,6 +348,9 @@ def handle_service_virtualmin_reconciliation(
     harmless. Enqueue happens on_commit — suspension/reactivation callers
     hold open atomics, and work for a rolled-back transition must never run.
     """
+    if kwargs.get("raw"):
+        return  # loaddata fixtures must never trigger real provisioning
+
     update_fields = kwargs.get("update_fields")
     # A bare save() (update_fields=None) cannot prove status did NOT change —
     # reconciliation is idempotent and on_commit, so err on running it.
