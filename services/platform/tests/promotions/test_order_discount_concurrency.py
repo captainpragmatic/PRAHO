@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
+from unittest import mock
 
 from django.db import close_old_connections, connection
 from django.test import TestCase, TransactionTestCase
@@ -14,6 +15,7 @@ from apps.billing.models import Currency
 from apps.customers.models import Customer
 from apps.orders.models import Order, OrderItem
 from apps.products.models import Product
+from apps.promotions import services as promotion_services
 from apps.promotions.models import Coupon, GiftCard
 from apps.promotions.services import ApplyResult, CouponService, GiftCardService
 
@@ -66,6 +68,40 @@ class PromotionOrderLockTestCase(TestCase):
             is_stackable=True,
             valid_from=timezone.now() - timezone.timedelta(days=1),
         )
+
+    def test_gift_card_deactivated_while_waiting_for_order_lock_is_refused(self) -> None:
+        """Pre-lock validation races any status change; the Order lock widens that gap.
+
+        A card deactivated between the unlocked validity check and the locked
+        redemption must be refused on the locked row — not redeemed with its
+        status silently overwritten to partially_used.
+        """
+        card = GiftCard.objects.create(
+            code="TOCTOU-GIFT",
+            initial_value_cents=5000,
+            current_balance_cents=5000,
+            currency=self.currency,
+            status="active",
+        )
+        original_lock = promotion_services._lock_order_for_discount_update
+
+        def deactivate_card_then_lock(order: Order) -> None:
+            GiftCard.objects.filter(pk=card.pk).update(is_active=False)
+            original_lock(order)
+
+        with mock.patch.object(
+            promotion_services, "_lock_order_for_discount_update", side_effect=deactivate_card_then_lock
+        ):
+            result = GiftCardService.redeem_gift_card(
+                code=card.code, order=self.order, amount_cents=1000, customer=self.customer
+            )
+
+        self.assertFalse(result.success)
+        card.refresh_from_db()
+        self.assertEqual(card.status, "active")
+        self.assertEqual(card.current_balance_cents, 5000)
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.discount_cents, 0)
 
     def test_coupon_preserves_a_concurrently_committed_discount(self) -> None:
         coupon = self._coupon("STALE20")

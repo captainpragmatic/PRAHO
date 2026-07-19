@@ -950,6 +950,11 @@ class GiftCardService:
                 error_code="INVALID_CODE",
             )
 
+        return cls._validate_gift_card_instance(gift_card)
+
+    @classmethod
+    def _validate_gift_card_instance(cls, gift_card: GiftCard) -> ValidationResult:
+        """Validate an already-fetched gift card; used pre-lock and re-run on the locked row."""
         if not gift_card.is_valid:
             if gift_card.status == "depleted":
                 return ValidationResult(
@@ -995,6 +1000,13 @@ class GiftCardService:
         _lock_order_for_discount_update(order)
 
         gift_card = GiftCard.objects.select_for_update().get(code=code.upper().strip())
+
+        # Re-validate on the locked row (mirrors the coupon path): the pre-lock check
+        # raced any status change, and the Order lock above widens that window. Without
+        # this, a deactivated/expired card is still redeemed and its status overwritten.
+        locked_validation = cls._validate_gift_card_instance(gift_card)
+        if not locked_validation.is_valid:
+            return ApplyResult(success=False, error_message=locked_validation.error_message)
 
         # A gift card holds a balance in ITS OWN currency. Redeeming across currencies applied the
         # foreign cents 1:1 — a 100 EUR card wiped 100 RON of an order at a fifth of its worth
