@@ -69,9 +69,15 @@ def _resolve_subscription_unit_price_cents(product: Any, currency: Any, billing_
         return Err(f"No active {getattr(currency, 'code', currency)} price for product {product}")
 
     cents = price.get_price_cents_for_period(period)
-    if not cents or cents <= 0:
-        # A zero/None period price means "unset" on ProductPrice, not a real list price —
+    has_active_free_promotion = (
+        price.promo_price_cents == 0
+        and price.promo_valid_until is not None
+        and timezone.now() <= price.promo_valid_until
+    )
+    if cents <= 0 and not has_active_free_promotion:
+        # A bare zero period price means "unset" on ProductPrice, not a real list price —
         # returning it as Ok would recreate the billed-zero defect this fix removes (#209).
+        # An explicit, unexpired zero-cent promotion is intentional and remains valid.
         return Err(
             f"Product {product} has no usable {period} list price in "
             f"{getattr(currency, 'code', currency)}; pass custom_price_cents"

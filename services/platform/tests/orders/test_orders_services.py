@@ -565,6 +565,42 @@ class OrderServiceCreationTestCase(TestCase):
             is_active=True,
         )
 
+    def test_service_creation_uses_authoritative_order_item_billing_period(self):
+        """Provisioned services must renew on the period priced and stored by the order."""
+        from apps.orders.services import OrderServiceCreationService  # noqa: PLC0415
+
+        test_cases = (
+            ("semiannual", "semi_annual", 17994),
+            ("annual", "annual", 35988),
+        )
+
+        for index, (order_period, expected_service_cycle, unit_price_cents) in enumerate(test_cases):
+            with self.subTest(order_period=order_period):
+                order = Order.objects.create(
+                    order_number=f"ORD-PERIOD-{index}",
+                    customer=self.customer,
+                    currency=self.currency,
+                    customer_email=self.customer.primary_email,
+                    customer_name=self.customer.name,
+                )
+                item = OrderItem.objects.create(
+                    order=order,
+                    product=self.product,
+                    product_name=self.product.name,
+                    product_type=self.product.product_type,
+                    unit_price_cents=unit_price_cents,
+                    line_total_cents=unit_price_cents,
+                    # A legacy/client value must not override the server-authoritative order period.
+                    config={"billing_period": order_period, "billing_cycle": "monthly"},
+                )
+
+                result = OrderServiceCreationService.create_pending_services(order)
+
+                self.assertTrue(result.is_ok(), f"Service creation failed: {result}")
+                service = result.unwrap()[0]
+                self.assertEqual(service.billing_cycle, expected_service_cycle)
+                self.assertEqual(service.price, item.unit_price)
+
     def test_complete_service_creation_flow(self):
         """Test the complete service creation flow: draft → pending → processing → completed"""
         # Step 1: Create draft order
@@ -1532,3 +1568,42 @@ class ProformaReuseOnRetryTest(TestCase):
             first_proforma_id,
             "The original proforma must still exist and be linked after retry",
         )
+
+
+class OrderItemBillingPeriodValidationTests(TestCase):
+    """create_order must reject out-of-set billing periods with zero writes (#314)."""
+
+    def setUp(self):
+        self.customer = Customer.objects.create(
+            name="Period Reject SRL", customer_type="company", company_name="Period Reject SRL", status="active"
+        )
+        self.currency, _ = Currency.objects.get_or_create(
+            code="RON", defaults={"name": "Romanian Leu", "symbol": "lei", "decimals": 2}
+        )
+        self.product = Product.objects.create(
+            slug="period-reject-plan", name="Period Reject Plan", product_type="shared_hosting", is_active=True
+        )
+
+    def test_unsupported_billing_period_returns_err_and_persists_nothing(self) -> None:
+        order_data = OrderCreateData(
+            customer=self.customer,
+            items=[
+                {
+                    "product_id": self.product.id,
+                    "quantity": 1,
+                    "unit_price_cents": 10_000,
+                    "billing_period": "weekly",
+                    "description": "Out-of-set period",
+                    "meta": {},
+                }
+            ],
+            billing_address={"address": "Str. Test 1", "city": "Bucharest", "country": "RO"},
+            currency=self.currency.code,
+        )
+
+        result = OrderService.create_order(order_data)
+
+        self.assertTrue(result.is_err())
+        self.assertIn("Unsupported order item billing period", result.unwrap_err())
+        self.assertFalse(Order.objects.exists())
+        self.assertFalse(OrderItem.objects.exists())

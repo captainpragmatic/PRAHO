@@ -476,16 +476,19 @@ class OrderService:
                 if product_id is None:
                     raise ValueError(f"Order item missing product_id: {item_data.get('description', 'unknown')}")
 
-                item_config = dict(item_data.get("meta", {}))
-                billing_period = item_data.get("billing_period")
-                if billing_period:
-                    item_config["billing_period"] = billing_period
-
                 # OrderItemData.service_id was accepted but silently dropped here, so renewal
                 # items never linked back to their Service and renewal history was invisible
                 # on Service.order_items (#223). Stringified because django-stubs' FK-id
                 # setter union does not include UUID; Django adapts it back at the DB layer.
                 service_id = item_data.get("service_id")
+                billing_period = item_data.get("billing_period", "monthly")
+                if billing_period not in OrderItem.BILLING_PERIOD_CHOICES:
+                    raise ValueError(f"Unsupported order item billing period: {billing_period}")
+
+                # OrderItem stores the period in config. Override any client-supplied config value
+                # with the validated top-level field so the amount and persisted period cannot diverge.
+                item_config = dict(item_data.get("meta") or {})
+                item_config["billing_period"] = billing_period
                 OrderItem.objects.create(
                     order=order,
                     product_id=product_id,
@@ -744,6 +747,8 @@ class OrderServiceCreationService:
                 if item.domain_name:
                     service_name = f"{item.product_name} - {item.domain_name}"
 
+                # create_order validates the top-level period and forces it into config,
+                # so the config-derived read below is server-authoritative for new orders.
                 billing_period = _order_item_billing_period(item)
                 billing_cycle = _ORDER_PERIOD_TO_SERVICE_CYCLE[billing_period]
 

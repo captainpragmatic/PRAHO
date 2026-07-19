@@ -701,7 +701,7 @@ class OrderCartVersioningSecurityTestCase(SimpleTestCase):
 
         # Add items to cart
         cart.add_item('product1', 1, 'monthly')
-        cart.add_item('product2', 2, 'yearly')
+        cart.add_item('product2', 2, 'annual')
 
         # Generate version multiple times - should be consistent
         version1 = cart.get_cart_version()

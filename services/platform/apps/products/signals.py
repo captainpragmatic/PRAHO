@@ -203,7 +203,7 @@ def log_price_changes(sender: type[ProductPrice], instance: ProductPrice, create
                     "billing_model": "simplified_monthly",
                     "vat_compliance_verified": True,
                     "grandfathered_customers_affected": pricing_changes.get("price_increased", False),
-                    "promotional_pricing_active": bool(instance.promo_price_cents),
+                    "promotional_pricing_active": instance.promo_price_cents is not None,
                     "discount_adjustments": {
                         "semiannual": float(instance.semiannual_discount_percent),
                         "annual": float(instance.annual_discount_percent),
@@ -312,8 +312,9 @@ def _check_pricing_changes(instance: ProductPrice) -> dict[str, Any] | None:
         changes["promotional_pricing_changed"] = {
             "from_cents": instance._old_promo_price_cents,
             "to_cents": instance.promo_price_cents,
-            "promotion_added": instance.promo_price_cents and not instance._old_promo_price_cents,
-            "promotion_removed": not instance.promo_price_cents and instance._old_promo_price_cents,
+            # None-checks, not truthiness: a 0-cent promo is an ACTIVE free promotion.
+            "promotion_added": instance.promo_price_cents is not None and instance._old_promo_price_cents is None,
+            "promotion_removed": instance.promo_price_cents is None and instance._old_promo_price_cents is not None,
         }
 
     # Check semiannual discount changes

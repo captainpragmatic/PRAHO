@@ -37,6 +37,7 @@ from apps.provisioning.tasks import queue_service_provisioning
 from .serializers import (
     CartCalculationInputSerializer,
     CartCalculationOutputSerializer,
+    CartItemInputSerializer,
     OrderCreateInputSerializer,
     OrderDetailSerializer,
     OrderListSerializer,
@@ -231,15 +232,14 @@ def calculate_cart_totals(  # noqa: PLR0912, PLR0915  # Complexity: multi-step b
             # Build order item data (include setup fee for accurate totals)
             # Include product_slug + billing_period as stable identifiers so callers
             # can map per-item totals deterministically (not by list index).
+            billing_period = item_data.get("billing_period", "monthly")
             order_items.append(
                 {
                     "product_id": product.id,
                     "product_slug": product.slug,
-                    "billing_period": item_data.get("billing_period", "monthly"),
+                    "billing_period": billing_period,
                     "quantity": item_data["quantity"],
-                    "unit_price_cents": int(
-                        product_price.get_price_cents_for_period(item_data.get("billing_period", "monthly"))
-                    ),
+                    "unit_price_cents": int(product_price.get_price_cents_for_period(billing_period)),
                     "setup_cents": int(product_price.setup_cents),
                     "description": product.name,
                     "meta": item_data.get("config", {}),
@@ -355,7 +355,7 @@ def _resolve_currency(raw_code: object) -> tuple[Currency | None, Response | Non
 @permission_classes([AllowAny])  # No permissions required (auth handled by secure_auth)
 @throttle_classes([OrderCalculateThrottle])
 @require_customer_authentication
-def preflight_order(  # noqa: PLR0911, PLR0915  # Complexity: multi-step business logic
+def preflight_order(  # noqa: PLR0911, PLR0912, PLR0915  # Complexity: multi-step business logic
     request: Request, customer: Customer
 ) -> Response:  # Complexity: order processing pipeline  # Complexity: multi-step business logic
     """
@@ -377,6 +377,20 @@ def preflight_order(  # noqa: PLR0911, PLR0915  # Complexity: multi-step busines
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
+        # Keep preflight on the same item contract as calculation and creation.
+        item_serializer = CartItemInputSerializer(data=cart_items, many=True)
+        if not item_serializer.is_valid():
+            return Response(
+                {
+                    "success": False,
+                    "errors": [str(_("Cart contains invalid items"))],
+                    "warnings": [],
+                    "details": item_serializer.errors,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        cart_items = item_serializer.validated_data
 
         # Create a preview order data structure (without saving to DB)
         currency, error_response = _resolve_currency(request.data.get("currency", "RON"))
