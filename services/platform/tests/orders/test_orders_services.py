@@ -1568,3 +1568,42 @@ class ProformaReuseOnRetryTest(TestCase):
             first_proforma_id,
             "The original proforma must still exist and be linked after retry",
         )
+
+
+class OrderItemBillingPeriodValidationTests(TestCase):
+    """create_order must reject out-of-set billing periods with zero writes (#314)."""
+
+    def setUp(self):
+        self.customer = Customer.objects.create(
+            name="Period Reject SRL", customer_type="company", company_name="Period Reject SRL", status="active"
+        )
+        self.currency, _ = Currency.objects.get_or_create(
+            code="RON", defaults={"name": "Romanian Leu", "symbol": "lei", "decimals": 2}
+        )
+        self.product = Product.objects.create(
+            slug="period-reject-plan", name="Period Reject Plan", product_type="shared_hosting", is_active=True
+        )
+
+    def test_unsupported_billing_period_returns_err_and_persists_nothing(self) -> None:
+        order_data = OrderCreateData(
+            customer=self.customer,
+            items=[
+                {
+                    "product_id": self.product.id,
+                    "quantity": 1,
+                    "unit_price_cents": 10_000,
+                    "billing_period": "weekly",
+                    "description": "Out-of-set period",
+                    "meta": {},
+                }
+            ],
+            billing_address={"address": "Str. Test 1", "city": "Bucharest", "country": "RO"},
+            currency=self.currency.code,
+        )
+
+        result = OrderService.create_order(order_data)
+
+        self.assertTrue(result.is_err())
+        self.assertIn("Unsupported order item billing period", result.unwrap_err())
+        self.assertFalse(Order.objects.exists())
+        self.assertFalse(OrderItem.objects.exists())

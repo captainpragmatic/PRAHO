@@ -77,7 +77,10 @@ class OrderInputValidator:
     def validate_billing_period(period: str) -> str:
         """Validate billing period against allowed values"""
         if not period or period not in OrderInputValidator.ALLOWED_BILLING_PERIODS:
-            raise ValidationError(_("Invalid billing period"))
+            allowed = ", ".join(sorted(OrderInputValidator.ALLOWED_BILLING_PERIODS))
+            raise ValidationError(
+                _("Invalid billing period '%(period)s' — allowed: %(allowed)s") % {"period": period, "allowed": allowed}
+            )
         return period
 
     @staticmethod

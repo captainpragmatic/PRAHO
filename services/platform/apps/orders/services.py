@@ -476,11 +476,6 @@ class OrderService:
                 if product_id is None:
                     raise ValueError(f"Order item missing product_id: {item_data.get('description', 'unknown')}")
 
-                item_config = dict(item_data.get("meta", {}))
-                billing_period = item_data.get("billing_period")
-                if billing_period:
-                    item_config["billing_period"] = billing_period
-
                 # OrderItemData.service_id was accepted but silently dropped here, so renewal
                 # items never linked back to their Service and renewal history was invisible
                 # on Service.order_items (#223). Stringified because django-stubs' FK-id
