@@ -1,4 +1,4 @@
-"""Contract tests for PostgreSQL-only billing coverage in nightly CI."""
+"""Contract tests for PostgreSQL-only financial concurrency coverage in nightly CI."""
 
 from __future__ import annotations
 
@@ -10,11 +10,15 @@ from django.test import SimpleTestCase
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
 _NIGHTLY_WORKFLOW = _REPOSITORY_ROOT / ".github" / "workflows" / "nightly.yml"
-_CONCURRENCY_STEP_NAME = "Billing payment-intent concurrency tests (PostgreSQL)"
+_CONCURRENCY_STEP_NAME = "Financial concurrency tests (PostgreSQL)"
 _PLATFORM_STEP_NAME = "Platform tests with coverage (no failfast — complete picture)"
-_CONCURRENCY_TEST_CLASS = (
+_BILLING_CONCURRENCY_TEST_CLASS = (
     "tests.billing.test_payment_intent_security."
     "DirectPaymentIntentPostgresConcurrencyTests"
+)
+_PROMOTION_CONCURRENCY_TEST_CLASS = (
+    "tests.promotions.test_order_discount_concurrency."
+    "PromotionOrderPostgresConcurrencyTests"
 )
 
 
@@ -32,7 +36,7 @@ class NightlyPostgresConcurrencyWorkflowTests(SimpleTestCase):
         )
         cls.nightly_job = cls.workflow["jobs"]["nightly"]
 
-    def test_billing_concurrency_step_runs_on_postgresql_before_broad_suite(self) -> None:
+    def test_financial_concurrency_step_runs_on_postgresql_before_broad_suite(self) -> None:
         postgres_service = self.nightly_job["services"]["postgres"]
         self.assertEqual(postgres_service["image"], "postgres:16-alpine")
 
@@ -59,7 +63,8 @@ class NightlyPostgresConcurrencyWorkflowTests(SimpleTestCase):
             self.assertEqual(concurrency_step["env"].get(key), value)
 
         command = concurrency_step["run"]
-        self.assertIn(_CONCURRENCY_TEST_CLASS, command)
+        self.assertIn(_BILLING_CONCURRENCY_TEST_CLASS, command)
+        self.assertIn(_PROMOTION_CONCURRENCY_TEST_CLASS, command)
         self.assertIn("--settings=config.settings.ci", command)
         self.assertNotIn("config.settings.test", command)
         self.assertNotIn("--parallel", command)
