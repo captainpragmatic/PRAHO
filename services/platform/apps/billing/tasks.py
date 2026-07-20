@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
     from apps.billing.gateways.base import PaymentConfirmResult
+    from apps.billing.refund_service import RefundGatewayFacts
     from apps.customers.profile_models import CustomerTaxProfile
 
 from django.db import transaction
@@ -1176,6 +1177,104 @@ def run_payment_collection_async() -> str:
     return async_task("apps.billing.tasks.run_payment_collection", timeout=TASK_TIME_LIMIT * 2)
 
 
+def _stripe_refund_facts(source: dict[str, Any], refund_id: str) -> RefundGatewayFacts:
+    """Build a convergence fact-dict from a gateway result, omitting empty optionals."""
+    facts: RefundGatewayFacts = {
+        "refund_id": refund_id,
+        "payment_intent_id": source["payment_intent_id"],
+        "amount_cents": source["amount_cents"],
+        "currency": source["currency"],
+        "status": source["status"],
+    }
+    if source.get("reason"):
+        facts["reason"] = source["reason"]
+    if source.get("failure_reason"):
+        facts["failure_reason"] = source["failure_reason"]
+    return facts
+
+
+def _collect_stripe_refund_facts(
+    gateway: Any, *, lookback_days: int, discovery_page_size: int, errors: list[str]
+) -> dict[str, RefundGatewayFacts]:
+    """Gather refund facts to converge: non-terminal local refunds + recent gateway refunds."""
+    from apps.billing.models import Refund  # noqa: PLC0415
+
+    refund_facts: dict[str, RefundGatewayFacts] = {}
+    pending_ids = (
+        Refund.objects.filter(status__in=("pending", "processing", "approved"))
+        .exclude(gateway_refund_id="")
+        .values_list("gateway_refund_id", flat=True)
+    )
+    for refund_id in pending_ids.iterator():
+        retrieved = gateway.retrieve_refund(refund_id)
+        if retrieved["success"]:
+            refund_facts[refund_id] = _stripe_refund_facts(retrieved, retrieved["refund_id"])
+        else:
+            errors.append(f"{refund_id}: {retrieved['error'] or 'gateway retrieval failed'}")
+
+    created_gte = int((timezone.now() - timedelta(days=max(lookback_days, 1))).timestamp())
+    listed = gateway.list_refunds(created_gte=created_gte, limit=discovery_page_size)
+    if not listed["success"]:
+        errors.append(f"Stripe refund discovery failed: {listed['error'] or 'unknown error'}")
+        return refund_facts
+    for discovered in listed["refunds"]:
+        refund_id = discovered["refund_id"]
+        if refund_id and refund_id not in refund_facts:
+            refund_facts[refund_id] = _stripe_refund_facts(discovered, refund_id)
+    return refund_facts
+
+
+def reconcile_stripe_refunds(*, lookback_days: int = 30, discovery_page_size: int = 100) -> dict[str, Any]:
+    """Converge non-terminal and recently created Stripe refunds into PRAHO."""
+    from apps.billing.gateways import PaymentGatewayFactory  # noqa: PLC0415
+    from apps.billing.refund_service import RefundConvergenceService  # noqa: PLC0415
+
+    errors: list[str] = []
+    try:
+        gateway = PaymentGatewayFactory.create_gateway("stripe")
+    except Exception as exc:
+        logger.exception("[Refund reconciliation] Stripe gateway initialization failed")
+        return {"success": False, "refunds_checked": 0, "refunds_converged": 0, "errors": [str(exc)]}
+
+    refund_facts = _collect_stripe_refund_facts(
+        gateway, lookback_days=lookback_days, discovery_page_size=discovery_page_size, errors=errors
+    )
+
+    converged = 0
+    external_skipped = 0
+    for refund_id, facts in refund_facts.items():
+        result = RefundConvergenceService.converge_gateway_refund(facts)
+        if result.is_err():
+            errors.append(f"{refund_id}: {result.unwrap_err()}")
+            continue
+        # Ok(None) means the PaymentIntent is not in this DB (a refund for another system
+        # sharing the Stripe account) — a skip, not a convergence. Counting it would inflate
+        # the report by every unrelated account refund in the lookback window.
+        if result.unwrap() is None:
+            external_skipped += 1
+        else:
+            converged += 1
+
+    if errors:
+        # django-q marks a task that returns normally as successful even when the returned
+        # payload says success=False; log at error level so a failing nightly reconciliation
+        # is visible to monitoring instead of silently green.
+        logger.error(
+            "🔥 [Refund reconciliation] completed with %d error(s); converged=%d external_skipped=%d",
+            len(errors),
+            converged,
+            external_skipped,
+        )
+
+    return {
+        "success": not errors,
+        "refunds_checked": len(refund_facts),
+        "refunds_converged": converged,
+        "refunds_external_skipped": external_skipped,
+        "errors": errors,
+    }
+
+
 def setup_billing_scheduled_tasks() -> dict[str, str]:
     """Register the single PRAHO renewal path plus local usage processing."""
     from django_q.models import Schedule  # noqa: PLC0415
@@ -1214,6 +1313,11 @@ def setup_billing_scheduled_tasks() -> dict[str, str]:
             "billing-payment-retries",
             "apps.billing.tasks.run_payment_collection",
             "*/15 * * * *",
+        ),
+        (
+            "billing-refund-reconciliation",
+            "apps.billing.tasks.reconcile_stripe_refunds",
+            "45 2 * * *",
         ),
     )
     results: dict[str, str] = {}

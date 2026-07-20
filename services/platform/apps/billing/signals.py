@@ -620,8 +620,14 @@ def handle_payment_created_or_updated(sender: type[Payment], instance: Payment, 
         if old_status and old_status != instance.status:
             _handle_payment_status_change(instance, old_status, instance.status)
 
-            # EXTENDED: Service activation
-            if instance.status == "succeeded" and old_status != "succeeded":
+            # EXTENDED: Service activation.
+            # Guard is `old_status == "pending"` (not `!= "succeeded"`) DELIBERATELY: the only
+            # FSM edges into 'succeeded' are succeed() from 'pending' (a genuine first success)
+            # and restore_after_refund_reversal() from refunded/partially_refunded (a projection
+            # un-refunding a payment). Only the first should (re)activate services — a refund
+            # reversal must not re-trigger activation or positive credit scoring. Creates carry
+            # old_status=None and are already excluded by the outer `if old_status` check above.
+            if instance.status == "succeeded" and old_status == "pending":
                 _activate_payment_services(instance)
 
             # EXTENDED: Customer credit scoring
@@ -968,7 +974,9 @@ def _update_customer_payment_credit(payment: Payment, old_status: str) -> None:
         from apps.customers.services import CustomerCreditService
 
         event_type = None
-        if payment.status == "succeeded" and old_status != "succeeded":
+        # `old_status == "pending"` only: a refund reversal restoring 'succeeded' (see
+        # handle_payment_created_or_updated) is not a new positive payment.
+        if payment.status == "succeeded" and old_status == "pending":
             event_type = "positive_payment"
         elif payment.status == "failed" and old_status != "failed":
             event_type = "failed_payment"
@@ -1122,7 +1130,9 @@ def _handle_payment_status_change(payment: Payment, old_status: str, new_status:
             },
         )
 
-        if new_status == "succeeded" and old_status != "succeeded":
+        # `old_status == "pending"` only: a refund-reversal projection restoring 'succeeded'
+        # (see handle_payment_created_or_updated) is not a fresh payment success.
+        if new_status == "succeeded" and old_status == "pending":
             _handle_payment_success(payment)
         elif (
             new_status == "failed"

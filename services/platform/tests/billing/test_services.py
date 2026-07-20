@@ -136,7 +136,7 @@ class RefundServiceComprehensiveCoverageTestCase(TestCase):
             defaults={"name": "Romanian Leu", "symbol": "lei"}
         )
 
-        return Order.objects.create(
+        order = Order.objects.create(
             customer=self.customer,
             status='completed',
             total_cents=15000,
@@ -144,6 +144,15 @@ class RefundServiceComprehensiveCoverageTestCase(TestCase):
             currency=currency,
             meta={}
         )
+        Payment.objects.create(
+            customer=self.customer,
+            currency=currency,
+            payment_method="bank",
+            amount_cents=order.total_cents,
+            status="succeeded",
+            meta={"order_id": str(order.id)},
+        )
+        return order
 
     def _create_refund_data(
         self,
@@ -517,14 +526,6 @@ class RefundServiceComprehensiveCoverageTestCase(TestCase):
     def test_process_bidirectional_refund_simplified_behavior(self) -> None:
         """Test _process_bidirectional_refund with simplified order processing."""
         mock_order = self._create_test_order()
-        Payment.objects.create(
-            customer=self.customer,
-            currency=self.currency,
-            payment_method="bank",
-            amount_cents=mock_order.total_cents,
-            status="succeeded",
-            meta={"order_id": str(mock_order.id)},
-        )
 
         refund_data = self._create_refund_data(refund_type=RefundType.PARTIAL, amount_cents=5000)
         result = RefundService._process_bidirectional_refund(

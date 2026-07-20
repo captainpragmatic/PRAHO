@@ -380,7 +380,10 @@ class Invoice(models.Model):
             or 0
         )
         refunded = (
-            Refund.objects.filter(invoice=self, status="completed").aggregate(total=models.Sum("amount_cents"))["total"]
+            Refund.objects.filter(
+                models.Q(invoice=self) | models.Q(payment__invoice=self),
+                status="completed",
+            ).aggregate(total=models.Sum("amount_cents"))["total"]
             or 0
         )
         net_collected = max(0, collected - refunded)
@@ -413,6 +416,14 @@ class Invoice(models.Model):
     @transition(field=status, source=["paid", "partially_refunded"], target="partially_refunded")
     def mark_partially_refunded(self) -> None:
         """Mark invoice as partially refunded."""
+
+    @transition(field=status, source=["partially_refunded", "refunded"], target="paid")
+    def restore_after_refund_reversal(self) -> None:
+        """Restore an invoice when no completed refund remains."""
+
+    @transition(field=status, source="refunded", target="partially_refunded")
+    def restore_partial_after_refund_reversal(self) -> None:
+        """Restore an invoice when only part of its completed refund remains."""
 
     @property
     def amount_due(self) -> int:

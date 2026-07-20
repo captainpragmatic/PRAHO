@@ -2,13 +2,21 @@
 
 ## Overview
 
-The **RefundService** is a critical financial component of the PRAHO Platform that handles bidirectional refund synchronization between orders and invoices. It ensures that refunding either an order OR an invoice automatically refunds the other, maintaining data integrity across the financial system.
+The **RefundService** is PRAHO's authoritative refund ledger and Stripe refund
+orchestrator. Refunds may be initiated from either an order or an invoice, but
+their monetary state converges through the authoritative `Payment`. PRAHO
+updates `Payment` and `Invoice` balances only after the gateway reports that
+funds have settled.
 
 ## 🚨 Critical Safety Features
 
 - **Atomic Transactions**: All refund operations use `@transaction.atomic` to prevent partial refunds
-- **Double Refund Prevention**: Validates that entities haven't already been fully refunded
+- **Canonical Lock Order**: Refund paths lock Payment → Invoice → Order → Refund to avoid cross-flow deadlocks
+- **Double Refund Prevention**: Pending and settled refund reservations both reduce the available refundable amount
 - **Amount Validation**: Ensures refund amounts don't exceed available amounts
+- **Gateway Convergence**: Stripe webhooks and the scheduled sweep share one idempotent convergence service
+- **Gateway Identity Integrity**: A non-empty gateway refund ID is unique in the PRAHO ledger
+- **Fail-Closed Linkage**: Gateway facts must match PRAHO's Payment, customer, amount, and currency
 - **Comprehensive Audit Logging**: All operations are logged for regulatory compliance
 - **Strong Typing**: TypedDict and Enums prevent runtime errors
 - **Result Pattern**: Explicit error handling with `Result[T, E]` types
@@ -56,6 +64,22 @@ Service for querying refund data:
 
 - `get_entity_refunds(entity_type, entity_id)` - Get refund history
 - `get_refund_statistics(customer_id?, date_range?)` - Generate refund reports
+
+#### RefundConvergenceService
+
+The only service allowed to project Stripe refund facts into PRAHO:
+
+- imports a Stripe-created refund when it can be linked unambiguously to a PRAHO Payment
+- advances existing refunds through the local FSM
+- ignores stale gateway events using an event-time watermark
+- treats duplicate webhook delivery and scheduled discovery as idempotent
+- projects only completed refund totals onto Payment and Invoice
+
+Stripe `refund.created`, `refund.updated`, `refund.failed`,
+`charge.refund.updated`, and legacy `charge.refunded` events route through
+this service. The scheduled reconciliation task also retrieves all known
+non-terminal refunds and discovers recent Stripe refunds, covering lost
+webhooks and dashboard-created refunds.
 
 ## Usage Examples
 
@@ -124,24 +148,26 @@ result = RefundService.get_refund_eligibility('order', order.id, 5000)
 ### Refund Eligibility
 
 **Orders can be refunded if:**
-- Status is `completed` or `provisioning`
+- Status is `paid`, `completed`, or `partially_refunded`
 - Not already fully refunded
 - Order total > 0
 
 **Orders CANNOT be refunded if:**
-- Status is `draft`, `awaiting_payment`, `cancelled`, or `failed`
+- Status is `draft`, `pending`, `awaiting_payment`, `cancelled`, or `failed`
 - Already fully refunded
 - Invalid or missing order
 
-> **Note:** Refund status (`refunded`, `partially_refunded`) is tracked on **Invoice** and **Payment** models, not on the Order FSM. An order's financial reversal is reflected via its linked invoice.
+> **Note:** Settlement status (`refunded`, `partially_refunded`) is tracked
+> on **Invoice** and **Payment**, not on the Order FSM. The Refund row records
+> the gateway lifecycle and retains its order or invoice ownership.
 
 **Invoices can be refunded if:**
-- Status is `issued`, `paid`, or `overdue`
+- Status is `paid` or `completed`
 - Not already fully refunded
 - Invoice total > 0
 
 **Invoices CANNOT be refunded if:**
-- Status is `draft` or `void`
+- Status is `draft`, `issued`, `overdue`, `void`, or another non-settled state
 - Already fully refunded
 - Invalid or missing invoice
 
@@ -156,21 +182,25 @@ Refund status is tracked on Invoice (not Order). The table below reflects Invoic
 | `partially_refunded` | Full | `refunded` |
 | `partially_refunded` | Partial | `partially_refunded` |
 
-### Bidirectional Synchronization
+### Gateway Lifecycle and Settlement
 
 When refunding an **order**:
-1. Find associated invoice(s)
-2. Update order status
-3. Update invoice status and metadata
-4. Process payment refunds if requested
-5. Create audit trail
+1. Resolve the authoritative Payment and its invoice/proforma linkage
+2. Lock Payment, then Invoice, then Order
+3. Reserve the amount against pending and settled refunds
+4. Submit the exact cent amount and currency to the gateway with an idempotency key
+5. Create a Refund ledger row with the gateway refund ID
+6. Project Payment and Invoice status only when the gateway status is `succeeded`
 
 When refunding an **invoice**:
-1. Find associated order(s)
-2. Update invoice status and metadata
-3. Update order status
-4. Process payment refunds if requested
-5. Create audit trail
+1. Resolve and lock its authoritative Payment before the Invoice
+2. Perform the same reservation, gateway submission, ledger, and settlement flow
+
+Gateway `pending` and `requires_action` results remain non-terminal and do
+not reduce the settled Payment or Invoice balance. Gateway `failed`,
+`canceled`, and locally rejected refunds release the reservation. A later
+webhook or reconciliation sweep can advance the same Refund without creating a
+second ledger entry.
 
 ## Error Handling
 
@@ -198,8 +228,19 @@ else:
 
 ## Data Storage
 
-### Order Metadata
-Refund information is stored in `Order.meta['refunds']`:
+The `Refund` model is the source of truth. Each row has exactly one owning
+document (`order` or `invoice`), may link to the authoritative `payment`, and
+stores amount, currency, reason, local FSM status, the unique
+`gateway_refund_id`, and gateway metadata.
+
+Migration `billing.0037_refund_gateway_id_unique` fails closed if existing
+non-empty gateway IDs are duplicated. Operators must reconcile those ledger
+rows before deploying the constraint.
+
+### Legacy Order Metadata
+
+Historical refund information may remain in `Order.meta['refunds']`, but it is
+audit data rather than the source for availability or settlement:
 
 ```json
 {
@@ -216,8 +257,10 @@ Refund information is stored in `Order.meta['refunds']`:
 }
 ```
 
-### Invoice Metadata
-Refund information is stored in `Invoice.meta['refunds']` with the same structure.
+### Legacy Invoice Metadata
+
+Historical `Invoice.meta['refunds']` entries have the same legacy structure.
+New refund calculations use Refund rows.
 
 ## Security & Compliance
 
@@ -252,12 +295,9 @@ log_security_event(
 
 ### Database Queries
 - Uses `select_related()` to minimize database queries
-- Atomic transactions prevent race conditions
-- Indexes on order/invoice lookups
-
-### Query Budget
-- Order refund: ~3-5 queries (order, invoice, payments)
-- Invoice refund: ~3-5 queries (invoice, orders, payments)
+- Uses row locks in the canonical Payment → Invoice → Order → Refund order
+- Indexes order, invoice, payment, status, and gateway refund lookups
+- Uses one conditional unique constraint for non-empty gateway refund IDs
 - Eligibility check: ~2 queries (entity + related data)
 
 ## Integration Points

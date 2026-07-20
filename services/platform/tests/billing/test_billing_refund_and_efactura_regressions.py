@@ -239,6 +239,113 @@ class StripeRefundTests(TestCase):
         self.assertTrue(result["success"])
         self.assertEqual(result["status"], "pending")
 
+    def test_refund_requires_action_status_is_a_created_request(self):
+        mock_stripe = MagicMock()
+        mock_stripe.Refund.create.return_value = MagicMock(
+            id="re_action",
+            amount=5000,
+            status="requires_action",
+        )
+        result = self._make_gateway(mock_stripe).refund_payment("pi_123")
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["status"], "requires_action")
+
+    def test_retrieve_refund_returns_normalized_authoritative_facts(self):
+        mock_stripe = MagicMock()
+        mock_stripe.Refund.retrieve.return_value = MagicMock(
+            id="re_lookup",
+            payment_intent="pi_lookup",
+            amount=1234,
+            currency="ron",
+            status="succeeded",
+            reason="requested_by_customer",
+            failure_reason="lost_or_stolen_card",
+        )
+
+        result = self._make_gateway(mock_stripe).retrieve_refund("re_lookup")
+
+        mock_stripe.Refund.retrieve.assert_called_once_with("re_lookup")
+        self.assertEqual(
+            result,
+            {
+                "success": True,
+                "refund_id": "re_lookup",
+                "payment_intent_id": "pi_lookup",
+                "amount_cents": 1234,
+                "currency": "ron",
+                "status": "succeeded",
+                "reason": "requested_by_customer",
+                "failure_reason": "lost_or_stolen_card",
+                "error": None,
+            },
+        )
+
+    def test_retrieve_refund_rejects_missing_gateway_identity(self):
+        mock_stripe = MagicMock()
+        mock_stripe.Refund.retrieve.return_value = MagicMock(
+            id=None,
+            payment_intent="pi_missing_refund_id",
+            amount=1234,
+            currency="ron",
+            status="succeeded",
+            reason=None,
+        )
+
+        result = self._make_gateway(mock_stripe).retrieve_refund("re_expected")
+
+        self.assertFalse(result["success"])
+        self.assertIn("malformed", result["error"].lower())
+
+    def test_list_refunds_normalizes_auto_paged_results(self):
+        mock_stripe = MagicMock()
+        mock_stripe.Refund.list.return_value.auto_paging_iter.return_value = [
+            MagicMock(
+                id="re_recent",
+                payment_intent=MagicMock(id="pi_recent"),
+                amount=987,
+                currency="ron",
+                status="pending",
+                reason=None,
+            ),
+            MagicMock(
+                id="re_older_page",
+                payment_intent="pi_older_page",
+                amount=321,
+                currency="ron",
+                status="succeeded",
+                reason=None,
+            ),
+        ]
+
+        result = self._make_gateway(mock_stripe).list_refunds(created_gte=123456, limit=1)
+
+        mock_stripe.Refund.list.assert_called_once_with(created={"gte": 123456}, limit=1)
+        self.assertTrue(result["success"])
+        self.assertEqual(len(result["refunds"]), 2)
+        self.assertEqual(result["refunds"][0]["payment_intent_id"], "pi_recent")
+        self.assertEqual(result["refunds"][0]["amount_cents"], 987)
+
+    def test_list_refunds_skips_malformed_refund_without_dropping_valid_ones(self):
+        """One malformed refund must not discard the whole discovery page (#339).
+
+        Regression: a list comprehension over `auto_paging_iter()` let a single
+        ValueError abort the entire page, returning `success=False, refunds=[]`
+        and silently defeating the daily reconciliation safety-net.
+        """
+        mock_stripe = MagicMock()
+        mock_stripe.Refund.list.return_value.auto_paging_iter.return_value = [
+            MagicMock(id="re_valid_1", payment_intent="pi_v1", amount=500, currency="ron", status="succeeded", reason=None),
+            # payment_intent=None → _normalize_refund raises ValueError
+            MagicMock(id="re_malformed", payment_intent=None, amount=700, currency="ron", status="succeeded", reason=None),
+            MagicMock(id="re_valid_2", payment_intent="pi_v2", amount=900, currency="ron", status="succeeded", reason=None),
+        ]
+
+        result = self._make_gateway(mock_stripe).list_refunds(created_gte=123456, limit=100)
+
+        self.assertTrue(result["success"])
+        self.assertEqual([r["refund_id"] for r in result["refunds"]], ["re_valid_1", "re_valid_2"])
+
 
 # ===============================================================================
 # 6. Gateway-First Refund Pattern Tests (Fix #1 + #2)
