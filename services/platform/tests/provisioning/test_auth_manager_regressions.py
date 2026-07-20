@@ -19,7 +19,13 @@ from apps.provisioning.virtualmin_auth_manager import (
     AuthMethod,
     VirtualminAuthenticationManager,
 )
-from apps.provisioning.virtualmin_gateway import VirtualminAPIError, VirtualminAuthError
+from apps.provisioning.virtualmin_gateway import (
+    VirtualminAPIError,
+    VirtualminAuthError,
+    VirtualminAuthorizationError,
+    VirtualminGateway,
+    VirtualminRateLimitedError,
+)
 
 
 class ExecuteWithMethodDispatchTests(TestCase):
@@ -152,6 +158,28 @@ class ExecuteWithMethodDispatchTests(TestCase):
         self.assertIsInstance(result.unwrap_err(), VirtualminAuthError)
 
     @patch("apps.provisioning.virtualmin_auth_manager.VirtualminGateway.call")
+    def test_acl_preserves_retriability_of_raised_rate_limit(self, mock_call: MagicMock) -> None:
+        # gateway.call RAISES the rate-limit error (429 is not a RequestException,
+        # so the gateway retry loop does not catch it). The conversion to Err must
+        # keep it RETRIABLE, or a rate-limited request is treated as terminal.
+        mock_call.side_effect = VirtualminRateLimitedError("429", "host", "list-domains")
+
+        result = self.manager._execute_acl_auth("list-domains", {})
+
+        self.assertTrue(result.is_err())
+        self.assertEqual(retriability_of(result), Retriability.RETRIABLE)
+
+    @override_settings(VIRTUALMIN_MASTER_USERNAME="root", VIRTUALMIN_MASTER_PASSWORD="secret")
+    @patch("apps.provisioning.virtualmin_auth_manager.VirtualminGateway.call")
+    def test_master_proxy_preserves_retriability_of_raised_rate_limit(self, mock_call: MagicMock) -> None:
+        mock_call.side_effect = VirtualminRateLimitedError("429", "host", "list-domains")
+
+        result = self.manager._execute_master_proxy("list-domains", {})
+
+        self.assertTrue(result.is_err())
+        self.assertEqual(retriability_of(result), Retriability.RETRIABLE)
+
+    @patch("apps.provisioning.virtualmin_auth_manager.VirtualminGateway.call")
     def test_acl_preserves_gateway_retriability(self, mock_call: MagicMock) -> None:
         mock_call.return_value = Err(
             VirtualminAPIError("rate limited"),
@@ -194,3 +222,62 @@ class ExecuteWithMethodDispatchTests(TestCase):
         mock_execute.assert_called_once_with(
             "sudo /usr/sbin/virtualmin create-domain --domain 'example.com; touch /tmp/pwned'"
         )
+
+
+class AuthorizationDenialDoesNotEscalateTests(TestCase):
+    """403 ACL authorization denial must be terminal. Escalating to master/root
+    would bypass the ACL the node deliberately enforced — and, against a
+    compromised node returning 403, would hand it master credentials."""
+
+    def setUp(self) -> None:
+        self.mock_server = MagicMock()
+        self.mock_server.hostname = "node.example.com"
+        self.mock_server.id = 7
+        self.manager = VirtualminAuthenticationManager(self.mock_server)
+
+    @patch.object(VirtualminAuthenticationManager, "_cache_failed_auth_method")
+    @patch.object(VirtualminAuthenticationManager, "_get_auth_method_priority")
+    @patch.object(VirtualminAuthenticationManager, "_execute_with_method")
+    def test_authorization_denial_never_escalates(
+        self,
+        mock_execute: MagicMock,
+        mock_priority: MagicMock,
+        _cache_failed: MagicMock,
+    ) -> None:
+        mock_priority.return_value = [AuthMethod.ACL, AuthMethod.MASTER_PROXY, AuthMethod.SSH_SUDO]
+        # ACL account authenticated but is forbidden (403); master would succeed
+        # but must never be reached.
+        mock_execute.side_effect = [
+            Err(VirtualminAuthorizationError("Access forbidden - check ACL permissions")),
+            Ok({"success": True}),
+        ]
+
+        result = self.manager.execute_virtualmin_command("delete-domain", {})
+
+        self.assertTrue(result.is_err())
+        mock_execute.assert_called_once_with(AuthMethod.ACL, "delete-domain", {})
+
+
+class GatewayHttpStatusClassificationTests(TestCase):
+    """401 (authentication) and 403 (authorization) must be distinct types so the
+    auth manager can escalate on the former but never the latter."""
+
+    @staticmethod
+    def _gateway_and_response(status_code: int) -> tuple[VirtualminGateway, MagicMock]:
+        gateway = object.__new__(VirtualminGateway)
+        gateway.server = MagicMock()
+        gateway.server.hostname = "node.example.com"
+        response = MagicMock()
+        response.status_code = status_code
+        return gateway, response
+
+    def test_401_maps_to_authentication_error_not_authorization(self) -> None:
+        gateway, response = self._gateway_and_response(401)
+        with self.assertRaises(VirtualminAuthError) as ctx:
+            gateway._validate_http_status(response)
+        self.assertNotIsInstance(ctx.exception, VirtualminAuthorizationError)
+
+    def test_403_maps_to_authorization_error(self) -> None:
+        gateway, response = self._gateway_and_response(403)
+        with self.assertRaises(VirtualminAuthorizationError):
+            gateway._validate_http_status(response)

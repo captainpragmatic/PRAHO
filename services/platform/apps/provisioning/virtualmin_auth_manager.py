@@ -23,7 +23,15 @@ from django.utils import timezone
 from apps.common.ssh import configure_strict_host_key_checking
 from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 
-from .virtualmin_gateway import VirtualminAPIError, VirtualminAuthError, VirtualminConfig, VirtualminGateway
+from .virtualmin_gateway import (
+    VirtualminAPIError,
+    VirtualminAuthError,
+    VirtualminAuthorizationError,
+    VirtualminConfig,
+    VirtualminGateway,
+    VirtualminRateLimitedError,
+    VirtualminTransientError,
+)
 from .virtualmin_models import VirtualminServer
 from .virtualmin_validators import VirtualminValidator
 
@@ -111,6 +119,19 @@ class SSHCredentials:
     password: str | None = None
 
 
+def _retriability_of_exception(error: VirtualminAPIError) -> Retriability:
+    """Preserve retry-safety when a typed gateway exception is converted to Err.
+
+    gateway.call() RAISES rate-limit/transient errors (HTTP 429/5xx are not
+    RequestExceptions, so its retry loop does not catch them). Converting them
+    to a bare Err would drop RETRIABLE and make a caller treat a transient
+    failure as terminal.
+    """
+    if isinstance(error, (VirtualminRateLimitedError, VirtualminTransientError)):
+        return Retriability.RETRIABLE
+    return Retriability.UNKNOWN
+
+
 class VirtualminAuthenticationManager:
     """
     🚨 CRITICAL: Multi-path authentication manager for ACL risk mitigation.
@@ -177,6 +198,11 @@ class VirtualminAuthenticationManager:
                     last_error = f"{method.value}: {error_msg}"
                     logger.warning(f"❌ [Virtualmin Auth] {method.value} failed: {error_msg}")
 
+                    if isinstance(error, VirtualminAuthorizationError):
+                        # 403: the account authenticated but is not permitted.
+                        # Escalating to a higher-privilege method would bypass the
+                        # ACL the server enforced — terminal, never fall through.
+                        return Err(last_error, retriability=last_retriability)
                     if isinstance(error, VirtualminAuthError):
                         self._cache_failed_auth_method(method, error_msg)
                         continue
@@ -229,7 +255,7 @@ class VirtualminAuthenticationManager:
             result = gateway.call(program, parameters)
             return cast(Result[Any, AuthFailure], result)
         except VirtualminAPIError as e:
-            return Err(e)
+            return Err(e, retriability=_retriability_of_exception(e))
         except Exception as e:
             return Err(VirtualminAPIError(f"ACL request failed: {e!s}", self.server.hostname, program))
 
@@ -266,7 +292,7 @@ class VirtualminAuthenticationManager:
 
             return cast(Result[Any, AuthFailure], result)
         except VirtualminAPIError as e:
-            return Err(e)
+            return Err(e, retriability=_retriability_of_exception(e))
         except Exception as e:
             return Err(VirtualminAPIError(f"Master proxy request failed: {e!s}", self.server.hostname, program))
 

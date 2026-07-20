@@ -433,6 +433,16 @@ class VirtualminAuthError(VirtualminAPIError):
     """Authentication failed - check credentials or ACL permissions"""
 
 
+class VirtualminAuthorizationError(VirtualminAuthError):
+    """HTTP 403 — authenticated but not permitted (ACL denial).
+
+    Distinct from VirtualminAuthError (401, authentication failure): an
+    authorization denial must NOT trigger privilege-escalating auth fallback,
+    or a forbidden operation would succeed as master/root and a compromised
+    node returning 403 could coax PRAHO into sending it master credentials.
+    """
+
+
 class VirtualminRateLimitedError(VirtualminAPIError):
     """Rate limit exceeded - implement exponential backoff"""
 
@@ -898,7 +908,7 @@ class VirtualminGateway:
         if response.status_code == HTTP_UNAUTHORIZED:
             raise VirtualminAuthError("Authentication failed - check API credentials", self.server.hostname)
         elif response.status_code == HTTP_FORBIDDEN:
-            raise VirtualminAuthError("Access forbidden - check ACL permissions", self.server.hostname)
+            raise VirtualminAuthorizationError("Access forbidden - check ACL permissions", self.server.hostname)
         elif response.status_code == HTTP_TOO_MANY_REQUESTS:
             raise VirtualminRateLimitedError("Server rate limit exceeded", self.server.hostname)
         elif response.status_code >= HTTP_INTERNAL_SERVER_ERROR:
