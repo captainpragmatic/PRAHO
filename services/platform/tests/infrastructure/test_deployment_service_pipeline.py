@@ -19,7 +19,7 @@ from unittest.mock import MagicMock, patch
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 
-from apps.common.types import Err, Ok
+from apps.common.types import Err, Ok, Retriability
 from apps.infrastructure.audit_service import InfrastructureAuditContext
 from apps.infrastructure.deployment_service import NodeDeploymentService
 from apps.infrastructure.models import (
@@ -656,3 +656,27 @@ class TestDestroyClearsExternalIdForRetryIdempotency(TestCase):
         mock_gateway.delete_server.assert_called_once_with("srv-123")
         deployment.refresh_from_db()
         self.assertEqual(deployment.external_node_id, "")
+
+
+class TestSshKeyFallbackAggregateRetriability(TestCase):
+    """An ambiguous key-generation mutation must keep the compound deploy result
+    UNKNOWN — a RETRIABLE fallback failure must not mask it into a replay that
+    generates the key a second time (#253/#254)."""
+
+    def test_unknown_keygen_then_retriable_fallback_stays_unknown(self) -> None:
+        deployment = _create_deployment("pending")
+        service = _make_service()
+        # The key-gen MUTATION timed out ambiguously — the key may exist.
+        service._ssh_manager.generate_deployment_key.return_value = Err(
+            "ssh key generation timed out", retriability=Retriability.UNKNOWN
+        )
+        # The fallback fails with a retriable signal that must NOT win.
+        service._ssh_manager.get_master_key.return_value = Err(
+            "master key store rate limited", retriability=Retriability.RETRIABLE
+        )
+
+        with patch("apps.infrastructure.deployment_service.SettingsService.get_setting", return_value=True):
+            result = service.deploy_node(deployment=deployment, credentials={"api_token": "test"})
+
+        self.assertTrue(result.is_err())
+        self.assertEqual(result.retriability, Retriability.UNKNOWN)
