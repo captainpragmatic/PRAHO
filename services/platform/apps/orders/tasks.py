@@ -364,7 +364,7 @@ def _trigger_item_provisioning(order: Order, results: dict[str, Any]) -> int:
     provisioned_items = 0
     for item in order.items.filter(provisioning_status="pending"):
         try:
-            async_task("apps.provisioning.tasks.provision_order_item", item.id, timeout=TASK_TIME_LIMIT)
+            async_task("apps.orders.tasks.provision_order_item", item.id, timeout=TASK_TIME_LIMIT)
             provisioned_items += 1
         except Exception as e:
             logger.error(f"🔥 [OrderProcessor] Failed to trigger provisioning for item {item.id}: {e}")
@@ -547,7 +547,7 @@ def _process_free_order(order: Order, order_result: dict[str, Any], results: dic
     if order.status == "provisioning":
         for item in order.items.filter(provisioning_status="pending"):
             try:
-                async_task("apps.provisioning.tasks.provision_order_item", item.id, timeout=TASK_TIME_LIMIT)
+                async_task("apps.orders.tasks.provision_order_item", item.id, timeout=TASK_TIME_LIMIT)
                 results["provisioning_triggered"] += 1
             except Exception as e:
                 logger.error(f"🔥 [OrderProcessor] Failed to trigger provisioning for free order item {item.id}: {e}")
