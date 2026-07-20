@@ -37,6 +37,7 @@ from .forms import (
     NodeDeploymentForm,
     NodeSizeForm,
 )
+from .maintenance import MAINTENANCE_ACTION_PLAYBOOKS
 from .models import (
     CloudProvider,
     DriftCheck,
@@ -48,6 +49,7 @@ from .models import (
     NodeSize,
 )
 from .permissions import (
+    can_deploy_nodes,
     can_manage_deployments,
     require_deploy_permission,
     require_deployment_management,
@@ -419,6 +421,7 @@ def deployment_detail(request: HttpRequest, pk: int) -> HttpResponse:
         "status_icon": _get_status_icon(deployment.status),
         "can_retry": deployment.status == "failed",
         "can_destroy": deployment.status in ("completed", "failed", "stopped"),
+        "can_deploy": can_deploy_nodes(cast("User", request.user)),
         "can_manage": can_manage_deployments(cast("User", request.user)),
         "is_in_progress": deployment.status
         in (
@@ -723,7 +726,7 @@ def deployment_reboot(request: HttpRequest, pk: int) -> HttpResponse:
 
 
 @login_required
-@require_deployment_management
+@require_deploy_permission
 @require_http_methods(["GET", "POST"])
 def deployment_maintenance(request: HttpRequest, pk: int) -> HttpResponse:
     """Run maintenance tasks on a deployment."""
@@ -736,21 +739,15 @@ def deployment_maintenance(request: HttpRequest, pk: int) -> HttpResponse:
 
     # Available maintenance playbooks
     playbook_options = [
-        {"id": "update", "name": "System Update", "description": "Update system packages and security patches"},
-        {"id": "security", "name": "Security Hardening", "description": "Apply security hardening configurations"},
-        {
-            "id": "ssl_renew",
-            "name": "SSL Certificate Renewal",
-            "description": "Renew SSL certificates via Let's Encrypt",
-        },
-        {"id": "backup", "name": "Backup Now", "description": "Trigger immediate backup"},
-        {"id": "cleanup", "name": "Disk Cleanup", "description": "Clean up temporary files and logs"},
+        {"id": "security", "name": "Security Hardening", "description": "Apply security hardening configurations"}
     ]
 
     if request.method == "POST":
         selected_playbooks = request.POST.getlist("playbooks")
         if not selected_playbooks:
             messages.error(request, _("Please select at least one maintenance task."))
+        elif any(action not in MAINTENANCE_ACTION_PLAYBOOKS for action in selected_playbooks):
+            messages.error(request, _("One or more maintenance tasks are unsupported."))
         else:
             # Queue maintenance task
             task_id = queue_maintenance(

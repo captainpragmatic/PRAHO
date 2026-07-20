@@ -98,7 +98,7 @@ class ServiceTestServerConnectionRetriabilityTests(SimpleTestCase):
         service = VirtualminProvisioningService()
         account = MagicMock()
         gateway = MagicMock()
-        gateway.call.return_value = Err("bad credentials", retriability=Retriability.NOT_RETRIABLE)
+        gateway.get_domain_state.return_value = Err("bad credentials", retriability=Retriability.NOT_RETRIABLE)
 
         with patch.object(service, "_get_gateway", return_value=gateway):
             result = service.sync_account_from_virtualmin(account)
@@ -156,7 +156,7 @@ class ServiceTestServerConnectionRetriabilityTests(SimpleTestCase):
         account.domain = "example.com"
         account.virtualmin_username = "owner"
         gateway = MagicMock()
-        gateway.call.return_value = Err("cannot inspect domains", retriability=Retriability.RETRIABLE)
+        gateway.list_domains_with_owners.return_value = Err("cannot inspect domains", retriability=Retriability.RETRIABLE)
 
         result = service._check_domain_conflicts(account, gateway)
 
@@ -168,7 +168,7 @@ class ServiceTestServerConnectionRetriabilityTests(SimpleTestCase):
         account = MagicMock()
         account.template_name = "Default"
         gateway = MagicMock()
-        gateway.call.return_value = Err("bad ACL", retriability=Retriability.NOT_RETRIABLE)
+        gateway.list_templates.return_value = Err("bad ACL", retriability=Retriability.NOT_RETRIABLE)
 
         result = service._check_template_availability(account, gateway)
 

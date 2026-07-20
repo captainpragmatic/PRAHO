@@ -325,12 +325,52 @@ def audit_service_lifecycle_events(sender: type[Service], instance: Service, cre
                     ),
                 )
 
-                # Trigger automatic provisioning if service becomes active
-                if instance.status == "active":
-                    _trigger_automatic_virtualmin_provisioning(instance)
-
     except Exception as e:
         logger.exception(f"🔥 [Service] Failed to audit service lifecycle: {e}")
+
+
+@receiver(post_save, sender=Service)
+def handle_service_virtualmin_reconciliation(
+    sender: type[Service], instance: Service, created: bool, **kwargs: Any
+) -> None:
+    """
+    Queue Virtualmin state reconciliation on Service status changes.
+
+    Deliberately SEPARATE from the audit handler: hosting propagation is
+    business logic, not auditing, so it must not be silenced by
+    DISABLE_AUDIT_SIGNALS, and it must not die when audit logging does
+    (#325 defect 7 — the provisioning trigger used to live inside the audit
+    handler).
+
+    Reconcile-not-command: the task reads the COMMITTED Service+account
+    state and converges Virtualmin to it, so stale commands and
+    multi-transition ordering races cannot occur; duplicate enqueues are
+    harmless. Enqueue happens on_commit — suspension/reactivation callers
+    hold open atomics, and work for a rolled-back transition must never run.
+    """
+    if kwargs.get("raw"):
+        return  # loaddata fixtures must never trigger real provisioning
+
+    update_fields = kwargs.get("update_fields")
+    # A bare save() (update_fields=None) cannot prove status did NOT change —
+    # reconciliation is idempotent and on_commit, so err on running it.
+    status_changed = created or update_fields is None or "status" in update_fields
+    if not status_changed:
+        return
+
+    service_id = str(instance.pk)
+
+    def _enqueue() -> None:
+        try:
+            from apps.provisioning.virtualmin_tasks import (  # noqa: PLC0415  # Deferred: avoids circular import
+                reconcile_virtualmin_service_state_async,  # Circular: cross-app
+            )
+
+            reconcile_virtualmin_service_state_async(service_id)
+        except Exception as e:
+            logger.exception(f"🔥 [Service] Failed to queue Virtualmin reconciliation for {service_id}: {e}")
+
+    transaction.on_commit(_enqueue)
 
 
 # ===============================================================================

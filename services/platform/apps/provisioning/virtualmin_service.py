@@ -9,6 +9,7 @@ Implements:
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import secrets
 import string
@@ -27,6 +28,7 @@ from .security_utils import IdempotencyManager
 from .virtualmin_backup_service import BackupConfig, RestoreConfig
 from .virtualmin_gateway import VirtualminConfig, VirtualminGateway, get_virtualmin_config
 from .virtualmin_models import (
+    HEALTH_AUTO_FAIL_THRESHOLD,
     VirtualminAccount,
     VirtualminDriftRecord,
     VirtualminProvisioningJob,
@@ -95,7 +97,7 @@ class VirtualminProvisioningService:
             config = VirtualminConfig(
                 server=target_server,
                 timeout=config_data["timeout"],
-                verify_ssl=config_data.get("ssl_verify", target_server.ssl_verify),
+                verify_ssl=target_server.ssl_verify,
                 cert_fingerprint=target_server.ssl_cert_fingerprint or config_data.get("pinned_cert_sha256", ""),
             )
 
@@ -341,42 +343,25 @@ class VirtualminProvisioningService:
 
         return Ok(None)
 
-    def _check_domain_conflicts(  # noqa: PLR0911  # Two fail-closed remote lookups
-        self, account: VirtualminAccount, gateway: VirtualminGateway
-    ) -> Result[None, str]:
-        """Check for domain and username conflicts."""
-        domain_check = gateway.call("list-domains", {"domain": account.domain})
-        if domain_check.is_err():
+    def _check_domain_conflicts(self, account: VirtualminAccount, gateway: VirtualminGateway) -> Result[None, str]:
+        """Check for domain and username conflicts via the normalized listing.
+
+        The raw response payloads never carried 'domains'/'users' keys (#325),
+        so the listing is normalized. A listing FAILURE fails closed with its
+        retriability (#253/#254) — a transient error retries rather than
+        proceeding blind to a possible conflict.
+        """
+        listing = gateway.list_domains_with_owners()
+        if listing.is_err():
             return Err(
-                f"Domain conflict check failed: {domain_check.unwrap_err()}",
-                retriability=retriability_of(domain_check),
+                f"Domain conflict check failed: {listing.unwrap_err()}",
+                retriability=retriability_of(listing),
             )
 
-        domain_response = domain_check.unwrap()
-        if not domain_response.success:
-            return Err(
-                f"Domain conflict check was rejected: {domain_response.data.get('error', 'Unknown error')}",
-                retriability=Retriability.NOT_RETRIABLE,
-            )
-        domains = domain_response.data.get("domains", [])
-        if any(d.get("domain") == account.domain for d in domains):
+        domains = listing.unwrap()
+        if any(d["domain"] == account.domain for d in domains):
             return Err(f"Domain {account.domain} already exists on server", retriability=Retriability.NOT_RETRIABLE)
-
-        user_check = gateway.call("list-users", {"user": account.virtualmin_username})
-        if user_check.is_err():
-            return Err(
-                f"Username conflict check failed: {user_check.unwrap_err()}",
-                retriability=retriability_of(user_check),
-            )
-
-        user_response = user_check.unwrap()
-        if not user_response.success:
-            return Err(
-                f"Username conflict check was rejected: {user_response.data.get('error', 'Unknown error')}",
-                retriability=Retriability.NOT_RETRIABLE,
-            )
-        users = user_response.data.get("users", [])
-        if any(u.get("user") == account.virtualmin_username for u in users):
+        if any(d["username"] and d["username"] == account.virtualmin_username for d in domains):
             return Err(
                 f"Username {account.virtualmin_username} already exists on server",
                 retriability=Retriability.NOT_RETRIABLE,
@@ -385,22 +370,16 @@ class VirtualminProvisioningService:
         return Ok(None)
 
     def _check_template_availability(self, account: VirtualminAccount, gateway: VirtualminGateway) -> Result[None, str]:
-        """Check if the required template exists."""
-        template_check = gateway.call("list-templates")
+        """Check the required template exists via the normalized listing (#325),
+        failing closed with retriability so a transient listing error retries
+        rather than passing the gate blind (#253/#254)."""
+        template_check = gateway.list_templates()
         if template_check.is_err():
             return Err(
                 f"Template availability check failed: {template_check.unwrap_err()}",
                 retriability=retriability_of(template_check),
             )
-
-        template_response = template_check.unwrap()
-        if not template_response.success:
-            return Err(
-                f"Template availability check was rejected: {template_response.data.get('error', 'Unknown error')}",
-                retriability=Retriability.NOT_RETRIABLE,
-            )
-        templates = template_response.data.get("templates", [])
-        if not any(t.get("name") == account.template_name for t in templates):
+        if account.template_name not in template_check.unwrap():
             return Err(
                 f"Template {account.template_name} not found on server",
                 retriability=Retriability.NOT_RETRIABLE,
@@ -408,7 +387,7 @@ class VirtualminProvisioningService:
 
         return Ok(None)
 
-    def _validate_provisioning_preconditions(
+    def _validate_provisioning_preconditions(  # noqa: PLR0911  # Pre-flight gate: one exit per precondition
         self, account: VirtualminAccount, gateway: VirtualminGateway
     ) -> Result[bool, str]:
         """
@@ -422,13 +401,19 @@ class VirtualminProvisioningService:
         - User conflicts
         """
         try:
-            # 1. Server health check
-            health_result = self.health_check_server(account.server)  # type: ignore[attr-defined]
+            # 1. Server connectivity (the gateway is already bound to the
+            # target server; no status side effects, unlike the management
+            # service's health_check_server)
+            health_result = gateway.test_connection()
             if health_result.is_err():
                 return Err(
                     f"Server health check failed: {health_result.unwrap_err()}",
                     retriability=retriability_of(health_result),
                 )
+            if health_result.unwrap().get("healthy") is not True:
+                # Require AFFIRMATIVE health (#325): a missing/malformed/non-bool
+                # "healthy" is not proof of health, so it blocks provisioning.
+                return Err(f"Server reported unhealthy: {health_result.unwrap()}")
 
             # 2. Check server capacity and disk space
             capacity_result = self._check_server_capacity(account, health_result)
@@ -563,7 +548,7 @@ class VirtualminProvisioningService:
             rollback_details["error"] = str(e)
             return "failed", rollback_details
 
-    def suspend_account(  # noqa: PLR0911  # Complexity: multi-step business logic
+    def suspend_account(  # noqa: PLR0911, PLR0912, PLR0915  # Complexity: multi-step workflow with rollback + cache self-heal
         self, account: VirtualminAccount, reason: str = ""
     ) -> Result[bool, str]:  # Complexity: Virtualmin workflow  # Complexity: multi-step business logic
         """
@@ -597,9 +582,18 @@ class VirtualminProvisioningService:
             # Check if operation is already in progress
             is_new, existing_result = IdempotencyManager.check_and_set(idempotency_key)
             if not is_new:
-                if isinstance(existing_result, dict) and existing_result.get("success"):
+                cached_success = isinstance(existing_result, dict) and existing_result.get("success")
+                account.refresh_from_db(fields=["status"])
+                if cached_success and account.status == "suspended":
                     logger.info(f"✅ [VirtualminService] Returning cached suspend result for {account.domain}")
                     return Ok(True)
+                if cached_success:
+                    # Cached success no longer matches reality (flip-flop inside
+                    # the TTL) — self-heal: clear and execute for real.
+                    IdempotencyManager.clear(idempotency_key)
+                    is_new, _ = IdempotencyManager.check_and_set(idempotency_key)
+                    if not is_new:
+                        return Err("Operation already in progress")
                 else:
                     logger.warning(f"⚠️ [VirtualminService] Suspend operation already in progress for {account.domain}")
                     return Err("Operation already in progress")
@@ -682,10 +676,12 @@ class VirtualminProvisioningService:
                 raise
 
         except Exception as e:
+            with contextlib.suppress(Exception):
+                IdempotencyManager.clear(idempotency_key)
             logger.exception(f"Error suspending account {account.domain}: {e}")
             return Err(str(e))
 
-    def unsuspend_account(  # noqa: PLR0911  # Complexity: multi-step business logic
+    def unsuspend_account(  # noqa: PLR0911, PLR0912, PLR0915  # Complexity: multi-step workflow with rollback + cache self-heal
         self, account: VirtualminAccount
     ) -> Result[bool, str]:  # Complexity: Virtualmin workflow  # Complexity: multi-step business logic
         """
@@ -718,9 +714,16 @@ class VirtualminProvisioningService:
             # Check if operation is already in progress
             is_new, existing_result = IdempotencyManager.check_and_set(idempotency_key)
             if not is_new:
-                if isinstance(existing_result, dict) and existing_result.get("success"):
+                cached_success = isinstance(existing_result, dict) and existing_result.get("success")
+                account.refresh_from_db(fields=["status"])
+                if cached_success and account.status == "active":
                     logger.info(f"✅ [VirtualminService] Returning cached unsuspend result for {account.domain}")
                     return Ok(True)
+                if cached_success:
+                    IdempotencyManager.clear(idempotency_key)
+                    is_new, _ = IdempotencyManager.check_and_set(idempotency_key)
+                    if not is_new:
+                        return Err("Operation already in progress")
                 else:
                     logger.warning(
                         f"⚠️ [VirtualminService] Unsuspend operation already in progress for {account.domain}"
@@ -805,6 +808,8 @@ class VirtualminProvisioningService:
                 raise
 
         except Exception as e:
+            with contextlib.suppress(Exception):
+                IdempotencyManager.clear(idempotency_key)
             logger.exception(f"Error unsuspending account {account.domain}: {e}")
             return Err(str(e))
 
@@ -966,6 +971,163 @@ class VirtualminProvisioningService:
             logger.exception(f"Error deleting account {account.domain}: {e}")
             return Err(str(e))
 
+    def retry_job(self, job: VirtualminProvisioningJob) -> Result[bool, str]:
+        """
+        Re-run a failed job on its EXISTING account and job rows.
+
+        A fresh create is a structural no-op for create_domain (the account row
+        survives failure with status='error', so the existing-account check
+        early-exits), and calling the public suspend/unsuspend/delete methods
+        would mint a NEW job each — exponential fan-out under the retry sweep.
+        """
+        account = job.account
+        if account is None:
+            return Err("Job has no account to retry against")
+
+        if job.operation == "create_domain":
+            return self._retry_create_domain(account, job)
+        if job.operation in ("suspend_domain", "unsuspend_domain", "delete_domain"):
+            return self._execute_lifecycle_operation(account, job)
+        return Err(f"Unsupported retry operation '{job.operation}'")
+
+    def _retry_create_domain(self, account: VirtualminAccount, job: VirtualminProvisioningJob) -> Result[bool, str]:
+        """
+        Convergent create retry: a timed-out-but-remotely-successful
+        create-domain must finalize local state, never re-create or rotate
+        credentials; an absent remote domain re-runs creation on the same rows.
+        """
+        gateway = self._get_gateway(account.server)
+        owner_result = gateway.get_domain_owner(account.domain)
+        if owner_result.is_err():
+            # An unreachable probe is NOT evidence of absence — creating here
+            # could double-create. Keep the job failed for a later attempt.
+            return Err(f"Ownership probe failed: {owner_result.unwrap_err()}")
+
+        owner = owner_result.unwrap()
+        if owner == "":
+            # Present but owner indeterminate: never adopt blindly, never
+            # re-create over it — retry later.
+            return Err(f"Remote domain {account.domain} exists but ownership is indeterminate")
+        if owner is not None and owner != account.virtualmin_username:
+            # Same name, different owner: never adopt. Terminal conflict.
+            job.mark_failed(f"Remote domain {account.domain} is owned by '{owner}' — manual resolution required")
+            VirtualminProvisioningJob.terminalize(job.pk)
+            return Err(f"Remote domain {account.domain} owned by another account")
+
+        if owner is not None:
+            # Remote domain exists on OUR server for OUR account row: the
+            # original create succeeded past the response. Finalize in place.
+            previously_active = account.status == "active"
+            with transaction.atomic():
+                account.status = "active"
+                account.status_message = ""
+                if account.provisioned_at is None:
+                    account.provisioned_at = timezone.now()
+                account.save(update_fields=["status", "status_message", "provisioned_at", "updated_at"])
+
+                if not previously_active:
+                    # Exactly-once: the failed original never incremented
+                    VirtualminServer.objects.filter(pk=account.server_id).update(
+                        current_domains=models.F("current_domains") + 1, updated_at=timezone.now()
+                    )
+
+                job.mark_completed({"recovered": "remote domain already present"})
+            logger.info(f"✅ [VirtualminService] Retry converged existing remote domain {account.domain}")
+            return Ok(True)
+
+        creation_result = self._execute_domain_creation(account, job)
+        if creation_result.is_err():
+            return Err(creation_result.unwrap_err())
+        return Ok(True)
+
+    def _execute_lifecycle_operation(
+        self, account: VirtualminAccount, job: VirtualminProvisioningJob
+    ) -> Result[bool, str]:
+        """Run suspend/unsuspend/delete against the gateway reusing the SAME job."""
+        operations = {
+            "suspend_domain": ("disable-domain", "suspended"),
+            "unsuspend_domain": ("enable-domain", "active"),
+            "delete_domain": ("delete-domain", "terminated"),
+        }
+        program, target_status = operations[job.operation]
+
+        # Stale-intent guard: a job minted under an older Service state must
+        # not replay against the current desired state (e.g. an old unsuspend
+        # re-enabling hosting for a since-suspended customer).
+        desired = {
+            "suspend_domain": ("suspended", "terminated", "expired"),
+            "unsuspend_domain": ("active",),
+            "delete_domain": ("terminated",),
+        }[job.operation]
+        service_status = account.service.status if account.service_id else None
+        if service_status is not None and service_status not in desired:
+            job.mark_failed(f"Superseded by current service state '{service_status}'")
+            VirtualminProvisioningJob.terminalize(job.pk)
+            from apps.provisioning.virtualmin_tasks import (  # noqa: PLC0415  # Deferred: avoids circular import
+                reconcile_virtualmin_service_state_async,  # Circular: cross-app
+            )
+
+            reconcile_virtualmin_service_state_async(str(account.service_id))
+            return Err(f"Job superseded by current service state '{service_status}'")
+
+        if job.operation == "delete_domain" and account.protected_from_deletion:
+            job.mark_failed("Account is protected from deletion")
+            job.next_retry_at = None  # terminal — retrying cannot help
+            job.save(update_fields=["next_retry_at", "updated_at"])
+            return Err("Account is protected from deletion")
+
+        if account.status == target_status:
+            job.mark_completed({"idempotent": f"account already {target_status}"})
+            return Ok(True)
+
+        job.mark_started()
+        gateway = self._get_gateway(account.server)
+        result = gateway.call(program, {"domain": account.domain}, correlation_id=job.correlation_id)
+
+        if result.is_err():
+            error_msg = str(result.unwrap_err())
+            job.mark_failed(error_msg)
+            return Err(error_msg, retriability=retriability_of(result))
+
+        response = result.unwrap()
+        if not response.success:
+            error_msg = response.data.get("error", f"{program} failed")
+            job.mark_failed(error_msg, response.data)
+            return Err(error_msg)
+
+        previous_status = account.status
+        with transaction.atomic():
+            account.status = target_status
+            reason = (job.parameters or {}).get("reason", "")
+            account.status_message = reason
+            account.save(update_fields=["status", "status_message", "updated_at"])
+            if job.operation == "delete_domain" and previous_status != "terminated":
+                # Clamped: counter drift must never underflow the PositiveInteger
+                VirtualminServer.objects.filter(pk=account.server_id, current_domains__gt=0).update(
+                    current_domains=models.F("current_domains") - 1, updated_at=timezone.now()
+                )
+            job.mark_completed(response.data)
+
+        # The remote op is done; if the Service moved while it was in flight,
+        # converge on the new truth instead of leaving divergent state.
+        if account.service_id:
+            current = (
+                account.service.__class__.objects.filter(pk=account.service_id).values_list("status", flat=True).first()
+            )
+            desired_after = {
+                "suspend_domain": ("suspended", "terminated", "expired"),
+                "unsuspend_domain": ("active",),
+                "delete_domain": ("terminated",),
+            }[job.operation]
+            if current is not None and current not in desired_after:
+                from apps.provisioning.virtualmin_tasks import (  # noqa: PLC0415  # Deferred: avoids circular import
+                    reconcile_virtualmin_service_state_async,  # Circular: cross-app
+                )
+
+                reconcile_virtualmin_service_state_async(str(account.service_id))
+        logger.info(f"✅ [VirtualminService] Retry completed {job.operation} for {account.domain}")
+        return Ok(True)
+
     def _select_best_server(self) -> Result[VirtualminServer, str]:
         """
         Select best available server for new domain.
@@ -1085,39 +1247,41 @@ class VirtualminProvisioningService:
         try:
             gateway = self._get_gateway(account.server)
 
-            # Get current state from Virtualmin
-            result = gateway.call("list-domains", {"domain": account.domain})
-            if result.is_err():
+            # Get current state from Virtualmin (normalized multiline probe (#325) —
+            # the raw response never carried "domains"/"status" keys)
+            state_result = gateway.get_domain_state(account.domain)
+            if state_result.is_err():
                 return Err(
-                    f"Failed to query Virtualmin: {result.unwrap_err()}",
-                    retriability=retriability_of(result),
+                    f"Failed to query Virtualmin: {state_result.unwrap_err()}",
+                    retriability=retriability_of(state_result),
                 )
 
-            response = result.unwrap()
-            virtualmin_data = response.data
+            state = state_result.unwrap()
+            virtualmin_data = state
 
             # Detect drift between PRAHO and Virtualmin
             drift_detected = []
 
-            # Check domain existence
-            if not virtualmin_data.get("domains"):
+            if not state["exists"]:
                 drift_detected.append("Domain missing from Virtualmin")
-
-            # Check account status
-            virtualmin_status = virtualmin_data.get("status", "unknown")
-            expected_status = "active" if account.status == "active" else "disabled"
-            if virtualmin_status != expected_status:
-                drift_detected.append(f"Status mismatch: PRAHO={account.status}, Virtualmin={virtualmin_status}")
+            elif state["enabled"] is not None:
+                expected_enabled = account.status == "active"
+                if state["enabled"] != expected_enabled:
+                    drift_detected.append(
+                        f"Status mismatch: PRAHO={account.status}, "
+                        f"Virtualmin={'enabled' if state['enabled'] else 'disabled'}"
+                    )
 
             if drift_detected:
                 # Log drift for audit
-                VirtualminDriftRecord.objects.create(  # type: ignore[misc]
-                    account=account,
+                VirtualminDriftRecord.objects.create(
+                    domain=account.domain,
+                    server=account.server,
                     drift_type="status_mismatch",
+                    description="; ".join(drift_detected),
                     praho_state={"status": account.status, "domain": account.domain},
                     virtualmin_state=virtualmin_data,
-                    drift_description="; ".join(drift_detected),
-                    resolution_action="logged_for_review",
+                    resolution_status="pending",
                 )
 
                 logger.warning(f"🔍 [VirtualminService] Drift detected for {account.domain}: {drift_detected}")
@@ -1174,24 +1338,34 @@ class VirtualminProvisioningService:
             actions_taken = []
             gateway = self._get_gateway(account.server)
 
-            # Enforce account status
+            # Enforce account status — an action counts only on APPLICATION
+            # success (transport Ok can still carry success=False)
+            failures = []
             if account.status == "active":
                 result = gateway.call("enable-domain", {"domain": account.domain})
-                if result.is_ok():
+                if result.is_ok() and result.unwrap().success:
                     actions_taken.append("enabled_domain")
+                else:
+                    failures.append("enable-domain failed")
             elif account.status == "suspended":
                 result = gateway.call("disable-domain", {"domain": account.domain})
-                if result.is_ok():
+                if result.is_ok() and result.unwrap().success:
                     actions_taken.append("suspended_domain")
+                else:
+                    failures.append("disable-domain failed")
 
-            # Log enforcement action
-            VirtualminDriftRecord.objects.create(  # type: ignore[misc]
-                account=account,
-                drift_type="praho_state_enforced",
+            # Log enforcement action honestly: auto_fixed only when the
+            # remote change actually succeeded.
+            # "praho_state_enforced" is not a DRIFT_TYPE_CHOICES value — the
+            # drift itself is a status mismatch; enforcement is the resolution.
+            VirtualminDriftRecord.objects.create(
+                domain=account.domain,
+                server=account.server,
+                drift_type="status_mismatch",
+                description=f"Enforced PRAHO state: {actions_taken}" + (f"; failures: {failures}" if failures else ""),
                 praho_state=sync_data["praho_state"],
                 virtualmin_state=sync_data["virtualmin_state"],
-                drift_description=f"Enforced PRAHO state: {actions_taken}",
-                resolution_action="praho_state_enforced",
+                resolution_status="auto_fixed" if actions_taken and not failures else "pending",
             )
 
             logger.warning(f"🚨 [VirtualminService] Enforced PRAHO state for {account.domain}: {actions_taken}")
@@ -1226,24 +1400,62 @@ class VirtualminServerManagementService:
             provisioning_service = VirtualminProvisioningService(server)
             result = provisioning_service.test_server_connection(server)
 
+            if result.is_ok() and result.unwrap().get("healthy") is not True:
+                # Affirmative health only: a missing/malformed/non-bool "healthy"
+                # is a failed check, never a streak reset or freshness stamp.
+                result = Err(f"Server reported unhealthy: {result.unwrap()}")
+
             if result.is_ok():
                 health_data = result.unwrap()
 
-                # Update server health status
+                # Success: stamp the (success-only) timestamp, clear the error
+                # and streak, and auto-recover a server WE auto-failed —
+                # operator-set "failed" is never touched by health checks.
                 server.last_health_check = timezone.now()
                 server.health_check_error = ""
-                server.save(update_fields=["last_health_check", "health_check_error", "updated_at"])
+                server.consecutive_health_failures = 0
+                update_fields = [
+                    "last_health_check",
+                    "health_check_error",
+                    "consecutive_health_failures",
+                    "updated_at",
+                ]
+                server.save(update_fields=update_fields)
+                recovered = VirtualminServer.objects.filter(
+                    pk=server.pk, status="failed", failed_by_health_check=True
+                ).update(status="active", failed_by_health_check=False, updated_at=timezone.now())
+                if recovered:
+                    server.refresh_from_db()
+                    logger.info(f"✅ [ServerManagement] Auto-recovered {server.hostname} to active")
 
                 logger.info(f"✅ [ServerManagement] Health check passed for {server.hostname}")
                 return Ok(health_data)
             else:
                 error_msg = result.unwrap_err()
 
-                # Update server with error and mark as failed
-                server.last_health_check = timezone.now()
-                server.health_check_error = error_msg
-                server.status = "failed"
-                server.save(update_fields=["last_health_check", "health_check_error", "status", "updated_at"])
+                # Failure: record the error and the streak. last_health_check
+                # is NOT stamped (it means "last verified"), and a single
+                # strike no longer evicts the server — only a sustained
+                # streak auto-fails it, reversibly.
+                VirtualminServer.objects.filter(pk=server.pk).update(
+                    health_check_error=error_msg,
+                    consecutive_health_failures=models.F("consecutive_health_failures") + 1,
+                    updated_at=timezone.now(),
+                )
+                server.refresh_from_db()
+                if server.status == "active" and server.consecutive_health_failures >= HEALTH_AUTO_FAIL_THRESHOLD:
+                    # Conditional on the CURRENT DB streak: a concurrent
+                    # success that reset the streak wins over this stale probe.
+                    VirtualminServer.objects.filter(
+                        pk=server.pk,
+                        status="active",
+                        consecutive_health_failures__gte=HEALTH_AUTO_FAIL_THRESHOLD,
+                    ).update(status="failed", failed_by_health_check=True, updated_at=timezone.now())
+                    server.refresh_from_db()
+                    logger.error(
+                        f"🔥 [ServerManagement] Auto-failed {server.hostname} after "
+                        f"{server.consecutive_health_failures} consecutive failed checks"
+                    )
 
                 logger.warning(f"⚠️ [ServerManagement] Health check failed for {server.hostname}: {error_msg}")
                 return Err(error_msg, retriability=retriability_of(result))

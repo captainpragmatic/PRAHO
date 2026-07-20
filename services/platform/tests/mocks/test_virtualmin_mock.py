@@ -36,7 +36,7 @@ class MockGatewayCreateDomainTest(TestCase):
         self.assertTrue(response.success)
         self.assertEqual(response.program, "create-domain")
         # Domain should exist in state
-        d = self.gw.get_domain_state("new.com")
+        d = self.gw.domain_state_of("new.com")
         self.assertIsNotNone(d)
         self.assertEqual(d.username, "newuser")
         self.assertTrue(d.enabled)
@@ -77,7 +77,7 @@ class MockGatewayDeleteDomainTest(TestCase):
         self.assertTrue(result.is_ok())
         response = result.unwrap()
         self.assertTrue(response.success)
-        self.assertIsNone(self.gw.get_domain_state("target.com"))
+        self.assertIsNone(self.gw.domain_state_of("target.com"))
 
     def test_delete_domain_not_found(self):
         result = self.gw.call("delete-domain", {"domain": "nonexistent.com"})
@@ -95,11 +95,11 @@ class MockGatewaySuspendTest(TestCase):
     def test_disable_domain_success(self):
         result = self.gw.call("disable-domain", {"domain": "active.com"})
         self.assertTrue(result.is_ok())
-        d = self.gw.get_domain_state("active.com")
+        d = self.gw.domain_state_of("active.com")
         self.assertFalse(d.enabled)
 
     def test_disable_already_disabled(self):
-        self.gw.get_domain_state("active.com").enabled = False
+        self.gw.domain_state_of("active.com").enabled = False
         result = self.gw.call("disable-domain", {"domain": "active.com"})
         # Still returns Ok with a failure response (not an exception)
         self.assertTrue(result.is_ok())
@@ -112,10 +112,10 @@ class MockGatewaySuspendTest(TestCase):
         self.assertIsInstance(result.unwrap_err(), VirtualminNotFoundError)
 
     def test_enable_domain_success(self):
-        self.gw.get_domain_state("active.com").enabled = False
+        self.gw.domain_state_of("active.com").enabled = False
         result = self.gw.call("enable-domain", {"domain": "active.com"})
         self.assertTrue(result.is_ok())
-        d = self.gw.get_domain_state("active.com")
+        d = self.gw.domain_state_of("active.com")
         self.assertTrue(d.enabled)
 
     def test_enable_already_enabled(self):
@@ -187,7 +187,7 @@ class MockGatewayCallLoggingTest(TestCase):
         self.gw.reset_calls()
         self.assertEqual(self.gw.call_count, 0)
         # State preserved
-        self.assertIsNotNone(self.gw.get_domain_state("keep.com"))
+        self.assertIsNotNone(self.gw.domain_state_of("keep.com"))
 
     def test_full_reset(self):
         self.gw.seed_domain("gone.com")
@@ -296,22 +296,22 @@ class MockGatewayStateLifecycleTest(TestCase):
         # Create
         result = gw.call("create-domain", {"domain": "lifecycle.com"})
         self.assertTrue(result.is_ok())
-        self.assertTrue(gw.get_domain_state("lifecycle.com").enabled)
+        self.assertTrue(gw.domain_state_of("lifecycle.com").enabled)
 
         # Suspend
         result = gw.call("disable-domain", {"domain": "lifecycle.com"})
         self.assertTrue(result.is_ok())
-        self.assertFalse(gw.get_domain_state("lifecycle.com").enabled)
+        self.assertFalse(gw.domain_state_of("lifecycle.com").enabled)
 
         # Unsuspend
         result = gw.call("enable-domain", {"domain": "lifecycle.com"})
         self.assertTrue(result.is_ok())
-        self.assertTrue(gw.get_domain_state("lifecycle.com").enabled)
+        self.assertTrue(gw.domain_state_of("lifecycle.com").enabled)
 
         # Delete
         result = gw.call("delete-domain", {"domain": "lifecycle.com"})
         self.assertTrue(result.is_ok())
-        self.assertIsNone(gw.get_domain_state("lifecycle.com"))
+        self.assertIsNone(gw.domain_state_of("lifecycle.com"))
 
         # Verify call count
         self.assertEqual(gw.call_count, 4)
@@ -344,7 +344,7 @@ class VirtualminMockMixinTest(VirtualminMockMixin, TestCase):
 
     def test_mock_gateway_tracks_state(self):
         self.mock_gateway.seed_domain("mixin-test.com")
-        self.assertIsNotNone(self.mock_gateway.get_domain_state("mixin-test.com"))
+        self.assertIsNotNone(self.mock_gateway.domain_state_of("mixin-test.com"))
 
     def test_mock_gateway_tracks_calls(self):
         self.mock_gateway.call("info")

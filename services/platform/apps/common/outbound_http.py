@@ -13,6 +13,7 @@ from __future__ import annotations
 import http.client
 import ipaddress
 import logging
+import re
 import socket
 import ssl
 import urllib.parse
@@ -72,6 +73,20 @@ class OutboundSecurityError(Exception):
     """
 
 
+def normalize_tls_cert_fingerprint(fingerprint: str) -> str:
+    """Return a normalized SHA-256 certificate fingerprint or fail closed."""
+    if not fingerprint:
+        return ""
+
+    normalized = fingerprint.strip().lower()
+    if normalized.startswith("sha256:"):
+        normalized = normalized.removeprefix("sha256:")
+    normalized = normalized.replace(":", "")
+    if not re.fullmatch(r"[0-9a-f]{64}", normalized):
+        raise OutboundSecurityError("TLS certificate fingerprint must be a SHA-256 hex digest")
+    return normalized
+
+
 # ---------------------------------------------------------------------------
 # Policy dataclass
 # ---------------------------------------------------------------------------
@@ -90,6 +105,7 @@ class OutboundPolicy:
     blocked_ports: frozenset[int] = DANGEROUS_PORTS
     allowed_domains: frozenset[str] | None = None  # None = any domain
     verify_tls: bool = True
+    tls_cert_fingerprint: str = ""
     max_retries: int = 0
     check_dns: bool = True
 
@@ -416,14 +432,23 @@ class PinnedIPAdapter(HTTPAdapter):
     _hostname: str
     _port: int
 
-    def __init__(self, pinned_ip: str, hostname: str, port: int = 443) -> None:
+    def __init__(
+        self,
+        pinned_ip: str,
+        hostname: str,
+        port: int = 443,
+        tls_cert_fingerprint: str = "",
+    ) -> None:
         self._pinned_ip = pinned_ip
         self._hostname = hostname
         self._port = port
+        self._tls_cert_fingerprint = normalize_tls_cert_fingerprint(tls_cert_fingerprint)
         super().__init__()
 
     def init_poolmanager(self, *args: object, **kwargs: object) -> None:
         kwargs["server_hostname"] = self._hostname
+        if self._tls_cert_fingerprint:
+            kwargs["assert_fingerprint"] = self._tls_cert_fingerprint
         super().init_poolmanager(*args, **kwargs)
 
     def _rewrite_url_to_ip(self, request: requests.PreparedRequest, ip: str) -> None:
@@ -492,7 +517,15 @@ def _follow_redirects(
 
         pinned_ip = target.pinned_ips[0] if target.pinned_ips else target.hostname
         prefix = f"{target.scheme}://{target.hostname}"
-        session.mount(prefix, PinnedIPAdapter(pinned_ip=pinned_ip, hostname=target.hostname, port=target.port))
+        session.mount(
+            prefix,
+            PinnedIPAdapter(
+                pinned_ip=pinned_ip,
+                hostname=target.hostname,
+                port=target.port,
+                tls_cert_fingerprint=policy.tls_cert_fingerprint,
+            ),
+        )
 
         if response.status_code == HTTP_STATUS_SEE_OTHER:
             method = "GET"
@@ -534,6 +567,7 @@ def safe_request(
         OutboundSecurityError: If the URL violates the security policy
         requests.RequestException: For transport errors
     """
+    normalize_tls_cert_fingerprint(policy.tls_cert_fingerprint)
     try:
         target = validate_and_resolve(url, policy)
     except OutboundSecurityError:
@@ -557,10 +591,17 @@ def _execute_pinned_request(
     **kwargs: object,
 ) -> requests.Response:
     """Mount pinned adapter, send request, handle redirects."""
-    if target.pinned_ips:
+    if target.pinned_ips or policy.tls_cert_fingerprint:
         prefix = f"{target.scheme}://"
+        pinned_ip = target.pinned_ips[0] if target.pinned_ips else target.hostname
         session.mount(
-            prefix, PinnedIPAdapter(pinned_ip=target.pinned_ips[0], hostname=target.hostname, port=target.port)
+            prefix,
+            PinnedIPAdapter(
+                pinned_ip=pinned_ip,
+                hostname=target.hostname,
+                port=target.port,
+                tls_cert_fingerprint=policy.tls_cert_fingerprint,
+            ),
         )
 
     # Strip transport kwargs from Request constructor kwargs
@@ -609,6 +650,9 @@ def safe_urlopen(
     Returns:
         http.client.HTTPResponse
     """
+    if policy.tls_cert_fingerprint:
+        raise OutboundSecurityError("safe_urlopen cannot enforce TLS certificate fingerprints; use safe_request")
+
     target = validate_and_resolve(url, policy)
     effective_timeout = timeout if timeout is not None else policy.timeout_seconds
 

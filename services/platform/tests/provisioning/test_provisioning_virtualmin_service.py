@@ -15,7 +15,6 @@ from unittest.mock import MagicMock, patch
 from django.test import TestCase
 
 from apps.billing.models import Currency
-from apps.common.types import Err, Ok
 from apps.customers.models import Customer
 from apps.provisioning.models import Service, ServicePlan
 from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminServer
@@ -23,7 +22,7 @@ from apps.provisioning.virtualmin_service import (
     VirtualminProvisioningService,
     VirtualminServerManagementService,
 )
-from tests.mocks.virtualmin_mock import MockVirtualminGateway, VirtualminMockMixin
+from tests.mocks.virtualmin_mock import MockVirtualminGateway
 
 
 class VirtualminProvisioningServiceTest(TestCase):
@@ -208,7 +207,9 @@ class VirtualminServerManagementServiceTest(TestCase):
 
     @patch('apps.provisioning.virtualmin_service.VirtualminGateway')
     def test_health_check_failure(self, mock_gateway_class):
-        """Test failed server health check using MockVirtualminGateway with fail_operations"""
+        """A single failed check records the error and streak but must NOT
+        evict the server (#325: single-strike status='failed' removed servers
+        from placement AND from the sweep's own queryset — permanently)."""
         mock_gw = MockVirtualminGateway(fail_operations={"info": "Connection refused"})
         mock_gateway_class.return_value = mock_gw
 
@@ -217,11 +218,12 @@ class VirtualminServerManagementServiceTest(TestCase):
 
         self.assertTrue(result.is_err())
 
-        # Check server status was updated to failed
         self.server.refresh_from_db()
-        self.assertEqual(self.server.status, "failed")
+        self.assertEqual(self.server.status, "active")  # still swept, can recover
         self.assertIn("Connection refused", self.server.health_check_error)
-        self.assertIsNotNone(self.server.last_health_check)
+        self.assertEqual(self.server.consecutive_health_failures, 1)
+        self.assertFalse(self.server.is_healthy)  # but not placeable
+        self.assertIsNone(self.server.last_health_check)  # success-only stamp
 
     @patch('apps.provisioning.virtualmin_service.VirtualminGateway')
     def test_statistics_update(self, mock_gateway_class):
@@ -316,8 +318,6 @@ class VirtualminServiceIntegrationTest(TestCase):
             praho_customer_id=self.customer.id,
             praho_service_id=self.service.id
         )
-
-        service = VirtualminProvisioningService(self.server)
 
         # Verify account was created with PRAHO as authority
         self.assertEqual(account.service, self.service)

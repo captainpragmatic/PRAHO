@@ -74,7 +74,6 @@ def queue_service_provisioning(service: Service, delay_seconds: int = 0) -> str:
         service.id,
         hook="apps.provisioning.tasks.provisioning_complete_hook",
         timeout=300,  # 5 minutes timeout
-        retry=2,  # Retry up to 2 times
         sync=False,  # Always async
     )
 

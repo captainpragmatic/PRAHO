@@ -94,12 +94,13 @@ class MockVirtualminGateway:
         # State
         self._domains: dict[str, MockDomain] = {}
         self._calls: list[CallRecord] = []
+        self.available_templates: list[str] = ["Default"]
 
     # ---------------------------------------------------------------
     # State management helpers (for test setup)
     # ---------------------------------------------------------------
 
-    def seed_domain(
+    def seed_domain(  # noqa: PLR0913  # Mock seeding convenience
         self,
         domain: str,
         username: str = "",
@@ -112,7 +113,7 @@ class MockVirtualminGateway:
         """Pre-populate a domain in mock state. Returns the MockDomain."""
         d = MockDomain(
             name=domain,
-            username=username or domain.split(".")[0],
+            username=username or domain.split(".", 1)[0],
             enabled=enabled,
             disk_usage_mb=disk_usage_mb,
             disk_quota_mb=disk_quota_mb,
@@ -122,8 +123,8 @@ class MockVirtualminGateway:
         self._domains[domain] = d
         return d
 
-    def get_domain_state(self, domain: str) -> MockDomain | None:
-        """Inspect mock state for assertions."""
+    def domain_state_of(self, domain: str) -> MockDomain | None:
+        """Inspect raw mock state for assertions (test helper, not gateway API)."""
         return self._domains.get(domain)
 
     @property
@@ -252,6 +253,14 @@ class MockVirtualminGateway:
             return Err(f"Failed to list domains: {response.data.get('error', 'Unknown')}")
         return Err(f"API call failed: {result.unwrap_err()}")
 
+    def list_templates(self) -> Result[list[str], str]:
+        """Normalized template listing (mirrors VirtualminGateway.list_templates)."""
+        if "list-templates" in self.fail_operations:
+            self._record_call("list-templates", {}, success=False)
+            return Err(self.fail_operations["list-templates"])
+        self._record_call("list-templates", {}, success=True)
+        return Ok(list(self.available_templates))
+
     def get_server_info(self) -> Result[dict[str, Any], str]:
         """Get mock server info."""
         result = self.call("info")
@@ -261,6 +270,70 @@ class MockVirtualminGateway:
                 return Ok(response.data)
             return Err(f"Failed to get server info: {response.data.get('error', 'Unknown')}")
         return Err(f"API call failed: {result.unwrap_err()}")
+
+    def get_domain_state(self, domain: str) -> Result[dict[str, Any], str]:
+        """Mirror VirtualminGateway.get_domain_state through call()."""
+        result = self.call("list-domains", {"domain": domain, "multiline": ""})
+        if result.is_err():
+            return Err(f"Domain state probe failed: {result.unwrap_err()}")
+        response = result.unwrap()
+        if not response.success:
+            return Err("Domain state probe rejected")
+        items = response.data.get("data", []) if isinstance(response.data, dict) else []
+        for item in items:
+            if isinstance(item, dict) and item.get("name") == domain:
+                values = item.get("values", {}) or {}
+                status = values.get("Status", "")
+                if isinstance(status, list):
+                    status = status[0] if status else ""
+                username = values.get("Username", "")
+                if isinstance(username, list):
+                    username = username[0] if username else ""
+                return Ok(
+                    {
+                        "exists": True,
+                        "enabled": (str(status).lower().startswith("enable")) if status else None,
+                        "owner": str(username),
+                    }
+                )
+        return Ok({"exists": False, "enabled": None, "owner": ""})
+
+    def list_domains_with_owners(self) -> Result[list[dict[str, str]], str]:
+        """Mirror VirtualminGateway.list_domains_with_owners through call()."""
+        result = self.call("list-domains", {"multiline": ""})
+        if result.is_err():
+            return Err(f"Domain listing failed: {result.unwrap_err()}")
+        response = result.unwrap()
+        if not response.success:
+            return Err("Domain listing rejected")
+        items = response.data.get("data", []) if isinstance(response.data, dict) else []
+        rows: list[dict[str, str]] = []
+        for item in items:
+            if isinstance(item, dict) and item.get("name"):
+                values = item.get("values", {}) or {}
+                username = values.get("Username", "")
+                if isinstance(username, list):
+                    username = username[0] if username else ""
+                rows.append({"domain": str(item["name"]), "username": str(username)})
+        return Ok(rows)
+
+    def get_domain_owner(self, domain: str) -> Result[str | None, str]:
+        """Mirror VirtualminGateway.get_domain_owner through the mock's call()."""
+        result = self.call("list-domains", {"domain": domain, "multiline": ""})
+        if result.is_err():
+            return Err(f"Ownership probe failed: {result.unwrap_err()}")
+        response = result.unwrap()
+        if not response.success:
+            return Err("Ownership probe rejected")
+        items = response.data.get("data", []) if isinstance(response.data, dict) else []
+        for item in items:
+            if isinstance(item, dict) and item.get("name") == domain:
+                values = item.get("values", {}) or {}
+                username = values.get("Username", "")
+                if isinstance(username, list):
+                    username = username[0] if username else ""
+                return Ok(str(username))
+        return Ok(None)
 
     def get_domain_info(self, domain: str) -> Result[dict[str, Any], str]:
         """Get domain info from mock state."""

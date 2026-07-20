@@ -583,7 +583,7 @@ class RollbackMechanismTest(TestCase):
         self.assertEqual(rollback_details["failed_operations"], 0)
 
         # Verify domain was actually removed from mock state
-        self.assertIsNone(mock_gw.get_domain_state("test.example.com"))
+        self.assertIsNone(mock_gw.domain_state_of("test.example.com"))
         # Verify call was logged
         self.assertEqual(len(mock_gw.get_calls("delete-domain")), 1)
 
