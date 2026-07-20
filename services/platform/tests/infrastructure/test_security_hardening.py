@@ -109,6 +109,32 @@ class InfrastructureSSHTrustTests(SimpleTestCase):
         policy = client.set_missing_host_key_policy.call_args.args[0]
         self.assertIsInstance(policy, paramiko.RejectPolicy)
 
+    @patch("apps.infrastructure.validation_service.paramiko.Ed25519Key.from_private_key")
+    @patch("apps.infrastructure.validation_service.paramiko.SSHClient")
+    @override_settings(PRAHO_SSH_KNOWN_HOSTS_PATH="/etc/praho/known_hosts")
+    def test_host_key_mismatch_reading_webmin_cert_surfaces_as_mitm(
+        self,
+        mock_client_class: MagicMock,
+        _mock_private_key: MagicMock,
+    ) -> None:
+        """HIGH-1: a changed SSH host key while reading the Webmin cert is the
+        MITM signal this verified-SSH path exists to catch — it must return a
+        distinct, MITM-scoped error, not generic connection friction."""
+        service = object.__new__(NodeValidationService)
+        service.timeout = 10
+        service._ssh_manager = MagicMock()
+        service._ssh_manager.get_deployment_key.return_value = Ok(MagicMock(private_key="private-key"))
+        deployment = MagicMock(ipv4_address="203.0.113.10", hostname="node.example.com")
+        client = mock_client_class.return_value
+        client.connect.side_effect = paramiko.BadHostKeyException(
+            "203.0.113.10", MagicMock(), MagicMock()
+        )
+
+        result = service.get_webmin_certificate_fingerprint(deployment)
+
+        self.assertTrue(result.is_err())
+        self.assertIn("MITM", result.unwrap_err())
+
     @override_settings(PRAHO_SSH_KNOWN_HOSTS_PATH="/etc/praho/known_hosts")
     def test_shared_ssh_pool_rejects_unknown_host_keys(self) -> None:
         pool = object.__new__(SSHConnectionPool)

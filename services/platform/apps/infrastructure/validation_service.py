@@ -189,6 +189,10 @@ class NodeValidationService:
 
             if key_result.is_err():
                 # Try master key as fallback
+                logger.warning(
+                    "🔑 [Validation] Deployment SSH key unavailable for %s — falling back to master key",
+                    getattr(deployment, "hostname", "unknown"),
+                )
                 master_result = self._ssh_manager.get_master_key()
                 if master_result.is_err():
                     return ValidationResult(
@@ -257,7 +261,9 @@ class NodeValidationService:
                 message=f"SSH check failed: {e}",
             )
 
-    def get_webmin_certificate_fingerprint(self, deployment: NodeDeployment) -> Result[str, str]:
+    def get_webmin_certificate_fingerprint(  # noqa: PLR0911  # Explicit fail-closed exits per error class
+        self, deployment: NodeDeployment
+    ) -> Result[str, str]:
         """Read the certificate actually served by Webmin over the trusted SSH channel."""
         if not deployment.ipv4_address:
             return Err("Node has no IP address assigned")
@@ -267,6 +273,11 @@ class NodeValidationService:
             reason="Node registration - verify Webmin TLS certificate",
         )
         if key_result.is_err():
+            logger.warning(
+                "🔑 [Validation] Deployment SSH key unavailable for %s (%s) — falling back to master key",
+                deployment.hostname,
+                key_result.unwrap_err(),
+            )
             master_result = self._ssh_manager.get_master_key()
             if master_result.is_err():
                 return Err(f"Could not get SSH key: {key_result.unwrap_err()}")
@@ -304,7 +315,23 @@ class NodeValidationService:
                 return Err("Could not parse Webmin SHA-256 certificate fingerprint")
             fingerprint = normalize_tls_cert_fingerprint(raw_fingerprint)
             return Ok(fingerprint)
+        except paramiko.BadHostKeyException as exc:
+            # The node's SSH host key does not match the pinned known_hosts entry.
+            # This is the MITM signal this verified-SSH path exists to catch — never
+            # flatten it into generic connection friction.
+            logger.error(
+                "🚨 [Security] SSH host-key mismatch reading Webmin certificate for %s — "
+                "possible man-in-the-middle; refusing to trust the served certificate: %s",
+                deployment.ipv4_address,
+                exc,
+            )
+            return Err(f"SSH host-key mismatch for {deployment.hostname} — possible MITM, certificate not trusted")
         except Exception as exc:
+            logger.warning(
+                "⚠️ [Validation] Could not read Webmin certificate over SSH for %s: %s",
+                deployment.hostname,
+                exc,
+            )
             return Err(f"Could not verify Webmin certificate fingerprint over SSH: {exc}")
         finally:
             if client is not None:

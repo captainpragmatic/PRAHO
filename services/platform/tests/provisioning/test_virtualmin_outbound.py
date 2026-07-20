@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from typing import Any, ClassVar
 from unittest.mock import MagicMock, patch
 
-from django.test import TestCase
+from django.core.cache import cache as django_cache
+from django.test import TestCase, override_settings
 
 from apps.provisioning.virtualmin_gateway import (
+    RateLimitOutcome,
     VirtualminAPIError,
     VirtualminConfig,
     VirtualminGateway,
@@ -17,25 +20,25 @@ class VirtualminOutboundTests(TestCase):
     """Verify Virtualmin gateway uses safe_request() with DNS pinning."""
 
     @patch("apps.provisioning.virtualmin_gateway.safe_request")
-    def test_execute_http_request_uses_safe_request(self, mock_safe_request: MagicMock) -> None:
-        """_execute_http_request() must use safe_request()."""
+    def test_execute_http_request_routes_through_safe_request_with_pinning_policy(
+        self, mock_safe_request: MagicMock
+    ) -> None:
+        """_execute_http_request must actually call safe_request with an
+        https-only, pin-carrying policy — not merely exist."""
         mock_response = MagicMock()
         mock_response.status_code = 200
-        mock_response.headers = {"content-length": "100"}
+        mock_response.headers = {"content-length": "20"}
         mock_response.iter_content.return_value = iter([b'{"status":"success"}'])
         mock_safe_request.return_value = mock_response
 
-        # We test the method indirectly through the gateway
-        # The import itself validates the module structure
-        from apps.provisioning.virtualmin_gateway import VirtualminGateway  # noqa: PLC0415
+        gateway = self._gateway(fingerprint="a" * 64)
+        gateway._execute_http_request({"program": "list-domains"})
 
-        self.assertTrue(hasattr(VirtualminGateway, "_execute_http_request"))
-
-    def test_safe_request_import_available(self) -> None:
-        """safe_request must be importable from the gateway module."""
-        import apps.provisioning.virtualmin_gateway as gw  # noqa: PLC0415
-
-        self.assertTrue(hasattr(gw, "safe_request"))
+        self.assertEqual(mock_safe_request.call_count, 1)
+        policy = mock_safe_request.call_args.kwargs["policy"]
+        self.assertTrue(policy.require_https)
+        self.assertEqual(policy.allowed_schemes, frozenset({"https"}))
+        self.assertEqual(policy.tls_cert_fingerprint, "a" * 64)
 
     def _gateway(
         self,
@@ -98,9 +101,9 @@ class VirtualminOutboundTests(TestCase):
         gateway = self._gateway()
         mock_cache.add.side_effect = [False, False, True]
 
-        allowed = gateway._check_rate_limit("create-domain")
+        outcome = gateway._check_rate_limit("create-domain")
 
-        self.assertTrue(allowed)
+        self.assertEqual(outcome, RateLimitOutcome.ALLOWED)
         self.assertEqual(mock_cache.add.call_count, 3)
         mock_cache.get.assert_not_called()
         mock_cache.set.assert_not_called()
@@ -113,7 +116,7 @@ class VirtualminOutboundTests(TestCase):
         gateway = self._gateway()
         mock_cache.add.return_value = False
 
-        self.assertFalse(gateway._check_rate_limit("create-domain"))
+        self.assertEqual(gateway._check_rate_limit("create-domain"), RateLimitOutcome.EXHAUSTED)
         self.assertEqual(mock_cache.add.call_count, VIRTUALMIN_RATE_LIMIT_MAX_CALLS)
         mock_cache.incr.assert_not_called()
 
@@ -122,4 +125,54 @@ class VirtualminOutboundTests(TestCase):
         gateway = self._gateway()
         mock_cache.add.side_effect = RuntimeError("cache unavailable")
 
-        self.assertFalse(gateway._check_rate_limit("create-domain"))
+        # HIGH-2: a backend failure is distinct from genuine exhaustion so the
+        # caller can avoid reporting it as a retriable rate-limit hit.
+        self.assertEqual(gateway._check_rate_limit("create-domain"), RateLimitOutcome.BACKEND_ERROR)
+
+    _LOCMEM: ClassVar[dict[str, Any]] = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "virtualmin-ratelimit-test",
+        }
+    }
+
+    @override_settings(CACHES=_LOCMEM)
+    def test_rate_limit_allows_exactly_max_then_denies_against_live_cache(self) -> None:
+        """MEDIUM-5: prove the atomic slot claim against a REAL cache backend,
+        not a mock — exactly MAX allowed, the next denied, and a fresh window
+        resets."""
+        from apps.provisioning.virtualmin_gateway import (  # noqa: PLC0415
+            VIRTUALMIN_RATE_LIMIT_MAX_CALLS,
+        )
+
+        django_cache.clear()
+        gateway = self._gateway()
+
+        allowed = sum(
+            1
+            for _ in range(VIRTUALMIN_RATE_LIMIT_MAX_CALLS)
+            if gateway._check_rate_limit("create-domain") is RateLimitOutcome.ALLOWED
+        )
+        self.assertEqual(allowed, VIRTUALMIN_RATE_LIMIT_MAX_CALLS)
+        self.assertIs(gateway._check_rate_limit("create-domain"), RateLimitOutcome.EXHAUSTED)
+        # A different operation has its own slot namespace.
+        self.assertIs(gateway._check_rate_limit("other-op"), RateLimitOutcome.ALLOWED)
+
+    @patch.object(VirtualminGateway, "_check_rate_limit", return_value=RateLimitOutcome.BACKEND_ERROR)
+    @patch.object(VirtualminGateway, "_validate_server_health")
+    def test_call_reports_cache_backend_failure_as_non_retriable(
+        self, mock_health: MagicMock, _mock_rl: MagicMock
+    ) -> None:
+        """HIGH-2: a rate-limit BACKEND failure must not surface as a retriable
+        'rate limit exceeded' — that invites retry loops against a dead cache."""
+        from apps.common.types import Ok, Retriability, retriability_of  # noqa: PLC0415
+        from apps.provisioning.virtualmin_gateway import VirtualminRateLimitedError  # noqa: PLC0415
+
+        mock_health.return_value = Ok(True)
+        gateway = self._gateway()
+
+        result = gateway.call("list-domains", {})
+
+        self.assertTrue(result.is_err())
+        self.assertNotIsInstance(result.unwrap_err(), VirtualminRateLimitedError)
+        self.assertNotEqual(retriability_of(result), Retriability.RETRIABLE)

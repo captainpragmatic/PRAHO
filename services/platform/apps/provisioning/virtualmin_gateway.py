@@ -16,6 +16,7 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from enum import Enum
 from functools import lru_cache, wraps
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
@@ -419,6 +420,14 @@ class VirtualminConfig:
         )
 
 
+class RateLimitOutcome(Enum):
+    """Outcome of a rate-limit slot claim (distinguishes exhaustion from backend failure)."""
+
+    ALLOWED = "allowed"
+    EXHAUSTED = "exhausted"
+    BACKEND_ERROR = "backend_error"
+
+
 class VirtualminAPIError(Exception):
     """Base exception for Virtualmin API errors"""
 
@@ -682,18 +691,24 @@ class VirtualminGateway:
 
     # _create_session removed — safe_request() handles sessions with DNS-pinned adapters
 
-    def _check_rate_limit(self, operation: str) -> bool:
-        """Atomically reserve a request slot, failing closed on cache errors."""
+    def _check_rate_limit(self, operation: str) -> RateLimitOutcome:
+        """Atomically reserve a request slot, failing closed on cache errors.
+
+        Returns ALLOWED (slot claimed), EXHAUSTED (all slots taken this window),
+        or BACKEND_ERROR (the cache raised). The caller must NOT report a
+        BACKEND_ERROR as a retriable rate-limit hit — during a cache outage that
+        would make every call fleet-wide fail with a misleading "just wait".
+        """
         window = int(time.time() // VIRTUALMIN_RATE_LIMIT_WINDOW)
         scope = hashlib.sha256(f"{self.server.hostname}\0{operation}".encode()).hexdigest()[:24]
         cache_key_prefix = f"virtualmin_rate_limit:{scope}:{window}"
         try:
             for slot in range(VIRTUALMIN_RATE_LIMIT_MAX_CALLS):
                 if cache.add(f"{cache_key_prefix}:{slot}", 1, VIRTUALMIN_RATE_LIMIT_WINDOW):
-                    return True
+                    return RateLimitOutcome.ALLOWED
         except Exception:
             logger.exception("Virtualmin rate-limit counter failed for %s", self.server.hostname)
-            return False
+            return RateLimitOutcome.BACKEND_ERROR
 
         logger.warning(
             "Rate limit exceeded for %s operation %s: %s slots claimed",
@@ -701,7 +716,7 @@ class VirtualminGateway:
             operation,
             VIRTUALMIN_RATE_LIMIT_MAX_CALLS,
         )
-        return False
+        return RateLimitOutcome.EXHAUSTED
 
     def _validate_server_health(self) -> Result[bool, str]:
         """Validate server health before making requests"""
@@ -749,10 +764,22 @@ class VirtualminGateway:
             return Err(VirtualminAPIError(health_result.unwrap_err(), self.server.hostname, program))
 
         # Rate limiting check
-        if not self._check_rate_limit(program):
+        rate_limit_outcome = self._check_rate_limit(program)
+        if rate_limit_outcome is RateLimitOutcome.EXHAUSTED:
             return Err(
                 VirtualminRateLimitedError(f"Rate limit exceeded for {program}", self.server.hostname, program),
                 retriability=Retriability.RETRIABLE,
+            )
+        if rate_limit_outcome is RateLimitOutcome.BACKEND_ERROR:
+            # The limiter could not be consulted — fail closed, but NOT as a
+            # retriable rate-limit: retrying hammers a backend that will not
+            # self-heal, and the operator needs the real cause.
+            return Err(
+                VirtualminAPIError(
+                    f"Rate-limit backend unavailable for {program} — refusing to proceed unmetered",
+                    self.server.hostname,
+                    program,
+                )
             )
 
         # Prepare request parameters

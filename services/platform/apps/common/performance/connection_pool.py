@@ -405,6 +405,8 @@ class SSHConnectionPool:
             known_hosts_path = str(getattr(settings, "PRAHO_SSH_KNOWN_HOSTS_PATH", "")).strip()
             if known_hosts_path:
                 client.load_host_keys(known_hosts_path)
+            # Host-key rejection mirrors apps/common/ssh.py (kept inline to avoid an
+            # import cycle through the pool); keep the two in sync if either changes.
             client.set_missing_host_key_policy(self._paramiko.RejectPolicy())
 
             connect_kwargs: dict[str, Any] = {

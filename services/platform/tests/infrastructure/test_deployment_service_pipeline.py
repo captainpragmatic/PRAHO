@@ -379,7 +379,7 @@ class TestDestroyNodeAtomicTransition(TestCase):
         self.assertTrue(result.is_err())
         self.assertIn("Cannot destroy", result.unwrap_err())
 
-    def test_destroy_revokes_vault_key_through_real_manager_contract(self) -> None:
+    def test_destroy_pins_renamed_vault_key_deletion_method_signature(self) -> None:
         deployment = _create_deployment("completed")
         service = _make_service()
 
@@ -632,3 +632,27 @@ class TestMaintenanceStatusCheck(TestCase):
         self.assertTrue(result.is_err())
         self.assertIn("Unsupported maintenance action", result.unwrap_err())
         service._ansible.run_playbook.assert_not_called()
+
+
+class TestDestroyClearsExternalIdForRetryIdempotency(TestCase):
+    """MEDIUM-4: after the cloud VM is deleted, external_node_id must be cleared
+    so a destroy retry (triggered by a later vault-revocation failure) does not
+    re-invoke delete_server against an already-deleted VM."""
+
+    def test_destroy_clears_external_node_id_after_cloud_deletion(self) -> None:
+        deployment = _create_deployment("completed", external_node_id="srv-123")
+        service = _make_service()
+        # Vault revocation FAILS after cloud deletion succeeds -> destroy returns Err.
+        service._ssh_manager.delete_deployment_key.return_value = Err("vault unavailable")
+
+        mock_gateway = MagicMock()
+        mock_gateway.delete_server.return_value = Ok(True)
+        mock_gateway.delete_ssh_key.return_value = Ok(True)
+
+        with patch("apps.infrastructure.deployment_service.get_cloud_gateway", return_value=mock_gateway):
+            result = service.destroy_node(deployment, credentials={"api_token": "tok"})
+
+        self.assertTrue(result.is_err())
+        mock_gateway.delete_server.assert_called_once_with("srv-123")
+        deployment.refresh_from_db()
+        self.assertEqual(deployment.external_node_id, "")

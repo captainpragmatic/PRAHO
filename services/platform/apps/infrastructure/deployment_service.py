@@ -614,6 +614,12 @@ class NodeDeploymentService:
                     )
                     return Err(f"Server deletion failed: {delete_result.unwrap_err()}")
 
+                # Cloud VM is gone. Clear external_node_id NOW so that if a later
+                # step (vault-key revocation) fails and the destroy is retried, the
+                # retry does not re-invoke delete_server against an already-deleted VM.
+                deployment.external_node_id = ""
+                deployment.save(update_fields=["external_node_id", "updated_at"])
+
                 # Clean up SSH key from provider
                 ssh_key_name = f"praho-{deployment.hostname}"
                 ssh_delete_result = gateway.delete_ssh_key(ssh_key_name)
