@@ -9,16 +9,16 @@ from unittest.mock import MagicMock, patch
 from django.test import TestCase
 
 from apps.infrastructure.cloud_gateway import (
+    _PROVIDER_REGISTRY,
+    STANDARD_FIREWALL_RULES,
     CloudProviderGateway,
     FirewallRule,
     LocationInfo,
-    SSHKeyResult,
     ServerCreateRequest,
     ServerCreateResult,
     ServerInfo,
     ServerTypeInfo,
-    STANDARD_FIREWALL_RULES,
-    _PROVIDER_REGISTRY,
+    SSHKeyResult,
     get_cloud_gateway,
     get_registered_providers,
     normalize_server_status,
@@ -305,3 +305,53 @@ class TestFirewallRuleSourceIps(TestCase):
         # rule2's source_ips should NOT be affected
         self.assertNotIn("10.0.0.0/8", rule2.source_ips)
         self.assertEqual(len(rule2.source_ips), 2)
+
+
+class _HcloudNotFoundError(Exception):
+    """Mimics hcloud APIException(code='not_found') raised by get_by_id on 404."""
+
+    code = "not_found"
+
+
+class TestHcloudIdempotentDeletes(TestCase):
+    """#328-7: hcloud get_by_id raises APIException(code='not_found') for a
+    missing resource (never returns None), so an already-deleted server made
+    delete_server return Err and destroy_node wedged forever. Delete must be
+    idempotent."""
+
+    def _service(self, client):
+        from apps.infrastructure.hcloud_service import HcloudService  # noqa: PLC0415
+
+        with patch.object(HcloudService, "__init__", lambda self, **kw: setattr(self, "client", client)):
+            return HcloudService(token="test-token")
+
+    def test_delete_server_treats_not_found_as_success(self):
+        client = MagicMock()
+        client.servers.get_by_id.side_effect = _HcloudNotFoundError("Server not found")
+        svc = self._service(client)
+
+        result = svc.delete_server("12345")
+
+        self.assertTrue(result.is_ok())
+        self.assertTrue(result.unwrap())
+
+    def test_delete_firewall_treats_not_found_as_success(self):
+        client = MagicMock()
+        client.firewalls.get_by_id.side_effect = _HcloudNotFoundError("Firewall not found")
+        svc = self._service(client)
+
+        self.assertTrue(svc.delete_firewall("999").is_ok())
+
+    def test_delete_snapshot_treats_not_found_as_success(self):
+        client = MagicMock()
+        client.images.get_by_id.side_effect = _HcloudNotFoundError("Image not found")
+        svc = self._service(client)
+
+        self.assertTrue(svc.delete_snapshot("999").is_ok())
+
+    def test_delete_server_still_errs_on_real_failure(self):
+        client = MagicMock()
+        client.servers.get_by_id.side_effect = RuntimeError("500 internal error")
+        svc = self._service(client)
+
+        self.assertTrue(svc.delete_server("12345").is_err())
