@@ -1759,6 +1759,8 @@ def recover_stale_remediations_task() -> dict[str, Any]:
     2. approved that never started within the threshold (queue backlog, guard
        loser, lost task) -> re-enqueued, not failed: the claim into execution
        is a conditional update, so a duplicate task is harmless.
+    2b. scheduled with a NULL scheduled_for -> failed: undispatchable yet still
+       "open", so it would block replacement forever (defense in depth).
     3. Open drift on deployments that left scan scope (stopped/destroyed/...)
        -> superseded; the scanner skips those deployments, so nothing else
        would ever close their reports and requests.
@@ -1825,6 +1827,23 @@ def recover_stale_remediations_task() -> dict[str, Any]:
             errors.append(f"request {req.pk}: {e}")
             logger.error(f"🔥 [Task:recover_stale_remediations] Error re-queueing request {req.pk}: {e}")
 
+    # 2b. Malformed 'scheduled' rows: a scheduled request with a NULL
+    # scheduled_for is never dispatched (apply_scheduled_remediations filters
+    # scheduled_for__lte=now, which SQL-excludes NULL) yet counts as OPEN for
+    # uniq_open_request_per_report, permanently blocking a replacement request.
+    # Current writers always set a non-NULL datetime, so this is defense in
+    # depth — but on a still-completed deployment the step-3 scope sweep would
+    # never reach it, so it needs a dedicated terminalizing sweep.
+    malformed_scheduled = DriftRemediationRequest.objects.filter(status="scheduled", scheduled_for__isnull=True).update(
+        status="failed",
+        error_message="Scheduled remediation had no scheduled_for time — cannot dispatch; auto-recovered",
+    )
+    if malformed_scheduled:
+        logger.warning(
+            f"⚠️ [Task:recover_stale_remediations] Failed {malformed_scheduled} malformed "
+            f"scheduled request(s) with NULL scheduled_for"
+        )
+
     # 3. Drift bookkeeping for deployments outside scan scope
     swept_reports = (
         DriftReport.objects.filter(resolved=False)
@@ -1845,6 +1864,7 @@ def recover_stale_remediations_task() -> dict[str, Any]:
         "success": len(errors) == 0,
         "recovered_count": recovered,
         "requeued_count": requeued,
+        "malformed_scheduled_count": malformed_scheduled,
         "swept_reports": swept_reports,
         "swept_requests": swept_requests,
         "errors": errors,

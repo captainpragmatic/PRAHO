@@ -196,9 +196,7 @@ class TestApproveReject(DriftRemediationTestBase):
 
     def test_reject_flow(self):
         """Rejecting should set status=rejected with reason."""
-        result = self.service.reject_remediation(
-            self.remediation_request.pk, self.admin, "Not needed"
-        )
+        result = self.service.reject_remediation(self.remediation_request.pk, self.admin, "Not needed")
         self.assertTrue(result.is_ok())
 
         self.remediation_request.refresh_from_db()
@@ -208,9 +206,7 @@ class TestApproveReject(DriftRemediationTestBase):
     def test_schedule_flow(self):
         """Scheduling should set status=scheduled with datetime."""
         future = timezone.now() + timedelta(hours=2)
-        result = self.service.schedule_remediation(
-            self.remediation_request.pk, self.admin, future
-        )
+        result = self.service.schedule_remediation(self.remediation_request.pk, self.admin, future)
         self.assertTrue(result.is_ok())
 
         self.remediation_request.refresh_from_db()
@@ -682,9 +678,7 @@ class TestCleanupSnapshots(DriftRemediationTestBase):
             status="available",
             expires_at=timezone.now() - timedelta(days=1),
         )
-        expired = DriftSnapshot.objects.filter(
-            expires_at__lte=timezone.now(), status="available"
-        )
+        expired = DriftSnapshot.objects.filter(expires_at__lte=timezone.now(), status="available")
         self.assertEqual(expired.count(), 1)
         self.assertEqual(expired.first().provider_snapshot_id, "snap-old")
 
@@ -741,9 +735,7 @@ class TestExecutionClaim(DriftRemediationTestBase):
     @patch("apps.infrastructure.drift_remediation.DriftRemediationService._verify_remediation")
     @patch("apps.infrastructure.drift_remediation.DriftRemediationService._get_gateway")
     @patch("apps.infrastructure.drift_remediation.DriftRemediationService._take_snapshot")
-    def test_stale_in_progress_is_reaped_inline_and_new_claim_succeeds(
-        self, mock_snapshot, mock_gateway, mock_verify
-    ):
+    def test_stale_in_progress_is_reaped_inline_and_new_claim_succeeds(self, mock_snapshot, mock_gateway, mock_verify):
         """One crashed execution can never block a deployment forever."""
         stale = DriftRemediationRequest.objects.create(
             report=self._make_report(),
@@ -904,6 +896,29 @@ class TestRecoverStaleRemediations(DriftRemediationTestBase):
         self.assertEqual(result["swept_reports"], 1)
         self.assertEqual(result["swept_requests"], 1)
 
+    def test_scheduled_with_null_scheduled_for_is_recovered(self):
+        """#333.5: a 'scheduled' request whose scheduled_for is NULL can never
+        be dispatched (apply_scheduled_remediations filters scheduled_for__lte,
+        which excludes NULL) yet counts as OPEN for uniq_open_request_per_report,
+        permanently blocking a replacement request. The deployment here stays
+        'completed' so the out-of-scope sweep (step 3) never touches it — only a
+        dedicated malformed-row sweep frees it."""
+        # Force the malformed terminal-blocking state a buggy writer could leave.
+        DriftRemediationRequest.objects.filter(pk=self.remediation_request.pk).update(
+            status="scheduled", scheduled_for=None
+        )
+
+        result = self._run_task()
+
+        self.remediation_request.refresh_from_db()
+        self.assertEqual(self.remediation_request.status, "failed")
+        self.assertNotIn(
+            self.remediation_request.status,
+            ("pending_approval", "approved", "scheduled", "in_progress"),
+            "malformed scheduled row must no longer count as open",
+        )
+        self.assertEqual(result["malformed_scheduled_count"], 1)
+
 
 class TestApplyScheduledRemediations(DriftRemediationTestBase):
     """Tests for the per-row claim + enqueue scheduled task."""
@@ -1059,7 +1074,9 @@ class TestVerifyRemediation(DriftRemediationTestBase):
     @patch("apps.infrastructure.drift_remediation.DriftRemediationService._rollback")
     @patch("apps.infrastructure.drift_remediation.DriftRemediationService._get_gateway")
     @patch("apps.infrastructure.drift_remediation.DriftRemediationService._take_snapshot")
-    def test_inconclusive_verification_fails_without_rollback(self, mock_snapshot, mock_gateway, mock_rollback, _settings):
+    def test_inconclusive_verification_fails_without_rollback(
+        self, mock_snapshot, mock_gateway, mock_rollback, _settings
+    ):
         """An inconclusive verification marks the request failed and never restores the snapshot."""
         self.remediation_request.status = "approved"
         self.remediation_request.save(update_fields=["status"])
