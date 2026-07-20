@@ -63,6 +63,26 @@ class NodeRegistrationTLSPinTests(TestCase):
         self.assertIn("certificate fingerprint", result.unwrap_err())
         mock_server_model.objects.create.assert_not_called()
 
+    @patch("apps.provisioning.virtualmin_models.VirtualminServer")
+    @patch("apps.infrastructure.validation_service.get_validation_service")
+    def test_registration_creates_disabled_server_until_credentials_configured(
+        self,
+        mock_get_validation: MagicMock,
+        mock_server_model: MagicMock,
+    ) -> None:
+        """#328-4: the admin password is generated + vaulted but never configured
+        on the node, so the server must NOT be registered 'active' (which would
+        make _select_best_server place domains on it and fail auth). It is
+        'disabled' until an operator configures and verifies the credentials."""
+        mock_get_validation.return_value.get_webmin_certificate_fingerprint.return_value = Ok("cd" * 32)
+        mock_server_model.objects.filter.return_value.exists.return_value = False
+        mock_server_model.objects.create.return_value = MagicMock(id=9)
+
+        result = NodeRegistrationService().register_node(self._deployment())
+
+        self.assertTrue(result.is_ok(), result.unwrap_err() if result.is_err() else "")
+        self.assertEqual(mock_server_model.objects.create.call_args.kwargs["status"], "disabled")
+
 
 class VirtualminCertificatePinCommandTests(TestCase):
     """Existing self-signed node records have an explicit trusted migration path."""

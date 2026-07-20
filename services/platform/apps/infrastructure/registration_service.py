@@ -107,7 +107,13 @@ class NodeRegistrationService:
                 if VirtualminServer.objects.filter(hostname=deployment.fqdn).exists():
                     return Err(f"VirtualminServer with hostname '{deployment.fqdn}' already exists")
 
-                # Create VirtualminServer record
+                # Register as 'disabled', NOT 'active': the admin password is
+                # generated here and stored in the vault, but nothing has
+                # configured a Virtualmin ACL user with it on the node yet, so the
+                # first API call would fail authentication. _select_best_server
+                # only places on status='active' servers, so a disabled server is
+                # never auto-selected — an operator activates it after configuring
+                # and verifying the API credentials on the node.
                 server = VirtualminServer.objects.create(
                     name=f"Node: {deployment.hostname}",
                     hostname=deployment.fqdn,
@@ -115,7 +121,7 @@ class NodeRegistrationService:
                     use_ssl=True,
                     ssl_verify=False,  # Self-signed initially
                     ssl_cert_fingerprint=ssl_cert_fingerprint,
-                    status="active",
+                    status="disabled",
                     api_username=admin_username,
                     encrypted_api_password=b"",  # Stored in CredentialVault instead
                     max_domains=deployment.node_size.max_domains if deployment.node_size else 50,
@@ -154,8 +160,9 @@ class NodeRegistrationService:
                 deployment.save(update_fields=["virtualmin_server", "updated_at"])
 
                 logger.info(
-                    f"📝 [Registration] Successfully registered node: "
-                    f"{deployment.hostname} -> VirtualminServer(id={server.id})"
+                    f"📝 [Registration] Registered node {deployment.hostname} -> "
+                    f"VirtualminServer(id={server.id}, status=disabled). Configure and verify the "
+                    f"Virtualmin API credentials on the node, then activate it before it can host domains."
                 )
 
                 return Ok(server)
