@@ -447,7 +447,7 @@ class VirtualminNotFoundError(VirtualminAPIError):
 
 
 class VirtualminTransientError(VirtualminAPIError):
-    """Temporary failure - retry with backoff"""
+    """Temporary or ambiguous failure - retry only when the operation policy permits."""
 
     default_retriability = Retriability.UNKNOWN
 

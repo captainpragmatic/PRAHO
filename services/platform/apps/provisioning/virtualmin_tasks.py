@@ -305,16 +305,17 @@ def _execute_provisioning_transaction(context: ProvisioningContext, server_id: s
 
             return result
 
-    except Exception as db_error:
-        logger.error(f"🔥 [VirtualminTask] Database operation failed: {db_error}")
+    except RetryableProvisioningError as retry_error:
         IdempotencyManager.clear(context.idempotency_key)
+        logger.warning(f"🔄 [VirtualminTask] Explicitly retryable error, will retry: {retry_error}")
+        raise
 
-        if isinstance(db_error, RetryableProvisioningError):
-            logger.warning(f"🔄 [VirtualminTask] Explicitly retryable error, will retry: {db_error}")
-            raise
+    except Exception as provisioning_error:
+        logger.error(f"🔥 [VirtualminTask] Provisioning transaction failed: {provisioning_error}")
+        IdempotencyManager.clear(context.idempotency_key)
         return {
             "success": False,
-            "error": f"Database error: {db_error}",
+            "error": f"Provisioning error: {provisioning_error}",
             "retriability": Retriability.UNKNOWN.value,
         }
 

@@ -684,7 +684,10 @@ class VirtualminProvisioningJob(models.Model):
         self.status_message = error_message
         self.completed_at = now
 
-        self.result = dict(result or {})
+        if result:
+            self.result = dict(result)
+        else:
+            self.result = dict(self.result or {})
         self.result["retriability"] = retriability.value
 
         # Track rollback information

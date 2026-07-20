@@ -124,6 +124,49 @@ class VirtualminProvisioningJobRollbackTest(TestCase):
         self.assertIsNone(job.next_retry_at)
         self.assertEqual(job.result["retriability"], Retriability.UNKNOWN.value)
 
+    def test_mark_failed_preserves_existing_result_when_payload_omitted(self):
+        job = VirtualminProvisioningJob.objects.create(
+            operation="create_domain",
+            server=self.server,
+            correlation_id="test-preserve-result",
+            result={"provider_request_id": "request-123"},
+        )
+
+        job.mark_failed("response lost")
+
+        job.refresh_from_db()
+        self.assertEqual(job.result["provider_request_id"], "request-123")
+        self.assertEqual(job.result["retriability"], Retriability.UNKNOWN.value)
+
+    def test_mark_failed_preserves_existing_result_for_empty_payload(self):
+        job = VirtualminProvisioningJob.objects.create(
+            operation="create_domain",
+            server=self.server,
+            correlation_id="test-preserve-empty-result",
+            result={"provider_request_id": "request-456"},
+        )
+
+        job.mark_failed("response lost", result={})
+
+        job.refresh_from_db()
+        self.assertEqual(job.result["provider_request_id"], "request-456")
+        self.assertEqual(job.result["retriability"], Retriability.UNKNOWN.value)
+
+    def test_mark_failed_replaces_existing_result_with_non_empty_payload(self):
+        job = VirtualminProvisioningJob.objects.create(
+            operation="create_domain",
+            server=self.server,
+            correlation_id="test-replace-result",
+            result={"previous_attempt": "stale"},
+        )
+
+        job.mark_failed("rejected", result={"provider_request_id": "request-789"})
+
+        job.refresh_from_db()
+        self.assertNotIn("previous_attempt", job.result)
+        self.assertEqual(job.result["provider_request_id"], "request-789")
+        self.assertEqual(job.result["retriability"], Retriability.UNKNOWN.value)
+
     def test_mark_failed_schedules_only_explicitly_retriable_failure(self):
         job = VirtualminProvisioningJob.objects.create(
             operation="suspend_domain",

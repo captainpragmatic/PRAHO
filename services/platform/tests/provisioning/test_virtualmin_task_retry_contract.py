@@ -142,9 +142,14 @@ class ProvisioningFailureHandlerRetryContractTests(SimpleTestCase):
             patch.object(virtualmin_tasks, "_get_provisioning_server_secure", return_value=None),
             patch.object(virtualmin_tasks, "_execute_virtualmin_provisioning_with_params", side_effect=retry_error),
             patch.object(virtualmin_tasks.IdempotencyManager, "clear"),
+            patch.object(virtualmin_tasks.logger, "error") as error_log,
+            patch.object(virtualmin_tasks.logger, "warning") as warning_log,
             self.assertRaises(virtualmin_tasks.RetryableProvisioningError),
         ):
             virtualmin_tasks._execute_provisioning_transaction(context, None)
+
+        error_log.assert_not_called()
+        warning_log.assert_called_once()
 
     def test_transaction_does_not_retry_unknown_timeout_text(self) -> None:
         context = virtualmin_tasks.ProvisioningContext(
@@ -172,11 +177,16 @@ class ProvisioningFailureHandlerRetryContractTests(SimpleTestCase):
                 side_effect=RuntimeError("connection timeout after request was sent"),
             ),
             patch.object(virtualmin_tasks.IdempotencyManager, "clear"),
+            patch.object(virtualmin_tasks.logger, "error") as error_log,
         ):
             result = virtualmin_tasks._execute_provisioning_transaction(context, None)
 
         self.assertFalse(result["success"])
+        self.assertEqual(result["error"], "Provisioning error: connection timeout after request was sent")
         self.assertEqual(result["retriability"], Retriability.UNKNOWN.value)
+        error_log.assert_called_once_with(
+            "🔥 [VirtualminTask] Provisioning transaction failed: connection timeout after request was sent"
+        )
 
     def test_task_entrypoint_preserves_explicit_retry_exception(self) -> None:
         context = virtualmin_tasks.ProvisioningContext(
