@@ -197,7 +197,7 @@ class VirtualminProvisioningService:
                 account.status_message = error_msg
                 account.save(update_fields=["status", "status_message", "updated_at"])
 
-                return Err(error_msg)
+                return Err(error_msg, retriability=retriability_of(provisioning_result))
 
         except ValidationError as e:
             return Err(f"Validation error: {e}")

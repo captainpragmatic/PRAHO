@@ -20,6 +20,7 @@ from apps.provisioning.virtualmin_gateway import (
 )
 from apps.provisioning.virtualmin_models import VirtualminServer
 from apps.provisioning.virtualmin_service import (
+    VirtualminAccountCreationData,
     VirtualminProvisioningService,
     VirtualminServerManagementService,
 )
@@ -104,6 +105,37 @@ class ServiceTestServerConnectionRetriabilityTests(SimpleTestCase):
 
         assert isinstance(result, Err)
         self.assertEqual(result.retriability, Retriability.NOT_RETRIABLE)
+
+
+    def test_failed_creation_preserves_inner_retriability(self) -> None:
+        service = VirtualminProvisioningService()
+        customer = MagicMock(id=42)
+        creation_data = VirtualminAccountCreationData(
+            service=MagicMock(id=7, customer=customer),
+            domain="retry.example.com",
+            username="retryuser",
+            password="StrongPassword123!",
+            server=MagicMock(),
+        )
+        account = MagicMock(id=11)
+        job = MagicMock()
+        inner = Err("connect timeout", retriability=Retriability.RETRIABLE)
+
+        with (
+            patch("apps.provisioning.virtualmin_service.transaction.atomic"),
+            patch("apps.provisioning.virtualmin_service.VirtualminAccount") as account_cls,
+            patch("apps.provisioning.virtualmin_service.VirtualminProvisioningJob") as job_cls,
+            patch.object(service, "_execute_domain_creation", return_value=inner),
+        ):
+            account_cls.objects.filter.return_value.first.return_value = None
+            account_cls.return_value = account
+            job_cls.return_value = job
+
+            result = service.create_virtualmin_account(creation_data)
+
+        assert isinstance(result, Err)
+        self.assertEqual(result.unwrap_err(), "connect timeout")
+        self.assertEqual(result.retriability, Retriability.RETRIABLE)
 
     def test_server_statistics_preserves_gateway_retriability(self) -> None:
         server = MagicMock()
