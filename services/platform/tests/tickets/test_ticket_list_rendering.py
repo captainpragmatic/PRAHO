@@ -73,6 +73,8 @@ class TicketListRenderingTests(TestCase):
             self.assertIn(key, content)
         self.assertIn("target.focus()", content)
         self.assertIn("target.click()", content)
+        self.assertIn("t.classList.remove(t.dataset.tabBorder, t.dataset.tabText)", content)
+        self.assertNotIn(".className.replace(", content)
 
     def test_search_htmx_returns_table_partial(self) -> None:
         response = self.client.get(reverse("tickets:search_htmx"), {"status": "open"})

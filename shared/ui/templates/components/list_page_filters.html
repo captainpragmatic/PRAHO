@@ -132,7 +132,8 @@ function switchTab(el) {
     t.setAttribute('aria-selected', 'false');
     t.setAttribute('tabindex', '-1');
     /* Remove any active border/text color classes, restore inactive */
-    t.className = t.className.replace(/border-\w+-500/g, 'border-transparent').replace(/text-\w+-\d{3}/g, 'text-slate-400');
+    t.classList.remove(t.dataset.tabBorder, t.dataset.tabText);
+    t.classList.add('border-transparent', 'text-slate-400');
   }
   /* Activate clicked tab (both desktop and mobile instances share same data attrs) */
   var allMatching = root.querySelectorAll('.list-filter-tab[data-tab-value="' + value + '"]');
@@ -140,7 +141,8 @@ function switchTab(el) {
     var m = allMatching[j];
     m.setAttribute('aria-selected', 'true');
     m.setAttribute('tabindex', '0');
-    m.className = m.className.replace('border-transparent', borderClass).replace('text-slate-400', textClass);
+    m.classList.remove('border-transparent', 'text-slate-400');
+    m.classList.add(borderClass, textClass);
   }
   var panel = document.getElementById(el.getAttribute('aria-controls'));
   if (panel) {
