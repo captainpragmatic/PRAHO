@@ -23,7 +23,7 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
 
-from apps.common.types import Err, Ok, Result, retriability_of
+from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 from apps.infrastructure.ansible_service import AnsibleResult, get_ansible_service
 from apps.infrastructure.audit_service import InfrastructureAuditContext, InfrastructureAuditService
 from apps.infrastructure.cloud_gateway import (
@@ -205,6 +205,18 @@ class NodeDeploymentService:
             )
 
             if key_result.is_err():
+                # generate_deployment_key is a MUTATION; an UNKNOWN failure may
+                # have created the key already, so the compound operation can
+                # never be MORE retriable than that ambiguity — a RETRIABLE
+                # fallback failure must not mask it into a replay that would
+                # generate the key a second time (#253/#254).
+                key_retriability = retriability_of(key_result)
+
+                def _aggregate(fallback: Result[Any, str]) -> Retriability:
+                    if key_retriability is Retriability.UNKNOWN:
+                        return Retriability.UNKNOWN
+                    return retriability_of(fallback)
+
                 # Try master key fallback
                 master_result = self._ssh_manager.get_master_key()
                 if master_result.is_err():
@@ -216,7 +228,7 @@ class NodeDeploymentService:
                     )
                     return Err(
                         f"SSH key generation failed; master key fallback failed: {master_result.unwrap_err()}",
-                        retriability=retriability_of(master_result),
+                        retriability=_aggregate(master_result),
                     )
                 master_pub_result = self._ssh_manager.get_master_public_key()
                 if master_pub_result.is_err():
@@ -228,7 +240,7 @@ class NodeDeploymentService:
                     )
                     return Err(
                         f"SSH key generation failed and master public key unavailable: {master_pub_result.unwrap_err()}",
-                        retriability=retriability_of(master_pub_result),
+                        retriability=_aggregate(master_pub_result),
                     )
                 ssh_public_key = master_pub_result.unwrap()
                 log_deployment("warning", "Using master SSH key (fallback)")

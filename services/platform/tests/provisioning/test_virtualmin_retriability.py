@@ -10,6 +10,7 @@ stay UNKNOWN — the fail-closed default the tri-state design mandates.
 
 from unittest.mock import MagicMock, patch
 
+import requests
 from django.test import SimpleTestCase
 
 from apps.common.types import Err, Retriability
@@ -17,6 +18,7 @@ from apps.provisioning.virtualmin_gateway import (
     VirtualminAPIError,
     VirtualminConfig,
     VirtualminGateway,
+    VirtualminTransientError,
 )
 from apps.provisioning.virtualmin_models import VirtualminServer
 from apps.provisioning.virtualmin_service import (
@@ -32,6 +34,17 @@ def _gateway() -> VirtualminGateway:
 
 
 class GatewayTestConnectionRetriabilityTests(SimpleTestCase):
+    def test_ssl_error_is_terminal_not_transient(self) -> None:
+        """requests.SSLError subclasses ConnectionError, so it must be caught
+        first — a TLS/cert failure is PERMANENT (NOT_RETRIABLE), not a transient
+        UNKNOWN that a read-only call would replay forever."""
+        gateway = _gateway()
+        with patch.object(gateway, "_execute_http_request", side_effect=requests.exceptions.SSLError("bad cert")):
+            result = gateway.call("list-domains")
+        assert isinstance(result, Err)
+        self.assertNotIsInstance(result.unwrap_err(), VirtualminTransientError)
+        self.assertEqual(result.retriability, Retriability.NOT_RETRIABLE)
+
     def test_failed_call_propagates_inner_retriability(self) -> None:
         """An inner Err with UNKNOWN retriability must not be upgraded to RETRIABLE."""
         gateway = _gateway()

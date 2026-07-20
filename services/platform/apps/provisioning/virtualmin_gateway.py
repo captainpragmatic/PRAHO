@@ -910,13 +910,19 @@ class VirtualminGateway:
             ) from e
         except requests.exceptions.ReadTimeout as e:
             raise VirtualminTransientError(f"Read timeout from {self.server.hostname}", self.server.hostname) from e
+        except requests.exceptions.SSLError as e:
+            # SSLError subclasses ConnectionError, so it MUST be caught first —
+            # otherwise a TLS/cert failure is misread as a transient connection
+            # error. A cert/TLS validation failure is PERMANENT (NOT_RETRIABLE);
+            # replaying it — even a read-only call — never resolves it.
+            raise VirtualminAPIError(
+                f"SSL error connecting to {self.server.hostname}: {e}",
+                self.server.hostname,
+                retriability=Retriability.NOT_RETRIABLE,
+            ) from e
         except requests.exceptions.ConnectionError as e:
             raise VirtualminTransientError(
                 f"Connection error to {self.server.hostname}: {e}", self.server.hostname
-            ) from e
-        except requests.exceptions.SSLError as e:
-            raise VirtualminAPIError(
-                f"SSL error connecting to {self.server.hostname}: {e}", self.server.hostname
             ) from e
         except OutboundSecurityError as e:
             raise VirtualminAPIError(
