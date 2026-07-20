@@ -693,6 +693,39 @@ class RefundGatewayIntegrityTests(TestCase):
         self.assertEqual(refund.payment_id, payment.id)
         self.assertEqual(payment.status, "refunded")
 
+    def test_settlement_projection_counts_legacy_unlinked_invoice_refunds(self) -> None:
+        invoice = self._make_invoice()
+        payment = self._make_payment(invoice, transaction_id="pi_legacy_projection")
+        payment.partially_refund()
+        payment.save(update_fields=["status", "updated_at"])
+        Refund.objects.create(
+            customer=self.customer,
+            invoice=invoice,
+            amount_cents=2_500,
+            currency=self.currency,
+            original_amount_cents=10_000,
+            status="completed",
+            reference_number="REF-LEGACY-PROJECTION",
+        )
+        Refund.objects.create(
+            customer=self.customer,
+            invoice=invoice,
+            payment=payment,
+            amount_cents=7_500,
+            currency=self.currency,
+            original_amount_cents=10_000,
+            status="completed",
+            reference_number="REF-LINKED-PROJECTION",
+        )
+
+        result = RefundService._project_settled_refunds(payment, invoice)
+
+        self.assertTrue(result.is_ok(), result.unwrap_err() if result.is_err() else "")
+        payment.refresh_from_db()
+        invoice.refresh_from_db()
+        self.assertEqual(payment.status, "refunded")
+        self.assertEqual(invoice.status, "refunded")
+
     def test_legacy_charge_refunded_event_converges_embedded_refund(self) -> None:
         invoice = self._make_invoice()
         payment = self._make_payment(invoice, transaction_id="pi_legacy_refund")

@@ -1139,11 +1139,28 @@ class RefundService:
         return Ok(True)
 
     @staticmethod
+    def _legacy_refund_scope_for_payment(payment: Payment) -> Q | None:
+        """Locate pre-Refund.payment rows through the payment's document relation."""
+        if payment.invoice_id is not None:
+            return Q(invoice_id=payment.invoice_id)
+        if payment.proforma_id is not None:
+            return Q(order__proforma_id=payment.proforma_id)
+        return None
+
+    @staticmethod
     def _project_settled_refunds(payment: Payment, invoice: Invoice | None) -> Result[dict[str, bool], str]:
         """Project completed refund totals onto coarse Payment and Invoice states."""
         try:
+            payment_scope = Q(payment=payment)
+            legacy_scope = RefundService._legacy_refund_scope_for_payment(payment)
+            if legacy_scope is not None:
+                payment_scope |= Q(payment__isnull=True) & legacy_scope
             settled_payment = int(
-                payment.refunds.filter(status="completed").aggregate(total=Sum("amount_cents", default=0))["total"]
+                Refund.objects.filter(
+                    payment_scope,
+                    status="completed",
+                    amount_cents__gt=0,
+                ).aggregate(total=Sum("amount_cents", default=0))["total"]
             )
             payment_target = (
                 "succeeded"
@@ -1359,11 +1376,7 @@ class RefundService:
             # Legacy rows predate Refund.payment being populated: they carry only the
             # document FK. Without counting them, a bank/cash payment with a pre-existing
             # partial refund reports its FULL amount as remaining — an over-refund.
-            legacy_scope: Q | None = None
-            if payment.invoice_id is not None:
-                legacy_scope = Q(invoice_id=payment.invoice_id)
-            elif payment.proforma_id is not None:
-                legacy_scope = Q(order__proforma_id=payment.proforma_id)
+            legacy_scope = RefundService._legacy_refund_scope_for_payment(payment)
             if legacy_scope is not None:
                 legacy_filter = Q(payment__isnull=True) & live_refunds & legacy_scope
                 already_refunded += int(
