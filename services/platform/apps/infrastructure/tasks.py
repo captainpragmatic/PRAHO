@@ -1960,11 +1960,25 @@ def cleanup_old_snapshots_task() -> dict[str, Any]:
                 snapshot.save(update_fields=["status"])
                 deleted += 1
             else:
+                # A confirmed provider-delete failure is terminal 'cleanup_failed'
+                # (distinct, surfaced for manual reconciliation) rather than left
+                # 'available' to be retried every day forever with no escalation.
+                snapshot.status = "cleanup_failed"
+                snapshot.save(update_fields=["status"])
                 failed += 1
                 logger.warning(f"⚠️ [Task:cleanup_snapshots] Delete failed: {result.unwrap_err()}")
         except Exception as e:
             failed += 1
             logger.error(f"🔥 [Task:cleanup_snapshots] Error: {e}")
 
-    logger.info(f"✅ [Task:cleanup_snapshots] Deleted: {deleted}, Failed: {failed}")
-    return {"deleted": deleted, "failed": failed}
+    # Reap snapshots stuck 'creating' (a crash between the provider create and
+    # the id write): the DB trace that prevents a silent orphan, terminalized
+    # once clearly stale so it stops reading as an in-flight snapshot.
+    stale_creating = DriftSnapshot.objects.filter(status="creating", created_at__lt=now - timedelta(days=1)).update(
+        status="failed"
+    )
+    if stale_creating:
+        logger.warning(f"⚠️ [Task:cleanup_snapshots] Reaped {stale_creating} stale 'creating' snapshot(s)")
+
+    logger.info(f"✅ [Task:cleanup_snapshots] Deleted: {deleted}, Failed: {failed}, Reaped: {stale_creating}")
+    return {"deleted": deleted, "failed": failed, "reaped_creating": stale_creating}

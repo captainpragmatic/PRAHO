@@ -30,7 +30,11 @@ from apps.infrastructure.models import (
     NodeSize,
     PanelType,
 )
-from apps.infrastructure.tasks import apply_scheduled_remediations_task, recover_stale_remediations_task
+from apps.infrastructure.tasks import (
+    apply_scheduled_remediations_task,
+    cleanup_old_snapshots_task,
+    recover_stale_remediations_task,
+)
 from apps.users.models import User
 
 
@@ -681,6 +685,104 @@ class TestCleanupSnapshots(DriftRemediationTestBase):
         expired = DriftSnapshot.objects.filter(expires_at__lte=timezone.now(), status="available")
         self.assertEqual(expired.count(), 1)
         self.assertEqual(expired.first().provider_snapshot_id, "snap-old")
+
+
+class TestSnapshotLifecycleHonesty(DriftRemediationTestBase):
+    """#321.1: _take_snapshot wrote status='available' directly and created no
+    row at all when the provider call failed, so a provider-create that
+    succeeded but then crashed before the DB write left a silent orphan, and the
+    'creating'/'failed' statuses were never written. It must record the attempt
+    BEFORE the provider call and commit a terminal status after."""
+
+    def _gateway(self, create_result):
+        gw = MagicMock()
+        gw.create_snapshot.return_value = create_result
+        return gw
+
+    def test_provider_error_persists_failed_snapshot_row(self):
+        """A provider failure must leave a durable 'failed' row (was: no row)."""
+        with patch.object(self.service, "_get_gateway", return_value=self._gateway(Err("provider boom"))):
+            result = self.service._take_snapshot(self.deployment)
+
+        self.assertTrue(result.is_err())
+        rows = DriftSnapshot.objects.filter(deployment=self.deployment)
+        self.assertEqual(rows.count(), 1, "the attempt must be durably recorded, not silently dropped")
+        self.assertEqual(rows.first().status, "failed")
+
+    def test_success_transitions_creating_to_available_with_id(self):
+        with patch.object(self.service, "_get_gateway", return_value=self._gateway(Ok("snap-xyz"))):
+            result = self.service._take_snapshot(self.deployment)
+
+        self.assertTrue(result.is_ok())
+        snap = result.unwrap()
+        snap.refresh_from_db()
+        self.assertEqual(snap.status, "available")
+        self.assertEqual(snap.provider_snapshot_id, "snap-xyz")
+
+
+class TestCleanupSnapshotTask(DriftRemediationTestBase):
+    """#321.3: drive cleanup_old_snapshots_task itself (the old test only
+    re-implemented its queryset). A confirmed provider-delete failure must move
+    the snapshot to the distinct 'cleanup_failed' state (surfaced, not retried
+    forever); stale 'creating' rows are reaped."""
+
+    def _run(self):
+        return cleanup_old_snapshots_task()
+
+    def _expired_available(self, sid="snap-1"):
+        return DriftSnapshot.objects.create(
+            deployment=self.deployment,
+            provider_snapshot_id=sid,
+            snapshot_type="pre_remediation",
+            status="available",
+            expires_at=timezone.now() - timedelta(days=1),
+        )
+
+    @patch("apps.infrastructure.provider_config.get_provider_token")
+    @patch("apps.infrastructure.cloud_gateway.get_cloud_gateway")
+    def test_delete_success_marks_deleted(self, mock_gateway_factory, mock_token):
+        snap = self._expired_available()
+        mock_token.return_value = Ok("tok")
+        gw = MagicMock()
+        gw.delete_snapshot.return_value = Ok(True)
+        mock_gateway_factory.return_value = gw
+
+        result = self._run()
+
+        snap.refresh_from_db()
+        self.assertEqual(snap.status, "deleted")
+        self.assertEqual(result["deleted"], 1)
+
+    @patch("apps.infrastructure.provider_config.get_provider_token")
+    @patch("apps.infrastructure.cloud_gateway.get_cloud_gateway")
+    def test_delete_failure_marks_cleanup_failed_not_retried(self, mock_gateway_factory, mock_token):
+        snap = self._expired_available()
+        mock_token.return_value = Ok("tok")
+        gw = MagicMock()
+        gw.delete_snapshot.return_value = Err("provider refused")
+        mock_gateway_factory.return_value = gw
+
+        self._run()
+
+        snap.refresh_from_db()
+        self.assertEqual(snap.status, "cleanup_failed")
+        # No longer 'available', so a second run does not re-select it.
+        self.assertEqual(DriftSnapshot.objects.filter(status="available", expires_at__lte=timezone.now()).count(), 0)
+
+    def test_stale_creating_is_reaped_as_failed(self):
+        snap = DriftSnapshot.objects.create(
+            deployment=self.deployment,
+            provider_snapshot_id="",
+            snapshot_type="pre_remediation",
+            status="creating",
+            expires_at=timezone.now() + timedelta(days=1),
+        )
+        DriftSnapshot.objects.filter(pk=snap.pk).update(created_at=timezone.now() - timedelta(days=2))
+
+        self._run()
+
+        snap.refresh_from_db()
+        self.assertEqual(snap.status, "failed")
 
 
 class TestExecutionClaim(DriftRemediationTestBase):

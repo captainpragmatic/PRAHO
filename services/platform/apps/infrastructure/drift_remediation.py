@@ -661,18 +661,36 @@ class DriftRemediationService:
             return Err("Cannot get cloud gateway for snapshot")
 
         name = f"praho-drift-{deployment.hostname}-{timezone.now().strftime('%Y%m%d%H%M%S')}"
-        result = gateway.create_snapshot(deployment.external_node_id, name)
 
-        if result.is_err():
-            return Err(f"Snapshot creation failed: {result.unwrap_err()}")
-
+        # Three explicit commit phases so a crash never leaves a silent orphan.
+        # This MUST NOT run inside an enclosing transaction (execute_remediation
+        # calls it after the claim's conditional update, with no atomic block) —
+        # otherwise the phase-1/phase-3 markers would roll back with the caller.
+        #
+        # Phase 1: durably record the attempt BEFORE the provider call. If the
+        # process dies between the provider create and the id write, this
+        # 'creating' row is the trace the cleanup sweep reaps (vs. an untracked
+        # provider snapshot billing forever with no PRAHO record).
         snapshot = DriftSnapshot.objects.create(
             deployment=deployment,
-            provider_snapshot_id=result.unwrap(),
+            provider_snapshot_id="",
             snapshot_type="pre_remediation",
-            status="available",
+            status="creating",
             expires_at=timezone.now() + timedelta(days=SNAPSHOT_EXPIRY_DAYS),
         )
+
+        # Phase 2: provider call (outside any transaction).
+        result = gateway.create_snapshot(deployment.external_node_id, name)
+
+        # Phase 3: commit the terminal status.
+        if result.is_err():
+            snapshot.status = "failed"
+            snapshot.save(update_fields=["status"])
+            return Err(f"Snapshot creation failed: {result.unwrap_err()}")
+
+        snapshot.provider_snapshot_id = result.unwrap()
+        snapshot.status = "available"
+        snapshot.save(update_fields=["provider_snapshot_id", "status"])
 
         logger.info(f"✅ [DriftRemediation] Snapshot created: {snapshot.provider_snapshot_id}")
         return Ok(snapshot)
