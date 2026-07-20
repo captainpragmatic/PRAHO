@@ -20,6 +20,10 @@ _PROMOTION_CONCURRENCY_TEST_CLASS = (
     "tests.promotions.test_order_discount_concurrency."
     "PromotionOrderPostgresConcurrencyTests"
 )
+_RECURRING_COLLECTION_CONCURRENCY_TEST_CLASS = (
+    "tests.billing.test_recurring_collection_concurrency."
+    "RecurringCollectionPostgresConcurrencyTests"
+)
 
 
 class NightlyPostgresConcurrencyWorkflowTests(SimpleTestCase):
@@ -65,6 +69,7 @@ class NightlyPostgresConcurrencyWorkflowTests(SimpleTestCase):
         command = concurrency_step["run"]
         self.assertIn(_BILLING_CONCURRENCY_TEST_CLASS, command)
         self.assertIn(_PROMOTION_CONCURRENCY_TEST_CLASS, command)
+        self.assertIn(_RECURRING_COLLECTION_CONCURRENCY_TEST_CLASS, command)
         self.assertIn("--settings=config.settings.ci", command)
         self.assertNotIn("config.settings.test", command)
         self.assertNotIn("--parallel", command)

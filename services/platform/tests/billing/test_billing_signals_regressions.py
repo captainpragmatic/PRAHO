@@ -2294,6 +2294,7 @@ class RefundServiceSuspensionAuditTrailTest(TestCase):
             captured_security_events.append((event_type, data))
 
         with (
+            patch("apps.billing.recurring_locking.lock_recurring_collection_customer"),
             patch("apps.orders.signals.Order.objects") as mock_qs,
             patch("apps.orders.signals.log_security_event", side_effect=capture_security_event),
             patch("apps.provisioning.models.Service.objects.select_for_update") as mock_service_lock,

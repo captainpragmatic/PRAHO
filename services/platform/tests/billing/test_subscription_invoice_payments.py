@@ -21,7 +21,11 @@ from apps.billing.invoice_models import Invoice, InvoiceLine
 from apps.billing.metering_models import BillingCycle, UsageAggregation, UsageMeter
 from apps.billing.payment_convergence import PaymentSuccessService
 from apps.billing.payment_models import Payment, PaymentRetryAttempt, PaymentRetryPolicy
-from apps.billing.payment_service import PaymentService
+from apps.billing.payment_service import (
+    PaymentService,
+    _revalidate_invoice_payment_reservation,
+    _submit_recurring_charge_under_revocation_lock,
+)
 from apps.billing.proforma_models import ProformaInvoice, ProformaLine
 from apps.billing.recurring_authorization_service import RecurringPaymentAuthorizationService
 from apps.billing.recurring_billing import RecurringBillingOrchestrator, next_billing_period_end
@@ -49,8 +53,8 @@ def _intent_result(
     )
 
 
-class SubscriptionInvoicePaymentTestCase(TestCase):
-    """Exercise the real invoice, Payment, and recurring-billing path."""
+class _SubscriptionInvoicePaymentFixture:
+    """Shared invoice-native recurring-billing fixture."""
 
     def setUp(self) -> None:
         self.currency, _ = Currency.objects.get_or_create(
@@ -230,6 +234,10 @@ class SubscriptionInvoicePaymentTestCase(TestCase):
             payment_authorization=self.authorization,
             auto_payment_enabled=True,
         )
+
+
+class SubscriptionInvoicePaymentTestCase(_SubscriptionInvoicePaymentFixture, TestCase):
+    """Exercise the real invoice, Payment, and recurring-billing path."""
 
     def test_due_aligned_services_share_one_cycle_linked_proforma_idempotently(self) -> None:
         now = timezone.now()
@@ -2759,3 +2767,82 @@ class WebhookAttemptMisbindingRegressionTests(TestCase):
         self.assertTrue(result.is_ok(), f"recovery failed: {result}")
         self.p2.refresh_from_db()
         self.assertEqual(self.p2.gateway_txn_id, "pi_for_attempt_2")
+
+
+class RecurringChargeAbandonGuardTests(_SubscriptionInvoicePaymentFixture, TestCase):
+    """A resumed reservation may already carry a live Stripe intent from a prior
+    attempt (worker died before binding, success webhook not yet delivered).
+    Abandoning it inline would record a real charge as failed — only a
+    freshly-created reservation is provably pre-submit and safe to abandon."""
+
+    def _pending_recurring_payment(self) -> Payment:
+        return Payment.objects.create(
+            customer=self.customer,
+            invoice_id=self.invoice.id,
+            amount_cents=self.invoice.total_cents,
+            currency=self.currency,
+            status="pending",
+            payment_method="stripe",
+            idempotency_key=f"invoice:{self.invoice.id}:stripe:guard",
+            meta={"source": "recurring_billing"},
+        )
+
+    def _disable_kill_switch(self) -> None:
+        SettingsService.set_setting("billing.recurring_auto_collection_enabled", False)
+
+    def test_resumed_reservation_is_not_abandoned_when_collection_disabled(self) -> None:
+        self._disable_kill_switch()
+        payment = self._pending_recurring_payment()
+        submit_called = {"v": False}
+
+        def _submit() -> PaymentIntentResult:
+            submit_called["v"] = True
+            return _intent_result(payment_intent_id="pi_should_not_run")
+
+        _result, submitted = _submit_recurring_charge_under_revocation_lock(
+            customer_id=self.customer.id,
+            payment=payment,
+            revalidate=lambda: None,
+            submit=_submit,
+            reservation_is_resumed=True,
+        )
+
+        self.assertFalse(submitted)
+        self.assertFalse(submit_called["v"])
+        payment.refresh_from_db()
+        self.assertEqual(payment.status, "pending")
+        self.assertNotIn("reservation_abandoned", payment.meta)
+
+    def test_fresh_reservation_is_abandoned_when_collection_disabled(self) -> None:
+        self._disable_kill_switch()
+        payment = self._pending_recurring_payment()
+
+        _result, submitted = _submit_recurring_charge_under_revocation_lock(
+            customer_id=self.customer.id,
+            payment=payment,
+            revalidate=lambda: None,
+            submit=lambda: _intent_result(payment_intent_id="pi_never"),
+            reservation_is_resumed=False,
+        )
+
+        self.assertFalse(submitted)
+        payment.refresh_from_db()
+        self.assertEqual(payment.status, "failed")
+        self.assertTrue(payment.meta.get("reservation_abandoned"))
+
+    def test_revalidation_failure_skips_abandon_for_resumed_reservation(self) -> None:
+        payment = self._pending_recurring_payment()
+        # Force a revalidation failure by expecting a different amount.
+        reason = _revalidate_invoice_payment_reservation(
+            invoice_id=self.invoice.id,
+            payment_id=payment.id,
+            expected_amount_cents=payment.amount_cents + 1,
+            expected_currency_id=self.currency.code,
+            expected_saved_method_id=self.payment_method.id,
+            abandon_on_failure=False,
+        )
+
+        self.assertIsNotNone(reason)
+        payment.refresh_from_db()
+        self.assertEqual(payment.status, "pending")
+        self.assertNotIn("reservation_abandoned", payment.meta)

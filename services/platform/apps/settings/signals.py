@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from django.db import transaction
 from django.db.models.signals import post_delete, post_save
 from django.dispatch import receiver
 
@@ -38,8 +39,9 @@ def handle_setting_saved(sender: Any, instance: SystemSetting, created: bool, **
     - Send notifications if needed
     """
     try:
-        # Clear cache for the updated setting
-        SettingsService._clear_setting_cache(instance.key)
+        # Do not invalidate before the database value is visible to other
+        # transactions; an early reader could otherwise repopulate the old value.
+        transaction.on_commit(lambda key=instance.key: SettingsService._clear_setting_cache(key))
 
         # Log audit event
         action = "create" if created else "update"
@@ -83,8 +85,7 @@ def handle_setting_deleted(sender: Any, instance: SystemSetting, **kwargs: Any) 
     - Log audit event
     """
     try:
-        # Clear cache for the deleted setting
-        SettingsService._clear_setting_cache(instance.key)
+        transaction.on_commit(lambda key=instance.key: SettingsService._clear_setting_cache(key))
 
         # Log audit event
         AuditService.log_simple_event(
