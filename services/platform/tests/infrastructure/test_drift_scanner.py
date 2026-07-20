@@ -88,11 +88,16 @@ class TestCloudDriftDetection(DriftScannerTestBase):
         """Server type mismatch should create HIGH drift report."""
         mock_token.return_value = Ok("test-token")
         mock_gw = MagicMock()
-        mock_gw.get_server.return_value = Ok(ServerInfo(
-            server_id="12345", name="test", status="running",
-            ipv4_address="1.2.3.4", ipv6_address="2001:db8::1",
-            server_type="cpx41",  # Different from cpx21
-        ))
+        mock_gw.get_server.return_value = Ok(
+            ServerInfo(
+                server_id="12345",
+                name="test",
+                status="running",
+                ipv4_address="1.2.3.4",
+                ipv6_address="2001:db8::1",
+                server_type="cpx41",  # Different from cpx21
+            )
+        )
         mock_gateway_factory.return_value = mock_gw
 
         result = self.scanner.scan_deployment(self.deployment, check_types=["cloud"])
@@ -122,12 +127,16 @@ class TestCloudDriftDetection(DriftScannerTestBase):
         """IP address change should create CRITICAL drift report."""
         mock_token.return_value = Ok("test-token")
         mock_gw = MagicMock()
-        mock_gw.get_server.return_value = Ok(ServerInfo(
-            server_id="12345", name="test", status="running",
-            ipv4_address="5.6.7.8",  # Different IP
-            ipv6_address="2001:db8::1",
-            server_type="cpx21",
-        ))
+        mock_gw.get_server.return_value = Ok(
+            ServerInfo(
+                server_id="12345",
+                name="test",
+                status="running",
+                ipv4_address="5.6.7.8",  # Different IP
+                ipv6_address="2001:db8::1",
+                server_type="cpx21",
+            )
+        )
         mock_gateway_factory.return_value = mock_gw
 
         result = self.scanner.scan_deployment(self.deployment, check_types=["cloud"])
@@ -143,12 +152,17 @@ class TestCloudDriftDetection(DriftScannerTestBase):
         """Matching server should produce no reports."""
         mock_token.return_value = Ok("test-token")
         mock_gw = MagicMock()
-        mock_gw.get_server.return_value = Ok(ServerInfo(
-            server_id="12345", name="prd-sha-het-de-fsn1-001", status="running",
-            ipv4_address="1.2.3.4", ipv6_address="2001:db8::1",
-            server_type="cpx21",
-            labels={"managed-by": "praho", "hostname": "prd-sha-het-de-fsn1-001"},
-        ))
+        mock_gw.get_server.return_value = Ok(
+            ServerInfo(
+                server_id="12345",
+                name="prd-sha-het-de-fsn1-001",
+                status="running",
+                ipv4_address="1.2.3.4",
+                ipv6_address="2001:db8::1",
+                server_type="cpx21",
+                labels={"managed-by": "praho", "hostname": "prd-sha-het-de-fsn1-001"},
+            )
+        )
         mock_gateway_factory.return_value = mock_gw
 
         result = self.scanner.scan_deployment(self.deployment, check_types=["cloud"])
@@ -167,9 +181,7 @@ class TestCloudDriftDetection(DriftScannerTestBase):
         result = self.scanner.scan_deployment(self.deployment, check_types=["cloud"])
         self.assertTrue(result.is_ok())
 
-        failed_checks = DriftCheck.objects.filter(
-            deployment=self.deployment, status="failed"
-        )
+        failed_checks = DriftCheck.objects.filter(deployment=self.deployment, status="failed")
         self.assertEqual(failed_checks.count(), 1)
 
 
@@ -233,12 +245,17 @@ class TestAutoResolution(DriftScannerTestBase):
         """
         mock_token.return_value = Ok("test-token")
         mock_gw = MagicMock()
-        mock_gw.get_server.return_value = Ok(ServerInfo(
-            server_id="12345", name="prd-sha-het-de-fsn1-001", status="running",
-            ipv4_address="1.2.3.4", ipv6_address="2001:db8::1",
-            server_type="cpx21",
-            labels={"managed-by": "other", "hostname": "wrong-hostname"},  # Both labels wrong
-        ))
+        mock_gw.get_server.return_value = Ok(
+            ServerInfo(
+                server_id="12345",
+                name="prd-sha-het-de-fsn1-001",
+                status="running",
+                ipv4_address="1.2.3.4",
+                ipv6_address="2001:db8::1",
+                server_type="cpx21",
+                labels={"managed-by": "other", "hostname": "wrong-hostname"},  # Both labels wrong
+            )
+        )
         mock_gateway_factory.return_value = mock_gw
 
         for _ in range(2):
@@ -260,12 +277,17 @@ class TestAutoResolution(DriftScannerTestBase):
         """HIGH drift should create a pending remediation request."""
         mock_token.return_value = Ok("test-token")
         mock_gw = MagicMock()
-        mock_gw.get_server.return_value = Ok(ServerInfo(
-            server_id="12345", name="test", status="running",
-            ipv4_address="1.2.3.4", ipv6_address="2001:db8::1",
-            server_type="cpx41",  # Different type -> HIGH
-            labels={"managed-by": "praho", "hostname": "prd-sha-het-de-fsn1-001"},
-        ))
+        mock_gw.get_server.return_value = Ok(
+            ServerInfo(
+                server_id="12345",
+                name="test",
+                status="running",
+                ipv4_address="1.2.3.4",
+                ipv6_address="2001:db8::1",
+                server_type="cpx41",  # Different type -> HIGH
+                labels={"managed-by": "praho", "hostname": "prd-sha-het-de-fsn1-001"},
+            )
+        )
         mock_gateway_factory.return_value = mock_gw
 
         result = self.scanner.scan_deployment(self.deployment, check_types=["cloud"])
@@ -324,9 +346,7 @@ class TestDedupAndConvergence(DriftScannerTestBase):
             result = self.scanner.scan_deployment(self.deployment, check_types=["cloud"])
             self.assertTrue(result.is_ok())
 
-        open_reports = DriftReport.objects.filter(
-            deployment=self.deployment, field_name="server_type", resolved=False
-        )
+        open_reports = DriftReport.objects.filter(deployment=self.deployment, field_name="server_type", resolved=False)
         self.assertEqual(open_reports.count(), 1)
         report = open_reports.first()
         self.assertEqual(report.occurrence_count, 2)
@@ -420,12 +440,17 @@ class TestScanDeployment(DriftScannerTestBase):
         """Scanning multiple layers should create checks for each."""
         mock_token.return_value = Ok("test-token")
         mock_gw = MagicMock()
-        mock_gw.get_server.return_value = Ok(ServerInfo(
-            server_id="12345", name="test", status="running",
-            ipv4_address="1.2.3.4", ipv6_address="2001:db8::1",
-            server_type="cpx21",
-            labels={"managed-by": "praho", "hostname": "prd-sha-het-de-fsn1-001"},
-        ))
+        mock_gw.get_server.return_value = Ok(
+            ServerInfo(
+                server_id="12345",
+                name="test",
+                status="running",
+                ipv4_address="1.2.3.4",
+                ipv6_address="2001:db8::1",
+                server_type="cpx21",
+                labels={"managed-by": "praho", "hostname": "prd-sha-het-de-fsn1-001"},
+            )
+        )
         mock_gateway_factory.return_value = mock_gw
         mock_probe.return_value = True
 
@@ -578,3 +603,48 @@ class TestExecuteTaskGuards(DriftScannerTestBase):
         outcome = execute_remediation_task(987654321)
 
         self.assertEqual(outcome, {"status": "missing"})
+
+
+class TestDismissedReportNotRerequested(DriftScannerTestBase):
+    """#332 RX1: the symmetric lock — a report dismissed (resolved='ignored')
+    must not get a fresh remediation request minted by a concurrent scan path."""
+
+    def test_create_request_skips_dismissed_report(self):
+        report = DriftReport.objects.create(
+            drift_check=DriftCheck.objects.create(deployment=self.deployment, check_type="cloud", status="completed"),
+            deployment=self.deployment,
+            severity="high",
+            category="server_state",
+            field_name="server_type",
+            expected_value="cpx21",
+            actual_value="cpx41",
+            resolved=True,
+            resolution_type="ignored",
+        )
+
+        created = self.scanner._create_remediation_request(report)
+
+        self.assertIsNone(created, "a dismissed report must not receive a new request")
+        self.assertEqual(report.remediation_requests.count(), 0)
+
+
+class TestScanAuditResilience(DriftScannerTestBase):
+    """#320: the scanner's scan-started / scan-completed audit calls were
+    unwrapped, so an audit-backend exception aborted an otherwise-successful
+    scan. They must be best-effort like every other drift audit call site."""
+
+    @patch("apps.infrastructure.drift_scanner.DriftScannerService._tcp_probe")
+    @patch(
+        "apps.infrastructure.drift_scanner.InfrastructureAuditService.log_drift_scan_completed",
+        side_effect=RuntimeError("audit backend down"),
+    )
+    @patch(
+        "apps.infrastructure.drift_scanner.InfrastructureAuditService.log_drift_scan_started",
+        side_effect=RuntimeError("audit backend down"),
+    )
+    def test_scan_survives_audit_failure(self, _mock_started, _mock_completed, mock_probe):
+        mock_probe.return_value = True  # reachable → clean scan, no drift to record
+
+        result = self.scanner.scan_deployment(self.deployment, check_types=["network"])
+
+        self.assertTrue(result.is_ok(), f"scan must survive an audit failure, got {result}")

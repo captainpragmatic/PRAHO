@@ -65,5 +65,6 @@ urlpatterns = [
     path("drift/remediations/<int:pk>/reject/", views.drift_remediation_reject, name="drift_remediation_reject"),
     path("drift/remediations/<int:pk>/schedule/", views.drift_remediation_schedule, name="drift_remediation_schedule"),
     path("drift/remediations/<int:pk>/accept/", views.drift_remediation_accept, name="drift_remediation_accept"),
+    path("drift/reports/<int:pk>/dismiss/", views.drift_report_dismiss, name="drift_report_dismiss"),
     path("drift/<int:deployment_pk>/scan/", views.drift_scan_trigger, name="drift_scan_trigger"),
 ]

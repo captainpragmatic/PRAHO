@@ -462,6 +462,18 @@ class NodeDeploymentService:
 
                 stages_completed.append(stage_name)
                 log_deployment("info", f"Ansible {playbook} completed successfully")
+                # Heartbeat: the four playbooks can legally run up to ~2h with no
+                # status transition; touch updated_at after each so
+                # recover_stuck_deployments_task never reaps a live deployment
+                # mid-stage.
+                deployment.save(update_fields=["updated_at"])
+
+            # The FSM requires installing_panel -> configuring_backups -> validating;
+            # the backup configuration is part of the ansible_backup playbook above,
+            # so record the state transition once here before validating (without it
+            # transition_to('validating') raises and every deployment fails at the
+            # very end after all paid provisioning work).
+            deployment.transition_to("configuring_backups")
 
             # Stage 11: Validation
             report_progress("validation")

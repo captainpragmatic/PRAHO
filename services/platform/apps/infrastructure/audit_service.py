@@ -962,6 +962,30 @@ class InfrastructureAuditService:
         )
 
     @classmethod
+    def log_drift_dismissed(
+        cls,
+        deployment: NodeDeployment,
+        drift_report: DriftReport,
+        admin: User,
+        context: InfrastructureAuditContext | None = None,
+    ) -> AuditEvent:
+        """Log a staff dismissal of a low/moderate drift report (kept as-is)."""
+        context = context or InfrastructureAuditContext()
+        return cls._create_event(
+            action="drift_dismissed",
+            content_object=deployment,
+            user=admin,
+            ip_address=context.ip_address,
+            user_agent=context.user_agent or "",
+            description=f"Drift dismissed on {deployment.hostname}: {drift_report.field_name} by {admin.email}",
+            metadata={
+                **context.metadata,
+                "field_name": drift_report.field_name,
+                "severity": drift_report.severity,
+            },
+        )
+
+    @classmethod
     def log_drift_remediation_rejected(
         cls,
         deployment: NodeDeployment,

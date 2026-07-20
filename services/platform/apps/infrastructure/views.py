@@ -1514,8 +1514,11 @@ def drift_remediation_approve(request: HttpRequest, pk: int) -> HttpResponse:
     )
 
     user = cast("User", request.user)
+    # ADR-0029: a remediation that reboots the server needs the restart itself
+    # explicitly confirmed (a separate checkbox on the approval form).
+    restart_approved = request.POST.get("restart_approved") in ("1", "true", "on", "yes")
     service = get_drift_remediation_service()
-    result = service.approve_remediation(pk, user)
+    result = service.approve_remediation(pk, user, restart_approved=restart_approved)
 
     if result.is_ok():
         messages.success(request, _("Remediation approved. Execution queued."))
@@ -1603,6 +1606,27 @@ def drift_remediation_accept(request: HttpRequest, pk: int) -> HttpResponse:
         messages.error(request, str(result.unwrap_err()))
 
     return redirect("infrastructure:drift_remediation_list")
+
+
+@login_required
+@require_deployment_management
+@require_POST
+def drift_report_dismiss(request: HttpRequest, pk: int) -> HttpResponse:
+    """Dismiss a low/moderate drift report that has no remediation request."""
+    from apps.infrastructure.drift_remediation import (  # noqa: PLC0415  # Deferred: avoids circular import
+        get_drift_remediation_service,  # Circular: cross-app
+    )
+
+    user = cast("User", request.user)
+    service = get_drift_remediation_service()
+    result = service.dismiss_report(pk, user)
+
+    if result.is_ok():
+        messages.success(request, _("Drift report dismissed."))
+    else:
+        messages.error(request, str(result.unwrap_err()))
+
+    return redirect("infrastructure:drift_dashboard")
 
 
 def _run_single_drift_scan(deployment_pk: int) -> dict[str, Any]:

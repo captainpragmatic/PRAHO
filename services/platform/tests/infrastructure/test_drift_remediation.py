@@ -30,7 +30,11 @@ from apps.infrastructure.models import (
     NodeSize,
     PanelType,
 )
-from apps.infrastructure.tasks import apply_scheduled_remediations_task, recover_stale_remediations_task
+from apps.infrastructure.tasks import (
+    apply_scheduled_remediations_task,
+    cleanup_old_snapshots_task,
+    recover_stale_remediations_task,
+)
 from apps.users.models import User
 
 
@@ -111,7 +115,9 @@ class DriftRemediationTestBase(TestCase):
                 "actual_value": "cpx41",
             },
             requires_approval=True,
-            requires_restart=True,
+            # Default fixture does not reboot: only server_type drift sets this,
+            # and the restart-approval gate is exercised in TestRestartApprovalGate.
+            requires_restart=False,
         )
         self.service = DriftRemediationService()
 
@@ -143,6 +149,115 @@ class DriftRemediationTestBase(TestCase):
             external_node_id=f"1234{node_number}",
             ipv4_address="1.2.3.5",
         )
+
+
+class TestDismissReport(DriftRemediationTestBase):
+    """#332: low/moderate reports never get a remediation request (only
+    high/critical do), so before this there was no staff action to clear a
+    permanent, intentional low-severity drift — it sat open forever inflating
+    dashboard counts. dismiss_report resolves it as 'ignored'."""
+
+    def _low_report(self) -> DriftReport:
+        return DriftReport.objects.create(
+            drift_check=self.check,
+            deployment=self.deployment,
+            severity="low",
+            category="labels",
+            field_name="labels",
+            expected_value="a",
+            actual_value="b",
+        )
+
+    def test_dismiss_low_report_marks_ignored(self):
+        report = self._low_report()
+
+        result = self.service.dismiss_report(report.pk, self.admin)
+
+        self.assertTrue(result.is_ok(), f"dismiss should succeed, got {result}")
+        report.refresh_from_db()
+        self.assertTrue(report.resolved)
+        self.assertEqual(report.resolution_type, "ignored")
+        self.assertIsNotNone(report.resolved_at)
+
+    def test_dismiss_refuses_when_open_request_exists(self):
+        """self.report already has an open remediation_request — dismissing it
+        would leave a resolved report with an open request. Refuse."""
+        result = self.service.dismiss_report(self.report.pk, self.admin)
+
+        self.assertTrue(result.is_err())
+        self.report.refresh_from_db()
+        self.assertFalse(self.report.resolved)
+
+    def test_dismiss_audit_failure_rolls_back(self):
+        """A staff ignore-decision's audit is mandatory: if it fails, the
+        dismissal must roll back (unlike the best-effort reject/schedule audit)."""
+        report = self._low_report()
+        with patch(
+            "apps.infrastructure.drift_remediation.InfrastructureAuditService.log_drift_dismissed",
+            side_effect=RuntimeError("audit backend down"),
+        ):
+            result = self.service.dismiss_report(report.pk, self.admin)
+
+        self.assertTrue(result.is_err())
+        report.refresh_from_db()
+        self.assertFalse(report.resolved, "dismissal must roll back when its mandatory audit fails")
+
+
+class TestRestartApprovalGate(DriftRemediationTestBase):
+    """#328-10 / ADR-0029: a remediation that reboots a customer-hosting server
+    (requires_restart, set by the scanner for server_type drift) must have the
+    restart itself explicitly signed off."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.remediation_request.requires_restart = True
+        self.remediation_request.save(update_fields=["requires_restart"])
+
+    @patch("django_q.tasks.async_task", return_value="task-1")
+    def test_approve_refuses_restart_without_confirmation(self, _mock_async):
+        result = self.service.approve_remediation(self.remediation_request.pk, self.admin)
+
+        self.assertTrue(result.is_err())
+        self.remediation_request.refresh_from_db()
+        self.assertEqual(self.remediation_request.status, "pending_approval")
+        self.assertFalse(self.remediation_request.restart_approved)
+
+    @patch("django_q.tasks.async_task", return_value="task-1")
+    def test_approve_with_confirmation_sets_flag(self, _mock_async):
+        result = self.service.approve_remediation(self.remediation_request.pk, self.admin, restart_approved=True)
+
+        self.assertTrue(result.is_ok(), f"approve with restart confirmation should succeed, got {result}")
+        self.remediation_request.refresh_from_db()
+        self.assertEqual(self.remediation_request.status, "approved")
+        self.assertTrue(self.remediation_request.restart_approved)
+
+    @patch("apps.infrastructure.drift_remediation.DriftRemediationService._take_snapshot")
+    def test_execute_refuses_requires_restart_without_approval(self, mock_snapshot):
+        self.remediation_request.status = "approved"
+        self.remediation_request.restart_approved = False
+        self.remediation_request.save(update_fields=["status", "restart_approved"])
+
+        result = self.service.execute_remediation(self.remediation_request)
+
+        self.assertTrue(result.is_err())
+        self.assertIn("restart", result.unwrap_err().lower())
+        mock_snapshot.assert_not_called()  # must fail before any destructive work
+
+    @patch("django_q.tasks.async_task", return_value="task-1")
+    def test_non_restart_request_needs_no_confirmation(self, _mock_async):
+        """A request that does not reboot approves normally without confirmation."""
+        other = DriftRemediationRequest.objects.create(
+            report=self._make_report(field_name="ipv4_address"),
+            deployment=self.deployment,
+            action_type="apply_desired",
+            action_details={"field_name": "ipv4_address"},
+            requires_approval=True,
+            requires_restart=False,
+        )
+
+        result = self.service.approve_remediation(other.pk, self.admin)
+
+        self.assertTrue(result.is_ok())
 
 
 class TestApproveReject(DriftRemediationTestBase):
@@ -196,9 +311,7 @@ class TestApproveReject(DriftRemediationTestBase):
 
     def test_reject_flow(self):
         """Rejecting should set status=rejected with reason."""
-        result = self.service.reject_remediation(
-            self.remediation_request.pk, self.admin, "Not needed"
-        )
+        result = self.service.reject_remediation(self.remediation_request.pk, self.admin, "Not needed")
         self.assertTrue(result.is_ok())
 
         self.remediation_request.refresh_from_db()
@@ -208,9 +321,7 @@ class TestApproveReject(DriftRemediationTestBase):
     def test_schedule_flow(self):
         """Scheduling should set status=scheduled with datetime."""
         future = timezone.now() + timedelta(hours=2)
-        result = self.service.schedule_remediation(
-            self.remediation_request.pk, self.admin, future
-        )
+        result = self.service.schedule_remediation(self.remediation_request.pk, self.admin, future)
         self.assertTrue(result.is_ok())
 
         self.remediation_request.refresh_from_db()
@@ -482,8 +593,16 @@ class TestExecuteRemediation(DriftRemediationTestBase):
         self.assertIn("already in progress", result.unwrap_err())
 
     def test_remediation_requires_restart_flag(self):
-        """server_type changes should have requires_restart=True."""
-        self.assertTrue(self.remediation_request.requires_restart)
+        """The requires_restart flag (set by the scanner for server_type drift)
+        is persisted on the request."""
+        req = DriftRemediationRequest.objects.create(
+            report=self._make_report(field_name="firewall"),
+            deployment=self.deployment,
+            action_type="apply_desired",
+            requires_restart=True,
+        )
+        req.refresh_from_db()
+        self.assertTrue(req.requires_restart)
 
     @patch("apps.infrastructure.drift_remediation.DriftRemediationService._take_snapshot")
     def test_execute_fails_fast_for_unfixable_field_without_snapshot(self, mock_snapshot):
@@ -682,11 +801,127 @@ class TestCleanupSnapshots(DriftRemediationTestBase):
             status="available",
             expires_at=timezone.now() - timedelta(days=1),
         )
-        expired = DriftSnapshot.objects.filter(
-            expires_at__lte=timezone.now(), status="available"
-        )
+        expired = DriftSnapshot.objects.filter(expires_at__lte=timezone.now(), status="available")
         self.assertEqual(expired.count(), 1)
         self.assertEqual(expired.first().provider_snapshot_id, "snap-old")
+
+
+class TestSnapshotLifecycleHonesty(DriftRemediationTestBase):
+    """#321.1: _take_snapshot wrote status='available' directly and created no
+    row at all when the provider call failed, so a provider-create that
+    succeeded but then crashed before the DB write left a silent orphan, and the
+    'creating'/'failed' statuses were never written. It must record the attempt
+    BEFORE the provider call and commit a terminal status after."""
+
+    def _gateway(self, create_result):
+        gw = MagicMock()
+        gw.create_snapshot.return_value = create_result
+        return gw
+
+    def test_provider_error_persists_failed_snapshot_row(self):
+        """A provider failure must leave a durable 'failed' row (was: no row)."""
+        with patch.object(self.service, "_get_gateway", return_value=self._gateway(Err("provider boom"))):
+            result = self.service._take_snapshot(self.deployment)
+
+        self.assertTrue(result.is_err())
+        rows = DriftSnapshot.objects.filter(deployment=self.deployment)
+        self.assertEqual(rows.count(), 1, "the attempt must be durably recorded, not silently dropped")
+        self.assertEqual(rows.first().status, "failed")
+
+    def test_success_transitions_creating_to_available_with_id(self):
+        with patch.object(self.service, "_get_gateway", return_value=self._gateway(Ok("snap-xyz"))):
+            result = self.service._take_snapshot(self.deployment)
+
+        self.assertTrue(result.is_ok())
+        snap = result.unwrap()
+        snap.refresh_from_db()
+        self.assertEqual(snap.status, "available")
+        self.assertEqual(snap.provider_snapshot_id, "snap-xyz")
+
+    def test_provider_raise_is_contained_and_marks_cleanup_failed(self):
+        """If the provider SDK raises (not returns Err), _take_snapshot must not
+        propagate — it returns Err so execute_remediation does not crash with the
+        request stuck in_progress. The raise is AMBIGUOUS (the provider may have
+        created the snapshot before the failure surfaced), so the row is marked
+        'cleanup_failed' (possible billable orphan, needs reconciliation), not
+        'failed' (which would assert no provider resource exists)."""
+        gw = MagicMock()
+        gw.create_snapshot.side_effect = RuntimeError("SDK exploded")
+        with patch.object(self.service, "_get_gateway", return_value=gw):
+            result = self.service._take_snapshot(self.deployment)
+
+        self.assertTrue(result.is_err())
+        rows = DriftSnapshot.objects.filter(deployment=self.deployment)
+        self.assertEqual(rows.count(), 1)
+        self.assertEqual(rows.first().status, "cleanup_failed")
+
+
+class TestCleanupSnapshotTask(DriftRemediationTestBase):
+    """#321.3: drive cleanup_old_snapshots_task itself (the old test only
+    re-implemented its queryset). A confirmed provider-delete failure must move
+    the snapshot to the distinct 'cleanup_failed' state (surfaced, not retried
+    forever); stale 'creating' rows are reaped."""
+
+    def _run(self):
+        return cleanup_old_snapshots_task()
+
+    def _expired_available(self, sid="snap-1"):
+        return DriftSnapshot.objects.create(
+            deployment=self.deployment,
+            provider_snapshot_id=sid,
+            snapshot_type="pre_remediation",
+            status="available",
+            expires_at=timezone.now() - timedelta(days=1),
+        )
+
+    @patch("apps.infrastructure.provider_config.get_provider_token")
+    @patch("apps.infrastructure.cloud_gateway.get_cloud_gateway")
+    def test_delete_success_marks_deleted(self, mock_gateway_factory, mock_token):
+        snap = self._expired_available()
+        mock_token.return_value = Ok("tok")
+        gw = MagicMock()
+        gw.delete_snapshot.return_value = Ok(True)
+        mock_gateway_factory.return_value = gw
+
+        result = self._run()
+
+        snap.refresh_from_db()
+        self.assertEqual(snap.status, "deleted")
+        self.assertEqual(result["deleted"], 1)
+
+    @patch("apps.infrastructure.provider_config.get_provider_token")
+    @patch("apps.infrastructure.cloud_gateway.get_cloud_gateway")
+    def test_delete_failure_marks_cleanup_failed_not_retried(self, mock_gateway_factory, mock_token):
+        snap = self._expired_available()
+        mock_token.return_value = Ok("tok")
+        gw = MagicMock()
+        gw.delete_snapshot.return_value = Err("provider refused")
+        mock_gateway_factory.return_value = gw
+
+        self._run()
+
+        snap.refresh_from_db()
+        self.assertEqual(snap.status, "cleanup_failed")
+        # No longer 'available', so a second run does not re-select it.
+        self.assertEqual(DriftSnapshot.objects.filter(status="available", expires_at__lte=timezone.now()).count(), 0)
+
+    def test_stale_creating_is_reaped_as_cleanup_failed(self):
+        """A crash left this 'creating' row with no provider id; the provider
+        snapshot may still exist, so it terminalizes to cleanup_failed (surfaced
+        for manual reconciliation), not plain failed."""
+        snap = DriftSnapshot.objects.create(
+            deployment=self.deployment,
+            provider_snapshot_id="",
+            snapshot_type="pre_remediation",
+            status="creating",
+            expires_at=timezone.now() + timedelta(days=1),
+        )
+        DriftSnapshot.objects.filter(pk=snap.pk).update(created_at=timezone.now() - timedelta(days=2))
+
+        self._run()
+
+        snap.refresh_from_db()
+        self.assertEqual(snap.status, "cleanup_failed")
 
 
 class TestExecutionClaim(DriftRemediationTestBase):
@@ -741,9 +976,7 @@ class TestExecutionClaim(DriftRemediationTestBase):
     @patch("apps.infrastructure.drift_remediation.DriftRemediationService._verify_remediation")
     @patch("apps.infrastructure.drift_remediation.DriftRemediationService._get_gateway")
     @patch("apps.infrastructure.drift_remediation.DriftRemediationService._take_snapshot")
-    def test_stale_in_progress_is_reaped_inline_and_new_claim_succeeds(
-        self, mock_snapshot, mock_gateway, mock_verify
-    ):
+    def test_stale_in_progress_is_reaped_inline_and_new_claim_succeeds(self, mock_snapshot, mock_gateway, mock_verify):
         """One crashed execution can never block a deployment forever."""
         stale = DriftRemediationRequest.objects.create(
             report=self._make_report(),
@@ -904,6 +1137,29 @@ class TestRecoverStaleRemediations(DriftRemediationTestBase):
         self.assertEqual(result["swept_reports"], 1)
         self.assertEqual(result["swept_requests"], 1)
 
+    def test_scheduled_with_null_scheduled_for_is_recovered(self):
+        """#333.5: a 'scheduled' request whose scheduled_for is NULL can never
+        be dispatched (apply_scheduled_remediations filters scheduled_for__lte,
+        which excludes NULL) yet counts as OPEN for uniq_open_request_per_report,
+        permanently blocking a replacement request. The deployment here stays
+        'completed' so the out-of-scope sweep (step 3) never touches it — only a
+        dedicated malformed-row sweep frees it."""
+        # Force the malformed terminal-blocking state a buggy writer could leave.
+        DriftRemediationRequest.objects.filter(pk=self.remediation_request.pk).update(
+            status="scheduled", scheduled_for=None
+        )
+
+        result = self._run_task()
+
+        self.remediation_request.refresh_from_db()
+        self.assertEqual(self.remediation_request.status, "failed")
+        self.assertNotIn(
+            self.remediation_request.status,
+            ("pending_approval", "approved", "scheduled", "in_progress"),
+            "malformed scheduled row must no longer count as open",
+        )
+        self.assertEqual(result["malformed_scheduled_count"], 1)
+
 
 class TestApplyScheduledRemediations(DriftRemediationTestBase):
     """Tests for the per-row claim + enqueue scheduled task."""
@@ -1059,7 +1315,9 @@ class TestVerifyRemediation(DriftRemediationTestBase):
     @patch("apps.infrastructure.drift_remediation.DriftRemediationService._rollback")
     @patch("apps.infrastructure.drift_remediation.DriftRemediationService._get_gateway")
     @patch("apps.infrastructure.drift_remediation.DriftRemediationService._take_snapshot")
-    def test_inconclusive_verification_fails_without_rollback(self, mock_snapshot, mock_gateway, mock_rollback, _settings):
+    def test_inconclusive_verification_fails_without_rollback(
+        self, mock_snapshot, mock_gateway, mock_rollback, _settings
+    ):
         """An inconclusive verification marks the request failed and never restores the snapshot."""
         self.remediation_request.status = "approved"
         self.remediation_request.save(update_fields=["status"])
@@ -1343,3 +1601,142 @@ class TestAcceptDriftRaceDiagnostics(DriftRemediationTestBase):
 
         self.assertTrue(result.is_err())
         self.assertIn("approved", result.unwrap_err())
+
+
+class TestAuditWrappingResilience(DriftRemediationTestBase):
+    """#320: an audit-layer exception must not fail an otherwise-successful
+    operation. reject/schedule left their InfrastructureAuditService calls
+    unwrapped while every sibling call site (approve, accept, applied) wraps
+    try/except + warning — so an audit backend blip surfaced as a 500 after
+    the state change had already committed."""
+
+    def test_reject_survives_audit_failure(self) -> None:
+        with patch(
+            "apps.infrastructure.drift_remediation.InfrastructureAuditService.log_drift_remediation_rejected",
+            side_effect=RuntimeError("audit backend down"),
+        ):
+            result = self.service.reject_remediation(self.remediation_request.pk, self.admin, "Not needed")
+
+        self.assertTrue(result.is_ok(), f"reject must survive an audit failure, got {result}")
+        self.remediation_request.refresh_from_db()
+        self.assertEqual(self.remediation_request.status, "rejected")
+
+    def test_schedule_survives_audit_failure(self) -> None:
+        future = timezone.now() + timedelta(hours=2)
+        with patch(
+            "apps.infrastructure.drift_remediation.InfrastructureAuditService.log_drift_remediation_scheduled",
+            side_effect=RuntimeError("audit backend down"),
+        ):
+            result = self.service.schedule_remediation(self.remediation_request.pk, self.admin, future)
+
+        self.assertTrue(result.is_ok(), f"schedule must survive an audit failure, got {result}")
+        self.remediation_request.refresh_from_db()
+        self.assertEqual(self.remediation_request.status, "scheduled")
+
+
+class PR341HardeningTests(DriftRemediationTestBase):
+    """Discriminating regressions for the #341 review-hardening fixes.
+
+    Each fails against the pre-fix code and passes after the fix.
+    """
+
+    def test_dismiss_report_refuses_high_severity(self) -> None:
+        """Drift-W2: a high/critical report must not be dismissable as 'ignored' even
+        when its remediation request has gone terminal — it must be remediated or accepted."""
+        # self.report is severity='high'. Make its request terminal so the open-request
+        # guard does NOT fire — only the new severity guard should.
+        self.remediation_request.status = "failed"
+        self.remediation_request.save(update_fields=["status"])
+
+        result = self.service.dismiss_report(self.report.pk, self.admin)
+
+        self.assertTrue(result.is_err())
+        self.assertIn("remediated or accepted", result.unwrap_err())
+        self.report.refresh_from_db()
+        self.assertFalse(self.report.resolved)
+
+    def test_orphaned_restart_request_fails_terminally_no_requeue_loop(self) -> None:
+        """Chained recovery x restart-gate: a pre-migration approved server_type request
+        (restart_approved=False) re-executed by recovery fails TERMINALLY, and a
+        subsequent sweep does not re-queue it (no requeue -> fail -> requeue loop)."""
+        req = self.remediation_request
+        req.requires_restart = True
+        req.status = "approved"
+        req.restart_approved = False
+        req.started_at = None
+        req.approved_at = timezone.now() - timedelta(hours=2)
+        req.execution_claimed_at = None
+        req.save(
+            update_fields=[
+                "requires_restart",
+                "status",
+                "restart_approved",
+                "started_at",
+                "approved_at",
+                "execution_claimed_at",
+            ]
+        )
+
+        # The requeued execution (what recover_stale_remediations enqueues) fails at the gate.
+        result = self.service.execute_remediation(req)
+        self.assertTrue(result.is_err())
+        req.refresh_from_db()
+        self.assertEqual(req.status, "failed")
+
+        # A subsequent recovery sweep must NOT re-queue a terminal 'failed' request.
+        with patch("django_q.tasks.async_task", return_value="task-x") as mock_async:
+            recover_stale_remediations_task()
+            mock_async.assert_not_called()
+        req.refresh_from_db()
+        self.assertEqual(req.status, "failed")
+
+    def test_teardown_token_raise_does_not_crash_sweep(self) -> None:
+        """Tasks-W1: a raising get_provider_token (corrupt credential under fail-closed
+        decryption) must return Err, not propagate and crash the whole cleanup sweep."""
+        from apps.infrastructure.tasks import _teardown_cloud_deployment  # noqa: PLC0415
+
+        self.deployment.status = "destroying"  # already claimed → reach the provider block
+        self.deployment.save(update_fields=["status"])
+        with patch(
+            "apps.infrastructure.provider_config.get_provider_token",
+            side_effect=RuntimeError("credential decrypt failed"),
+        ):
+            result = _teardown_cloud_deployment(self.deployment)
+
+        self.assertTrue(result.is_err())
+        self.assertIn("raised", result.unwrap_err().lower())
+
+    def test_teardown_post_delete_save_raise_returns_err(self) -> None:
+        """Tasks-W2: a DB error on the post-delete identifier-clear save must return Err,
+        not crash the sweep (the idempotent delete re-converges on the next run)."""
+        from apps.infrastructure.tasks import _teardown_cloud_deployment  # noqa: PLC0415
+
+        self.deployment.status = "destroying"
+        self.deployment.save(update_fields=["status"])
+        mock_gw = MagicMock()
+        mock_gw.delete_server.return_value = Ok(True)
+        with (
+            patch("apps.infrastructure.provider_config.get_provider_token", return_value=Ok("token")),
+            patch("apps.infrastructure.cloud_gateway.get_cloud_gateway", return_value=mock_gw),
+            patch.object(NodeDeployment, "save", side_effect=RuntimeError("db down")),
+        ):
+            result = _teardown_cloud_deployment(self.deployment)
+
+        self.assertTrue(result.is_err())
+
+    def test_hcloud_not_found_trusts_code_over_message(self) -> None:
+        """Deploy-W1: a structured non-404 .code must not be overridden by a 'not found'
+        message, or an auth failure is swallowed as a successful delete (billable orphan)."""
+        from apps.infrastructure.hcloud_service import _is_hcloud_not_found  # noqa: PLC0415
+
+        class FakeApiError(Exception):
+            def __init__(self, msg: str, code: str) -> None:
+                super().__init__(msg)
+                self.code = code
+
+        # forbidden + a 'not found' message must NOT be treated as gone.
+        self.assertFalse(_is_hcloud_not_found(FakeApiError("resource not found or access denied", "forbidden")))
+        # a genuine not_found code is still detected.
+        self.assertTrue(_is_hcloud_not_found(FakeApiError("gone", "not_found")))
+        # no structured code → message fallback still works.
+        self.assertTrue(_is_hcloud_not_found(Exception("server not found")))

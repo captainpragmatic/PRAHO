@@ -19,6 +19,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.utils import timezone
 
+from apps.common.types import Err, Ok
 from apps.infrastructure.models import (
     CloudProvider,
     NodeDeployment,
@@ -28,11 +29,13 @@ from apps.infrastructure.models import (
 )
 from apps.infrastructure.tasks import (
     calculate_daily_costs_task,
+    cleanup_failed_deployments_task,
     deploy_node_task,
     destroy_node_task,
     queue_deploy_node,
     queue_destroy_node,
     queue_retry_deployment,
+    recover_stuck_deployments_task,
     retry_deployment_task,
 )
 
@@ -88,9 +91,9 @@ def _create_test_deployment(status: str = "pending") -> NodeDeployment:
         email="task-test@test.com",
         defaults={"password": "!unusable"},
     )
-    next_number = NodeDeployment.objects.filter(
-        environment="dev", node_type="sha", provider=provider, region=region
-    ).count() + 1
+    next_number = (
+        NodeDeployment.objects.filter(environment="dev", node_type="sha", provider=provider, region=region).count() + 1
+    )
     deployment = NodeDeployment(
         environment="dev",
         node_type="sha",
@@ -347,3 +350,98 @@ class TestTaskTokenFetchFailure(TestCase):
         result = deploy_node_task(deployment.id, deployment.provider_id)
         self.assertFalse(result["success"])
         self.assertIn("provider token", result["error"])
+
+
+class TestCleanupFailedDeploymentsTeardown(TestCase):
+    """#328-8: the cleanup sweep now runs failed deployments through a convergent
+    idempotent teardown (delete server, audit, clear ids, failed -> destroying ->
+    destroyed) so rows stop reprocessing; a failed delete is deferred, not
+    counted as cleaned."""
+
+    def _aged_failed(self, external_node_id: str = "srv-9"):
+        d = _create_test_deployment("failed")
+        d.external_node_id = external_node_id
+        d.save(update_fields=["external_node_id"])
+        NodeDeployment.objects.filter(pk=d.pk).update(updated_at=timezone.now() - timedelta(hours=48))
+        return d
+
+    @patch("apps.infrastructure.provider_config.get_provider_token")
+    @patch("apps.infrastructure.cloud_gateway.get_cloud_gateway")
+    def test_failed_deployment_torn_down_and_destroyed(self, mock_gw_factory, mock_token):
+        d = self._aged_failed()
+        mock_token.return_value = Ok("tok")
+        gw = MagicMock()
+        gw.delete_server.return_value = Ok(True)
+        mock_gw_factory.return_value = gw
+
+        result = cleanup_failed_deployments_task()
+
+        d.refresh_from_db()
+        self.assertEqual(d.status, "destroyed")
+        self.assertEqual(d.external_node_id, "")
+        self.assertEqual(result["cleaned_count"], 1)
+        gw.delete_server.assert_called_once()
+
+    @patch("apps.infrastructure.provider_config.get_provider_token")
+    @patch("apps.infrastructure.cloud_gateway.get_cloud_gateway")
+    def test_delete_failure_leaves_destroying_for_retry(self, mock_gw_factory, mock_token):
+        d = self._aged_failed()
+        mock_token.return_value = Ok("tok")
+        gw = MagicMock()
+        gw.delete_server.return_value = Err("provider 500")
+        mock_gw_factory.return_value = gw
+
+        result = cleanup_failed_deployments_task()
+
+        d.refresh_from_db()
+        self.assertEqual(d.status, "destroying")
+        self.assertEqual(d.external_node_id, "srv-9", "identifier retained for retry")
+        self.assertEqual(result["cleaned_count"], 0)
+        self.assertEqual(len(result["errors"]), 1)
+
+
+class TestRecoverStuckDeployments(TestCase):
+    """#328-9: recovery uses the FSM + audit (not raw save), covers the real
+    intermediate states (incl. 'registering'), and retries stranded 'destroying'
+    rows to convergence."""
+
+    def _force(self, d, status: str, hours: float):
+        NodeDeployment.objects.filter(pk=d.pk).update(status=status, updated_at=timezone.now() - timedelta(hours=hours))
+        d.refresh_from_db()
+
+    def test_stuck_registering_recovered_to_failed(self):
+        d = _create_test_deployment("pending")
+        self._force(d, "registering", 5)  # omitted from the old status list
+
+        recover_stuck_deployments_task()
+
+        d.refresh_from_db()
+        self.assertEqual(d.status, "failed")
+        self.assertIn("stuck", d.status_message.lower())
+
+    def test_fresh_intermediate_not_reaped(self):
+        d = _create_test_deployment("pending")
+        self._force(d, "installing_panel", 0.1)  # within threshold
+
+        recover_stuck_deployments_task()
+
+        d.refresh_from_db()
+        self.assertEqual(d.status, "installing_panel")
+
+    @patch("apps.infrastructure.provider_config.get_provider_token")
+    @patch("apps.infrastructure.cloud_gateway.get_cloud_gateway")
+    def test_stale_destroying_retried_to_destroyed(self, mock_gw_factory, mock_token):
+        d = _create_test_deployment("failed")
+        d.external_node_id = "srv-1"
+        d.save(update_fields=["external_node_id"])
+        self._force(d, "destroying", 5)
+        mock_token.return_value = Ok("tok")
+        gw = MagicMock()
+        gw.delete_server.return_value = Ok(True)
+        mock_gw_factory.return_value = gw
+
+        result = recover_stuck_deployments_task()
+
+        d.refresh_from_db()
+        self.assertEqual(d.status, "destroyed")
+        self.assertEqual(result["torn_down_count"], 1)

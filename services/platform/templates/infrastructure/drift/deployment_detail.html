@@ -61,6 +61,15 @@
                                 <span class="text-green-400 text-sm">{{ report.get_resolution_type_display }}</span>
                                 {% else %}
                                 <span class="text-amber-400 text-sm">{% trans "Open" %}</span>
+                                {% if report.severity == 'low' or report.severity == 'moderate' %}
+                                <form method="post" action="{% url 'infrastructure:drift_report_dismiss' report.pk %}" class="inline">
+                                    {% csrf_token %}
+                                    {% trans "Dismiss this low-severity drift?" as confirm_dismiss %}
+                                    <button type="submit" class="ml-2 px-2 py-0.5 text-xs bg-slate-600 hover:bg-slate-500 text-white rounded transition-colors" onclick="return confirm('{{ confirm_dismiss|escapejs }}')">
+                                        {% trans "Dismiss" %}
+                                    </button>
+                                </form>
+                                {% endif %}
                                 {% endif %}
                             </td>
                             <td class="px-6 py-3 text-slate-400 text-sm">{{ report.created_at|timesince }} {% trans "ago" %}</td>

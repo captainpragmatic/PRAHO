@@ -42,6 +42,24 @@ logger = logging.getLogger(__name__)
 HCLOUD_ACTION_MAX_RETRIES = 300
 
 
+def _is_hcloud_not_found(exc: Exception) -> bool:
+    """hcloud's get_by_id raises APIException(code='not_found') for a missing
+    resource — it never returns None — so the `if not obj` guards on the delete
+    paths are dead and an already-deleted resource surfaces as an exception.
+    Treat that as 'already gone' so deletes stay idempotent (and destroy_node
+    can converge instead of wedging on a server the cleanup task already removed).
+    Duck-typed on `.code` to avoid coupling to the SDK's exception import path,
+    with a message fallback ONLY when no structured code exists. When the SDK
+    gives a `.code`, trust it exclusively: a non-404 code (e.g. 'forbidden')
+    whose message happens to contain 'not found' must NOT be swallowed as a
+    successful delete, or an auth/permission failure would silently leave a
+    billable server/firewall/snapshot orphaned while cleanup reports success."""
+    code = getattr(exc, "code", None)
+    if code is not None:
+        return bool(code == "not_found")
+    return "not found" in str(exc).lower()
+
+
 class HcloudService(CloudProviderGateway):
     """
     Hetzner Cloud SDK wrapper implementing CloudProviderGateway.
@@ -140,6 +158,9 @@ class HcloudService(CloudProviderGateway):
             return Ok(True)
 
         except Exception as e:
+            if _is_hcloud_not_found(e):
+                logger.info(f"✅ [Hcloud] Server {server_id} already gone — treating delete as success")
+                return Ok(True)
             logger.error(f"🔥 [Hcloud] Server deletion failed: {e}")
             return Err(f"Server deletion failed: {e}")
 
@@ -154,8 +175,8 @@ class HcloudService(CloudProviderGateway):
             return Ok(self._server_to_gateway_info(server))
 
         except Exception as e:
-            # If server not found, return None instead of error
-            if "not found" in str(e).lower():
+            # A missing server is Ok(None), not an error (code-based, message fallback).
+            if _is_hcloud_not_found(e):
                 return Ok(None)
             return Err(f"Failed to get server {server_id}: {e}")
 
@@ -291,6 +312,9 @@ class HcloudService(CloudProviderGateway):
             logger.info(f"✅ [Hcloud] Firewall deleted: {firewall_id}")
             return Ok(True)
         except Exception as e:
+            if _is_hcloud_not_found(e):
+                logger.info(f"✅ [Hcloud] Firewall {firewall_id} already gone — treating delete as success")
+                return Ok(True)
             return Err(f"Firewall deletion failed: {e}")
 
     def get_locations(self) -> Result[Sequence[LocationInfo], str]:
@@ -421,6 +445,9 @@ class HcloudService(CloudProviderGateway):
             logger.info(f"✅ [Hcloud] Snapshot deleted: {snapshot_id}")
             return Ok(True)
         except Exception as e:
+            if _is_hcloud_not_found(e):
+                logger.info(f"✅ [Hcloud] Snapshot {snapshot_id} already gone — treating delete as success")
+                return Ok(True)
             logger.error(f"🔥 [Hcloud] Snapshot deletion failed: {e}")
             return Err(f"Snapshot deletion failed: {e}")
 

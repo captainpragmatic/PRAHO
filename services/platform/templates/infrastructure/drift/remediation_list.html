@@ -48,6 +48,12 @@
                             {% if req.action_type == "apply_desired" %}
                             <form method="post" action="{% url 'infrastructure:drift_remediation_approve' req.pk %}">
                                 {% csrf_token %}
+                                {% if req.requires_restart %}
+                                <label class="flex items-center gap-1 text-xs text-amber-300 mb-1">
+                                    <input type="checkbox" name="restart_approved" value="1" required>
+                                    {% trans "Approve server restart (ADR-0029)" %}
+                                </label>
+                                {% endif %}
                                 {% trans "Approve this remediation?" as confirm_approve %}
                                 {% trans "Approve" as approve_btn %}{% button approve_btn variant="success" type="submit" size="sm" attrs="onclick=\"return confirm('{{ confirm_approve|escapejs }}')\"" %}
                             </form>

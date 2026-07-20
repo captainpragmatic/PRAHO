@@ -146,8 +146,15 @@ class DriftRemediationService:
         self,
         request_id: int,
         user: User,
+        restart_approved: bool = False,
     ) -> Result[DriftRemediationRequest, str]:
-        """Approve and queue execution asynchronously (single owner of this transition)."""
+        """Approve and queue execution asynchronously (single owner of this transition).
+
+        ADR-0029: when the request reboots a customer-hosting server
+        (requires_restart), the reboot must be explicitly confirmed here; the
+        approval and the restart sign-off are set together in one atomic write,
+        so a later re-approval is the only thing that can change them.
+        """
         from django_q.tasks import async_task  # noqa: PLC0415  # Deferred: avoids circular import
 
         try:
@@ -157,6 +164,9 @@ class DriftRemediationService:
 
         if req.action_type != "apply_desired":
             return Err("This drift has no automated fix — resolve it manually and re-scan, or accept the drift")
+
+        if req.requires_restart and not restart_approved:
+            return Err("This remediation reboots the server — the restart must be explicitly approved")
 
         # Status flip + task enqueue in one transaction (django-q2 writes to the
         # django_q table, so a failed enqueue rolls the approval back too). The
@@ -169,6 +179,7 @@ class DriftRemediationService:
                 approved_by=user,
                 approved_at=now,
                 execution_claimed_at=now,
+                restart_approved=restart_approved,
             )
             if not updated:
                 req.refresh_from_db()
@@ -215,12 +226,20 @@ class DriftRemediationService:
             return Err(f"Cannot reject request in status '{req.status}'")
         req.refresh_from_db()
 
-        InfrastructureAuditService.log_drift_remediation_rejected(
-            deployment=req.deployment,
-            request=req,
-            rejector=user,
-            reason=reason,
-        )
+        # Best-effort operational audit: the reject transition is already
+        # durably committed (and separately recoverable), so an audit-backend
+        # blip must not surface as a 500 out of a successful reject. This is
+        # deliberately NOT a mandatory-audit path — cf. the staff dismiss
+        # action, whose audit is mandatory and rolls back on failure.
+        try:
+            InfrastructureAuditService.log_drift_remediation_rejected(
+                deployment=req.deployment,
+                request=req,
+                rejector=user,
+                reason=reason,
+            )
+        except Exception as e:
+            logger.warning(f"⚠️ [DriftRemediation] Failed to log audit for rejection: {e}")
 
         logger.info(f"✅ [DriftRemediation] Request {request_id} rejected by {user.email}: {reason}")
         return Ok(req)
@@ -256,14 +275,70 @@ class DriftRemediationService:
             return Err(f"Cannot schedule request in status '{req.status}'")
         req.refresh_from_db()
 
-        InfrastructureAuditService.log_drift_remediation_scheduled(
-            deployment=req.deployment,
-            request=req,
-            scheduled_for=str(scheduled_for),
-        )
+        # Best-effort operational audit (see reject_remediation): the schedule
+        # transition is already committed; an audit failure must not fail it.
+        try:
+            InfrastructureAuditService.log_drift_remediation_scheduled(
+                deployment=req.deployment,
+                request=req,
+                scheduled_for=str(scheduled_for),
+            )
+        except Exception as e:
+            logger.warning(f"⚠️ [DriftRemediation] Failed to log audit for scheduling: {e}")
 
         logger.info(f"✅ [DriftRemediation] Request {request_id} scheduled for {scheduled_for}")
         return Ok(req)
+
+    def dismiss_report(self, report_id: int, user: User) -> Result[DriftReport, str]:  # noqa: PLR0911  # Guarded workflow: one early Err per validation gate (not-found/resolved/open-request/severity/audit)
+        """
+        Staff dismissal of a low/moderate drift report that has no automated
+        remediation request (Accept exists only via a request, minted for
+        high/critical only). Marks it resolved='ignored' so an intentional,
+        permanent low-severity mismatch stops inflating the open-drift count.
+
+        The report row is locked and re-checked for an open request inside one
+        transaction so a scan concurrently escalating it cannot leave a resolved
+        report with an open request. The dismissal audit is mandatory: if it
+        fails the resolution rolls back (unlike the best-effort operational
+        audits on reject/schedule/scan).
+        """
+        try:
+            with transaction.atomic():
+                try:
+                    report = DriftReport.objects.select_for_update().get(pk=report_id)
+                except DriftReport.DoesNotExist:
+                    return Err(f"Drift report {report_id} not found")
+
+                if report.resolved:
+                    return Err("Report is already resolved")
+                if report.remediation_requests.filter(status__in=DriftRemediationRequest.OPEN_STATUSES).exists():
+                    return Err("Report has an open remediation request — act on that instead of dismissing")
+                # Dismiss is a low/moderate-only escape hatch. A high/critical report
+                # whose remediation request went terminal (rejected/failed) would
+                # otherwise pass the checks above and be silently marked 'ignored',
+                # burying real actionable drift. High/critical must be remediated or
+                # explicitly accepted (accept_drift), never dismissed.
+                if report.severity in ("high", "critical"):
+                    return Err("High/critical drift must be remediated or accepted, not dismissed")
+
+                report.resolved = True
+                report.resolved_at = timezone.now()
+                report.resolution_type = "ignored"
+                report.save(update_fields=["resolved", "resolved_at", "resolution_type"])
+
+                try:
+                    InfrastructureAuditService.log_drift_dismissed(
+                        report.deployment, report, user, InfrastructureAuditContext(user=user)
+                    )
+                except Exception as e:
+                    transaction.set_rollback(True)
+                    return Err(f"Dismissal audit failed — not dismissing: {e}")
+
+            logger.info(f"✅ [DriftRemediation] Report {report_id} dismissed by {user.email}")
+            return Ok(report)
+        except Exception as e:
+            logger.error(f"🔥 [DriftRemediation] dismiss_report {report_id} failed: {e}")
+            return Err(str(e))
 
     def accept_drift(  # noqa: PLR0911  # Guarded workflow: one early exit per validation
         self,
@@ -393,6 +468,29 @@ class DriftRemediationService:
 
         return Err(f"Field '{field}' has no durable write-back")
 
+    def _preflight_execution(self, request: DriftRemediationRequest) -> Result[bool, str]:
+        """Refuse work BEFORE any snapshot so a legacy/manual/unapproved-restart
+        request fails fast instead of no-op'ing into a false 'remediated' (and a
+        pointless destructive rollback)."""
+        details = request.action_details or {}
+        field_name = details.get("field_name", "")
+        if request.action_type != "apply_desired" or field_name not in AUTO_FIXABLE_FIELDS:
+            self._mark_failed(
+                request,
+                f"No automated fix available for field '{field_name or 'unknown'}' — manual intervention required",
+            )
+            return Err(f"No automated fix available for field '{field_name or 'unknown'}'")
+
+        # ADR-0029: never reboot a customer-hosting server under the generic
+        # approval — the restart needs its own sign-off. Enforced here too (not
+        # only at approval) so no path reaches the destructive resize/power op
+        # without explicit restart consent.
+        if request.requires_restart and not request.restart_approved:
+            self._mark_failed(request, "Remediation requires a server restart that was not approved")
+            return Err("Remediation requires a server restart that was not approved")
+
+        return Ok(True)
+
     def execute_remediation(  # noqa: PLR0911  # Multi-step workflow: each gate exits early
         self,
         request: DriftRemediationRequest,
@@ -408,17 +506,12 @@ class DriftRemediationService:
             return claim_result
         request.refresh_from_db()
 
-        # Pre-flight: refuse work that has no automated fix BEFORE any snapshot,
-        # so legacy/manual requests fail fast instead of no-op'ing into a
-        # false "remediated" (and a pointless destructive rollback on failure).
+        preflight = self._preflight_execution(request)
+        if preflight.is_err():
+            return preflight
+
         details = request.action_details or {}
         field_name = details.get("field_name", "")
-        if request.action_type != "apply_desired" or field_name not in AUTO_FIXABLE_FIELDS:
-            self._mark_failed(
-                request,
-                f"No automated fix available for field '{field_name or 'unknown'}' — manual intervention required",
-            )
-            return Err(f"No automated fix available for field '{field_name or 'unknown'}'")
 
         # Step 1: Take snapshot
         snapshot_result = self._take_snapshot(deployment)
@@ -648,18 +741,51 @@ class DriftRemediationService:
             return Err("Cannot get cloud gateway for snapshot")
 
         name = f"praho-drift-{deployment.hostname}-{timezone.now().strftime('%Y%m%d%H%M%S')}"
-        result = gateway.create_snapshot(deployment.external_node_id, name)
 
-        if result.is_err():
-            return Err(f"Snapshot creation failed: {result.unwrap_err()}")
-
+        # Three explicit commit phases so a crash never leaves a silent orphan.
+        # This MUST NOT run inside an enclosing transaction (execute_remediation
+        # calls it after the claim's conditional update, with no atomic block) —
+        # otherwise the phase-1/phase-3 markers would roll back with the caller.
+        #
+        # Phase 1: durably record the attempt BEFORE the provider call. If the
+        # process dies between the provider create and the id write, this
+        # 'creating' row is the trace the cleanup sweep reaps (vs. an untracked
+        # provider snapshot billing forever with no PRAHO record).
         snapshot = DriftSnapshot.objects.create(
             deployment=deployment,
-            provider_snapshot_id=result.unwrap(),
+            provider_snapshot_id="",
             snapshot_type="pre_remediation",
-            status="available",
+            status="creating",
             expires_at=timezone.now() + timedelta(days=SNAPSHOT_EXPIRY_DAYS),
         )
+
+        # Phase 2: provider call (outside any transaction). Guard against the SDK
+        # raising rather than returning Err — otherwise execute_remediation would
+        # crash mid-flight leaving the request in_progress and this row 'creating'.
+        try:
+            result = gateway.create_snapshot(deployment.external_node_id, name)
+        except Exception as e:
+            # A RAISE here is AMBIGUOUS: the provider may have created the snapshot
+            # before the failure surfaced (e.g. a lost response after create). Mark
+            # 'cleanup_failed' — the "possible billable orphan, needs manual
+            # reconciliation" state the sweep uses — NOT 'failed', which asserts no
+            # provider resource exists and lets cleanup ignore it. The orphan is
+            # discoverable by its name praho-drift-{hostname}-{ts}, where ts matches
+            # this row's created_at within a second.
+            snapshot.status = "cleanup_failed"
+            snapshot.save(update_fields=["status"])
+            return Err(f"Snapshot creation raised: {e}")
+
+        # Phase 3: a returned Err is a structured provider failure (the gateway
+        # confirmed the call did not create a resource), so 'failed' is honest here.
+        if result.is_err():
+            snapshot.status = "failed"
+            snapshot.save(update_fields=["status"])
+            return Err(f"Snapshot creation failed: {result.unwrap_err()}")
+
+        snapshot.provider_snapshot_id = result.unwrap()
+        snapshot.status = "available"
+        snapshot.save(update_fields=["provider_snapshot_id", "status"])
 
         logger.info(f"✅ [DriftRemediation] Snapshot created: {snapshot.provider_snapshot_id}")
         return Ok(snapshot)

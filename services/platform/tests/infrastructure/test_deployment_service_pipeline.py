@@ -21,6 +21,7 @@ from django.test import TestCase
 
 from apps.common.types import Err, Ok, Retriability
 from apps.infrastructure.audit_service import InfrastructureAuditContext
+from apps.infrastructure.cloud_gateway import ServerCreateResult
 from apps.infrastructure.deployment_service import NodeDeploymentService
 from apps.infrastructure.models import (
     CloudProvider,
@@ -83,9 +84,9 @@ def _create_deployment(status: str = "pending", external_node_id: str = "") -> N
         email="deployer@test.com",
         defaults={"password": "!unusable"},
     )
-    next_number = NodeDeployment.objects.filter(
-        environment="dev", node_type="sha", provider=provider, region=region
-    ).count() + 1
+    next_number = (
+        NodeDeployment.objects.filter(environment="dev", node_type="sha", provider=provider, region=region).count() + 1
+    )
     deployment = NodeDeployment(
         environment="dev",
         node_type="sha",
@@ -118,6 +119,44 @@ def _make_service() -> NodeDeploymentService:
 
 
 # ===========================================================================
+# #328-2: deploy_node must reach 'completed' through the full FSM chain
+# ===========================================================================
+
+
+class TestDeployNodeReachesCompletedThroughFSM(TestCase):
+    """deploy_node transitions installing_panel -> configuring_backups ->
+    validating -> registering -> completed. It previously skipped
+    configuring_backups, so transition_to('validating') raised ValidationError
+    and every deployment failed at the very end after all paid provisioning."""
+
+    def test_happy_path_reaches_completed(self) -> None:
+        deployment = _create_deployment("pending")
+        service = _make_service()
+        service._ssh_manager.generate_deployment_key.return_value = Ok(MagicMock(public_key="ssh-rsa AAAA"))
+        service._ansible.get_playbook_order.return_value = ["base.yml", "panel.yml", "harden.yml", "backup.yml"]
+        service._ansible.run_playbook.return_value = Ok(MagicMock(success=True, stderr=""))
+        service._validation.validate_node.return_value = Ok(MagicMock(all_passed=True, summary="ok"))
+        service._registration.register_node.return_value = Ok(MagicMock(id=1))
+
+        gateway = MagicMock()
+        gateway.upload_ssh_key.return_value = Ok("praho-key")
+        gateway.create_firewall.return_value = Ok("fw-1")
+        gateway.create_server.return_value = Ok(
+            ServerCreateResult(server_id="srv-1", ipv4_address="1.2.3.4", ipv6_address="")
+        )
+
+        with (
+            patch("apps.infrastructure.deployment_service.SettingsService.get_setting", return_value=True),
+            patch("apps.infrastructure.deployment_service.get_cloud_gateway", return_value=gateway),
+        ):
+            result = service.deploy_node(deployment=deployment, credentials={"api_token": "test-token"})
+
+        self.assertTrue(result.is_ok(), f"deploy_node happy path must succeed, got {result}")
+        deployment.refresh_from_db()
+        self.assertEqual(deployment.status, "completed")
+
+
+# ===========================================================================
 # H2: Transient errors must NOT clear external_node_id
 # ===========================================================================
 
@@ -130,9 +169,7 @@ class TestTransientErrorPreservesExternalId(TestCase):
         service = _make_service()
 
         # SSH key succeeds
-        service._ssh_manager.generate_deployment_key.return_value = Ok(
-            MagicMock(public_key="ssh-rsa AAAA")
-        )
+        service._ssh_manager.generate_deployment_key.return_value = Ok(MagicMock(public_key="ssh-rsa AAAA"))
 
         # Mock SettingsService and cloud gateway
         mock_gateway = MagicMock()
@@ -157,9 +194,7 @@ class TestTransientErrorPreservesExternalId(TestCase):
         deployment = _create_deployment("pending", external_node_id="srv-456")
         service = _make_service()
 
-        service._ssh_manager.generate_deployment_key.return_value = Ok(
-            MagicMock(public_key="ssh-rsa AAAA")
-        )
+        service._ssh_manager.generate_deployment_key.return_value = Ok(MagicMock(public_key="ssh-rsa AAAA"))
 
         mock_gateway = MagicMock()
         # Ok(None) = server confirmed not found
@@ -470,9 +505,7 @@ class TestMarkFailedAuditContext(TestCase):
     def test_mark_failed_passes_audit_context(self, mock_log_failed: MagicMock) -> None:
         deployment = _create_deployment("provisioning_node")
         service = _make_service()
-        user, _ = User.objects.get_or_create(
-            email="admin@test.com", defaults={"password": "!unusable"}
-        )
+        user, _ = User.objects.get_or_create(email="admin@test.com", defaults={"password": "!unusable"})
         ctx = InfrastructureAuditContext(user=user)
 
         service._mark_failed(deployment, "test error", stage="ssh_key", audit_ctx=ctx)
@@ -499,9 +532,7 @@ class TestMarkFailedAuditContext(TestCase):
 
         service._mark_failed(deployment, "something broke", stage="provision_server")
 
-        log = NodeDeploymentLog.objects.filter(
-            deployment=deployment, level="ERROR"
-        ).first()
+        log = NodeDeploymentLog.objects.filter(deployment=deployment, level="ERROR").first()
         self.assertIsNotNone(log)
         self.assertIn("something broke", log.message)
         self.assertEqual(log.phase, "provision_server")
@@ -559,9 +590,7 @@ class TestDeployNodeNoApiToken(TestCase):
         deployment = _create_deployment("pending")
         service = _make_service()
 
-        service._ssh_manager.generate_deployment_key.return_value = Ok(
-            MagicMock(public_key="ssh-rsa AAAA")
-        )
+        service._ssh_manager.generate_deployment_key.return_value = Ok(MagicMock(public_key="ssh-rsa AAAA"))
 
         with patch("apps.infrastructure.deployment_service.SettingsService.get_setting", return_value=True):
             result = service.deploy_node(
