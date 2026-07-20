@@ -752,8 +752,15 @@ class DriftRemediationService:
             expires_at=timezone.now() + timedelta(days=SNAPSHOT_EXPIRY_DAYS),
         )
 
-        # Phase 2: provider call (outside any transaction).
-        result = gateway.create_snapshot(deployment.external_node_id, name)
+        # Phase 2: provider call (outside any transaction). Guard against the SDK
+        # raising rather than returning Err — otherwise execute_remediation would
+        # crash mid-flight leaving the request in_progress and this row 'creating'.
+        try:
+            result = gateway.create_snapshot(deployment.external_node_id, name)
+        except Exception as e:
+            snapshot.status = "failed"
+            snapshot.save(update_fields=["status"])
+            return Err(f"Snapshot creation raised: {e}")
 
         # Phase 3: commit the terminal status.
         if result.is_err():

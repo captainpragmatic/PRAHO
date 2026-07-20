@@ -493,8 +493,13 @@ def _teardown_cloud_deployment(deployment: Any) -> Result[bool, str]:
         if token_result.is_err():
             return Err(f"No provider token for {deployment.hostname}: {token_result.unwrap_err()}")
 
-        gateway = get_cloud_gateway(deployment.provider.provider_type, token_result.unwrap())
-        delete_result = gateway.delete_server(deployment.external_node_id)
+        # The provider SDK may raise rather than return Err; contain it so one
+        # bad deployment defers instead of crashing the whole sweep.
+        try:
+            gateway = get_cloud_gateway(deployment.provider.provider_type, token_result.unwrap())
+            delete_result = gateway.delete_server(deployment.external_node_id)
+        except Exception as e:
+            return Err(f"Server deletion raised for {deployment.hostname}: {e}")
         if delete_result.is_err():
             try:
                 InfrastructureAuditService.log_destroy_failed(deployment, delete_result.unwrap_err())
@@ -508,12 +513,16 @@ def _teardown_cloud_deployment(deployment: Any) -> Result[bool, str]:
         deployment.ipv4_address = None
         deployment.save(update_fields=["external_node_id", "ipv4_address", "updated_at"])
 
-    NodeDeploymentLog.objects.create(
-        deployment=deployment,
-        level="info",
-        message="Cloud resources torn down by scheduled cleanup",
-        phase="destroying",
-    )
+    # Best-effort log — a transient DB write must not crash the sweep.
+    try:
+        NodeDeploymentLog.objects.create(
+            deployment=deployment,
+            level="info",
+            message="Cloud resources torn down by scheduled cleanup",
+            phase="destroying",
+        )
+    except Exception as log_err:
+        logger.warning(f"[Task:cleanup] Could not write teardown log for {deployment.hostname}: {log_err}")
 
     try:
         deployment.transition_to("destroyed", "Teardown complete")
@@ -2045,13 +2054,18 @@ def cleanup_old_snapshots_task() -> dict[str, Any]:
             logger.error(f"🔥 [Task:cleanup_snapshots] Error: {e}")
 
     # Reap snapshots stuck 'creating' (a crash between the provider create and
-    # the id write): the DB trace that prevents a silent orphan, terminalized
-    # once clearly stale so it stops reading as an in-flight snapshot.
+    # the id write). The provider snapshot MAY exist and be billing with its id
+    # lost to PRAHO, so terminalize into 'cleanup_failed' — the distinct state
+    # that says "possible provider orphan, needs manual reconciliation" — rather
+    # than plain 'failed', which would read as "nothing to clean up".
     stale_creating = DriftSnapshot.objects.filter(status="creating", created_at__lt=now - timedelta(days=1)).update(
-        status="failed"
+        status="cleanup_failed"
     )
     if stale_creating:
-        logger.warning(f"⚠️ [Task:cleanup_snapshots] Reaped {stale_creating} stale 'creating' snapshot(s)")
+        logger.warning(
+            f"⚠️ [Task:cleanup_snapshots] {stale_creating} stale 'creating' snapshot(s) -> cleanup_failed "
+            f"(possible provider orphan, manual reconciliation needed)"
+        )
 
     logger.info(f"✅ [Task:cleanup_snapshots] Deleted: {deleted}, Failed: {failed}, Reaped: {stale_creating}")
     return {"deleted": deleted, "failed": failed, "reaped_creating": stale_creating}

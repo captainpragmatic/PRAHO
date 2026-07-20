@@ -838,6 +838,20 @@ class TestSnapshotLifecycleHonesty(DriftRemediationTestBase):
         self.assertEqual(snap.status, "available")
         self.assertEqual(snap.provider_snapshot_id, "snap-xyz")
 
+    def test_provider_raise_is_contained_and_marks_failed(self):
+        """If the provider SDK raises (not returns Err), _take_snapshot must not
+        propagate — it marks the row failed and returns Err so execute_remediation
+        does not crash with the request stuck in_progress."""
+        gw = MagicMock()
+        gw.create_snapshot.side_effect = RuntimeError("SDK exploded")
+        with patch.object(self.service, "_get_gateway", return_value=gw):
+            result = self.service._take_snapshot(self.deployment)
+
+        self.assertTrue(result.is_err())
+        rows = DriftSnapshot.objects.filter(deployment=self.deployment)
+        self.assertEqual(rows.count(), 1)
+        self.assertEqual(rows.first().status, "failed")
+
 
 class TestCleanupSnapshotTask(DriftRemediationTestBase):
     """#321.3: drive cleanup_old_snapshots_task itself (the old test only
@@ -888,7 +902,10 @@ class TestCleanupSnapshotTask(DriftRemediationTestBase):
         # No longer 'available', so a second run does not re-select it.
         self.assertEqual(DriftSnapshot.objects.filter(status="available", expires_at__lte=timezone.now()).count(), 0)
 
-    def test_stale_creating_is_reaped_as_failed(self):
+    def test_stale_creating_is_reaped_as_cleanup_failed(self):
+        """A crash left this 'creating' row with no provider id; the provider
+        snapshot may still exist, so it terminalizes to cleanup_failed (surfaced
+        for manual reconciliation), not plain failed."""
         snap = DriftSnapshot.objects.create(
             deployment=self.deployment,
             provider_snapshot_id="",
@@ -901,7 +918,7 @@ class TestCleanupSnapshotTask(DriftRemediationTestBase):
         self._run()
 
         snap.refresh_from_db()
-        self.assertEqual(snap.status, "failed")
+        self.assertEqual(snap.status, "cleanup_failed")
 
 
 class TestExecutionClaim(DriftRemediationTestBase):
