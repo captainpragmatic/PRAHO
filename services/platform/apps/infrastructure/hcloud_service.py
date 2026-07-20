@@ -49,8 +49,15 @@ def _is_hcloud_not_found(exc: Exception) -> bool:
     Treat that as 'already gone' so deletes stay idempotent (and destroy_node
     can converge instead of wedging on a server the cleanup task already removed).
     Duck-typed on `.code` to avoid coupling to the SDK's exception import path,
-    with a message fallback."""
-    return getattr(exc, "code", None) == "not_found" or "not found" in str(exc).lower()
+    with a message fallback ONLY when no structured code exists. When the SDK
+    gives a `.code`, trust it exclusively: a non-404 code (e.g. 'forbidden')
+    whose message happens to contain 'not found' must NOT be swallowed as a
+    successful delete, or an auth/permission failure would silently leave a
+    billable server/firewall/snapshot orphaned while cleanup reports success."""
+    code = getattr(exc, "code", None)
+    if code is not None:
+        return bool(code == "not_found")
+    return "not found" in str(exc).lower()
 
 
 class HcloudService(CloudProviderGateway):

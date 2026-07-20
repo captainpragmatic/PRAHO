@@ -456,7 +456,7 @@ def bulk_validate_nodes_task() -> dict[str, Any]:
     }
 
 
-def _teardown_cloud_deployment(deployment: Any) -> Result[bool, str]:
+def _teardown_cloud_deployment(deployment: Any) -> Result[bool, str]:  # noqa: PLR0911  # Convergent teardown: one early Err per distinct failure mode (claim/token/delete/save)
     """Idempotent, convergent teardown for a failed/stranded deployment.
 
     Shared by the cleanup sweep (failed rows) and the stale-'destroying' recovery
@@ -489,17 +489,19 @@ def _teardown_cloud_deployment(deployment: Any) -> Result[bool, str]:
 
     # Delete the cloud server if one was ever created.
     if deployment.external_node_id and deployment.provider:
-        token_result = get_provider_token(deployment.provider)
-        if token_result.is_err():
-            return Err(f"No provider token for {deployment.hostname}: {token_result.unwrap_err()}")
-
-        # The provider SDK may raise rather than return Err; contain it so one
-        # bad deployment defers instead of crashing the whole sweep.
+        # Token retrieval decrypts a stored provider credential — which can RAISE
+        # under the fail-closed encryption reads (#346) on a corrupt credential —
+        # and the provider SDK may raise rather than return Err. Contain both
+        # inside one boundary so a single bad deployment defers to the next sweep
+        # instead of crashing the whole cleanup run and skipping every other row.
         try:
+            token_result = get_provider_token(deployment.provider)
+            if token_result.is_err():
+                return Err(f"No provider token for {deployment.hostname}: {token_result.unwrap_err()}")
             gateway = get_cloud_gateway(deployment.provider.provider_type, token_result.unwrap())
             delete_result = gateway.delete_server(deployment.external_node_id)
         except Exception as e:
-            return Err(f"Server deletion raised for {deployment.hostname}: {e}")
+            return Err(f"Teardown provider call raised for {deployment.hostname}: {e}")
         if delete_result.is_err():
             try:
                 InfrastructureAuditService.log_destroy_failed(deployment, delete_result.unwrap_err())
@@ -508,10 +510,16 @@ def _teardown_cloud_deployment(deployment: Any) -> Result[bool, str]:
             return Err(f"Server deletion failed for {deployment.hostname}: {delete_result.unwrap_err()}")
 
         # Confirmed gone (delete is idempotent on not-found): clear identifiers so
-        # this row is never reprocessed and the provider is never re-hit.
-        deployment.external_node_id = ""
-        deployment.ipv4_address = None
-        deployment.save(update_fields=["external_node_id", "ipv4_address", "updated_at"])
+        # this row is never reprocessed and the provider is never re-hit. A DB
+        # error on this write must not crash the sweep — the row stays 'destroying'
+        # with its external_node_id intact and the next sweep re-converges (the
+        # delete is a no-op on the already-gone server).
+        try:
+            deployment.external_node_id = ""
+            deployment.ipv4_address = None
+            deployment.save(update_fields=["external_node_id", "ipv4_address", "updated_at"])
+        except Exception as e:
+            return Err(f"Failed to clear identifiers for {deployment.hostname} after delete: {e}")
 
     # Best-effort log — a transient DB write must not crash the sweep.
     try:

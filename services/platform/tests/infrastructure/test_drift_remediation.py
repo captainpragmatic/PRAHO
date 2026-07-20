@@ -838,10 +838,13 @@ class TestSnapshotLifecycleHonesty(DriftRemediationTestBase):
         self.assertEqual(snap.status, "available")
         self.assertEqual(snap.provider_snapshot_id, "snap-xyz")
 
-    def test_provider_raise_is_contained_and_marks_failed(self):
+    def test_provider_raise_is_contained_and_marks_cleanup_failed(self):
         """If the provider SDK raises (not returns Err), _take_snapshot must not
-        propagate — it marks the row failed and returns Err so execute_remediation
-        does not crash with the request stuck in_progress."""
+        propagate — it returns Err so execute_remediation does not crash with the
+        request stuck in_progress. The raise is AMBIGUOUS (the provider may have
+        created the snapshot before the failure surfaced), so the row is marked
+        'cleanup_failed' (possible billable orphan, needs reconciliation), not
+        'failed' (which would assert no provider resource exists)."""
         gw = MagicMock()
         gw.create_snapshot.side_effect = RuntimeError("SDK exploded")
         with patch.object(self.service, "_get_gateway", return_value=gw):
@@ -850,7 +853,7 @@ class TestSnapshotLifecycleHonesty(DriftRemediationTestBase):
         self.assertTrue(result.is_err())
         rows = DriftSnapshot.objects.filter(deployment=self.deployment)
         self.assertEqual(rows.count(), 1)
-        self.assertEqual(rows.first().status, "failed")
+        self.assertEqual(rows.first().status, "cleanup_failed")
 
 
 class TestCleanupSnapshotTask(DriftRemediationTestBase):
@@ -1629,3 +1632,111 @@ class TestAuditWrappingResilience(DriftRemediationTestBase):
         self.assertTrue(result.is_ok(), f"schedule must survive an audit failure, got {result}")
         self.remediation_request.refresh_from_db()
         self.assertEqual(self.remediation_request.status, "scheduled")
+
+
+class PR341HardeningTests(DriftRemediationTestBase):
+    """Discriminating regressions for the #341 review-hardening fixes.
+
+    Each fails against the pre-fix code and passes after the fix.
+    """
+
+    def test_dismiss_report_refuses_high_severity(self) -> None:
+        """Drift-W2: a high/critical report must not be dismissable as 'ignored' even
+        when its remediation request has gone terminal — it must be remediated or accepted."""
+        # self.report is severity='high'. Make its request terminal so the open-request
+        # guard does NOT fire — only the new severity guard should.
+        self.remediation_request.status = "failed"
+        self.remediation_request.save(update_fields=["status"])
+
+        result = self.service.dismiss_report(self.report.pk, self.admin)
+
+        self.assertTrue(result.is_err())
+        self.assertIn("remediated or accepted", result.unwrap_err())
+        self.report.refresh_from_db()
+        self.assertFalse(self.report.resolved)
+
+    def test_orphaned_restart_request_fails_terminally_no_requeue_loop(self) -> None:
+        """Chained recovery x restart-gate: a pre-migration approved server_type request
+        (restart_approved=False) re-executed by recovery fails TERMINALLY, and a
+        subsequent sweep does not re-queue it (no requeue -> fail -> requeue loop)."""
+        req = self.remediation_request
+        req.requires_restart = True
+        req.status = "approved"
+        req.restart_approved = False
+        req.started_at = None
+        req.approved_at = timezone.now() - timedelta(hours=2)
+        req.execution_claimed_at = None
+        req.save(
+            update_fields=[
+                "requires_restart",
+                "status",
+                "restart_approved",
+                "started_at",
+                "approved_at",
+                "execution_claimed_at",
+            ]
+        )
+
+        # The requeued execution (what recover_stale_remediations enqueues) fails at the gate.
+        result = self.service.execute_remediation(req)
+        self.assertTrue(result.is_err())
+        req.refresh_from_db()
+        self.assertEqual(req.status, "failed")
+
+        # A subsequent recovery sweep must NOT re-queue a terminal 'failed' request.
+        with patch("django_q.tasks.async_task", return_value="task-x") as mock_async:
+            recover_stale_remediations_task()
+            mock_async.assert_not_called()
+        req.refresh_from_db()
+        self.assertEqual(req.status, "failed")
+
+    def test_teardown_token_raise_does_not_crash_sweep(self) -> None:
+        """Tasks-W1: a raising get_provider_token (corrupt credential under fail-closed
+        decryption) must return Err, not propagate and crash the whole cleanup sweep."""
+        from apps.infrastructure.tasks import _teardown_cloud_deployment  # noqa: PLC0415
+
+        self.deployment.status = "destroying"  # already claimed → reach the provider block
+        self.deployment.save(update_fields=["status"])
+        with patch(
+            "apps.infrastructure.provider_config.get_provider_token",
+            side_effect=RuntimeError("credential decrypt failed"),
+        ):
+            result = _teardown_cloud_deployment(self.deployment)
+
+        self.assertTrue(result.is_err())
+        self.assertIn("raised", result.unwrap_err().lower())
+
+    def test_teardown_post_delete_save_raise_returns_err(self) -> None:
+        """Tasks-W2: a DB error on the post-delete identifier-clear save must return Err,
+        not crash the sweep (the idempotent delete re-converges on the next run)."""
+        from apps.infrastructure.tasks import _teardown_cloud_deployment  # noqa: PLC0415
+
+        self.deployment.status = "destroying"
+        self.deployment.save(update_fields=["status"])
+        mock_gw = MagicMock()
+        mock_gw.delete_server.return_value = Ok(True)
+        with (
+            patch("apps.infrastructure.provider_config.get_provider_token", return_value=Ok("token")),
+            patch("apps.infrastructure.cloud_gateway.get_cloud_gateway", return_value=mock_gw),
+            patch.object(NodeDeployment, "save", side_effect=RuntimeError("db down")),
+        ):
+            result = _teardown_cloud_deployment(self.deployment)
+
+        self.assertTrue(result.is_err())
+
+    def test_hcloud_not_found_trusts_code_over_message(self) -> None:
+        """Deploy-W1: a structured non-404 .code must not be overridden by a 'not found'
+        message, or an auth failure is swallowed as a successful delete (billable orphan)."""
+        from apps.infrastructure.hcloud_service import _is_hcloud_not_found  # noqa: PLC0415
+
+        class FakeApiError(Exception):
+            def __init__(self, msg: str, code: str) -> None:
+                super().__init__(msg)
+                self.code = code
+
+        # forbidden + a 'not found' message must NOT be treated as gone.
+        self.assertFalse(_is_hcloud_not_found(FakeApiError("resource not found or access denied", "forbidden")))
+        # a genuine not_found code is still detected.
+        self.assertTrue(_is_hcloud_not_found(FakeApiError("gone", "not_found")))
+        # no structured code → message fallback still works.
+        self.assertTrue(_is_hcloud_not_found(Exception("server not found")))

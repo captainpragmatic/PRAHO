@@ -289,7 +289,7 @@ class DriftRemediationService:
         logger.info(f"✅ [DriftRemediation] Request {request_id} scheduled for {scheduled_for}")
         return Ok(req)
 
-    def dismiss_report(self, report_id: int, user: User) -> Result[DriftReport, str]:
+    def dismiss_report(self, report_id: int, user: User) -> Result[DriftReport, str]:  # noqa: PLR0911  # Guarded workflow: one early Err per validation gate (not-found/resolved/open-request/severity/audit)
         """
         Staff dismissal of a low/moderate drift report that has no automated
         remediation request (Accept exists only via a request, minted for
@@ -313,6 +313,13 @@ class DriftRemediationService:
                     return Err("Report is already resolved")
                 if report.remediation_requests.filter(status__in=DriftRemediationRequest.OPEN_STATUSES).exists():
                     return Err("Report has an open remediation request — act on that instead of dismissing")
+                # Dismiss is a low/moderate-only escape hatch. A high/critical report
+                # whose remediation request went terminal (rejected/failed) would
+                # otherwise pass the checks above and be silently marked 'ignored',
+                # burying real actionable drift. High/critical must be remediated or
+                # explicitly accepted (accept_drift), never dismissed.
+                if report.severity in ("high", "critical"):
+                    return Err("High/critical drift must be remediated or accepted, not dismissed")
 
                 report.resolved = True
                 report.resolved_at = timezone.now()
@@ -758,11 +765,19 @@ class DriftRemediationService:
         try:
             result = gateway.create_snapshot(deployment.external_node_id, name)
         except Exception as e:
-            snapshot.status = "failed"
+            # A RAISE here is AMBIGUOUS: the provider may have created the snapshot
+            # before the failure surfaced (e.g. a lost response after create). Mark
+            # 'cleanup_failed' — the "possible billable orphan, needs manual
+            # reconciliation" state the sweep uses — NOT 'failed', which asserts no
+            # provider resource exists and lets cleanup ignore it. The orphan is
+            # discoverable by its name praho-drift-{hostname}-{ts}, where ts matches
+            # this row's created_at within a second.
+            snapshot.status = "cleanup_failed"
             snapshot.save(update_fields=["status"])
             return Err(f"Snapshot creation raised: {e}")
 
-        # Phase 3: commit the terminal status.
+        # Phase 3: a returned Err is a structured provider failure (the gateway
+        # confirmed the call did not create a resource), so 'failed' is honest here.
         if result.is_err():
             snapshot.status = "failed"
             snapshot.save(update_fields=["status"])
