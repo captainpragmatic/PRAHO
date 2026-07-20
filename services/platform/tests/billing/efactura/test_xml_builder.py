@@ -2,7 +2,6 @@
 Tests for UBL 2.1 XML Builder with CIUS-RO compliance.
 """
 
-
 from datetime import UTC, date, datetime
 from decimal import Decimal
 
@@ -67,6 +66,91 @@ class UBLInvoiceBuilderTestCase(TestCase):
             tax_rate=Decimal("0.1900"),  # Matches invoice's tax_total_cents=19000
         )
 
+    def _foreign_invoice(self, **overrides: object):
+        currency = CurrencyFactory(code="EUR")
+        values: dict[str, object] = {
+            "customer": self.customer,
+            "currency": currency,
+            "number": "INV-2026-EUR-001",
+            "bill_to_name": "Customer SRL",
+            "bill_to_country": "RO",
+            "bill_to_tax_id": "RO87654321",
+            "status": "issued",
+            "issued_at": datetime(2026, 7, 20, 9, 0, tzinfo=UTC),
+            "tax_point_date": date(2026, 7, 20),
+            "subtotal_cents": 10000,
+            "tax_total_cents": 2100,
+            "total_cents": 12100,
+            "exchange_to_ron": Decimal("5.01234567"),
+            "exchange_rate_as_of": date(2026, 7, 17),
+            "exchange_rate_source": "bnr",
+            "exchange_rate_source_reference": "https://www.bnr.ro/nbrfxrates.xml",
+        }
+        values.update(overrides)
+        invoice = InvoiceFactory(**values)
+        InvoiceLineFactory(
+            invoice=invoice,
+            description="Web Hosting Service",
+            unit_price_cents=10000,
+            quantity=1,
+            tax_rate=Decimal("0.2100"),
+        )
+        return invoice
+
+    def test_ron_invoice_omits_tax_currency_and_has_one_tax_total(self):
+        doc = etree.fromstring(UBLInvoiceBuilder(self.invoice).build().encode())
+
+        self.assertIsNone(doc.find(f"{{{NAMESPACES['cbc']}}}TaxCurrencyCode"))
+        self.assertEqual(len(doc.findall(f"{{{NAMESPACES['cac']}}}TaxTotal")), 1)
+
+    def test_foreign_invoice_emits_bt6_and_two_distinct_tax_totals(self):
+        doc = etree.fromstring(UBLInvoiceBuilder(self._foreign_invoice()).build().encode())
+
+        tax_currency = doc.find(f"{{{NAMESPACES['cbc']}}}TaxCurrencyCode")
+        self.assertIsNotNone(tax_currency)
+        self.assertEqual(tax_currency.text, "RON")
+        tax_totals = doc.findall(f"{{{NAMESPACES['cac']}}}TaxTotal")
+        self.assertEqual(len(tax_totals), 2)
+
+        accounting_amount = tax_totals[0].find(f"{{{NAMESPACES['cbc']}}}TaxAmount")
+        self.assertEqual(accounting_amount.get("currencyID"), "RON")
+        self.assertEqual(accounting_amount.text, "105.26")
+        self.assertIsNone(tax_totals[0].find(f"{{{NAMESPACES['cac']}}}TaxSubtotal"))
+
+        document_amount = tax_totals[1].find(f"{{{NAMESPACES['cbc']}}}TaxAmount")
+        self.assertEqual(document_amount.get("currencyID"), "EUR")
+        self.assertEqual(document_amount.text, "21.00")
+        self.assertIsNotNone(tax_totals[1].find(f"{{{NAMESPACES['cac']}}}TaxSubtotal"))
+
+    def test_foreign_invoice_never_emits_tax_exchange_rate(self):
+        doc = etree.fromstring(UBLInvoiceBuilder(self._foreign_invoice()).build().encode())
+
+        self.assertIsNone(doc.find(f".//{{{NAMESPACES['cac']}}}TaxExchangeRate"))
+
+    def test_foreign_invoice_requires_complete_positive_snapshot(self):
+        incomplete = self._foreign_invoice(exchange_rate_source_reference="")
+        with self.assertRaisesRegex(XMLBuilderError, "complete provenanced EUR/RON"):
+            UBLInvoiceBuilder(incomplete).build()
+
+        non_positive = self._foreign_invoice(number="INV-2026-EUR-002", exchange_to_ron=Decimal("0"))
+        with self.assertRaisesRegex(XMLBuilderError, "positive EUR/RON"):
+            UBLInvoiceBuilder(non_positive).build()
+
+        unapproved = self._foreign_invoice(number="INV-2026-EUR-004", exchange_rate_source="manual")
+        with self.assertRaisesRegex(XMLBuilderError, "approved EUR/RON source"):
+            UBLInvoiceBuilder(unapproved).build()
+
+    def test_tax_point_date_is_emitted_only_when_distinct_from_issue_date(self):
+        same_day = etree.fromstring(UBLInvoiceBuilder(self._foreign_invoice()).build().encode())
+        self.assertIsNone(same_day.find(f"{{{NAMESPACES['cbc']}}}TaxPointDate"))
+
+        different = etree.fromstring(
+            UBLInvoiceBuilder(self._foreign_invoice(number="INV-2026-EUR-003", tax_point_date=date(2026, 7, 18)))
+            .build()
+            .encode()
+        )
+        self.assertEqual(different.find(f"{{{NAMESPACES['cbc']}}}TaxPointDate").text, "2026-07-18")
+
     def test_build_generates_valid_xml(self):
         """Test that build() generates well-formed XML."""
         builder = UBLInvoiceBuilder(self.invoice)
@@ -126,16 +210,25 @@ class UBLInvoiceBuilderTestCase(TestCase):
         this instant does not roll the day — the cross-midnight cases are covered separately.
         """
         invoice = InvoiceFactory(
-            customer=self.customer, currency=self.currency, number="INV-2026-FMT",
-            bill_to_name="Customer SRL", bill_to_country="RO", bill_to_tax_id="RO87654321",
+            customer=self.customer,
+            currency=self.currency,
+            number="INV-2026-FMT",
+            bill_to_name="Customer SRL",
+            bill_to_country="RO",
+            bill_to_tax_id="RO87654321",
             status="issued",
             issued_at=datetime(2026, 6, 10, 9, 0, tzinfo=UTC),
             due_at=datetime(2026, 7, 10, 9, 0, tzinfo=UTC),
-            subtotal_cents=100000, tax_total_cents=19000, total_cents=119000,
+            subtotal_cents=100000,
+            tax_total_cents=19000,
+            total_cents=119000,
         )
         InvoiceLineFactory(
-            invoice=invoice, description="Web Hosting Service", unit_price_cents=100000,
-            quantity=1, tax_rate=Decimal("0.1900"),
+            invoice=invoice,
+            description="Web Hosting Service",
+            unit_price_cents=100000,
+            quantity=1,
+            tax_rate=Decimal("0.1900"),
         )
         doc = etree.fromstring(UBLInvoiceBuilder(invoice).build().encode())
 
@@ -150,16 +243,25 @@ class UBLInvoiceBuilderTestCase(TestCase):
         where the UTC calendar date is the PREVIOUS Romanian day — the #220 failure mode.
         """
         invoice = InvoiceFactory(
-            customer=self.customer, currency=self.currency, number="INV-2026-TZ1",
-            bill_to_name="Customer SRL", bill_to_country="RO", bill_to_tax_id="RO87654321",
+            customer=self.customer,
+            currency=self.currency,
+            number="INV-2026-TZ1",
+            bill_to_name="Customer SRL",
+            bill_to_country="RO",
+            bill_to_tax_id="RO87654321",
             status="issued",
             issued_at=datetime(2026, 1, 15, 22, 30, tzinfo=UTC),
             due_at=datetime(2026, 2, 14, 22, 30, tzinfo=UTC),
-            subtotal_cents=100000, tax_total_cents=19000, total_cents=119000,
+            subtotal_cents=100000,
+            tax_total_cents=19000,
+            total_cents=119000,
         )
         InvoiceLineFactory(
-            invoice=invoice, description="Web Hosting Service", unit_price_cents=100000,
-            quantity=1, tax_rate=Decimal("0.1900"),
+            invoice=invoice,
+            description="Web Hosting Service",
+            unit_price_cents=100000,
+            quantity=1,
+            tax_rate=Decimal("0.1900"),
         )
         return invoice
 
@@ -197,14 +299,25 @@ class UBLInvoiceBuilderTestCase(TestCase):
     def _invoice_at(self, number, issued_at, due_at):
         """Invoice with explicit aware timestamps, for DST-boundary date assertions."""
         invoice = InvoiceFactory(
-            customer=self.customer, currency=self.currency, number=number,
-            bill_to_name="Customer SRL", bill_to_country="RO", bill_to_tax_id="RO87654321",
-            status="issued", issued_at=issued_at, due_at=due_at,
-            subtotal_cents=100000, tax_total_cents=19000, total_cents=119000,
+            customer=self.customer,
+            currency=self.currency,
+            number=number,
+            bill_to_name="Customer SRL",
+            bill_to_country="RO",
+            bill_to_tax_id="RO87654321",
+            status="issued",
+            issued_at=issued_at,
+            due_at=due_at,
+            subtotal_cents=100000,
+            tax_total_cents=19000,
+            total_cents=119000,
         )
         InvoiceLineFactory(
-            invoice=invoice, description="Web Hosting Service", unit_price_cents=100000,
-            quantity=1, tax_rate=Decimal("0.1900"),
+            invoice=invoice,
+            description="Web Hosting Service",
+            unit_price_cents=100000,
+            quantity=1,
+            tax_rate=Decimal("0.1900"),
         )
         return invoice
 
@@ -272,17 +385,27 @@ class UBLInvoiceBuilderTestCase(TestCase):
         datetimes. They carry no timezone and must NOT be converted — .astimezone() on a date
         raises AttributeError. They are emitted verbatim."""
         invoice = InvoiceFactory(
-            customer=self.customer, currency=self.currency, number="INV-2026-PERIOD",
-            bill_to_name="Customer SRL", bill_to_country="RO", bill_to_tax_id="RO87654321",
+            customer=self.customer,
+            currency=self.currency,
+            number="INV-2026-PERIOD",
+            bill_to_name="Customer SRL",
+            bill_to_country="RO",
+            bill_to_tax_id="RO87654321",
             status="issued",
             issued_at=datetime(2026, 1, 15, 22, 30, tzinfo=UTC),
             due_at=datetime(2026, 2, 14, 22, 30, tzinfo=UTC),
-            subtotal_cents=100000, tax_total_cents=19000, total_cents=119000,
+            subtotal_cents=100000,
+            tax_total_cents=19000,
+            total_cents=119000,
         )
         InvoiceLineFactory(
-            invoice=invoice, description="Web Hosting Service", unit_price_cents=100000,
-            quantity=1, tax_rate=Decimal("0.1900"),
-            period_start=date(2026, 1, 1), period_end=date(2026, 1, 31),
+            invoice=invoice,
+            description="Web Hosting Service",
+            unit_price_cents=100000,
+            quantity=1,
+            tax_rate=Decimal("0.1900"),
+            period_start=date(2026, 1, 1),
+            period_end=date(2026, 1, 31),
         )
         doc = etree.fromstring(UBLInvoiceBuilder(invoice).build().encode())
 
@@ -1212,20 +1335,33 @@ class UBLCreditNoteBuilderTestCase(TestCase):
         worst case, where the UTC bug corrupts the fiscal YEAR of the reference, not just the day.
         """
         original = InvoiceFactory(
-            customer=self.customer, currency=self.currency, number="INV-2025-YEAREND",
-            bill_to_name="Customer SRL", bill_to_country="RO", bill_to_tax_id="RO87654321",
+            customer=self.customer,
+            currency=self.currency,
+            number="INV-2025-YEAREND",
+            bill_to_name="Customer SRL",
+            bill_to_country="RO",
+            bill_to_tax_id="RO87654321",
             status="paid",
             issued_at=datetime(2025, 12, 31, 22, 30, tzinfo=UTC),
         )
         cn = InvoiceFactory(
-            customer=self.customer, currency=self.currency, number="CN-2026-TZ1",
-            bill_to_name="Customer SRL", bill_to_country="RO", bill_to_tax_id="RO87654321",
+            customer=self.customer,
+            currency=self.currency,
+            number="CN-2026-TZ1",
+            bill_to_name="Customer SRL",
+            bill_to_country="RO",
+            bill_to_tax_id="RO87654321",
             status="issued",
             issued_at=datetime(2026, 1, 15, 22, 30, tzinfo=UTC),
-            subtotal_cents=50000, tax_total_cents=9500, total_cents=59500,
+            subtotal_cents=50000,
+            tax_total_cents=9500,
+            total_cents=59500,
         )
         InvoiceLineFactory(
-            invoice=cn, description="Partial Refund", unit_price_cents=50000, quantity=1,
+            invoice=cn,
+            description="Partial Refund",
+            unit_price_cents=50000,
+            quantity=1,
             tax_rate=Decimal("0.1900"),
         )
         doc = etree.fromstring(UBLCreditNoteBuilder(cn, original).build().encode())
@@ -1235,10 +1371,7 @@ class UBLCreditNoteBuilderTestCase(TestCase):
 
         # The referenced original's date, scoped via BillingReference — a bare .//IssueDate
         # would match the document-level one above, which is emitted first.
-        ref = doc.find(
-            f".//{{{NAMESPACES['cac']}}}BillingReference"
-            f"/{{{NAMESPACES['cac']}}}InvoiceDocumentReference"
-        )
+        ref = doc.find(f".//{{{NAMESPACES['cac']}}}BillingReference/{{{NAMESPACES['cac']}}}InvoiceDocumentReference")
         self.assertEqual(ref.find(f"{{{NAMESPACES['cbc']}}}IssueDate").text, "2026-01-01")
 
     def test_credit_note_document_discount_emits_allowance_and_reconciles(self):

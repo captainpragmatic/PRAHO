@@ -124,16 +124,39 @@ class CIUSROValidator:
     # NB: 48 (bank card) is emitted by the builder for Stripe payments; 49 (direct debit) and
     # 54 (credit card) are also valid UNCL4461 codes a conforming invoice may carry.
     VALID_PAYMENT_MEANS: ClassVar[set[str]] = {
-        "10", "20", "30", "31", "42", "48", "49", "54", "57", "58", "59", "68", "97"
+        "10",
+        "20",
+        "30",
+        "31",
+        "42",
+        "48",
+        "49",
+        "54",
+        "57",
+        "58",
+        "59",
+        "68",
+        "97",
     }
 
     # Valid EN16931 VAT exemption reason codes (BT-121 / VATEX codelist). The builder emits
     # AE/IC/O/G; the rest are the standard EU exemption codes a conforming invoice may use.
     VALID_VATEX_CODES: ClassVar[set[str]] = {
-        "VATEX-EU-AE", "VATEX-EU-D", "VATEX-EU-F", "VATEX-EU-G", "VATEX-EU-I",
-        "VATEX-EU-IC", "VATEX-EU-J", "VATEX-EU-O",
-        "VATEX-EU-79-C", "VATEX-EU-132", "VATEX-EU-143", "VATEX-EU-148",
-        "VATEX-EU-151", "VATEX-EU-159", "VATEX-EU-309",
+        "VATEX-EU-AE",
+        "VATEX-EU-D",
+        "VATEX-EU-F",
+        "VATEX-EU-G",
+        "VATEX-EU-I",
+        "VATEX-EU-IC",
+        "VATEX-EU-J",
+        "VATEX-EU-O",
+        "VATEX-EU-79-C",
+        "VATEX-EU-132",
+        "VATEX-EU-143",
+        "VATEX-EU-148",
+        "VATEX-EU-151",
+        "VATEX-EU-159",
+        "VATEX-EU-309",
     }
 
     # EN16931 categories that must carry NEITHER an exemption code NOR reason text (BR-S/Z-10).
@@ -142,6 +165,7 @@ class CIUSROValidator:
     _ZERO_RATE_CATEGORIES: ClassVar[set[str]] = {"Z", "E", "AE", "K", "G", "O"}
     # Allowed rounding tolerance for the multiply-based rule BR-CO-14 (tax = base * rate).
     _ROUNDING_TOLERANCE: ClassVar[Decimal] = Decimal("0.01")
+    _MAX_ACCOUNTING_AMOUNT_DECIMALS: ClassVar[int] = 2
 
     def __init__(self) -> None:
         """Initialize validator."""
@@ -411,6 +435,140 @@ class CIUSROValidator:
                     if not percent:
                         result.add_error("BR-48-PCT", "Tax percentage is mandatory for standard rate")
 
+        self._validate_tax_currency_totals(doc, result, tax_totals)
+
+    def _validate_tax_currency_totals(
+        self,
+        doc: etree._Element,
+        result: ValidationResult,
+        tax_totals: list[etree._Element],
+    ) -> None:
+        """Validate BR-RO-030 and the two-total accounting-currency shape."""
+        document_currency = self._get_text(doc, "./cbc:DocumentCurrencyCode")
+        tax_currency_nodes = self._find_all(doc, "./cbc:TaxCurrencyCode")
+        tax_currency = self._single_node_text(tax_currency_nodes)
+        document_totals, accounting_shape_totals = self._split_tax_totals(tax_totals)
+
+        self._validate_tax_total_cardinality(
+            result,
+            tax_currency_nodes,
+            document_totals,
+            accounting_shape_totals,
+        )
+        self._validate_currency_ids(doc, document_currency, result)
+
+        if document_currency == "RON":
+            if tax_currency_nodes:
+                result.add_error("BR-RO-030", "RON invoices must not specify a separate tax accounting currency")
+            return
+
+        if len(tax_currency_nodes) != 1 or tax_currency != "RON":
+            result.add_error("BR-RO-030", "A non-RON invoice must specify exactly one TaxCurrencyCode equal to RON")
+
+        accounting_totals = [
+            total for total in accounting_shape_totals if self._currency_id(total, "./cbc:TaxAmount") == tax_currency
+        ]
+        if len(accounting_totals) != 1:
+            result.add_error(
+                "BR-53",
+                "The invoice must contain one VAT total in the declared tax accounting currency",
+            )
+
+        if len(document_totals) != 1 or len(accounting_totals) != 1:
+            return
+
+        document_total = document_totals[0]
+        accounting_total = accounting_totals[0]
+        self._validate_accounting_tax_amount(document_total, accounting_total, result)
+
+    def _validate_tax_total_cardinality(
+        self,
+        result: ValidationResult,
+        tax_currency_nodes: list[etree._Element],
+        document_totals: list[etree._Element],
+        accounting_totals: list[etree._Element],
+    ) -> None:
+        if len(document_totals) != 1:
+            result.add_error("R053", "Exactly one TaxTotal with TaxSubtotal elements is required")
+        expected_accounting_totals = 1 if tax_currency_nodes else 0
+        if len(accounting_totals) != expected_accounting_totals:
+            result.add_error(
+                "R054",
+                "Exactly one TaxTotal without TaxSubtotal is required when TaxCurrencyCode is provided",
+            )
+
+    @staticmethod
+    def _single_node_text(nodes: list[etree._Element]) -> str:
+        if len(nodes) != 1 or nodes[0].text is None:
+            return ""
+        return nodes[0].text.strip()
+
+    def _split_tax_totals(
+        self,
+        tax_totals: list[etree._Element],
+    ) -> tuple[list[etree._Element], list[etree._Element]]:
+        document_totals = [total for total in tax_totals if self._find_all(total, "./cac:TaxSubtotal")]
+        accounting_totals = [total for total in tax_totals if not self._find_all(total, "./cac:TaxSubtotal")]
+        return document_totals, accounting_totals
+
+    def _validate_currency_ids(
+        self,
+        doc: etree._Element,
+        document_currency: str,
+        result: ValidationResult,
+    ) -> None:
+        for amount in self._find_all(doc, ".//*[@currencyID]"):
+            parent = amount.getparent()
+            is_accounting_tax_amount = (
+                etree.QName(amount).localname == "TaxAmount"
+                and parent is not None
+                and etree.QName(parent).localname == "TaxTotal"
+                and not self._find_all(parent, "./cac:TaxSubtotal")
+            )
+            if not is_accounting_tax_amount and amount.get("currencyID", "") != document_currency:
+                result.add_error(
+                    "R051",
+                    f"{etree.QName(amount).localname} must use document currency {document_currency}",
+                )
+
+    def _currency_id(self, node: etree._Element, xpath: str) -> str:
+        amount = self._find(node, xpath)
+        return amount.get("currencyID", "") if amount is not None else ""
+
+    def _validate_accounting_tax_amount(
+        self,
+        document_total: etree._Element,
+        accounting_total: etree._Element,
+        result: ValidationResult,
+    ) -> None:
+        document_amount_node = self._find(document_total, "./cbc:TaxAmount")
+        accounting_amount_node = self._find(accounting_total, "./cbc:TaxAmount")
+        if document_amount_node is None or accounting_amount_node is None:
+            return
+
+        document_amount = self._decimal(document_total, "./cbc:TaxAmount")
+        accounting_amount = self._decimal(accounting_total, "./cbc:TaxAmount")
+        if document_amount is not None and accounting_amount is not None and document_amount * accounting_amount < 0:
+            result.add_error("R055", "Document and accounting-currency tax totals must have the same sign")
+
+        accounting_text = (accounting_amount_node.text or "").strip()
+        if accounting_text and not self._has_at_most_two_decimals(accounting_text):
+            result.add_error("BR-DEC-15", "BT-111 accounting-currency tax amount may have at most two decimals")
+
+    def _document_tax_total(self, doc: etree._Element) -> etree._Element | None:
+        """Select BT-110 by currency and subtotal shape, never XML order."""
+        document_currency = self._get_text(doc, "./cbc:DocumentCurrencyCode")
+        candidates = []
+        for tax_total in self._find_all(doc, "./cac:TaxTotal"):
+            amount = self._find(tax_total, "./cbc:TaxAmount")
+            if (
+                amount is not None
+                and amount.get("currencyID", "") == document_currency
+                and self._find_all(tax_total, "./cac:TaxSubtotal")
+            ):
+                candidates.append(tax_total)
+        return candidates[0] if len(candidates) == 1 else None
+
     def _validate_invoice_lines(
         self, doc: etree._Element, result: ValidationResult, is_credit_note: bool = False
     ) -> None:
@@ -496,7 +654,10 @@ class CIUSROValidator:
         allowance = self._decimal(monetary, "cbc:AllowanceTotalAmount") or Decimal("0")
         charge = self._decimal(monetary, "cbc:ChargeTotalAmount") or Decimal("0")
         prepaid = self._decimal(monetary, "cbc:PrepaidAmount") or Decimal("0")
-        tax_amount = self._decimal(doc, ".//cac:TaxTotal/cbc:TaxAmount") or Decimal("0")
+        document_tax_total = self._document_tax_total(doc)
+        tax_amount = (
+            self._decimal(document_tax_total, "./cbc:TaxAmount") if document_tax_total is not None else Decimal("0")
+        ) or Decimal("0")
 
         # BR-CO-10: BT-106 == Σ line BT-131
         line_tag = "CreditNoteLine" if is_credit_note else "InvoiceLine"
@@ -531,7 +692,9 @@ class CIUSROValidator:
         # breakdown sums to a different value (BR-CO-14 family).
         subtotal_taxes = sum(
             (self._decimal(st, "cbc:TaxAmount") or Decimal("0"))
-            for st in self._find_all(doc, ".//cac:TaxTotal/cac:TaxSubtotal")
+            for st in (
+                self._find_all(document_tax_total, "./cac:TaxSubtotal") if document_tax_total is not None else []
+            )
         )
         if subtotal_taxes != tax_amount:
             result.add_error(
@@ -555,7 +718,8 @@ class CIUSROValidator:
                 expected = (taxable * percent / Decimal("100")).quantize(Decimal("0.01"), ROUND_HALF_UP)
                 if abs(tax - expected) > self._ROUNDING_TOLERANCE:
                     result.add_error(
-                        "BR-CO-14", f"Standard-rate TaxAmount {tax} != taxable {taxable} * {percent}% (expected {expected})"
+                        "BR-CO-14",
+                        f"Standard-rate TaxAmount {tax} != taxable {taxable} * {percent}% (expected {expected})",
                     )
 
             # BR-*-05: non-standard categories must carry rate 0
@@ -586,4 +750,17 @@ class CIUSROValidator:
             float(amount_str)
             return True
         except ValueError:
+            return False
+
+    @staticmethod
+    def _has_at_most_two_decimals(amount_str: str) -> bool:
+        try:
+            amount = Decimal(amount_str)
+            exponent = amount.as_tuple().exponent
+            return (
+                amount.is_finite()
+                and isinstance(exponent, int)
+                and exponent >= -CIUSROValidator._MAX_ACCOUNTING_AMOUNT_DECIMALS
+            )
+        except (InvalidOperation, ValueError):
             return False

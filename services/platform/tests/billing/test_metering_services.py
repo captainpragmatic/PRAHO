@@ -1248,6 +1248,24 @@ class UsageInvoiceServiceTestCase(TestCase):
         self.assertTrue(result.is_err())
         self.assertIn("not found", result.error.lower())
 
+    def test_issue_foreign_currency_invoice_without_rate_returns_error(self):
+        eur, _ = Currency.objects.get_or_create(code="EUR", defaults={"symbol": "EUR", "decimals": 2})
+        invoice = Invoice.objects.create(
+            customer=self.customer,
+            currency=eur,
+            number="INV-MISSING-FX",
+            subtotal_cents=1000,
+            tax_cents=210,
+            total_cents=1210,
+        )
+
+        result = self.service.issue_invoice(str(invoice.id))
+
+        self.assertTrue(result.is_err())
+        self.assertIn("exchange rate", result.unwrap_err().lower())
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.status, "draft")
+
 
 class UsageAlertServiceTestCase(TestCase):
     """Test UsageAlertService functionality."""

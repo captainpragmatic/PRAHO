@@ -17,7 +17,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
-from django.core.exceptions import ObjectDoesNotExist
+from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.db import transaction
 from django.db.models import Exists, Max, OuterRef, Sum
 from django.utils import timezone
@@ -398,6 +398,9 @@ class UsageInvoiceService:
             except TransitionNotAllowed:
                 logger.warning("⚠️ [Invoice] Cannot issue invoice %s from status '%s'", invoice.number, invoice.status)
                 return Err(f"Cannot issue invoice {invoice.number} from status '{invoice.status}'")
+            except ValidationError as exc:
+                logger.warning("⚠️ [Invoice] Fiscal issuance validation failed for %s: %s", invoice.number, exc)
+                return Err(f"Cannot issue invoice {invoice.number}: {'; '.join(exc.messages)}")
             # Note: issue() FSM transition already sets issued_at and locked_at
             invoice.save()
 

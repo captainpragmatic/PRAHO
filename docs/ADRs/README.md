@@ -13,7 +13,7 @@ providing a historical record of why the system is built the way it is.
 ## How to Create a New ADR
 
 1. Create a new file: `ADR-XXXX-short-descriptive-title.md`
-2. Use the next available number (currently: **ADR-0041**)
+2. Use the next available number (currently: **ADR-0042**)
 3. Follow the standard format: Status, Date, Authors, Context, Decision, Consequences
 4. Set status to **Proposed** initially, then update to **Accepted** after team review
 
@@ -69,6 +69,7 @@ providing a historical record of why the system is built the way it is.
 | [ADR-0038](ADR-0038-proforma-payment-convergence.md) | Proforma Payment Convergence Architecture | Accepted | 2026-03 |
 | [ADR-0039](ADR-0039-praho-owned-recurring-billing.md) | PRAHO-Owned Recurring Billing | Accepted | 2026-07 |
 | [ADR-0040](ADR-0040-row-bound-encrypted-json-fields.md) | Row-Bound Encrypted JSON Fields | Accepted | 2026-07 |
+| [ADR-0041](ADR-0041-foreign-currency-efactura-accounting.md) | Foreign-Currency e-Factura Accounting | Accepted | 2026-07 |
 
 ### 🟡 Partially Superseded
 
@@ -128,6 +129,7 @@ Billing Ownership
   ADR-0025 (amounts in cents) ──related──▶ ADR-0038 (proforma convergence)
   ADR-0038 ──extended by──▶ ADR-0039 (PRAHO-owned recurring billing)
   ADR-0039 ──related──▶ ADR-0034 (FSM lifecycle)
+  ADR-0025 ──extended by──▶ ADR-0041 (foreign-currency e-Factura accounting)
 ```
 
 ---
@@ -178,13 +180,14 @@ Billing Ownership
 - [ADR-0029](ADR-0029-config-drift-detection.md) — Drift detection and remediation workflow
 - [ADR-0038](ADR-0038-proforma-payment-convergence.md) — Atomic proforma payment and invoice convergence
 - [ADR-0039](ADR-0039-praho-owned-recurring-billing.md) — PRAHO-owned subscriptions, consent, collection, and usage billing
+- [ADR-0041](ADR-0041-foreign-currency-efactura-accounting.md) — provenanced FX snapshots and multi-currency e-Factura VAT
 
 ---
 
 ## Statistics
 
-- **Total ADRs**: 40 (ADR-0001 through ADR-0040)
-- **Active**: 34 (Accepted + Implemented)
+- **Total ADRs**: 41 (ADR-0001 through ADR-0041)
+- **Active**: 35 (Accepted + Implemented)
 - **Partially Superseded**: 1
 - **Superseded / Historical**: 5
-- **Next available**: ADR-0041
+- **Next available**: ADR-0042

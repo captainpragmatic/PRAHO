@@ -143,6 +143,22 @@ class EFacturaDocumentModelTestCase(TestCase):
         self.assertIsNotNone(document.next_retry_at)
         self.assertEqual(document.last_error, "Network timeout")
 
+    def test_mark_local_error_is_not_retryable(self):
+        document = EFacturaDocument.objects.create(invoice=self.invoice)
+        force_status(document, EFacturaStatus.QUEUED.value)
+        document.save()
+        errors = [{"code": "BR-01", "message": "ID missing"}]
+
+        document.mark_local_error("Native validation failed", errors)
+        document.save()
+        document.refresh_from_db()
+
+        self.assertEqual(document.status, EFacturaStatus.ERROR.value)
+        self.assertEqual(document.validation_errors, errors)
+        self.assertEqual(document.retry_count, 0)
+        self.assertIsNone(document.next_retry_at)
+        self.assertFalse(document.can_retry)
+
     def test_max_retries_exceeded(self):
         """Test that next_retry_at is None after max retries."""
         document = EFacturaDocument.objects.create(
@@ -178,6 +194,7 @@ class EFacturaDocumentModelTestCase(TestCase):
         self.assertFalse(document.can_retry)
 
         force_status(document, EFacturaStatus.ERROR.value)
+        document.next_retry_at = timezone.now()
         self.assertTrue(document.can_retry)
 
         document.retry_count = EFacturaDocument.MAX_RETRIES

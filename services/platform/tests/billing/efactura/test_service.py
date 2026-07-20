@@ -111,6 +111,8 @@ class EFacturaServiceTestCase(TestCase):
     def setUp(self):
         self.mock_client = Mock(spec=EFacturaClient)
         self.service = EFacturaService(client=self.mock_client)
+        self.service._validator = Mock()
+        self.service._validator.validate.return_value = ValidationResult(is_valid=True)
         self.invoice = MockInvoice()
 
     def test_init_with_default_client(self):
@@ -171,11 +173,12 @@ class EFacturaServiceTestCase(TestCase):
         mock_validate.return_value = validation_result
 
         with patch.object(self.service, "_log_audit_event"):
-            result = self.service.submit_invoice(self.invoice, validate_first=True)
+            result = self.service.submit_invoice(self.invoice)
 
         self.assertFalse(result.success)
         self.assertIn("validation failed", result.error_message.lower())
-        mock_doc.mark_error.assert_called_once()
+        mock_doc.mark_local_error.assert_called_once()
+        self.mock_client.upload_invoice.assert_not_called()
 
     @patch("apps.billing.efactura.service.EFacturaDocument.objects")
     @patch.object(EFacturaService, "_generate_xml")
@@ -194,7 +197,7 @@ class EFacturaServiceTestCase(TestCase):
         )
 
         with patch.object(self.service, "_log_audit_event"):
-            result = self.service.submit_invoice(self.invoice, validate_first=False)
+            result = self.service.submit_invoice(self.invoice)
 
         self.assertFalse(result.success)
         mock_doc.mark_error.assert_called_once()
@@ -225,7 +228,7 @@ class EFacturaServiceTestCase(TestCase):
         self.mock_client.upload_invoice.side_effect = AuthenticationError("Token expired")
 
         with patch.object(self.service, "_get_existing_document", return_value=mock_doc):
-            result = self.service.submit_invoice(self.invoice, validate_first=False)
+            result = self.service.submit_invoice(self.invoice)
 
         self.assertFalse(result.success)
         self.assertIn("Authentication", result.error_message)
@@ -242,7 +245,7 @@ class EFacturaServiceTestCase(TestCase):
         self.mock_client.upload_invoice.side_effect = NetworkError("Connection refused")
 
         with patch.object(self.service, "_get_existing_document", return_value=mock_doc):
-            result = self.service.submit_invoice(self.invoice, validate_first=False)
+            result = self.service.submit_invoice(self.invoice)
 
         self.assertFalse(result.success)
         self.assertIn("Network", result.error_message)
@@ -674,6 +677,14 @@ class SubmissionLifecycleTests(TestCase):
         doc.save()
         return doc
 
+    @staticmethod
+    def _service(client: EFacturaClient) -> EFacturaService:
+        """Build a service whose validator accepts the deliberately minimal lifecycle XML."""
+        service = EFacturaService(client=client)
+        service._validator = Mock()
+        service._validator.validate.return_value = ValidationResult(is_valid=True)
+        return service
+
     def test_submit_drives_new_doc_to_submitted_and_persists_index(self):
         """A fresh (draft) document must reach SUBMITTED with the upload_index persisted.
 
@@ -684,7 +695,7 @@ class SubmissionLifecycleTests(TestCase):
         invoice = self._ro_invoice("INV-LC-1")
         client = Mock(spec=EFacturaClient)
         client.upload_invoice.return_value = UploadResponse(success=True, upload_index="IDX-1")
-        service = EFacturaService(client=client)
+        service = self._service(client)
 
         with (
             patch.object(service, "_generate_xml", return_value="<Invoice/>"),
@@ -716,7 +727,7 @@ class SubmissionLifecycleTests(TestCase):
         doc = self._submitted_doc(invoice, "IDX-2")
         client = Mock(spec=EFacturaClient)
         client.get_upload_status.return_value = StatusResponse(status="ok", download_id="DL-2")
-        service = EFacturaService(client=client)
+        service = self._service(client)
 
         with patch.object(service, "_log_audit_event"), patch.object(service, "_record_webhook_event"):
             result = service.check_status(doc)
@@ -732,7 +743,7 @@ class SubmissionLifecycleTests(TestCase):
         doc = self._submitted_doc(invoice, "IDX-3")
         client = Mock(spec=EFacturaClient)
         client.get_upload_status.return_value = StatusResponse(status="nok", download_id="")
-        service = EFacturaService(client=client)
+        service = self._service(client)
 
         with patch.object(service, "_log_audit_event"), patch.object(service, "_record_webhook_event"):
             result = service.check_status(doc)
@@ -750,7 +761,7 @@ class SubmissionLifecycleTests(TestCase):
         invoice = self._ro_invoice("INV-LC-4")
         self._submitted_doc(invoice, "IDX-4")
         client = Mock(spec=EFacturaClient)
-        service = EFacturaService(client=client)
+        service = self._service(client)
 
         with (
             patch.object(service, "_generate_xml", return_value="<Invoice/>"),
@@ -769,7 +780,7 @@ class SubmissionLifecycleTests(TestCase):
         invoice = self._ro_invoice("INV-B2C-1", bill_to_tax_id="")
         client = Mock(spec=EFacturaClient)
         client.upload_b2c.return_value = UploadResponse(success=True, upload_index="B2C-1")
-        service = EFacturaService(client=client)
+        service = self._service(client)
 
         with (
             patch.object(service, "_generate_xml", return_value="<Invoice/>"),
@@ -791,7 +802,7 @@ class SubmissionLifecycleTests(TestCase):
         )
         client = Mock(spec=EFacturaClient)
         client.upload_credit_note.return_value = UploadResponse(success=True, upload_index="CN-B2B-1")
-        service = EFacturaService(client=client)
+        service = self._service(client)
 
         with (
             patch.object(service, "_generate_xml", return_value="<CreditNote/>"),
@@ -812,7 +823,7 @@ class SubmissionLifecycleTests(TestCase):
         )
         client = Mock(spec=EFacturaClient)
         client.upload_b2c.return_value = UploadResponse(success=True, upload_index="CN-B2C-1")
-        service = EFacturaService(client=client)
+        service = self._service(client)
 
         with (
             patch.object(service, "_generate_xml", return_value="<CreditNote/>"),
@@ -832,7 +843,7 @@ class SubmissionLifecycleTests(TestCase):
         invoice = self._ro_invoice("INV-FAIL-1")
         client = Mock(spec=EFacturaClient)
         client.upload_invoice.side_effect = NetworkError("boom")
-        service = EFacturaService(client=client)
+        service = self._service(client)
 
         with (
             patch.object(service, "_generate_xml", return_value="<Invoice/>"),
@@ -858,7 +869,7 @@ class SubmissionLifecycleTests(TestCase):
         doc.mark_rejected([{"message": "bad"}])
         doc.save()
         client = Mock(spec=EFacturaClient)
-        service = EFacturaService(client=client)
+        service = self._service(client)
 
         with (
             patch.object(service, "_generate_xml", return_value="<Invoice/>"),
@@ -875,7 +886,7 @@ class SubmissionLifecycleTests(TestCase):
         invoice = self._ro_invoice("INV-B2B-1")
         client = Mock(spec=EFacturaClient)
         client.upload_invoice.return_value = UploadResponse(success=True, upload_index="B2B-1")
-        service = EFacturaService(client=client)
+        service = self._service(client)
 
         with (
             patch.object(service, "_generate_xml", return_value="<Invoice/>"),

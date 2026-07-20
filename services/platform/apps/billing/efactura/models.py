@@ -377,6 +377,17 @@ class EFacturaDocument(models.Model):
         else:
             self.next_retry_at = None  # No more retries
 
+    @transition(
+        field=status,
+        source=[EFacturaStatus.DRAFT.value, EFacturaStatus.QUEUED.value],
+        target=EFacturaStatus.ERROR.value,
+    )
+    def mark_local_error(self, error_message: str, errors: list[dict[str, Any]] | None = None) -> None:
+        """Record a deterministic local failure without scheduling network retries."""
+        self.last_error = error_message
+        self.validation_errors = errors or []
+        self.next_retry_at = None
+
     def _update_invoice_on_acceptance(self) -> None:
         """Update the related invoice when e-Factura is accepted."""
         self.invoice.efactura_id = self.anaf_upload_index
@@ -425,7 +436,11 @@ class EFacturaDocument(models.Model):
     @property
     def can_retry(self) -> bool:
         """Check if document can be retried."""
-        return self.status in EFacturaStatus.retryable_statuses() and self.retry_count < self.MAX_RETRIES
+        return (
+            self.status in EFacturaStatus.retryable_statuses()
+            and self.retry_count < self.MAX_RETRIES
+            and self.next_retry_at is not None
+        )
 
     @property
     def submission_deadline(self) -> datetime.datetime | None:

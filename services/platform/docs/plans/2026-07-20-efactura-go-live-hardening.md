@@ -64,24 +64,25 @@ branch.
 - Update `docs/ADRs/README.md`.
 - Modify `services/platform/apps/billing/currency_models.py`.
 - Create `services/platform/apps/billing/migrations/0038_fxrate_provenance_and_constraints.py`.
-- Extend `services/platform/tests/billing/test_billing_models_regressions.py`.
+- Create `services/platform/tests/billing/test_fxrate_constraints.py`.
+- Create `services/platform/tests/billing/test_fxrate_migration.py`.
 
 **RED tests**
 
-- Zero/negative rates and self pairs violate database constraints.
+- Non-finite, zero, and negative rates and self pairs fail closed.
 - A valid `EUR/RON` row stores direction, effective date, source, source reference, and fetch time.
 - Existing rows migrate as `legacy_unknown` with nullable provenance; no migration invents a BNR
   source or fetch timestamp.
 
 **Implementation**
 
-- Add a minimum-value validator plus positive-rate and base-not-quote constraints.
+- Add finite-range validation plus positive-rate and base-not-quote constraints.
 - Add an explicit source choice, source reference, and nullable `fetched_at`.
 - Define legacy rows honestly. New issuance may not consume `legacy_unknown` rows.
 
 **Verify**
 
-- `make test-file FILE=tests.billing.test_billing_models_regressions`
+- Focused FX constraint and migration test modules.
 - Migration executor test for legacy provenance.
 - `manage.py makemigrations --check --dry-run --settings=config.settings.test`
 
@@ -103,7 +104,7 @@ published rate with its source reference.
 - Lookup selects the latest exact-direction row with `as_of <= effective_date`.
 - Saturday/holiday lookup resolves the last published row; reversed pairs are never auto-inverted.
 - Missing, non-positive, or legacy-unprovenanced data fails with a typed operator-readable error.
-- More than three Romanian working days without a publication logs an operational warning but does
+- More than three weekdays without a publication logs an operational warning but does
   not reject a legally valid last-published rate.
 - Conversion uses `Decimal` and `ROUND_HALF_UP` at exact midpoint boundaries.
 - The command requires source/reference/date, creates once, audits the actor/context, and refuses to
@@ -112,7 +113,8 @@ published rate with its source reference.
 **Implementation**
 
 - Add immutable `ExchangeRateSnapshot`, typed lookup errors, exact-direction lookup, conversion,
-  and Romanian-working-day staleness warning.
+  and an explicitly weekday-based staleness warning. Rate validity still comes from the latest
+  published row on or before the tax point; the warning does not guess provider holiday calendars.
 - Keep all network I/O out of issuance. Document a future BNR/Django-Q2 importer as the next #103
   operational phase.
 
@@ -126,10 +128,11 @@ published rate with its source reference.
 
 - Modify `services/platform/apps/billing/invoice_models.py`.
 - Create `services/platform/apps/billing/migrations/0039_invoice_tax_point_and_fx_snapshot.py`.
-- Modify production issuance seams in:
-  - `services/platform/apps/billing/services.py`
-  - `services/platform/apps/billing/usage_invoice_service.py`
-- Extend invoice, proforma-conversion, and usage-invoice tests.
+- Modify the result-returning issuance seam in
+  `services/platform/apps/billing/usage_invoice_service.py` so fiscal validation errors remain a
+  typed service failure.
+- Create `services/platform/tests/billing/test_invoice_exchange_rate_snapshot.py` and extend the
+  usage-invoice tests.
 
 **Rules**
 
@@ -149,8 +152,8 @@ published rate with its source reference.
 - EUR issuance resolves by tax point, snapshots once, then locks currency/tax point/all FX fields.
 - Normal save and `update_fields` cannot mutate the locked snapshot.
 - Existing locked foreign invoices without proof cannot generate e-Factura XML.
-- `ProformaConversionService.convert_to_invoice`, fixed usage issuance, and rated usage issuance
-  all pass through the same preparation boundary.
+- All production issuance callers—including proforma conversion and both usage-invoice paths—call
+  `Invoice.issue()`, the single preparation boundary.
 - `InvoiceService.create_from_order` remains draft-only and does not snapshot prematurely.
 
 **Verify**
