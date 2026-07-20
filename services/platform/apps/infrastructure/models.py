@@ -1015,6 +1015,11 @@ class DriftRemediationRequest(models.Model):
     action_details = models.JSONField(default=dict, verbose_name=_("Action Details"))
     requires_approval = models.BooleanField(default=True, verbose_name=_("Requires Approval"))
     requires_restart = models.BooleanField(default=False, verbose_name=_("Requires Restart"))
+    # ADR-0029: a remediation that reboots a customer-hosting server needs the
+    # restart itself signed off, separately from the generic approval. Defaults
+    # False so any pre-existing approved server_type request is fail-closed and
+    # must have the reboot re-confirmed before it can execute.
+    restart_approved = models.BooleanField(default=False, verbose_name=_("Restart Approved"))
     status = models.CharField(
         max_length=20, choices=STATUS_CHOICES, default="pending_approval", verbose_name=_("Status")
     )
@@ -1089,6 +1094,9 @@ class DriftSnapshot(models.Model):
         ("restoring", _("Restoring")),
         ("deleted", _("Deleted")),
         ("failed", _("Failed")),
+        # Provider-side delete failed after expiry: a billable orphan that is
+        # surfaced for manual reconciliation rather than retried forever.
+        ("cleanup_failed", _("Cleanup Failed")),
     ]
 
     deployment = models.ForeignKey(
