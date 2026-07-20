@@ -668,6 +668,46 @@ class TestReviewHardening325(VirtualminTaskTestBase):
         job.refresh_from_db()
         self.assertEqual(job.status, "failed")
 
+    def test_stranded_initial_create_recovers_and_retry_converges_end_to_end(self):
+        """Full first-attempt recovery: a worker death after mark_started()
+        (running, claimed_at=NULL) leaves the account at 'provisioning' while
+        the remote domain already exists. The sweep must recover the job, and
+        the job-aware retry must converge the existing remote domain to active
+        — proving the fix closes the stranding, not just flips the job row."""
+        mock_gateway = MockVirtualminGateway()
+        mock_gateway.seed_domain(self.account.domain, username=self.account.virtualmin_username)
+        self.account.status = "provisioning"
+        self.account.save(update_fields=["status"])
+        domains_before = self.server.current_domains
+        job = self._failed_job(
+            status="running",
+            claimed_at=None,
+            started_at=timezone.now() - timedelta(minutes=31),
+        )
+
+        # 1. Sweep recovers the stranded first-attempt job by started_at.
+        VirtualminProvisioningJob.recover_expired_claims(
+            timezone.now() - timedelta(minutes=30), timezone.now() - timedelta(minutes=1)
+        )
+        # 2. The sweep then claims it for retry (failed -> pending).
+        self.assertTrue(VirtualminProvisioningJob.claim_for_retry(job.pk, timezone.now()))
+
+        # 3. The job-aware retry converges the existing remote domain.
+        with patch(
+            "apps.provisioning.virtualmin_service.VirtualminGateway",
+            return_value=mock_gateway,
+        ):
+            result = retry_virtualmin_job(str(job.id))
+
+        self.assertTrue(result["success"], result)
+        job.refresh_from_db()
+        self.account.refresh_from_db()
+        self.server.refresh_from_db()
+        self.assertEqual(job.status, "completed")
+        self.assertEqual(self.account.status, "active")
+        self.assertEqual(self.server.current_domains, domains_before + 1)
+        self.assertEqual(len(mock_gateway.get_calls("create-domain")), 0)
+
     def test_running_initial_execution_with_no_claim_is_recovered(self):
         """A worker death during the INITIAL execution strands the job as
         status='running' with claimed_at=NULL (mark_started never claims). The
