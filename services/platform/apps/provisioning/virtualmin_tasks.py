@@ -18,6 +18,7 @@ from django_q.models import Schedule as ScheduleModel
 from django_q.tasks import async_task, schedule
 
 from apps.audit.services import AuditContext, AuditEventData, AuditService
+from apps.common.types import Retriability, retriability_of
 from apps.provisioning.models import Service
 
 from .security_utils import (
@@ -40,6 +41,11 @@ from .virtualmin_service import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+class RetryableProvisioningError(RuntimeError):
+    """Raised only when a Result explicitly marks a task replay as safe."""
+
 
 # ===============================================================================
 # TASK CONFIGURATION - Externalized Timeouts
@@ -300,18 +306,19 @@ def _execute_provisioning_transaction(context: ProvisioningContext, server_id: s
 
             return result
 
-    except Exception as db_error:
-        logger.error(f"🔥 [VirtualminTask] Database operation failed: {db_error}")
+    except RetryableProvisioningError as retry_error:
         IdempotencyManager.clear(context.idempotency_key)
+        logger.warning(f"🔄 [VirtualminTask] Explicitly retryable error, will retry: {retry_error}")
+        raise
 
-        # Classify error for proper handling
-        error_type = ProvisioningErrorClassifier.classify_error(str(db_error))
-
-        if ProvisioningErrorClassifier.is_retryable(error_type):
-            logger.warning(f"🔄 [VirtualminTask] Retryable error, will retry: {db_error}")
-            raise db_error  # Trigger retry
-        else:
-            return {"success": False, "error": f"Database error: {db_error}"}
+    except Exception as provisioning_error:
+        logger.error(f"🔥 [VirtualminTask] Provisioning transaction failed: {provisioning_error}")
+        IdempotencyManager.clear(context.idempotency_key)
+        return {
+            "success": False,
+            "error": f"Provisioning error: {provisioning_error}",
+            "retriability": Retriability.UNKNOWN.value,
+        }
 
 
 def provision_virtualmin_account(params: VirtualminProvisioningParams | SecureTaskParameters) -> dict[str, Any]:
@@ -355,6 +362,9 @@ def provision_virtualmin_account(params: VirtualminProvisioningParams | SecureTa
 
         # Step 4: Execute provisioning in transaction
         return _execute_provisioning_transaction(context, decrypted_params.get("server_id"))
+
+    except RetryableProvisioningError:
+        raise
 
     except Exception as e:
         # Use context values if available, otherwise use original parameters
@@ -515,6 +525,7 @@ def _execute_virtualmin_provisioning_with_params(exec_params: ProvisioningExecut
                 exec_params.domain,
                 exec_params.correlation_id,
                 exec_params.safe_log_ctx,
+                retriability=retriability_of(result),
             )
 
     except Exception as exec_error:
@@ -534,10 +545,13 @@ def _execute_virtualmin_provisioning_with_params(exec_params: ProvisioningExecut
             exec_params.domain,
         )
 
-        if ProvisioningErrorClassifier.is_retryable(error_type):
-            raise exec_error  # Trigger retry
-        else:
-            return {"success": False, "error": f"Execution failed: {exec_error}"}
+        if isinstance(exec_error, RetryableProvisioningError):
+            raise
+        return {
+            "success": False,
+            "error": f"Execution failed: {exec_error}",
+            "retriability": Retriability.UNKNOWN.value,
+        }
 
 
 def _execute_virtualmin_provisioning(
@@ -669,12 +683,17 @@ def _handle_successful_provisioning(account: Any, service: Service, correlation_
     return _handle_successful_provisioning_secure(account, service, correlation_id, safe_log_ctx)
 
 
-def _handle_failed_provisioning_secure(
-    error_msg: str, service: Service, domain: str, correlation_id: str, safe_log_ctx: dict[str, Any]
+def _handle_failed_provisioning_secure(  # noqa: PLR0913  # Structured audit context is intentionally explicit
+    error_msg: str,
+    service: Service,
+    domain: str,
+    correlation_id: str,
+    safe_log_ctx: dict[str, Any],
+    *,
+    retriability: Retriability = Retriability.UNKNOWN,
 ) -> dict[str, Any]:
-    """Handle failed provisioning with enhanced security and error classification."""
+    """Handle failure while preserving the service's explicit replay contract."""
 
-    # Classify error type for proper handling
     error_type = ProvisioningErrorClassifier.classify_error(error_msg)
 
     error_ctx = safe_log_ctx.copy()
@@ -682,13 +701,13 @@ def _handle_failed_provisioning_secure(
         {
             "error": error_msg,
             "error_type": error_type.value,
+            "retriability": retriability.value,
         }
     )
 
     logger.error(f"❌ [VirtualminTask] Secure provisioning failed: {sanitize_log_parameters(error_ctx)}")
 
     try:
-        # Enhanced audit logging with error classification
         AuditService.log_event(
             AuditEventData(
                 event_type="virtualmin_provisioning_failed",
@@ -701,6 +720,7 @@ def _handle_failed_provisioning_secure(
                     "customer_id": str(service.customer.id),
                     "provisioning_type": "automatic_secure",
                     "correlation_id": correlation_id,
+                    "retriability": retriability.value,
                 },
                 description=f"VirtualMin secure provisioning failed for domain '{domain}': {error_msg}",
             ),
@@ -715,18 +735,19 @@ def _handle_failed_provisioning_secure(
                     "domain": domain,
                     "error_type": error_type.value,
                     "customer_id": str(service.customer.id),
-                    "retryable": ProvisioningErrorClassifier.is_retryable(error_type),
+                    "retryable": retriability is Retriability.RETRIABLE,
+                    "retriability": retriability.value,
                 },
             ),
         )
 
-        # Log security event for provisioning failures
         log_security_event_safe(
             "virtualmin_provisioning_failed",
             {
                 "error": error_msg,
                 "error_type": error_type.value,
-                "retryable": ProvisioningErrorClassifier.is_retryable(error_type),
+                "retryable": retriability is Retriability.RETRIABLE,
+                "retriability": retriability.value,
                 "context": error_ctx,
             },
             str(service.id),
@@ -736,10 +757,9 @@ def _handle_failed_provisioning_secure(
     except Exception as audit_error:
         logger.warning(f"⚠️ [VirtualminTask] Audit logging failed for error case: {audit_error}")
 
-    # Check if this is a retryable error using enhanced classification
-    if ProvisioningErrorClassifier.is_retryable(error_type):
-        logger.warning(f"🔄 [VirtualminTask] Retryable error for {domain}, will retry: {error_type.value}")
-        raise Exception(error_msg)  # Trigger retry in django-q2
+    if retriability is Retriability.RETRIABLE:
+        logger.warning(f"🔄 [VirtualminTask] Explicitly retryable error for {domain}: {error_type.value}")
+        raise RetryableProvisioningError(error_msg)
 
     return {
         "success": False,
@@ -747,6 +767,7 @@ def _handle_failed_provisioning_secure(
         "error_type": error_type.value,
         "correlation_id": correlation_id,
         "security_enhanced": True,
+        "retriability": retriability.value,
     }
 
 
@@ -763,9 +784,10 @@ def _handle_failed_provisioning(error_msg: str, service: Service, domain: str, c
 def _handle_critical_provisioning_error_secure(
     error: Exception, domain: str, service_id: str, correlation_id: str, safe_log_ctx: dict[str, Any]
 ) -> dict[str, Any]:
-    """Handle critical provisioning errors with enhanced security and classification."""
+    """Handle unexpected failures without inferring replay safety from text."""
     error_msg = str(error)
     error_type = ProvisioningErrorClassifier.classify_error(error_msg)
+    retriability = Retriability.RETRIABLE if isinstance(error, RetryableProvisioningError) else Retriability.UNKNOWN
 
     critical_ctx = safe_log_ctx.copy()
     critical_ctx.update(
@@ -773,12 +795,12 @@ def _handle_critical_provisioning_error_secure(
             "error": error_msg,
             "error_type": error_type.value,
             "is_critical": True,
+            "retriability": retriability.value,
         }
     )
 
     logger.exception(f"💥 [VirtualminTask] Critical secure provisioning error: {sanitize_log_parameters(critical_ctx)}")
 
-    # Log critical error with enhanced security context
     try:
         AuditService.log_event(
             AuditEventData(
@@ -792,6 +814,7 @@ def _handle_critical_provisioning_error_secure(
                     "provisioning_type": "automatic_secure",
                     "correlation_id": correlation_id,
                     "requires_investigation": True,
+                    "retriability": retriability.value,
                 },
                 description=f"Critical error during secure VirtualMin provisioning for domain '{domain}': {error_msg}",
             ),
@@ -806,18 +829,19 @@ def _handle_critical_provisioning_error_secure(
                     "domain": domain,
                     "error_type": error_type.value,
                     "requires_investigation": True,
-                    "retryable": ProvisioningErrorClassifier.is_retryable(error_type),
+                    "retryable": retriability is Retriability.RETRIABLE,
+                    "retriability": retriability.value,
                 },
             ),
         )
 
-        # Log security event for critical errors
         log_security_event_safe(
             "virtualmin_provisioning_critical_error",
             {
                 "error": error_msg,
                 "error_type": error_type.value,
                 "requires_investigation": True,
+                "retriability": retriability.value,
                 "context": critical_ctx,
             },
             service_id,
@@ -827,20 +851,20 @@ def _handle_critical_provisioning_error_secure(
     except Exception as audit_error:
         logger.error(f"🔥 [VirtualminTask] Failed to log critical error audit event: {audit_error}")
 
-    # Determine if error should trigger retry based on classification
-    if ProvisioningErrorClassifier.is_retryable(error_type):
-        logger.warning(f"🔄 [VirtualminTask] Critical error is retryable: {error_type.value}")
-        raise error  # Re-raise to trigger retry
-    else:
-        logger.error(f"❌ [VirtualminTask] Critical error is permanent: {error_type.value}")
-        return {
-            "success": False,
-            "error": error_msg,
-            "error_type": error_type.value,
-            "correlation_id": correlation_id,
-            "is_critical": True,
-            "security_enhanced": True,
-        }
+    if retriability is Retriability.RETRIABLE:
+        logger.warning(f"🔄 [VirtualminTask] Critical error is explicitly retryable: {error_type.value}")
+        raise error
+
+    logger.error(f"❌ [VirtualminTask] Critical error requires review: {error_type.value}")
+    return {
+        "success": False,
+        "error": error_msg,
+        "error_type": error_type.value,
+        "correlation_id": correlation_id,
+        "is_critical": True,
+        "security_enhanced": True,
+        "retriability": retriability.value,
+    }
 
 
 def _handle_critical_provisioning_error(
@@ -1005,14 +1029,18 @@ def suspend_virtualmin_account(account_id: str, reason: str = "") -> dict[str, A
             error_msg = result.unwrap_err()
             logger.error(f"❌ [VirtualminTask] Suspension failed for {account.domain}: {error_msg}")
 
-            if _is_retryable_error(error_msg):
-                raise Exception(error_msg)  # Trigger retry
+            retriability = retriability_of(result)
+            if retriability is Retriability.RETRIABLE:
+                raise RetryableProvisioningError(error_msg)
 
-            return {"success": False, "error": error_msg}
+            return {"success": False, "error": error_msg, "retriability": retriability.value}
+
+    except RetryableProvisioningError:
+        raise
 
     except Exception as e:
         logger.exception(f"💥 [VirtualminTask] Error suspending account {account_id}: {e}")
-        raise
+        return {"success": False, "error": str(e), "retriability": Retriability.UNKNOWN.value}
 
 
 def unsuspend_virtualmin_account(account_id: str) -> dict[str, Any]:
@@ -1049,14 +1077,18 @@ def unsuspend_virtualmin_account(account_id: str) -> dict[str, Any]:
             error_msg = result.unwrap_err()
             logger.error(f"❌ [VirtualminTask] Unsuspension failed for {account.domain}: {error_msg}")
 
-            if _is_retryable_error(error_msg):
-                raise Exception(error_msg)  # Trigger retry
+            retriability = retriability_of(result)
+            if retriability is Retriability.RETRIABLE:
+                raise RetryableProvisioningError(error_msg)
 
-            return {"success": False, "error": error_msg}
+            return {"success": False, "error": error_msg, "retriability": retriability.value}
+
+    except RetryableProvisioningError:
+        raise
 
     except Exception as e:
         logger.exception(f"💥 [VirtualminTask] Error unsuspending account {account_id}: {e}")
-        raise
+        return {"success": False, "error": str(e), "retriability": Retriability.UNKNOWN.value}
 
 
 def delete_virtualmin_account(account_id: str) -> dict[str, Any]:
@@ -1096,14 +1128,18 @@ def delete_virtualmin_account(account_id: str) -> dict[str, Any]:
             error_msg = result.unwrap_err()
             logger.error(f"❌ [VirtualminTask] Deletion failed for {domain}: {error_msg}")
 
-            if _is_retryable_error(error_msg):
-                raise Exception(error_msg)  # Trigger retry
+            retriability = retriability_of(result)
+            if retriability is Retriability.RETRIABLE:
+                raise RetryableProvisioningError(error_msg)
 
-            return {"success": False, "error": error_msg}
+            return {"success": False, "error": error_msg, "retriability": retriability.value}
+
+    except RetryableProvisioningError:
+        raise
 
     except Exception as e:
         logger.exception(f"💥 [VirtualminTask] Error deleting account {account_id}: {e}")
-        raise
+        return {"success": False, "error": str(e), "retriability": Retriability.UNKNOWN.value}
 
 
 def health_check_virtualmin_servers() -> dict[str, Any]:
@@ -1387,32 +1423,6 @@ def process_failed_virtualmin_jobs() -> dict[str, Any]:
     except Exception as e:
         logger.exception(f"💥 [VirtualminTask] Error processing failed jobs: {e}")
         return {"success": False, "error": str(e)}
-
-
-def _is_retryable_error(error_message: str) -> bool:
-    """
-    Determine if an error is retryable.
-
-    Args:
-        error_message: Error message to analyze
-
-    Returns:
-        True if error should be retried
-    """
-    retryable_patterns = [
-        "connection timeout",
-        "connection error",
-        "server error",
-        "timeout",
-        "temporarily unavailable",
-        "service unavailable",
-        "rate limit",
-        "network error",
-        "dns error",
-    ]
-
-    error_lower = error_message.lower()
-    return any(pattern in error_lower for pattern in retryable_patterns)
 
 
 # ===============================================================================

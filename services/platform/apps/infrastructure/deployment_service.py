@@ -23,7 +23,7 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
 
-from apps.common.types import Err, Ok, Result
+from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 from apps.infrastructure.ansible_service import AnsibleResult, get_ansible_service
 from apps.infrastructure.audit_service import InfrastructureAuditContext, InfrastructureAuditService
 from apps.infrastructure.cloud_gateway import (
@@ -205,16 +205,31 @@ class NodeDeploymentService:
             )
 
             if key_result.is_err():
+                # generate_deployment_key is a MUTATION; an UNKNOWN failure may
+                # have created the key already, so the compound operation can
+                # never be MORE retriable than that ambiguity — a RETRIABLE
+                # fallback failure must not mask it into a replay that would
+                # generate the key a second time (#253/#254).
+                key_retriability = retriability_of(key_result)
+
+                def _aggregate(fallback: Result[Any, str]) -> Retriability:
+                    if key_retriability is Retriability.UNKNOWN:
+                        return Retriability.UNKNOWN
+                    return retriability_of(fallback)
+
                 # Try master key fallback
                 master_result = self._ssh_manager.get_master_key()
                 if master_result.is_err():
                     self._mark_failed(
                         deployment,
-                        f"SSH key generation failed: {key_result.unwrap_err()}",
+                        f"SSH key generation failed; master key fallback failed: {master_result.unwrap_err()}",
                         stage="ssh_key",
                         audit_ctx=audit_ctx,
                     )
-                    return Err(f"SSH key generation failed: {key_result.unwrap_err()}")
+                    return Err(
+                        f"SSH key generation failed; master key fallback failed: {master_result.unwrap_err()}",
+                        retriability=_aggregate(master_result),
+                    )
                 master_pub_result = self._ssh_manager.get_master_public_key()
                 if master_pub_result.is_err():
                     self._mark_failed(
@@ -223,7 +238,10 @@ class NodeDeploymentService:
                         stage="ssh_key",
                         audit_ctx=audit_ctx,
                     )
-                    return Err(f"SSH key generation failed: {key_result.unwrap_err()}")
+                    return Err(
+                        f"SSH key generation failed and master public key unavailable: {master_pub_result.unwrap_err()}",
+                        retriability=_aggregate(master_pub_result),
+                    )
                 ssh_public_key = master_pub_result.unwrap()
                 log_deployment("warning", "Using master SSH key (fallback)")
             else:
@@ -257,7 +275,10 @@ class NodeDeploymentService:
                         stage="provision_server",
                         audit_ctx=audit_ctx,
                     )
-                    return Err(f"Cannot verify existing server: {server_info_result.unwrap_err()}")
+                    return Err(
+                        f"Cannot verify existing server: {server_info_result.unwrap_err()}",
+                        retriability=retriability_of(server_info_result),
+                    )
                 elif server_info_result.unwrap() is not None:
                     info = server_info_result.unwrap()
                     assert info is not None  # narrowed by elif above
@@ -285,7 +306,10 @@ class NodeDeploymentService:
                         f"SSH key upload failed: {key_upload_result.unwrap_err()}",
                         stage="provision_server",
                     )
-                    return Err(f"SSH key upload failed: {key_upload_result.unwrap_err()}")
+                    return Err(
+                        f"SSH key upload failed: {key_upload_result.unwrap_err()}",
+                        retriability=retriability_of(key_upload_result),
+                    )
 
                 created_resources.append(("ssh_key", ssh_key_name))
                 log_deployment("info", f"SSH key '{ssh_key_name}' uploaded to provider")
@@ -310,7 +334,10 @@ class NodeDeploymentService:
                         f"Firewall creation failed: {firewall_result.unwrap_err()}",
                         stage="provision_server",
                     )
-                    return Err(f"Firewall creation failed: {firewall_result.unwrap_err()}")
+                    return Err(
+                        f"Firewall creation failed: {firewall_result.unwrap_err()}",
+                        retriability=retriability_of(firewall_result),
+                    )
 
                 firewall_id = firewall_result.unwrap()
                 created_resources.append(("firewall", firewall_id))
@@ -352,7 +379,10 @@ class NodeDeploymentService:
                         f"Server creation failed: {server_result.unwrap_err()}",
                         stage="provision_server",
                     )
-                    return Err(f"Server creation failed: {server_result.unwrap_err()}")
+                    return Err(
+                        f"Server creation failed: {server_result.unwrap_err()}",
+                        retriability=retriability_of(server_result),
+                    )
 
                 server_create_result = server_result.unwrap()
                 created_resources.append(("server", server_create_result.server_id))
@@ -416,7 +446,10 @@ class NodeDeploymentService:
                     self._mark_failed(
                         deployment, f"Ansible {playbook} failed: {playbook_result.unwrap_err()}", stage=stage_name
                     )
-                    return Err(f"Ansible {playbook} failed: {playbook_result.unwrap_err()}")
+                    return Err(
+                        f"Ansible {playbook} failed: {playbook_result.unwrap_err()}",
+                        retriability=retriability_of(playbook_result),
+                    )
 
                 result = playbook_result.unwrap()
                 ansible_results.append(result)
@@ -443,7 +476,10 @@ class NodeDeploymentService:
                 self._mark_failed(
                     deployment, f"Validation failed: {validation_result.unwrap_err()}", stage="validation"
                 )
-                return Err(f"Validation failed: {validation_result.unwrap_err()}")
+                return Err(
+                    f"Validation failed: {validation_result.unwrap_err()}",
+                    retriability=retriability_of(validation_result),
+                )
 
             validation_report = validation_result.unwrap()
 
@@ -612,7 +648,10 @@ class NodeDeploymentService:
                         stage="destroying",
                         audit_ctx=audit_ctx,
                     )
-                    return Err(f"Server deletion failed: {delete_result.unwrap_err()}")
+                    return Err(
+                        f"Server deletion failed: {delete_result.unwrap_err()}",
+                        retriability=retriability_of(delete_result),
+                    )
 
                 # Cloud VM is gone. Clear external_node_id NOW so that if a later
                 # step (vault-key revocation) fails and the destroy is retried, the
@@ -828,7 +867,7 @@ class NodeDeploymentService:
                     InfrastructureAuditService.log_node_upgrade_failed(deployment, error_msg, audit_ctx)
                 except Exception:
                     logger.warning(f"[Upgrade:{deployment.hostname}] Failed to log audit: upgrade failed")
-                return Err(error_msg)
+                return Err(error_msg, retriability=retriability_of(result))
 
             cmd_result = result.unwrap()
             if not cmd_result.success:
@@ -954,7 +993,7 @@ class NodeDeploymentService:
                         )
                     except Exception:
                         logger.warning(f"[Maintenance:{deployment.hostname}] Failed to log audit: maintenance failed")
-                    return Err(error_msg)
+                    return Err(error_msg, retriability=retriability_of(result))
 
                 ansible_result = result.unwrap()
                 results.append(ansible_result)
@@ -1064,7 +1103,7 @@ class NodeDeploymentService:
                     InfrastructureAuditService.log_node_stop_failed(deployment, error_msg, audit_ctx)
                 except Exception:
                     logger.warning(f"[Stop:{deployment.hostname}] Failed to log audit: stop failed")
-                return Err(error_msg)
+                return Err(error_msg, retriability=retriability_of(result))
 
             cmd_result = result.unwrap()
             if not cmd_result.success:
@@ -1144,7 +1183,7 @@ class NodeDeploymentService:
                     InfrastructureAuditService.log_node_start_failed(deployment, error_msg, audit_ctx)
                 except Exception:
                     logger.warning(f"[Start:{deployment.hostname}] Failed to log audit: start failed")
-                return Err(error_msg)
+                return Err(error_msg, retriability=retriability_of(result))
 
             cmd_result = result.unwrap()
             if not cmd_result.success:
@@ -1224,7 +1263,7 @@ class NodeDeploymentService:
                     InfrastructureAuditService.log_node_reboot_failed(deployment, error_msg, audit_ctx)
                 except Exception:
                     logger.warning(f"[Reboot:{deployment.hostname}] Failed to log audit: reboot failed")
-                return Err(error_msg)
+                return Err(error_msg, retriability=retriability_of(result))
 
             cmd_result = result.unwrap()
             if not cmd_result.success:

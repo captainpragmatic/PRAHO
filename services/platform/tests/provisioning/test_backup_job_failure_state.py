@@ -1,10 +1,10 @@
 """#295 follow-through: a failed backup job must keep its failure reason permanently.
 
-mark_failed() arms next_retry_at whenever retries remain, and the periodic sweeper
-(process_failed_virtualmin_jobs) picks up any failed job whose next_retry_at has passed —
-but its dispatcher has no backup/restore branch. Without the opt-out, a failed backup job
-is flipped back to "pending" within minutes, its status_message wiped, and nothing ever
-dispatched: a forever-stuck job that just lost the very failure reason #295 preserves.
+mark_failed() arms next_retry_at only for explicitly retriable failures, and the periodic
+sweeper (process_failed_virtualmin_jobs) picks up any failed job whose next_retry_at has
+passed — but its dispatcher has no backup/restore branch. Even a genuinely retriable backup
+must therefore opt out, or it is flipped back to "pending", its status_message wiped, and
+nothing ever dispatched: a forever-stuck job that lost the failure reason #295 preserves.
 """
 
 from decimal import Decimal
@@ -13,7 +13,7 @@ from unittest.mock import patch
 from django.test import TestCase
 
 from apps.billing.models import Currency
-from apps.common.types import Err
+from apps.common.types import Err, Retriability
 from apps.customers.models import Customer
 from apps.provisioning.models import Service, ServicePlan
 from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminProvisioningJob, VirtualminServer
@@ -62,7 +62,9 @@ class BackupJobFailureStateTests(TestCase):
 
     @patch("apps.provisioning.virtualmin_backup_service.VirtualminBackupService")
     def test_failed_backup_keeps_reason_and_opts_out_of_retry_sweep(self, mock_service_cls) -> None:
-        mock_service_cls.return_value.backup_domain.return_value = Err("disk full — backup aborted")
+        mock_service_cls.return_value.backup_domain.return_value = Err(
+            "disk full — backup aborted", retriability=Retriability.RETRIABLE
+        )
 
         result = VirtualminBackupManagementService(self.vm_server).create_backup_job(self.account)
 

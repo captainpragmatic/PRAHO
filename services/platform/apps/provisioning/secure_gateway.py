@@ -18,6 +18,7 @@ from django.core.exceptions import ValidationError
 
 from apps.common.encryption import DecryptionError
 from apps.common.outbound_http import OutboundPolicy, OutboundSecurityError, safe_request
+from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 from apps.common.validators import SecureInputValidator
 
 from .models import Server
@@ -41,6 +42,8 @@ def get_api_timeouts() -> dict[str, int]:
 
 # HTTP status codes below this are considered successful
 HTTP_SUCCESS_THRESHOLD = 400
+HTTP_TOO_MANY_REQUESTS = 429
+HTTP_INTERNAL_SERVER_ERROR = 500
 
 # Whitelisted server management domains for SSRF protection
 # SECURITY: localhost/127.0.0.1 removed to prevent SSRF attacks (OWASP A10:2021)
@@ -354,8 +357,8 @@ class SecureServerGateway:
         if api_secret:
             headers["X-API-Secret"] = api_secret
 
-        success = False
         result: dict[str, Any] = {}
+        is_read_only = method.upper() in {"GET", "HEAD", "OPTIONS"}
         for attempt in range(max_retries):
             req = {
                 "method": method,
@@ -365,17 +368,24 @@ class SecureServerGateway:
                 "timeout": request_timeout,
                 "verify": True,
             }
-            success, payload, should_continue = SecureServerGateway._attempt_request(
+            attempt_result = SecureServerGateway._attempt_request(
                 request_kwargs=req,
                 server_name=server.name,
                 attempt=attempt,
                 max_retries=max_retries,
             )
-            if success:
-                return True, payload
-            result = payload
-            if not should_continue:
+            if attempt_result.is_ok():
+                return True, attempt_result.unwrap()
+
+            result = attempt_result.unwrap_err()
+            retriability = retriability_of(attempt_result)
+            result["retriability"] = retriability.value
+            should_retry = retriability is Retriability.RETRIABLE or (
+                retriability is Retriability.UNKNOWN and is_read_only
+            )
+            if not should_retry or attempt == max_retries - 1:
                 break
+
             # Exponential backoff with cryptographically secure jitter
             jitter = secrets.randbelow(1000) / 1000  # 0-1 second jitter
             delay = (2**attempt) + jitter
@@ -383,7 +393,7 @@ class SecureServerGateway:
 
         if result:
             return False, result
-        return False, {"error": "All retry attempts failed"}
+        return False, {"error": "All retry attempts failed", "retriability": Retriability.UNKNOWN.value}
 
     @staticmethod
     def _attempt_request(
@@ -392,10 +402,8 @@ class SecureServerGateway:
         server_name: str,
         attempt: int,
         max_retries: int,
-    ) -> tuple[bool, dict[str, Any], bool]:
-        """Perform a single HTTP request attempt with unified error handling.
-        Returns (success, payload, should_continue).
-        """
+    ) -> Result[dict[str, Any], dict[str, Any]]:
+        """Perform one request and classify whether replay is safe."""
         logger.info(
             f"🖥️ [Server API] {request_kwargs.get('method')} {request_kwargs.get('url')} "
             f"(attempt {attempt + 1}/{max_retries})"
@@ -408,35 +416,53 @@ class SecureServerGateway:
                 json=request_kwargs.get("json"),
                 headers=request_kwargs["headers"],
             )
-            is_success, resp_payload = SecureServerGateway._process_http_response(response)
-            if is_success:
-                return True, resp_payload, False
-            # Failure: continue unless last attempt
-            is_last = attempt == max_retries - 1
-            return False, resp_payload, not is_last
-        except Exception as e:  # Consolidated exception handling
-            is_last = attempt == max_retries - 1
-            if isinstance(e, requests.exceptions.Timeout):
-                logger.warning(f"⏱️ [Server API] Timeout for {server_name} (attempt {attempt + 1})")
-                payload = {"error": "Request timeout"}
-            elif isinstance(e, requests.exceptions.ConnectionError):
-                logger.warning(f"🔌 [Server API] Connection error for {server_name}: {e}")
-                payload = {"error": "Connection failed"}
-            else:
-                logger.error(f"🔥 [Server API] Unexpected error for {server_name}: {e}")
-                payload = {"error": str(e)}
-            return False, payload, not is_last
+            return SecureServerGateway._process_http_response(response)
+        except Exception as e:
+            return SecureServerGateway._classify_request_exception(e, server_name, attempt)
 
     @staticmethod
-    def _process_http_response(response: requests.Response) -> tuple[bool, dict[str, Any]]:
-        """Process HTTP response into a success flag and payload."""
+    def _classify_request_exception(error: Exception, server_name: str, attempt: int) -> Err[dict[str, Any]]:
+        """Classify one transport failure without deciding operation replay policy."""
+        retriability = Retriability.UNKNOWN
+        if isinstance(error, requests.exceptions.ConnectTimeout):
+            logger.warning(f"⏱️ [Server API] Connection timeout for {server_name} (attempt {attempt + 1})")
+            payload = {"error": "Connection timeout"}
+            retriability = Retriability.RETRIABLE
+        elif isinstance(error, requests.exceptions.ReadTimeout):
+            logger.warning(f"⏱️ [Server API] Read timeout for {server_name} (attempt {attempt + 1})")
+            payload = {"error": "Read timeout"}
+        elif isinstance(error, requests.exceptions.ConnectionError):
+            logger.warning(f"🔌 [Server API] Connection error for {server_name}: {error}")
+            payload = {"error": "Connection failed"}
+        elif isinstance(error, requests.exceptions.Timeout):
+            logger.warning(f"⏱️ [Server API] Request timeout for {server_name} (attempt {attempt + 1})")
+            payload = {"error": "Request timeout"}
+        elif isinstance(error, OutboundSecurityError):
+            logger.error(f"🔥 [Server API] Outbound security policy rejected request for {server_name}: {error}")
+            payload = {"error": "Outbound security policy rejected request"}
+            retriability = Retriability.NOT_RETRIABLE
+        else:
+            logger.error(f"🔥 [Server API] Unexpected error for {server_name}: {error}")
+            payload = {"error": str(error)}
+
+        return Err(payload, retriability=retriability)
+
+    @staticmethod
+    def _process_http_response(response: requests.Response) -> Result[dict[str, Any], dict[str, Any]]:
+        """Process an HTTP response with explicit replay semantics."""
         if response.status_code < HTTP_SUCCESS_THRESHOLD:
             try:
-                return True, response.json()
+                return Ok(response.json())
             except ValueError:
-                return True, {"response": response.text}
+                return Ok({"response": response.text})
+
         logger.warning(f"⚠️ [Server API] HTTP {response.status_code}: {response.text}")
-        return False, {"error": f"HTTP {response.status_code}", "message": response.text[:200]}
+        payload = {"error": f"HTTP {response.status_code}", "message": response.text[:200]}
+        if response.status_code == HTTP_TOO_MANY_REQUESTS:
+            return Err(payload, retriability=Retriability.RETRIABLE)
+        if response.status_code >= HTTP_INTERNAL_SERVER_ERROR:
+            return Err(payload, retriability=Retriability.UNKNOWN)
+        return Err(payload, retriability=Retriability.NOT_RETRIABLE)
 
     @staticmethod
     def _update_server_metrics(server: Server, resource_data: dict[str, Any]) -> None:

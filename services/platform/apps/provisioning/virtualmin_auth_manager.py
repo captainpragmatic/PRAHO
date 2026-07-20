@@ -25,7 +25,6 @@ from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 
 from .virtualmin_gateway import (
     VirtualminAPIError,
-    VirtualminAuthError,
     VirtualminAuthorizationError,
     VirtualminConfig,
     VirtualminGateway,
@@ -171,6 +170,7 @@ class VirtualminAuthenticationManager:
 
         # Determine authentication method to try
         methods_to_try = [force_method] if force_method else self._get_auth_method_priority()
+        is_read_only = program == "info" or program.startswith("list-")
 
         last_error = ""
         last_retriability = Retriability.UNKNOWN
@@ -199,21 +199,44 @@ class VirtualminAuthenticationManager:
                     logger.warning(f"❌ [Virtualmin Auth] {method.value} failed: {error_msg}")
 
                     if isinstance(error, VirtualminAuthorizationError):
-                        # 403: the account authenticated but is not permitted.
-                        # Escalating to a higher-privilege method would bypass the
-                        # ACL the server enforced — terminal, never fall through.
+                        # 403 (#334): authenticated but not permitted. Escalating
+                        # to a higher-privilege method would bypass the ACL —
+                        # terminal, never fall through.
                         return Err(last_error, retriability=last_retriability)
-                    if isinstance(error, VirtualminAuthError):
-                        self._cache_failed_auth_method(method, error_msg)
-                        continue
                     if isinstance(error, AuthMethodUnavailableError):
+                        # Method NOT configured: nothing was ever attempted, so
+                        # it carries zero double-execution risk — try the next
+                        # method. This MUST precede the ambiguous-mutation check,
+                        # whose UNKNOWN-default would otherwise strand a mutation
+                        # fallback on any server without master-proxy creds.
                         continue
-                    return Err(last_error, retriability=last_retriability)
+                    if last_retriability is Retriability.UNKNOWN and not is_read_only:
+                        # Ambiguous MUTATION outcome (#253/#254): the request may
+                        # already have executed. Replaying it via a fallback
+                        # method could double-apply it — refuse fallback.
+                        logger.error(
+                            f"🛑 [Virtualmin Auth] Ambiguous {program} outcome; refusing authentication fallback"
+                        )
+                        return Err(last_error, retriability=Retriability.UNKNOWN)
+                    # Everything else — a 401 (authentication rejected, the
+                    # operation did not run), a read-only ambiguous outcome
+                    # (safe to re-read), or a proven-rejection mutation error —
+                    # is safe to escalate to the next configured method. Only
+                    # 403 and an ambiguous MUTATION (handled above) fail closed.
+                    self._cache_failed_auth_method(method, error_msg)
+                    continue
 
             except Exception as e:
                 last_error = f"{method.value}: {e!s}"
+                last_retriability = Retriability.UNKNOWN
                 logger.error(f"🔥 [Virtualmin Auth] {method.value} exception: {e}")
-                return Err(last_error)
+                if not is_read_only:
+                    logger.error(
+                        f"🛑 [Virtualmin Auth] Ambiguous {program} exception; refusing authentication fallback"
+                    )
+                    return Err(last_error, retriability=Retriability.UNKNOWN)
+
+                self._cache_failed_auth_method(method, str(e))
 
         # All methods failed
         logger.error(f"🚨 [Virtualmin Auth] ALL methods failed for {program}: {last_error}")
