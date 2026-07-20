@@ -136,6 +136,29 @@
       failed_when: false
       changed_when: false
 
+    - name: Create the PRAHO API administrator (dedicated ACL user, never master admin)
+      # #347: PRAHO stores this same password in its vault at registration, so the
+      # first API call and verify_and_activate authenticate. The password arrives
+      # via a 0600 extra-vars file (never the ansible command line) and is no_log
+      # here so it never lands in ansible output.
+      # VALIDATE ON A REAL NODE: the exact `create-admin` capability flags govern
+      # what PRAHO can do via the API and must be confirmed against a live
+      # Virtualmin before this is trusted (part of the #347 acceptance drill).
+      ansible.builtin.command: >
+        virtualmin create-admin
+        --name {{ praho_api_user }}
+        --pass {{ praho_api_password }}
+        --desc "PRAHO platform API administrator"
+        --can-create
+        --can-edit
+      when: praho_api_user is defined and praho_api_password is defined
+      no_log: true
+      register: praho_admin_result
+      changed_when: praho_admin_result.rc == 0
+      failed_when:
+        - praho_admin_result.rc != 0
+        - "'already exists' not in (praho_admin_result.stderr | default(''))"
+
     - name: Create PRAHO tracking file
       ansible.builtin.copy:
         content: |

@@ -427,6 +427,19 @@ class NodeDeploymentService:
                     else str(deployment.panel_type)
                 )
 
+            # #347: generate the dedicated Virtualmin API credential BEFORE the
+            # Ansible stages so the panel playbook can provision it ON the node
+            # (create the ACL user with this password). Registration stores the
+            # same password in the vault, so the first API call — and
+            # verify_and_activate below — authenticate. Threaded via a 0600 vars
+            # file, so the secret never reaches the ansible command line.
+            import string  # noqa: PLC0415  # Deferred: stdlib, local use
+
+            virtualmin_api_username = "praho-api"
+            virtualmin_api_password = "".join(
+                secrets.choice(string.ascii_letters + string.digits + "!@#$%^&*") for _ in range(24)
+            )
+
             playbook_names = self._ansible.get_playbook_order(panel_type)
             stage_keys = ["ansible_base", "ansible_panel", "ansible_harden", "ansible_backup"]
             ansible_playbooks = list(zip(stage_keys, playbook_names, strict=False))
@@ -438,6 +451,10 @@ class NodeDeploymentService:
                 playbook_result = self._ansible.run_playbook(
                     deployment=deployment,
                     playbook=playbook,
+                    extra_vars={
+                        "praho_api_user": virtualmin_api_username,
+                        "praho_api_password": virtualmin_api_password,
+                    },
                 )
 
                 if playbook_result.is_err():
@@ -508,17 +525,10 @@ class NodeDeploymentService:
             deployment.transition_to("registering")
             log_deployment("info", "Registering node as VirtualminServer")
 
-            # Generate a random password for Virtualmin admin
-            import string  # noqa: PLC0415  # Deferred: avoids circular import
-
-            admin_password = "".join(
-                secrets.choice(string.ascii_letters + string.digits + "!@#$%^&*") for _ in range(24)
-            )
-
             registration_result = self._registration.register_node(
                 deployment=deployment,
-                admin_username="root",
-                admin_password=admin_password,
+                admin_username=virtualmin_api_username,
+                admin_password=virtualmin_api_password,
                 user=user,
             )
 
@@ -530,6 +540,15 @@ class NodeDeploymentService:
                 server = registration_result.unwrap()
                 virtualmin_server_id = server.id
                 log_deployment("info", f"Registered as VirtualminServer(id={server.id})")
+                # #347: confirm the credential the playbook provisioned actually
+                # authenticates, then activate. A failed check leaves the server
+                # 'disabled' (safe, never customer-routed) — the deployment still
+                # completes; the node simply isn't customer-ready until resolved.
+                activation = self._registration.verify_and_activate(server)
+                if activation.is_ok():
+                    log_deployment("info", f"VirtualminServer(id={server.id}) credential-verified and activated")
+                else:
+                    log_deployment("warning", f"Node registered but left disabled: {activation.unwrap_err()}")
 
             stages_completed.append("registration")
 

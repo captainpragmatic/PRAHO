@@ -157,6 +157,50 @@ class TestDeployNodeReachesCompletedThroughFSM(TestCase):
 
 
 # ===========================================================================
+# #347 GAP 1: deploy provisions a PRAHO-controlled credential, then activates
+# ===========================================================================
+
+
+class TestCredentialSeamWiring(TestCase):
+    """The deploy pipeline generates a Virtualmin API credential, hands it to the
+    panel playbook via extra_vars, registers with that ACL user (not root), and
+    verifies + activates the node."""
+
+    def test_credential_threaded_registered_and_activated(self) -> None:
+        deployment = _create_deployment("pending")
+        service = _make_service()
+        service._ssh_manager.generate_deployment_key.return_value = Ok(MagicMock(public_key="ssh-rsa AAAA"))
+        service._ansible.get_playbook_order.return_value = ["base.yml", "virtualmin.yml", "harden.yml", "backup.yml"]
+        service._ansible.run_playbook.return_value = Ok(MagicMock(success=True, stderr=""))
+        service._validation.validate_node.return_value = Ok(MagicMock(all_passed=True, summary="ok"))
+        registered = MagicMock(id=7)
+        service._registration.register_node.return_value = Ok(registered)
+        service._registration.verify_and_activate.return_value = Ok(registered)
+
+        gateway = MagicMock()
+        gateway.upload_ssh_key.return_value = Ok("praho-key")
+        gateway.create_firewall.return_value = Ok("fw-1")
+        gateway.create_server.return_value = Ok(
+            ServerCreateResult(server_id="srv-1", ipv4_address="1.2.3.4", ipv6_address="")
+        )
+
+        with (
+            patch("apps.infrastructure.deployment_service.SettingsService.get_setting", return_value=True),
+            patch("apps.infrastructure.deployment_service.get_cloud_gateway", return_value=gateway),
+        ):
+            result = service.deploy_node(deployment=deployment, credentials={"api_token": "test-token"})
+
+        self.assertTrue(result.is_ok(), f"deploy_node should succeed, got {result}")
+        extra = service._ansible.run_playbook.call_args.kwargs["extra_vars"]
+        self.assertEqual(extra["praho_api_user"], "praho-api")
+        self.assertTrue(extra["praho_api_password"], "API password must be generated and threaded")
+        reg_kwargs = service._registration.register_node.call_args.kwargs
+        self.assertEqual(reg_kwargs["admin_username"], "praho-api")
+        self.assertEqual(reg_kwargs["admin_password"], extra["praho_api_password"])
+        service._registration.verify_and_activate.assert_called_once_with(registered)
+
+
+# ===========================================================================
 # H2: Transient errors must NOT clear external_node_id
 # ===========================================================================
 
