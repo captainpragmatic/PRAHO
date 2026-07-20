@@ -668,6 +668,23 @@ class TestReviewHardening325(VirtualminTaskTestBase):
         job.refresh_from_db()
         self.assertEqual(job.status, "failed")
 
+    def test_running_initial_execution_with_no_claim_is_recovered(self):
+        """A worker death during the INITIAL execution strands the job as
+        status='running' with claimed_at=NULL (mark_started never claims). The
+        sweep must still recover it — by started_at — or it strands forever,
+        the exact class this PR set out to eliminate."""
+        job = self._failed_job(
+            status="running",
+            claimed_at=None,
+            started_at=timezone.now() - timedelta(minutes=31),
+        )
+
+        with patch("apps.provisioning.virtualmin_tasks.async_task", return_value="t-1"):
+            process_failed_virtualmin_jobs()
+
+        job.refresh_from_db()
+        self.assertEqual(job.status, "failed")
+
     def test_exhausted_job_opts_out_of_future_sweeps(self):
         job = self._failed_job(retry_count=3, max_retries=3)
 

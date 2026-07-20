@@ -385,9 +385,10 @@ class VirtualminProvisioningService:
             health_result = gateway.test_connection()
             if health_result.is_err():
                 return Err(f"Server health check failed: {health_result.unwrap_err()}")
-            if not health_result.unwrap().get("healthy", True):
-                # HTTP-level success carrying an application-level failure —
-                # same gate as the health-management path.
+            if health_result.unwrap().get("healthy") is not True:
+                # Require AFFIRMATIVE health: a missing/malformed/non-bool
+                # "healthy" is not proof of health, so it blocks provisioning
+                # (fail-closed) rather than passing on the default.
                 return Err(f"Server reported unhealthy: {health_result.unwrap()}")
 
             # 2. Check server capacity and disk space
@@ -1003,7 +1004,7 @@ class VirtualminProvisioningService:
                 if not previously_active:
                     # Exactly-once: the failed original never incremented
                     VirtualminServer.objects.filter(pk=account.server_id).update(
-                        current_domains=models.F("current_domains") + 1
+                        current_domains=models.F("current_domains") + 1, updated_at=timezone.now()
                     )
 
                 job.mark_completed({"recovered": "remote domain already present"})
@@ -1079,7 +1080,7 @@ class VirtualminProvisioningService:
             if job.operation == "delete_domain" and previous_status != "terminated":
                 # Clamped: counter drift must never underflow the PositiveInteger
                 VirtualminServer.objects.filter(pk=account.server_id, current_domains__gt=0).update(
-                    current_domains=models.F("current_domains") - 1
+                    current_domains=models.F("current_domains") - 1, updated_at=timezone.now()
                 )
             job.mark_completed(response.data)
 
@@ -1373,9 +1374,9 @@ class VirtualminServerManagementService:
             provisioning_service = VirtualminProvisioningService(server)
             result = provisioning_service.test_server_connection(server)
 
-            if result.is_ok() and not result.unwrap().get("healthy", True):
-                # HTTP-level success carrying an application-level failure —
-                # a failed check, never a streak reset.
+            if result.is_ok() and result.unwrap().get("healthy") is not True:
+                # Affirmative health only: a missing/malformed/non-bool "healthy"
+                # is a failed check, never a streak reset or freshness stamp.
                 result = Err(f"Server reported unhealthy: {result.unwrap()}")
 
             if result.is_ok():

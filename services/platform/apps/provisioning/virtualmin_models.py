@@ -674,12 +674,27 @@ class VirtualminProvisioningJob(models.Model):
 
     @classmethod
     def recover_expired_claims(cls, cutoff: Any, retry_at: Any) -> int:
-        """Claimed jobs (pending OR running) whose lease expired go back to failed."""
-        return cls.objects.filter(
-            models.Q(status="pending") | models.Q(status="running"),
-            claimed_at__isnull=False,
-            claimed_at__lt=cutoff,
-        ).update(status="failed", next_retry_at=retry_at, claimed_at=None, updated_at=timezone.now())
+        """Return orphaned in-flight jobs to the failed pool so the sweep retries them.
+
+        Two orphan classes, both recovered by age:
+        - a leased retry whose claimed_at lease expired; and
+        - an INITIAL execution that died mid-run — mark_started() sets
+          status='running' and started_at but never claims (claimed_at stays
+          NULL), so without the started_at arm a first-execution worker death
+          (SIGKILL/OOM/deploy restart) would strand the job in 'running'
+          forever. started_at is only compared for unclaimed rows so a live
+          leased job is never reclaimed on started_at alone.
+        """
+        return (
+            cls.objects.filter(
+                models.Q(status="pending") | models.Q(status="running"),
+            )
+            .filter(
+                models.Q(claimed_at__isnull=False, claimed_at__lt=cutoff)
+                | models.Q(claimed_at__isnull=True, started_at__isnull=False, started_at__lt=cutoff),
+            )
+            .update(status="failed", next_retry_at=retry_at, claimed_at=None, updated_at=timezone.now())
+        )
 
     @classmethod
     def restore_after_enqueue_failure(cls, job_id: Any, retry_at: Any) -> int:
