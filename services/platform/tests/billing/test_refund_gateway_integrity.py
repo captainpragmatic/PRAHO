@@ -1309,6 +1309,38 @@ class RefundConvergenceHardeningTests(TestCase):
         self.assertEqual(payment.status, "succeeded")
         self.assertEqual(invoice.status, "paid")
 
+    def test_convergence_rolls_back_disputed_payment_refund_with_no_projection_path(self) -> None:
+        """Fix 1 (unmocked, real production trigger): dispute-then-refund has no FSM path.
+
+        A charge disputed then refunded to resolve it reaches Payment.status='disputed'
+        via the real dispute_payment() transition. _apply_payment_refund_projection has no
+        ('disputed', 'refunded') edge, so convergence returns Err AFTER creating the Refund
+        row. Without set_rollback this permanently commits a 'completed' ledger row against a
+        'disputed' payment — the daily reconcile sweep then hits the identical dead end
+        forever. Rolling back keeps the ledger and Payment consistent.
+        """
+        invoice = self._make_invoice()
+        payment = self._make_payment(invoice, transaction_id="pi_disputed_refund")
+        payment.dispute_payment()
+        payment.save(update_fields=["status", "updated_at"])
+        from apps.billing.refund_service import RefundConvergenceService  # noqa: PLC0415
+
+        result = RefundConvergenceService.converge_gateway_refund(
+            {
+                "refund_id": "re_disputed_refund",
+                "payment_intent_id": "pi_disputed_refund",
+                "amount_cents": 10_000,
+                "currency": "ron",
+                "status": "succeeded",
+            }
+        )
+
+        self.assertTrue(result.is_err())
+        self.assertIn("disputed", result.unwrap_err().lower())
+        self.assertFalse(Refund.objects.filter(gateway_refund_id="re_disputed_refund").exists())
+        payment.refresh_from_db()
+        self.assertEqual(payment.status, "disputed")
+
     def test_partially_refunded_invoice_accepts_second_partial_refund(self) -> None:
         """Fix 2: refund_invoice must allow a second partial while balance remains.
 
