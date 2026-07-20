@@ -11,12 +11,15 @@ import json
 import logging
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
+
+from django.conf import settings
 
 from apps.common.types import Err, Ok, Result
 from apps.infrastructure.ssh_key_manager import get_ssh_key_manager
@@ -73,6 +76,17 @@ class AnsibleService:
 
     # Default playbook order (backwards compatibility)
     PLAYBOOK_ORDER = PANEL_PLAYBOOKS["virtualmin"]
+    ALLOWED_PLAYBOOKS: ClassVar[frozenset[str]] = frozenset(
+        {
+            "common_base.yml",
+            "virtualmin.yml",
+            "virtualmin_harden.yml",
+            "virtualmin_backup.yml",
+            "blesta.yml",
+            "blesta_harden.yml",
+            "blesta_backup.yml",
+        }
+    )
 
     def __init__(self, timeout: int = 1800) -> None:
         """Initialize Ansible service"""
@@ -132,7 +146,7 @@ class AnsibleService:
         logger.info(f"📜 [Ansible] All {len(results)} playbooks completed successfully")
         return Ok(results)
 
-    def run_playbook(
+    def run_playbook(  # noqa: PLR0911, PLR0912  # Explicit fail-closed boundary checks
         self,
         deployment: NodeDeployment,
         playbook: str,
@@ -152,12 +166,17 @@ class AnsibleService:
         if not deployment.ipv4_address:
             return Err("Deployment has no IP address")
 
-        playbook_path = PLAYBOOKS_PATH / playbook
+        if playbook not in self.ALLOWED_PLAYBOOKS:
+            return Err(f"Playbook not allowed: {playbook}")
+
+        playbook_path = (PLAYBOOKS_PATH / playbook).resolve()
+        if playbook_path.parent != PLAYBOOKS_PATH.resolve():
+            return Err(f"Playbook not allowed: {playbook}")
         if not playbook_path.exists():
             return Err(f"Playbook not found: {playbook_path}")
 
         # Get SSH key
-        key_result = self._ssh_manager.get_private_key_file(  # type: ignore[call-arg]
+        key_result = self._ssh_manager.get_private_key_file(
             deployment,
             reason=f"Ansible playbook: {playbook}",
         )
@@ -193,6 +212,8 @@ class AnsibleService:
 
             logger.info(f"📜 [Ansible] Running: {playbook} on {deployment.ipv4_address}")
 
+            ansible_env = self._build_ansible_env()
+
             # Execute
             result = subprocess.run(  # Safe: shell=False  # noqa: S603  # Safe: shell=False
                 cmd,
@@ -201,12 +222,7 @@ class AnsibleService:
                 text=True,
                 timeout=self.timeout,
                 check=False,
-                env={
-                    **os.environ,
-                    "ANSIBLE_HOST_KEY_CHECKING": "False",
-                    "ANSIBLE_STDOUT_CALLBACK": "yaml",
-                    "ANSIBLE_FORCE_COLOR": "0",
-                },
+                env=ansible_env,
             )
 
             success = result.returncode == 0
@@ -250,6 +266,22 @@ class AnsibleService:
                 key_file.unlink()
             if "inventory_file" in locals() and inventory_file.exists():
                 inventory_file.unlink()
+
+    @staticmethod
+    def _build_ansible_env() -> dict[str, str]:
+        """Build an environment that always enforces managed SSH host-key trust."""
+        ansible_env = {
+            **os.environ,
+            "ANSIBLE_HOST_KEY_CHECKING": "True",
+            "ANSIBLE_SSH_COMMON_ARGS": "-o StrictHostKeyChecking=yes",
+            "ANSIBLE_STDOUT_CALLBACK": "yaml",
+            "ANSIBLE_FORCE_COLOR": "0",
+        }
+        known_hosts_path = str(getattr(settings, "PRAHO_SSH_KNOWN_HOSTS_PATH", "")).strip()
+        if known_hosts_path:
+            known_hosts_arg = f"-o UserKnownHostsFile={shlex.quote(known_hosts_path)}"
+            ansible_env["ANSIBLE_SSH_COMMON_ARGS"] = f"{ansible_env['ANSIBLE_SSH_COMMON_ARGS']} {known_hosts_arg}"
+        return ansible_env
 
     def _generate_inventory(self, deployment: NodeDeployment) -> Path:
         """Generate dynamic inventory file for deployment"""

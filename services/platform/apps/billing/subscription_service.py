@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from apps.products.models import Product
     from apps.users.models import User
 
+from .recurring_locking import lock_recurring_collection_customer
 from .subscription_models import (
     PriceGrandfathering,
     Subscription,
@@ -393,7 +394,10 @@ class SubscriptionService:
         """
         try:
             with transaction.atomic():
+                locked_customer = lock_recurring_collection_customer(subscription.customer_id)
                 locked_subscription = Subscription.objects.select_for_update(of=("self",)).get(pk=subscription.pk)
+                if locked_subscription.customer_id != locked_customer.id:
+                    return Err("Subscription customer changed during cancellation")
                 locked_subscription.cancel(
                     reason=reason,
                     at_period_end=at_period_end,
@@ -664,17 +668,19 @@ class SubscriptionLifecycleService:
         """Complete cancellations once the customer's paid-through period ends."""
         run_at = as_of or timezone.now()
         finalized = 0
-        subscription_ids = Subscription.objects.filter(
+        subscriptions = Subscription.objects.filter(
             status__in=["active", "trialing", "past_due", "paused"],
             cancel_at_period_end=True,
             current_period_end__lte=run_at,
-        ).values_list("id", flat=True)
-        for subscription_id in subscription_ids:
+        ).values_list("id", "customer_id")
+        for subscription_id, customer_id in subscriptions:
             try:
                 with transaction.atomic():
+                    locked_customer = lock_recurring_collection_customer(customer_id)
                     subscription = Subscription.objects.select_for_update(of=("self",)).get(id=subscription_id)
                     if (
-                        subscription.status not in {"active", "trialing", "past_due", "paused"}
+                        subscription.customer_id != locked_customer.id
+                        or subscription.status not in {"active", "trialing", "past_due", "paused"}
                         or not subscription.cancel_at_period_end
                         or subscription.current_period_end > run_at
                     ):
@@ -705,17 +711,19 @@ class SubscriptionLifecycleService:
         """Cancel trials that reached expiry without a successfully paid renewal."""
         run_at = as_of or timezone.now()
         count = 0
-        subscription_ids = Subscription.objects.filter(
+        subscriptions = Subscription.objects.filter(
             status="trialing",
             trial_end__lte=run_at,
-        ).values_list("id", flat=True)
+        ).values_list("id", "customer_id")
 
-        for subscription_id in subscription_ids:
+        for subscription_id, customer_id in subscriptions:
             try:
                 with transaction.atomic():
+                    locked_customer = lock_recurring_collection_customer(customer_id)
                     subscription = Subscription.objects.select_for_update(of=("self",)).get(id=subscription_id)
                     if (
-                        subscription.status != "trialing"
+                        subscription.customer_id != locked_customer.id
+                        or subscription.status != "trialing"
                         or subscription.trial_end is None
                         or subscription.trial_end > run_at
                     ):
@@ -743,17 +751,19 @@ class SubscriptionLifecycleService:
         run_at = as_of or timezone.now()
         count = 0
         retry_limit = get_max_payment_retries()
-        subscription_ids = Subscription.objects.filter(
+        subscriptions = Subscription.objects.filter(
             status__in=["past_due", "paused"],
             grace_period_ends_at__lte=run_at,
-        ).values_list("id", flat=True)
+        ).values_list("id", "customer_id")
 
-        for subscription_id in subscription_ids:
+        for subscription_id, customer_id in subscriptions:
             try:
                 with transaction.atomic():
+                    locked_customer = lock_recurring_collection_customer(customer_id)
                     subscription = Subscription.objects.select_for_update(of=("self",)).get(id=subscription_id)
                     if (
-                        subscription.status not in {"past_due", "paused"}
+                        subscription.customer_id != locked_customer.id
+                        or subscription.status not in {"past_due", "paused"}
                         or subscription.grace_period_ends_at is None
                         or subscription.grace_period_ends_at > run_at
                     ):

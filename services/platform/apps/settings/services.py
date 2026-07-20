@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
 from django.utils.translation import gettext_lazy as _
 
 from apps.common.security_decorators import (
@@ -415,30 +415,28 @@ class SettingsService:
             ValidationError: If value is invalid for the setting type
         """
         try:
-            # Get the setting
-            setting = SystemSetting.objects.get(key=key)
+            with transaction.atomic():
+                # Serialize every settings write; the recurring kill switch shares this row
+                # lock with final off-session authorization and gateway submission.
+                setting = SystemSetting.objects.select_for_update(of=("self",)).get(key=key)
 
-            # Validate and convert value based on data type
-            if setting.data_type == "boolean":
-                value = value.lower() in ("true", "1", "on", "yes") if isinstance(value, str) else bool(value)
-            elif setting.data_type == "integer":
-                value = int(value)
-            elif setting.data_type == "decimal":
-                value = Decimal(str(value))
-            elif (setting.data_type in {"list", "json"}) and isinstance(value, str):
-                value = json.loads(value)
-            # string type needs no conversion
+                # Validate and convert value based on data type
+                if setting.data_type == "boolean":
+                    value = value.lower() in ("true", "1", "on", "yes") if isinstance(value, str) else bool(value)
+                elif setting.data_type == "integer":
+                    value = int(value)
+                elif setting.data_type == "decimal":
+                    value = Decimal(str(value))
+                elif (setting.data_type in {"list", "json"}) and isinstance(value, str):
+                    value = json.loads(value)
+                # string type needs no conversion
 
-            # Prepare value for JSON serialization
-            json_value = cls._prepare_value_for_json(value, setting.data_type)
+                # Prepare value for JSON serialization
+                json_value = cls._prepare_value_for_json(value, setting.data_type)
 
-            # Update the setting value
-            setting.value = json_value
-            setting.save()
-
-            # Clear cache for this setting
-            cache_key = cls._get_cache_key(key)
-            cache.delete(cache_key, version=cls.CACHE_VERSION)
+                # Update the setting value
+                setting.value = json_value
+                setting.save()
 
             logger.info("⚡ [Settings] Updated %s = %s", key, value)
 
@@ -553,9 +551,6 @@ class SettingsService:
                 setting.value = json_value
                 setting.full_clean()  # Validate
                 setting.save(update_fields=["value", "updated_at"])
-
-            # Clear cache
-            cls._clear_setting_cache(key)
 
             # Log the change
             logger.info(

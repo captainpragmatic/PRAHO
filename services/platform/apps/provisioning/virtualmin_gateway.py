@@ -16,6 +16,7 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from enum import Enum
 from functools import lru_cache, wraps
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
@@ -348,9 +349,18 @@ class VirtualminConfig:
 
     server: VirtualminServer
     timeout: int = VIRTUALMIN_API_TIMEOUT
-    verify_ssl: bool = True
+    verify_ssl: bool | None = None
     cert_fingerprint: str = ""
     use_credential_vault: bool = True
+
+    def __post_init__(self) -> None:
+        """Default TLS settings from the persisted server when callers omit them."""
+        if self.verify_ssl is None:
+            object.__setattr__(self, "verify_ssl", bool(getattr(self.server, "ssl_verify", True)))
+        if not self.cert_fingerprint:
+            server_fingerprint = getattr(self.server, "ssl_cert_fingerprint", "")
+            if isinstance(server_fingerprint, str):
+                object.__setattr__(self, "cert_fingerprint", server_fingerprint)
 
     @classmethod
     def from_credentials(  # Virtualmin API parameters  # noqa: PLR0913  # Business logic parameters
@@ -386,13 +396,16 @@ class VirtualminConfig:
         """
         # Create a temporary VirtualminServer-like object for the config
         # We can't create a real VirtualminServer because it requires database access
-        temp_server = SimpleNamespace()
+        temp_server = SimpleNamespace(status="active")
         temp_server.hostname = hostname
         temp_server.api_username = username
         temp_server.api_port = port
+        temp_server.api_path = "/virtual-server/remote.cgi"
         temp_server.use_ssl = use_ssl
         temp_server.ssl_verify = verify_ssl
         temp_server.ssl_cert_fingerprint = cert_fingerprint
+        protocol = "https" if use_ssl else "http"
+        temp_server.api_url = f"{protocol}://{hostname}:{port}{temp_server.api_path}"
 
         # Store the password directly (bypass get_api_password method)
         temp_server._api_password = password
@@ -407,6 +420,14 @@ class VirtualminConfig:
         )
 
 
+class RateLimitOutcome(Enum):
+    """Outcome of a rate-limit slot claim (distinguishes exhaustion from backend failure)."""
+
+    ALLOWED = "allowed"
+    EXHAUSTED = "exhausted"
+    BACKEND_ERROR = "backend_error"
+
+
 class VirtualminAPIError(Exception):
     """Base exception for Virtualmin API errors"""
 
@@ -419,6 +440,16 @@ class VirtualminAPIError(Exception):
 
 class VirtualminAuthError(VirtualminAPIError):
     """Authentication failed - check credentials or ACL permissions"""
+
+
+class VirtualminAuthorizationError(VirtualminAuthError):
+    """HTTP 403 — authenticated but not permitted (ACL denial).
+
+    Distinct from VirtualminAuthError (401, authentication failure): an
+    authorization denial must NOT trigger privilege-escalating auth fallback,
+    or a forbidden operation would succeed as master/root and a compromised
+    node returning 403 could coax PRAHO into sending it master credentials.
+    """
 
 
 class VirtualminRateLimitedError(VirtualminAPIError):
@@ -660,21 +691,32 @@ class VirtualminGateway:
 
     # _create_session removed — safe_request() handles sessions with DNS-pinned adapters
 
-    def _check_rate_limit(self, operation: str) -> bool:
-        """Check if server is within rate limits"""
-        cache_key = f"virtualmin_rate_limit:{self.server.hostname}:{operation}"
-        current_calls = cache.get(cache_key, 0)
+    def _check_rate_limit(self, operation: str) -> RateLimitOutcome:
+        """Atomically reserve a request slot, failing closed on cache errors.
 
-        if current_calls >= VIRTUALMIN_RATE_LIMIT_MAX_CALLS:
-            logger.warning(
-                f"Rate limit exceeded for {self.server.hostname} operation {operation}: "
-                f"{current_calls}/{VIRTUALMIN_RATE_LIMIT_MAX_CALLS}"
-            )
-            return False
+        Returns ALLOWED (slot claimed), EXHAUSTED (all slots taken this window),
+        or BACKEND_ERROR (the cache raised). The caller must NOT report a
+        BACKEND_ERROR as a retriable rate-limit hit — during a cache outage that
+        would make every call fleet-wide fail with a misleading "just wait".
+        """
+        window = int(time.time() // VIRTUALMIN_RATE_LIMIT_WINDOW)
+        scope = hashlib.sha256(f"{self.server.hostname}\0{operation}".encode()).hexdigest()[:24]
+        cache_key_prefix = f"virtualmin_rate_limit:{scope}:{window}"
+        try:
+            for slot in range(VIRTUALMIN_RATE_LIMIT_MAX_CALLS):
+                if cache.add(f"{cache_key_prefix}:{slot}", 1, VIRTUALMIN_RATE_LIMIT_WINDOW):
+                    return RateLimitOutcome.ALLOWED
+        except Exception:
+            logger.exception("Virtualmin rate-limit counter failed for %s", self.server.hostname)
+            return RateLimitOutcome.BACKEND_ERROR
 
-        # Increment counter
-        cache.set(cache_key, current_calls + 1, VIRTUALMIN_RATE_LIMIT_WINDOW)
-        return True
+        logger.warning(
+            "Rate limit exceeded for %s operation %s: %s slots claimed",
+            self.server.hostname,
+            operation,
+            VIRTUALMIN_RATE_LIMIT_MAX_CALLS,
+        )
+        return RateLimitOutcome.EXHAUSTED
 
     # Programs an auto-failed server may still receive: the health probe only.
     # Everything mutating stays blocked until the server recovers.
@@ -693,31 +735,6 @@ class VirtualminGateway:
             return Err(f"Server {self.server.hostname} is not active (status: {self.server.status})")
 
         return Ok(True)
-
-    def _validate_ssl_certificate(self, response: requests.Response) -> bool:
-        """Validate SSL certificate if fingerprint is configured"""
-        if not self.config.cert_fingerprint:
-            return True
-
-        try:
-            # Get certificate from response
-            cert_der = response.raw.connection.sock.getpeercert(binary_form=True)  # type: ignore[union-attr]
-            cert_sha256 = hashlib.sha256(cert_der).hexdigest()
-
-            expected = self.config.cert_fingerprint.replace("sha256:", "").lower()
-            actual = cert_sha256.lower()
-
-            if expected != actual:
-                logger.error(
-                    f"SSL certificate mismatch for {self.server.hostname}. Expected: {expected}, Got: {actual}"
-                )
-                return False
-
-            return True
-
-        except Exception as e:
-            logger.error(f"Failed to validate SSL certificate: {e}")
-            return False
 
     def call(
         self,
@@ -756,10 +773,22 @@ class VirtualminGateway:
             return Err(VirtualminAPIError(health_result.unwrap_err(), self.server.hostname, program))
 
         # Rate limiting check
-        if not self._check_rate_limit(program):
+        rate_limit_outcome = self._check_rate_limit(program)
+        if rate_limit_outcome is RateLimitOutcome.EXHAUSTED:
             return Err(
                 VirtualminRateLimitedError(f"Rate limit exceeded for {program}", self.server.hostname, program),
                 retriability=Retriability.RETRIABLE,
+            )
+        if rate_limit_outcome is RateLimitOutcome.BACKEND_ERROR:
+            # The limiter could not be consulted — fail closed, but NOT as a
+            # retriable rate-limit: retrying hammers a backend that will not
+            # self-heal, and the operator needs the real cause.
+            return Err(
+                VirtualminAPIError(
+                    f"Rate-limit backend unavailable for {program} — refusing to proceed unmetered",
+                    self.server.hostname,
+                    program,
+                )
             )
 
         # Prepare request parameters
@@ -844,7 +873,6 @@ class VirtualminGateway:
         try:
             response = self._execute_http_request(params)
             self._validate_response_size(response)
-            self._validate_ssl_if_configured(response)
             self._validate_http_status(response)
             return response
 
@@ -862,7 +890,15 @@ class VirtualminGateway:
             ) from e
 
     def _execute_http_request(self, params: dict[str, Any]) -> requests.Response:
-        """Execute the HTTP request via safe_request() with DNS pinning."""
+        """Execute HTTPS with DNS pinning and optional handshake-time certificate pinning."""
+        if not self.server.use_ssl or not self.server.api_url.lower().startswith("https://"):
+            raise VirtualminAPIError("Virtualmin API requires HTTPS", self.server.hostname)
+        if not self.config.verify_ssl and not self.config.cert_fingerprint:
+            raise VirtualminAPIError(
+                "Disabling CA verification requires a pinned SHA-256 certificate fingerprint",
+                self.server.hostname,
+            )
+
         # Get current timeout configuration (supports hot-reloading)
         timeout_config = get_virtualmin_timeouts()
         request_timeout = timeout_config.get("API_REQUEST_TIMEOUT", self.config.timeout)
@@ -870,9 +906,10 @@ class VirtualminGateway:
         # Build per-server policy — Virtualmin uses self-signed certs on some nodes
         virtualmin_policy = OutboundPolicy(
             name="virtualmin",
-            require_https=False,
-            verify_tls=self.config.verify_ssl,
-            allowed_schemes=frozenset({"https", "http"}),
+            require_https=True,
+            verify_tls=bool(self.config.verify_ssl),
+            tls_cert_fingerprint=self.config.cert_fingerprint,
+            allowed_schemes=frozenset({"https"}),
             timeout_seconds=float(request_timeout),
             blocked_ports=frozenset(),  # Virtualmin runs on non-standard ports
         )
@@ -902,17 +939,12 @@ class VirtualminGateway:
         # Replace response content
         response._content = content
 
-    def _validate_ssl_if_configured(self, response: requests.Response) -> None:
-        """Validate SSL certificate if configured."""
-        if self.server.use_ssl and self.config.cert_fingerprint and not self._validate_ssl_certificate(response):
-            raise VirtualminAPIError("SSL certificate validation failed", self.server.hostname)
-
     def _validate_http_status(self, response: requests.Response) -> None:
         """Validate HTTP status codes and raise appropriate errors."""
         if response.status_code == HTTP_UNAUTHORIZED:
             raise VirtualminAuthError("Authentication failed - check API credentials", self.server.hostname)
         elif response.status_code == HTTP_FORBIDDEN:
-            raise VirtualminAuthError("Access forbidden - check ACL permissions", self.server.hostname)
+            raise VirtualminAuthorizationError("Access forbidden - check ACL permissions", self.server.hostname)
         elif response.status_code == HTTP_TOO_MANY_REQUESTS:
             raise VirtualminRateLimitedError("Server rate limit exceeded", self.server.hostname)
         elif response.status_code >= HTTP_INTERNAL_SERVER_ERROR:

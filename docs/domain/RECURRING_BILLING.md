@@ -1,7 +1,7 @@
 # Recurring Billing Operations
 
 > **Status**: Active reference
-> **Last updated**: 2026-07-18
+> **Last updated**: 2026-07-19
 > **Architecture decision**: [ADR-0039](../ADRs/ADR-0039-praho-owned-recurring-billing.md)
 
 ## Ownership Boundary
@@ -54,6 +54,18 @@ The first paid order is the initial entitlement. Once payment and any review gat
 - Withdrawing the authorization disables every linked subscription immediately but does not cancel services or existing invoices.
 - Staff may revoke an authorization but cannot manufacture customer consent.
 - PRAHO accepts the current recurring-payment terms version server-side before creating the SetupIntent; the SetupIntent metadata binds the exact terms hash and accepting principal, so another billing user cannot inherit the consent flow. PRAHO stores the exact accepted text alongside its version and hash so later wording changes cannot rewrite historical evidence. The browser checkbox is only the user interface for that signed acceptance.
+
+## Revocation and In-Flight Charges
+
+Final recurring authorization and Stripe submission share a PostgreSQL ordering boundary. PRAHO locks the global collection-switch row and then the customer row, revalidates the document and every enrolled service, and retains those locks only until the gateway request returns. Mandate withdrawal/revocation, subscription cancellation, per-service auto-payment changes, renewal opt-out, and terminal service lifecycle changes take the same customer lock before changing authority.
+
+The customer mutex uses PostgreSQL `NO KEY UPDATE`: all boundary participants still serialize, while manual Payments and other rows may safely retain or add foreign keys to the customer instead of creating a document/customer lock inversion.
+
+- If a disabling mutation obtains the boundary first, the charge waits, observes the committed opt-out, and abandons its unbound local Payment before contacting Stripe.
+- If a charge obtains the boundary first, it is considered in flight. The disabling mutation waits until the gateway request has returned; PRAHO then records the opt-out without automatically refunding that already-submitted attempt.
+- Once a withdrawal, cancellation, opt-out, or kill-switch update returns successfully, no later automatic PaymentIntent may be submitted under the old authority.
+
+This short database transaction intentionally spans one Stripe request. Do not add unrelated work inside it or acquire service/subscription locks before the customer boundary.
 
 ## Plan Changes
 

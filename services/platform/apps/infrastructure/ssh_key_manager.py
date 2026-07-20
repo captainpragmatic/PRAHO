@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
+from django.db import transaction
 
 from apps.common.credential_vault import (
     CredentialData,
@@ -182,6 +183,20 @@ class SSHKeyManager:
             deployment.ssh_key_credential_id = str(credential.id)
             deployment.save(update_fields=["ssh_key_credential_id", "updated_at"])
 
+            try:
+                from apps.infrastructure.audit_service import (  # noqa: PLC0415
+                    InfrastructureAuditContext,
+                    InfrastructureAuditService,
+                )
+
+                InfrastructureAuditService.log_ssh_key_generated(
+                    deployment,
+                    key_pair.fingerprint,
+                    InfrastructureAuditContext(user=user),
+                )
+            except Exception:
+                logger.exception("Failed to audit SSH key generation for %s", deployment.hostname)
+
             logger.info(
                 f"🔑 [SSH Manager] Generated and stored SSH key for deployment: "
                 f"{deployment.hostname}, fingerprint: {key_pair.fingerprint}"
@@ -272,6 +287,7 @@ class SSHKeyManager:
         self,
         deployment: NodeDeployment,
         user: User | None = None,
+        reason: str = "Private key for Ansible",
     ) -> Result[Path, str]:
         """
         Get private key written to a temporary file (for Ansible).
@@ -281,11 +297,12 @@ class SSHKeyManager:
         Args:
             deployment: NodeDeployment instance
             user: User requesting access
+            reason: Audit reason recorded for private-key access
 
         Returns:
             Result with Path to temporary key file or error
         """
-        result = self.get_deployment_key(deployment, user, "Private key for Ansible")
+        result = self.get_deployment_key(deployment, user, reason)
 
         if result.is_err():
             return Err(result.unwrap_err())
@@ -331,22 +348,34 @@ class SSHKeyManager:
             return Ok(True)
 
         try:
-            # Deactivate the credential (soft delete)
-            credential = EncryptedCredential.objects.get(id=deployment.ssh_key_credential_id)
-            credential.is_active = False
-            credential.save(update_fields=["is_active", "updated_at"])
+            with transaction.atomic():
+                try:
+                    credential = EncryptedCredential.objects.get(id=deployment.ssh_key_credential_id)
+                except EncryptedCredential.DoesNotExist:
+                    logger.warning(f"🔑 [SSH Manager] SSH key credential not found: {deployment.ssh_key_credential_id}")
+                else:
+                    credential.is_active = False
+                    credential.save(update_fields=["is_active", "updated_at"])
 
-            # Clear the reference on deployment
-            deployment.ssh_key_credential_id = ""
-            deployment.save(update_fields=["ssh_key_credential_id", "updated_at"])
+                deployment.ssh_key_credential_id = ""
+                deployment.save(update_fields=["ssh_key_credential_id", "updated_at"])
+
+            try:
+                from apps.infrastructure.audit_service import (  # noqa: PLC0415
+                    InfrastructureAuditContext,
+                    InfrastructureAuditService,
+                )
+
+                InfrastructureAuditService.log_ssh_key_revoked(
+                    deployment,
+                    InfrastructureAuditContext(user=user),
+                )
+            except Exception:
+                logger.exception("Failed to audit SSH key revocation for %s", deployment.hostname)
 
             logger.info(f"🔑 [SSH Manager] Deleted SSH key for: {deployment.hostname}")
 
             return Ok(True)
-
-        except EncryptedCredential.DoesNotExist:
-            logger.warning(f"🔑 [SSH Manager] SSH key credential not found: {deployment.ssh_key_credential_id}")
-            return Ok(True)  # Already deleted
 
         except Exception as e:
             logger.error(f"🚨 [SSH Manager] Failed to delete SSH key: {e}")

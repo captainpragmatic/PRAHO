@@ -22,7 +22,13 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 import paramiko
 
-from apps.common.outbound_http import OutboundPolicy, OutboundSecurityError, safe_urlopen
+from apps.common.outbound_http import (
+    OutboundPolicy,
+    OutboundSecurityError,
+    normalize_tls_cert_fingerprint,
+    safe_urlopen,
+)
+from apps.common.ssh import configure_strict_host_key_checking
 from apps.common.types import Err, Ok, Result
 from apps.infrastructure.ssh_key_manager import get_ssh_key_manager
 
@@ -183,6 +189,10 @@ class NodeValidationService:
 
             if key_result.is_err():
                 # Try master key as fallback
+                logger.warning(
+                    "🔑 [Validation] Deployment SSH key unavailable for %s — falling back to master key",
+                    getattr(deployment, "hostname", "unknown"),
+                )
                 master_result = self._ssh_manager.get_master_key()
                 if master_result.is_err():
                     return ValidationResult(
@@ -196,9 +206,7 @@ class NodeValidationService:
 
             # Create SSH client
             client = paramiko.SSHClient()
-            client.set_missing_host_key_policy(
-                paramiko.AutoAddPolicy()  # noqa: S507  # Intentional: auto-trust for infra validation
-            )  # Intentional: auto-trust for infra validation  # Intentional: auto-trust for infra validation
+            configure_strict_host_key_checking(client)
 
             # Load private key
 
@@ -252,6 +260,82 @@ class NodeValidationService:
                 passed=False,
                 message=f"SSH check failed: {e}",
             )
+
+    def get_webmin_certificate_fingerprint(  # noqa: PLR0911  # Explicit fail-closed exits per error class
+        self, deployment: NodeDeployment
+    ) -> Result[str, str]:
+        """Read the certificate actually served by Webmin over the trusted SSH channel."""
+        if not deployment.ipv4_address:
+            return Err("Node has no IP address assigned")
+
+        key_result = self._ssh_manager.get_deployment_key(
+            deployment,
+            reason="Node registration - verify Webmin TLS certificate",
+        )
+        if key_result.is_err():
+            logger.warning(
+                "🔑 [Validation] Deployment SSH key unavailable for %s (%s) — falling back to master key",
+                deployment.hostname,
+                key_result.unwrap_err(),
+            )
+            master_result = self._ssh_manager.get_master_key()
+            if master_result.is_err():
+                return Err(f"Could not get SSH key: {key_result.unwrap_err()}")
+            private_key_content = master_result.unwrap()
+        else:
+            private_key_content = key_result.unwrap().private_key
+
+        client: paramiko.SSHClient | None = None
+        try:
+            client = paramiko.SSHClient()
+            configure_strict_host_key_checking(client)
+            pkey = paramiko.Ed25519Key.from_private_key(io.StringIO(private_key_content))
+            client.connect(
+                hostname=deployment.ipv4_address,
+                port=22,
+                username="root",
+                pkey=pkey,
+                timeout=self.timeout,
+                allow_agent=False,
+                look_for_keys=False,
+            )
+
+            command = (
+                "openssl s_client -connect 127.0.0.1:10000 </dev/null 2>/dev/null "
+                "| openssl x509 -noout -fingerprint -sha256"
+            )
+            _stdin, stdout, stderr = client.exec_command(command, timeout=self.timeout)
+            output = stdout.read().decode().strip()
+            if stdout.channel.recv_exit_status() != 0:
+                error_output = stderr.read().decode().strip()
+                return Err(f"Could not read Webmin certificate: {error_output or 'openssl failed'}")
+
+            _label, separator, raw_fingerprint = output.partition("=")
+            if not separator or not raw_fingerprint.strip():
+                return Err("Could not parse Webmin SHA-256 certificate fingerprint")
+            fingerprint = normalize_tls_cert_fingerprint(raw_fingerprint)
+            return Ok(fingerprint)
+        except paramiko.BadHostKeyException as exc:
+            # The node's SSH host key does not match the pinned known_hosts entry.
+            # This is the MITM signal this verified-SSH path exists to catch — never
+            # flatten it into generic connection friction.
+            logger.error(
+                "🚨 [Security] SSH host-key mismatch reading Webmin certificate for %s — "
+                "possible man-in-the-middle; refusing to trust the served certificate: %s",
+                deployment.ipv4_address,
+                exc,
+            )
+            return Err(f"SSH host-key mismatch for {deployment.hostname} — possible MITM, certificate not trusted")
+        except Exception as exc:
+            logger.warning(
+                "⚠️ [Validation] Could not read Webmin certificate over SSH for %s: %s",
+                deployment.hostname,
+                exc,
+            )
+            return Err(f"Could not verify Webmin certificate fingerprint over SSH: {exc}")
+        finally:
+            if client is not None:
+                client.close()
 
     def _check_ports(self, deployment: NodeDeployment) -> ValidationResult:
         """Check required ports are open"""

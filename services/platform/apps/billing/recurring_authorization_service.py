@@ -12,6 +12,7 @@ from apps.customers.models import Customer, CustomerPaymentMethod
 from apps.users.models import CustomerMembership, User
 
 from .gateways.base import PaymentGatewayFactory, SetupIntentStatusResult
+from .recurring_locking import lock_recurring_collection_customer
 from .recurring_models import RecurringPaymentAuthorization
 from .subscription_models import Subscription
 
@@ -192,13 +193,14 @@ class RecurringPaymentAuthorizationService:
         terms_hash = cls._terms_text_hash()
         now = timezone.now()
         with transaction.atomic():
+            locked_customer = lock_recurring_collection_customer(customer.id)
             locked_payment_method = (
                 CustomerPaymentMethod.objects.select_for_update().filter(pk=payment_method.pk).first()
             )
             if locked_payment_method is None:
                 return Err("Saved payment method is not active")
             locked_validation = cls._validate_principal_and_method(
-                customer=customer,
+                customer=locked_customer,
                 payment_method=locked_payment_method,
                 actor=actor,
                 lock_principal=True,
@@ -285,11 +287,12 @@ class RecurringPaymentAuthorizationService:
     ) -> Result[RecurringPaymentAuthorization, str]:
         """Let a customer billing principal withdraw a mandate immediately."""
         with transaction.atomic():
-            billing_role = cls._customer_billing_role(authorization.customer, actor, for_update=True)
+            locked_customer = lock_recurring_collection_customer(authorization.customer_id)
+            billing_role = cls._customer_billing_role(locked_customer, actor, for_update=True)
             if billing_role is None:
                 return Err("Only a customer billing principal may withdraw recurring-payment authorization")
             locked = RecurringPaymentAuthorization.objects.select_for_update().get(pk=authorization.pk)
-            if locked.customer_id != authorization.customer_id:
+            if locked.customer_id != locked_customer.id:
                 return Err("Recurring-payment authorization customer changed during withdrawal")
             if locked.status == "withdrawn":
                 return Ok(locked)
@@ -318,7 +321,8 @@ class RecurringPaymentAuthorizationService:
     ) -> Result[Subscription, str]:
         """Enroll or remove one subscription without changing its siblings."""
         with transaction.atomic():
-            billing_role = cls._customer_billing_role(subscription.customer, actor, for_update=True)
+            locked_customer = lock_recurring_collection_customer(subscription.customer_id)
+            billing_role = cls._customer_billing_role(locked_customer, actor, for_update=True)
             if billing_role is None:
                 return Err("Only a customer billing principal may change automatic payment")
 
@@ -333,7 +337,7 @@ class RecurringPaymentAuthorizationService:
                 )
 
             locked = Subscription.objects.select_for_update().get(pk=subscription.pk)
-            if locked.customer_id != subscription.customer_id:
+            if locked.customer_id != locked_customer.id:
                 return Err("Subscription customer changed while automatic payment was being updated")
             if not enabled:
                 locked.auto_payment_enabled = False
@@ -377,7 +381,10 @@ class RecurringPaymentAuthorizationService:
             return Err("Only billing administrators may revoke recurring-payment authorization")
 
         with transaction.atomic():
+            locked_customer = lock_recurring_collection_customer(authorization.customer_id)
             locked = RecurringPaymentAuthorization.objects.select_for_update().get(pk=authorization.pk)
+            if locked.customer_id != locked_customer.id:
+                return Err("Recurring-payment authorization customer changed during revocation")
             if locked.status == "revoked":
                 return Ok(locked)
             if locked.status != "active":

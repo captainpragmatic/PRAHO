@@ -6,6 +6,7 @@ import logging
 from decimal import Decimal
 
 from django.core.paginator import Paginator
+from django.db import transaction
 from django.db.models import Count, Q
 from django.http import HttpRequest
 from django.utils import timezone
@@ -14,6 +15,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
 from apps.api.secure_auth import public_api_endpoint, require_customer_authentication
+from apps.billing.recurring_locking import lock_recurring_collection_customer
 from apps.common.tax_service import TaxService
 from apps.customers.models import Customer
 from apps.provisioning.service_models import Service, ServicePlan
@@ -378,9 +380,16 @@ def update_service_auto_renew_api(request: HttpRequest, customer: Customer, serv
         if auto_renew is None:
             return Response({"success": False, "error": "auto_renew field is required"}, status=400)
 
-        # Update auto-renew setting
-        service.auto_renew = bool(auto_renew)
-        service.save(update_fields=["auto_renew"])
+        # Serialize customer opt-out with any recurring gateway submission.
+        with transaction.atomic():
+            locked_customer = lock_recurring_collection_customer(customer.id)
+            service = Service.objects.select_for_update(of=("self",)).get(id=service_id, customer=locked_customer)
+            if service.status not in ["active", "suspended"]:
+                return Response(
+                    {"success": False, "error": "Auto-renew cannot be modified for this service status"}, status=400
+                )
+            service.auto_renew = bool(auto_renew)
+            service.save(update_fields=["auto_renew", "updated_at"])
 
         logger.info(f"✅ [Services API] Auto-renew updated for service {service_id}: {auto_renew}")
 

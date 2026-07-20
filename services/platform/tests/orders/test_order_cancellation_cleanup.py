@@ -439,6 +439,7 @@ class ProformaExpiryErrorLoggingTest(TestCase):
         mock_proforma.expire.side_effect = DatabaseError("DB exc_info test")
 
         mock_order = MagicMock()
+        mock_order.customer_id = self.customer.id
         mock_order.order_number = "ORD-EXCINFO-001"
         mock_order.proforma = mock_proforma
         mock_order.items.select_for_update.return_value.filter.return_value.select_related.return_value = []

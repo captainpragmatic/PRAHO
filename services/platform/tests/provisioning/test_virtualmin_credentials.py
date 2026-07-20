@@ -16,6 +16,7 @@ from django.test import TestCase
 from apps.common.credential_vault import CredentialData, CredentialVault
 from apps.common.types import Err, Ok
 from apps.provisioning.models import Server
+from apps.provisioning.virtualmin_forms import VirtualminServerForm
 from apps.provisioning.virtualmin_gateway import VirtualminConfig, VirtualminGateway, get_virtualmin_config
 from apps.provisioning.virtualmin_models import VirtualminServer
 
@@ -176,6 +177,45 @@ class GetCredentialsNoEnvFallbackTest(TestCase):
         username, password = result.unwrap()
         self.assertEqual(username, "fallback_user")
         self.assertEqual(password, "fallback_pass")
+
+
+class VirtualminServerTLSFormTest(TestCase):
+    """The staff form must not persist credential-bearing insecure transports."""
+
+    def _data(self, **overrides: object) -> dict[str, object]:
+        data: dict[str, object] = {
+            "name": "secure-vmin",
+            "hostname": "vmin.example.com",
+            "api_port": 10000,
+            "api_username": "praho_api",
+            "api_password": "StrongPassword1!",
+            "use_ssl": "on",
+            "ssl_verify": "on",
+            "ssl_cert_fingerprint": "",
+            "status": "active",
+            "max_domains": 100,
+            "max_disk_gb": "",
+            "max_bandwidth_gb": "",
+        }
+        data.update(overrides)
+        return data
+
+    def test_plain_http_configuration_is_rejected(self) -> None:
+        form = VirtualminServerForm(data=self._data(use_ssl=""))
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("use_ssl", form.errors)
+
+    def test_disabling_ca_verification_requires_valid_sha256_pin(self) -> None:
+        form = VirtualminServerForm(data=self._data(ssl_verify="", ssl_cert_fingerprint=""))
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("ssl_cert_fingerprint", form.errors)
+
+    def test_valid_sha256_pin_allows_private_ca_configuration(self) -> None:
+        form = VirtualminServerForm(data=self._data(ssl_verify="", ssl_cert_fingerprint="sha256:" + "ab" * 32))
+
+        self.assertTrue(form.is_valid(), form.errors.as_json())
 
 
 class ConfigDictNoEnvCredentialsTest(TestCase):
