@@ -105,6 +105,11 @@ primary-key AAD before removing the UUID.
   use database backups or sanitized fixtures instead.
 - The migration is intentionally fail-closed and can block deployment until
   unexpected historical data is investigated.
+- The migration runs atomically, so its safe all-or-nothing rollback is bought
+  with a table-level lock: PostgreSQL's `ADD COLUMN` takes `ACCESS EXCLUSIVE` and
+  holds it through the entire row-by-row re-encryption. Plan a maintenance window
+  proportional to the size of `customer_payment_methods`; a very large table
+  warrants a staged online migration instead.
 
 ## Threat Boundary
 

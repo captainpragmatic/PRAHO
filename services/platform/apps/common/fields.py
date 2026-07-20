@@ -37,7 +37,15 @@ SQLParams = list[str | int] | tuple[str | int, ...] | tuple[()]
 
 
 class _PreparedEncryptedValue(str):
-    """Ciphertext produced or verified with a concrete model instance."""
+    """Marks ciphertext produced or verified by ``pre_save`` with a concrete model instance.
+
+    This is a pre_save -> get_prep_value hand-off marker, NOT a cryptographic authenticity
+    boundary: it defends against accidental unbound writes (a raw dict/string reaching
+    ``QuerySet.update()``/``bulk_update()``/``loaddata`` is rejected), not against application
+    code that deliberately constructs this private type. The real transplant guard is
+    read-time — any ciphertext whose embedded AAD does not match the row's context fails
+    closed on read, regardless of how it was written.
+    """
 
 
 def _extract_embedded_aad(encrypted_str: str) -> bytes | None:
