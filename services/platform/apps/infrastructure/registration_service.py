@@ -171,6 +171,56 @@ class NodeRegistrationService:
             logger.error(f"🚨 [Registration] Failed to register node {deployment.hostname}: {e}")
             return Err(f"Registration failed: {e}")
 
+    def verify_and_activate(self, server: VirtualminServer) -> Result[VirtualminServer, str]:
+        """
+        #347 GAP 2: confirm the API credential provisioned on the node actually
+        authenticates, then transition the server disabled -> active so placement
+        can use it. A failed handshake leaves it disabled with a clear reason —
+        PRAHO never activates a server it cannot authenticate to. Requires an
+        AFFIRMATIVE health result (#325 posture): a missing/non-True 'healthy' is
+        not proof and does not activate.
+        """
+        from django.utils import timezone  # noqa: PLC0415  # Deferred: local use
+
+        from apps.provisioning.virtualmin_gateway import (  # noqa: PLC0415  # Circular: cross-app  # Deferred: avoids circular import
+            VirtualminConfig,
+            VirtualminGateway,
+            get_virtualmin_config,
+        )
+        from apps.provisioning.virtualmin_models import (  # noqa: PLC0415  # Circular: cross-app  # Deferred: avoids circular import
+            VirtualminServer as VMServer,
+        )
+
+        try:
+            config_data = get_virtualmin_config()
+            config = VirtualminConfig(
+                server=server,
+                timeout=config_data["timeout"],
+                verify_ssl=server.ssl_verify,
+                cert_fingerprint=server.ssl_cert_fingerprint or config_data.get("pinned_cert_sha256", ""),
+            )
+            health = VirtualminGateway(config).test_connection()
+        except Exception as e:
+            return Err(f"Credential verification raised for {server.hostname}: {e}")
+
+        if health.is_err():
+            return Err(f"Credential check failed for {server.hostname}, leaving disabled: {health.unwrap_err()}")
+        if health.unwrap().get("healthy") is not True:
+            return Err(f"Server {server.hostname} did not report healthy, leaving disabled: {health.unwrap()}")
+
+        # CAS: only a still-'disabled' server may be activated — never resurrect a
+        # 'failed'/'maintenance' server, and never race a concurrent transition.
+        updated = VMServer.objects.filter(pk=server.pk, status="disabled").update(
+            status="active", updated_at=timezone.now()
+        )
+        if not updated:
+            server.refresh_from_db()
+            return Err(f"Server {server.hostname} left 'disabled' before activation (now '{server.status}')")
+
+        server.refresh_from_db()
+        logger.info(f"✅ [Registration] Node {server.hostname} credential-verified and activated")
+        return Ok(server)
+
     def unregister_node(
         self,
         deployment: NodeDeployment,
