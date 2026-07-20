@@ -576,6 +576,7 @@ def process_auto_payment(invoice_id: str) -> dict[str, Any]:
         cycles = list(
             BillingCycle.objects.filter(Q(invoice=invoice) | Q(usage_invoice=invoice))
             .select_related("subscription__saved_payment_method")
+            .defer("subscription__saved_payment_method__bank_details")
             .order_by("subscription_id", "id")
         )
         payment_method_ids = {
@@ -924,6 +925,7 @@ def _retry_collection_target(original_payment: Any) -> tuple[Any, int | None, An
                 Q(invoice_id=original_payment.invoice_id) | Q(usage_invoice_id=original_payment.invoice_id)
             )
             .select_related("subscription__saved_payment_method")
+            .defer("subscription__saved_payment_method__bank_details")
             .order_by("subscription_id")
             .first()
         )
@@ -933,6 +935,7 @@ def _retry_collection_target(original_payment: Any) -> tuple[Any, int | None, An
     if original_payment.proforma_id is not None:
         cycle = (
             original_payment.proforma.billing_cycles.select_related("subscription__saved_payment_method")
+            .defer("subscription__saved_payment_method__bank_details")
             .order_by("subscription_id")
             .first()
         )

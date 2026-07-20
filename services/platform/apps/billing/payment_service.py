@@ -165,6 +165,7 @@ def _revalidate_invoice_payment_reservation(  # noqa: PLR0913  # Keyword-only re
             return reason
         saved_method = (
             CustomerPaymentMethod.objects.select_for_update(of=("self",))
+            .defer("bank_details")
             .filter(id=expected_saved_method_id, customer_id=invoice.customer_id, is_active=True)
             .first()
         )
@@ -276,6 +277,7 @@ def _revalidate_proforma_payment_reservation(  # noqa: PLR0913  # Keyword-only r
             return reason
         saved_method = (
             CustomerPaymentMethod.objects.select_for_update(of=("self",))
+            .defer("bank_details")
             .filter(id=expected_saved_method_id, customer_id=proforma.customer_id, is_active=True)
             .first()
         )
@@ -758,6 +760,7 @@ class PaymentService:
                     stripe_payment_method_id=payment_method_id,
                     is_active=True,
                 )
+                .defer("bank_details")
                 .exclude(stripe_customer_id="")
                 .first()
             )
@@ -1090,6 +1093,7 @@ class PaymentService:
                     stripe_payment_method_id=payment_method_id,
                     is_active=True,
                 )
+                .defer("bank_details")
                 .exclude(stripe_customer_id="")
                 .first()
             )

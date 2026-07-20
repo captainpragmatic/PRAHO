@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from unittest.mock import MagicMock, patch
 
+from django.db import connection
 from django.test import TestCase, override_settings
+from django.utils import timezone
 from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin
 
+from apps.billing.models import RecurringPaymentAuthorization
 from apps.billing.recurring_authorization_service import RecurringPaymentAuthorizationService
 from apps.customers.models import Customer, CustomerPaymentMethod
 from apps.users.models import CustomerMembership, User
@@ -52,6 +57,37 @@ class RecurringPaymentsAPITestCase(HMACTestMixin, TestCase):
         self.assertEqual(body["payment_methods"][0]["id"], self.method.id)
         self.assertNotIn("stripe_payment_method_id", body["payment_methods"][0])
         self.assertNotIn("stripe_customer_id", body["payment_methods"][0])
+
+    def test_overview_does_not_read_unrelated_bank_details(self) -> None:
+        terms = "Authorized recurring collection terms"
+        RecurringPaymentAuthorization.objects.create(
+            customer=self.customer,
+            payment_method=self.method,
+            status="active",
+            setup_intent_id="seti_corrupt_unrelated_bank",
+            terms_version="test-v1",
+            terms_text=terms,
+            terms_text_hash=hashlib.sha256(terms.encode()).hexdigest(),
+            granted_by=self.owner,
+            granted_by_role="owner",
+            granted_at=timezone.now(),
+        )
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE customer_payment_methods SET bank_details = %s WHERE id = %s",
+                [json.dumps("aes:v2:!!!garbage!!!"), self.method.id],
+            )
+
+        response = self.portal_post(
+            "/api/billing/recurring-payments/",
+            self._payload("recurring_payment_overview"),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["payment_methods"][0]["id"], self.method.id)
+        self.assertIsNotNone(
+            response.json()["payment_methods"][0]["authorization"]
+        )
 
     def test_technical_member_cannot_read_or_manage_recurring_payment_state(self) -> None:
         technician = User.objects.create_user(email="api-tech@example.test")

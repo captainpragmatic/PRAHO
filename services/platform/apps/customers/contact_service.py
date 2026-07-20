@@ -160,7 +160,7 @@ class ContactService:
     @staticmethod
     def get_active_payment_methods(customer: Customer) -> QuerySet[CustomerPaymentMethod]:
         """Get active payment methods for customer."""
-        return CustomerPaymentMethod.objects.filter(customer=customer, is_active=True)
+        return CustomerPaymentMethod.objects.filter(customer=customer, is_active=True).defer("bank_details")
 
     @staticmethod
     def get_recent_notes(customer: Customer, limit: int = 10) -> QuerySet[CustomerNote]:

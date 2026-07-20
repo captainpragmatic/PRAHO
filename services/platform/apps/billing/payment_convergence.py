@@ -368,7 +368,14 @@ class PaymentSuccessService:
         subscriptions = {
             subscription.id: subscription
             for subscription in Subscription.objects.select_for_update(of=("self",))
-            .select_related("saved_payment_method", "payment_authorization")
+            .select_related(
+                "saved_payment_method",
+                "payment_authorization__payment_method",
+            )
+            .defer(
+                "saved_payment_method__bank_details",
+                "payment_authorization__payment_method__bank_details",
+            )
             .filter(id__in=subscription_ids)
             .order_by("id")
         }

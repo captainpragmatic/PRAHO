@@ -125,6 +125,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **Row-bound encrypted payment data** — bank details now use v2 AES-256-GCM with exact immutable per-row AAD on first insert and every ORM projection; cross-row ciphertext transplants, downgrade/plaintext values, malformed base64, empty AAD, and decryption failures fail loudly without replacing forensic ciphertext with NULL. Existing rows are re-encrypted by a reversible fail-closed migration, Stripe-only paths defer unrelated bank data, and the key-rotation cipher cache is bounded (#205, #267, #268; ADR-0040)
+
 - **Domain webhook HMAC-SHA256 verification** — implemented signature verification for domain registrar webhooks with timing-safe comparison
 
 - **Order idempotency hardening** — DB-backed unique constraint per customer with atomic `cache.add` and stuck-lock recovery; `IntegrityError` catch narrowed to only handle idempotency race conditions, not financial check constraints

@@ -13,7 +13,7 @@ providing a historical record of why the system is built the way it is.
 ## How to Create a New ADR
 
 1. Create a new file: `ADR-XXXX-short-descriptive-title.md`
-2. Use the next available number (currently: **ADR-0040**)
+2. Use the next available number (currently: **ADR-0041**)
 3. Follow the standard format: Status, Date, Authors, Context, Decision, Consequences
 4. Set status to **Proposed** initially, then update to **Accepted** after team review
 
@@ -68,6 +68,7 @@ providing a historical record of why the system is built the way it is.
 | [ADR-0037](ADR-0037-psycopg-v3-migration.md) | psycopg v3 Migration | Active | 2026-03-20 |
 | [ADR-0038](ADR-0038-proforma-payment-convergence.md) | Proforma Payment Convergence Architecture | Accepted | 2026-03 |
 | [ADR-0039](ADR-0039-praho-owned-recurring-billing.md) | PRAHO-Owned Recurring Billing | Accepted | 2026-07 |
+| [ADR-0040](ADR-0040-row-bound-encrypted-json-fields.md) | Row-Bound Encrypted JSON Fields | Accepted | 2026-07 |
 
 ### 🟡 Partially Superseded
 
@@ -120,6 +121,9 @@ Token & Inter-Service Auth
   ADR-0031 (API token auth) ──related──▶ ADR-0017, ADR-0024
   ADR-0032 (dual HMAC) ──related──▶ ADR-0017, ADR-0031
 
+Encryption Architecture
+  ADR-0033 (AES-256-GCM consolidation) ──extended by──▶ ADR-0040 (row-bound encrypted JSON)
+
 Billing Ownership
   ADR-0025 (amounts in cents) ──related──▶ ADR-0038 (proforma convergence)
   ADR-0038 ──extended by──▶ ADR-0039 (PRAHO-owned recurring billing)
@@ -143,6 +147,7 @@ Billing Ownership
 - [ADR-0017](ADR-0017-portal-auth-fail-open-strategy.md) — Portal fail-open auth
 - [ADR-0018](ADR-0018-django-encryption-key-management.md) — Encryption key management (superseded by ADR-0033)
 - [ADR-0033](ADR-0033-encryption-architecture-consolidation.md) — Encryption architecture consolidation
+- [ADR-0040](ADR-0040-row-bound-encrypted-json-fields.md) — Exact row binding and fail-loud encrypted JSON reads
 - [ADR-0021](ADR-0021-email-enumeration-prevention.md) — Email enumeration prevention
 - [ADR-0030](ADR-0030-rate-limiting-architecture.md) — Throttle architecture and startup validation
 - [ADR-0031](ADR-0031-api-token-authentication-strategy.md) — Token auth gaps and roadmap
@@ -178,8 +183,8 @@ Billing Ownership
 
 ## Statistics
 
-- **Total ADRs**: 39 (ADR-0001 through ADR-0039)
-- **Active**: 33 (Accepted + Implemented)
+- **Total ADRs**: 40 (ADR-0001 through ADR-0040)
+- **Active**: 34 (Accepted + Implemented)
 - **Partially Superseded**: 1
 - **Superseded / Historical**: 5
-- **Next available**: ADR-0040
+- **Next available**: ADR-0041

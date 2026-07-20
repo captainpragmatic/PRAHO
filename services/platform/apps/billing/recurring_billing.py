@@ -155,10 +155,15 @@ class RecurringCollectionGate:
         from .metering_models import BillingCycle  # noqa: PLC0415
 
         cycles = list(
-            BillingCycle.objects.filter(Q(invoice=invoice) | Q(usage_invoice=invoice)).select_related(
+            BillingCycle.objects.filter(Q(invoice=invoice) | Q(usage_invoice=invoice))
+            .select_related(
                 "subscription__service",
                 "subscription__saved_payment_method",
                 "subscription__payment_authorization__payment_method",
+            )
+            .defer(
+                "subscription__saved_payment_method__bank_details",
+                "subscription__payment_authorization__payment_method__bank_details",
             )
         )
         if not cycles:
@@ -210,10 +215,15 @@ class RecurringCollectionGate:
         from .metering_models import BillingCycle  # noqa: PLC0415
 
         cycles = list(
-            BillingCycle.objects.filter(proforma=proforma).select_related(
+            BillingCycle.objects.filter(proforma=proforma)
+            .select_related(
                 "subscription__service",
                 "subscription__saved_payment_method",
                 "subscription__payment_authorization__payment_method",
+            )
+            .defer(
+                "subscription__saved_payment_method__bank_details",
+                "subscription__payment_authorization__payment_method__bank_details",
             )
         )
         if not cycles:
@@ -303,6 +313,11 @@ class RecurringBillingOrchestrator:
                         "service",
                         "saved_payment_method",
                         "payment_authorization",
+                        "payment_authorization__payment_method",
+                    )
+                    .defer(
+                        "saved_payment_method__bank_details",
+                        "payment_authorization__payment_method__bank_details",
                     )
                     .filter(
                         status__in=["active", "trialing"],
@@ -501,6 +516,7 @@ class RecurringBillingOrchestrator:
                     cycles = list(
                         BillingCycle.objects.select_for_update(of=("self",))
                         .select_related("subscription__saved_payment_method")
+                        .defer("subscription__saved_payment_method__bank_details")
                         .filter(proforma=proforma)
                         .order_by("subscription_id", "id")
                     )
