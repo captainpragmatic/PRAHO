@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Any, TypedDict
 
 from django.conf import settings
@@ -571,6 +572,10 @@ def _handle_successful_provisioning_secure(
     account: Any, service: Service, correlation_id: str, safe_log_ctx: dict[str, Any]
 ) -> dict[str, Any]:
     """Handle successful provisioning with enhanced security and audit logging."""
+    # Converge once more after creation: a termination that landed while the
+    # gateway was working must not leave a live account for a dead Service.
+    service_id = str(service.id)
+    transaction.on_commit(lambda: reconcile_virtualmin_service_state_async(service_id))
     try:
         # Enhanced audit logging with security metadata
         AuditService.log_event(
@@ -850,6 +855,121 @@ def _handle_critical_provisioning_error(
     return _handle_critical_provisioning_error_secure(error, domain, service_id, correlation_id, safe_log_ctx)
 
 
+def reconcile_virtualmin_service_state(  # noqa: PLR0911  # Convergence matrix: one exit per state pair
+    service_id: str,
+) -> dict[str, Any]:
+    """
+    Idempotent convergence: read the COMMITTED Service + account state and
+    make Virtualmin match it (#325 defect 4 — suspension/termination never
+    propagated; reactivation was silently absorbed).
+
+    active + no account      -> auto-provision (kill-switch gated, ADR-0019)
+    active + suspended acct  -> unsuspend
+    suspended/terminated/expired + active acct -> suspend (never delete —
+    deletion stays protected/manual)
+    """
+    from apps.provisioning.virtualmin_service import (  # noqa: PLC0415  # Deferred: avoids circular import
+        VirtualminProvisioningService,  # Circular: cross-app
+    )
+
+    service = Service.objects.filter(pk=service_id).first()
+    if service is None:
+        return {"success": False, "error": f"Service {service_id} not found"}
+
+    account = VirtualminAccount.objects.filter(service=service).select_related("server").first()
+
+    if service.status == "active":
+        if account is None:
+            if not getattr(settings, "VIRTUALMIN_AUTO_PROVISIONING_ENABLED", True):
+                logger.info(f"⏭️ [VirtualminTask] Auto-provisioning disabled — skipping {service_id}")
+                return {"success": True, "action": "kill_switch_disabled"}
+            from apps.provisioning.signals import (  # noqa: PLC0415  # Deferred: avoids circular import
+                _trigger_automatic_virtualmin_provisioning,  # Circular: cross-app
+            )
+
+            _trigger_automatic_virtualmin_provisioning(service)
+            return {"success": True, "action": "provisioning_triggered"}
+        if account.status == "suspended":
+            result = VirtualminProvisioningService(account.server).unsuspend_account(account)
+            if result.is_err():
+                return {"success": False, "action": "unsuspend", "error": str(result.unwrap_err())}
+            _reconcile_again_if_state_moved(service, expected_status="active")
+            return {"success": True, "action": "unsuspended"}
+        return {"success": True, "action": "noop"}
+
+    if service.status in ("suspended", "terminated", "expired"):
+        if account is not None and account.status == "active":
+            reason = service.suspension_reason or f"service_{service.status}"
+            result = VirtualminProvisioningService(account.server).suspend_account(account, reason)
+            if result.is_err():
+                return {"success": False, "action": "suspend", "error": str(result.unwrap_err())}
+            _reconcile_again_if_state_moved(service, expected_status=service.status)
+            return {"success": True, "action": "suspended"}
+        return {"success": True, "action": "noop"}
+
+    return {"success": True, "action": "noop"}
+
+
+def _reconcile_again_if_state_moved(service: Service, expected_status: str) -> None:
+    """
+    Snapshot-race guard: if the Service transitioned while our gateway call was
+    in flight (e.g. terminated mid-unsuspend), the state we just converged to
+    is already stale — queue one more reconcile to converge on the new truth.
+    """
+    current = Service.objects.filter(pk=service.pk).values_list("status", flat=True).first()
+    if current is None or current == expected_status:
+        return
+    # For the suspend branch expected_status is the snapshot status; any of the
+    # suspended-family statuses still map to the same converged account state.
+    suspend_family = ("suspended", "terminated", "expired")
+    if expected_status in suspend_family and current in suspend_family:
+        return
+    logger.info(f"🔄 [VirtualminTask] Service {service.pk} moved to '{current}' mid-reconcile — re-queuing")
+    reconcile_virtualmin_service_state_async(str(service.pk))
+
+
+def reconcile_divergent_services_task() -> dict[str, Any]:
+    """
+    Durable backstop (every 15 min): a lost reconcile enqueue (broker down at
+    on_commit time) must not leave Service and Virtualmin divergent forever.
+    Finds the divergence signatures directly and re-queues reconciliation.
+    """
+    suspended_family = ("suspended", "terminated", "expired")
+
+    divergent_ids: set[str] = set()
+    # (a) suspended-family Service with a live account
+    for sid in VirtualminAccount.objects.filter(status="active", service__status__in=suspended_family).values_list(
+        "service_id", flat=True
+    )[:50]:
+        divergent_ids.add(str(sid))
+    # (b) active Service with a suspended account
+    for sid in VirtualminAccount.objects.filter(status="suspended", service__status="active").values_list(
+        "service_id", flat=True
+    )[:50]:
+        divergent_ids.add(str(sid))
+
+    queued = 0
+    for service_id in divergent_ids:
+        try:
+            reconcile_virtualmin_service_state_async(service_id)
+            queued += 1
+        except Exception as e:
+            logger.warning(f"⚠️ [VirtualminTask] Failed to queue divergence reconcile for {service_id}: {e}")
+
+    if queued:
+        logger.info(f"🔄 [VirtualminTask] Divergence backstop queued {queued} reconciliations")
+    return {"success": True, "queued": queued}
+
+
+def reconcile_virtualmin_service_state_async(service_id: str) -> str:
+    """Queue Virtualmin state reconciliation for a service."""
+    return async_task(
+        "apps.provisioning.virtualmin_tasks.reconcile_virtualmin_service_state",
+        service_id,
+        timeout=TASK_SOFT_TIME_LIMIT,
+    )
+
+
 def suspend_virtualmin_account(account_id: str, reason: str = "") -> dict[str, Any]:
     """
     Sync task to suspend Virtualmin account.
@@ -1002,11 +1122,16 @@ def health_check_virtualmin_servers() -> dict[str, Any]:
             logger.info("⏭️ [VirtualminTask] Health check already running, skipping")
             return {"success": True, "message": "Already running"}
 
-        # Set lock for 30 minutes
-        cache.set(lock_key, True, 1800)
+        # Lock must not outlive the 10-minute sweep cadence, or a crashed
+        # worker would silently skip sweeps until the stale lock expires.
+        cache.set(lock_key, True, 540)
 
         try:
-            servers = VirtualminServer.objects.filter(status="active")
+            # Auto-failed servers stay in the sweep so they can recover;
+            # operator-failed servers are left alone.
+            servers = VirtualminServer.objects.filter(
+                models.Q(status="active") | models.Q(status="failed", failed_by_health_check=True)
+            )
             results: dict[str, Any] = {
                 "total_servers": servers.count(),
                 "healthy_servers": 0,
@@ -1072,7 +1197,11 @@ def update_virtualmin_server_statistics() -> dict[str, Any]:
         cache.set(lock_key, True, 3600)
 
         try:
-            servers = VirtualminServer.objects.filter(status="active")
+            # Auto-failed servers stay in the sweep so they can recover;
+            # operator-failed servers are left alone.
+            servers = VirtualminServer.objects.filter(
+                models.Q(status="active") | models.Q(status="failed", failed_by_health_check=True)
+            )
             results: dict[str, Any] = {
                 "total_servers": servers.count(),
                 "updated_servers": 0,
@@ -1118,80 +1247,139 @@ def update_virtualmin_server_statistics() -> dict[str, Any]:
         return {"success": False, "error": str(e)}
 
 
+# Operations retry_virtualmin_job knows how to recover; anything else found
+# failed is terminal for the sweep (backup/restore jobs opt out separately).
+_RETRYABLE_OPERATIONS = ("create_domain", "suspend_domain", "unsuspend_domain", "delete_domain")
+
+# A claimed (pending) job whose retry task has not reconciled it within this
+# window is presumed lost to a process death and returned to the failed pool.
+_CLAIM_LEASE_MINUTES = 30
+
+
+def retry_virtualmin_job(job_id: str, claim_nonce: str = "") -> dict[str, Any]:
+    """One-off task: re-run a claimed failed job on its existing rows."""
+    from apps.provisioning.virtualmin_service import (  # noqa: PLC0415  # Deferred: avoids circular import
+        VirtualminProvisioningService,  # Circular: cross-app
+    )
+
+    try:
+        job = VirtualminProvisioningJob.objects.select_related("server", "account", "account__service").get(pk=job_id)
+    except VirtualminProvisioningJob.DoesNotExist:
+        return {"success": False, "error": f"Job {job_id} not found"}
+
+    # Fence: only the owner of THIS claim may execute. A re-delivered task, or
+    # one whose claim was recovered and re-issued, finds the row not pending
+    # (or carrying a different claim nonce) and discards itself.
+    if not VirtualminProvisioningJob.start_claimed(job_id, timezone.now(), claim_nonce or None):
+        logger.info(f"⏭️ [VirtualminTask] Discarding stale retry delivery for job {job_id}")
+        return {"success": False, "action": "stale_claim_discarded"}
+    job.refresh_from_db()
+
+    service = VirtualminProvisioningService(job.server)
+    result = service.retry_job(job)
+    if result.is_ok():
+        return {"success": True, "job_id": job_id}
+    return {"success": False, "job_id": job_id, "error": str(result.unwrap_err())}
+
+
+def _recover_expired_claims(now: Any) -> int:
+    """Claimed jobs (pending or running) whose lease expired return to the failed pool."""
+    lease_cutoff = now - timedelta(minutes=_CLAIM_LEASE_MINUTES)
+    return VirtualminProvisioningJob.recover_expired_claims(lease_cutoff, now + timedelta(minutes=5))
+
+
 def process_failed_virtualmin_jobs() -> dict[str, Any]:
     """
-    Process failed Virtualmin jobs that can be retried.
-
-    Returns:
-        Dictionary with job processing results
+    Retry sweep with a leased-claim protocol: each due failed job is claimed by
+    a conditional update (attempt consumed at claim time, so a broken dispatch
+    can never rearm the same attempt forever), then handed its own
+    retry_virtualmin_job task which recovers on the EXISTING account+job rows.
     """
     logger.info("🔄 [VirtualminTask] Processing failed jobs")
 
     try:
-        # Get failed jobs that can be retried
         now = timezone.now()
-        retryable_jobs = VirtualminProvisioningJob.objects.filter(
-            status="failed", retry_count__lt=models.F("max_retries"), next_retry_at__lte=now
-        ).select_related("server", "account")
+        recovered_claims = _recover_expired_claims(now)
+
+        # Exhausted jobs opt out of future sweeps entirely (existing
+        # next_retry_at=None convention) instead of sitting armed forever.
+        exhausted = VirtualminProvisioningJob.objects.filter(
+            status="failed", retry_count__gte=models.F("max_retries"), next_retry_at__isnull=False
+        ).update(next_retry_at=None)
+
+        retryable_jobs = (
+            VirtualminProvisioningJob.objects.filter(
+                status="failed", retry_count__lt=models.F("max_retries"), next_retry_at__lte=now
+            )
+            .select_related("server", "account")
+            .order_by("next_retry_at", "pk")  # deterministic fairness under the 50-job cap
+        )
 
         results: dict[str, Any] = {
             "total_jobs": retryable_jobs.count(),
             "retried_jobs": 0,
             "skipped_jobs": 0,
+            "recovered_claims": recovered_claims,
+            "exhausted_jobs": exhausted,
             "jobs": [],
         }
 
         for job in retryable_jobs[:50]:  # Limit to 50 jobs per run
             try:
-                # Schedule job for retry
-                job.schedule_retry()
+                # Validate BEFORE claiming: unsupported/orphaned jobs are
+                # terminal, never counted as retried.
+                if job.operation not in _RETRYABLE_OPERATIONS or job.account is None:
+                    VirtualminProvisioningJob.terminalize(job.pk)
+                    results["skipped_jobs"] += 1
+                    results["jobs"].append({"job_id": str(job.id), "operation": job.operation, "status": "terminal"})
+                    continue
 
-                # Trigger appropriate task based on operation
-                if job.operation == "create_domain" and job.account:
-                    async_task(
-                        "apps.provisioning.virtualmin_tasks.provision_virtualmin_account",
-                        str(job.account.service.id),
-                        job.account.domain,
-                        job.account.virtualmin_username,
-                        server_id=str(job.server.id),
+                # Leased claim: concurrent sweeps lose cleanly; the attempt is
+                # consumed here so retries are bounded even if dispatch breaks.
+                if not VirtualminProvisioningJob.claim_for_retry(job.pk, now):
+                    continue
+
+                try:
+                    task_id = async_task(
+                        "apps.provisioning.virtualmin_tasks.retry_virtualmin_job",
+                        str(job.id),
+                        now.isoformat(),  # claim nonce: only this claim's task may run the job
                         timeout=TASK_TIME_LIMIT,
                     )
-                elif job.operation == "suspend_domain" and job.account:
-                    async_task(
-                        "apps.provisioning.virtualmin_tasks.suspend_virtualmin_account",
-                        str(job.account.id),
-                        job.parameters.get("reason", ""),
-                        timeout=TASK_TIME_LIMIT,
+                    VirtualminProvisioningJob.record_dispatch(job.pk, task_id)
+                except Exception as enqueue_error:
+                    # Enqueue failed: return the job to the failed pool with a
+                    # future retry window instead of stranding it pending.
+                    VirtualminProvisioningJob.restore_after_enqueue_failure(job.pk, now + timedelta(minutes=5))
+                    results["skipped_jobs"] += 1
+                    results["jobs"].append(
+                        {
+                            "job_id": str(job.id),
+                            "operation": job.operation,
+                            "status": "enqueue_failed",
+                            "error": str(enqueue_error),
+                        }
                     )
-                elif job.operation == "unsuspend_domain" and job.account:
-                    async_task(
-                        "apps.provisioning.virtualmin_tasks.unsuspend_virtualmin_account",
-                        str(job.account.id),
-                        timeout=TASK_TIME_LIMIT,
-                    )
-                elif job.operation == "delete_domain" and job.account:
-                    async_task(
-                        "apps.provisioning.virtualmin_tasks.delete_virtualmin_account",
-                        str(job.account.id),
-                        timeout=TASK_TIME_LIMIT,
-                    )
+                    logger.warning(f"⚠️ [VirtualminTask] Failed to enqueue retry for job {job.id}: {enqueue_error}")
+                    continue
 
                 results["retried_jobs"] += 1
-                results["jobs"].append({"job_id": str(job.id), "operation": job.operation, "status": "retried"})
-
-                logger.info(f"🔄 [VirtualminTask] Retried job {job.id} ({job.operation})")
+                results["jobs"].append(
+                    {"job_id": str(job.id), "operation": job.operation, "status": "retried", "task_id": task_id}
+                )
+                logger.info(f"🔄 [VirtualminTask] Claimed and dispatched retry for job {job.id} ({job.operation})")
 
             except Exception as e:
                 results["skipped_jobs"] += 1
                 results["jobs"].append(
                     {"job_id": str(job.id), "operation": job.operation, "status": "skipped", "error": str(e)}
                 )
-
                 logger.warning(f"⚠️ [VirtualminTask] Failed to retry job {job.id}: {e}")
 
         logger.info(
             f"✅ [VirtualminTask] Job processing completed: "
-            f"{results['retried_jobs']} retried, {results['skipped_jobs']} skipped"
+            f"{results['retried_jobs']} retried, {results['skipped_jobs']} skipped, "
+            f"{recovered_claims} expired claims recovered"
         )
 
         return {"success": True, "results": results}
@@ -1244,11 +1432,13 @@ def provision_virtualmin_account_async(params: VirtualminProvisioningParams | Se
             safe_params = sanitize_log_parameters(dict(params))
             logger.info(f"🚀 [VirtualminTask] Scheduling provisioning task: {safe_params}")
 
+        # NOTE: no `retry=` — django-q2 1.9.0 has no such option; it would leak
+        # into the task kwargs and TypeError on every dequeue. Retries are
+        # DB-driven via VirtualminProvisioningJob + process_failed_virtualmin_jobs.
         return async_task(
             "apps.provisioning.virtualmin_tasks.provision_virtualmin_account",
             params,
             timeout=TASK_TIME_LIMIT,
-            retry=TASK_MAX_RETRIES,
         )
 
     except Exception as e:
@@ -1311,17 +1501,32 @@ def setup_virtualmin_scheduled_tasks() -> dict[str, str]:
         ).values_list("name", flat=True)
     )
 
-    # Health check every hour
-    if "virtualmin-health-check" not in existing_tasks:
-        schedule(
-            "apps.provisioning.virtualmin_tasks.health_check_virtualmin_servers",
-            schedule_type="H",
-            name="virtualmin-health-check",
-            cluster="praho-cluster",
-        )
-        tasks_created["health_check"] = "created"
-    else:
-        tasks_created["health_check"] = "already_exists"
+    # Health check every 10 minutes. UPSERT by name: skip-if-exists left
+    # deployed installations on the old hourly cadence forever, starving
+    # placement (is_healthy freshness << cadence).
+    _, created = ScheduleModel.objects.update_or_create(
+        name="virtualmin-health-check",
+        defaults={
+            "func": "apps.provisioning.virtualmin_tasks.health_check_virtualmin_servers",
+            "schedule_type": "I",
+            "minutes": 10,
+            "cluster": "praho-cluster",
+        },
+    )
+    tasks_created["health_check"] = "created" if created else "updated"
+
+    # Divergence backstop every 15 minutes (durable recovery for lost
+    # reconcile enqueues)
+    _, created = ScheduleModel.objects.update_or_create(
+        name="virtualmin-reconcile-divergence",
+        defaults={
+            "func": "apps.provisioning.virtualmin_tasks.reconcile_divergent_services_task",
+            "schedule_type": "I",
+            "minutes": 15,
+            "cluster": "praho-cluster",
+        },
+    )
+    tasks_created["reconcile_divergence"] = "created" if created else "updated"
 
     # Statistics update every 6 hours
     if "virtualmin-statistics" not in existing_tasks:

@@ -718,11 +718,20 @@ class VirtualminGateway:
         )
         return RateLimitOutcome.EXHAUSTED
 
-    def _validate_server_health(self) -> Result[bool, str]:
+    # Programs an auto-failed server may still receive: the health probe only.
+    # Everything mutating stays blocked until the server recovers.
+    _AUTO_FAILED_ALLOWED_PROGRAMS = frozenset({"info"})
+
+    def _validate_server_health(self, program: str = "") -> Result[bool, str]:
         """Validate server health before making requests"""
         # Only check if server is active, not if it's healthy
         # (is_healthy depends on recent health checks, creating a catch-22)
+        # Auto-failed servers stay probe-able for the health sweep, or
+        # auto-recovery would be unreachable (the same catch-22) — but ONLY
+        # for the health probe, never for mutating programs.
         if self.server.status != "active":
+            if self.server.failed_by_health_check and program in self._AUTO_FAILED_ALLOWED_PROGRAMS:
+                return Ok(True)
             return Err(f"Server {self.server.hostname} is not active (status: {self.server.status})")
 
         return Ok(True)
@@ -759,7 +768,7 @@ class VirtualminGateway:
             return Err(VirtualminAPIError(f"Validation error: {e}", self.server.hostname, program))
 
         # Server health check
-        health_result = self._validate_server_health()
+        health_result = self._validate_server_health(program)
         if health_result.is_err():
             return Err(VirtualminAPIError(health_result.unwrap_err(), self.server.hostname, program))
 
@@ -1057,6 +1066,29 @@ class VirtualminGateway:
             return [line.strip() for line in raw_response.split("\n") if line.strip()]
         return []
 
+    def list_templates(self) -> Result[list[str], str]:
+        """List available server template names (normalized across formats)."""
+        result = self.call("list-templates", {"name-only": ""})
+        if result.is_err():
+            return Err(f"API call failed: {result.unwrap_err()}")
+        response = result.unwrap()
+        if not response.success:
+            return Err(f"Failed to list templates: {response.data.get('error', 'Unknown error')}")
+
+        data = response.data
+        if "templates" in data:
+            return Ok([t["name"] if isinstance(t, dict) else str(t) for t in data["templates"]])
+        if "data" in data:
+            names = []
+            for item in data["data"]:
+                if isinstance(item, dict) and "name" in item:
+                    line = item["name"].strip()
+                    if line and not line.startswith(("Template", "---")):
+                        names.append(line.split()[0])
+            return Ok(names)
+        raw = data.get("raw_response", "")
+        return Ok([line.strip() for line in raw.split("\n") if line.strip()])
+
     def ping_server(self) -> bool:
         """Ping server to check connectivity"""
         # Use test_connection method as ping
@@ -1075,6 +1107,84 @@ class VirtualminGateway:
             raise RuntimeError(f"Virtualmin API call '{command}' failed: {error}")
         response = result.unwrap()
         return {"status": "ok", "command": command, "data": response.data}
+
+    def list_domains_with_owners(self) -> Result[list[dict[str, str]], str]:
+        """Full multiline listing normalized to [{'domain', 'username'}] rows."""
+        result = self.call("list-domains", {"multiline": ""})
+        if result.is_err():
+            return Err(f"Domain listing failed: {result.unwrap_err()}")
+        response = result.unwrap()
+        if not response.success:
+            return Err(f"Domain listing rejected: {response.data.get('error', 'Unknown error')}")
+
+        if not isinstance(response.data, dict) or not isinstance(response.data.get("data"), list):
+            return Err("Domain listing returned an unrecognized response shape")
+        rows: list[dict[str, str]] = []
+        for item in response.data["data"]:
+            if isinstance(item, dict) and item.get("name"):
+                values = item.get("values", {}) or {}
+                username = values.get("Username", "")
+                if isinstance(username, list):
+                    username = username[0] if username else ""
+                rows.append({"domain": str(item["name"]), "username": str(username)})
+        return Ok(rows)
+
+    def get_domain_state(self, domain: str) -> Result[dict[str, Any], str]:
+        """Normalized existence/enabled/owner snapshot for one domain."""
+        result = self.call("list-domains", {"domain": domain, "multiline": ""})
+        if result.is_err():
+            return Err(f"Domain state probe failed: {result.unwrap_err()}")
+        response = result.unwrap()
+        if not response.success:
+            return Err(f"Domain state probe rejected: {response.data.get('error', 'Unknown error')}")
+        if not isinstance(response.data, dict) or not isinstance(response.data.get("data"), list):
+            return Err(f"Domain state probe returned an unrecognized response shape for {domain}")
+
+        for item in response.data["data"]:
+            if isinstance(item, dict) and item.get("name") == domain:
+                values = item.get("values", {}) or {}
+                status = values.get("Status", "")
+                if isinstance(status, list):
+                    status = status[0] if status else ""
+                username = values.get("Username", "")
+                if isinstance(username, list):
+                    username = username[0] if username else ""
+                return Ok(
+                    {
+                        "exists": True,
+                        "enabled": (str(status).lower().startswith("enable")) if status else None,
+                        "owner": str(username),
+                    }
+                )
+        return Ok({"exists": False, "enabled": None, "owner": ""})
+
+    def get_domain_owner(self, domain: str) -> Result[str | None, str]:
+        """
+        Ownership probe: who owns this domain on the server?
+
+        Returns Ok(None) when the domain is absent, Ok(username) when present
+        with a parsed owner, Ok("") when present but the owner could not be
+        determined (callers must treat that as indeterminate, never adopt).
+        """
+        result = self.call("list-domains", {"domain": domain, "multiline": ""})
+        if result.is_err():
+            return Err(f"Ownership probe failed: {result.unwrap_err()}")
+        response = result.unwrap()
+        if not response.success:
+            return Err(f"Ownership probe rejected: {response.data.get('error', 'Unknown error')}")
+
+        if not isinstance(response.data, dict) or not isinstance(response.data.get("data"), list):
+            # Unrecognized shape is NOT proof of absence — treating it as
+            # absent would let a create retry re-issue create-domain blindly.
+            return Err(f"Ownership probe returned an unrecognized response shape for {domain}")
+        for item in response.data["data"]:
+            if isinstance(item, dict) and item.get("name") == domain:
+                values = item.get("values", {}) or {}
+                username = values.get("Username", "")
+                if isinstance(username, list):
+                    username = username[0] if username else ""
+                return Ok(str(username))
+        return Ok(None)
 
     def get_domain_info(self, domain: str) -> Result[dict[str, Any], str]:
         """

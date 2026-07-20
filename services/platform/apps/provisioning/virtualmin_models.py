@@ -26,8 +26,12 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Health check constants
-HEALTH_CHECK_FRESH_SECONDS = 600  # 10 minutes
+# Health check constants. The sweep runs every 10 minutes; freshness covers
+# 2.5 cadences so a single missed sweep never blanks placement fleet-wide.
+HEALTH_CHECK_FRESH_SECONDS = 1500  # 25 minutes
+# Consecutive failed checks (~1h at 10-min cadence) before a server is
+# auto-failed; only auto-failed servers are auto-recovered.
+HEALTH_AUTO_FAIL_THRESHOLD = 6
 
 
 class VirtualminServer(models.Model):
@@ -73,6 +77,10 @@ class VirtualminServer(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="active", verbose_name=_("Status"))
     last_health_check = models.DateTimeField(null=True, blank=True)
     health_check_error = models.TextField(blank=True)
+    # Consecutive failed health checks; only a sustained streak may auto-fail
+    # the server, and only auto-failed servers are ever auto-recovered.
+    consecutive_health_failures = models.PositiveIntegerField(default=0)
+    failed_by_health_check = models.BooleanField(default=False)
 
     # Load balancing and placement
     weight = models.PositiveIntegerField(
@@ -146,11 +154,16 @@ class VirtualminServer(models.Model):
 
     @property
     def is_healthy(self) -> bool:
-        """Check if server is healthy"""
+        """Check if server is healthy: active, recently verified, no live error.
+
+        last_health_check is stamped on SUCCESS only — a just-failed server
+        must never look healthy merely because it was probed recently.
+        """
         if self.status != "active":
             return False
+        if self.health_check_error:
+            return False
 
-        # Check if health check is recent (within 10 minutes)
         if self.last_health_check:
             age = timezone.now() - self.last_health_check
             return age.total_seconds() < HEALTH_CHECK_FRESH_SECONDS
@@ -581,6 +594,10 @@ class VirtualminProvisioningJob(models.Model):
     retry_count = models.PositiveIntegerField(default=0)
     max_retries = models.PositiveIntegerField(default=3)
     next_retry_at = models.DateTimeField(null=True, blank=True)
+    # Leased-claim marker: set when the retry sweep claims this job; a pending
+    # job whose lease expired (process death before/after enqueue) is
+    # recovered back to failed by the sweep.
+    claimed_at = models.DateTimeField(null=True, blank=True)
 
     # Rollback tracking
     rollback_executed = models.BooleanField(
@@ -629,6 +646,72 @@ class VirtualminProvisioningJob(models.Model):
 
     def __str__(self) -> str:
         return f"{self.get_operation_display()} on {self.server.name} ({self.get_status_display()})"
+
+    @classmethod
+    def claim_for_retry(cls, job_id: Any, now: Any) -> bool:
+        """Leased claim: failed -> pending, consuming one attempt atomically."""
+        return bool(
+            cls.objects.filter(
+                pk=job_id,
+                status="failed",
+                retry_count__lt=models.F("max_retries"),
+                next_retry_at__lte=now,
+            ).update(status="pending", retry_count=models.F("retry_count") + 1, claimed_at=now, updated_at=now)
+        )
+
+    @classmethod
+    def start_claimed(cls, job_id: Any, now: Any, claim_nonce: str | None = None) -> bool:
+        """Fence at execution: pending -> running, optionally bound to the
+        claim nonce (claimed_at isoformat) so a delivery from a recovered and
+        re-issued claim cannot steal the new claim. 0 rows = stale delivery."""
+        if claim_nonce:
+            claimed_at = cls.objects.filter(pk=job_id).values_list("claimed_at", flat=True).first()
+            if claimed_at is None or claimed_at.isoformat() != claim_nonce:
+                return False
+        return bool(
+            cls.objects.filter(pk=job_id, status="pending").update(status="running", started_at=now, updated_at=now)
+        )
+
+    @classmethod
+    def recover_expired_claims(cls, cutoff: Any, retry_at: Any) -> int:
+        """Return orphaned in-flight jobs to the failed pool so the sweep retries them.
+
+        Two orphan classes, both recovered by age:
+        - a leased retry whose claimed_at lease expired; and
+        - an INITIAL execution that died mid-run — mark_started() sets
+          status='running' and started_at but never claims (claimed_at stays
+          NULL), so without the started_at arm a first-execution worker death
+          (SIGKILL/OOM/deploy restart) would strand the job in 'running'
+          forever. started_at is only compared for unclaimed rows so a live
+          leased job is never reclaimed on started_at alone.
+        """
+        return (
+            cls.objects.filter(
+                models.Q(status="pending") | models.Q(status="running"),
+            )
+            .filter(
+                models.Q(claimed_at__isnull=False, claimed_at__lt=cutoff)
+                | models.Q(claimed_at__isnull=True, started_at__isnull=False, started_at__lt=cutoff),
+            )
+            .update(status="failed", next_retry_at=retry_at, claimed_at=None, updated_at=timezone.now())
+        )
+
+    @classmethod
+    def restore_after_enqueue_failure(cls, job_id: Any, retry_at: Any) -> int:
+        """Return a claimed-but-undispatched job to the failed pool."""
+        return cls.objects.filter(pk=job_id, status="pending").update(
+            status="failed", claimed_at=None, next_retry_at=retry_at, updated_at=timezone.now()
+        )
+
+    @classmethod
+    def terminalize(cls, job_id: Any) -> int:
+        """Opt a job out of the retry sweep permanently (existing convention)."""
+        return cls.objects.filter(pk=job_id).update(next_retry_at=None, updated_at=timezone.now())
+
+    @classmethod
+    def record_dispatch(cls, job_id: Any, task_id: str) -> int:
+        """Persist the queue task id for the dispatched retry."""
+        return cls.objects.filter(pk=job_id).update(task_id=task_id, updated_at=timezone.now())
 
     @property
     def can_retry(self) -> bool:
