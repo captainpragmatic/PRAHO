@@ -196,7 +196,11 @@ class AnsibleService:
 
             # Build extra vars
             vars_dict = self._build_vars(deployment, extra_vars)
-            vars_json = json.dumps(vars_dict)
+            # Pass vars via a 0600 temp file (`-e @file`), never `-e <json>` on the
+            # command line: extra_vars can carry secrets (the Virtualmin API
+            # password, #347) that would otherwise leak into the process list.
+            # Cleaned up in the finally block.
+            vars_file = self._write_vars_file(vars_dict)
 
             # Build command
             cmd = [
@@ -206,7 +210,7 @@ class AnsibleService:
                 "--private-key",
                 str(key_file),
                 "-e",
-                vars_json,
+                f"@{vars_file}",
                 str(playbook_path),
             ]
 
@@ -261,11 +265,24 @@ class AnsibleService:
             logger.error(f"🚨 [Ansible] Playbook {playbook} failed: {e}")
             return Err(f"Playbook execution failed: {e}")
         finally:
-            # Cleanup temporary files
-            if key_file.exists():
-                key_file.unlink()
-            if "inventory_file" in locals() and inventory_file.exists():
-                inventory_file.unlink()
+            # Cleanup any temp files that were created (key, inventory, vars).
+            local_vars = locals()
+            for _tmp_name in ("key_file", "inventory_file", "vars_file"):
+                _tmp_path = local_vars.get(_tmp_name)
+                if isinstance(_tmp_path, Path) and _tmp_path.exists():
+                    _tmp_path.unlink()
+
+    @staticmethod
+    def _write_vars_file(vars_dict: dict[str, Any]) -> Path:
+        """Write playbook vars to a 0600 temp file so secrets in extra_vars (the
+        Virtualmin API password, #347) never reach the ansible command line or
+        the host's process list. The caller removes it in its finally block."""
+        vars_fd, vars_path_str = tempfile.mkstemp(prefix="praho_ansible_vars_", suffix=".json")
+        vars_file = Path(vars_path_str)
+        with os.fdopen(vars_fd, "w") as vars_fh:
+            json.dump(vars_dict, vars_fh)
+        os.chmod(vars_file, 0o600)
+        return vars_file
 
     @staticmethod
     def _build_ansible_env() -> dict[str, str]:

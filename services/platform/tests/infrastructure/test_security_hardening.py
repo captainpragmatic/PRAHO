@@ -56,6 +56,30 @@ class AnsiblePlaybookBoundaryTests(SimpleTestCase):
             mock_run.call_args.kwargs["env"]["ANSIBLE_SSH_COMMON_ARGS"],
         )
 
+    @patch("apps.infrastructure.ansible_service.subprocess.run")
+    @override_settings(PRAHO_SSH_KNOWN_HOSTS_PATH="/etc/praho/known_hosts")
+    def test_secret_extra_vars_never_reach_the_command_line(self, mock_run: MagicMock) -> None:
+        """#347: extra_vars can carry the Virtualmin API password; it must be
+        passed via a 0600 temp file (-e @file), never `-e <json>` on argv, or it
+        leaks into the PRAHO host's process list."""
+        service = self._service()
+        service._ssh_manager.get_private_key_file.return_value = Ok(Path("nonexistent-praho-key"))
+        deployment = MagicMock(ipv4_address="203.0.113.10", hostname="node.example.com")
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        secret = "SUPER-SECRET-API-PW-9f3a"  # test literal, not a real credential
+        with (
+            patch.object(service, "_generate_inventory", return_value=Path("nonexistent-praho-inventory")),
+            patch.object(service, "_build_vars", return_value={"praho_api_password": secret}),
+        ):
+            result = service.run_playbook(deployment, "virtualmin.yml", extra_vars={"praho_api_password": secret})
+
+        self.assertTrue(result.is_ok())
+        argv = [str(a) for a in mock_run.call_args.args[0]]
+        self.assertFalse(any(secret in a for a in argv), f"secret leaked onto the command line: {argv}")
+        e_idx = argv.index("-e")
+        self.assertTrue(argv[e_idx + 1].startswith("@"), f"expected -e @file, got {argv[e_idx + 1]!r}")
+
     @patch.dict(
         "os.environ",
         {
@@ -126,9 +150,7 @@ class InfrastructureSSHTrustTests(SimpleTestCase):
         service._ssh_manager.get_deployment_key.return_value = Ok(MagicMock(private_key="private-key"))
         deployment = MagicMock(ipv4_address="203.0.113.10", hostname="node.example.com")
         client = mock_client_class.return_value
-        client.connect.side_effect = paramiko.BadHostKeyException(
-            "203.0.113.10", MagicMock(), MagicMock()
-        )
+        client.connect.side_effect = paramiko.BadHostKeyException("203.0.113.10", MagicMock(), MagicMock())
 
         result = service.get_webmin_certificate_fingerprint(deployment)
 
