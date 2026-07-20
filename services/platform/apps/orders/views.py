@@ -301,22 +301,29 @@ def order_list(request: HttpRequest) -> HttpResponse:
 
     # Get status counts for filter badges — single aggregate query (#130/L1)
     base_qs = Order.objects.filter(customer_id__in=customer_ids)
-    status_counts = base_qs.aggregate(
-        total=Count("id"),
-        draft=Count("id", filter=Q(status="draft")),
-        awaiting_payment=Count("id", filter=Q(status="awaiting_payment")),
-        paid=Count("id", filter=Q(status="paid")),
-        in_review=Count("id", filter=Q(status="in_review")),
-        provisioning=Count("id", filter=Q(status="provisioning")),
-        completed=Count("id", filter=Q(status="completed")),
-        failed=Count("id", filter=Q(status="failed")),
-        cancelled=Count("id", filter=Q(status="cancelled")),
-        refunded=Count("id", filter=Q(status="refunded")),
+    status_aggregates = {status: Count("id", filter=Q(status=status)) for status, _label in Order.STATUS_CHOICES}
+    status_counts = base_qs.aggregate(total=Count("id"), **status_aggregates)
+
+    statuses_with_cards = {"draft", "awaiting_payment", "paid", "provisioning", "completed"}
+    other_status_priority = {"in_review": 0, "failed": 1, "cancelled": 2}
+    other_statuses = sorted(
+        ((status, label) for status, label in Order.STATUS_CHOICES if status not in statuses_with_cards),
+        key=lambda choice: other_status_priority.get(choice[0], len(other_status_priority)),
     )
+    other_status_breakdown = [
+        {"label": str(label), "count": status_counts[status]}
+        for status, label in other_statuses
+        if status_counts[status]
+    ]
+    other_status_summary = {
+        "total": sum(status_counts[status] for status, _label in other_statuses),
+        "breakdown": other_status_breakdown,
+    }
 
     context = {
         "orders": orders,
         "status_counts": status_counts,
+        "other_status_summary": other_status_summary,
         "current_status": status_filter,
         # Only superusers or users with a staff_role are considered staff for UI permissions
         "is_staff": getattr(request.user, "is_staff_user", False),

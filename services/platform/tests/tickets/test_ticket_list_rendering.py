@@ -54,6 +54,26 @@ class TicketListRenderingTests(TestCase):
         # Staff table has 5 columns (incl. Customer) — skeleton must match.
         self.assertIn("grid-cols-5", content)
 
+    def test_filter_tabs_expose_complete_keyboard_and_panel_contract(self) -> None:
+        content = self.client.get(reverse("tickets:list")).content.decode()
+
+        tab_count = content.count('role="tab" data-tab-value=')
+        self.assertGreater(tab_count, 0)
+        self.assertEqual(content.count('aria-controls="tickets-content"'), tab_count)
+        self.assertEqual(content.count('onkeydown="handleTabKeydown(event, this)"'), tab_count)
+        self.assertIn('tabindex="0"', content)
+        self.assertIn('tabindex="-1"', content)
+        self.assertIn(
+            'id="tickets-content" role="tabpanel" tabindex="0" aria-label="Filtered results"',
+            content,
+        )
+
+        self.assertIn("function handleTabKeydown(event, el)", content)
+        for key in ("ArrowLeft", "ArrowRight", "Home", "End"):
+            self.assertIn(key, content)
+        self.assertIn("target.focus()", content)
+        self.assertIn("target.click()", content)
+
     def test_search_htmx_returns_table_partial(self) -> None:
         response = self.client.get(reverse("tickets:search_htmx"), {"status": "open"})
 

@@ -76,6 +76,53 @@ class ServiceSearchStatusEmptyStateTests(TestCase):
         session["user_id"] = 2
         session.save()
 
+    @patch("apps.services.views.services_api.get_services_summary")
+    @patch("apps.services.views.services_api.get_customer_services")
+    def test_list_tabs_include_all_and_per_status_counts(self, mock_get: object, mock_summary: object) -> None:
+        mock_get.return_value = {"results": [], "count": 0}
+        mock_summary.return_value = {
+            "active_services": 2,
+            "total_services": 3,
+            "status_counts": {
+                "pending": 1,
+                "provisioning": 0,
+                "active": 2,
+                "suspended": 0,
+                "failed": 0,
+                "terminated": 0,
+                "expired": 0,
+            },
+        }
+
+        response = self.client.get(reverse("services:list"))
+
+        self.assertEqual(response.status_code, 200)
+        tabs = response.context["filter_tabs"]
+        self.assertEqual(
+            {tab["value"]: tab["count"] for tab in tabs},
+            {
+                "": 3,
+                "active": 2,
+                "pending": 1,
+                "provisioning": 0,
+                "suspended": 0,
+                "failed": 0,
+                "terminated": 0,
+                "expired": 0,
+            },
+        )
+        self.assertTrue(all(tab["show_count"] for tab in tabs))
+        content = response.content.decode()
+        tab_count = content.count('role="tab" data-tab-value=')
+        self.assertEqual(content.count('aria-controls="services-content"'), tab_count)
+        self.assertEqual(content.count('onkeydown="handleTabKeydown(event, this)"'), tab_count)
+        self.assertIn(
+            'id="services-content" role="tabpanel" tabindex="0" aria-label="Filtered results"',
+            content,
+        )
+
+        self.assertContains(response, 'data-tab-count="0"')
+
     @patch("apps.services.views.services_api.get_customer_services")
     def test_filtered_empty_state_names_the_status(self, mock_get: object) -> None:
         mock_get.return_value = {"results": [], "count": 0}

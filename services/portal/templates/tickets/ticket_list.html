@@ -20,7 +20,7 @@
     {% include "components/list_page_skeleton.html" with skeleton_id="tickets-skeleton" skeleton_cols=4 skeleton_rows=6 skeleton_has_avatar=False %}
 
     {# Content (swapped by HTMX) #}
-    <div id="tickets-content">
+    <div id="tickets-content" role="tabpanel" tabindex="0" aria-label="{% trans 'Filtered results' %}">
       {% include 'tickets/partials/tickets_table.html' %}
     </div>
   </div>

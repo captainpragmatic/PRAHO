@@ -46,6 +46,15 @@ def _empty_services_summary() -> dict[str, Any]:
         "pending_services": 0,
         "overdue": 0,
         "expiring_soon": 0,
+        "status_counts": {
+            "pending": 0,
+            "provisioning": 0,
+            "active": 0,
+            "suspended": 0,
+            "failed": 0,
+            "terminated": 0,
+            "expired": 0,
+        },
         "total_monthly_cost": 0.0,
         "total_monthly_cost_with_vat": 0.0,
         "total_disk_usage_gb": 0.0,
@@ -76,7 +85,7 @@ class ServicesAPIClient(PlatformAPIClient):
             customer_id: Customer ID for filtering services
             user_id: User ID for HMAC authentication
             page: Page number for pagination
-            status: Filter by service status (active, suspended, pending, cancelled)
+            status: Filter by a value from the platform Service status choices
             service_type: Filter by service type (shared, vps, dedicated, etc.)
 
         Returns:

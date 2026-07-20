@@ -120,8 +120,7 @@
       </div>
     </div>
 
-    {% with other_count=status_counts.failed|add:status_counts.cancelled %}
-    {% if other_count %}
+    {% if other_status_summary.total %}
     <div class="bg-slate-800 rounded-lg p-6 border border-slate-700">
       <div class="flex items-center">
         <div class="flex-shrink-0">
@@ -129,16 +128,16 @@
         </div>
         <div class="ml-4">
           <p class="text-sm font-medium text-slate-400">{% trans 'Other' %}</p>
-          <p class="text-2xl font-semibold text-white">{{ other_count }}</p>
+          <p class="text-2xl font-semibold text-white" data-testid="orders-other-status-count">{{ other_status_summary.total }}</p>
           <p class="text-xs text-slate-500">
-            {% if status_counts.failed %}{{ status_counts.failed }} {% trans "failed" %}{% endif %}
-            {% if status_counts.cancelled %}{% if status_counts.failed %}, {% endif %}{{ status_counts.cancelled }} {% trans "cancelled" %}{% endif %}
+            {% for item in other_status_summary.breakdown %}
+              {% if not forloop.first %}, {% endif %}{{ item.count }} {{ item.label }}
+            {% endfor %}
           </p>
         </div>
       </div>
     </div>
     {% endif %}
-    {% endwith %}
   </div>
 
   <!-- Filters and Search -->

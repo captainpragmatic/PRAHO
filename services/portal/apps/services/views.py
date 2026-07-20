@@ -76,8 +76,22 @@ def _services_base_context(
     search_query: str = "",
     active_count: int = 0,
     total_count: int = 0,
+    status_counts: dict[str, int] | None = None,
 ) -> dict:
     """Build shared context for services list and search views."""
+    tab_counts = status_counts or {}
+    filter_tabs = (
+        [
+            {
+                **tab,
+                "count": total_count if tab["value"] == "" else tab_counts.get(str(tab["value"]), 0),
+                "show_count": True,
+            }
+            for tab in SERVICE_STATUS_TABS
+        ]
+        if status_counts is not None
+        else SERVICE_STATUS_TABS
+    )
     return {
         "status_filter": status_filter,
         "search_query": search_query,
@@ -89,7 +103,7 @@ def _services_base_context(
             {"value": str(active_count), "label": _("Active"), "color": "text-green-400"},
             {"value": str(total_count), "label": _("Total"), "color": "text-white"},
         ],
-        "filter_tabs": SERVICE_STATUS_TABS,
+        "filter_tabs": filter_tabs,
     }
 
 
@@ -133,7 +147,13 @@ def service_list(request: HttpRequest) -> HttpResponse:
             "services": services,
             "paginator_data": paginator_data,
             "pagination_params": pagination_params,
-            **_services_base_context(status_filter, search_query, active_count, summary.get("total_services", 0)),
+            **_services_base_context(
+                status_filter,
+                search_query,
+                active_count,
+                summary.get("total_services", 0),
+                status_counts=summary.get("status_counts", {}),
+            ),
         }
 
         logger.info(f"✅ [Services View] Loaded {len(services)} services for customer {customer_id}")
@@ -147,7 +167,7 @@ def service_list(request: HttpRequest) -> HttpResponse:
             "error": True,
             "paginator_data": PaginatorData(total_count=0, current_page=1, page_size=20),
             "pagination_params": "",
-            **_services_base_context(status_filter, search_query),
+            **_services_base_context(status_filter, search_query, status_counts={}),
             **error_ctx,
         }
 

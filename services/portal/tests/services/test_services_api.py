@@ -19,12 +19,22 @@ CANONICAL_SERVICES_SUMMARY_KEYS = {
     "pending_services",
     "overdue",
     "expiring_soon",
+    "status_counts",
     "total_monthly_cost",
     "total_monthly_cost_with_vat",
     "total_disk_usage_gb",
     "total_bandwidth_usage_gb",
     "service_types",
     "recent_services",
+}
+SERVICE_STATUS_COUNT_KEYS = {
+    "pending",
+    "provisioning",
+    "active",
+    "suspended",
+    "failed",
+    "terminated",
+    "expired",
 }
 
 
@@ -50,6 +60,9 @@ class ServicesAPIClientSummaryShapeTests(SimpleTestCase):
         result = ServicesAPIClient().get_services_summary(customer_id=1, user_id=2)
         self.assertEqual(set(result.keys()), CANONICAL_SERVICES_SUMMARY_KEYS)
 
+        self.assertEqual(set(result["status_counts"]), SERVICE_STATUS_COUNT_KEYS)
+        self.assertTrue(all(count == 0 for count in result["status_counts"].values()))
+
     @patch("apps.services.services.ServicesAPIClient._make_request")
     def test_platform_api_error_fallback_matches_canonical(self, mock_make_request) -> None:
         mock_make_request.side_effect = PlatformAPIError(
@@ -63,6 +76,7 @@ class ServicesAPIClientSummaryShapeTests(SimpleTestCase):
         canonical = dict.fromkeys(CANONICAL_SERVICES_SUMMARY_KEYS, 0)
         canonical["service_types"] = {}
         canonical["recent_services"] = []
+        canonical["status_counts"] = dict.fromkeys(SERVICE_STATUS_COUNT_KEYS, 0)
         canonical["total_monthly_cost"] = 0.0
         canonical["total_monthly_cost_with_vat"] = 0.0
         canonical["total_disk_usage_gb"] = 0.0
