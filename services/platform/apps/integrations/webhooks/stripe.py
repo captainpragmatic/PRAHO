@@ -103,6 +103,7 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
         # Event handler registry - maps event prefixes to handler methods
         self._event_handlers: dict[str, StripeEventHandler] = {
             "payment_intent.": self.handle_payment_intent_event,
+            "refund.": self.handle_refund_event,
             "customer.": self.handle_customer_event,
             "charge.": self.handle_charge_event,
             "setup_intent.": self.handle_setup_intent_event,
@@ -412,91 +413,158 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
 
         return True, f"Skipped Customer event: {event_type}"
 
-    def handle_charge_event(self, event_type: str, payload: dict[str, Any]) -> tuple[bool, str]:
-        """💰 Handle Stripe Charge events"""
-        charge = payload.get("data", {}).get("object", {})
-        charge_id = charge.get("id")
+    @staticmethod
+    def _stripe_string(value: Any) -> str:
+        """Normalize a Stripe string or expandable reference without coercion."""
+        if isinstance(value, dict):
+            value = value.get("id")
+        return value if isinstance(value, str) else ""
 
-        if event_type == "charge.dispute.created":
-            dispute_id = charge_id
-            payment_intent_ref = charge.get("payment_intent")
-            if isinstance(payment_intent_ref, dict):
-                payment_intent_ref = payment_intent_ref.get("id")
-            payment_intent_id = payment_intent_ref if isinstance(payment_intent_ref, str) else None
-            dispute_amount = charge.get("amount", 0)
-            if isinstance(dispute_amount, bool) or not isinstance(dispute_amount, int | float):
-                dispute_amount = 0
-            dispute_currency = str(charge.get("currency") or "unknown").upper()
+    @staticmethod
+    def _stripe_integer(value: Any) -> int:
+        """Normalize a Stripe integer while rejecting bool's int subtype."""
+        return value if isinstance(value, int) and not isinstance(value, bool) else 0
 
-            logger.critical(
-                "🚨 DISPUTE CREATED %s for PaymentIntent %s - manual review required!",
-                dispute_id,
-                payment_intent_id,
+    def handle_refund_event(self, event_type: str, payload: dict[str, Any]) -> tuple[bool, str]:
+        """Converge modern Stripe Refund events into PRAHO's ledger."""
+        refund_object = payload.get("data", {}).get("object", {})
+        if not isinstance(refund_object, dict):
+            return False, "Malformed Stripe refund object"
+        from apps.billing.refund_service import (  # noqa: PLC0415
+            RefundConvergenceService,
+            RefundGatewayFacts,
+        )
+
+        facts = RefundGatewayFacts(
+            refund_id=self._stripe_string(refund_object.get("id")),
+            payment_intent_id=self._stripe_string(refund_object.get("payment_intent")),
+            amount_cents=self._stripe_integer(refund_object.get("amount")),
+            currency=self._stripe_string(refund_object.get("currency")),
+            status=self._stripe_string(refund_object.get("status")),
+            reason=self._stripe_string(refund_object.get("reason")),
+            failure_reason=self._stripe_string(refund_object.get("failure_reason")),
+            event_id=self._stripe_string(payload.get("id")),
+            event_created=self._stripe_integer(payload.get("created")),
+        )
+        result = RefundConvergenceService.converge_gateway_refund(facts)
+        if result.is_err():
+            error = result.unwrap_err()
+            logger.critical("Stripe refund convergence rejected: %s", error)
+            return False, error
+        refund = result.unwrap()
+        if refund is None:
+            return True, f"Refund not found (external): {refund_object.get('id')}"
+        return True, f"Refund {refund.gateway_refund_id} converged to {refund.status}"
+
+    def _handle_charge_refunded(
+        self,
+        event_type: str,
+        payload: dict[str, Any],
+        charge: dict[str, Any],
+    ) -> tuple[bool, str]:
+        """Converge the embedded refunds from the legacy charge event."""
+        refund_list = charge.get("refunds", {}).get("data", [])
+        if not isinstance(refund_list, list):
+            return False, "Malformed Stripe charge refunds"
+        for refund_object in refund_list:
+            if not isinstance(refund_object, dict):
+                return False, "Malformed embedded Stripe refund"
+            normalized_refund = {
+                **refund_object,
+                "payment_intent": refund_object.get("payment_intent") or charge.get("payment_intent"),
+                "currency": refund_object.get("currency") or charge.get("currency"),
+            }
+            normalized_payload = {**payload, "data": {"object": normalized_refund}}
+            accepted, message = self.handle_refund_event(event_type, normalized_payload)
+            if not accepted:
+                return False, message
+        return True, f"Charge refunds converged: {len(refund_list)}"
+
+    @staticmethod
+    def _handle_charge_dispute(charge: dict[str, Any], charge_id: Any) -> tuple[bool, str]:
+        """Reconcile a dispute and send the existing urgent notification."""
+        dispute_id = charge_id
+        payment_intent_id = StripeWebhookProcessor._stripe_string(charge.get("payment_intent")) or None
+        dispute_amount = charge.get("amount", 0)
+        if isinstance(dispute_amount, bool) or not isinstance(dispute_amount, int | float):
+            dispute_amount = 0
+        dispute_currency = str(charge.get("currency") or "unknown").upper()
+
+        logger.critical(
+            "🚨 DISPUTE CREATED %s for PaymentIntent %s - manual review required!",
+            dispute_id,
+            payment_intent_id,
+        )
+
+        if payment_intent_id:
+            with transaction.atomic():
+                payment = (
+                    Payment.objects.select_for_update(of=("self",)).filter(gateway_txn_id=payment_intent_id).first()
+                )
+                if payment is not None and payment.status != "disputed":
+                    changed = payment.apply_gateway_event(
+                        "disputed",
+                        {
+                            "dispute_id": dispute_id,
+                            "dispute_charge_id": charge.get("charge"),
+                            "dispute_reason": charge.get("reason"),
+                            "dispute_amount_cents": dispute_amount,
+                            "dispute_currency": dispute_currency,
+                            "dispute_created_at": timezone.now().isoformat(),
+                        },
+                    )
+                    if not changed:
+                        logger.critical(
+                            "Stripe dispute %s could not transition payment %s from %s",
+                            dispute_id,
+                            payment.id,
+                            payment.status,
+                        )
+                        return False, f"Payment {payment.id} cannot transition to disputed"
+        else:
+            logger.critical("Stripe dispute %s did not identify a PaymentIntent", dispute_id)
+
+        try:
+            from apps.notifications.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+                NotificationService,  # Circular: cross-app  # Deferred: avoids circular import
             )
 
-            if payment_intent_id:
-                with transaction.atomic():
-                    payment = (
-                        Payment.objects.select_for_update(of=("self",)).filter(gateway_txn_id=payment_intent_id).first()
-                    )
-                    if payment is not None and payment.status != "disputed":
-                        changed = payment.apply_gateway_event(
-                            "disputed",
-                            {
-                                "dispute_id": dispute_id,
-                                "dispute_charge_id": charge.get("charge"),
-                                "dispute_reason": charge.get("reason"),
-                                "dispute_amount_cents": dispute_amount,
-                                "dispute_currency": dispute_currency,
-                                "dispute_created_at": timezone.now().isoformat(),
-                            },
-                        )
-                        if not changed:
-                            logger.critical(
-                                "Stripe dispute %s could not transition payment %s from %s",
-                                dispute_id,
-                                payment.id,
-                                payment.status,
-                            )
-                            return False, f"Payment {payment.id} cannot transition to disputed"
-            else:
-                logger.critical("Stripe dispute %s did not identify a PaymentIntent", dispute_id)
+            NotificationService.send_admin_alert(
+                subject=f"URGENT: Stripe Dispute Created - {dispute_id}",
+                message=f"A dispute has been created for PaymentIntent {payment_intent_id or 'unknown'}.\n"
+                f"Amount: {dispute_amount / 100:.2f} {dispute_currency}\n"
+                f"Reason: {charge.get('reason', 'Unknown')}\n"
+                f"Please review immediately.",
+                alert_type="dispute",
+                metadata={
+                    "dispute_id": dispute_id,
+                    "charge_id": charge.get("charge"),
+                    "payment_intent_id": payment_intent_id,
+                },
+            )
+        except Exception as notify_error:
+            logger.error(f"⚠️ Failed to send dispute notification: {notify_error}")
 
-            # Send urgent notification to admin
-            try:
-                from apps.notifications.services import (  # noqa: PLC0415  # Deferred: avoids circular import
-                    NotificationService,  # Circular: cross-app  # Deferred: avoids circular import
-                )
+        return True, f"Dispute created: {dispute_id}"
 
-                NotificationService.send_admin_alert(
-                    subject=f"URGENT: Stripe Dispute Created - {dispute_id}",
-                    message=f"A dispute has been created for PaymentIntent {payment_intent_id or 'unknown'}.\n"
-                    f"Amount: {dispute_amount / 100:.2f} {dispute_currency}\n"
-                    f"Reason: {charge.get('reason', 'Unknown')}\n"
-                    f"Please review immediately.",
-                    alert_type="dispute",
-                    metadata={
-                        "dispute_id": dispute_id,
-                        "charge_id": charge.get("charge"),
-                        "payment_intent_id": payment_intent_id,
-                    },
-                )
-            except Exception as notify_error:
-                logger.error(f"⚠️ Failed to send dispute notification: {notify_error}")
+    def handle_charge_event(self, event_type: str, payload: dict[str, Any]) -> tuple[bool, str]:
+        """💰 Handle Stripe Charge events"""
+        if event_type == "charge.refund.updated":
+            return self.handle_refund_event(event_type, payload)
 
-            return True, f"Dispute created: {dispute_id}"
-
-        elif event_type == "charge.succeeded":
-            # Charge succeeded - payment completed
+        charge = payload.get("data", {}).get("object", {})
+        charge_id = charge.get("id")
+        if event_type == "charge.refunded":
+            return self._handle_charge_refunded(event_type, payload, charge)
+        if event_type == "charge.dispute.created":
+            return self._handle_charge_dispute(charge, charge_id)
+        if event_type == "charge.succeeded":
             logger.info(f"✅ Stripe charge succeeded: {charge_id}")
             return True, f"Charge succeeded: {charge_id}"
-
-        elif event_type == "charge.failed":
-            # Charge failed
+        if event_type == "charge.failed":
             failure_reason = charge.get("failure_message", "Unknown error")
             logger.warning(f"❌ Stripe charge failed: {charge_id} - {failure_reason}")
             return True, f"Charge failed: {charge_id}"
-
         return True, f"Skipped Charge event: {event_type}"
 
     def handle_setup_intent_event(self, event_type: str, payload: dict[str, Any]) -> tuple[bool, str]:

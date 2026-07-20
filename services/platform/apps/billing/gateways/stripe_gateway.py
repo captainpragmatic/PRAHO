@@ -14,7 +14,9 @@ from .base import (
     PaymentConfirmResult,
     PaymentGatewayFactory,
     PaymentIntentResult,
+    RefundListResult,
     RefundResult,
+    RefundStatusResult,
     SetupIntentResult,
     SetupIntentStatusResult,
 )
@@ -428,7 +430,7 @@ class StripeGateway(BasePaymentGateway):
             )
 
             return RefundResult(
-                success=refund.status in ("succeeded", "pending"),
+                success=True,
                 refund_id=refund.id,
                 amount_refunded_cents=refund.amount,
                 status=refund.status,
@@ -443,6 +445,82 @@ class StripeGateway(BasePaymentGateway):
             return RefundResult(
                 success=False, refund_id=None, amount_refunded_cents=0, status="error", error=f"Unexpected error: {e}"
             )
+
+    @staticmethod
+    def _normalize_refund(refund: Any) -> RefundStatusResult:
+        """Convert a Stripe Refund object into PRAHO's reconciliation contract."""
+
+        def field(name: str, default: Any = None) -> Any:
+            return refund.get(name, default) if isinstance(refund, dict) else getattr(refund, name, default)
+
+        refund_id = field("id")
+        payment_intent = field("payment_intent")
+        if isinstance(payment_intent, dict):
+            payment_intent_id = payment_intent.get("id", "")
+        elif isinstance(payment_intent, str):
+            payment_intent_id = payment_intent
+        else:
+            payment_intent_id = getattr(payment_intent, "id", "")
+        amount_cents = field("amount")
+        currency = field("currency")
+        status = field("status")
+        if (
+            not isinstance(refund_id, str)
+            or not refund_id
+            or not isinstance(payment_intent_id, str)
+            or not payment_intent_id
+            or isinstance(amount_cents, bool)
+            or not isinstance(amount_cents, int)
+            or amount_cents <= 0
+            or not isinstance(currency, str)
+            or not currency
+            or not isinstance(status, str)
+            or not status
+        ):
+            raise ValueError("Malformed Stripe refund object")
+        reason = field("reason")
+        failure_reason = field("failure_reason")
+
+        return RefundStatusResult(
+            success=True,
+            refund_id=refund_id,
+            payment_intent_id=payment_intent_id,
+            amount_cents=amount_cents,
+            currency=currency.lower(),
+            status=status,
+            reason=reason if isinstance(reason, str) else None,
+            failure_reason=failure_reason if isinstance(failure_reason, str) else None,
+            error=None,
+        )
+
+    def retrieve_refund(self, refund_id: str) -> RefundStatusResult:
+        """Retrieve authoritative Stripe state for one refund."""
+        try:
+            return self._normalize_refund(self._stripe.Refund.retrieve(refund_id))
+        except Exception as e:
+            self.logger.error("🔥 Stripe refund retrieval failed for %s: %s", refund_id, e)
+            return RefundStatusResult(
+                success=False,
+                refund_id=refund_id,
+                payment_intent_id="",
+                amount_cents=0,
+                currency="",
+                status="error",
+                reason=None,
+                failure_reason=None,
+                error=str(e),
+            )
+
+    def list_refunds(self, *, created_gte: int, limit: int = 100) -> RefundListResult:
+        """List all Stripe refunds in the lookback window via auto-pagination."""
+        page_size = min(max(limit, 1), 100)
+        try:
+            page = self._stripe.Refund.list(created={"gte": created_gte}, limit=page_size)
+            refunds = [self._normalize_refund(refund) for refund in page.auto_paging_iter()]
+            return RefundListResult(success=True, refunds=refunds, error=None)
+        except Exception as e:
+            self.logger.error("🔥 Stripe refund listing failed: %s", e)
+            return RefundListResult(success=False, refunds=[], error=str(e))
 
 
 # ===============================================================================

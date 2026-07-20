@@ -221,6 +221,14 @@ class Payment(ConcurrentTransitionMixin, models.Model):
     def complete_refund(self) -> None:
         """Complete refund on partially refunded payment."""
 
+    @transition(field=status, source=["partially_refunded", "refunded"], target="succeeded")
+    def restore_after_refund_reversal(self) -> None:
+        """Restore a payment when no completed refund remains."""
+
+    @transition(field=status, source="refunded", target="partially_refunded")
+    def restore_partial_after_refund_reversal(self) -> None:
+        """Restore a payment when only part of its completed refund remains."""
+
     @transition(field=status, source=["pending", "succeeded", "partially_refunded"], target="disputed")
     def dispute_payment(self) -> None:
         """Mark payment as disputed (Stripe charge.dispute.created)."""

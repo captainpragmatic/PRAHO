@@ -13,6 +13,7 @@ from typing import Any, TypedDict
 
 from django.db import DatabaseError, IntegrityError, InterfaceError, OperationalError, transaction
 from django.db.models import Count, Q, Sum
+from django.utils import timezone
 from django_fsm import ConcurrentTransition, TransitionNotAllowed
 
 from apps.billing.gateways.base import GATEWAY_PAYMENT_METHODS, PaymentGatewayFactory
@@ -24,6 +25,7 @@ logger = logging.getLogger(__name__)
 
 _FALLBACK_ORDER_TOTAL_CENTS = 15_000  # 150 EUR — safe fallback for missing order total
 _FALLBACK_INVOICE_TOTAL_CENTS = 11_900  # 119 EUR — safe fallback for missing invoice total
+_REFUND_RESERVING_STATUSES = ("pending", "processing", "approved", "completed")
 
 
 class RefundType(enum.Enum):
@@ -81,6 +83,7 @@ class RefundResult(TypedDict, total=False):
     order_status_updated: bool
     invoice_status_updated: bool
     payment_refund_processed: bool
+    refund_status: str
     audit_entries_created: int
 
 
@@ -95,6 +98,20 @@ class RefundRecordParams(TypedDict, total=False):
     refund_data: RefundData | None
     payment: Payment
     gateway_refund_id: str
+
+
+class RefundGatewayFacts(TypedDict, total=False):
+    """Authoritative refund facts received from a payment processor."""
+
+    refund_id: str
+    payment_intent_id: str
+    amount_cents: int
+    currency: str
+    status: str
+    reason: str
+    failure_reason: str
+    event_id: str
+    event_created: int
 
 
 class RefundStatus(enum.Enum):
@@ -113,7 +130,7 @@ class RefundService:
     """RefundService implementation with Result pattern"""
 
     @staticmethod
-    def refund_order(order_id: Any, refund_data: RefundData) -> Result[RefundResult, str]:
+    def refund_order(order_id: Any, refund_data: RefundData) -> Result[RefundResult, str]:  # noqa: PLR0911
         """Refund an order with comprehensive validation.
 
         Uses select_for_update to prevent TOCTTOU race conditions where
@@ -126,11 +143,32 @@ class RefundService:
 
             # Execute entire refund process within atomic block to prevent race conditions
             with transaction.atomic():
-                # Get order with row lock to prevent concurrent refund race
+                # Read the payment relation before acquiring any document lock.
                 try:
-                    order = Order.objects.select_for_update(of=("self",)).select_related("customer").get(id=order_id)
+                    order_snapshot = Order.objects.select_related("customer").get(id=order_id)
                 except Order.DoesNotExist:
                     return Err("Failed to process refund: Order not found")
+
+                if order_snapshot.status not in {"paid", "completed", "partially_refunded"}:
+                    return Err(f"Order status '{order_snapshot.status}' is not eligible for refund")
+
+                payment_result = RefundService._resolve_refundable_payment(order_snapshot, None)
+                if payment_result.is_err():
+                    return Err(f"Failed to process refund: {payment_result.unwrap_err()}")
+                payment = payment_result.unwrap()
+
+                invoice_result = RefundService._lock_related_invoice_for_refund(order_snapshot, None)
+                if invoice_result.is_err():
+                    return Err(f"Failed to process refund: {invoice_result.unwrap_err()}")
+                processing_invoice = invoice_result.unwrap()
+
+                order = Order.objects.select_for_update(of=("self",)).select_related("customer").get(id=order_id)
+                if (
+                    order.customer_id != order_snapshot.customer_id
+                    or order.invoice_id != order_snapshot.invoice_id
+                    or order.proforma_id != order_snapshot.proforma_id
+                ):
+                    return Err("Failed to process refund: Order payment linkage changed; retry refund")
 
                 # Validate eligibility INSIDE the atomic block with lock held
                 validation_result = RefundService._validate_order_refund(order, refund_data)
@@ -138,7 +176,12 @@ class RefundService:
                     return Err(validation_result.unwrap_err())
 
                 # Process refund (already inside atomic block)
-                return RefundService._execute_order_refund_internal(order, refund_data)
+                return RefundService._execute_order_refund_internal(
+                    order,
+                    refund_data,
+                    payment=payment,
+                    processing_invoice=processing_invoice,
+                )
 
         except Exception:
             # Deliberately NOT RETRIABLE (UNKNOWN default): the refund flow is
@@ -226,7 +269,13 @@ class RefundService:
             return RefundService._execute_order_refund_internal(order, refund_data)
 
     @staticmethod
-    def _execute_order_refund_internal(order: Any, refund_data: RefundData) -> Result[RefundResult, str]:
+    def _execute_order_refund_internal(
+        order: Any,
+        refund_data: RefundData,
+        *,
+        payment: Payment | None = None,
+        processing_invoice: Invoice | None = None,
+    ) -> Result[RefundResult, str]:
         """Execute the order refund - must be called within an existing atomic block.
 
         This internal method does NOT create its own transaction, allowing the caller
@@ -235,7 +284,12 @@ class RefundService:
         """
         refund_id = uuid.uuid4()
         process_result = RefundService._process_bidirectional_refund(
-            order=order, invoice=None, refund_id=refund_id, refund_data=refund_data
+            order=order,
+            invoice=None,
+            refund_id=refund_id,
+            refund_data=refund_data,
+            locked_payment=payment,
+            locked_invoice=processing_invoice,
         )
 
         if process_result.is_err():
@@ -243,6 +297,9 @@ class RefundService:
 
         result_data = process_result.unwrap()
         actual_amount = int(result_data["amount_refunded_cents"])
+        refund_status = str(result_data.get("refund_status", ""))
+        if refund_status in {"failed", "cancelled", "rejected"}:
+            return Err(f"Gateway refund ended in terminal '{refund_status}' status")
 
         # Log security event
         log_security_event(
@@ -269,6 +326,7 @@ class RefundService:
                 order_status_updated=result_data.get("order_status_updated", False),
                 invoice_status_updated=result_data.get("invoice_status_updated", False),
                 payment_refund_processed=result_data.get("payment_refund_processed", False),
+                refund_status=refund_status,
                 audit_entries_created=1,
             )
         )
@@ -286,7 +344,7 @@ class RefundService:
             return refund_data.get("amount_cents", refund_data.get("amount", 0))
 
     @staticmethod
-    def refund_invoice(invoice_id: Any, refund_data: RefundData) -> Result[RefundResult, str]:
+    def refund_invoice(invoice_id: Any, refund_data: RefundData) -> Result[RefundResult, str]:  # noqa: PLR0911
         """Refund an invoice with comprehensive validation.
 
         Uses select_for_update to prevent TOCTTOU race conditions where
@@ -299,13 +357,23 @@ class RefundService:
 
             # Execute entire refund process within atomic block to prevent race conditions
             with transaction.atomic():
-                # Get invoice with row lock to prevent concurrent refund race
+                # Discover and lock the authoritative Payment before Invoice.
                 try:
-                    invoice = (
-                        Invoice.objects.select_for_update(of=("self",)).select_related("customer").get(id=invoice_id)
-                    )
+                    invoice_snapshot = Invoice.objects.select_related("customer").get(id=invoice_id)
                 except Invoice.DoesNotExist:
                     return Err("Failed to process refund: Invoice not found")
+
+                if invoice_snapshot.status not in {"paid", "completed"}:
+                    return Err(f"Invoice status '{invoice_snapshot.status}' is not eligible for refund")
+
+                payment_result = RefundService._resolve_refundable_payment(None, invoice_snapshot)
+                if payment_result.is_err():
+                    return Err(f"Failed to process refund: {payment_result.unwrap_err()}")
+                payment = payment_result.unwrap()
+
+                invoice = Invoice.objects.select_for_update(of=("self",)).select_related("customer").get(id=invoice_id)
+                if invoice.customer_id != invoice_snapshot.customer_id:
+                    return Err("Failed to process refund: Invoice payment linkage changed; retry refund")
 
                 # Validate eligibility INSIDE the atomic block with lock held
                 validation_result = RefundService._validate_invoice_refund(invoice, refund_data)
@@ -313,7 +381,7 @@ class RefundService:
                     return Err(validation_result.unwrap_err())
 
                 # Process refund (already inside atomic block)
-                return RefundService._execute_invoice_refund_internal(invoice, refund_data)
+                return RefundService._execute_invoice_refund_internal(invoice, refund_data, payment=payment)
 
         except Exception:
             # NOT RETRIABLE (UNKNOWN): gateway-first refund — a DB error may follow a
@@ -384,7 +452,12 @@ class RefundService:
             return RefundService._execute_invoice_refund_internal(invoice, refund_data)
 
     @staticmethod
-    def _execute_invoice_refund_internal(invoice: Any, refund_data: RefundData) -> Result[RefundResult, str]:
+    def _execute_invoice_refund_internal(
+        invoice: Any,
+        refund_data: RefundData,
+        *,
+        payment: Payment | None = None,
+    ) -> Result[RefundResult, str]:
         """Execute the invoice refund - must be called within an existing atomic block.
 
         This internal method does NOT create its own transaction, allowing the caller
@@ -393,7 +466,12 @@ class RefundService:
         """
         refund_id = uuid.uuid4()
         process_result = RefundService._process_bidirectional_refund(
-            order=None, invoice=invoice, refund_id=refund_id, refund_data=refund_data
+            order=None,
+            invoice=invoice,
+            refund_id=refund_id,
+            refund_data=refund_data,
+            locked_payment=payment,
+            locked_invoice=invoice if payment else None,
         )
 
         if process_result.is_err():
@@ -401,6 +479,9 @@ class RefundService:
 
         result_data = process_result.unwrap()
         actual_amount = int(result_data["amount_refunded_cents"])
+        refund_status = str(result_data.get("refund_status", ""))
+        if refund_status in {"failed", "cancelled", "rejected"}:
+            return Err(f"Gateway refund ended in terminal '{refund_status}' status")
 
         # Log security event
         log_security_event(
@@ -427,6 +508,7 @@ class RefundService:
                 order_status_updated=result_data.get("order_status_updated", False),
                 invoice_status_updated=result_data.get("invoice_status_updated", False),
                 payment_refund_processed=result_data.get("payment_refund_processed", False),
+                refund_status=refund_status,
                 audit_entries_created=1,
             )
         )
@@ -512,8 +594,8 @@ class RefundService:
             # Get comprehensive statistics
             stats = Refund.objects.aggregate(
                 total_refunds=Count("id"),
-                total_amount_cents=Sum("amount_cents", default=0),
-                pending_refunds=Count("id", filter=Q(status="pending")),
+                total_amount_cents=Sum("amount_cents", filter=Q(status="completed"), default=0),
+                pending_refunds=Count("id", filter=Q(status__in=("pending", "processing", "approved"))),
                 completed_refunds=Count("id", filter=Q(status="completed")),
             )
 
@@ -714,11 +796,13 @@ class RefundService:
         return Ok(None)
 
     @staticmethod
-    def _process_bidirectional_refund(
+    def _process_bidirectional_refund(  # noqa: C901, PLR0911, PLR0912, PLR0913, PLR0915
         order: Any = None,
         invoice: Any = None,
         refund_id: Any = None,
         refund_data: RefundData | None = None,
+        locked_payment: Payment | None = None,
+        locked_invoice: Invoice | None = None,
         **kwargs: Any,
     ) -> Result[dict[str, Any], str]:
         """Process bidirectional refund for order and/or invoice"""
@@ -727,9 +811,16 @@ class RefundService:
             refund_amount_cents = RefundService._extract_refund_amount(refund_data, kwargs)
             original_cents = RefundService._calculate_original_amount(order, invoice, refund_amount_cents)
 
-            # Centralize the Order -> Invoice lock here so every caller,
-            # including internal orchestration callers, establishes the same
-            # Invoice -> Payment lock order before touching the gateway.
+            # Resolve Payment before acquiring Invoice so refund initiation and
+            # payment convergence share one canonical lock order.
+            payment = locked_payment
+            if payment is None:
+                payment_lookup = RefundService._resolve_refundable_payment(order, invoice)
+                if payment_lookup.is_err():
+                    transaction.set_rollback(True)
+                    return Err(payment_lookup.unwrap_err())
+                payment = payment_lookup.unwrap()
+
             # Contract: every Err exit below marks the caller's transaction for
             # rollback. Pre-gateway exits have no pending writes (no-op); the
             # post-gateway exits MUST NOT commit — the payment status update
@@ -737,7 +828,11 @@ class RefundService:
             # Refund row exists, and a plain return Err would commit that
             # half-written state (#319 convention). The gateway idempotency key
             # makes the rolled-back attempt safe to retry.
-            invoice_result = RefundService._lock_related_invoice_for_refund(order, invoice)
+            invoice_result = (
+                Ok(locked_invoice)
+                if locked_invoice is not None
+                else RefundService._lock_related_invoice_for_refund(order, invoice)
+            )
             if invoice_result.is_err():
                 transaction.set_rollback(True)
                 return Err(invoice_result.unwrap_err())
@@ -745,7 +840,12 @@ class RefundService:
 
             # Resolve and refund the authoritative payment before any durable
             # Refund or Invoice mutation. This helper also locks the Payment row.
-            payment_result = RefundService._process_payment_refund_if_exists(order, invoice_for_processing, refund_data)
+            payment_result = RefundService._process_payment_refund_if_exists(
+                order,
+                invoice_for_processing,
+                refund_data,
+                payment=payment,
+            )
             if payment_result.is_err():
                 transaction.set_rollback(True)
                 return Err(payment_result.unwrap_err())
@@ -785,17 +885,48 @@ class RefundService:
                 transaction.set_rollback(True)
                 return refund_result  # type: ignore[return-value]
 
-            # Process entity updates
-            result = RefundService._process_entity_updates(
-                order, invoice_for_processing, refund_id, effective_refund_data
+            refund = refund_result.unwrap()
+            status_result = RefundService._advance_refund_status(
+                refund,
+                str(payment_data.get("gateway_status") or "succeeded"),
             )
-            if result.is_err():
+            if status_result.is_err():
                 transaction.set_rollback(True)
-                return result
+                return Err(status_result.unwrap_err())
+            refund = status_result.unwrap()
 
-            final_result = result.unwrap()
-            final_result["payment_refund_processed"] = True
+            if refund.status == "completed":
+                projection = RefundService._project_settled_refunds(payment, invoice_for_processing)
+                if projection.is_err():
+                    transaction.set_rollback(True)
+                    return Err(projection.unwrap_err())
+                projected = projection.unwrap()
+                if order is not None:
+                    order_result = RefundService._update_order_refund_status(order, refund_data=effective_refund_data)
+                    if order_result.is_err():
+                        transaction.set_rollback(True)
+                        return Err(order_result.unwrap_err())
+                final_result = {
+                    "refund_id": refund_id,
+                    "order_status_updated": False,
+                    "invoice_status_updated": projected["invoice"],
+                    "order_id": order.id if order else None,
+                    "invoice_id": invoice_for_processing.id if invoice_for_processing else None,
+                    "refund_record_created": True,
+                }
+            else:
+                final_result = {
+                    "refund_id": refund_id,
+                    "order_status_updated": False,
+                    "invoice_status_updated": False,
+                    "order_id": order.id if order else None,
+                    "invoice_id": invoice_for_processing.id if invoice_for_processing else None,
+                    "refund_record_created": True,
+                }
+
+            final_result["payment_refund_processed"] = refund.status == "completed"
             final_result["amount_refunded_cents"] = refund_amount_cents
+            final_result["refund_status"] = str(refund.status)
 
             return Ok(final_result)
         except Exception:
@@ -842,7 +973,7 @@ class RefundService:
             return Err("Failed to lock linked invoice for refund")
 
     @staticmethod
-    def _create_refund_record(params: RefundRecordParams) -> Result[None, str]:
+    def _create_refund_record(params: RefundRecordParams) -> Result[Refund, str]:
         """Create refund record with error handling"""
         try:
             refund_id = params["refund_id"]
@@ -894,7 +1025,7 @@ class RefundService:
                     exc_info=True,
                 )
 
-            return Ok(None)
+            return Ok(refund)
 
         except IntegrityError:
             # FK constraint violated — catches both SQLite and PostgreSQL (#120)
@@ -913,6 +1044,143 @@ class RefundService:
             entity_pk = order.pk if order else (invoice.pk if invoice else "unknown")
             logger.exception("Refund record creation failed for %s_id=%s", entity_label, entity_pk)
             return Err("Failed to process bidirectional refund")
+
+    @staticmethod
+    def _advance_refund_status(refund: Refund, gateway_status: str) -> Result[Refund, str]:
+        """Advance the Refund FSM from authoritative processor status."""
+        normalized = "canceled" if gateway_status == "cancelled" else gateway_status
+        if normalized not in {"pending", "requires_action", "succeeded", "failed", "canceled"}:
+            return Err(f"Unsupported gateway refund status: {gateway_status}")
+
+        expected_terminal = {"succeeded": "completed", "failed": "failed", "canceled": "cancelled"}
+        current_status = str(refund.status)
+        if current_status in {"completed", "failed", "cancelled", "rejected"}:
+            if expected_terminal.get(normalized) != current_status:
+                return Err(f"Refund state mismatch: cannot apply '{gateway_status}' to '{current_status}'")
+            return Ok(refund)
+
+        def apply_transition(method_name: str) -> None:
+            previous_status = str(refund.status)
+            getattr(refund, method_name)()
+            refund.save(update_fields=["status", "processed_at", "updated_at"])
+            RefundStatusHistory.objects.create(
+                refund=refund,
+                previous_status=previous_status,
+                new_status=str(refund.status),
+                change_reason=f"Gateway reported {normalized}",
+                metadata={"gateway_status": normalized},
+            )
+
+        transition_paths: dict[str, dict[str, tuple[str, ...]]] = {
+            "pending": {"pending": ("start_processing",)},
+            "requires_action": {"pending": ("start_processing",)},
+            "succeeded": {
+                "pending": ("start_processing", "approve", "complete"),
+                "processing": ("approve", "complete"),
+                "approved": ("complete",),
+            },
+            "failed": {
+                "pending": ("start_processing", "mark_failed"),
+                "processing": ("mark_failed",),
+                "approved": ("mark_failed",),
+            },
+            "canceled": {str(refund.status): ("cancel",)},
+        }
+        try:
+            for transition in transition_paths[normalized].get(str(refund.status), ()):
+                apply_transition(transition)
+        except (TransitionNotAllowed, ConcurrentTransition) as exc:
+            return Err(f"Refund state transition failed: {exc}")
+
+        refund.metadata = {**(refund.metadata or {}), "gateway_status": normalized}
+        update_fields = ["metadata", "updated_at"]
+        if normalized in expected_terminal:
+            refund.gateway_processed_at = timezone.now()
+            update_fields.append("gateway_processed_at")
+        refund.save(update_fields=update_fields)
+        return Ok(refund)
+
+    @staticmethod
+    def _apply_payment_refund_projection(payment: Payment, target: str) -> Result[bool, str]:
+        """Apply one valid coarse Payment refund-state projection."""
+        if payment.status == target:
+            return Ok(False)
+        transition = {
+            ("partially_refunded", "succeeded"): "restore_after_refund_reversal",
+            ("refunded", "succeeded"): "restore_after_refund_reversal",
+            ("succeeded", "partially_refunded"): "partially_refund",
+            ("refunded", "partially_refunded"): "restore_partial_after_refund_reversal",
+            ("succeeded", "refunded"): "refund_payment",
+            ("partially_refunded", "refunded"): "complete_refund",
+        }.get((str(payment.status), target))
+        if transition is None:
+            return Err(f"Cannot project payment {payment.pk} from {payment.status!r} to {target!r}")
+        getattr(payment, transition)()
+        payment.save(update_fields=["status", "updated_at"])
+        return Ok(True)
+
+    @staticmethod
+    def _apply_invoice_refund_projection(invoice: Invoice, target: str) -> Result[bool, str]:
+        """Apply one valid coarse Invoice refund-state projection."""
+        if invoice.status == target:
+            return Ok(False)
+        transition = {
+            ("partially_refunded", "paid"): "restore_after_refund_reversal",
+            ("refunded", "paid"): "restore_after_refund_reversal",
+            ("paid", "partially_refunded"): "mark_partially_refunded",
+            ("refunded", "partially_refunded"): "restore_partial_after_refund_reversal",
+            ("paid", "refunded"): "refund_invoice",
+            ("partially_refunded", "refunded"): "refund_invoice",
+        }.get((str(invoice.status), target))
+        if transition is None:
+            return Err(f"Cannot project invoice {invoice.pk} from {invoice.status!r} to {target!r}")
+        getattr(invoice, transition)()
+        invoice.save(update_fields=["status", "updated_at"])
+        return Ok(True)
+
+    @staticmethod
+    def _project_settled_refunds(payment: Payment, invoice: Invoice | None) -> Result[dict[str, bool], str]:
+        """Project completed refund totals onto coarse Payment and Invoice states."""
+        try:
+            settled_payment = int(
+                payment.refunds.filter(status="completed").aggregate(total=Sum("amount_cents", default=0))["total"]
+            )
+            payment_target = (
+                "succeeded"
+                if settled_payment == 0
+                else "refunded"
+                if settled_payment >= payment.amount_cents
+                else "partially_refunded"
+            )
+            payment_projection = RefundService._apply_payment_refund_projection(payment, payment_target)
+            if payment_projection.is_err():
+                return Err(payment_projection.unwrap_err())
+            payment_changed = payment_projection.unwrap()
+
+            if invoice is None:
+                return Ok({"payment": payment_changed, "invoice": False})
+            invoice.refresh_from_db()
+            settled_invoice = int(
+                Refund.objects.filter(
+                    Q(invoice=invoice) | Q(payment__invoice=invoice),
+                    status="completed",
+                ).aggregate(total=Sum("amount_cents", default=0))["total"]
+            )
+            invoice_target = (
+                "paid"
+                if settled_invoice == 0
+                else "refunded"
+                if settled_invoice >= invoice.total_cents
+                else "partially_refunded"
+            )
+            invoice_projection = RefundService._apply_invoice_refund_projection(invoice, invoice_target)
+            if invoice_projection.is_err():
+                return Err(invoice_projection.unwrap_err())
+            invoice_changed = invoice_projection.unwrap()
+            return Ok({"payment": payment_changed, "invoice": invoice_changed})
+        except Exception as exc:
+            logger.exception("Refund settlement projection failed for payment_id=%s", payment.pk)
+            return Err(f"Refund settlement projection failed: {exc}")
 
     @staticmethod
     def _process_entity_updates(
@@ -975,15 +1243,25 @@ class RefundService:
 
     @staticmethod
     def _process_payment_refund_if_exists(
-        order: Any, invoice: Any, refund_data: RefundData | None
+        order: Any,
+        invoice: Any,
+        refund_data: RefundData | None,
+        *,
+        payment: Payment | None = None,
     ) -> Result[dict[str, Any], str]:
         """Resolve and refund the single authoritative payment for an entity."""
-        payment_result = RefundService._resolve_refundable_payment(order, invoice)
-        if payment_result.is_err():
-            return Err(payment_result.unwrap_err())
+        if payment is None:
+            payment_result = RefundService._resolve_refundable_payment(order, invoice)
+            if payment_result.is_err():
+                return Err(payment_result.unwrap_err())
+            payment = payment_result.unwrap()
 
-        payment = payment_result.unwrap()
-        gateway_result = RefundService._process_payment_refund(payment, refund_data)
+        gateway_result = RefundService._process_payment_refund(
+            payment,
+            refund_data,
+            payment_locked=True,
+            defer_settlement=True,
+        )
         if gateway_result.is_err():
             return Err(gateway_result.unwrap_err())
 
@@ -992,16 +1270,16 @@ class RefundService:
     @staticmethod
     def _resolve_refundable_payment(order: Any, invoice: Any) -> Result[Payment, str]:
         """Find and lock one refundable Payment through PRAHO's real relations."""
-        if invoice is not None:
-            relation_filter = Q(invoice_id=invoice.pk)
-            customer_id = invoice.customer_id
-        elif order is not None:
+        if order is not None:
             relation_filter = Q(meta__order_id=str(order.pk))
             if order.invoice_id:
                 relation_filter |= Q(invoice_id=order.invoice_id)
             if order.proforma_id:
                 relation_filter |= Q(proforma_id=order.proforma_id)
             customer_id = order.customer_id
+        elif invoice is not None:
+            relation_filter = Q(invoice_id=invoice.pk)
+            customer_id = invoice.customer_id
         else:
             return Err("No successful payments found to refund")
 
@@ -1085,7 +1363,7 @@ class RefundService:
             if payment.invoice_id is not None:
                 legacy_scope = Q(invoice_id=payment.invoice_id)
             elif payment.proforma_id is not None:
-                legacy_scope = Q(proforma_id=payment.proforma_id)
+                legacy_scope = Q(order__proforma_id=payment.proforma_id)
             if legacy_scope is not None:
                 legacy_filter = Q(payment__isnull=True) & live_refunds & legacy_scope
                 already_refunded += int(
@@ -1207,7 +1485,11 @@ class RefundService:
 
         # Single source of truth: Refund model (#125 — removed meta.refunds fallback)
         try:
-            return int(Refund.objects.filter(order=order).aggregate(total=Sum("amount_cents", default=0))["total"])
+            return int(
+                Refund.objects.filter(order=order, status__in=_REFUND_RESERVING_STATUSES).aggregate(
+                    total=Sum("amount_cents", default=0)
+                )["total"]
+            )
         except (TypeError, AttributeError) as exc:
             logger.error(
                 "Refund amount aggregation failed for order_id=%s — aborting to prevent over-refund",
@@ -1225,9 +1507,10 @@ class RefundService:
         # Single source of truth: Refund model (#125 — removed meta.refunds fallback)
         try:
             return int(
-                Refund.objects.filter(Q(invoice=invoice) | Q(payment__invoice=invoice)).aggregate(
-                    total=Sum("amount_cents", default=0)
-                )["total"]
+                Refund.objects.filter(
+                    Q(invoice=invoice) | Q(payment__invoice=invoice),
+                    status__in=_REFUND_RESERVING_STATUSES,
+                ).aggregate(total=Sum("amount_cents", default=0))["total"]
             )
         except (TypeError, AttributeError) as exc:
             logger.error(
@@ -1358,6 +1641,8 @@ class RefundService:
         order = kwargs.get("order")
         invoice = kwargs.get("invoice")
         refund_amount_cents = kwargs.get("refund_amount_cents")
+        payment_locked = bool(kwargs.get("payment_locked", False))
+        defer_settlement = bool(kwargs.get("defer_settlement", False))
 
         # If payment not passed directly, resolve it through the same
         # authoritative document relations used by the public refund flow.
@@ -1372,7 +1657,8 @@ class RefundService:
             # Without this, two concurrent refund requests can both read status="succeeded",
             # both call the gateway, and the customer receives double the refund.
             if isinstance(payment, Payment) and payment.pk:
-                payment = Payment.objects.select_for_update(of=("self",)).get(pk=payment.pk)
+                if not payment_locked:
+                    payment = Payment.objects.select_for_update(of=("self",)).get(pk=payment.pk)
                 if payment.status not in {"succeeded", "partially_refunded"}:
                     return Err(f"Payment is not refundable from status '{payment.status}'")
 
@@ -1416,7 +1702,11 @@ class RefundService:
             gateway_data["requested_amount_cents"] = effective_amount
 
             # Only update local payment status AFTER gateway succeeds (or for non-gateway payments)
-            if hasattr(payment, "status"):
+            if (
+                hasattr(payment, "status")
+                and not defer_settlement
+                and gateway_data.get("gateway_status") == "succeeded"
+            ):
                 RefundService._update_payment_status_after_refund(payment, refund_type, int(processed_amount))
 
             return Ok(gateway_data)
@@ -1434,10 +1724,13 @@ class RefundService:
         try:
             is_fully_refunded = refund_type in (RefundType.FULL, "full")
             if isinstance(payment, Payment):
-                previously_refunded = int(payment.refunds.aggregate(total=Sum("amount_cents", default=0))["total"])
-                is_fully_refunded = (
-                    is_fully_refunded or previously_refunded + refund_amount_cents >= payment.amount_cents
+                settled_refunded = int(
+                    payment.refunds.filter(status="completed").aggregate(total=Sum("amount_cents", default=0))["total"]
                 )
+                if settled_refunded:
+                    is_fully_refunded = settled_refunded >= payment.amount_cents
+                else:
+                    is_fully_refunded = is_fully_refunded or refund_amount_cents >= payment.amount_cents
             target_status = "refunded" if is_fully_refunded else "partially_refunded"
 
             if payment.status == "partially_refunded":
@@ -1500,6 +1793,7 @@ class RefundService:
             return Ok(
                 {
                     "gateway_refund": "not_applicable",
+                    "gateway_status": "succeeded",
                     "payment_status_updated": True,
                     "total_refunded_cents": effective_amount,
                     "payments_refunded": 1 if payment else 0,
@@ -1512,7 +1806,8 @@ class RefundService:
         # replays the same refund), while the next distinct partial gets a fresh key.
         remaining = RefundService._get_remaining_payment_refund_amount(payment)
         already_refunded = (payment.amount_cents - remaining) if remaining is not None else 0
-        refund_idempotency_key = f"refund:{payment.id}:{already_refunded}:{effective_amount}"[:64]
+        terminal_attempts = payment.refunds.filter(status__in=("failed", "cancelled", "rejected")).count()
+        refund_idempotency_key = (f"refund:{payment.id}:{already_refunded}:{effective_amount}:{terminal_attempts}")[:64]
         refund_result = gateway.refund_payment(
             gateway_txn_id=payment.gateway_txn_id,
             amount_cents=refund_amount_cents,
@@ -1538,12 +1833,226 @@ class RefundService:
         return Ok(
             {
                 "gateway_refund": "success",
+                "gateway_status": refund_result["status"],
                 "refund_id": refund_result["refund_id"],
                 "payment_status_updated": True,
                 "total_refunded_cents": refund_result["amount_refunded_cents"],
                 "payments_refunded": 1,
             }
         )
+
+
+class RefundConvergenceService:
+    """Converge gateway refund facts into PRAHO's refund ledger."""
+
+    @staticmethod
+    def _lock_related_order(
+        payment: Payment,
+        preferred_order_id: uuid.UUID | None,
+    ) -> Result[Order | None, str]:
+        """Lock the order explicitly linked to a payment, if one exists."""
+        try:
+            if preferred_order_id is not None:
+                candidates = list(
+                    Order.objects.select_for_update(of=("self",)).filter(
+                        pk=preferred_order_id, customer_id=payment.customer_id
+                    )[:2]
+                )
+            else:
+                relation_filter = Q()
+                metadata_order_id = (payment.meta or {}).get("order_id")
+                if metadata_order_id not in (None, ""):
+                    relation_filter |= Q(pk=metadata_order_id)
+                if payment.proforma_id is not None:
+                    relation_filter |= Q(proforma_id=payment.proforma_id)
+                if not relation_filter.children:
+                    return Ok(None)
+                candidates = list(
+                    Order.objects.select_for_update(of=("self",))
+                    .filter(relation_filter, customer_id=payment.customer_id)
+                    .order_by("id")[:2]
+                )
+        except (TypeError, ValueError):
+            return Err("Payment has an invalid order linkage")
+        if not candidates:
+            return Ok(None)
+        if len(candidates) > 1:
+            return Err("Payment resolves to multiple orders during refund reconciliation")
+
+        order = candidates[0]
+        metadata_matches = str((payment.meta or {}).get("order_id", "")) == str(order.pk)
+        proforma_matches = payment.proforma_id is not None and payment.proforma_id == order.proforma_id
+        invoice_matches = payment.invoice_id is not None and payment.invoice_id == order.invoice_id
+        if not (metadata_matches or proforma_matches or invoice_matches):
+            return Err("Gateway refund order does not match the payment linkage")
+        return Ok(order)
+
+    @staticmethod
+    def _validate_existing_refund(
+        refund: Refund,
+        payment: Payment,
+        invoice: Invoice | None,
+        order: Order | None,
+        amount_cents: int,
+    ) -> Result[None, str]:
+        """Validate and attach a legacy refund before projecting its state."""
+        if refund.payment_id not in (None, payment.id):
+            return Err("Gateway refund is linked to a different payment")
+        if refund.customer_id != payment.customer_id or refund.currency_id != payment.currency_id:
+            return Err("Gateway refund customer or currency linkage mismatch")
+        if refund.amount_cents != amount_cents:
+            return Err(f"Gateway refund amount mismatch: expected {refund.amount_cents}, received {amount_cents}")
+        if refund.invoice_id is not None and (invoice is None or refund.invoice_id != invoice.id):
+            return Err("Gateway refund invoice does not match the payment linkage")
+        if refund.order_id is not None and (order is None or refund.order_id != order.id):
+            return Err("Gateway refund order does not match the payment linkage")
+        if refund.payment_id is None:
+            refund.payment = payment
+            refund.save(update_fields=["payment", "updated_at"])
+        return Ok(None)
+
+    @staticmethod
+    def converge_gateway_refund(  # noqa: C901, PLR0911, PLR0912, PLR0915
+        facts: RefundGatewayFacts,
+    ) -> Result[Refund | None, str]:
+        refund_id = facts.get("refund_id")
+        payment_intent_id = facts.get("payment_intent_id")
+        amount_cents = facts.get("amount_cents")
+        currency = facts.get("currency")
+        gateway_status = facts.get("status")
+        if not isinstance(refund_id, str) or not refund_id:
+            return Err("Gateway refund ID is missing")
+        if not isinstance(payment_intent_id, str) or not payment_intent_id:
+            return Err("Gateway refund PaymentIntent is missing")
+        if isinstance(amount_cents, bool) or not isinstance(amount_cents, int) or amount_cents <= 0:
+            return Err("Gateway refund amount must be a positive integer")
+        if not isinstance(currency, str) or not currency:
+            return Err("Gateway refund currency is missing")
+        if not isinstance(gateway_status, str):
+            return Err("Gateway refund status is missing")
+        event_created = facts.get("event_created")
+        if event_created is not None and (isinstance(event_created, bool) or not isinstance(event_created, int)):
+            return Err("Gateway refund event timestamp is invalid")
+
+        try:
+            with transaction.atomic():
+                snapshot_query = Refund.objects.filter(gateway_refund_id=refund_id)
+                snapshot = snapshot_query.values("id", "payment_id", "invoice_id", "order_id").first()
+                payment_query = Payment.objects.select_for_update(of=("self",)).select_related("currency")
+                if snapshot and snapshot["payment_id"]:
+                    payment = payment_query.filter(pk=snapshot["payment_id"]).first()
+                else:
+                    payment = payment_query.filter(gateway_txn_id=payment_intent_id).first()
+                if payment is None:
+                    return Ok(None)
+                if payment.gateway_txn_id != payment_intent_id:
+                    return Err("Gateway refund PaymentIntent mismatch")
+                if payment.currency.code.upper() != currency.upper():
+                    return Err(
+                        f"Gateway refund currency mismatch: expected {payment.currency.code.upper()}, received {currency!r}"
+                    )
+
+                # Refresh only after the Payment lock. A concurrent first delivery
+                # may have created the Refund while this transaction was waiting.
+                snapshot = snapshot_query.values("id", "payment_id", "invoice_id", "order_id").first()
+                if snapshot and snapshot["payment_id"] not in (None, payment.id):
+                    return Err("Gateway refund is linked to a different payment")
+                snapshot_invoice_id = snapshot["invoice_id"] if snapshot else None
+                if snapshot_invoice_id and payment.invoice_id and snapshot_invoice_id != payment.invoice_id:
+                    return Err("Gateway refund invoice does not match the payment linkage")
+                invoice_id = payment.invoice_id or snapshot_invoice_id
+                invoice = (
+                    Invoice.objects.select_for_update(of=("self",)).get(pk=invoice_id)
+                    if invoice_id is not None
+                    else None
+                )
+
+                preferred_order_id = snapshot["order_id"] if snapshot else None
+                order_result = (
+                    Ok(None)
+                    if snapshot_invoice_id is not None
+                    else RefundConvergenceService._lock_related_order(payment, preferred_order_id)
+                )
+                if order_result.is_err():
+                    return Err(order_result.unwrap_err())
+                order = order_result.unwrap()
+
+                refund = (
+                    Refund.objects.select_for_update(of=("self",)).get(gateway_refund_id=refund_id)
+                    if snapshot
+                    else None
+                )
+                if refund is not None:
+                    validation = RefundConvergenceService._validate_existing_refund(
+                        refund,
+                        payment,
+                        invoice,
+                        order,
+                        amount_cents,
+                    )
+                    if validation.is_err():
+                        return Err(validation.unwrap_err())
+
+                    previous_created = (refund.metadata or {}).get("gateway_event_created")
+                    if (
+                        isinstance(previous_created, int)
+                        and isinstance(event_created, int)
+                        and event_created < previous_created
+                    ):
+                        return Ok(refund)
+                else:
+                    if order is None and invoice is None:
+                        return Err("Known payment has no order or invoice for refund reconciliation")
+                    remaining = RefundService._get_remaining_payment_refund_amount(payment)
+                    if remaining is None or amount_cents > remaining:
+                        return Err(f"Gateway refund amount exceeds refundable balance: {amount_cents} > {remaining}")
+                    reason_map = {
+                        "duplicate": "duplicate_payment",
+                        "fraudulent": "fraud",
+                        "requested_by_customer": "customer_request",
+                    }
+                    create_result = RefundService._create_refund_record(
+                        RefundRecordParams(
+                            refund_id=uuid.uuid4(),
+                            order=order,
+                            invoice=None if order is not None else invoice,
+                            refund_amount_cents=amount_cents,
+                            original_cents=payment.amount_cents,
+                            refund_data=RefundData(
+                                refund_type="full" if amount_cents >= payment.amount_cents else "partial",
+                                reason=reason_map.get(str(facts.get("reason")), "administrative"),
+                                reference=f"STRIPE-{refund_id}"[:100],
+                            ),
+                            payment=payment,
+                            gateway_refund_id=refund_id,
+                        )
+                    )
+                    if create_result.is_err():
+                        return Err(create_result.unwrap_err())
+                    refund = create_result.unwrap()
+
+                state_result = RefundService._advance_refund_status(refund, gateway_status)
+                if state_result.is_err():
+                    return Err(state_result.unwrap_err())
+                refund = state_result.unwrap()
+                metadata = dict(refund.metadata or {})
+                event_id = facts.get("event_id")
+                failure_reason = facts.get("failure_reason")
+                if isinstance(event_id, str):
+                    metadata["gateway_event_id"] = event_id
+                if isinstance(event_created, int):
+                    metadata["gateway_event_created"] = event_created
+                if isinstance(failure_reason, str) and failure_reason:
+                    metadata["gateway_failure_reason"] = failure_reason
+                refund.metadata = metadata
+                refund.save(update_fields=["metadata", "updated_at"])
+                projection = RefundService._project_settled_refunds(payment, invoice)
+                if projection.is_err():
+                    return Err(projection.unwrap_err())
+                return Ok(refund)
+        except Exception as exc:
+            logger.exception("Refund convergence failed for gateway_refund_id=%s", refund_id)
+            return Err(f"Refund convergence failed: {exc}")
 
 
 class RefundQueryService:
@@ -1555,13 +2064,15 @@ class RefundQueryService:
         try:
             # Get aggregate statistics
             aggregated = Refund.objects.aggregate(
-                total_refunds=Count("id"), total_amount_refunded_cents=Sum("amount_cents", default=0)
+                total_refunds=Count("id"),
+                total_amount_refunded_cents=Sum("amount_cents", filter=Q(status="completed"), default=0),
             )
 
             # Get refunds by reason
             refunds_by_reason = {}
             reason_stats = Refund.objects.values("reason").annotate(
-                count=Count("id"), total_amount_cents=Sum("amount_cents", default=0)
+                count=Count("id"),
+                total_amount_cents=Sum("amount_cents", filter=Q(status="completed"), default=0),
             )
 
             for stat in reason_stats:
@@ -1573,7 +2084,8 @@ class RefundQueryService:
             # Get refunds by type for compatibility with tests
             refunds_by_type = {}
             type_stats = Refund.objects.values("refund_type").annotate(
-                count=Count("id"), total_amount_cents=Sum("amount_cents", default=0)
+                count=Count("id"),
+                total_amount_cents=Sum("amount_cents", filter=Q(status="completed"), default=0),
             )
 
             for stat in type_stats:
@@ -1583,8 +2095,9 @@ class RefundQueryService:
                 }
 
             # Get additional statistics
-            orders_refunded = Refund.objects.filter(order__isnull=False).values("order").distinct().count()
-            invoices_refunded = Refund.objects.filter(invoice__isnull=False).values("invoice").distinct().count()
+            settled = Refund.objects.filter(status="completed")
+            orders_refunded = settled.filter(order__isnull=False).values("order").distinct().count()
+            invoices_refunded = settled.filter(invoice__isnull=False).values("invoice").distinct().count()
 
             stats = {
                 "total_refunds": aggregated["total_refunds"],

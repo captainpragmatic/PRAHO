@@ -78,6 +78,28 @@ class RefundResult(TypedDict):
     error: str | None
 
 
+class RefundStatusResult(TypedDict):
+    """Authoritative gateway facts for one refund."""
+
+    success: bool
+    refund_id: str
+    payment_intent_id: str
+    amount_cents: int
+    currency: str
+    status: str
+    reason: str | None
+    failure_reason: str | None
+    error: str | None
+
+
+class RefundListResult(TypedDict):
+    """Result from listing recent gateway refunds."""
+
+    success: bool
+    refunds: list[RefundStatusResult]
+    error: str | None
+
+
 # ===============================================================================
 # ABSTRACT BASE GATEWAY
 # ===============================================================================
@@ -186,6 +208,14 @@ class BasePaymentGateway(ABC):
         Returns:
             RefundResult with success status and refund details
         """
+
+    @abstractmethod
+    def retrieve_refund(self, refund_id: str) -> RefundStatusResult:
+        """Retrieve authoritative facts for one gateway refund."""
+
+    @abstractmethod
+    def list_refunds(self, *, created_gte: int, limit: int = 100) -> RefundListResult:
+        """List all recent refunds, using limit as the provider page size."""
 
     def validate_configuration(self) -> bool:
         """

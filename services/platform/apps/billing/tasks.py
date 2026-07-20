@@ -1176,6 +1176,87 @@ def run_payment_collection_async() -> str:
     return async_task("apps.billing.tasks.run_payment_collection", timeout=TASK_TIME_LIMIT * 2)
 
 
+def reconcile_stripe_refunds(*, lookback_days: int = 30, discovery_page_size: int = 100) -> dict[str, Any]:
+    """Converge non-terminal and recently created Stripe refunds into PRAHO."""
+    from apps.billing.gateways import PaymentGatewayFactory  # noqa: PLC0415
+    from apps.billing.models import Refund  # noqa: PLC0415
+    from apps.billing.refund_service import (  # noqa: PLC0415
+        RefundConvergenceService,
+        RefundGatewayFacts,
+    )
+
+    errors: list[str] = []
+    refund_facts: dict[str, RefundGatewayFacts] = {}
+    try:
+        gateway = PaymentGatewayFactory.create_gateway("stripe")
+    except Exception as exc:
+        logger.exception("[Refund reconciliation] Stripe gateway initialization failed")
+        return {
+            "success": False,
+            "refunds_checked": 0,
+            "refunds_converged": 0,
+            "errors": [str(exc)],
+        }
+
+    pending_ids = (
+        Refund.objects.filter(
+            status__in=("pending", "processing", "approved"),
+        )
+        .exclude(gateway_refund_id="")
+        .values_list("gateway_refund_id", flat=True)
+    )
+    for refund_id in pending_ids.iterator():
+        retrieved = gateway.retrieve_refund(refund_id)
+        if retrieved["success"]:
+            failure_reason = retrieved.get("failure_reason")
+            refund_facts[refund_id] = {
+                "refund_id": retrieved["refund_id"],
+                "payment_intent_id": retrieved["payment_intent_id"],
+                "amount_cents": retrieved["amount_cents"],
+                "currency": retrieved["currency"],
+                "status": retrieved["status"],
+                **({"reason": retrieved["reason"]} if retrieved["reason"] else {}),
+                **({"failure_reason": failure_reason} if failure_reason else {}),
+            }
+        else:
+            errors.append(f"{refund_id}: {retrieved['error'] or 'gateway retrieval failed'}")
+
+    created_gte = int((timezone.now() - timedelta(days=max(lookback_days, 1))).timestamp())
+    listed = gateway.list_refunds(created_gte=created_gte, limit=discovery_page_size)
+    if listed["success"]:
+        for discovered in listed["refunds"]:
+            refund_id = discovered["refund_id"]
+            if not refund_id or refund_id in refund_facts:
+                continue
+            failure_reason = discovered.get("failure_reason")
+            refund_facts[refund_id] = {
+                "refund_id": refund_id,
+                "payment_intent_id": discovered["payment_intent_id"],
+                "amount_cents": discovered["amount_cents"],
+                "currency": discovered["currency"],
+                "status": discovered["status"],
+                **({"reason": discovered["reason"]} if discovered["reason"] else {}),
+                **({"failure_reason": failure_reason} if failure_reason else {}),
+            }
+    else:
+        errors.append(f"Stripe refund discovery failed: {listed['error'] or 'unknown error'}")
+
+    converged = 0
+    for refund_id, facts in refund_facts.items():
+        result = RefundConvergenceService.converge_gateway_refund(facts)
+        if result.is_err():
+            errors.append(f"{refund_id}: {result.unwrap_err()}")
+            continue
+        converged += 1
+
+    return {
+        "success": not errors,
+        "refunds_checked": len(refund_facts),
+        "refunds_converged": converged,
+        "errors": errors,
+    }
+
+
 def setup_billing_scheduled_tasks() -> dict[str, str]:
     """Register the single PRAHO renewal path plus local usage processing."""
     from django_q.models import Schedule  # noqa: PLC0415
@@ -1214,6 +1295,11 @@ def setup_billing_scheduled_tasks() -> dict[str, str]:
             "billing-payment-retries",
             "apps.billing.tasks.run_payment_collection",
             "*/15 * * * *",
+        ),
+        (
+            "billing-refund-reconciliation",
+            "apps.billing.tasks.reconcile_stripe_refunds",
+            "45 2 * * *",
         ),
     )
     results: dict[str, str] = {}

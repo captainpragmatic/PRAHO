@@ -621,7 +621,7 @@ def handle_payment_created_or_updated(sender: type[Payment], instance: Payment, 
             _handle_payment_status_change(instance, old_status, instance.status)
 
             # EXTENDED: Service activation
-            if instance.status == "succeeded" and old_status != "succeeded":
+            if instance.status == "succeeded" and old_status == "pending":
                 _activate_payment_services(instance)
 
             # EXTENDED: Customer credit scoring
@@ -968,7 +968,7 @@ def _update_customer_payment_credit(payment: Payment, old_status: str) -> None:
         from apps.customers.services import CustomerCreditService
 
         event_type = None
-        if payment.status == "succeeded" and old_status != "succeeded":
+        if payment.status == "succeeded" and old_status == "pending":
             event_type = "positive_payment"
         elif payment.status == "failed" and old_status != "failed":
             event_type = "failed_payment"
@@ -1122,7 +1122,7 @@ def _handle_payment_status_change(payment: Payment, old_status: str, new_status:
             },
         )
 
-        if new_status == "succeeded" and old_status != "succeeded":
+        if new_status == "succeeded" and old_status == "pending":
             _handle_payment_success(payment)
         elif (
             new_status == "failed"

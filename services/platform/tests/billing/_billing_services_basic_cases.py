@@ -14,6 +14,7 @@ from apps.billing.models import (
     Currency,
     Invoice,
     InvoiceSequence,
+    Payment,
     ProformaSequence,
 )
 from apps.billing.services import (
@@ -111,13 +112,24 @@ class RefundServiceComprehensiveTestCase(TestCase):
         self.assertIn("Order", result.error)
 
     @patch('apps.billing.services.RefundService._validate_order_refund_eligibility')
-    @patch('apps.orders.models.Order.objects.select_for_update')
-    def test_refund_order_not_eligible(self, mock_select_for_update: Mock, mock_validate: Mock) -> None:
+    def test_refund_order_not_eligible(self, mock_validate: Mock) -> None:
         """Test refund_order when order is not eligible for refund"""
 
-        mock_order = Mock()
-        mock_order.id = uuid.uuid4()
-        mock_select_for_update.return_value.select_related.return_value.get.return_value = mock_order
+        order = Order.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            status="completed",
+            total_cents=10_000,
+            order_number="ORD-NOT-ELIGIBLE",
+        )
+        Payment.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            payment_method="bank",
+            amount_cents=order.total_cents,
+            status="succeeded",
+            meta={"order_id": str(order.id)},
+        )
 
         mock_validate.return_value = Err("Order not eligible")
 
@@ -131,7 +143,7 @@ class RefundServiceComprehensiveTestCase(TestCase):
             'process_payment_refund': False,
         }
 
-        result = RefundService.refund_order(mock_order.id, refund_data)
+        result = RefundService.refund_order(order.id, refund_data)
 
         self.assertTrue(result.is_err())
         self.assertEqual(result.error, "Order not eligible")
