@@ -21,7 +21,7 @@ from django.db import models, transaction
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
-from apps.common.types import Err, Ok, Result, retriability_of
+from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 
 from .security_utils import IdempotencyManager
 from .virtualmin_backup_service import BackupConfig, RestoreConfig
@@ -134,7 +134,10 @@ class VirtualminProvisioningService:
             if not creation_data.server:
                 server_result = self._select_best_server()
                 if server_result.is_err():
-                    return Err(f"Server selection failed: {server_result.unwrap_err()}")
+                    return Err(
+                        f"Server selection failed: {server_result.unwrap_err()}",
+                        retriability=retriability_of(server_result),
+                    )
                 server = server_result.unwrap()
             else:
                 server = creation_data.server
@@ -220,8 +223,9 @@ class VirtualminProvisioningService:
             validation_result = self._validate_provisioning_preconditions(account, gateway)
             if validation_result.is_err():
                 error_msg = validation_result.unwrap_err()
-                job.mark_failed(f"Validation failed: {error_msg}")
-                return Err(f"Pre-flight validation failed: {error_msg}")
+                retriability = retriability_of(validation_result)
+                job.mark_failed(f"Validation failed: {error_msg}", retriability=retriability)
+                return Err(f"Pre-flight validation failed: {error_msg}", retriability=retriability)
 
             logger.info(f"✅ [VirtualminService] Pre-flight validation passed for {account.domain}")
 
@@ -306,13 +310,13 @@ class VirtualminProvisioningService:
 
                 else:
                     error_msg = response.data.get("error", "Domain creation failed")
-                    job.mark_failed(error_msg, response.data)
-                    return Err(error_msg)
+                    job.mark_failed(error_msg, response.data, retriability=Retriability.NOT_RETRIABLE)
+                    return Err(error_msg, retriability=Retriability.NOT_RETRIABLE)
 
             else:
                 error = result.unwrap_err()
                 error_msg = str(error)
-                job.mark_failed(error_msg)
+                job.mark_failed(error_msg, retriability=retriability_of(result))
                 return Err(error_msg, retriability=retriability_of(result))
 
         except Exception as e:
@@ -337,31 +341,70 @@ class VirtualminProvisioningService:
 
         return Ok(None)
 
-    def _check_domain_conflicts(self, account: VirtualminAccount, gateway: VirtualminGateway) -> Result[None, str]:
-        """Check for domain and username conflicts"""
-        # Verify domain doesn't already exist on server
+    def _check_domain_conflicts(  # noqa: PLR0911  # Two fail-closed remote lookups
+        self, account: VirtualminAccount, gateway: VirtualminGateway
+    ) -> Result[None, str]:
+        """Check for domain and username conflicts."""
         domain_check = gateway.call("list-domains", {"domain": account.domain})
-        if domain_check.is_ok() and domain_check.unwrap().success:
-            domains = domain_check.unwrap().data.get("domains", [])
-            if any(d.get("domain") == account.domain for d in domains):
-                return Err(f"Domain {account.domain} already exists on server")
+        if domain_check.is_err():
+            return Err(
+                f"Domain conflict check failed: {domain_check.unwrap_err()}",
+                retriability=retriability_of(domain_check),
+            )
 
-        # Check if username conflicts exist
+        domain_response = domain_check.unwrap()
+        if not domain_response.success:
+            return Err(
+                f"Domain conflict check was rejected: {domain_response.data.get('error', 'Unknown error')}",
+                retriability=Retriability.NOT_RETRIABLE,
+            )
+        domains = domain_response.data.get("domains", [])
+        if any(d.get("domain") == account.domain for d in domains):
+            return Err(f"Domain {account.domain} already exists on server", retriability=Retriability.NOT_RETRIABLE)
+
         user_check = gateway.call("list-users", {"user": account.virtualmin_username})
-        if user_check.is_ok() and user_check.unwrap().success:
-            users = user_check.unwrap().data.get("users", [])
-            if any(u.get("user") == account.virtualmin_username for u in users):
-                return Err(f"Username {account.virtualmin_username} already exists on server")
+        if user_check.is_err():
+            return Err(
+                f"Username conflict check failed: {user_check.unwrap_err()}",
+                retriability=retriability_of(user_check),
+            )
+
+        user_response = user_check.unwrap()
+        if not user_response.success:
+            return Err(
+                f"Username conflict check was rejected: {user_response.data.get('error', 'Unknown error')}",
+                retriability=Retriability.NOT_RETRIABLE,
+            )
+        users = user_response.data.get("users", [])
+        if any(u.get("user") == account.virtualmin_username for u in users):
+            return Err(
+                f"Username {account.virtualmin_username} already exists on server",
+                retriability=Retriability.NOT_RETRIABLE,
+            )
 
         return Ok(None)
 
     def _check_template_availability(self, account: VirtualminAccount, gateway: VirtualminGateway) -> Result[None, str]:
-        """Check if required template exists"""
+        """Check if the required template exists."""
         template_check = gateway.call("list-templates")
-        if template_check.is_ok() and template_check.unwrap().success:
-            templates = template_check.unwrap().data.get("templates", [])
-            if not any(t.get("name") == account.template_name for t in templates):
-                return Err(f"Template {account.template_name} not found on server")
+        if template_check.is_err():
+            return Err(
+                f"Template availability check failed: {template_check.unwrap_err()}",
+                retriability=retriability_of(template_check),
+            )
+
+        template_response = template_check.unwrap()
+        if not template_response.success:
+            return Err(
+                f"Template availability check was rejected: {template_response.data.get('error', 'Unknown error')}",
+                retriability=Retriability.NOT_RETRIABLE,
+            )
+        templates = template_response.data.get("templates", [])
+        if not any(t.get("name") == account.template_name for t in templates):
+            return Err(
+                f"Template {account.template_name} not found on server",
+                retriability=Retriability.NOT_RETRIABLE,
+            )
 
         return Ok(None)
 
@@ -382,22 +425,25 @@ class VirtualminProvisioningService:
             # 1. Server health check
             health_result = self.health_check_server(account.server)  # type: ignore[attr-defined]
             if health_result.is_err():
-                return Err(f"Server health check failed: {health_result.unwrap_err()}")
+                return Err(
+                    f"Server health check failed: {health_result.unwrap_err()}",
+                    retriability=retriability_of(health_result),
+                )
 
             # 2. Check server capacity and disk space
             capacity_result = self._check_server_capacity(account, health_result)
             if capacity_result.is_err():
-                return Err(capacity_result.unwrap_err())
+                return Err(capacity_result.unwrap_err(), retriability=retriability_of(capacity_result))
 
             # 3. Check domain and username conflicts
             conflict_result = self._check_domain_conflicts(account, gateway)
             if conflict_result.is_err():
-                return Err(conflict_result.unwrap_err())
+                return Err(conflict_result.unwrap_err(), retriability=retriability_of(conflict_result))
 
             # 4. Check template availability
             template_result = self._check_template_availability(account, gateway)
             if template_result.is_err():
-                return Err(template_result.unwrap_err())
+                return Err(template_result.unwrap_err(), retriability=retriability_of(template_result))
 
             logger.info(f"✅ [VirtualminService] All preconditions validated for {account.domain}")
             return Ok(True)
@@ -620,14 +666,14 @@ class VirtualminProvisioningService:
                             return Err(f"Suspension failed during database update: {db_error}")
                     else:
                         error_msg = response.data.get("error", "Suspension failed")
-                        job.mark_failed(error_msg, response.data)
+                        job.mark_failed(error_msg, response.data, retriability=Retriability.NOT_RETRIABLE)
                         IdempotencyManager.clear(idempotency_key)
-                        return Err(error_msg)
+                        return Err(error_msg, retriability=Retriability.NOT_RETRIABLE)
 
                 else:
                     error = result.unwrap_err()
                     error_msg = str(error)
-                    job.mark_failed(error_msg)
+                    job.mark_failed(error_msg, retriability=retriability_of(result))
                     IdempotencyManager.clear(idempotency_key)
                     return Err(error_msg, retriability=retriability_of(result))
 
@@ -743,14 +789,14 @@ class VirtualminProvisioningService:
                             return Err(f"Unsuspension failed during database update: {db_error}")
                     else:
                         error_msg = response.data.get("error", "Unsuspension failed")
-                        job.mark_failed(error_msg, response.data)
+                        job.mark_failed(error_msg, response.data, retriability=Retriability.NOT_RETRIABLE)
                         IdempotencyManager.clear(idempotency_key)
-                        return Err(error_msg)
+                        return Err(error_msg, retriability=Retriability.NOT_RETRIABLE)
 
                 else:
                     error = result.unwrap_err()
                     error_msg = str(error)
-                    job.mark_failed(error_msg)
+                    job.mark_failed(error_msg, retriability=retriability_of(result))
                     IdempotencyManager.clear(idempotency_key)
                     return Err(error_msg, retriability=retriability_of(result))
 
@@ -901,14 +947,14 @@ class VirtualminProvisioningService:
 
                     else:
                         error_msg = response.data.get("error", "Deletion failed")
-                        job.mark_failed(error_msg, response.data)
+                        job.mark_failed(error_msg, response.data, retriability=Retriability.NOT_RETRIABLE)
                         IdempotencyManager.clear(idempotency_key)
-                        return Err(error_msg)
+                        return Err(error_msg, retriability=Retriability.NOT_RETRIABLE)
 
                 else:
                     error = result.unwrap_err()
                     error_msg = str(error)
-                    job.mark_failed(error_msg)
+                    job.mark_failed(error_msg, retriability=retriability_of(result))
                     IdempotencyManager.clear(idempotency_key)
                     return Err(error_msg, retriability=retriability_of(result))
 
@@ -1042,7 +1088,10 @@ class VirtualminProvisioningService:
             # Get current state from Virtualmin
             result = gateway.call("list-domains", {"domain": account.domain})
             if result.is_err():
-                return Err(f"Failed to query Virtualmin: {result.unwrap_err()}")
+                return Err(
+                    f"Failed to query Virtualmin: {result.unwrap_err()}",
+                    retriability=retriability_of(result),
+                )
 
             response = result.unwrap()
             virtualmin_data = response.data
@@ -1220,12 +1269,18 @@ class VirtualminServerManagementService:
             # Get server info
             info_result = gateway.get_server_info()
             if info_result.is_err():
-                return Err(f"Failed to get server info: {info_result.unwrap_err()}")
+                return Err(
+                    f"Failed to get server info: {info_result.unwrap_err()}",
+                    retriability=retriability_of(info_result),
+                )
 
             # Get domain list
             domains_result = gateway.list_domains(name_only=True)
             if domains_result.is_err():
-                return Err(f"Failed to list domains: {domains_result.unwrap_err()}")
+                return Err(
+                    f"Failed to list domains: {domains_result.unwrap_err()}",
+                    retriability=retriability_of(domains_result),
+                )
 
             domains = domains_result.unwrap()
             domain_count = len(domains) if isinstance(domains, list) else 0
@@ -1309,18 +1364,22 @@ class VirtualminBackupManagementService:
             if backup_result.is_err():
                 # mark_failed persists the error to the real field (status_message); assigning a
                 # nonexistent `error_message` left the failure recorded nowhere.
-                job.mark_failed(backup_result.unwrap_err())
+                job.mark_failed(
+                    backup_result.unwrap_err(),
+                    retriability=retriability_of(backup_result),
+                )
 
                 # Backup/restore have no branch in the retry dispatcher
                 # (process_failed_virtualmin_jobs handles create/suspend/unsuspend/delete
-                # only). mark_failed() arms next_retry_at unconditionally, so the sweeper
-                # would flip this job back to "pending", wipe the status_message persisted
-                # above, and dispatch nothing — a forever-stuck job with its failure reason
-                # lost. Opt out of the sweep until these operations support retry.
+                # only). Even explicitly retriable failures must opt out of the sweep until
+                # these operations have a dispatcher branch.
                 job.next_retry_at = None
                 job.save(update_fields=["next_retry_at", "updated_at"])
 
-                return Err(f"Backup failed: {backup_result.unwrap_err()}")
+                return Err(
+                    f"Backup failed: {backup_result.unwrap_err()}",
+                    retriability=retriability_of(backup_result),
+                )
 
             # Update job with success
             backup_info = backup_result.unwrap()
@@ -1386,18 +1445,22 @@ class VirtualminBackupManagementService:
 
             if restore_result.is_err():
                 # See the backup path: assigning `error_message` silently dropped the failure.
-                job.mark_failed(restore_result.unwrap_err())
+                job.mark_failed(
+                    restore_result.unwrap_err(),
+                    retriability=retriability_of(restore_result),
+                )
 
                 # Backup/restore have no branch in the retry dispatcher
                 # (process_failed_virtualmin_jobs handles create/suspend/unsuspend/delete
-                # only). mark_failed() arms next_retry_at unconditionally, so the sweeper
-                # would flip this job back to "pending", wipe the status_message persisted
-                # above, and dispatch nothing — a forever-stuck job with its failure reason
-                # lost. Opt out of the sweep until these operations support retry.
+                # only). Even explicitly retriable failures must opt out of the sweep until
+                # these operations have a dispatcher branch.
                 job.next_retry_at = None
                 job.save(update_fields=["next_retry_at", "updated_at"])
 
-                return Err(f"Restore failed: {restore_result.unwrap_err()}")
+                return Err(
+                    f"Restore failed: {restore_result.unwrap_err()}",
+                    retriability=retriability_of(restore_result),
+                )
 
             # Update job with success
             restore_info = restore_result.unwrap()

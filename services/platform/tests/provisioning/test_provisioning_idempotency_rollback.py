@@ -11,12 +11,13 @@ Comprehensive tests for Virtualmin provisioning idempotency and rollback mechani
 """
 
 from decimal import Decimal
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from django.test import TestCase
+from django.utils import timezone
 
 from apps.billing.models import Currency
-from apps.common.types import Err, Ok
+from apps.common.types import Retriability
 from apps.customers.models import Customer
 from apps.provisioning.models import Service, ServicePlan
 from apps.provisioning.security_utils import IdempotencyManager
@@ -120,6 +121,34 @@ class VirtualminProvisioningJobRollbackTest(TestCase):
         self.assertFalse(job.rollback_executed)
         self.assertEqual(job.rollback_status, "")
         self.assertEqual(job.rollback_details, {})
+        self.assertIsNone(job.next_retry_at)
+        self.assertEqual(job.result["retriability"], Retriability.UNKNOWN.value)
+
+    def test_mark_failed_schedules_only_explicitly_retriable_failure(self):
+        job = VirtualminProvisioningJob.objects.create(
+            operation="suspend_domain",
+            server=self.server,
+            correlation_id="test-retriable",
+        )
+
+        job.mark_failed("Connection was refused", retriability=Retriability.RETRIABLE)
+
+        job.refresh_from_db()
+        self.assertIsNotNone(job.next_retry_at)
+        self.assertEqual(job.result["retriability"], Retriability.RETRIABLE.value)
+
+    def test_mark_failed_clears_stale_retry_for_unknown_failure(self):
+        job = VirtualminProvisioningJob.objects.create(
+            operation="delete_domain",
+            server=self.server,
+            correlation_id="test-unknown",
+            next_retry_at=timezone.now(),
+        )
+
+        job.mark_failed("timeout after request was sent")
+
+        job.refresh_from_db()
+        self.assertIsNone(job.next_retry_at)
 
     def test_mark_failed_with_successful_rollback(self):
         """Test mark_failed with successful rollback"""

@@ -13,7 +13,7 @@ from unittest.mock import MagicMock, patch
 
 from django.test import TestCase
 
-from apps.common.types import Ok
+from apps.common.types import Err, Ok, Retriability
 from apps.provisioning.virtualmin_auth_manager import (
     AuthMethod,
     VirtualminAuthenticationManager,
@@ -78,3 +78,96 @@ class ExecuteWithMethodDispatchTests(TestCase):
 
         mock_ssh.assert_called_once_with("create-domain", {"domain": "test.com"})
         self.assertEqual(result, expected)
+
+    @patch("apps.provisioning.virtualmin_auth_manager.VirtualminGateway")
+    def test_acl_wrapper_preserves_gateway_retriability(self, gateway_cls: MagicMock) -> None:
+        self.mock_server.api_username = "api"
+        self.mock_server.api_port = 10000
+        self.mock_server.use_ssl = True
+        self.mock_server.ssl_verify = True
+        self.mock_server.get_api_password.return_value = "secret"
+        gateway_cls.return_value.call.return_value = Err(
+            "rate limited", retriability=Retriability.RETRIABLE
+        )
+
+        result = self.manager._execute_acl_auth("list-domains", {})
+
+        self.assertTrue(result.is_err())
+        self.assertEqual(result.retriability, Retriability.RETRIABLE)
+
+    def test_auth_fallback_preserves_terminal_retriability(self) -> None:
+        terminal = Err("bad credentials", retriability=Retriability.NOT_RETRIABLE)
+
+        with (
+            patch.object(self.manager, "_get_auth_method_priority", return_value=[AuthMethod.ACL]),
+            patch.object(self.manager, "_execute_with_method", return_value=terminal),
+            patch.object(self.manager, "_cache_failed_auth_method"),
+        ):
+            result = self.manager.execute_virtualmin_command("list-domains", {})
+
+        self.assertTrue(result.is_err())
+        self.assertEqual(result.retriability, Retriability.NOT_RETRIABLE)
+
+    def test_auth_fallback_stops_after_ambiguous_outcome(self) -> None:
+        ambiguous = Err("response lost", retriability=Retriability.UNKNOWN)
+
+        with (
+            patch.object(
+                self.manager,
+                "_get_auth_method_priority",
+                return_value=[AuthMethod.ACL, AuthMethod.MASTER_PROXY],
+            ),
+            patch.object(
+                self.manager,
+                "_execute_with_method",
+                side_effect=[ambiguous, Ok({"success": True})],
+            ) as execute,
+            patch.object(self.manager, "_cache_failed_auth_method"),
+        ):
+            result = self.manager.execute_virtualmin_command("create-domain", {"domain": "example.com"})
+
+        self.assertTrue(result.is_err())
+        self.assertEqual(result.retriability, Retriability.UNKNOWN)
+        execute.assert_called_once()
+
+    def test_auth_fallback_allows_ambiguous_read_only_outcome(self) -> None:
+        ambiguous = Err("response lost", retriability=Retriability.UNKNOWN)
+
+        with (
+            patch.object(
+                self.manager,
+                "_get_auth_method_priority",
+                return_value=[AuthMethod.ACL, AuthMethod.MASTER_PROXY],
+            ),
+            patch.object(
+                self.manager,
+                "_execute_with_method",
+                side_effect=[ambiguous, Ok({"domains": []})],
+            ) as execute,
+            patch.object(self.manager, "_cache_failed_auth_method"),
+        ):
+            result = self.manager.execute_virtualmin_command("list-domains", {})
+
+        self.assertTrue(result.is_ok())
+        self.assertEqual(result.unwrap(), {"domains": []})
+        self.assertEqual(execute.call_count, 2)
+
+    def test_auth_fallback_stops_after_unexpected_mutation_exception(self) -> None:
+        with (
+            patch.object(
+                self.manager,
+                "_get_auth_method_priority",
+                return_value=[AuthMethod.ACL, AuthMethod.MASTER_PROXY],
+            ),
+            patch.object(
+                self.manager,
+                "_execute_with_method",
+                side_effect=[RuntimeError("response lost"), Ok({"success": True})],
+            ) as execute,
+            patch.object(self.manager, "_cache_failed_auth_method"),
+        ):
+            result = self.manager.execute_virtualmin_command("modify-domain", {"domain": "example.com"})
+
+        self.assertTrue(result.is_err())
+        self.assertEqual(result.retriability, Retriability.UNKNOWN)
+        execute.assert_called_once()

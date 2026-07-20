@@ -20,6 +20,7 @@ from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 from apps.common.encryption import decrypt_sensitive_data, encrypt_sensitive_data
+from apps.common.types import Retriability
 
 if TYPE_CHECKING:
     from apps.customers.models import Customer
@@ -658,13 +659,14 @@ class VirtualminProvisioningJob(models.Model):
 
         self.save(update_fields=["status", "completed_at", "result", "execution_time_seconds", "updated_at"])
 
-    def mark_failed(
+    def mark_failed(  # noqa: PLR0913  # Cohesive persisted failure transition
         self,
         error_message: str,
         result: dict[str, Any] | None = None,
         rollback_executed: bool = False,
         rollback_status: str = "",
         rollback_details: dict[str, Any] | None = None,
+        retriability: Retriability = Retriability.UNKNOWN,
     ) -> None:
         """
         Mark job as failed with optional rollback tracking.
@@ -675,14 +677,15 @@ class VirtualminProvisioningJob(models.Model):
             rollback_executed: Whether rollback was attempted
             rollback_status: Status of rollback ("success", "partial", "failed")
             rollback_details: Details of rollback operations performed
+            retriability: Whether an automatic replay is known to be safe
         """
         now = timezone.now()
         self.status = "failed"
         self.status_message = error_message
         self.completed_at = now
 
-        if result:
-            self.result = result
+        self.result = dict(result or {})
+        self.result["retriability"] = retriability.value
 
         # Track rollback information
         self.rollback_executed = rollback_executed
@@ -694,8 +697,10 @@ class VirtualminProvisioningJob(models.Model):
             duration = now - self.started_at
             self.execution_time_seconds = Decimal(str(duration.total_seconds()))
 
-        # Calculate next retry time if retries available
-        if self.can_retry:
+        # Only explicit safe-to-replay failures enter the automatic retry sweep.
+        # UNKNOWN includes lost responses where a mutation may already have run.
+        self.next_retry_at = None
+        if retriability is Retriability.RETRIABLE and self.can_retry:
             # Exponential backoff: 2^retry_count minutes
             backoff_minutes = 2**self.retry_count
             self.next_retry_at = now + timedelta(minutes=backoff_minutes)

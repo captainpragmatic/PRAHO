@@ -27,7 +27,7 @@ from django.core.exceptions import ValidationError
 from django.utils import timezone
 
 from apps.common.encryption import DecryptionError
-from apps.common.outbound_http import OutboundPolicy, safe_request
+from apps.common.outbound_http import OutboundPolicy, OutboundSecurityError, safe_request
 from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 from apps.settings.services import SettingsService
 
@@ -410,11 +410,22 @@ class VirtualminConfig:
 class VirtualminAPIError(Exception):
     """Base exception for Virtualmin API errors"""
 
-    def __init__(self, message: str, server: str = "", program: str = "", http_status: int = 0):
+    default_retriability = Retriability.NOT_RETRIABLE
+
+    def __init__(
+        self,
+        message: str,
+        server: str = "",
+        program: str = "",
+        http_status: int = 0,
+        *,
+        retriability: Retriability | None = None,
+    ):
         super().__init__(message)
         self.server = server
         self.program = program
         self.http_status = http_status
+        self.retriability = retriability if retriability is not None else self.default_retriability
 
 
 class VirtualminAuthError(VirtualminAPIError):
@@ -423,6 +434,8 @@ class VirtualminAuthError(VirtualminAPIError):
 
 class VirtualminRateLimitedError(VirtualminAPIError):
     """Rate limit exceeded - implement exponential backoff"""
+
+    default_retriability = Retriability.RETRIABLE
 
 
 class VirtualminConflictExistsError(VirtualminAPIError):
@@ -435,6 +448,8 @@ class VirtualminNotFoundError(VirtualminAPIError):
 
 class VirtualminTransientError(VirtualminAPIError):
     """Temporary failure - retry with backoff"""
+
+    default_retriability = Retriability.UNKNOWN
 
 
 class VirtualminQuotaExceededError(VirtualminAPIError):
@@ -739,12 +754,18 @@ class VirtualminGateway:
             params = VirtualminValidator.validate_virtualmin_params(params) if params else {}
 
         except ValidationError as e:
-            return Err(VirtualminAPIError(f"Validation error: {e}", self.server.hostname, program))
+            return Err(
+                VirtualminAPIError(f"Validation error: {e}", self.server.hostname, program),
+                retriability=Retriability.NOT_RETRIABLE,
+            )
 
         # Server health check
         health_result = self._validate_server_health()
         if health_result.is_err():
-            return Err(VirtualminAPIError(health_result.unwrap_err(), self.server.hostname, program))
+            return Err(
+                VirtualminAPIError(health_result.unwrap_err(), self.server.hostname, program),
+                retriability=Retriability.NOT_RETRIABLE,
+            )
 
         # Rate limiting check
         if not self._check_rate_limit(program):
@@ -770,7 +791,8 @@ class VirtualminGateway:
         )
 
         # Make API request with retries
-        last_error = None
+        last_error: VirtualminAPIError | None = None
+        is_read_only = program == "info" or program.startswith("list-")
         for attempt in range(VIRTUALMIN_MAX_RETRIES):
             try:
                 response = self._make_request(api_params, attempt + 1)
@@ -796,10 +818,15 @@ class VirtualminGateway:
                 )
 
                 return Ok(virtualmin_response)
-
-            except requests.exceptions.RequestException as e:
+            except VirtualminAPIError as e:
                 last_error = e
                 logger.warning(f"⚠️ [Virtualmin] Attempt {attempt + 1}/{VIRTUALMIN_MAX_RETRIES} failed: {e}")
+
+                should_retry = e.retriability is Retriability.RETRIABLE or (
+                    e.retriability is Retriability.UNKNOWN and is_read_only
+                )
+                if not should_retry:
+                    return Err(e, retriability=e.retriability)
 
                 # Exponential backoff for retries
                 if attempt < VIRTUALMIN_MAX_RETRIES - 1:
@@ -812,10 +839,9 @@ class VirtualminGateway:
 
         logger.error(f"❌ [Virtualmin] {program} failed after {execution_time:.2f}s: {error_msg}")
 
-        # A read timeout or 5xx after exhausting retries does NOT prove the mutating
-        # call was not applied server-side, so leave it UNKNOWN (the default) rather
-        # than asserting a blanket safe-to-replay.
-        return Err(VirtualminTransientError(error_msg, self.server.hostname, program))
+        if last_error is None:
+            last_error = VirtualminTransientError(error_msg, self.server.hostname, program)
+        return Err(last_error, retriability=last_error.retriability)
 
     def _make_request(self, params: dict[str, Any], attempt: int) -> requests.Response:
         """
@@ -840,7 +866,11 @@ class VirtualminGateway:
             return response
 
         except requests.exceptions.ConnectTimeout as e:
-            raise VirtualminTransientError(f"Connection timeout to {self.server.hostname}", self.server.hostname) from e
+            raise VirtualminTransientError(
+                f"Connection timeout to {self.server.hostname}",
+                self.server.hostname,
+                retriability=Retriability.RETRIABLE,
+            ) from e
         except requests.exceptions.ReadTimeout as e:
             raise VirtualminTransientError(f"Read timeout from {self.server.hostname}", self.server.hostname) from e
         except requests.exceptions.ConnectionError as e:
@@ -850,6 +880,18 @@ class VirtualminGateway:
         except requests.exceptions.SSLError as e:
             raise VirtualminAPIError(
                 f"SSL error connecting to {self.server.hostname}: {e}", self.server.hostname
+            ) from e
+        except OutboundSecurityError as e:
+            raise VirtualminAPIError(
+                f"Outbound security policy rejected request to {self.server.hostname}: {e}",
+                self.server.hostname,
+                retriability=Retriability.NOT_RETRIABLE,
+            ) from e
+        except requests.exceptions.RequestException as e:
+            raise VirtualminTransientError(
+                f"Request error to {self.server.hostname}: {e}",
+                self.server.hostname,
+                retriability=Retriability.UNKNOWN,
             ) from e
 
     def _execute_http_request(self, params: dict[str, Any]) -> requests.Response:
@@ -954,9 +996,12 @@ class VirtualminGateway:
             if response.success:
                 return Ok(response.data)
             else:
-                return Err(f"Failed to get server info: {response.data.get('error', 'Unknown error')}")
+                return Err(
+                    f"Failed to get server info: {response.data.get('error', 'Unknown error')}",
+                    retriability=Retriability.NOT_RETRIABLE,
+                )
         else:
-            return Err(f"API call failed: {result.unwrap_err()}")
+            return Err(f"API call failed: {result.unwrap_err()}", retriability=retriability_of(result))
 
     def list_domains(self, name_only: bool = False) -> Result[list[dict[str, Any]], str]:
         """
@@ -977,9 +1022,12 @@ class VirtualminGateway:
                 domains = self._parse_domains_response(response.data, name_only)
                 return Ok(domains)
             else:
-                return Err(f"Failed to list domains: {response.data.get('error', 'Unknown error')}")
+                return Err(
+                    f"Failed to list domains: {response.data.get('error', 'Unknown error')}",
+                    retriability=Retriability.NOT_RETRIABLE,
+                )
         else:
-            return Err(f"API call failed: {result.unwrap_err()}")
+            return Err(f"API call failed: {result.unwrap_err()}", retriability=retriability_of(result))
 
     def _parse_domains_response(self, data: dict[str, Any], name_only: bool) -> list[dict[str, Any]]:
         """Parse domains response based on different formats"""
@@ -1074,11 +1122,17 @@ class VirtualminGateway:
         disk_result = self.call("list-domains", {"domain": domain, "multiline": ""})
 
         if disk_result.is_err():
-            return Err(f"Disk usage API call failed: {disk_result.unwrap_err()}")
+            return Err(
+                f"Disk usage API call failed: {disk_result.unwrap_err()}",
+                retriability=retriability_of(disk_result),
+            )
 
         response = disk_result.unwrap()
         if not response.success:
-            return Err(f"Failed to get disk usage: {response.data.get('error', 'Unknown error')}")
+            return Err(
+                f"Failed to get disk usage: {response.data.get('error', 'Unknown error')}",
+                retriability=Retriability.NOT_RETRIABLE,
+            )
 
         disk_info = self._parse_multiline_domain_response(response.data)
         return Ok(

@@ -19,7 +19,7 @@ from django.conf import settings
 from django.core.cache import cache
 from django.utils import timezone
 
-from apps.common.types import Err, Ok, Result
+from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 
 from .virtualmin_gateway import VirtualminConfig, VirtualminGateway
 from .virtualmin_models import VirtualminServer
@@ -135,8 +135,10 @@ class VirtualminAuthenticationManager:
 
         # Determine authentication method to try
         methods_to_try = [force_method] if force_method else self._get_auth_method_priority()
+        is_read_only = program == "info" or program.startswith("list-")
 
         last_error = ""
+        last_retriability = Retriability.UNKNOWN
 
         for method in methods_to_try:
             logger.info(f"🔐 [Virtualmin Auth] Trying {method.value} for {program} on {self.server.hostname}")
@@ -157,19 +159,36 @@ class VirtualminAuthenticationManager:
                 else:
                     error_msg = result.unwrap_err()
                     last_error = f"{method.value}: {error_msg}"
+                    last_retriability = retriability_of(result)
                     logger.warning(f"❌ [Virtualmin Auth] {method.value} failed: {error_msg}")
+
+                    if last_retriability is Retriability.UNKNOWN and not is_read_only:
+                        logger.error(
+                            f"🛑 [Virtualmin Auth] Ambiguous {program} outcome; refusing authentication fallback"
+                        )
+                        return Err(last_error, retriability=Retriability.UNKNOWN)
 
                     # Mark this method as failed
                     self._cache_failed_auth_method(method, error_msg)
 
             except Exception as e:
                 last_error = f"{method.value}: {e!s}"
+                last_retriability = Retriability.UNKNOWN
                 logger.error(f"🔥 [Virtualmin Auth] {method.value} exception: {e}")
+                if not is_read_only:
+                    logger.error(
+                        f"🛑 [Virtualmin Auth] Ambiguous {program} exception; refusing authentication fallback"
+                    )
+                    return Err(last_error, retriability=Retriability.UNKNOWN)
+
                 self._cache_failed_auth_method(method, str(e))
 
         # All methods failed
         logger.error(f"🚨 [Virtualmin Auth] ALL methods failed for {program}: {last_error}")
-        return Err(f"All authentication methods failed. Last error: {last_error}")
+        return Err(
+            f"All authentication methods failed. Last error: {last_error}",
+            retriability=last_retriability,
+        )
 
     def _execute_with_method(self, method: AuthMethod, program: str, parameters: dict[str, Any]) -> Result[Any, str]:
         """Execute command with specific authentication method."""
@@ -200,7 +219,7 @@ class VirtualminAuthenticationManager:
             gateway = VirtualminGateway(config)
             result = gateway.call(program, parameters)
             if result.is_err():
-                return Err(str(result.unwrap_err()))
+                return Err(str(result.unwrap_err()), retriability=retriability_of(result))
             return Ok(result.unwrap())
         except Exception as e:
             return Err(f"ACL authentication failed: {e!s}")
@@ -236,7 +255,7 @@ class VirtualminAuthenticationManager:
                 )
                 return Ok(result.unwrap())
 
-            return Err(str(result.unwrap_err()))
+            return Err(str(result.unwrap_err()), retriability=retriability_of(result))
         except Exception as e:
             return Err(f"Master proxy authentication failed: {e!s}")
 
