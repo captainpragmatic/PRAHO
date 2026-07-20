@@ -171,7 +171,7 @@ class NodeRegistrationService:
             logger.error(f"🚨 [Registration] Failed to register node {deployment.hostname}: {e}")
             return Err(f"Registration failed: {e}")
 
-    def verify_and_activate(self, server: VirtualminServer) -> Result[VirtualminServer, str]:
+    def verify_and_activate(self, server: VirtualminServer) -> Result[VirtualminServer, str]:  # noqa: PLR0911  # Guarded credential-verification workflow: one early Err per gate (vault-miss/empty-cred/handshake/not-healthy/CAS)
         """
         #347 GAP 2: confirm the API credential provisioned on the node actually
         authenticates, then transition the server disabled -> active so placement
@@ -182,6 +182,9 @@ class NodeRegistrationService:
         """
         from django.utils import timezone  # noqa: PLC0415  # Deferred: local use
 
+        from apps.common.credential_vault import (  # noqa: PLC0415  # Circular: cross-app  # Deferred: avoids circular import
+            get_credential_vault,
+        )
         from apps.provisioning.virtualmin_gateway import (  # noqa: PLC0415  # Circular: cross-app  # Deferred: avoids circular import
             VirtualminConfig,
             VirtualminGateway,
@@ -192,11 +195,37 @@ class NodeRegistrationService:
         )
 
         try:
+            # Fetch the credential PRODUCTION will use: register_node stores it in the
+            # vault (keyed by hostname) and leaves encrypted_api_password=b"", so the
+            # server's own get_api_password() is empty. Verifying against the vault
+            # credential means activation proves the node accepts EXACTLY the credential
+            # every later API call will present. A vault miss (register_node tolerates a
+            # failed store) leaves the node disabled — never activated blind.
+            vault_result = get_credential_vault().get_credential(
+                service_type="virtualmin",
+                service_identifier=server.hostname,
+                reason="Node activation credential check (#347)",
+            )
+            if vault_result.is_err():
+                return Err(f"No vault credential for {server.hostname}, leaving disabled: {vault_result.unwrap_err()}")
+            vault_username, vault_password, _meta = vault_result.unwrap()
+            if not vault_username or not vault_password:
+                return Err(f"Empty vault credential for {server.hostname}, leaving disabled")
+
             config_data = get_virtualmin_config()
-            config = VirtualminConfig(
-                server=server,
-                timeout=config_data["timeout"],
+            # Probe with the vault credential via from_credentials. It carries an
+            # active-status probe object, so the gateway's non-active guard (which exists
+            # to stop routing to not-yet-live servers) does not block the one call whose
+            # purpose is to verify a not-yet-active node. This still makes a REAL
+            # authenticated `info` call to the real node over the pinned-cert TLS policy.
+            config = VirtualminConfig.from_credentials(
+                hostname=server.hostname,
+                username=vault_username,
+                password=vault_password,
+                port=server.api_port,
+                use_ssl=server.use_ssl,
                 verify_ssl=server.ssl_verify,
+                timeout=config_data["timeout"],
                 cert_fingerprint=server.ssl_cert_fingerprint or config_data.get("pinned_cert_sha256", ""),
             )
             health = VirtualminGateway(config).test_connection()
