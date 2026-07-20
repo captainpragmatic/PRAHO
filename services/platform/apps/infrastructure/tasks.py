@@ -16,6 +16,7 @@ from django.core.cache import cache
 from django.db import transaction
 from django.utils import timezone
 
+from apps.common.types import Err, Ok, Result
 from apps.infrastructure.deployment_service import get_deployment_service
 from apps.infrastructure.validation_service import get_validation_service
 
@@ -24,14 +25,23 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Module-level constants for scheduled tasks
-_STUCK_TIMEOUT_HOURS = 2
+# Module-level constants for scheduled tasks.
+# Threshold sits above the worst-case Ansible run (4 stages x 30-min timeout =
+# 2h) with margin; deploy_node also heartbeats updated_at between stages, so a
+# live deployment is never falsely reaped.
+_STUCK_TIMEOUT_HOURS = 3
+# Real mid-pipeline statuses (see NodeDeployment.VALID_TRANSITIONS). The old
+# list had a nonexistent 'configuring_server' and omitted 'configuring_backups'
+# and 'registering', so a worker dying in those states left the row stuck with
+# no recovery path. 'destroying' is handled separately (teardown retry, not
+# fail) by the stale-destroying sweep.
 _INTERMEDIATE_STATUSES = [
     "provisioning_node",
     "configuring_dns",
     "installing_panel",
-    "configuring_server",
+    "configuring_backups",
     "validating",
+    "registering",
 ]
 _DRIFT_SCAN_LOCK_ID = "drift_scan_running"
 _DRIFT_SCAN_LOCK_TIMEOUT = 900  # 15 minutes
@@ -446,64 +456,111 @@ def bulk_validate_nodes_task() -> dict[str, Any]:
     }
 
 
+def _teardown_cloud_deployment(deployment: Any) -> Result[bool, str]:
+    """Idempotent, convergent teardown for a failed/stranded deployment.
+
+    Shared by the cleanup sweep (failed rows) and the stale-'destroying' recovery
+    sweep so a partial teardown converges on the next run instead of stranding.
+    Nothing is cleared until it is confirmed gone:
+
+      failed -> destroying (claim) -> delete the cloud server -> only on a
+      confirmed delete: clear identifiers, write a log + audit, destroying ->
+      destroyed. A delete failure leaves the row in 'destroying' with its
+      external_node_id intact and returns Err, to be retried by the next sweep.
+    """
+    from apps.infrastructure.audit_service import (  # noqa: PLC0415  # Deferred: avoids circular import
+        InfrastructureAuditService,  # Circular: cross-app
+    )
+    from apps.infrastructure.cloud_gateway import get_cloud_gateway  # noqa: PLC0415  # Deferred: avoids circular import
+    from apps.infrastructure.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+        NodeDeploymentLog,  # Circular: cross-app
+    )
+    from apps.infrastructure.provider_config import (  # noqa: PLC0415  # Deferred: avoids circular import
+        get_provider_token,  # Circular: cross-app
+    )
+
+    # Claim into 'destroying' (idempotent — a retried stale-destroying row is
+    # already there).
+    if deployment.status == "failed":
+        try:
+            deployment.transition_to("destroying", "Scheduled teardown of failed deployment")
+        except Exception as e:
+            return Err(f"Cannot start teardown for {deployment.hostname}: {e}")
+
+    # Delete the cloud server if one was ever created.
+    if deployment.external_node_id and deployment.provider:
+        token_result = get_provider_token(deployment.provider)
+        if token_result.is_err():
+            return Err(f"No provider token for {deployment.hostname}: {token_result.unwrap_err()}")
+
+        gateway = get_cloud_gateway(deployment.provider.provider_type, token_result.unwrap())
+        delete_result = gateway.delete_server(deployment.external_node_id)
+        if delete_result.is_err():
+            try:
+                InfrastructureAuditService.log_destroy_failed(deployment, delete_result.unwrap_err())
+            except Exception as audit_err:
+                logger.warning(f"[Task:cleanup] Audit failed for destroy failure: {audit_err}")
+            return Err(f"Server deletion failed for {deployment.hostname}: {delete_result.unwrap_err()}")
+
+        # Confirmed gone (delete is idempotent on not-found): clear identifiers so
+        # this row is never reprocessed and the provider is never re-hit.
+        deployment.external_node_id = ""
+        deployment.ipv4_address = None
+        deployment.save(update_fields=["external_node_id", "ipv4_address", "updated_at"])
+
+    NodeDeploymentLog.objects.create(
+        deployment=deployment,
+        level="info",
+        message="Cloud resources torn down by scheduled cleanup",
+        phase="destroying",
+    )
+
+    try:
+        deployment.transition_to("destroyed", "Teardown complete")
+    except Exception as e:
+        return Err(f"Cannot finalize teardown for {deployment.hostname}: {e}")
+
+    try:
+        InfrastructureAuditService.log_destroy_completed(deployment)
+    except Exception as audit_err:
+        logger.warning(f"[Task:cleanup] Audit failed for destroy completion: {audit_err}")
+
+    return Ok(True)
+
+
 def cleanup_failed_deployments_task(max_age_hours: int = 24) -> dict[str, Any]:
     """
-    Async task to clean up old failed deployments.
+    Scheduled cleanup of old failed deployments.
 
-    Cleans up cloud resources and temporary files for deployments
-    that have been failed for longer than max_age_hours.
-
-    Args:
-        max_age_hours: Maximum age in hours before cleanup
-
-    Returns:
-        dict with cleanup summary
+    Runs each failed deployment older than max_age_hours through the shared
+    idempotent teardown: it deletes the cloud server, audits the deletion, clears
+    the identifiers, and transitions failed -> destroying -> destroyed so the row
+    is never reprocessed. A deployment whose delete fails is left in 'destroying'
+    (identifiers intact) for the recovery sweep to retry — it is NOT counted as
+    cleaned.
     """
-
     from apps.infrastructure.models import (  # noqa: PLC0415  # Deferred: avoids circular import
-        NodeDeployment,  # Circular: cross-app  # Deferred: avoids circular import
+        NodeDeployment,  # Circular: cross-app
     )
 
     logger.info(f"[Task:cleanup] Cleaning up failed deployments older than {max_age_hours}h")
 
     cutoff = timezone.now() - timedelta(hours=max_age_hours)
-
-    failed_deployments = NodeDeployment.objects.filter(
-        status="failed",
-        updated_at__lt=cutoff,
-    )
+    failed_deployments = NodeDeployment.objects.filter(status="failed", updated_at__lt=cutoff)
 
     cleaned_count = 0
-    errors = []
+    errors: list[dict[str, str]] = []
 
     for deployment in failed_deployments:
-        try:
-            # If server was created in the cloud, attempt cleanup via provider SDK
-            if deployment.external_node_id and deployment.provider:
-                try:
-                    from apps.infrastructure.provider_config import (  # noqa: PLC0415  # Deferred: avoids circular import
-                        get_provider_token,  # Circular: cross-app
-                    )
-
-                    token_result = get_provider_token(deployment.provider)
-                    if token_result.is_ok():
-                        from apps.infrastructure.cloud_gateway import (  # noqa: PLC0415  # Deferred: avoids circular import
-                            get_cloud_gateway,  # Circular: cross-app
-                        )
-
-                        gateway = get_cloud_gateway(deployment.provider.provider_type, token_result.unwrap())
-                        gateway.delete_server(deployment.external_node_id)
-                        logger.info(f"[Task:cleanup] Deleted cloud server for {deployment.hostname}")
-                except Exception as e:
-                    logger.warning(f"[Task:cleanup] Could not delete cloud server for {deployment.hostname}: {e}")
-
+        result = _teardown_cloud_deployment(deployment)
+        if result.is_ok():
             cleaned_count += 1
+            logger.info(f"[Task:cleanup] Tore down {deployment.hostname}")
+        else:
+            errors.append({"hostname": deployment.hostname, "error": result.unwrap_err()})
+            logger.warning(f"[Task:cleanup] Teardown deferred for {deployment.hostname}: {result.unwrap_err()}")
 
-        except Exception as e:
-            logger.error(f"[Task:cleanup] Error cleaning {deployment.hostname}: {e}")
-            errors.append({"hostname": deployment.hostname, "error": str(e)})
-
-    logger.info(f"[Task:cleanup] Cleaned up {cleaned_count} failed deployments")
+    logger.info(f"[Task:cleanup] Cleaned up {cleaned_count} failed deployments, {len(errors)} deferred")
 
     return {
         "success": len(errors) == 0,
@@ -523,6 +580,9 @@ def recover_stuck_deployments_task() -> dict[str, Any]:
         dict with recovery summary
     """
 
+    from apps.infrastructure.audit_service import (  # noqa: PLC0415  # Deferred: avoids circular import
+        InfrastructureAuditService,  # Circular: cross-app
+    )
     from apps.infrastructure.models import (  # noqa: PLC0415  # Deferred: avoids circular import
         NodeDeployment,  # Circular: cross-app  # Deferred: avoids circular import
     )
@@ -533,37 +593,50 @@ def recover_stuck_deployments_task() -> dict[str, Any]:
 
     cutoff = timezone.now() - timedelta(hours=stuck_timeout_hours)
 
-    stuck_deployments = NodeDeployment.objects.filter(
-        status__in=_INTERMEDIATE_STATUSES,
-        updated_at__lt=cutoff,
-    )
-
     recovered_count = 0
+    torn_down_count = 0
     errors: list[dict[str, str]] = []
 
+    # 1. Mid-pipeline stuck -> failed via the FSM (audited), so the report is
+    # never left in a state with no valid transition and the recovery leaves an
+    # audit trail (the old raw save() did neither).
+    stuck_deployments = NodeDeployment.objects.filter(status__in=_INTERMEDIATE_STATUSES, updated_at__lt=cutoff)
     for deployment in stuck_deployments:
         try:
             stuck_duration = (timezone.now() - deployment.updated_at).total_seconds() / 3600
             error_msg = (
                 f"Deployment stuck in '{deployment.status}' for {stuck_duration:.1f}h — auto-recovered to failed"
             )
-            logger.warning(
-                f"⚠️ [Task:recover_stuck] {deployment.hostname} stuck in '{deployment.status}' "
-                f"for {stuck_duration:.1f}h, marking failed"
-            )
-            deployment.status = "failed"
-            deployment.error_message = error_msg
-            deployment.save(update_fields=["status", "error_message", "updated_at"])
+            logger.warning(f"⚠️ [Task:recover_stuck] {deployment.hostname}: {error_msg}")
+            deployment.transition_to("failed", error_msg)
+            try:
+                InfrastructureAuditService.log_deployment_failed(deployment, error_msg, stage="recovery")
+            except Exception as audit_err:
+                logger.warning(f"[Task:recover_stuck] Audit failed for {deployment.hostname}: {audit_err}")
             recovered_count += 1
         except Exception as e:
             logger.error(f"🔥 [Task:recover_stuck] Error recovering {deployment.hostname}: {e}")
             errors.append({"hostname": deployment.hostname, "error": str(e)})
 
-    logger.info(f"✅ [Task:recover_stuck] Recovered {recovered_count} stuck deployments, {len(errors)} errors")
+    # 2. Stranded 'destroying' rows (a teardown whose delete failed, or a worker
+    # that died mid-destroy) -> retry the idempotent teardown to convergence.
+    stale_destroying = NodeDeployment.objects.filter(status="destroying", updated_at__lt=cutoff)
+    for deployment in stale_destroying:
+        result = _teardown_cloud_deployment(deployment)
+        if result.is_ok():
+            torn_down_count += 1
+        else:
+            errors.append({"hostname": deployment.hostname, "error": result.unwrap_err()})
+
+    logger.info(
+        f"✅ [Task:recover_stuck] Recovered {recovered_count} stuck, tore down {torn_down_count} stranded, "
+        f"{len(errors)} errors"
+    )
 
     return {
         "success": len(errors) == 0,
         "recovered_count": recovered_count,
+        "torn_down_count": torn_down_count,
         "errors": errors,
     }
 
