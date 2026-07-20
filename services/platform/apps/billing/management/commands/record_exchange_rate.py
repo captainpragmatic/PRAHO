@@ -1,4 +1,4 @@
-"""Record a provenanced exchange rate for offline fiscal issuance."""
+"""Record or promote a provenanced exchange rate for offline fiscal issuance."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from apps.audit.services import AuditService
+from apps.billing.fx_rate_ingestion import LegacyRatePromotionError, promote_legacy_rate
 from apps.billing.models import Currency, FXRate
 
 
@@ -30,6 +31,11 @@ class Command(BaseCommand):
         parser.add_argument("--reference", required=True, help="Publication URL or auditable document reference")
         parser.add_argument(
             "--recorded-by", required=True, dest="recorded_by", help="Operator identity for the audit trail"
+        )
+        parser.add_argument(
+            "--promote-legacy",
+            action="store_true",
+            help="Attach verified provenance to an existing matching legacy row",
         )
 
     def handle(self, *args: Any, **options: Any) -> None:
@@ -60,6 +66,14 @@ class Command(BaseCommand):
         except Currency.DoesNotExist as exc:
             raise CommandError(f"Both currencies must exist before recording {base_code}/{quote_code}") from exc
 
+        if options["promote_legacy"]:
+            try:
+                message = promote_legacy_rate(base, quote, as_of, rate_value, source, reference, recorded_by)
+            except LegacyRatePromotionError as exc:
+                raise CommandError(str(exc)) from exc
+            self.stdout.write(self.style.SUCCESS(message))
+            return
+
         with transaction.atomic():
             fx_rate, created = FXRate.objects.get_or_create(
                 base_code=base,
@@ -83,6 +97,10 @@ class Command(BaseCommand):
                         self.style.SUCCESS(f"Exchange rate {base_code}/{quote_code} for {as_of} already recorded")
                     )
                     return
+                if fx_rate.source == FXRate.Source.LEGACY_UNKNOWN and fx_rate.rate == rate_value:
+                    raise CommandError(
+                        f"{base_code}/{quote_code} for {as_of} lacks approved provenance; rerun with --promote-legacy"
+                    )
                 raise CommandError(
                     f"{base_code}/{quote_code} for {as_of} already exists with different rate or provenance"
                 )

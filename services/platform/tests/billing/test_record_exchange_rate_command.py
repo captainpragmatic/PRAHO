@@ -76,7 +76,105 @@ class RecordExchangeRateCommandTest(TestCase):
         self.assertEqual(FXRate.objects.get().rate, Decimal("5.01230000"))
         audit_log.assert_called_once()
 
+    @patch("apps.audit.services.AuditService.log_simple_event")
+    def test_legacy_row_requires_explicit_promotion(self, audit_log: object) -> None:
+        legacy = FXRate.objects.create(
+            base_code_id="EUR",
+            quote_code_id="RON",
+            rate=Decimal("5.01230000"),
+            as_of=date(2026, 7, 17),
+        )
+
+        with self.assertRaisesRegex(CommandError, "--promote-legacy"):
+            call_command(*self.args)
+
+        legacy.refresh_from_db()
+        self.assertEqual(legacy.source, FXRate.Source.LEGACY_UNKNOWN)
+        self.assertEqual(legacy.source_reference, "")
+        self.assertIsNone(legacy.fetched_at)
+        audit_log.assert_not_called()
+
+    @patch("apps.audit.services.AuditService.log_simple_event")
+    def test_promote_legacy_row_adds_evidence_without_changing_rate(self, audit_log: object) -> None:
+        legacy = FXRate.objects.create(
+            base_code_id="EUR", quote_code_id="RON", rate=Decimal("5.01230000"), as_of=date(2026, 7, 17)
+        )
+        output = StringIO()
+
+        call_command(*self.args, "--promote-legacy", stdout=output)
+
+        legacy.refresh_from_db()
+        self.assertEqual(FXRate.objects.count(), 1)
+        self.assertEqual(legacy.rate, Decimal("5.01230000"))
+        self.assertEqual(legacy.source, FXRate.Source.BNR)
+        self.assertEqual(legacy.source_reference, "https://www.bnr.ro/nbrfxrates.xml")
+        self.assertIsNotNone(legacy.fetched_at)
+        audit_log.assert_called_once()
+        args = audit_log.call_args.args
+        kwargs = audit_log.call_args.kwargs
+
+        self.assertEqual(args[0], "fx_rate_provenance_promoted")
+        self.assertEqual(kwargs["content_object"], legacy)
+
+        self.assertEqual(kwargs["old_values"]["source"], FXRate.Source.LEGACY_UNKNOWN)
+        self.assertEqual(kwargs["new_values"]["source"], FXRate.Source.BNR)
+        self.assertEqual(kwargs["metadata"]["recorded_by"], "finance@example.test")
+        self.assertIn("Promoted legacy EUR/RON", output.getvalue())
+
+    @patch("apps.audit.services.AuditService.log_simple_event")
+    def test_legacy_promotion_cannot_change_historical_rate(self, audit_log: object) -> None:
+        legacy = FXRate.objects.create(
+            base_code_id="EUR", quote_code_id="RON", rate=Decimal("5.09990000"), as_of=date(2026, 7, 17)
+        )
+
+        with self.assertRaisesRegex(CommandError, "different rate"):
+            call_command(*self.args, "--promote-legacy")
+
+        legacy.refresh_from_db()
+        self.assertEqual(legacy.rate, Decimal("5.09990000"))
+        self.assertEqual(legacy.source, FXRate.Source.LEGACY_UNKNOWN)
+        audit_log.assert_not_called()
+
+    @patch("apps.audit.services.AuditService.log_simple_event", side_effect=RuntimeError("audit unavailable"))
+    def test_legacy_promotion_rolls_back_when_audit_fails(self, audit_log: object) -> None:
+        legacy = FXRate.objects.create(
+            base_code_id="EUR", quote_code_id="RON", rate=Decimal("5.01230000"), as_of=date(2026, 7, 17)
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "audit unavailable"):
+            call_command(*self.args, "--promote-legacy")
+
+        legacy.refresh_from_db()
+        self.assertEqual(legacy.source, FXRate.Source.LEGACY_UNKNOWN)
+        self.assertEqual(legacy.source_reference, "")
+        self.assertIsNone(legacy.fetched_at)
+        audit_log.assert_called_once()
+
+    @patch("apps.audit.services.AuditService.log_simple_event")
+    def test_legacy_promotion_requires_an_existing_row(self, audit_log: object) -> None:
+        with self.assertRaisesRegex(CommandError, "No legacy"):
+            call_command(*self.args, "--promote-legacy")
+
+        self.assertFalse(FXRate.objects.exists())
+        audit_log.assert_not_called()
+
+    @patch("apps.audit.services.AuditService.log_simple_event")
+    def test_legacy_promotion_replay_is_idempotent(self, audit_log: object) -> None:
+        FXRate.objects.create(
+            base_code_id="EUR", quote_code_id="RON", rate=Decimal("5.01230000"), as_of=date(2026, 7, 17)
+        )
+        call_command(*self.args, "--promote-legacy")
+        audit_log.reset_mock()
+        output = StringIO()
+
+        call_command(*self.args, "--promote-legacy", stdout=output)
+
+        self.assertEqual(FXRate.objects.count(), 1)
+        audit_log.assert_not_called()
+        self.assertIn("already recorded", output.getvalue())
+
     def test_command_rejects_non_statutory_source(self) -> None:
+        """Only institutions, not ingestion mechanisms, are valid sources."""
         for invalid_source in ("legacy_unknown", "manual"):
             invalid_args = tuple(invalid_source if value == "bnr" else value for value in self.args)
 
