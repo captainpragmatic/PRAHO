@@ -115,7 +115,9 @@ class DriftRemediationTestBase(TestCase):
                 "actual_value": "cpx41",
             },
             requires_approval=True,
-            requires_restart=True,
+            # Default fixture does not reboot: only server_type drift sets this,
+            # and the restart-approval gate is exercised in TestRestartApprovalGate.
+            requires_restart=False,
         )
         self.service = DriftRemediationService()
 
@@ -199,6 +201,63 @@ class TestDismissReport(DriftRemediationTestBase):
         self.assertTrue(result.is_err())
         report.refresh_from_db()
         self.assertFalse(report.resolved, "dismissal must roll back when its mandatory audit fails")
+
+
+class TestRestartApprovalGate(DriftRemediationTestBase):
+    """#328-10 / ADR-0029: a remediation that reboots a customer-hosting server
+    (requires_restart, set by the scanner for server_type drift) must have the
+    restart itself explicitly signed off."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.remediation_request.requires_restart = True
+        self.remediation_request.save(update_fields=["requires_restart"])
+
+    @patch("django_q.tasks.async_task", return_value="task-1")
+    def test_approve_refuses_restart_without_confirmation(self, _mock_async):
+        result = self.service.approve_remediation(self.remediation_request.pk, self.admin)
+
+        self.assertTrue(result.is_err())
+        self.remediation_request.refresh_from_db()
+        self.assertEqual(self.remediation_request.status, "pending_approval")
+        self.assertFalse(self.remediation_request.restart_approved)
+
+    @patch("django_q.tasks.async_task", return_value="task-1")
+    def test_approve_with_confirmation_sets_flag(self, _mock_async):
+        result = self.service.approve_remediation(self.remediation_request.pk, self.admin, restart_approved=True)
+
+        self.assertTrue(result.is_ok(), f"approve with restart confirmation should succeed, got {result}")
+        self.remediation_request.refresh_from_db()
+        self.assertEqual(self.remediation_request.status, "approved")
+        self.assertTrue(self.remediation_request.restart_approved)
+
+    @patch("apps.infrastructure.drift_remediation.DriftRemediationService._take_snapshot")
+    def test_execute_refuses_requires_restart_without_approval(self, mock_snapshot):
+        self.remediation_request.status = "approved"
+        self.remediation_request.restart_approved = False
+        self.remediation_request.save(update_fields=["status", "restart_approved"])
+
+        result = self.service.execute_remediation(self.remediation_request)
+
+        self.assertTrue(result.is_err())
+        self.assertIn("restart", result.unwrap_err().lower())
+        mock_snapshot.assert_not_called()  # must fail before any destructive work
+
+    @patch("django_q.tasks.async_task", return_value="task-1")
+    def test_non_restart_request_needs_no_confirmation(self, _mock_async):
+        """A request that does not reboot approves normally without confirmation."""
+        other = DriftRemediationRequest.objects.create(
+            report=self._make_report(field_name="ipv4_address"),
+            deployment=self.deployment,
+            action_type="apply_desired",
+            action_details={"field_name": "ipv4_address"},
+            requires_approval=True,
+            requires_restart=False,
+        )
+
+        result = self.service.approve_remediation(other.pk, self.admin)
+
+        self.assertTrue(result.is_ok())
 
 
 class TestApproveReject(DriftRemediationTestBase):
@@ -534,8 +593,16 @@ class TestExecuteRemediation(DriftRemediationTestBase):
         self.assertIn("already in progress", result.unwrap_err())
 
     def test_remediation_requires_restart_flag(self):
-        """server_type changes should have requires_restart=True."""
-        self.assertTrue(self.remediation_request.requires_restart)
+        """The requires_restart flag (set by the scanner for server_type drift)
+        is persisted on the request."""
+        req = DriftRemediationRequest.objects.create(
+            report=self._make_report(field_name="firewall"),
+            deployment=self.deployment,
+            action_type="apply_desired",
+            requires_restart=True,
+        )
+        req.refresh_from_db()
+        self.assertTrue(req.requires_restart)
 
     @patch("apps.infrastructure.drift_remediation.DriftRemediationService._take_snapshot")
     def test_execute_fails_fast_for_unfixable_field_without_snapshot(self, mock_snapshot):

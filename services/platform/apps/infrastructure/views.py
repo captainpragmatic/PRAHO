@@ -1514,8 +1514,11 @@ def drift_remediation_approve(request: HttpRequest, pk: int) -> HttpResponse:
     )
 
     user = cast("User", request.user)
+    # ADR-0029: a remediation that reboots the server needs the restart itself
+    # explicitly confirmed (a separate checkbox on the approval form).
+    restart_approved = request.POST.get("restart_approved") in ("1", "true", "on", "yes")
     service = get_drift_remediation_service()
-    result = service.approve_remediation(pk, user)
+    result = service.approve_remediation(pk, user, restart_approved=restart_approved)
 
     if result.is_ok():
         messages.success(request, _("Remediation approved. Execution queued."))

@@ -146,8 +146,15 @@ class DriftRemediationService:
         self,
         request_id: int,
         user: User,
+        restart_approved: bool = False,
     ) -> Result[DriftRemediationRequest, str]:
-        """Approve and queue execution asynchronously (single owner of this transition)."""
+        """Approve and queue execution asynchronously (single owner of this transition).
+
+        ADR-0029: when the request reboots a customer-hosting server
+        (requires_restart), the reboot must be explicitly confirmed here; the
+        approval and the restart sign-off are set together in one atomic write,
+        so a later re-approval is the only thing that can change them.
+        """
         from django_q.tasks import async_task  # noqa: PLC0415  # Deferred: avoids circular import
 
         try:
@@ -157,6 +164,9 @@ class DriftRemediationService:
 
         if req.action_type != "apply_desired":
             return Err("This drift has no automated fix — resolve it manually and re-scan, or accept the drift")
+
+        if req.requires_restart and not restart_approved:
+            return Err("This remediation reboots the server — the restart must be explicitly approved")
 
         # Status flip + task enqueue in one transaction (django-q2 writes to the
         # django_q table, so a failed enqueue rolls the approval back too). The
@@ -169,6 +179,7 @@ class DriftRemediationService:
                 approved_by=user,
                 approved_at=now,
                 execution_claimed_at=now,
+                restart_approved=restart_approved,
             )
             if not updated:
                 req.refresh_from_db()
@@ -450,6 +461,29 @@ class DriftRemediationService:
 
         return Err(f"Field '{field}' has no durable write-back")
 
+    def _preflight_execution(self, request: DriftRemediationRequest) -> Result[bool, str]:
+        """Refuse work BEFORE any snapshot so a legacy/manual/unapproved-restart
+        request fails fast instead of no-op'ing into a false 'remediated' (and a
+        pointless destructive rollback)."""
+        details = request.action_details or {}
+        field_name = details.get("field_name", "")
+        if request.action_type != "apply_desired" or field_name not in AUTO_FIXABLE_FIELDS:
+            self._mark_failed(
+                request,
+                f"No automated fix available for field '{field_name or 'unknown'}' — manual intervention required",
+            )
+            return Err(f"No automated fix available for field '{field_name or 'unknown'}'")
+
+        # ADR-0029: never reboot a customer-hosting server under the generic
+        # approval — the restart needs its own sign-off. Enforced here too (not
+        # only at approval) so no path reaches the destructive resize/power op
+        # without explicit restart consent.
+        if request.requires_restart and not request.restart_approved:
+            self._mark_failed(request, "Remediation requires a server restart that was not approved")
+            return Err("Remediation requires a server restart that was not approved")
+
+        return Ok(True)
+
     def execute_remediation(  # noqa: PLR0911  # Multi-step workflow: each gate exits early
         self,
         request: DriftRemediationRequest,
@@ -465,17 +499,12 @@ class DriftRemediationService:
             return claim_result
         request.refresh_from_db()
 
-        # Pre-flight: refuse work that has no automated fix BEFORE any snapshot,
-        # so legacy/manual requests fail fast instead of no-op'ing into a
-        # false "remediated" (and a pointless destructive rollback on failure).
+        preflight = self._preflight_execution(request)
+        if preflight.is_err():
+            return preflight
+
         details = request.action_details or {}
         field_name = details.get("field_name", "")
-        if request.action_type != "apply_desired" or field_name not in AUTO_FIXABLE_FIELDS:
-            self._mark_failed(
-                request,
-                f"No automated fix available for field '{field_name or 'unknown'}' — manual intervention required",
-            )
-            return Err(f"No automated fix available for field '{field_name or 'unknown'}'")
 
         # Step 1: Take snapshot
         snapshot_result = self._take_snapshot(deployment)
