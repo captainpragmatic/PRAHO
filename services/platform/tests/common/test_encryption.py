@@ -14,7 +14,9 @@ from apps.common.encryption import (
     VERSIONED_V2_PREFIX,
     DecryptionError,
     EncryptionError,
+    _aesgcm_cache,
     _clear_aesgcm_cache,
+    _get_aesgcm,
     decrypt_if_needed,
     decrypt_sensitive_data,
     decrypt_value,
@@ -310,8 +312,13 @@ class TestAADBinding(SimpleTestCase):
     def test_aad_roundtrip(self) -> None:
         aad = b"table:field:pk"
         encrypted = encrypt_sensitive_data("aad-data", aad=aad)
-        # v2 decryption is self-contained — AAD is embedded
-        self.assertEqual(decrypt_sensitive_data(encrypted), "aad-data")
+        self.assertEqual(decrypt_sensitive_data(encrypted, aad=aad), "aad-data")
+
+    def test_v2_expected_aad_mismatch_is_rejected(self) -> None:
+        encrypted = encrypt_sensitive_data("row-a", aad=b"table:field:row-a")
+
+        with self.assertRaises(DecryptionError):
+            decrypt_sensitive_data(encrypted, aad=b"table:field:row-b")
 
     def test_aad_mismatch_fails_gcm_auth(self) -> None:
         """Ciphertext encrypted with one AAD cannot be decrypted if AAD is tampered."""
@@ -332,10 +339,31 @@ class TestAADBinding(SimpleTestCase):
         encrypted = encrypt_sensitive_data("no-aad")
         self.assertTrue(encrypted.startswith(VERSIONED_V1_PREFIX))
 
-    def test_v2_with_empty_aad(self) -> None:
-        encrypted = encrypt_sensitive_data("empty-aad", aad=b"")
-        self.assertTrue(encrypted.startswith(VERSIONED_V2_PREFIX))
-        self.assertEqual(decrypt_sensitive_data(encrypted), "empty-aad")
+    def test_v2_with_empty_aad_is_rejected(self) -> None:
+        with self.assertRaises(EncryptionError):
+            encrypt_sensitive_data("empty-aad", aad=b"")
+
+        with self.assertRaises(EncryptionError):
+            encrypt_sensitive_data("", aad=b"")
+
+    def test_existing_v2_ciphertext_with_empty_aad_is_rejected(self) -> None:
+        key = base64.urlsafe_b64decode(TEST_KEY)
+        nonce = os.urandom(12)
+        ciphertext = AESGCM(key).encrypt(nonce, b"legacy-empty-aad", b"")
+        wire = VERSIONED_V2_PREFIX + base64.urlsafe_b64encode(
+            b"\x00\x00" + nonce + ciphertext
+        ).decode("ascii")
+
+        with self.assertRaises(DecryptionError):
+            decrypt_sensitive_data(wire)
+
+    def test_v2_ciphertext_rejects_non_base64_characters(self) -> None:
+        encrypted = encrypt_sensitive_data("strict-base64", aad=b"table:field:row")
+        prefix, encoded = encrypted.rsplit(":", 1)
+        malformed = f"{prefix}:{encoded[:5]}!{encoded[5:]}"
+
+        with self.assertRaises(DecryptionError):
+            decrypt_sensitive_data(malformed)
 
     def test_v2_with_long_aad(self) -> None:
         aad = b"a" * 500
@@ -408,6 +436,12 @@ class TestKeyringStrictValidation(SimpleTestCase):
 
     def setUp(self) -> None:
         _clear_aesgcm_cache()
+
+    def test_aesgcm_cache_is_bounded_during_key_rotation(self) -> None:
+        for marker in range(32):
+            _get_aesgcm(bytes([marker]) * 32)
+
+        self.assertLessEqual(len(_aesgcm_cache), 8)
 
     @override_settings(ENCRYPTION_KEYS=[TEST_KEY, "not-valid-base64-@@@@"])
     def test_malformed_previous_key_raises_not_skipped(self) -> None:

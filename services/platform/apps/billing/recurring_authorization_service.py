@@ -195,7 +195,10 @@ class RecurringPaymentAuthorizationService:
         with transaction.atomic():
             locked_customer = lock_recurring_collection_customer(customer.id)
             locked_payment_method = (
-                CustomerPaymentMethod.objects.select_for_update().filter(pk=payment_method.pk).first()
+                CustomerPaymentMethod.objects.select_for_update()
+                .defer("bank_details")
+                .filter(pk=payment_method.pk)
+                .first()
             )
             if locked_payment_method is None:
                 return Err("Saved payment method is not active")
@@ -333,6 +336,7 @@ class RecurringPaymentAuthorizationService:
                 locked_authorization = (
                     RecurringPaymentAuthorization.objects.select_for_update()
                     .select_related("payment_method")
+                    .defer("payment_method__bank_details")
                     .get(pk=authorization.pk)
                 )
 
