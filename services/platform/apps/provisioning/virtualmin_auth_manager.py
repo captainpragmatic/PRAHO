@@ -196,7 +196,6 @@ class VirtualminAuthenticationManager:
                     error_msg = str(error)
                     last_retriability = retriability_of(result)
                     last_error = f"{method.value}: {error_msg}"
-                    last_retriability = retriability_of(result)
                     logger.warning(f"❌ [Virtualmin Auth] {method.value} failed: {error_msg}")
 
                     if isinstance(error, VirtualminAuthorizationError):
@@ -204,6 +203,13 @@ class VirtualminAuthenticationManager:
                         # to a higher-privilege method would bypass the ACL —
                         # terminal, never fall through.
                         return Err(last_error, retriability=last_retriability)
+                    if isinstance(error, AuthMethodUnavailableError):
+                        # Method NOT configured: nothing was ever attempted, so
+                        # it carries zero double-execution risk — try the next
+                        # method. This MUST precede the ambiguous-mutation check,
+                        # whose UNKNOWN-default would otherwise strand a mutation
+                        # fallback on any server without master-proxy creds.
+                        continue
                     if last_retriability is Retriability.UNKNOWN and not is_read_only:
                         # Ambiguous MUTATION outcome (#253/#254): the request may
                         # already have executed. Replaying it via a fallback
@@ -212,8 +218,6 @@ class VirtualminAuthenticationManager:
                             f"🛑 [Virtualmin Auth] Ambiguous {program} outcome; refusing authentication fallback"
                         )
                         return Err(last_error, retriability=Retriability.UNKNOWN)
-                    if isinstance(error, AuthMethodUnavailableError):
-                        continue
                     # Everything else — a 401 (authentication rejected, the
                     # operation did not run), a read-only ambiguous outcome
                     # (safe to re-read), or a proven-rejection mutation error —

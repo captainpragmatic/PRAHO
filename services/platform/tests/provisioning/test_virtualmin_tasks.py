@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 from decimal import Decimal
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from django.db import transaction
 from django.test import TestCase, override_settings
@@ -20,7 +20,7 @@ from django.utils import timezone
 from django_q.models import Schedule
 
 from apps.billing.models import Currency
-from apps.common.types import Ok
+from apps.common.types import Err, Ok, Retriability
 from apps.customers.models import Customer
 from apps.provisioning.models import Service, ServicePlan
 from apps.provisioning.signals import handle_service_virtualmin_reconciliation
@@ -742,6 +742,27 @@ class TestReviewHardening325(VirtualminTaskTestBase):
 
         job.refresh_from_db()
         self.assertEqual(job.task_id, "task-xyz")
+
+    def test_lifecycle_retry_arms_next_retry_on_retriable_failure(self):
+        """A RETRIABLE gateway failure DURING a retry must keep next_retry_at
+        armed. mark_failed() defaulted to UNKNOWN, which disarms it — stranding
+        a job whose retry_count is still below max after a transient failure."""
+        self.account.status = "active"
+        self.account.save(update_fields=["status"])
+        force_status(self.service, "suspended")  # suspend is still the desired state
+        job = self._failed_job(
+            operation="suspend_domain", status="pending", retry_count=1, claimed_at=timezone.now()
+        )
+        gateway = MagicMock()
+        gateway.call.return_value = Err("gateway temporarily unavailable", retriability=Retriability.RETRIABLE)
+
+        with patch("apps.provisioning.virtualmin_service.VirtualminGateway", return_value=gateway):
+            result = retry_virtualmin_job(str(job.id))
+
+        self.assertFalse(result["success"])
+        job.refresh_from_db()
+        self.assertEqual(job.status, "failed")
+        self.assertIsNotNone(job.next_retry_at)
 
     def test_stale_unsuspend_job_is_superseded_by_current_state(self):
         """An old unsuspend retry must not re-enable hosting for a since-suspended service."""

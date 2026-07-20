@@ -1086,14 +1086,17 @@ class VirtualminProvisioningService:
 
         if result.is_err():
             error_msg = str(result.unwrap_err())
-            job.mark_failed(error_msg)
+            # Thread the gateway's retriability so a RETRIABLE failure during a
+            # retry keeps next_retry_at armed instead of stranding the job.
+            job.mark_failed(error_msg, retriability=retriability_of(result))
             return Err(error_msg, retriability=retriability_of(result))
 
         response = result.unwrap()
         if not response.success:
+            # A structured application rejection is a proven, permanent failure.
             error_msg = response.data.get("error", f"{program} failed")
-            job.mark_failed(error_msg, response.data)
-            return Err(error_msg)
+            job.mark_failed(error_msg, response.data, retriability=Retriability.NOT_RETRIABLE)
+            return Err(error_msg, retriability=Retriability.NOT_RETRIABLE)
 
         previous_status = account.status
         with transaction.atomic():

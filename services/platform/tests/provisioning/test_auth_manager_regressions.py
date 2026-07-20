@@ -17,6 +17,7 @@ from django.test import TestCase, override_settings
 from apps.common.types import Err, Ok, Retriability, retriability_of
 from apps.provisioning.virtualmin_auth_manager import (
     AuthMethod,
+    AuthMethodUnavailableError,
     VirtualminAuthenticationManager,
 )
 from apps.provisioning.virtualmin_gateway import (
@@ -137,6 +138,26 @@ class ExecuteWithMethodDispatchTests(TestCase):
         self.assertTrue(result.is_err())
         self.assertEqual(result.retriability, Retriability.UNKNOWN)
         execute.assert_called_once()
+
+    @patch.object(VirtualminAuthenticationManager, "_cache_failed_auth_method")
+    @patch.object(VirtualminAuthenticationManager, "_get_auth_method_priority")
+    @patch.object(VirtualminAuthenticationManager, "_execute_with_method")
+    def test_unavailable_method_does_not_strand_mutation_fallback(
+        self, mock_execute: MagicMock, mock_priority: MagicMock, _cache: MagicMock
+    ) -> None:
+        """A method that is NOT configured (AuthMethodUnavailableError) attempted
+        nothing, so a mutation must still fall through to the next method — the
+        unavailable check must precede the ambiguous-mutation terminal check."""
+        mock_priority.return_value = [AuthMethod.MASTER_PROXY, AuthMethod.SSH_SUDO]
+        mock_execute.side_effect = [
+            Err(AuthMethodUnavailableError("Master admin credentials not configured")),
+            Ok({"success": True}),
+        ]
+
+        result = self.manager.execute_virtualmin_command("create-domain", {})
+
+        self.assertTrue(result.is_ok())
+        self.assertEqual(mock_execute.call_count, 2)
 
     def test_auth_fallback_allows_ambiguous_read_only_outcome(self) -> None:
         ambiguous = Err("response lost", retriability=Retriability.UNKNOWN)
