@@ -326,6 +326,26 @@ class StripeRefundTests(TestCase):
         self.assertEqual(result["refunds"][0]["payment_intent_id"], "pi_recent")
         self.assertEqual(result["refunds"][0]["amount_cents"], 987)
 
+    def test_list_refunds_skips_malformed_refund_without_dropping_valid_ones(self):
+        """One malformed refund must not discard the whole discovery page (#339).
+
+        Regression: a list comprehension over `auto_paging_iter()` let a single
+        ValueError abort the entire page, returning `success=False, refunds=[]`
+        and silently defeating the daily reconciliation safety-net.
+        """
+        mock_stripe = MagicMock()
+        mock_stripe.Refund.list.return_value.auto_paging_iter.return_value = [
+            MagicMock(id="re_valid_1", payment_intent="pi_v1", amount=500, currency="ron", status="succeeded", reason=None),
+            # payment_intent=None → _normalize_refund raises ValueError
+            MagicMock(id="re_malformed", payment_intent=None, amount=700, currency="ron", status="succeeded", reason=None),
+            MagicMock(id="re_valid_2", payment_intent="pi_v2", amount=900, currency="ron", status="succeeded", reason=None),
+        ]
+
+        result = self._make_gateway(mock_stripe).list_refunds(created_gte=123456, limit=100)
+
+        self.assertTrue(result["success"])
+        self.assertEqual([r["refund_id"] for r in result["refunds"]], ["re_valid_1", "re_valid_2"])
+
 
 # ===============================================================================
 # 6. Gateway-First Refund Pattern Tests (Fix #1 + #2)

@@ -363,7 +363,9 @@ class RefundService:
                 except Invoice.DoesNotExist:
                     return Err("Failed to process refund: Invoice not found")
 
-                if invoice_snapshot.status not in {"paid", "completed"}:
+                # partially_refunded is refundable again while balance remains (mirrors
+                # refund_order); the fully-refunded invoice sits in 'refunded' and is excluded.
+                if invoice_snapshot.status not in {"paid", "completed", "partially_refunded"}:
                     return Err(f"Invoice status '{invoice_snapshot.status}' is not eligible for refund")
 
                 payment_result = RefundService._resolve_refundable_payment(None, invoice_snapshot)
@@ -576,7 +578,7 @@ class RefundService:
                     reason=f"Cannot refund {entity_type} in 'draft' status",
                 )
             )
-        elif status not in ["paid", "completed"]:
+        elif status not in ["paid", "completed", "partially_refunded"]:
             return Ok(
                 RefundEligibility(
                     is_eligible=False,
@@ -735,7 +737,10 @@ class RefundService:
         status = invoice.status
         if status == "draft":
             return False, "Cannot refund invoice in 'draft' status"
-        if status not in ["paid", "completed"]:
+        # partially_refunded stays eligible while balance remains; the fully-refunded
+        # guard in _validate_invoice_refund_eligibility (already_refunded >= total) blocks
+        # a refunded invoice from being over-refunded.
+        if status not in ["paid", "completed", "partially_refunded"]:
             return False, "Invoice not eligible"
         return True, ""
 
@@ -1055,6 +1060,12 @@ class RefundService:
         expected_terminal = {"succeeded": "completed", "failed": "failed", "canceled": "cancelled"}
         current_status = str(refund.status)
         if current_status in {"completed", "failed", "cancelled", "rejected"}:
+            # A non-terminal status (pending/requires_action) arriving after the refund is
+            # already terminal is a reordered earlier-lifecycle event — Stripe timestamps are
+            # second-resolution, so a same-second pending-after-succeeded is common. Acknowledge
+            # it as a no-op rather than raising a mismatch that makes the webhook retry forever.
+            if normalized in {"pending", "requires_action"}:
+                return Ok(refund)
             if expected_terminal.get(normalized) != current_status:
                 return Err(f"Refund state mismatch: cannot apply '{gateway_status}' to '{current_status}'")
             return Ok(refund)
@@ -1140,12 +1151,20 @@ class RefundService:
 
     @staticmethod
     def _legacy_refund_scope_for_payment(payment: Payment) -> Q | None:
-        """Locate pre-Refund.payment rows through the payment's document relation."""
+        """Locate pre-Refund.payment rows through the payment's document relation.
+
+        A Payment can carry BOTH invoice_id and proforma_id (no exclusivity constraint),
+        so the scopes must be ORed — an if/elif would drop a proforma-order-linked legacy
+        refund whenever invoice_id is populated, under-counting the reserved balance and
+        letting a subsequent refund exceed the payment amount.
+        """
+        scope: Q | None = None
         if payment.invoice_id is not None:
-            return Q(invoice_id=payment.invoice_id)
+            scope = Q(invoice_id=payment.invoice_id)
         if payment.proforma_id is not None:
-            return Q(order__proforma_id=payment.proforma_id)
-        return None
+            proforma_scope = Q(order__proforma_id=payment.proforma_id)
+            scope = proforma_scope if scope is None else scope | proforma_scope
+        return scope
 
     @staticmethod
     def _project_settled_refunds(payment: Payment, invoice: Invoice | None) -> Result[dict[str, bool], str]:
@@ -1814,13 +1833,20 @@ class RefundService:
             )
 
         gateway = PaymentGatewayFactory.create_gateway(payment.payment_method)
-        # Durable across retries of the same logical refund: derived from the payment and
-        # its CURRENT refunded ledger state — a retry after a timeout reuses the key (Stripe
-        # replays the same refund), while the next distinct partial gets a fresh key.
+        # Reconstructible idempotency key: the same logical refund derives the same key so a
+        # retry replays the same gateway refund, while a distinct partial gets a fresh key.
+        # LIMITATION: the key is derived from the payment's CURRENT refunded balance and
+        # terminal-attempt count, so it is stable only while no OTHER refund on this payment
+        # commits between the original attempt and the retry — intervening activity shifts
+        # already_refunded and mints a new key, which can re-execute the refund at the gateway.
+        # A fully stable key needs a persisted pre-gateway refund intent (tracked as a
+        # follow-up). The webhook + reconciliation convergence backstop the residual window.
         remaining = RefundService._get_remaining_payment_refund_amount(payment)
         already_refunded = (payment.amount_cents - remaining) if remaining is not None else 0
         terminal_attempts = payment.refunds.filter(status__in=("failed", "cancelled", "rejected")).count()
-        refund_idempotency_key = (f"refund:{payment.id}:{already_refunded}:{effective_amount}:{terminal_attempts}")[:64]
+        # No length slice: the readable key is ~81 chars max (well under Stripe's 255 limit);
+        # a [:64] slice could truncate away amount/terminal_attempts and collide distinct refunds.
+        refund_idempotency_key = f"refund:{payment.id}:{already_refunded}:{effective_amount}:{terminal_attempts}"
         refund_result = gateway.refund_payment(
             gateway_txn_id=payment.gateway_txn_id,
             amount_cents=refund_amount_cents,
@@ -2041,11 +2067,20 @@ class RefundConvergenceService:
                         )
                     )
                     if create_result.is_err():
+                        # Err after a durable write inside atomic() COMMITS unless flagged.
+                        # A failed create can leave the connection needs_rollback (DB error)
+                        # OR a clean no-write state; flag uniformly so convergence never
+                        # commits a half-written refund (mirrors _process_bidirectional_refund).
+                        transaction.set_rollback(True)
                         return Err(create_result.unwrap_err())
                     refund = create_result.unwrap()
 
                 state_result = RefundService._advance_refund_status(refund, gateway_status)
                 if state_result.is_err():
+                    # FSM advance may have persisted intermediate saves + history rows
+                    # (and _validate_existing_refund may have attached the payment); a
+                    # plain return Err would commit that partial state.
+                    transaction.set_rollback(True)
                     return Err(state_result.unwrap_err())
                 refund = state_result.unwrap()
                 metadata = dict(refund.metadata or {})
@@ -2061,6 +2096,11 @@ class RefundConvergenceService:
                 refund.save(update_fields=["metadata", "updated_at"])
                 projection = RefundService._project_settled_refunds(payment, invoice)
                 if projection.is_err():
+                    # By here the Refund row, FSM saves, history rows, and metadata are
+                    # written, and the projection may have saved the Payment before failing
+                    # on the Invoice. Roll back so the ledger row and its projection stay
+                    # consistent (an idempotent retry re-converges cleanly).
+                    transaction.set_rollback(True)
                     return Err(projection.unwrap_err())
                 return Ok(refund)
         except Exception as exc:

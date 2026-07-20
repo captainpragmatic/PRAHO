@@ -516,7 +516,22 @@ class StripeGateway(BasePaymentGateway):
         page_size = min(max(limit, 1), 100)
         try:
             page = self._stripe.Refund.list(created={"gte": created_gte}, limit=page_size)
-            refunds = [self._normalize_refund(refund) for refund in page.auto_paging_iter()]
+            refunds: list[RefundStatusResult] = []
+            skipped = 0
+            for refund in page.auto_paging_iter():
+                try:
+                    refunds.append(self._normalize_refund(refund))
+                except ValueError as item_error:
+                    # A single malformed refund must not discard the whole discovery page —
+                    # that would silently defeat the daily reconciliation safety-net. Skip it
+                    # (the valid refunds still converge) and log for reconciliation follow-up.
+                    skipped += 1
+                    refund_ref = refund.get("id") if isinstance(refund, dict) else getattr(refund, "id", "unknown")
+                    self.logger.warning(
+                        "⚠️ Stripe refund listing skipped malformed refund %s: %s", refund_ref, item_error
+                    )
+            if skipped:
+                self.logger.warning("⚠️ Stripe refund listing skipped %d malformed refund(s)", skipped)
             return RefundListResult(success=True, refunds=refunds, error=None)
         except Exception as e:
             self.logger.error("🔥 Stripe refund listing failed: %s", e)

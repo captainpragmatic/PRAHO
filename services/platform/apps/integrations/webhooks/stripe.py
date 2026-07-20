@@ -466,9 +466,15 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
         refund_list = charge.get("refunds", {}).get("data", [])
         if not isinstance(refund_list, list):
             return False, "Malformed Stripe charge refunds"
+        failures: list[str] = []
         for refund_object in refund_list:
             if not isinstance(refund_object, dict):
-                return False, "Malformed embedded Stripe refund"
+                # Do NOT short-circuit: a bad sibling here would starve every later valid
+                # embedded refund, and each Stripe retry would stop at the same bad item.
+                # Record it and keep going — convergence is idempotent, so re-processing the
+                # already-converged siblings on the whole-event retry is safe.
+                failures.append("Malformed embedded Stripe refund")
+                continue
             normalized_refund = {
                 **refund_object,
                 "payment_intent": refund_object.get("payment_intent") or charge.get("payment_intent"),
@@ -477,7 +483,10 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
             normalized_payload = {**payload, "data": {"object": normalized_refund}}
             accepted, message = self.handle_refund_event(event_type, normalized_payload)
             if not accepted:
-                return False, message
+                failures.append(message)
+        if failures:
+            converged_count = len(refund_list) - len(failures)
+            return False, f"Charge refunds: {converged_count} converged, {len(failures)} failed: {'; '.join(failures)}"
         return True, f"Charge refunds converged: {len(refund_list)}"
 
     @staticmethod

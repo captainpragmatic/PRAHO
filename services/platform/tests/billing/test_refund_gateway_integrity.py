@@ -1220,3 +1220,272 @@ class RefundGatewayIntegrityTests(TestCase):
         self.assertEqual(invoice.status, "paid")
         self.assertEqual(payment.status, "succeeded")
         self.assertFalse(Refund.objects.exists())
+
+
+class RefundConvergenceHardeningTests(TestCase):
+    """Discriminating regressions for the #339 convergence-hardening fixes.
+
+    Each test fails against the pre-#339 code and passes after the fix. Factory
+    helpers are duplicated (not inherited) so this class does not re-run the
+    RefundGatewayIntegrityTests suite under a second class name.
+    """
+
+    def setUp(self) -> None:
+        self.currency, _ = Currency.objects.get_or_create(
+            code="RON",
+            defaults={"name": "Romanian Leu", "symbol": "lei", "decimals": 2},
+        )
+        self.customer = Customer.objects.create(
+            name="Refund Convergence SRL",
+            customer_type="company",
+            company_name="Refund Convergence SRL",
+            status="active",
+        )
+
+    def _make_invoice(self, *, total_cents: int = 10_000) -> Invoice:
+        return Invoice.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            number=f"INV-{uuid.uuid4().hex[:10]}",
+            status="paid",
+            subtotal_cents=total_cents,
+            tax_cents=0,
+            total_cents=total_cents,
+            due_at=timezone.now() + timedelta(days=14),
+            bill_to_name=self.customer.company_name,
+        )
+
+    def _make_order(self, invoice: Invoice, *, total_cents: int = 10_000) -> Order:
+        return Order.objects.create(
+            order_number=f"ORD-{uuid.uuid4().hex[:10]}",
+            customer=self.customer,
+            currency=self.currency,
+            invoice=invoice,
+            status="completed",
+            subtotal_cents=total_cents,
+            tax_cents=0,
+            total_cents=total_cents,
+            customer_email="billing@example.test",
+            customer_name=self.customer.company_name,
+        )
+
+    def _make_payment(self, invoice: Invoice, *, transaction_id: str) -> Payment:
+        return Payment.objects.create(
+            customer=self.customer,
+            invoice=invoice,
+            currency=self.currency,
+            status="succeeded",
+            payment_method="stripe",
+            amount_cents=invoice.total_cents,
+            gateway_txn_id=transaction_id,
+        )
+
+    def test_convergence_rolls_back_new_refund_when_projection_fails(self) -> None:
+        """Fix 1: a post-write Err in converge must roll back, not commit a half state.
+
+        Before the fix, converge_gateway_refund returned Err after creating the Refund
+        row and advancing its FSM without set_rollback(True), committing a completed
+        ledger row whose Payment/Invoice projection never ran.
+        """
+        invoice = self._make_invoice()
+        payment = self._make_payment(invoice, transaction_id="pi_projection_rollback")
+        from apps.billing.refund_service import RefundConvergenceService  # noqa: PLC0415
+
+        with patch.object(RefundService, "_project_settled_refunds", return_value=Err("forced projection failure")):
+            result = RefundConvergenceService.converge_gateway_refund(
+                {
+                    "refund_id": "re_projection_rollback",
+                    "payment_intent_id": "pi_projection_rollback",
+                    "amount_cents": 10_000,
+                    "currency": "ron",
+                    "status": "succeeded",
+                }
+            )
+
+        self.assertTrue(result.is_err())
+        self.assertFalse(Refund.objects.filter(gateway_refund_id="re_projection_rollback").exists())
+        payment.refresh_from_db()
+        invoice.refresh_from_db()
+        self.assertEqual(payment.status, "succeeded")
+        self.assertEqual(invoice.status, "paid")
+
+    def test_partially_refunded_invoice_accepts_second_partial_refund(self) -> None:
+        """Fix 2: refund_invoice must allow a second partial while balance remains.
+
+        Before the fix, the invoice eligibility gates excluded 'partially_refunded'
+        (unlike refund_order), rejecting a legitimate second partial refund.
+        """
+        invoice = self._make_invoice(total_cents=10_000)
+        self._make_payment(invoice, transaction_id="pi_two_partials")
+        gateway = MagicMock()
+        gateway.refund_payment.return_value = {
+            "success": True,
+            "refund_id": "",
+            "amount_refunded_cents": 3_000,
+            "status": "succeeded",
+            "error": None,
+        }
+        partial: RefundData = {"refund_type": "partial", "amount_cents": 3_000, "reason": "customer_request"}
+
+        with patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway", return_value=gateway):
+            first = RefundService.refund_invoice(invoice.id, dict(partial))
+            self.assertTrue(first.is_ok(), first.unwrap_err() if first.is_err() else "")
+            invoice.refresh_from_db()
+            self.assertEqual(invoice.status, "partially_refunded")
+            second = RefundService.refund_invoice(invoice.id, dict(partial))
+
+        self.assertTrue(second.is_ok(), second.unwrap_err() if second.is_err() else "")
+        self.assertEqual(RefundService._get_invoice_refunded_amount(invoice), 6_000)
+
+    def test_legacy_proforma_refund_counted_when_payment_has_invoice_and_proforma(self) -> None:
+        """Fix 4: legacy refund scope must OR invoice_id and order.proforma_id.
+
+        A payment can carry both links; the if/elif dropped the proforma-linked legacy
+        refund whenever invoice_id was set, under-counting the reserved balance.
+        """
+        invoice = self._make_invoice()
+        proforma = ProformaInvoice.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            number=f"PRO-{uuid.uuid4().hex[:10]}",
+            subtotal_cents=10_000,
+            tax_cents=0,
+            total_cents=10_000,
+            valid_until=timezone.now() + timedelta(days=7),
+        )
+        order = self._make_order(invoice)
+        order.proforma = proforma
+        order.save(update_fields=["proforma", "updated_at"])
+        payment = Payment.objects.create(
+            customer=self.customer,
+            invoice=invoice,
+            proforma=proforma,
+            currency=self.currency,
+            status="succeeded",
+            payment_method="stripe",
+            amount_cents=10_000,
+            gateway_txn_id="pi_both_links",
+        )
+        # Legacy (pre-Refund.payment) refund, order-linked via the shared proforma.
+        Refund.objects.create(
+            customer=self.customer,
+            order=order,
+            payment=None,
+            amount_cents=4_000,
+            currency=self.currency,
+            original_amount_cents=10_000,
+            status="completed",
+            gateway_refund_id="",
+            reference_number="REF-LEGACY-PROFORMA",
+        )
+
+        # 10_000 - 4_000 legacy = 6_000. The if/elif bug ignored the legacy refund → 10_000.
+        self.assertEqual(RefundService._get_remaining_payment_refund_amount(payment), 6_000)
+
+    def test_terminal_refund_ignores_stale_nonterminal_gateway_event(self) -> None:
+        """Fix 5: a reordered non-terminal status on a terminal refund is a no-op.
+
+        Before the fix, a same-second 'pending' arriving after 'succeeded' hit the
+        terminal-mismatch branch and returned Err, forcing endless webhook retries.
+        """
+        invoice = self._make_invoice()
+        payment = self._make_payment(invoice, transaction_id="pi_stale_pending")
+        refund = Refund.objects.create(
+            customer=self.customer,
+            invoice=invoice,
+            payment=payment,
+            amount_cents=10_000,
+            currency=self.currency,
+            original_amount_cents=10_000,
+            status="completed",
+            gateway_refund_id="re_stale_pending",
+            reference_number="REF-STALE-PENDING",
+            gateway_processed_at=timezone.now(),
+        )
+
+        result = RefundService._advance_refund_status(refund, "pending")
+
+        self.assertTrue(result.is_ok(), result.unwrap_err() if result.is_err() else "")
+        refund.refresh_from_db()
+        self.assertEqual(refund.status, "completed")
+
+    def test_reconcile_counts_external_skips_separately_from_converged(self) -> None:
+        """Fix 7: Ok(None) external skips must not be counted as converged."""
+        invoice = self._make_invoice()
+        payment = self._make_payment(invoice, transaction_id="pi_sweep_counts")
+        refund = Refund.objects.create(
+            customer=self.customer,
+            invoice=invoice,
+            payment=payment,
+            amount_cents=5_000,
+            currency=self.currency,
+            original_amount_cents=10_000,
+            status="processing",
+            gateway_refund_id="re_local_counts",
+            reference_number="REF-LOCAL-COUNTS",
+        )
+        local_facts = {
+            "success": True,
+            "refund_id": "re_local_counts",
+            "payment_intent_id": "pi_sweep_counts",
+            "amount_cents": 5_000,
+            "currency": "ron",
+            "status": "succeeded",
+            "reason": None,
+            "error": None,
+        }
+        external_facts = {**local_facts, "refund_id": "re_external", "payment_intent_id": "pi_not_in_db"}
+        gateway = MagicMock()
+        gateway.retrieve_refund.return_value = local_facts
+        gateway.list_refunds.return_value = {"success": True, "refunds": [local_facts, external_facts], "error": None}
+        from apps.billing import tasks as billing_tasks  # noqa: PLC0415
+        from apps.common.types import Ok  # noqa: PLC0415
+
+        def fake_converge(facts: dict[str, Any]) -> Any:
+            return Ok(None) if facts["refund_id"] == "re_external" else Ok(refund)
+
+        with (
+            patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway", return_value=gateway),
+            patch(
+                "apps.billing.refund_service.RefundConvergenceService.converge_gateway_refund",
+                side_effect=fake_converge,
+            ),
+        ):
+            result = billing_tasks.reconcile_stripe_refunds()
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["refunds_checked"], 2)
+        self.assertEqual(result["refunds_converged"], 1)
+        self.assertEqual(result["refunds_external_skipped"], 1)
+
+    def test_charge_refunded_converges_all_embedded_refunds_despite_a_bad_sibling(self) -> None:
+        """Fix 8: a bad embedded refund must not starve its valid siblings."""
+        from apps.integrations.webhooks.stripe import StripeWebhookProcessor  # noqa: PLC0415
+
+        processor = StripeWebhookProcessor()
+        charge = {
+            "id": "ch_multi",
+            "payment_intent": "pi_multi",
+            "currency": "ron",
+            "refunds": {
+                "data": [
+                    {"id": "re_ok_1", "payment_intent": "pi_multi", "amount": 100, "currency": "ron", "status": "succeeded"},
+                    "not-a-dict",
+                    {"id": "re_ok_2", "payment_intent": "pi_multi", "amount": 200, "currency": "ron", "status": "succeeded"},
+                ]
+            },
+        }
+        payload = {"id": "evt_multi", "created": 1_700_000_000, "data": {"object": charge}}
+        seen: list[str] = []
+
+        def fake_handle(event_type: str, normalized_payload: dict[str, Any]) -> tuple[bool, str]:
+            seen.append(normalized_payload["data"]["object"]["id"])
+            return True, "ok"
+
+        with patch.object(processor, "handle_refund_event", side_effect=fake_handle):
+            accepted, message = processor._handle_charge_refunded("charge.refunded", payload, charge)
+
+        # Both valid siblings are processed even though the middle entry is malformed.
+        self.assertEqual(seen, ["re_ok_1", "re_ok_2"])
+        self.assertFalse(accepted)
+        self.assertIn("failed", message)
