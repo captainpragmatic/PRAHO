@@ -149,6 +149,58 @@ class DriftRemediationTestBase(TestCase):
         )
 
 
+class TestDismissReport(DriftRemediationTestBase):
+    """#332: low/moderate reports never get a remediation request (only
+    high/critical do), so before this there was no staff action to clear a
+    permanent, intentional low-severity drift — it sat open forever inflating
+    dashboard counts. dismiss_report resolves it as 'ignored'."""
+
+    def _low_report(self) -> DriftReport:
+        return DriftReport.objects.create(
+            drift_check=self.check,
+            deployment=self.deployment,
+            severity="low",
+            category="labels",
+            field_name="labels",
+            expected_value="a",
+            actual_value="b",
+        )
+
+    def test_dismiss_low_report_marks_ignored(self):
+        report = self._low_report()
+
+        result = self.service.dismiss_report(report.pk, self.admin)
+
+        self.assertTrue(result.is_ok(), f"dismiss should succeed, got {result}")
+        report.refresh_from_db()
+        self.assertTrue(report.resolved)
+        self.assertEqual(report.resolution_type, "ignored")
+        self.assertIsNotNone(report.resolved_at)
+
+    def test_dismiss_refuses_when_open_request_exists(self):
+        """self.report already has an open remediation_request — dismissing it
+        would leave a resolved report with an open request. Refuse."""
+        result = self.service.dismiss_report(self.report.pk, self.admin)
+
+        self.assertTrue(result.is_err())
+        self.report.refresh_from_db()
+        self.assertFalse(self.report.resolved)
+
+    def test_dismiss_audit_failure_rolls_back(self):
+        """A staff ignore-decision's audit is mandatory: if it fails, the
+        dismissal must roll back (unlike the best-effort reject/schedule audit)."""
+        report = self._low_report()
+        with patch(
+            "apps.infrastructure.drift_remediation.InfrastructureAuditService.log_drift_dismissed",
+            side_effect=RuntimeError("audit backend down"),
+        ):
+            result = self.service.dismiss_report(report.pk, self.admin)
+
+        self.assertTrue(result.is_err())
+        report.refresh_from_db()
+        self.assertFalse(report.resolved, "dismissal must roll back when its mandatory audit fails")
+
+
 class TestApproveReject(DriftRemediationTestBase):
     """Tests for approve/reject workflows."""
 

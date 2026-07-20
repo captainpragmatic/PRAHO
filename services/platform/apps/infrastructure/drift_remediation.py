@@ -278,6 +278,50 @@ class DriftRemediationService:
         logger.info(f"✅ [DriftRemediation] Request {request_id} scheduled for {scheduled_for}")
         return Ok(req)
 
+    def dismiss_report(self, report_id: int, user: User) -> Result[DriftReport, str]:
+        """
+        Staff dismissal of a low/moderate drift report that has no automated
+        remediation request (Accept exists only via a request, minted for
+        high/critical only). Marks it resolved='ignored' so an intentional,
+        permanent low-severity mismatch stops inflating the open-drift count.
+
+        The report row is locked and re-checked for an open request inside one
+        transaction so a scan concurrently escalating it cannot leave a resolved
+        report with an open request. The dismissal audit is mandatory: if it
+        fails the resolution rolls back (unlike the best-effort operational
+        audits on reject/schedule/scan).
+        """
+        try:
+            with transaction.atomic():
+                try:
+                    report = DriftReport.objects.select_for_update().get(pk=report_id)
+                except DriftReport.DoesNotExist:
+                    return Err(f"Drift report {report_id} not found")
+
+                if report.resolved:
+                    return Err("Report is already resolved")
+                if report.remediation_requests.filter(status__in=DriftRemediationRequest.OPEN_STATUSES).exists():
+                    return Err("Report has an open remediation request — act on that instead of dismissing")
+
+                report.resolved = True
+                report.resolved_at = timezone.now()
+                report.resolution_type = "ignored"
+                report.save(update_fields=["resolved", "resolved_at", "resolution_type"])
+
+                try:
+                    InfrastructureAuditService.log_drift_dismissed(
+                        report.deployment, report, user, InfrastructureAuditContext(user=user)
+                    )
+                except Exception as e:
+                    transaction.set_rollback(True)
+                    return Err(f"Dismissal audit failed — not dismissing: {e}")
+
+            logger.info(f"✅ [DriftRemediation] Report {report_id} dismissed by {user.email}")
+            return Ok(report)
+        except Exception as e:
+            logger.error(f"🔥 [DriftRemediation] dismiss_report {report_id} failed: {e}")
+            return Err(str(e))
+
     def accept_drift(  # noqa: PLR0911  # Guarded workflow: one early exit per validation
         self,
         request_id: int,

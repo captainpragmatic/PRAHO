@@ -48,23 +48,6 @@ _SCAN_LOCK_TIMEOUT = 900
 # healing closes legacy rows too.
 _NETWORK_FIELD_NAMES = ("network_unreachable", "network_unreachable_consecutive")
 
-# Severity classification for drift fields
-SEVERITY_MAP: dict[str, str] = {
-    "server_deleted": "critical",
-    "ipv4_address": "critical",
-    "ipv6_address": "critical",
-    "network_unreachable_consecutive": "critical",
-    "server_type": "high",
-    "firewall": "high",
-    "network_unreachable": "high",
-    "virtualmin_config": "moderate",
-    "extra_domains": "moderate",
-    "disk_usage": "low",
-    "bandwidth": "low",
-    "labels": "low",
-    "metadata": "low",
-}
-
 # TCP probe timeout in seconds
 _DEFAULT_NETWORK_PROBE_TIMEOUT = 10
 
@@ -377,13 +360,15 @@ class DriftScannerService:
         return outcomes
 
     def _process_report(self, outcome: ReportOutcome) -> None:
-        """Auto-resolve or ensure a remediation request based on severity."""
+        """Ensure a remediation request for actionable (high/critical) drift.
+
+        Low/moderate reports have no automated resolution path — they stay open
+        until a scan heals them or staff dismiss them (dismiss_report). The old
+        auto-resolve helpers were dead code: they were gated on
+        DriftReport.auto_resolvable, which nothing ever sets True.
+        """
         report = outcome.report
-        if report.severity == "low" and report.auto_resolvable:
-            self._auto_resolve_low_drift(report)
-        elif report.severity == "moderate" and report.auto_resolvable:
-            self._auto_resolve_moderate_drift(report)
-        elif report.severity in ("high", "critical"):
+        if report.severity in ("high", "critical"):
             self._ensure_remediation_request(report)
 
         # Audit only newly detected drift — a refresh of a known open report
@@ -534,37 +519,6 @@ class DriftScannerService:
 
         self._create_remediation_request(report)
 
-    def _auto_resolve_low_drift(self, report: DriftReport) -> None:
-        """Update DB field to match actual value. Mark resolved."""
-        report.resolved = True
-        report.resolved_at = timezone.now()
-        report.resolution_type = "auto_sync"
-        report.save(update_fields=["resolved", "resolved_at", "resolution_type"])
-
-        logger.info(f"✅ [DriftScanner] Auto-resolved LOW drift: {report.field_name} for {report.deployment.hostname}")
-
-        try:
-            InfrastructureAuditService.log_drift_auto_resolved(report.deployment, report, InfrastructureAuditContext())
-        except Exception:
-            logger.warning(f"⚠️ [DriftScanner] Failed to log audit for auto-resolve: {report}")
-
-    def _auto_resolve_moderate_drift(self, report: DriftReport) -> None:
-        """Update DB + create admin notification. Mark resolved."""
-        report.resolved = True
-        report.resolved_at = timezone.now()
-        report.resolution_type = "auto_sync"
-        report.save(update_fields=["resolved", "resolved_at", "resolution_type"])
-
-        logger.info(
-            f"✅ [DriftScanner] Auto-resolved MODERATE drift: {report.field_name} "
-            f"for {report.deployment.hostname} (notification sent)"
-        )
-
-        try:
-            InfrastructureAuditService.log_drift_auto_resolved(report.deployment, report, InfrastructureAuditContext())
-        except Exception:
-            logger.warning(f"⚠️ [DriftScanner] Failed to log audit for auto-resolve: {report}")
-
     def _sync_pending_fingerprint(self, req: DriftRemediationRequest, report: DriftReport) -> bool:
         """Align a still-pending request with the report's current drift.
 
@@ -583,8 +537,12 @@ class DriftScannerService:
         )
         return bool(updated)
 
-    def _create_remediation_request(self, report: DriftReport) -> DriftRemediationRequest:
-        """Create pending approval request for HIGH/CRITICAL drift."""
+    def _create_remediation_request(self, report: DriftReport) -> DriftRemediationRequest | None:
+        """Create pending approval request for HIGH/CRITICAL drift.
+
+        Returns None when the report was dismissed before the request could be
+        minted (see the symmetric lock below).
+        """
         from apps.infrastructure.drift_remediation import (  # noqa: PLC0415  # Deferred: avoids circular import
             AUTO_FIXABLE_FIELDS,  # Circular: cross-app
         )
@@ -594,6 +552,15 @@ class DriftScannerService:
 
         try:
             with transaction.atomic():
+                # Symmetric lock with dismiss_report: lock the report and re-read
+                # its resolved state before minting. Staff may dismiss this report
+                # (resolved='ignored') between the scan's read and this write; both
+                # sides lock the same row, so we never leave a resolved report with
+                # a fresh open request.
+                locked = DriftReport.objects.select_for_update().get(pk=report.pk)
+                if locked.resolved:
+                    logger.info(f"✅ [DriftScanner] Report {report.pk} resolved before request creation — skipping")
+                    return None
                 request = DriftRemediationRequest.objects.create(
                     report=report,
                     deployment=report.deployment,
