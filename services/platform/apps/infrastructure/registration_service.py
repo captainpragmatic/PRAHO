@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 from django.db import transaction
 
+from apps.common.outbound_http import OutboundSecurityError, normalize_tls_cert_fingerprint
 from apps.common.types import Err, Ok, Result
 
 if TYPE_CHECKING:
@@ -31,6 +32,35 @@ class NodeRegistrationService:
     Creates VirtualminServer records that integrate with the existing
     provisioning system.
     """
+
+    @staticmethod
+    def _registration_validation_error(deployment: NodeDeployment) -> str | None:
+        """Return a preflight error without opening a database transaction or SSH session."""
+        if deployment.status not in {"completed", "registering"}:
+            return f"Cannot register node in status '{deployment.status}'"
+        if not deployment.ipv4_address:
+            return "Deployment has no IP address assigned"
+        if deployment.virtualmin_server:
+            return f"Node already registered as: {deployment.virtualmin_server}"
+
+        from apps.provisioning.virtualmin_models import VirtualminServer  # noqa: PLC0415
+
+        if VirtualminServer.objects.filter(hostname=deployment.fqdn).exists():
+            return f"VirtualminServer with hostname '{deployment.fqdn}' already exists"
+        return None
+
+    @staticmethod
+    def _trusted_certificate_fingerprint(deployment: NodeDeployment) -> Result[str, str]:
+        """Obtain and validate the Webmin pin through the trusted SSH channel."""
+        from apps.infrastructure.validation_service import get_validation_service  # noqa: PLC0415
+
+        fingerprint_result = get_validation_service().get_webmin_certificate_fingerprint(deployment)
+        if fingerprint_result.is_err():
+            return Err(f"Could not verify Webmin certificate fingerprint: {fingerprint_result.unwrap_err()}")
+        try:
+            return Ok(normalize_tls_cert_fingerprint(fingerprint_result.unwrap()))
+        except OutboundSecurityError as exc:
+            return Err(f"Could not verify Webmin certificate fingerprint: {exc}")
 
     def register_node(
         self,
@@ -60,17 +90,16 @@ class NodeRegistrationService:
             VirtualminServer,
         )
 
-        # Validate deployment status
-        if deployment.status not in {"completed", "registering"}:
-            return Err(f"Cannot register node in status '{deployment.status}'")
-
-        if not deployment.ipv4_address:
-            return Err("Deployment has no IP address assigned")
-
-        if deployment.virtualmin_server:
-            return Err(f"Node already registered as: {deployment.virtualmin_server}")
+        validation_error = self._registration_validation_error(deployment)
+        if validation_error:
+            return Err(validation_error)
 
         logger.info(f"📝 [Registration] Registering node: {deployment.hostname}")
+
+        fingerprint_result = self._trusted_certificate_fingerprint(deployment)
+        if fingerprint_result.is_err():
+            return Err(fingerprint_result.unwrap_err())
+        ssl_cert_fingerprint = fingerprint_result.unwrap()
 
         try:
             with transaction.atomic():
@@ -85,6 +114,7 @@ class NodeRegistrationService:
                     api_port=10000,
                     use_ssl=True,
                     ssl_verify=False,  # Self-signed initially
+                    ssl_cert_fingerprint=ssl_cert_fingerprint,
                     status="active",
                     api_username=admin_username,
                     encrypted_api_password=b"",  # Stored in CredentialVault instead

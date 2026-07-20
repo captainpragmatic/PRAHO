@@ -10,7 +10,7 @@ remediation approval transactional safety.
 from __future__ import annotations
 
 from decimal import Decimal
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError, transaction
@@ -254,6 +254,41 @@ class TestDeploymentDetailProgress(_DeploymentTestMixin, TestCase):
         self.assertIsInstance(response.context["stages"], list)
         # progress_percentage=15, 15//16=0 → progress_step=0
         self.assertEqual(response.context["progress_step"], 0)
+
+
+class TestDeploymentMaintenanceSecurity(_DeploymentTestMixin, TestCase):
+    """Root-level maintenance requires deploy permission and semantic action IDs."""
+
+    def setUp(self) -> None:
+        self.deployment = self._create_deployment(status="completed")
+        self.url = reverse("infrastructure:deployment_maintenance", args=[self.deployment.pk])
+
+    def test_staff_without_deploy_permission_is_forbidden(self) -> None:
+        staff = User.objects.create_user(email="staff@test.com", password="testpass123", is_staff=True)
+        self.client.force_login(staff)
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_only_implemented_security_action_is_exposed(self) -> None:
+        superuser = User.objects.create_superuser(email="admin@test.com", password="testpass123")
+        self.client.force_login(superuser)
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([option["id"] for option in response.context["playbook_options"]], ["security"])
+
+    @patch("apps.infrastructure.views.queue_maintenance")
+    def test_unknown_action_is_rejected_before_queueing(self, mock_queue: MagicMock) -> None:
+        superuser = User.objects.create_superuser(email="admin@test.com", password="testpass123")
+        self.client.force_login(superuser)
+
+        response = self.client.post(self.url, {"playbooks": ["../ansible.cfg"]})
+
+        self.assertEqual(response.status_code, 200)
+        mock_queue.assert_not_called()
 
 
 class TestDriftDashboardCounts(_DeploymentTestMixin, TestCase):

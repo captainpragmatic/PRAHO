@@ -17,7 +17,6 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 from django.contrib.auth import get_user_model
-from django.core.exceptions import ValidationError
 from django.test import TestCase
 
 from apps.common.types import Err, Ok
@@ -111,6 +110,7 @@ def _make_service() -> NodeDeploymentService:
     with patch("apps.infrastructure.deployment_service.get_ansible_service", return_value=MagicMock()):
         service = NodeDeploymentService()
     service._ssh_manager = MagicMock()
+    service._ssh_manager.delete_deployment_key.return_value = Ok(True)
     service._ansible = MagicMock()
     service._validation = MagicMock()
     service._registration = MagicMock()
@@ -171,7 +171,7 @@ class TestTransientErrorPreservesExternalId(TestCase):
             patch("apps.infrastructure.deployment_service.SettingsService.get_setting", return_value=True),
             patch("apps.infrastructure.deployment_service.get_cloud_gateway", return_value=mock_gateway),
         ):
-            result = service.deploy_node(
+            service.deploy_node(
                 deployment=deployment,
                 credentials={"api_token": "test-token"},
             )
@@ -378,6 +378,27 @@ class TestDestroyNodeAtomicTransition(TestCase):
 
         self.assertTrue(result.is_err())
         self.assertIn("Cannot destroy", result.unwrap_err())
+
+    def test_destroy_pins_renamed_vault_key_deletion_method_signature(self) -> None:
+        deployment = _create_deployment("completed")
+        service = _make_service()
+
+        result = service.destroy_node(deployment=deployment, credentials={})
+
+        self.assertTrue(result.is_ok())
+        service._ssh_manager.delete_deployment_key.assert_called_once_with(deployment, user=None)
+
+    def test_destroy_fails_closed_when_vault_key_revocation_fails(self) -> None:
+        deployment = _create_deployment("completed")
+        service = _make_service()
+        service._ssh_manager.delete_deployment_key.return_value = Err("vault unavailable")
+
+        result = service.destroy_node(deployment=deployment, credentials={})
+
+        self.assertTrue(result.is_err())
+        self.assertIn("vault unavailable", result.unwrap_err())
+        deployment.refresh_from_db()
+        self.assertNotEqual(deployment.status, "destroyed")
 
 
 # ===========================================================================
@@ -587,3 +608,51 @@ class TestMaintenanceStatusCheck(TestCase):
 
         self.assertTrue(result.is_err())
         self.assertIn("Can only run maintenance on completed", result.unwrap_err())
+
+    def test_security_action_maps_to_panel_owned_playbook(self) -> None:
+        deployment = _create_deployment("completed")
+        service = _make_service()
+        service._ansible.run_playbook.return_value = Ok(MagicMock(success=True))
+
+        result = service.run_maintenance(deployment=deployment, playbooks=["security"])
+
+        self.assertTrue(result.is_ok())
+        service._ansible.run_playbook.assert_called_once_with(
+            deployment=deployment,
+            playbook="virtualmin_harden.yml",
+            extra_vars=None,
+        )
+
+    def test_unknown_maintenance_action_is_rejected_before_ansible(self) -> None:
+        deployment = _create_deployment("completed")
+        service = _make_service()
+
+        result = service.run_maintenance(deployment=deployment, playbooks=["../ansible.cfg"])
+
+        self.assertTrue(result.is_err())
+        self.assertIn("Unsupported maintenance action", result.unwrap_err())
+        service._ansible.run_playbook.assert_not_called()
+
+
+class TestDestroyClearsExternalIdForRetryIdempotency(TestCase):
+    """MEDIUM-4: after the cloud VM is deleted, external_node_id must be cleared
+    so a destroy retry (triggered by a later vault-revocation failure) does not
+    re-invoke delete_server against an already-deleted VM."""
+
+    def test_destroy_clears_external_node_id_after_cloud_deletion(self) -> None:
+        deployment = _create_deployment("completed", external_node_id="srv-123")
+        service = _make_service()
+        # Vault revocation FAILS after cloud deletion succeeds -> destroy returns Err.
+        service._ssh_manager.delete_deployment_key.return_value = Err("vault unavailable")
+
+        mock_gateway = MagicMock()
+        mock_gateway.delete_server.return_value = Ok(True)
+        mock_gateway.delete_ssh_key.return_value = Ok(True)
+
+        with patch("apps.infrastructure.deployment_service.get_cloud_gateway", return_value=mock_gateway):
+            result = service.destroy_node(deployment, credentials={"api_token": "tok"})
+
+        self.assertTrue(result.is_err())
+        mock_gateway.delete_server.assert_called_once_with("srv-123")
+        deployment.refresh_from_db()
+        self.assertEqual(deployment.external_node_id, "")

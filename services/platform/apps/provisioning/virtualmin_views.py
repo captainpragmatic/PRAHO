@@ -778,6 +778,7 @@ def virtualmin_server_test_connection(request: HttpRequest) -> HttpResponse:
         api_password = request.POST.get("api_password", "").strip()
         use_ssl = request.POST.get("use_ssl") == "on"
         ssl_verify = request.POST.get("ssl_verify") == "on"
+        ssl_cert_fingerprint = request.POST.get("ssl_cert_fingerprint", "").strip()
 
         # Validate required fields
         if not all([hostname, api_username, api_password]):
@@ -799,7 +800,12 @@ def virtualmin_server_test_connection(request: HttpRequest) -> HttpResponse:
 
         # Create a temporary server instance for testing
         temp_server = VirtualminServer(
-            hostname=hostname, api_port=int(api_port), api_username=api_username, use_ssl=use_ssl, ssl_verify=ssl_verify
+            hostname=hostname,
+            api_port=int(api_port),
+            api_username=api_username,
+            use_ssl=use_ssl,
+            ssl_verify=ssl_verify,
+            ssl_cert_fingerprint=ssl_cert_fingerprint,
         )
         # Set the password using the proper method (handles encryption)
         temp_server.set_api_password(api_password)

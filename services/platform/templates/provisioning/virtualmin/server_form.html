@@ -206,6 +206,16 @@
                                                 {{ form.ssl_verify.label }}
                                             </label>
                                         </div>
+
+                                        <div>
+                                            <label for="{{ form.ssl_cert_fingerprint.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-2">
+                                                {{ form.ssl_cert_fingerprint.label }}
+                                            </label>
+                                            {{ form.ssl_cert_fingerprint }}
+                                            {% if form.ssl_cert_fingerprint.errors %}
+                                            <p class="mt-1 text-sm text-red-400">{{ form.ssl_cert_fingerprint.errors.0 }}</p>
+                                            {% endif %}
+                                        </div>
                                     </div>
                                 </div>
                             </div>
