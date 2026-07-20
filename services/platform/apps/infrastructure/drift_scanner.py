@@ -125,7 +125,12 @@ class DriftScannerService:
         types_to_scan = check_types or ["cloud", "network", "application"]
         all_outcomes: list[ReportOutcome] = []
 
-        InfrastructureAuditService.log_drift_scan_started(deployment=deployment)
+        # Best-effort operational audit: an audit-backend failure must not abort
+        # the scan itself (every other drift audit call site wraps likewise).
+        try:
+            InfrastructureAuditService.log_drift_scan_started(deployment=deployment)
+        except Exception as e:
+            logger.warning(f"⚠️ [DriftScanner] Failed to log audit for scan start: {e}")
         logger.info(f"✅ [DriftScanner] Starting scan for {deployment.hostname}: {types_to_scan}")
 
         for check_type in types_to_scan:
@@ -153,10 +158,13 @@ class DriftScannerService:
         for outcome in all_outcomes:
             self._process_report(outcome)
 
-        InfrastructureAuditService.log_drift_scan_completed(
-            deployment=deployment,
-            drift_count=len(all_outcomes),
-        )
+        try:
+            InfrastructureAuditService.log_drift_scan_completed(
+                deployment=deployment,
+                drift_count=len(all_outcomes),
+            )
+        except Exception as e:
+            logger.warning(f"⚠️ [DriftScanner] Failed to log audit for scan completion: {e}")
         logger.info(f"✅ [DriftScanner] Scan complete for {deployment.hostname}: {len(all_outcomes)} findings")
         return Ok([outcome.report for outcome in all_outcomes])
 

@@ -578,3 +578,25 @@ class TestExecuteTaskGuards(DriftScannerTestBase):
         outcome = execute_remediation_task(987654321)
 
         self.assertEqual(outcome, {"status": "missing"})
+
+
+class TestScanAuditResilience(DriftScannerTestBase):
+    """#320: the scanner's scan-started / scan-completed audit calls were
+    unwrapped, so an audit-backend exception aborted an otherwise-successful
+    scan. They must be best-effort like every other drift audit call site."""
+
+    @patch("apps.infrastructure.drift_scanner.DriftScannerService._tcp_probe")
+    @patch(
+        "apps.infrastructure.drift_scanner.InfrastructureAuditService.log_drift_scan_completed",
+        side_effect=RuntimeError("audit backend down"),
+    )
+    @patch(
+        "apps.infrastructure.drift_scanner.InfrastructureAuditService.log_drift_scan_started",
+        side_effect=RuntimeError("audit backend down"),
+    )
+    def test_scan_survives_audit_failure(self, _mock_started, _mock_completed, mock_probe):
+        mock_probe.return_value = True  # reachable → clean scan, no drift to record
+
+        result = self.scanner.scan_deployment(self.deployment, check_types=["network"])
+
+        self.assertTrue(result.is_ok(), f"scan must survive an audit failure, got {result}")

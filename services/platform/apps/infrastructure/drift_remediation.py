@@ -215,12 +215,20 @@ class DriftRemediationService:
             return Err(f"Cannot reject request in status '{req.status}'")
         req.refresh_from_db()
 
-        InfrastructureAuditService.log_drift_remediation_rejected(
-            deployment=req.deployment,
-            request=req,
-            rejector=user,
-            reason=reason,
-        )
+        # Best-effort operational audit: the reject transition is already
+        # durably committed (and separately recoverable), so an audit-backend
+        # blip must not surface as a 500 out of a successful reject. This is
+        # deliberately NOT a mandatory-audit path — cf. the staff dismiss
+        # action, whose audit is mandatory and rolls back on failure.
+        try:
+            InfrastructureAuditService.log_drift_remediation_rejected(
+                deployment=req.deployment,
+                request=req,
+                rejector=user,
+                reason=reason,
+            )
+        except Exception as e:
+            logger.warning(f"⚠️ [DriftRemediation] Failed to log audit for rejection: {e}")
 
         logger.info(f"✅ [DriftRemediation] Request {request_id} rejected by {user.email}: {reason}")
         return Ok(req)
@@ -256,11 +264,16 @@ class DriftRemediationService:
             return Err(f"Cannot schedule request in status '{req.status}'")
         req.refresh_from_db()
 
-        InfrastructureAuditService.log_drift_remediation_scheduled(
-            deployment=req.deployment,
-            request=req,
-            scheduled_for=str(scheduled_for),
-        )
+        # Best-effort operational audit (see reject_remediation): the schedule
+        # transition is already committed; an audit failure must not fail it.
+        try:
+            InfrastructureAuditService.log_drift_remediation_scheduled(
+                deployment=req.deployment,
+                request=req,
+                scheduled_for=str(scheduled_for),
+            )
+        except Exception as e:
+            logger.warning(f"⚠️ [DriftRemediation] Failed to log audit for scheduling: {e}")
 
         logger.info(f"✅ [DriftRemediation] Request {request_id} scheduled for {scheduled_for}")
         return Ok(req)

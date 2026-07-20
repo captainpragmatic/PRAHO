@@ -1343,3 +1343,34 @@ class TestAcceptDriftRaceDiagnostics(DriftRemediationTestBase):
 
         self.assertTrue(result.is_err())
         self.assertIn("approved", result.unwrap_err())
+
+
+class TestAuditWrappingResilience(DriftRemediationTestBase):
+    """#320: an audit-layer exception must not fail an otherwise-successful
+    operation. reject/schedule left their InfrastructureAuditService calls
+    unwrapped while every sibling call site (approve, accept, applied) wraps
+    try/except + warning — so an audit backend blip surfaced as a 500 after
+    the state change had already committed."""
+
+    def test_reject_survives_audit_failure(self) -> None:
+        with patch(
+            "apps.infrastructure.drift_remediation.InfrastructureAuditService.log_drift_remediation_rejected",
+            side_effect=RuntimeError("audit backend down"),
+        ):
+            result = self.service.reject_remediation(self.remediation_request.pk, self.admin, "Not needed")
+
+        self.assertTrue(result.is_ok(), f"reject must survive an audit failure, got {result}")
+        self.remediation_request.refresh_from_db()
+        self.assertEqual(self.remediation_request.status, "rejected")
+
+    def test_schedule_survives_audit_failure(self) -> None:
+        future = timezone.now() + timedelta(hours=2)
+        with patch(
+            "apps.infrastructure.drift_remediation.InfrastructureAuditService.log_drift_remediation_scheduled",
+            side_effect=RuntimeError("audit backend down"),
+        ):
+            result = self.service.schedule_remediation(self.remediation_request.pk, self.admin, future)
+
+        self.assertTrue(result.is_ok(), f"schedule must survive an audit failure, got {result}")
+        self.remediation_request.refresh_from_db()
+        self.assertEqual(self.remediation_request.status, "scheduled")
