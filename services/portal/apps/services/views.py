@@ -8,6 +8,7 @@ from django.contrib import messages
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 from django.utils.translation import gettext as _
+from django.utils.translation import gettext_lazy
 
 from apps.common.pagination import PaginatorData, build_pagination_params
 from apps.common.rate_limit_feedback import handle_platform_error, is_rate_limited_error
@@ -20,20 +21,56 @@ logger = logging.getLogger(__name__)
 # Mirrors the platform Service.STATUS_CHOICES (provisioning/service_models.py) so
 # every real status is filterable — previously Provisioning/Failed/Terminated/Expired
 # had no tab and "Cancelled" was a dead tab (no such status). (#101)
+# Labels are lazy: module-level gettext would freeze them to the import-time locale.
 SERVICE_STATUS_TABS = [
-    {"value": "", "label": _("All Services"), "border_class": "border-blue-500", "text_class": "text-blue-400"},
-    {"value": "active", "label": _("Active"), "border_class": "border-green-500", "text_class": "text-green-400"},
-    {"value": "pending", "label": _("Pending"), "border_class": "border-yellow-500", "text_class": "text-yellow-400"},
     {
-        "value": "provisioning",
-        "label": _("Provisioning"),
+        "value": "",
+        "label": gettext_lazy("All Services"),
         "border_class": "border-blue-500",
         "text_class": "text-blue-400",
     },
-    {"value": "suspended", "label": _("Suspended"), "border_class": "border-red-500", "text_class": "text-red-400"},
-    {"value": "failed", "label": _("Failed"), "border_class": "border-red-500", "text_class": "text-red-400"},
-    {"value": "terminated", "label": _("Terminated"), "border_class": "border-gray-500", "text_class": "text-gray-400"},
-    {"value": "expired", "label": _("Expired"), "border_class": "border-orange-500", "text_class": "text-orange-400"},
+    {
+        "value": "active",
+        "label": gettext_lazy("Active"),
+        "border_class": "border-green-500",
+        "text_class": "text-green-400",
+    },
+    {
+        "value": "pending",
+        "label": gettext_lazy("Pending"),
+        "border_class": "border-yellow-500",
+        "text_class": "text-yellow-400",
+    },
+    {
+        "value": "provisioning",
+        "label": gettext_lazy("Provisioning"),
+        "border_class": "border-blue-500",
+        "text_class": "text-blue-400",
+    },
+    {
+        "value": "suspended",
+        "label": gettext_lazy("Suspended"),
+        "border_class": "border-red-500",
+        "text_class": "text-red-400",
+    },
+    {
+        "value": "failed",
+        "label": gettext_lazy("Failed"),
+        "border_class": "border-red-500",
+        "text_class": "text-red-400",
+    },
+    {
+        "value": "terminated",
+        "label": gettext_lazy("Terminated"),
+        "border_class": "border-gray-500",
+        "text_class": "text-gray-400",
+    },
+    {
+        "value": "expired",
+        "label": gettext_lazy("Expired"),
+        "border_class": "border-orange-500",
+        "text_class": "text-orange-400",
+    },
 ]
 
 # Allowlist for the ?status= query param ("" = All tab).
@@ -76,8 +113,22 @@ def _services_base_context(
     search_query: str = "",
     active_count: int = 0,
     total_count: int = 0,
+    status_counts: dict[str, int] | None = None,
 ) -> dict:
     """Build shared context for services list and search views."""
+    tab_counts = status_counts or {}
+    filter_tabs = (
+        [
+            {
+                **tab,
+                "count": total_count if tab["value"] == "" else tab_counts.get(str(tab["value"]), 0),
+                "show_count": True,
+            }
+            for tab in SERVICE_STATUS_TABS
+        ]
+        if status_counts is not None
+        else SERVICE_STATUS_TABS
+    )
     return {
         "status_filter": status_filter,
         "search_query": search_query,
@@ -89,7 +140,7 @@ def _services_base_context(
             {"value": str(active_count), "label": _("Active"), "color": "text-green-400"},
             {"value": str(total_count), "label": _("Total"), "color": "text-white"},
         ],
-        "filter_tabs": SERVICE_STATUS_TABS,
+        "filter_tabs": filter_tabs,
     }
 
 
@@ -133,7 +184,13 @@ def service_list(request: HttpRequest) -> HttpResponse:
             "services": services,
             "paginator_data": paginator_data,
             "pagination_params": pagination_params,
-            **_services_base_context(status_filter, search_query, active_count, summary.get("total_services", 0)),
+            **_services_base_context(
+                status_filter,
+                search_query,
+                active_count,
+                summary.get("total_services", 0),
+                status_counts=summary.get("status_counts"),
+            ),
         }
 
         logger.info(f"✅ [Services View] Loaded {len(services)} services for customer {customer_id}")
@@ -147,6 +204,8 @@ def service_list(request: HttpRequest) -> HttpResponse:
             "error": True,
             "paginator_data": PaginatorData(total_count=0, current_page=1, page_size=20),
             "pagination_params": "",
+            # Counts are unknown on error — omit status_counts so badges hide
+            # instead of claiming every status is 0.
             **_services_base_context(status_filter, search_query),
             **error_ctx,
         }

@@ -54,6 +54,41 @@ class TicketListRenderingTests(TestCase):
         # Staff table has 5 columns (incl. Customer) — skeleton must match.
         self.assertIn("grid-cols-5", content)
 
+    def test_filter_tabs_expose_complete_keyboard_and_panel_contract(self) -> None:
+        content = self.client.get(reverse("tickets:list")).content.decode()
+
+        tab_count = content.count('role="tab" data-tab-value=')
+        self.assertGreater(tab_count, 0)
+        self.assertEqual(content.count('aria-controls="tickets-content"'), tab_count)
+        self.assertEqual(content.count('onkeydown="handleTabKeydown(event, this)"'), tab_count)
+        self.assertIn('tabindex="0"', content)
+        self.assertIn('tabindex="-1"', content)
+        self.assertIn(
+            'id="tickets-content" role="tabpanel" tabindex="0" aria-label="Filtered results"',
+            content,
+        )
+
+        self.assertIn("function handleTabKeydown(event, el)", content)
+        for key in ("ArrowLeft", "ArrowRight", "Home", "End"):
+            self.assertIn(key, content)
+        self.assertIn("target.focus()", content)
+        self.assertIn("target.click()", content)
+        self.assertIn("if (t.dataset.tabBorder) { t.classList.remove(t.dataset.tabBorder); }", content)
+        self.assertIn("if (t.dataset.tabText) { t.classList.remove(t.dataset.tabText); }", content)
+        self.assertNotIn(".className.replace(", content)
+
+    def test_unknown_status_filter_falls_back_to_all_tab(self) -> None:
+        """?status= values outside the tab set clamp to the All tab.
+
+        With roving tabindex, an unmatched active value would leave every tab
+        tabindex="-1" and the tablist unreachable by keyboard.
+        """
+        response = self.client.get(reverse("tickets:list"), {"status": "bogus"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["filter_active_tab"], "")
+        self.assertEqual(response.content.decode().count('aria-selected="true"'), 2)
+
     def test_search_htmx_returns_table_partial(self) -> None:
         response = self.client.get(reverse("tickets:search_htmx"), {"status": "open"})
 

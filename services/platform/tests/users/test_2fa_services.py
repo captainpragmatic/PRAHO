@@ -25,8 +25,11 @@ from django.utils import timezone
 
 from config.settings.test import LOCMEM_TEST_CACHE
 
+from django.utils.functional import Promise
+
 from apps.audit.models import AuditEvent
 from apps.common.request_ip import get_safe_client_ip
+from apps.users.views import TWO_FACTOR_STEPS
 from apps.users.mfa import (
     BackupCodeService,
     MFAService,
@@ -980,3 +983,12 @@ class MFAIntegrationTestCase(TestCase):
         ]
         actual_actions = [log.action for log in audit_logs]
         self.assertEqual(actual_actions, expected_actions)
+
+
+class TwoFactorStepsConfigTests(TestCase):
+    """The module-level 2FA step labels must be lazy (per-request language)."""
+
+    def test_step_labels_are_lazy_for_per_request_language(self) -> None:
+        for step in TWO_FACTOR_STEPS:
+            self.assertIsInstance(step["label"], Promise, f"step label {step['label']!r} is not lazy")
+            self.assertIsInstance(step["description"], Promise, f"step description {step['description']!r} is not lazy")

@@ -229,6 +229,9 @@ def customer_services_summary_api(request: HttpRequest, customer: Customer) -> R
         # Calculate stats
         now = timezone.now()
         expiring_soon_date = now + timezone.timedelta(days=30)
+        status_count_expressions = {
+            f"status_{status}": Count("id", filter=Q(status=status)) for status, _label in Service.STATUS_CHOICES
+        }
 
         stats = services.aggregate(
             total=Count("id"),
@@ -239,7 +242,9 @@ def customer_services_summary_api(request: HttpRequest, customer: Customer) -> R
             expiring_soon=Count(
                 "id", filter=Q(expires_at__lt=expiring_soon_date, expires_at__gte=now, status="active")
             ),
+            **status_count_expressions,
         )
+        status_counts = {status: stats[f"status_{status}"] or 0 for status, _label in Service.STATUS_CHOICES}
 
         # Calculate cost information
         active_services = services.filter(status="active")
@@ -271,6 +276,7 @@ def customer_services_summary_api(request: HttpRequest, customer: Customer) -> R
             "pending_services": stats["pending"] or 0,
             "overdue": stats["overdue"] or 0,
             "expiring_soon": stats["expiring_soon"] or 0,
+            "status_counts": status_counts,
             "total_monthly_cost": round(total_monthly_cost, 2),
             "total_monthly_cost_with_vat": round(total_monthly_cost_with_vat, 2),
             "total_disk_usage_gb": round(total_disk_usage_gb, 2),

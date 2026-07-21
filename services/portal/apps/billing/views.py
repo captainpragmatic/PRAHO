@@ -11,6 +11,7 @@ from django.contrib import messages
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.utils.translation import gettext as _
+from django.utils.translation import gettext_lazy
 from django.views.decorators.http import require_http_methods
 
 from apps.api_client.services import PlatformAPIError
@@ -58,28 +59,49 @@ PROFORMA_STATUS_ICON_MAP: dict[str, str] = {
 
 
 # Tab configuration for document type filtering
+# Labels are lazy: module-level gettext would freeze them to the import-time locale.
 INVOICE_DOC_TYPE_TABS = [
-    {"value": "all", "label": _("All Documents"), "border_class": "border-blue-500", "text_class": "text-blue-400"},
-    {"value": "invoice", "label": _("Invoices"), "border_class": "border-green-500", "text_class": "text-green-400"},
+    {
+        "value": "all",
+        "label": gettext_lazy("All Documents"),
+        "border_class": "border-blue-500",
+        "text_class": "text-blue-400",
+    },
+    {
+        "value": "invoice",
+        "label": gettext_lazy("Invoices"),
+        "border_class": "border-green-500",
+        "text_class": "text-green-400",
+    },
     {
         "value": "proforma",
-        "label": _("Proformas"),
+        "label": gettext_lazy("Proformas"),
         "border_class": "border-purple-500",
         "text_class": "text-purple-400",
     },
 ]
 
+# Allowlist for the ?type= query param. The value is echoed into rendered
+# context, and the shared tab component's roving tabindex needs a matching tab
+# — unknown values fall back to the All Documents tab.
+_VALID_DOC_TYPES = {tab["value"] for tab in INVOICE_DOC_TYPE_TABS}
+
+
+def _validated_doc_type(raw: str) -> str:
+    return raw if raw in _VALID_DOC_TYPES else "all"
+
+
 INVOICE_STATUS_CHOICES = [
-    ("", _("All Statuses")),
-    ("draft", _("Draft")),
-    ("issued", _("Issued")),
-    ("sent", _("Sent")),
-    ("accepted", _("Accepted")),
-    ("paid", _("Paid")),
-    ("overdue", _("Overdue")),
-    ("expired", _("Expired")),
-    ("void", _("Void")),
-    ("refunded", _("Refunded")),
+    ("", gettext_lazy("All Statuses")),
+    ("draft", gettext_lazy("Draft")),
+    ("issued", gettext_lazy("Issued")),
+    ("sent", gettext_lazy("Sent")),
+    ("accepted", gettext_lazy("Accepted")),
+    ("paid", gettext_lazy("Paid")),
+    ("overdue", gettext_lazy("Overdue")),
+    ("expired", gettext_lazy("Expired")),
+    ("void", gettext_lazy("Void")),
+    ("refunded", gettext_lazy("Refunded")),
 ]
 
 ALLOWED_STATUSES = {"draft", "issued", "paid", "overdue", "void", "refunded", "sent", "accepted", "expired"}
@@ -185,7 +207,7 @@ def invoices_list_view(request: HttpRequest) -> HttpResponse:
 
     try:
         status_filter = request.GET.get("status", "")
-        doc_type = request.GET.get("type", "all")
+        doc_type = _validated_doc_type(request.GET.get("type", "all"))
         search_query = request.GET.get("q", "").strip()
         force_sync = request.GET.get("sync") == "true"
 
@@ -290,7 +312,7 @@ def invoices_search_api(request: HttpRequest) -> HttpResponse:
 
     search_query = request.GET.get("q", "").strip()
     status_filter = request.GET.get("status", "")
-    doc_type = request.GET.get("type", "all")
+    doc_type = _validated_doc_type(request.GET.get("type", "all"))
 
     try:
         documents = _fetch_filtered_documents(

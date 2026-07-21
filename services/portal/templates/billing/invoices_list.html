@@ -19,7 +19,7 @@
     {% include "components/list_page_skeleton.html" with skeleton_id="invoices-skeleton" skeleton_cols=5 skeleton_rows=6 %}
 
     {# Content (swapped by HTMX) #}
-    <div id="invoices-content">
+    <div id="invoices-content" role="tabpanel" tabindex="0" aria-label="{% trans 'Filtered results' %}">
       {% include 'billing/partials/invoices_table.html' %}
     </div>
   </div>

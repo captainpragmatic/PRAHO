@@ -2,6 +2,7 @@
 Tests for order list dashboard stats, billing address rendering, and status counts.
 Covers PR #132 review findings.
 """
+from unittest.mock import patch
 
 from django.test import Client, TestCase
 from django.urls import reverse
@@ -55,10 +56,7 @@ class OrderListStatusCountsTestCase(TestCase):
         self.assertEqual(response.status_code, 200)
         status_counts = response.context["status_counts"]
 
-        expected_keys = {
-            "total", "draft", "awaiting_payment", "paid", "in_review",
-            "provisioning", "completed", "cancelled", "failed", "refunded",
-        }
+        expected_keys = {status for status, _label in Order.STATUS_CHOICES} | {"total"}
         self.assertEqual(set(status_counts.keys()), expected_keys)
 
     def test_status_counts_correct_values(self) -> None:
@@ -85,6 +83,68 @@ class OrderListStatusCountsTestCase(TestCase):
         counts = response.context["status_counts"]
         self.assertEqual(counts["total"], 0)
         self.assertEqual(counts["draft"], 0)
+        self.assertEqual(response.context["other_status_summary"], {"total": 0, "breakdown": []})
+        self.assertNotContains(response, 'data-testid="orders-other-status-count"')
+
+    def test_status_summaries_follow_the_order_status_source_of_truth(self) -> None:
+        """A new enum status cannot silently disappear from dashboard summaries.
+
+        A quality_hold order cannot be created here — the order_status_valid_values
+        DB constraint pins rows to the migrated enum — so the addition direction
+        can only assert the zero-count key appears.
+        """
+        future_choices = (*Order.STATUS_CHOICES, ("quality_hold", "Quality Hold"))
+
+        with patch.object(Order, "STATUS_CHOICES", future_choices):
+            response = self.client.get(reverse("orders:order_list"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["status_counts"]["quality_hold"], 0)
+        self.assertEqual(
+            [item["label"] for item in response.context["other_status_summary"]["breakdown"]],
+            [],
+        )
+
+    def test_other_summary_follows_enum_removal_not_a_hardcoded_list(self) -> None:
+        """Removing a status from the enum removes it from the summaries.
+
+        This mirrors the real refunded removal: with an in_review order in the
+        DB but in_review dropped from STATUS_CHOICES, an enum-driven Other
+        summary excludes it, while a hardcoded in_review/failed/cancelled list
+        would still count the row.
+        """
+        self._create_order("in_review", "ENUM-RM")
+        reduced_choices = tuple(
+            (status, label) for status, label in Order.STATUS_CHOICES if status != "in_review"
+        )
+
+        with patch.object(Order, "STATUS_CHOICES", reduced_choices):
+            response = self.client.get(reverse("orders:order_list"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("in_review", response.context["status_counts"])
+        self.assertEqual(response.context["other_status_summary"], {"total": 0, "breakdown": []})
+
+    def test_other_status_summary_covers_every_status_without_a_card(self) -> None:
+        """The compact Other card must account for every omitted status."""
+        for suffix, status in enumerate(("in_review", "failed", "cancelled"), start=1):
+            self._create_order(status, f"OTHER-{suffix}")
+
+        response = self.client.get(reverse("orders:order_list"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.context["other_status_summary"],
+            {
+                "total": 3,
+                "breakdown": [
+                    {"label": "In Review", "count": 1},
+                    {"label": "Failed", "count": 1},
+                    {"label": "Cancelled", "count": 1},
+                ],
+            },
+        )
+        self.assertContains(response, 'data-testid="orders-other-status-count">3</p>')
 
 
 class OrderDetailBillingAddressTestCase(TestCase):

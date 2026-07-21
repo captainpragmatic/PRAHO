@@ -9,6 +9,7 @@ from django.contrib import messages
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.utils.translation import gettext as _
+from django.utils.translation import gettext_lazy
 from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_http_methods
 
@@ -19,24 +20,41 @@ from apps.services.services import services_api
 
 from .services import PlatformAPIError, TicketCreateRequest, TicketFilters, tickets_api
 
-# Tab configuration for ticket status filtering
+# Tab configuration for ticket status filtering.
+# Labels are lazy: module-level gettext would freeze them to the import-time locale.
 TICKET_STATUS_TABS = [
-    {"value": "", "label": _("All"), "border_class": "border-blue-500", "text_class": "text-blue-400"},
-    {"value": "open", "label": _("Open"), "border_class": "border-blue-500", "text_class": "text-blue-400"},
+    {"value": "", "label": gettext_lazy("All"), "border_class": "border-blue-500", "text_class": "text-blue-400"},
+    {"value": "open", "label": gettext_lazy("Open"), "border_class": "border-blue-500", "text_class": "text-blue-400"},
     {
         "value": "in_progress",
-        "label": _("In Progress"),
+        "label": gettext_lazy("In Progress"),
         "border_class": "border-purple-500",
         "text_class": "text-purple-400",
     },
     {
         "value": "waiting_on_customer",
-        "label": _("Waiting on You"),
+        "label": gettext_lazy("Waiting on You"),
         "border_class": "border-yellow-500",
         "text_class": "text-yellow-400",
     },
-    {"value": "closed", "label": _("Closed"), "border_class": "border-red-500", "text_class": "text-red-400"},
+    {
+        "value": "closed",
+        "label": gettext_lazy("Closed"),
+        "border_class": "border-red-500",
+        "text_class": "text-red-400",
+    },
 ]
+
+# Allowlist for the ?status= query param ("" = All tab). The value is echoed
+# into rendered context and forwarded to the platform API, and the shared tab
+# component's roving tabindex needs a matching tab — unknown values fall back
+# to the All tab (mirrors apps/services/views.py).
+_VALID_TICKET_STATUS_FILTERS = {tab["value"] for tab in TICKET_STATUS_TABS}
+
+
+def _validated_status_filter(raw: str) -> str:
+    return raw if raw in _VALID_TICKET_STATUS_FILTERS else ""
+
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +91,7 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
         return redirect("/login/")
 
     # Get filter parameters
-    status_filter = request.GET.get("status", "")
+    status_filter = _validated_status_filter(request.GET.get("status", ""))
     priority_filter = request.GET.get("priority", "")
     search_query = request.GET.get("search", "")
     try:
@@ -416,7 +434,7 @@ def ticket_search_api(request: HttpRequest) -> HttpResponse:
         return redirect("/login/")
 
     search_query = request.GET.get("q", "").strip()
-    status_filter = request.GET.get("status", "")
+    status_filter = _validated_status_filter(request.GET.get("status", ""))
     priority_filter = request.GET.get("priority", "")
 
     try:

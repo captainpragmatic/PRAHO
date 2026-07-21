@@ -12,7 +12,9 @@ from unittest.mock import patch
 
 from django.test import TestCase
 from django.urls import reverse
+from django.utils.functional import Promise
 
+from apps.api_client.services import PlatformAPIError
 from apps.services.views import SERVICE_STATUS_TABS
 
 # The platform Service.STATUS_CHOICES (provisioning/service_models.py).
@@ -66,6 +68,11 @@ class ServiceStatusTabConfigTests(TestCase):
             self.assertIn("border_class", tab)
             self.assertIn("text_class", tab)
 
+    def test_tab_labels_are_lazy_for_per_request_language(self) -> None:
+        """Module-level labels must be lazy or they freeze to the import-time locale."""
+        for tab in SERVICE_STATUS_TABS:
+            self.assertIsInstance(tab["label"], Promise, f"tab {tab['value']!r} label is not lazy")
+
 
 class ServiceSearchStatusEmptyStateTests(TestCase):
     """The HTMX filter endpoint renders a status-aware empty state."""
@@ -75,6 +82,96 @@ class ServiceSearchStatusEmptyStateTests(TestCase):
         session["customer_id"] = 1
         session["user_id"] = 2
         session.save()
+
+    @patch("apps.services.views.services_api.get_services_summary")
+    @patch("apps.services.views.services_api.get_customer_services")
+    def test_list_tabs_include_all_and_per_status_counts(self, mock_get: object, mock_summary: object) -> None:
+        mock_get.return_value = {"results": [], "count": 0}
+        mock_summary.return_value = {
+            "active_services": 2,
+            "total_services": 3,
+            "status_counts": {
+                "pending": 1,
+                "provisioning": 0,
+                "active": 2,
+                "suspended": 0,
+                "failed": 0,
+                "terminated": 0,
+                "expired": 0,
+            },
+        }
+
+        response = self.client.get(reverse("services:list"))
+
+        self.assertEqual(response.status_code, 200)
+        tabs = response.context["filter_tabs"]
+        self.assertEqual(
+            {tab["value"]: tab["count"] for tab in tabs},
+            {
+                "": 3,
+                "active": 2,
+                "pending": 1,
+                "provisioning": 0,
+                "suspended": 0,
+                "failed": 0,
+                "terminated": 0,
+                "expired": 0,
+            },
+        )
+        self.assertTrue(all(tab["show_count"] for tab in tabs))
+        content = response.content.decode()
+        tab_count = content.count('role="tab" data-tab-value=')
+        self.assertEqual(content.count('aria-controls="services-content"'), tab_count)
+        self.assertEqual(content.count('onkeydown="handleTabKeydown(event, this)"'), tab_count)
+        self.assertIn(
+            'id="services-content" role="tabpanel" tabindex="0" aria-label="Filtered results"',
+            content,
+        )
+
+        self.assertContains(response, 'data-tab-count="0"')
+
+    @patch("apps.services.views.services_api.get_services_summary")
+    @patch("apps.services.views.services_api.get_customer_services")
+    def test_summary_without_status_counts_hides_badges(self, mock_get: object, mock_summary: object) -> None:
+        """Deploy skew: a summary without status_counts must not render fake 0 badges."""
+        mock_get.return_value = {"results": [], "count": 0}
+        mock_summary.return_value = {"active_services": 2, "total_services": 3}
+
+        response = self.client.get(reverse("services:list"))
+
+        self.assertEqual(response.status_code, 200)
+        for tab in response.context["filter_tabs"]:
+            self.assertNotIn("count", tab)
+        self.assertNotContains(response, "data-tab-count")
+
+    @patch("apps.services.views.services_api.get_services_summary")
+    @patch("apps.services.views.services_api.get_customer_services")
+    def test_normalized_none_status_counts_hides_badges(self, mock_get: object, mock_summary: object) -> None:
+        """The client normalizes unknown counts to None — the view must hide badges."""
+        mock_get.return_value = {"results": [], "count": 0}
+        mock_summary.return_value = {"active_services": 2, "total_services": 3, "status_counts": None}
+
+        response = self.client.get(reverse("services:list"))
+
+        self.assertEqual(response.status_code, 200)
+        for tab in response.context["filter_tabs"]:
+            self.assertNotIn("count", tab)
+        self.assertNotContains(response, "data-tab-count")
+
+    @patch("apps.services.views.services_api.get_services_summary")
+    @patch("apps.services.views.services_api.get_customer_services")
+    def test_error_path_hides_badges(self, mock_get: object, mock_summary: object) -> None:
+        """When the platform call fails, counts are unknown — never claim 0."""
+        mock_get.side_effect = PlatformAPIError("platform down", status_code=500)
+        mock_summary.return_value = {"active_services": 0, "total_services": 0}
+
+        response = self.client.get(reverse("services:list"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.context["error"])
+        for tab in response.context["filter_tabs"]:
+            self.assertNotIn("count", tab)
+        self.assertNotContains(response, "data-tab-count")
 
     @patch("apps.services.views.services_api.get_customer_services")
     def test_filtered_empty_state_names_the_status(self, mock_get: object) -> None:
