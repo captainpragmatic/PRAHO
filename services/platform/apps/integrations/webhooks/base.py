@@ -246,7 +246,12 @@ class BaseWebhookProcessor(ABC):
                 )
 
                 # A concurrent request may have processed it between the duplicate check and the
-                # row lock; re-check under the lock so we never re-run a completed handler.
+                # row lock; re-check under the lock so we never re-run a completed handler. Note
+                # this only guards against re-running a *completed* handler: two concurrent
+                # redeliveries of a still-failed event can both reach handle_event, so handlers
+                # must be idempotent (the payment handlers converge on gateway state and are). The
+                # retry cron already reprocessed failed events through the same path, so this is a
+                # pre-existing contract, not a new requirement.
                 if not created and webhook_event.status == "processed":
                     logger.info(f"🔄 Webhook {self.source_name}:{event_id} already processed - skipping")
                     return Ok(
@@ -276,18 +281,16 @@ class BaseWebhookProcessor(ABC):
                     return Ok(WebhookProcessingResult.error_result(error_msg, webhook_event))
 
         except IntegrityError:
-            # get_or_create races are handled internally, but keep this as a backstop: re-read the
-            # row and only treat it as a completed duplicate. A non-processed row is surfaced as an
-            # error so the sender keeps retrying rather than being told the event succeeded.
+            # get_or_create handles the (source, event_id) race internally, so this backstop is
+            # near-unreachable; it stays as belt-and-braces. Re-read the row and only treat a
+            # completed one as a duplicate. A non-processed row returns an error so the sender keeps
+            # retrying rather than being told the event succeeded. The message is intentionally
+            # generic (no internal state) since it reaches the external caller.
             logger.info(f"🔄 Concurrent webhook {self.source_name}:{event_id} detected via constraint")
             existing = WebhookEvent.objects.get(source=self.source_name, event_id=event_id)
             if existing.status == "processed":
                 return Ok(WebhookProcessingResult.success_result(f"⏭️ Duplicate webhook skipped: {event_id}", existing))
-            return Ok(
-                WebhookProcessingResult.error_result(
-                    f"Webhook {event_id} is being processed concurrently; retry", existing
-                )
-            )
+            return Ok(WebhookProcessingResult.error_result("Webhook is being processed; please retry", existing))
 
     def extract_event_id(self, payload: dict[str, Any]) -> str | None:
         """🔍 Extract unique event ID from payload - override in subclasses"""
