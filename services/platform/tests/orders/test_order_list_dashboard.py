@@ -87,7 +87,12 @@ class OrderListStatusCountsTestCase(TestCase):
         self.assertNotContains(response, 'data-testid="orders-other-status-count"')
 
     def test_status_summaries_follow_the_order_status_source_of_truth(self) -> None:
-        """A new enum status cannot silently disappear from dashboard summaries."""
+        """A new enum status cannot silently disappear from dashboard summaries.
+
+        A quality_hold order cannot be created here — the order_status_valid_values
+        DB constraint pins rows to the migrated enum — so the addition direction
+        can only assert the zero-count key appears.
+        """
         future_choices = (*Order.STATUS_CHOICES, ("quality_hold", "Quality Hold"))
 
         with patch.object(Order, "STATUS_CHOICES", future_choices):
@@ -99,6 +104,26 @@ class OrderListStatusCountsTestCase(TestCase):
             [item["label"] for item in response.context["other_status_summary"]["breakdown"]],
             [],
         )
+
+    def test_other_summary_follows_enum_removal_not_a_hardcoded_list(self) -> None:
+        """Removing a status from the enum removes it from the summaries.
+
+        This mirrors the real refunded removal: with an in_review order in the
+        DB but in_review dropped from STATUS_CHOICES, an enum-driven Other
+        summary excludes it, while a hardcoded in_review/failed/cancelled list
+        would still count the row.
+        """
+        self._create_order("in_review", "ENUM-RM")
+        reduced_choices = tuple(
+            (status, label) for status, label in Order.STATUS_CHOICES if status != "in_review"
+        )
+
+        with patch.object(Order, "STATUS_CHOICES", reduced_choices):
+            response = self.client.get(reverse("orders:order_list"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("in_review", response.context["status_counts"])
+        self.assertEqual(response.context["other_status_summary"], {"total": 0, "breakdown": []})
 
     def test_other_status_summary_covers_every_status_without_a_card(self) -> None:
         """The compact Other card must account for every omitted status."""

@@ -46,15 +46,9 @@ def _empty_services_summary() -> dict[str, Any]:
         "pending_services": 0,
         "overdue": 0,
         "expiring_soon": 0,
-        "status_counts": {
-            "pending": 0,
-            "provisioning": 0,
-            "active": 0,
-            "suspended": 0,
-            "failed": 0,
-            "terminated": 0,
-            "expired": 0,
-        },
+        # None means "counts unknown" — the services view hides tab badges
+        # instead of rendering fabricated zeros next to a failed/absent summary.
+        "status_counts": None,
         "total_monthly_cost": 0.0,
         "total_monthly_cost_with_vat": 0.0,
         "total_disk_usage_gb": 0.0,
@@ -222,6 +216,11 @@ class ServicesAPIClient(PlatformAPIClient):
             # Extract summary data from nested response structure
             if response.get("success") and "data" in response and "summary" in response["data"]:
                 summary_data = response["data"]["summary"]
+                # An older platform may omit status_counts (independent deploys),
+                # and a non-dict must never reach the view: badges render only
+                # from a real per-status map, otherwise they are hidden.
+                status_counts = summary_data.get("status_counts")
+                summary_data["status_counts"] = status_counts if isinstance(status_counts, dict) else None
                 logger.info(
                     f"✅ [Services API] Retrieved services summary for customer {customer_id}: {summary_data.get('active_services', 0)} active"
                 )

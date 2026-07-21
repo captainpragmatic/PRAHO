@@ -30,6 +30,7 @@ from django.urls import reverse, reverse_lazy
 from django.utils.decorators import method_decorator
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils.translation import gettext as _
+from django.utils.translation import gettext_lazy
 from django.views.decorators.http import require_http_methods
 from django.views.generic import DetailView, ListView
 
@@ -452,19 +453,25 @@ logger = logging.getLogger(__name__)
 # MULTI-FACTOR AUTHENTICATION SETUP FLOW
 # ===============================================================================
 
-# Define 2FA Setup Steps for Progress Indicator
+# Define 2FA Setup Steps for Progress Indicator.
+# Labels are lazy (like the reverse_lazy URLs): module-level gettext would
+# freeze them to the import-time locale.
 TWO_FACTOR_STEPS = [
     {
-        "label": _("Choose Method"),
-        "description": _("Select authentication method"),
+        "label": gettext_lazy("Choose Method"),
+        "description": gettext_lazy("Select authentication method"),
         "url": reverse_lazy("users:mfa_setup"),
     },
     {
-        "label": _("Set Up Method"),
-        "description": _("Configure your authenticator"),
+        "label": gettext_lazy("Set Up Method"),
+        "description": gettext_lazy("Configure your authenticator"),
         "url": reverse_lazy("users:mfa_setup_totp"),
     },
-    {"label": _("Complete"), "description": _("Save backup codes"), "url": reverse_lazy("users:mfa_backup_codes")},
+    {
+        "label": gettext_lazy("Complete"),
+        "description": gettext_lazy("Save backup codes"),
+        "url": reverse_lazy("users:mfa_backup_codes"),
+    },
 ]
 
 

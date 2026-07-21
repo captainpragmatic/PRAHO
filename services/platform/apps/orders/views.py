@@ -301,8 +301,15 @@ def order_list(request: HttpRequest) -> HttpResponse:
 
     # Get status counts for filter badges — single aggregate query (#130/L1)
     base_qs = Order.objects.filter(customer_id__in=customer_ids)
-    status_aggregates = {status: Count("id", filter=Q(status=status)) for status, _label in Order.STATUS_CHOICES}
-    status_counts = base_qs.aggregate(total=Count("id"), **status_aggregates)
+    # Namespace the per-status keys (like the services summary API) so a status
+    # can never collide with the reserved "total" aggregate name.
+    status_aggregates = {
+        f"status_{status}": Count("id", filter=Q(status=status)) for status, _label in Order.STATUS_CHOICES
+    }
+    aggregated = base_qs.aggregate(total=Count("id"), **status_aggregates)
+    status_counts = {"total": aggregated["total"]} | {
+        status: aggregated[f"status_{status}"] for status, _label in Order.STATUS_CHOICES
+    }
 
     statuses_with_cards = {"draft", "awaiting_payment", "paid", "provisioning", "completed"}
     other_status_priority = {"in_review": 0, "failed": 1, "cancelled": 2}

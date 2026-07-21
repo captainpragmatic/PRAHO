@@ -53,6 +53,15 @@ TICKET_STATUS_TABS = [
     {"value": "closed", "label": _("Closed"), "border_class": "border-red-500", "text_class": "text-red-400"},
 ]
 
+# Allowlist for the ?status= query param ("" = All tab). The value is echoed
+# into rendered context, and the shared tab component's roving tabindex needs
+# a matching tab — unknown values fall back to the All tab.
+_VALID_TICKET_STATUS_FILTERS = {tab["value"] for tab in TICKET_STATUS_TABS}
+
+
+def _validated_status_filter(raw: str) -> str:
+    return raw if raw in _VALID_TICKET_STATUS_FILTERS else ""
+
 
 @dataclass
 class TicketReplyData:
@@ -83,7 +92,7 @@ def ticket_list(request: HttpRequest) -> HttpResponse:
 
     # Get filter parameters
     search_query = request.GET.get("search", "").strip()
-    status_filter = request.GET.get("status", "").strip()
+    status_filter = _validated_status_filter(request.GET.get("status", "").strip())
 
     # Apply search filter
     if search_query:
@@ -163,7 +172,7 @@ def ticket_search_htmx(request: HttpRequest) -> HttpResponse:
 
     # Get filter parameters
     search_query = request.GET.get("q", "").strip()
-    status_filter = request.GET.get("status", "").strip()
+    status_filter = _validated_status_filter(request.GET.get("status", "").strip())
 
     # Apply search filter
     if search_query:

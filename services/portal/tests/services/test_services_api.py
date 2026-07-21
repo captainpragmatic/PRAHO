@@ -60,8 +60,8 @@ class ServicesAPIClientSummaryShapeTests(SimpleTestCase):
         result = ServicesAPIClient().get_services_summary(customer_id=1, user_id=2)
         self.assertEqual(set(result.keys()), CANONICAL_SERVICES_SUMMARY_KEYS)
 
-        self.assertEqual(set(result["status_counts"]), SERVICE_STATUS_COUNT_KEYS)
-        self.assertTrue(all(count == 0 for count in result["status_counts"].values()))
+        # Unknown counts are None (badges hidden), never a fabricated all-zero dict.
+        self.assertIsNone(result["status_counts"])
 
     @patch("apps.services.services.ServicesAPIClient._make_request")
     def test_platform_api_error_fallback_matches_canonical(self, mock_make_request) -> None:
@@ -84,3 +84,35 @@ class ServicesAPIClientSummaryShapeTests(SimpleTestCase):
         mock_make_request.return_value = {"success": True, "data": {"summary": canonical}}
         result = ServicesAPIClient().get_services_summary(customer_id=1, user_id=2)
         self.assertEqual(set(result.keys()), CANONICAL_SERVICES_SUMMARY_KEYS)
+
+    @patch("apps.services.services.ServicesAPIClient._make_request")
+    def test_success_without_status_counts_normalizes_to_none(self, mock_make_request) -> None:
+        """Deploy skew: an older platform doesn't send status_counts yet.
+
+        The client must surface None (badges hidden) instead of letting the
+        view fabricate all-zero badges next to a real total.
+        """
+        summary = dict.fromkeys(CANONICAL_SERVICES_SUMMARY_KEYS - {"status_counts"}, 0)
+        summary["service_types"] = {}
+        summary["recent_services"] = []
+        mock_make_request.return_value = {"success": True, "data": {"summary": summary}}
+
+        result = ServicesAPIClient().get_services_summary(customer_id=1, user_id=2)
+
+        self.assertIn("status_counts", result)
+        self.assertIsNone(result["status_counts"])
+
+    @patch("apps.services.services.ServicesAPIClient._make_request")
+    def test_success_with_invalid_status_counts_normalizes_to_none(self, mock_make_request) -> None:
+        """A malformed status_counts must never reach the view as a non-dict."""
+        for bad in (None, ["active"], "active", 7):
+            with self.subTest(bad=bad):
+                summary = dict.fromkeys(CANONICAL_SERVICES_SUMMARY_KEYS, 0)
+                summary["service_types"] = {}
+                summary["recent_services"] = []
+                summary["status_counts"] = bad
+                mock_make_request.return_value = {"success": True, "data": {"summary": summary}}
+
+                result = ServicesAPIClient().get_services_summary(customer_id=1, user_id=2)
+
+                self.assertIsNone(result["status_counts"])
