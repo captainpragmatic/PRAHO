@@ -810,9 +810,11 @@ def virtualmin_server_test_connection(request: HttpRequest) -> HttpResponse:
         # Set the password using the proper method (handles encryption)
         temp_server.set_api_password(api_password)
 
-        # Test the connection
+        # Test the connection using the OPERATOR-SUPPLIED credentials (use_credential_vault=False),
+        # not whatever the vault holds for this hostname — otherwise testing an existing host would
+        # authenticate with the stored vault entry and report a misleading success/failure.
         provisioning_service = VirtualminProvisioningService()
-        result = provisioning_service.test_server_connection(temp_server)
+        result = provisioning_service.test_server_connection(temp_server, use_credential_vault=False)
 
         if result.is_ok():
             connection_info = result.unwrap()

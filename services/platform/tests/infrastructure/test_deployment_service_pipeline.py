@@ -157,6 +157,129 @@ class TestDeployNodeReachesCompletedThroughFSM(TestCase):
 
 
 # ===========================================================================
+# #347 GAP 1: deploy provisions a PRAHO-controlled credential, then activates
+# ===========================================================================
+
+
+class TestCredentialSeamWiring(TestCase):
+    """The deploy pipeline generates a Virtualmin API credential, hands it to the
+    panel playbook via extra_vars, registers with that ACL user (not root), and
+    verifies + activates the node."""
+
+    def test_credential_threaded_registered_and_activated(self) -> None:
+        deployment = _create_deployment("pending")
+        service = _make_service()
+        service._ssh_manager.generate_deployment_key.return_value = Ok(MagicMock(public_key="ssh-rsa AAAA"))
+        service._ansible.get_playbook_order.return_value = ["base.yml", "virtualmin.yml", "harden.yml", "backup.yml"]
+        service._ansible.run_playbook.return_value = Ok(MagicMock(success=True, stderr=""))
+        service._validation.validate_node.return_value = Ok(MagicMock(all_passed=True, summary="ok"))
+        registered = MagicMock(id=7)
+        service._registration.register_node.return_value = Ok(registered)
+        service._registration.verify_and_activate.return_value = Ok(registered)
+
+        gateway = MagicMock()
+        gateway.upload_ssh_key.return_value = Ok("praho-key")
+        gateway.create_firewall.return_value = Ok("fw-1")
+        gateway.create_server.return_value = Ok(
+            ServerCreateResult(server_id="srv-1", ipv4_address="1.2.3.4", ipv6_address="")
+        )
+
+        with (
+            patch("apps.infrastructure.deployment_service.SettingsService.get_setting", return_value=True),
+            patch("apps.infrastructure.deployment_service.get_cloud_gateway", return_value=gateway),
+        ):
+            result = service.deploy_node(deployment=deployment, credentials={"api_token": "test-token"})
+
+        self.assertTrue(result.is_ok(), f"deploy_node should succeed, got {result}")
+        # #348 finding #6: the credential goes ONLY to the panel playbook (virtualmin.yml), never
+        # broadcast to base/harden/backup which don't consume it.
+        calls = {c.kwargs["playbook"]: c.kwargs.get("extra_vars") for c in service._ansible.run_playbook.call_args_list}
+        panel_extra = calls["virtualmin.yml"]
+        self.assertEqual(panel_extra["praho_api_user"], "praho-api")
+        self.assertTrue(panel_extra["praho_api_password"], "API password must be generated and threaded")
+        for other in ("base.yml", "harden.yml", "backup.yml"):
+            self.assertIsNone(calls[other], f"the API credential must not reach {other}")
+        reg_kwargs = service._registration.register_node.call_args.kwargs
+        self.assertEqual(reg_kwargs["admin_username"], "praho-api")
+        self.assertEqual(reg_kwargs["admin_password"], panel_extra["praho_api_password"])
+        service._registration.verify_and_activate.assert_called_once_with(registered)
+
+    @staticmethod
+    def _wire_happy_path(service, *, registered) -> MagicMock:
+        service._ssh_manager.generate_deployment_key.return_value = Ok(MagicMock(public_key="ssh-rsa AAAA"))
+        service._ansible.get_playbook_order.return_value = ["base.yml", "virtualmin.yml", "harden.yml", "backup.yml"]
+        service._ansible.run_playbook.return_value = Ok(MagicMock(success=True, stderr=""))
+        service._validation.validate_node.return_value = Ok(MagicMock(all_passed=True, summary="ok"))
+        service._registration.register_node.return_value = Ok(registered)
+        gateway = MagicMock()
+        gateway.upload_ssh_key.return_value = Ok("praho-key")
+        gateway.create_firewall.return_value = Ok("fw-1")
+        gateway.create_server.return_value = Ok(
+            ServerCreateResult(server_id="srv-1", ipv4_address="1.2.3.4", ipv6_address="")
+        )
+        return gateway
+
+    def test_redeploy_reuses_existing_vault_credential(self) -> None:
+        """#348 finding #8: a re-deploy REUSES the node's existing vault credential rather than
+        minting a fresh password. create-admin tolerates the already-existing praho-api user without
+        resetting it, so a fresh password would desync the node (old pw) from the vault (new pw) and
+        401 verify_and_activate. Convergence: the panel + registration use the REUSED vault password."""
+        from apps.common.credential_vault import (  # noqa: PLC0415  # local: test-only
+            CredentialData,
+            CredentialVault,
+        )
+
+        deployment = _create_deployment("pending")
+        CredentialVault().store_credential(
+            CredentialData(
+                service_type="virtualmin",
+                service_identifier=deployment.fqdn,
+                username="praho-api",
+                password="REUSED-VAULT-PW",
+            )
+        )
+        service = _make_service()
+        registered = MagicMock(id=9)
+        service._registration.verify_and_activate.return_value = Ok(registered)
+        gateway = self._wire_happy_path(service, registered=registered)
+
+        with (
+            patch("apps.infrastructure.deployment_service.SettingsService.get_setting", return_value=True),
+            patch("apps.infrastructure.deployment_service.get_cloud_gateway", return_value=gateway),
+        ):
+            result = service.deploy_node(deployment=deployment, credentials={"api_token": "test-token"})
+
+        self.assertTrue(result.is_ok(), f"deploy_node should succeed, got {result}")
+        calls = {c.kwargs["playbook"]: c.kwargs.get("extra_vars") for c in service._ansible.run_playbook.call_args_list}
+        self.assertEqual(
+            calls["virtualmin.yml"]["praho_api_password"],
+            "REUSED-VAULT-PW",
+            "re-deploy must reuse the existing vault password, not mint a fresh one",
+        )
+        self.assertEqual(service._registration.register_node.call_args.kwargs["admin_password"], "REUSED-VAULT-PW")
+
+    def test_deploy_completes_even_if_activation_raises(self) -> None:
+        """#348 finding #7: verify_and_activate is best-effort. If it RAISES (e.g. a transient DB
+        error), the deployment must still COMPLETE (node registered, left disabled) — never be marked
+        failed and roll back the paid provisioning work."""
+        deployment = _create_deployment("pending")
+        service = _make_service()
+        registered = MagicMock(id=11)
+        service._registration.verify_and_activate.side_effect = RuntimeError("transient db error")
+        gateway = self._wire_happy_path(service, registered=registered)
+
+        with (
+            patch("apps.infrastructure.deployment_service.SettingsService.get_setting", return_value=True),
+            patch("apps.infrastructure.deployment_service.get_cloud_gateway", return_value=gateway),
+        ):
+            result = service.deploy_node(deployment=deployment, credentials={"api_token": "test-token"})
+
+        self.assertTrue(result.is_ok(), f"deploy must complete despite activation raising, got {result}")
+        deployment.refresh_from_db()
+        self.assertEqual(deployment.status, "completed")
+
+
+# ===========================================================================
 # H2: Transient errors must NOT clear external_node_id
 # ===========================================================================
 
