@@ -28,6 +28,10 @@
           {% badge doc.status variant="danger" icon="x" %}
         {% elif doc.status == "error" %}
           {% badge doc.status variant="warning" icon="warning" %}
+        {% elif doc.status == "outcome_unknown" %}
+          {% trans "Reconciliation Required" as lbl %}{% badge lbl variant="danger" icon="warning" %}
+        {% elif doc.status == "uploading" %}
+          {% badge doc.status variant="info" icon="external" %}
         {% elif doc.status == "processing" or doc.status == "submitted" %}
           {% badge doc.status variant="warning" icon="clock" %}
         {% else %}

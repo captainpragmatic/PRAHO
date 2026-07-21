@@ -154,6 +154,7 @@ class UploadResponse:
     message: str = ""
     errors: list[str] = field(default_factory=list)
     raw_response: dict[str, Any] = field(default_factory=dict)
+    outcome_is_known: bool = True
 
     @classmethod
     def from_response(cls, response: requests.Response) -> UploadResponse:
@@ -206,6 +207,15 @@ class UploadResponse:
                 message="Upload accepted for processing",
                 raw_response=raw,
             )
+        if exec_status == "0":
+            message = "ANAF reported upload success without index_incarcare"
+            return cls(
+                success=False,
+                message=message,
+                errors=[message],
+                raw_response=raw,
+                outcome_is_known=False,
+            )
         if not errors:
             errors = [f"ANAF upload rejected (ExecutionStatus={exec_status!r}, no index_incarcare)"]
         return cls(success=False, message=errors[0], errors=errors, raw_response=raw)
@@ -228,6 +238,7 @@ class UploadResponse:
             )
 
         errors = data.get("errors", [])
+        has_explicit_rejection = bool(data.get("errors") or data.get("message"))
         if isinstance(errors, str):
             errors = [errors]
         elif not errors and "message" in data:
@@ -240,6 +251,7 @@ class UploadResponse:
             message=data.get("message", "Upload failed"),
             errors=errors,
             raw_response=data,
+            outcome_is_known=response.status_code != HTTPStatus.OK or has_explicit_rejection,
         )
 
     @classmethod
@@ -633,6 +645,7 @@ class EFacturaClient:
             response = self._request_with_retry(
                 "POST",
                 f"{self.config.base_url}{endpoint_path}",
+                retry_network_errors=False,
                 params=params,
                 data=xml_content.encode("utf-8"),
                 headers={
@@ -641,7 +654,16 @@ class EFacturaClient:
                 },
             )
 
+            if (
+                response.status_code == HTTPStatus.REQUEST_TIMEOUT
+                or response.status_code >= HTTPStatus.INTERNAL_SERVER_ERROR
+            ):
+                raise NetworkError(f"e-Factura upload outcome is unknown after HTTP {response.status_code}")
+
             result = UploadResponse.from_response(response)
+
+            if not result.outcome_is_known:
+                raise NetworkError("e-Factura upload response did not prove acceptance or rejection")
 
             if result.success:
                 logger.info(f"e-Factura uploaded successfully: {result.upload_index}")
@@ -909,9 +931,16 @@ class EFacturaClient:
         self,
         method: str,
         url: str,
+        *,
+        retry_network_errors: bool = True,
         **kwargs: Any,
     ) -> requests.Response:
-        """Make HTTP request with retry logic via safe_request()."""
+        """Make an HTTP request, retrying only when replay safety is explicit.
+
+        Mutating e-Factura uploads pass ``retry_network_errors=False`` because a timeout or
+        connection loss cannot prove that ANAF did not accept the POST. Explicit 429 responses
+        remain safe to replay because the provider positively refused that attempt.
+        """
         # Merge default headers with caller-provided headers
         merged_headers = {**self._default_headers, **kwargs.pop("headers", {})}
         last_error: Exception | None = None
@@ -922,6 +951,8 @@ class EFacturaClient:
 
                 # Check for rate limiting
                 if response.status_code == HTTPStatus.TOO_MANY_REQUESTS:
+                    if attempt >= self.config.max_retries - 1:
+                        return response
                     retry_after = min(
                         int(response.headers.get("Retry-After", 60)),
                         MAX_RETRY_AFTER_SECONDS,
@@ -937,9 +968,13 @@ class EFacturaClient:
             except requests.Timeout as e:
                 last_error = e
                 logger.warning(f"⚠️ [e-Factura] Request timeout (attempt {attempt + 1}/{self.config.max_retries})")
+                if not retry_network_errors:
+                    raise NetworkError("e-Factura request outcome is unknown after timeout") from e
             except requests.ConnectionError as e:
                 last_error = e
                 logger.warning(f"⚠️ [e-Factura] Connection error (attempt {attempt + 1}/{self.config.max_retries})")
+                if not retry_network_errors:
+                    raise NetworkError("e-Factura request outcome is unknown after connection failure") from e
 
             # Wait before retry (exponential backoff)
             if attempt < self.config.max_retries - 1:

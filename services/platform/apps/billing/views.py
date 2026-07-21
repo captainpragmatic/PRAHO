@@ -2012,6 +2012,13 @@ def efactura_dashboard(request: HttpRequest) -> HttpResponse:
         {"key": "draft", "label": _("Draft"), "count": status_counts.get("draft", 0), "color": "slate", "icon": "📝"},
         {"key": "queued", "label": _("Queued"), "count": status_counts.get("queued", 0), "color": "blue", "icon": "📋"},
         {
+            "key": "uploading",
+            "label": _("Uploading"),
+            "count": status_counts.get("uploading", 0),
+            "color": "cyan",
+            "icon": "⬆️",
+        },
+        {
             "key": "submitted",
             "label": _("Submitted"),
             "count": status_counts.get("submitted", 0),
@@ -2040,6 +2047,13 @@ def efactura_dashboard(request: HttpRequest) -> HttpResponse:
             "icon": "❌",
         },
         {"key": "error", "label": _("Error"), "count": status_counts.get("error", 0), "color": "orange", "icon": "⚠️"},
+        {
+            "key": "outcome_unknown",
+            "label": _("Reconciliation Required"),
+            "count": status_counts.get("outcome_unknown", 0),
+            "color": "red",
+            "icon": "🚨",
+        },
     ]
 
     # 2-4. Queue data

@@ -41,6 +41,7 @@ class SubmitEfacturaTaskTestCase(TestCase):
 
         mock_doc = Mock()
         mock_doc.anaf_upload_index = "12345"
+        mock_doc.status = EFacturaStatus.SUBMITTED.value
         mock_service.submit_invoice.return_value = SubmissionResult(
             success=True,
             document=mock_doc,
@@ -51,6 +52,32 @@ class SubmitEfacturaTaskTestCase(TestCase):
         self.assertTrue(result["success"])
         self.assertEqual(result["invoice_id"], invoice_id)
         self.assertEqual(result["upload_index"], "12345")
+        self.assertEqual(result["status"], EFacturaStatus.SUBMITTED.value)
+
+    @patch("apps.billing.efactura.tasks.Invoice")
+    @patch("apps.billing.efactura.tasks.EFacturaService")
+    def test_active_claim_is_reported_as_in_progress(self, mock_service_class, mock_invoice_model):
+        invoice_id = str(uuid4())
+        mock_invoice = Mock(number="INV-ACTIVE")
+        mock_invoice_model.objects.get.return_value = mock_invoice
+
+        mock_document = Mock(
+            status=EFacturaStatus.UPLOADING.value,
+            anaf_upload_index="",
+        )
+        mock_service = Mock()
+        mock_service.submit_invoice.return_value = SubmissionResult(
+            success=True,
+            document=mock_document,
+        )
+        mock_service_class.return_value = mock_service
+
+        result = submit_efactura_task(invoice_id)
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["status"], EFacturaStatus.UPLOADING.value)
+        self.assertEqual(result["message"], "e-Factura submission is already in progress")
+        self.assertIsNone(result["upload_index"])
 
     @patch("apps.billing.efactura.tasks.Invoice")
     def test_submit_invoice_not_found(self, mock_invoice_model):

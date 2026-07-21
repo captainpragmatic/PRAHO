@@ -229,6 +229,10 @@ Design before code:
 - Use PostgreSQL `TransactionTestCase` concurrency tests. Ordinary `TestCase` mocks are
   insufficient proof.
 
+Implementation note: the exact lifecycle, crash boundary, and fail-closed operator procedure are
+documented in `services/platform/docs/efactura-submission-reconciliation.md`. Automated message
+reconciliation remains outside #351's stated scope.
+
 ## PR C — Truthful response archive and live harness (#352, #123)
 
 Design before code:

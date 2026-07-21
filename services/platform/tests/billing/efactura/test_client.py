@@ -231,6 +231,7 @@ class UploadResponseTestCase(TestCase):
         )
         self.assertFalse(result.success)
         self.assertEqual(result.upload_index, "")
+        self.assertFalse(result.outcome_is_known)
 
     def test_json_fallback_still_parses_legacy_success(self):
         """Defensive JSON fallback retained for legacy/sandbox shapes."""
@@ -551,6 +552,25 @@ class EFacturaClientTestCase(TestCase):
 
     @patch("apps.billing.efactura.client.safe_request")
     @patch("apps.billing.efactura.client.time.sleep")
+    def test_exhausted_rate_limit_remains_an_explicit_response(self, mock_sleep, mock_safe_request):
+        """Repeated 429s prove refusal, so they must not become an ambiguous network outcome."""
+        rate_limited = Mock()
+        rate_limited.status_code = 429
+        rate_limited.headers = {"Retry-After": "1"}
+        mock_safe_request.return_value = rate_limited
+
+        result = self.client._request_with_retry(
+            "POST",
+            "https://test.anaf.ro/upload",
+            retry_network_errors=False,
+        )
+
+        self.assertEqual(result.status_code, 429)
+        self.assertEqual(mock_safe_request.call_count, self.config.max_retries)
+        self.assertEqual(mock_sleep.call_count, self.config.max_retries - 1)
+
+    @patch("apps.billing.efactura.client.safe_request")
+    @patch("apps.billing.efactura.client.time.sleep")
     def test_request_with_retry_timeout(self, mock_sleep, mock_safe_request):
         """Test request with timeout retry."""
         import requests
@@ -562,6 +582,47 @@ class EFacturaClientTestCase(TestCase):
 
         # Should have retried max_retries times
         self.assertEqual(mock_safe_request.call_count, self.config.max_retries)
+
+    @patch("apps.billing.efactura.client.EFacturaClient._get_access_token", return_value="test-token")
+    @patch("apps.billing.efactura.client.safe_request")
+    def test_upload_timeout_is_never_automatically_replayed(self, mock_safe_request, _mock_token):
+        """A mutating POST with an ambiguous outcome must be attempted exactly once."""
+        import requests
+
+        mock_safe_request.side_effect = requests.Timeout("response lost")
+
+        with self.assertRaises(NetworkError):
+            self.client.upload_invoice("<Invoice/>")
+
+        self.assertEqual(mock_safe_request.call_count, 1)
+
+    @patch("apps.billing.efactura.client.EFacturaClient._get_access_token", return_value="test-token")
+    @patch("apps.billing.efactura.client.safe_request")
+    def test_upload_server_error_is_ambiguous_and_never_replayed(self, mock_safe_request, _mock_token):
+        """A 5xx response does not prove whether ANAF committed the uploaded invoice."""
+        response = Mock(status_code=500, text="upstream failure", headers={})
+        mock_safe_request.return_value = response
+
+        with self.assertRaises(NetworkError):
+            self.client.upload_invoice("<Invoice/>")
+
+        self.assertEqual(mock_safe_request.call_count, 1)
+
+    @patch("apps.billing.efactura.client.EFacturaClient._get_access_token", return_value="test-token")
+    @patch("apps.billing.efactura.client.safe_request")
+    def test_upload_success_status_without_index_is_ambiguous(self, mock_safe_request, _mock_token):
+        """ANAF may have committed an ExecutionStatus=0 response even when its index is absent."""
+        response = Mock(
+            status_code=200,
+            text='<header xmlns="mfp:anaf:dgti:spv:respUploadFisier:v1" ExecutionStatus="0"/>',
+            headers={},
+        )
+        mock_safe_request.return_value = response
+
+        with self.assertRaises(NetworkError):
+            self.client.upload_invoice("<Invoice/>")
+
+        self.assertEqual(mock_safe_request.call_count, 1)
 
     @patch("apps.billing.efactura.client.EFacturaClient._get_access_token")
     @patch("apps.billing.efactura.client.EFacturaClient._request_with_retry")

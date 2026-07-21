@@ -87,22 +87,30 @@ def submit_efactura_task(invoice_id: str) -> dict[str, Any]:
     result = service.submit_invoice(invoice)
 
     if result.success:
-        logger.info(f"[e-Factura Task] Successfully submitted invoice {invoice.number}")
+        document_status = result.document.status if result.document else ""
+        is_registered_with_anaf = document_status in {"submitted", "processing", "accepted"}
+        message = (
+            "e-Factura submission completed"
+            if is_registered_with_anaf
+            else "e-Factura submission is already in progress"
+        )
+        logger.info(f"[e-Factura Task] {message} for invoice {invoice.number}")
         return {
             "success": True,
             "invoice_id": invoice_id,
             "invoice_number": invoice.number,
-            "upload_index": result.document.anaf_upload_index if result.document else None,
+            "status": document_status,
+            "message": message,
+            "upload_index": result.document.anaf_upload_index or None if result.document else None,
         }
-    else:
-        logger.warning(f"[e-Factura Task] Failed to submit invoice {invoice.number}: {result.error_message}")
-        return {
-            "success": False,
-            "invoice_id": invoice_id,
-            "invoice_number": invoice.number,
-            "error": result.error_message,
-            "errors": result.errors,
-        }
+    logger.warning(f"[e-Factura Task] Failed to submit invoice {invoice.number}: {result.error_message}")
+    return {
+        "success": False,
+        "invoice_id": invoice_id,
+        "invoice_number": invoice.number,
+        "error": result.error_message,
+        "errors": result.errors,
+    }
 
 
 def poll_efactura_status_task(document_id: str) -> dict[str, Any]:

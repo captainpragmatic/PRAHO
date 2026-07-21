@@ -4,7 +4,10 @@ Tests for EFacturaDocument model.
 
 from datetime import timedelta
 from unittest.mock import patch
+from uuid import uuid4
 
+from django.core.exceptions import ValidationError
+from django.db import IntegrityError, transaction
 from django.test import TestCase
 from django.utils import timezone
 
@@ -54,6 +57,40 @@ class EFacturaDocumentModelTestCase(TestCase):
         self.assertNotEqual(document.xml_hash, "")
         self.assertEqual(len(document.xml_hash), 64)  # SHA-256
 
+    def test_xml_hash_recomputed_when_content_changes_with_update_fields(self):
+        document = EFacturaDocument.objects.create(
+            invoice=self.invoice,
+            xml_content="<Invoice>Original</Invoice>",
+        )
+        original_hash = document.xml_hash
+
+        document.xml_content = "<Invoice>Changed</Invoice>"
+        document.save(update_fields=["xml_content", "updated_at"])
+        document.refresh_from_db()
+
+        self.assertNotEqual(document.xml_hash, original_hash)
+        self.assertTrue(document.verify_xml_integrity())
+
+    def test_claimed_xml_cannot_be_changed(self):
+        document = EFacturaDocument.objects.create(
+            invoice=self.invoice,
+            xml_content="<Invoice>Frozen</Invoice>",
+        )
+        claimed_at = timezone.now()
+        document.mark_queued()
+        document.save()
+        document.mark_uploading(
+            claim_token=uuid4(),
+            claimed_at=claimed_at,
+            claim_expires_at=claimed_at + timedelta(minutes=10),
+        )
+        document.save()
+
+        document.xml_content = "<Invoice>Changed</Invoice>"
+
+        with self.assertRaisesMessage(ValidationError, "immutable"):
+            document.save(update_fields=["xml_content", "updated_at"])
+
     def test_verify_xml_integrity(self):
         """Test XML integrity verification."""
         document = EFacturaDocument.objects.create(
@@ -79,8 +116,16 @@ class EFacturaDocumentModelTestCase(TestCase):
     def test_mark_submitted(self):
         """Test marking document as submitted."""
         document = EFacturaDocument.objects.create(invoice=self.invoice)
-        # Walk FSM path: draft → queued → submitted
+        claim_token = uuid4()
+        claimed_at = timezone.now()
+        # Walk FSM path: draft → queued → uploading → submitted
         document.mark_queued()
+        document.save()
+        document.mark_uploading(
+            claim_token=claim_token,
+            claimed_at=claimed_at,
+            claim_expires_at=claimed_at + timedelta(minutes=10),
+        )
         document.save()
         document.mark_submitted("12345")
         document.save()
@@ -89,6 +134,43 @@ class EFacturaDocumentModelTestCase(TestCase):
         self.assertEqual(document.status, EFacturaStatus.SUBMITTED.value)
         self.assertEqual(document.anaf_upload_index, "12345")
         self.assertIsNotNone(document.submitted_at)
+        self.assertIsNone(document.submission_claim_token)
+        self.assertIsNone(document.submission_claimed_at)
+        self.assertIsNone(document.submission_claim_expires_at)
+
+    def test_mark_outcome_unknown_quarantines_ambiguous_upload(self):
+        document = EFacturaDocument.objects.create(invoice=self.invoice)
+        claim_token = uuid4()
+        claimed_at = timezone.now()
+        document.mark_queued()
+        document.save()
+        document.mark_uploading(
+            claim_token=claim_token,
+            claimed_at=claimed_at,
+            claim_expires_at=claimed_at + timedelta(minutes=10),
+        )
+        document.save()
+
+        document.mark_outcome_unknown("ANAF response was lost")
+        document.save()
+        document.refresh_from_db()
+
+        self.assertEqual(document.status, EFacturaStatus.OUTCOME_UNKNOWN.value)
+        self.assertEqual(document.last_error, "ANAF response was lost")
+        self.assertIsNone(document.submission_claim_token)
+        self.assertEqual(document.submission_claimed_at, claimed_at)
+        self.assertEqual(document.submission_claim_expires_at, claimed_at + timedelta(minutes=10))
+        self.assertTrue(document.is_terminal)
+        self.assertFalse(document.can_retry)
+
+    def test_outcome_unknown_requires_preserved_claim_evidence(self):
+        """The database must reject a quarantine state that loses its claim timestamps."""
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            EFacturaDocument.objects.create(
+                invoice=self.invoice,
+                status=EFacturaStatus.OUTCOME_UNKNOWN.value,
+                xml_content="<Invoice/>",
+            )
 
     def test_mark_accepted(self):
         """Test marking document as accepted."""

@@ -76,12 +76,16 @@ def submit_efactura(invoice_id: str) -> dict[str, Any]:
         # Submit through the canonical document lifecycle and endpoint router.
         service = EFacturaService()
         submission_result = service.submit_invoice(invoice)
+        document_status = submission_result.document.status if submission_result.document else ""
+        is_registered_with_anaf = document_status in {"submitted", "processing", "accepted"}
         if not submission_result.success:
             logger.error(f"🔥 [e-Factura] Submission failed for {invoice.number}: {submission_result.error_message}")
-        else:
+        elif is_registered_with_anaf:
             logger.info(f"✅ [e-Factura] Submitted invoice {invoice.number} to ANAF")
             invoice.meta = {**(invoice.meta or {}), "efactura_submitted": True}
             invoice.save(update_fields=["meta"])
+        else:
+            logger.info(f"🏛️ [e-Factura] Submission for {invoice.number} is already {document_status}")
 
         # Log the submission attempt
         AuditService.log_simple_event(
@@ -110,7 +114,12 @@ def submit_efactura(invoice_id: str) -> dict[str, Any]:
             "success": True,
             "invoice_id": str(invoice.id),
             "invoice_number": invoice.number,
-            "message": "e-Factura submission completed",
+            "status": document_status,
+            "message": (
+                "e-Factura submission completed"
+                if is_registered_with_anaf
+                else "e-Factura submission is already in progress"
+            ),
         }
 
     except Invoice.DoesNotExist:

@@ -2,12 +2,14 @@
 Tests for e-Factura compliance dashboard views.
 """
 
+from datetime import timedelta
 from unittest.mock import Mock, patch
 from uuid import uuid4
 
 from django.contrib.auth import get_user_model
 from django.test import Client, TestCase
 from django.urls import reverse
+from django.utils import timezone
 
 User = get_user_model()
 
@@ -51,7 +53,10 @@ class EfacturaDashboardViewTestCase(TestCase):
 
         response = self.client.get(reverse("billing:efactura_dashboard"))
         self.assertIn("status_cards", response.context)
-        self.assertEqual(len(response.context["status_cards"]), 7)
+        self.assertEqual(len(response.context["status_cards"]), 9)
+        card_keys = {card["key"] for card in response.context["status_cards"]}
+        self.assertIn("uploading", card_keys)
+        self.assertIn("outcome_unknown", card_keys)
 
     @patch("apps.billing.efactura.service.EFacturaService")
     def test_dashboard_status_filter(self, mock_service_class):
@@ -87,6 +92,34 @@ class EfacturaDocumentDetailViewTestCase(TestCase):
             reverse("billing:efactura_document_detail", kwargs={"pk": fake_uuid})
         )
         self.assertEqual(response.status_code, 404)
+
+    def test_unknown_outcome_requires_reconciliation_and_has_no_retry_action(self):
+        from apps.billing.efactura.models import EFacturaDocument, EFacturaStatus
+        from tests.factories import CurrencyFactory, CustomerFactory, InvoiceFactory
+
+        invoice = InvoiceFactory(
+            customer=CustomerFactory(),
+            currency=CurrencyFactory(code="RON"),
+            number="INV-UNKNOWN-UI",
+            bill_to_country="RO",
+            status="issued",
+        )
+        claimed_at = timezone.now() - timedelta(minutes=11)
+        document = EFacturaDocument.objects.create(
+            invoice=invoice,
+            status=EFacturaStatus.OUTCOME_UNKNOWN.value,
+            submission_claimed_at=claimed_at,
+            submission_claim_expires_at=claimed_at + timedelta(minutes=10),
+            xml_content="<Invoice/>",
+            last_error="ANAF upload response was lost",
+        )
+
+        response = self.client.get(reverse("billing:efactura_document_detail", kwargs={"pk": document.pk}))
+
+        self.assertContains(response, "Reconciliation Required")
+        self.assertContains(response, "Upload Claim Acquired")
+        self.assertContains(response, "Claim Lease Expired")
+        self.assertNotContains(response, "Retry Submission")
 
 
 class EfacturaSubmitViewTestCase(TestCase):

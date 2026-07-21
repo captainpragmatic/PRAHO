@@ -18,6 +18,7 @@ from unittest.mock import MagicMock, patch
 from django.test import TestCase
 from django.utils import timezone
 
+from apps.billing.efactura.models import EFacturaStatus
 from apps.billing.models import Invoice
 from apps.billing.payment_models import (
     PaymentCollectionRun,
@@ -200,6 +201,27 @@ class SubmitEfacturaTests(TestCase):
 
         self.assertFalse(result["success"])
         self.assertIn(fake_id, result["error"])
+
+    @patch("apps.billing.efactura.service.EFacturaService")
+    @patch("apps.audit.services.AuditService.log_simple_event")
+    def test_active_submission_claim_does_not_mark_invoice_as_submitted(
+        self,
+        mock_audit: MagicMock,
+        mock_service: MagicMock,
+    ) -> None:
+        invoice = _make_invoice(status="issued")
+        mock_service.return_value.submit_invoice.return_value = MagicMock(
+            success=True,
+            error_message="",
+            document=MagicMock(status=EFacturaStatus.UPLOADING.value),
+        )
+
+        result = submit_efactura(str(invoice.id))
+
+        invoice.refresh_from_db()
+        self.assertTrue(result["success"])
+        self.assertEqual(result["status"], EFacturaStatus.UPLOADING.value)
+        self.assertNotIn("efactura_submitted", invoice.meta)
 
     @patch("apps.audit.services.AuditService.log_simple_event")
     def test_generic_exception_returns_error(self, mock_audit: MagicMock) -> None:
