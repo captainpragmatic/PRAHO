@@ -459,6 +459,44 @@ class TestConfirmOrderConvertsProformaBeforeWebhook(CardProformaTestBase):
 
         self.assertEqual(mock_convert.call_args.kwargs["amount_cents"], proforma.total_cents)
 
+    @patch("apps.billing.proforma_service.ProformaPaymentService.record_payment_and_convert")
+    def test_confirm_order_rejects_proforma_drift_after_stripe_verification(self, mock_convert: MagicMock) -> None:
+        from apps.api.orders.views import confirm_order  # noqa: PLC0415
+
+        order = self._create_order_with_items()
+        force_status(order, "awaiting_payment")
+        proforma = self._create_sent_proforma_for_order(order)
+        verified_total_cents = proforma.total_cents
+        payment = self._create_pending_payment("pi_testProformaDrift53", proforma=proforma)
+        force_status(payment, "succeeded")
+        order.payment_intent_id = payment.gateway_txn_id
+        order.payment_method = "card"
+        order.save(update_fields=["payment_intent_id", "payment_method"])
+
+        def confirm_then_drift(_payment_intent_id: str) -> PaymentConfirmResult:
+            ProformaInvoice.objects.filter(pk=proforma.pk).update(total_cents=verified_total_cents + 100)
+            return PaymentConfirmResult(
+                success=True,
+                status="succeeded",
+                error=None,
+                amount_received=verified_total_cents,
+                currency="ron",
+            )
+
+        mock_gateway = MagicMock()
+        mock_gateway.confirm_payment.side_effect = confirm_then_drift
+        request = self._make_confirm_request({"payment_intent_id": payment.gateway_txn_id})
+
+        with (
+            patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)),
+            patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway", return_value=mock_gateway),
+        ):
+            response = confirm_order(request, str(order.id))
+
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("changed after payment verification", response.data["error"])
+        mock_convert.assert_not_called()
+
     def test_confirm_order_invoice_linked_to_order_after_conversion(self) -> None:
         """After confirm_order converts the proforma, order.invoice must be the new invoice.
 

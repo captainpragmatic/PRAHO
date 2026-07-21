@@ -1046,6 +1046,7 @@ def confirm_order(request: Request, customer: Customer, order_id: str) -> Respon
             order_number_for_log = order.order_number
             proforma_snapshot = order.proforma
             payable_total_cents = proforma_snapshot.total_cents if proforma_snapshot is not None else order.total_cents
+            payable_proforma_id = proforma_snapshot.pk if proforma_snapshot is not None else None
         # Phase 1 transaction ends here — DB lock released before any network call.
         # C2: The gap between Phase 1 and Phase 3 is safe because Phase 3 re-acquires
         # the lock and OrderPaymentConfirmationService.confirm_order() is idempotent.
@@ -1219,9 +1220,24 @@ def confirm_order(request: Request, customer: Customer, order_id: str) -> Respon
                 # Webhook hasn't arrived yet — convert proforma ourselves (idempotent).
                 from apps.billing.proforma_service import ProformaPaymentService  # noqa: PLC0415
 
+                if order.proforma_id != payable_proforma_id or order.proforma.total_cents != payable_total_cents:
+                    logger.critical(
+                        "🔥 [API] Billing document changed after payment verification for order %s: "
+                        "verified_proforma=%s current_proforma=%s verified_total=%d current_total=%d",
+                        order.order_number,
+                        payable_proforma_id,
+                        order.proforma_id,
+                        payable_total_cents,
+                        order.proforma.total_cents,
+                    )
+                    return Response(
+                        {"success": False, "error": "Billing document changed after payment verification"},
+                        status=status.HTTP_409_CONFLICT,
+                    )
+
                 convert_result = ProformaPaymentService.record_payment_and_convert(
                     proforma_id=str(order.proforma.id),
-                    amount_cents=order.proforma.total_cents,
+                    amount_cents=payable_total_cents,
                     payment_method="stripe",
                     existing_payment=verified_payment,
                 )
