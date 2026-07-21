@@ -983,6 +983,7 @@ def confirm_order(request: Request, customer: Customer, order_id: str) -> Respon
             # of=("self",) locks only the Order row, not related tables.
             order = (
                 Order.objects.select_for_update(of=("self",))
+                .select_related("proforma")
                 .prefetch_related("items")
                 .get(id=order_id, customer_id=customer.id)
             )
@@ -1043,7 +1044,8 @@ def confirm_order(request: Request, customer: Customer, order_id: str) -> Respon
             pi_to_verify = order.payment_intent_id
             order_payment_method = order.payment_method
             order_number_for_log = order.order_number
-            order_total_cents = order.total_cents
+            proforma_snapshot = order.proforma
+            payable_total_cents = proforma_snapshot.total_cents if proforma_snapshot is not None else order.total_cents
         # Phase 1 transaction ends here — DB lock released before any network call.
         # C2: The gap between Phase 1 and Phase 3 is safe because Phase 3 re-acquires
         # the lock and OrderPaymentConfirmationService.confirm_order() is idempotent.
@@ -1095,7 +1097,8 @@ def confirm_order(request: Request, customer: Customer, order_id: str) -> Respon
                         {"success": False, "error": "Payment verification failed"},
                         status=status.HTTP_400_BAD_REQUEST,
                     )
-                # H4 fix: Verify Stripe amount matches order total to prevent underpayment.
+                # Verify Stripe amount against the frozen billing document. The mutable
+                # order may drift after its proforma is issued; it is not the charge ledger.
                 # SFH-2 fix: Treat None as rejection (fail-closed). If Stripe says "succeeded"
                 # but won't tell us the amount, that's suspicious enough to reject.
                 stripe_amount = payment_result.get("amount_received")
@@ -1108,15 +1111,15 @@ def confirm_order(request: Request, customer: Customer, order_id: str) -> Respon
                         {"success": False, "error": "Payment amount could not be verified"},
                         status=status.HTTP_400_BAD_REQUEST,
                     )
-                if stripe_amount != order_total_cents:
+                if stripe_amount != payable_total_cents:
                     logger.warning(
-                        "[API] Stripe amount mismatch for order %s: PI=%d, order=%d",
+                        "[API] Stripe amount mismatch for order %s: PI=%d, billing_document=%d",
                         order_number_for_log,
                         stripe_amount,
-                        order_total_cents,
+                        payable_total_cents,
                     )
                     return Response(
-                        {"success": False, "error": "Payment amount does not match order total"},
+                        {"success": False, "error": "Payment amount does not match billing document total"},
                         status=status.HTTP_400_BAD_REQUEST,
                     )
                 # Capture verified status for the audit trail (not the client-supplied value)
@@ -1218,7 +1221,7 @@ def confirm_order(request: Request, customer: Customer, order_id: str) -> Respon
 
                 convert_result = ProformaPaymentService.record_payment_and_convert(
                     proforma_id=str(order.proforma.id),
-                    amount_cents=order.total_cents,
+                    amount_cents=order.proforma.total_cents,
                     payment_method="stripe",
                     existing_payment=verified_payment,
                 )

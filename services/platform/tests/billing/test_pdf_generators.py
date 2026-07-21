@@ -79,6 +79,13 @@ class BaseRomanianDocumentPDFGeneratorTestCase(TestCase):
         self.assertEqual(generator.width, A4[0])
         self.assertEqual(generator.height, A4[1])
 
+    def test_currency_code_never_silently_falls_back(self):
+        generator = RomanianDocumentPDFGenerator.__new__(RomanianDocumentPDFGenerator)
+        generator.document = Mock(currency=None)
+
+        with self.assertRaisesRegex(ValueError, "authoritative currency"):
+            generator._get_currency_code()
+
     def test_invoice_dates_rendered_in_romanian_local_calendar(self):
         """#286: the PDF must print the Romanian calendar date, not the UTC one.
 
@@ -1162,7 +1169,8 @@ class EN16931PDFComplianceTests(TestCase):
             customer=self.customer, currency=self.currency_eur,
             number='INV-EUR-002', subtotal_cents=10000, tax_cents=2100,
             total_cents=12100, status='issued', bill_to_name='EUR Client',
-            meta={'exchange_rate': '4.9750'},
+            exchange_to_ron=Decimal('4.9750'),
+            meta={'exchange_rate': '999.0000'},
         )
         InvoiceLine.objects.create(
             invoice=eur_invoice, kind='service', description='EUR service',
@@ -1172,6 +1180,7 @@ class EN16931PDFComplianceTests(TestCase):
         calls = self._get_canvas_calls(invoice=eur_invoice)
         text = ' '.join(calls)
         self.assertIn('4.9750', text)
+        self.assertNotIn('999.0000', text)
         self.assertIn('Curs valutar', text)
 
     def test_line_level_en16931_fields(self):
@@ -1302,15 +1311,36 @@ class EN16931PDFComplianceTests(TestCase):
         self.assertIn('17.10', text)                    # VAT == invoice.tax_amount (single TaxSubtotal)
         self.assertIn('107.10', text)                   # grand total
 
-    def test_discounted_multi_rate_collapses_deterministically(self):
-        """Defensive: a discounted invoice spanning multiple VAT rates violates the
-        single-category invariant (the e-Factura XML can't represent it either). The PDF
-        must not crash — it collapses to the dominant-rate net bucket, still reconciles to
-        the document total, and LOGS a warning rather than silently mislabelling."""
+    def test_pdf_rejects_a_stored_discount_that_contradicts_the_ledger(self):
+        contradictory = Invoice.objects.create(
+            customer=self.customer,
+            currency=self.currency_ron,
+            number='INV-DISC-CONTRADICTORY',
+            subtotal_cents=9000,
+            tax_cents=1710,
+            total_cents=10710,
+            discount_cents=500,
+            status='issued',
+            bill_to_name='Discount Client',
+        )
+        InvoiceLine.objects.create(
+            invoice=contradictory,
+            kind='service',
+            description='Discounted service',
+            quantity=1,
+            unit_price_cents=10000,
+            tax_rate=Decimal('0.19'),
+        )
+
+        with self.assertRaisesRegex(ValueError, 'does not reconcile'):
+            self._get_canvas_calls(invoice=contradictory)
+
+    def test_discounted_multi_rate_pdf_allocates_discount_per_vat_bucket(self):
+        """A PDF must never relabel mixed-rate VAT as one dominant-rate bucket."""
         multi = Invoice.objects.create(
             customer=self.customer, currency=self.currency_ron,
             number='INV-DISC-MULTI',
-            subtotal_cents=13500, tax_cents=2000, total_cents=15500,  # net + tax (invariant)
+            subtotal_cents=13500, tax_cents=2115, total_cents=15615,  # net + tax (invariant)
             discount_cents=1500, status='issued', bill_to_name='Disc Multi Client',
         )
         InvoiceLine.objects.create(
@@ -1321,13 +1351,12 @@ class EN16931PDFComplianceTests(TestCase):
             invoice=multi, kind='service', description='Reduced rate',
             quantity=1, unit_price_cents=5000, tax_rate=Decimal('0.09'),   # gross 50
         )
-        with self.assertLogs('apps.billing.pdf_generators', level='WARNING'):
-            text = ' '.join(self._get_canvas_calls(invoice=multi))
-        self.assertEqual(text.count('TVA '), 1, 'discounted invoice collapses to one VAT line')
-        self.assertIn('TVA 19%', text)                  # dominant (largest-base) rate, deterministic
-        self.assertRegex(text, r'baza:\s*135\.00')      # net = gross(150) - discount(15)
-        self.assertIn('20.00', text)                    # invoice tax
-        self.assertIn('155.00', text)                   # grand total reconciles
+        text = ' '.join(self._get_canvas_calls(invoice=multi))
+        self.assertEqual(text.count('TVA '), 2)
+        self.assertRegex(text, r'TVA 19%: 17\.10 .*baza:\s*90\.00')
+        self.assertRegex(text, r'TVA 9%: 4\.05 .*baza:\s*45\.00')
+        self.assertIn('21.15', text)
+        self.assertIn('156.15', text)
         self.assertRegex(text, r'[Dd]iscount.*15\.00')
 
     def test_no_discount_line_when_zero(self):

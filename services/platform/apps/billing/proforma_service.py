@@ -103,11 +103,6 @@ def send_proforma_email(
         return False
 
 
-# ===============================================================================
-# PROFORMA SERVICE CLASS
-# ===============================================================================
-
-
 class ProformaService:
     """Service class for proforma invoice business logic"""
 
@@ -186,7 +181,10 @@ class ProformaService:
             # the proforma reflects the actual amount the customer owes.
             from apps.billing.services import _build_customer_vat_info  # noqa: PLC0415
 
-            discount_cents = int(getattr(order, "discount_cents", 0) or 0)
+            discount_cents = max(
+                0,
+                min(int(getattr(order, "discount_cents", 0) or 0), int(order.subtotal_cents)),
+            )
             taxable_subtotal = max(0, int(order.subtotal_cents) - discount_cents)
             vat_result = TaxService.calculate_vat_for_document(
                 subtotal_cents=taxable_subtotal,
@@ -269,10 +267,11 @@ class ProformaService:
                     setup_line.calculate_totals()
                     setup_line.save()
 
-            # NOTE: Do NOT call proforma.recalculate_totals() here.
-            # The correct totals (including discount_cents) were already set at creation.
-            # recalculate_totals() recomputes from full-price lines and would overwrite
-            # the discount-aware amounts, producing a proforma that charges full price.
+            # Lines are the ledger; recompute once after all lines exist. The shared
+            # discount allocator applies discount_cents to taxable bases exactly once,
+            # so the order, proforma, PDF, and UBL all use the same net VAT.
+            proforma.recalculate_totals()
+            proforma.save(update_fields=["subtotal_cents", "discount_cents", "tax_cents", "total_cents"])
 
             # Link proforma to order (inside same transaction per F3)
             order.proforma = proforma

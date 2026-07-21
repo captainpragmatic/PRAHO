@@ -163,6 +163,39 @@ class CreateInvoiceFromOrderTests(TestCase):
         self.assertEqual(invoice.subtotal_cents, 9000)                  # net = gross(10000) - discount(1000)
         self.assertEqual(invoice.subtotal_cents + invoice.tax_cents, invoice.total_cents)
 
+    def test_create_from_order_reconciles_header_to_line_level_rounding(self) -> None:
+        """The finished invoice lines, not a pre-line aggregate estimate, own VAT rounding."""
+        order = Order.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            customer_email=self.customer.primary_email,
+            customer_name=self.customer.name,
+            subtotal_cents=3,
+            tax_cents=1,
+            total_cents=4,
+            billing_address={"company_name": "Order Co", "country": "RO"},
+        )
+        for index in range(3):
+            OrderItem.objects.create(
+                order=order,
+                product=self.product,
+                product_name=f"Micro item {index}",
+                product_type=self.product.product_type,
+                quantity=1,
+                unit_price_cents=1,
+                tax_rate=Decimal("0.2100"),
+                tax_cents=0,
+                line_total_cents=1,
+            )
+
+        invoice = InvoiceService().create_from_order(order).unwrap()
+
+        line_tax = sum(line.tax_cents for line in invoice.lines.all())
+        self.assertEqual(line_tax, 0)
+        self.assertEqual(invoice.tax_cents, line_tax)
+        self.assertEqual(invoice.subtotal_cents, 3)
+        self.assertEqual(invoice.total_cents, 3)
+
     def test_create_from_order_includes_setup_fee_line(self) -> None:
         """A setup fee must become its own invoice line so the lines reconcile with the header
         subtotal (which counts setup via OrderItem.subtotal_cents) — otherwise Σ lines < header

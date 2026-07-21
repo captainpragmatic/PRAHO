@@ -22,7 +22,7 @@ class OrderPreflightValidationService:
     """Run comprehensive checks before an order becomes payable."""
 
     @staticmethod
-    def validate(  # noqa: C901, PLR0912  # Complexity: multi-step business logic
+    def validate(  # noqa: C901, PLR0912, PLR0915  # Complexity: multi-step business logic
         order: Order,
     ) -> tuple[list[str], list[str]]:  # Complexity: order processing pipeline  # Complexity: multi-step business logic
         """Return (errors, warnings) for the given order."""
@@ -95,7 +95,15 @@ class OrderPreflightValidationService:
                 for item in order.items.all():
                     subtotal_cents += (int(item.unit_price_cents) * int(item.quantity)) + int(item.setup_cents)
 
-            # Reuse pre-computed VAT result when available (avoids duplicate calculation — B5/BUG-10)
+            discount_cents = max(
+                0,
+                min(int(getattr(order, "discount_cents", 0) or 0), int(subtotal_cents)),
+            )
+            taxable_subtotal_cents = int(subtotal_cents) - discount_cents
+
+            # Reuse pre-computed VAT result when available (avoids duplicate calculation — B5/BUG-10).
+            # Preview orders have no promotion yet; persisted orders calculate VAT on the
+            # allowance-reduced taxable base, matching Order and Proforma.
             if hasattr(order, "_preflight_vat_result"):
                 vat_result = order._preflight_vat_result
             else:
@@ -107,7 +115,7 @@ class OrderPreflightValidationService:
                     "order_id": str(order.id),
                 }
                 vat_result = OrderVATCalculator.calculate_vat(
-                    subtotal_cents=subtotal_cents, customer_info=customer_vat_info
+                    subtotal_cents=taxable_subtotal_cents, customer_info=customer_vat_info
                 )
 
             expected_tax_cents = int(vat_result.vat_cents)

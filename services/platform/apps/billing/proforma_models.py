@@ -111,7 +111,6 @@ class ProformaInvoice(models.Model):
     discount_cents = models.BigIntegerField(
         default=0, help_text=_("Document-level discount in cents (EN16931 BT-92/BT-107)")
     )
-
     # Proforma-specific fields
     STATUS_CHOICES: ClassVar = [
         ("draft", _("Draft")),
@@ -217,12 +216,13 @@ class ProformaInvoice(models.Model):
         return Decimal(self.total_cents) / 100
 
     def recalculate_totals(self) -> None:
-        """
-        Recalculate document totals from line items.
-        Ensures end-to-end consistency: subtotal = Σ(line subtotals), tax = Σ(line taxes)
-        """
-        totals = calculate_document_totals(list(self.lines.all()))
-        self.subtotal_cents = totals.subtotal_cents
+        """Reconcile the net header against gross lines and the stored allowance."""
+        totals = calculate_document_totals(
+            list(self.lines.order_by("sort_order", "pk")),
+            discount_cents=self.discount_cents,
+        )
+        self.discount_cents = min(self.discount_cents, totals.subtotal_cents)
+        self.subtotal_cents = totals.subtotal_cents - self.discount_cents
         self.tax_cents = totals.tax_cents
         self.total_cents = totals.total_cents
 

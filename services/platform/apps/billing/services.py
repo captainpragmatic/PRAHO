@@ -38,6 +38,7 @@ from apps.billing.fiscal_identity import (
     validated_cnp_or_empty,
 )
 from apps.billing.models import Invoice, InvoiceLine, InvoiceSequence
+from apps.common.financial_arithmetic import calculate_document_totals
 from apps.common.tax_service import CustomerVATInfo, TaxService
 from apps.common.types import Err, Ok, Result
 
@@ -132,7 +133,10 @@ class InvoiceService:
                 # document discount), mirroring the proforma conversion path. order.total_cents
                 # is the GROSS tax-INCLUSIVE total — feeding it here re-applied VAT on top of an
                 # already-taxed amount and double-taxed the invoice header.
-                order_discount_cents = int(getattr(order, "discount_cents", 0) or 0)
+                order_discount_cents = max(
+                    0,
+                    min(int(getattr(order, "discount_cents", 0) or 0), int(order.subtotal_cents)),
+                )
                 taxable_subtotal_cents = max(0, int(order.subtotal_cents) - order_discount_cents)
                 billing_address = order.billing_address or {}
                 bill_to_country = billing_country_code(billing_address.get("country"))
@@ -200,6 +204,13 @@ class InvoiceService:
                             unit_price_cents=setup_cents,
                             tax_rate=vat_rate_decimal,
                         )
+
+                # The completed line ledger is authoritative for rounding and discount
+                # allocation. Aggregate VAT calculated before line creation can differ by a
+                # cent at midpoint boundaries, so reconcile once all lines (including setup
+                # fees) exist, exactly as the order and proforma paths do.
+                invoice.recalculate_totals()
+                invoice.save(update_fields=["subtotal_cents", "discount_cents", "tax_cents", "total_cents"])
 
                 # Log invoice creation
                 log_security_event(
@@ -363,8 +374,6 @@ class ProformaConversionService:
 
         try:
             with transaction.atomic():
-                # Get invoice sequence
-                sequence, _ = InvoiceSequence.objects.get_or_create(scope="default")
                 currency = proforma.currency
 
                 if not currency:
@@ -372,9 +381,33 @@ class ProformaConversionService:
                         code="RON", defaults={"name": "Romanian Leu", "symbol": "lei", "is_active": True}
                     )
 
-                # C1 fix: Copy proforma totals verbatim — never recalculate.
-                # The proforma IS the agreed quote. Recalculating would cause
-                # invoice amounts to diverge if VAT rates changed after quoting.
+                # A proforma with a persisted line ledger must reconcile before it can
+                # become an immutable fiscal invoice. This prevents a stale header or a
+                # separately edited discount from being copied into contradictory records.
+                proforma_lines = list(proforma.lines.order_by("sort_order", "pk"))
+                if proforma_lines:
+                    expected = calculate_document_totals(proforma_lines, proforma.discount_cents)
+                    expected_discount = min(proforma.discount_cents, expected.subtotal_cents)
+                    expected_header = (
+                        expected.subtotal_cents - expected_discount,
+                        expected.tax_cents,
+                        expected.total_cents,
+                    )
+                    actual_header = (
+                        proforma.subtotal_cents,
+                        proforma.tax_cents,
+                        proforma.total_cents,
+                    )
+                    if expected_header != actual_header or expected_discount != proforma.discount_cents:
+                        return Err(f"Proforma {proforma.number} financial ledger does not reconcile")
+
+                # Allocate a legal number only after the source document passes its
+                # financial integrity gate.
+                sequence, _ = InvoiceSequence.objects.get_or_create(scope="default")
+
+                # Seed the invoice from the agreed proforma header. After copying its
+                # frozen line ledger below, recalculate with those stored rates only and
+                # reject any divergence; never consult current VAT configuration here.
                 subtotal_cents = proforma.subtotal_cents or 0
                 tax_cents = proforma.tax_cents or 0
                 total_cents = proforma.total_cents or 0
@@ -405,12 +438,8 @@ class ProformaConversionService:
                     bill_to_country=billing_country_code(getattr(proforma, "bill_to_country", "")),
                     meta={"proforma_id": str(proforma.id), "proforma_number": proforma.number},
                 )
-                # Issue via FSM transition to set locked_at and issued_at
-                invoice.issue()
-                invoice.save()
-
                 # Copy line items — copy ALL fields including EN16931 and financial fields
-                for line in proforma.lines.all():
+                for line in proforma_lines:
                     InvoiceLine.objects.create(
                         invoice=invoice,
                         kind=line.kind,
@@ -432,6 +461,16 @@ class ProformaConversionService:
                         seller_item_id=line.seller_item_id,
                         sort_order=line.sort_order,
                     )
+
+                if proforma_lines:
+                    invoice.recalculate_totals()
+                    invoice_header = (invoice.subtotal_cents, invoice.tax_cents, invoice.total_cents)
+                    if invoice_header != (subtotal_cents, tax_cents, total_cents):
+                        raise ValueError("Copied invoice lines diverge from the agreed proforma totals")
+
+                # Lock only after the complete copied ledger has been reconciled.
+                invoice.issue()
+                invoice.save()
 
                 from apps.billing.metering_models import BillingCycle  # noqa: PLC0415
 

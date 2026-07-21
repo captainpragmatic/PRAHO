@@ -394,12 +394,13 @@ class Invoice(models.Model):
         return Decimal(self.total_cents) / 100
 
     def recalculate_totals(self) -> None:
-        """
-        Recalculate document totals from line items.
-        Ensures end-to-end consistency: subtotal = Σ(line subtotals), tax = Σ(line taxes)
-        """
-        totals = calculate_document_totals(list(self.lines.all()))
-        self.subtotal_cents = totals.subtotal_cents
+        """Reconcile the net header against gross lines and the stored allowance."""
+        totals = calculate_document_totals(
+            list(self.lines.order_by("sort_order", "pk")),
+            discount_cents=self.discount_cents,
+        )
+        self.discount_cents = min(self.discount_cents, totals.subtotal_cents)
+        self.subtotal_cents = totals.subtotal_cents - self.discount_cents
         self.tax_cents = totals.tax_cents
         self.total_cents = totals.total_cents
 
@@ -465,7 +466,11 @@ class Invoice(models.Model):
             from apps.billing.exchange_rate_service import ExchangeRateError, ExchangeRateService  # noqa: PLC0415
 
             try:
-                snapshot = ExchangeRateService.resolve(self.currency_id, "RON", self.tax_point_date)
+                snapshot = ExchangeRateService.resolve(
+                    self.currency_id,
+                    "RON",
+                    self.tax_point_date,
+                )
             except ExchangeRateError as exc:
                 raise ValidationError(
                     {"exchange_to_ron": _("Cannot issue foreign-currency invoice: %(error)s") % {"error": str(exc)}}

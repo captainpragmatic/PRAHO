@@ -673,40 +673,44 @@ class UBLInvoiceBuilderTestCase(TestCase):
     def _lmt_amount(self, doc, name):
         return doc.find(f".//{{{NAMESPACES['cac']}}}LegalMonetaryTotal/{{{NAMESPACES['cbc']}}}{name}").text
 
-    def test_doc_allowance_reconciles_totals_and_orders_elements(self):
-        """BR-CO-13/15 + UBL order: a document-level allowance nets TaxExclusiveAmount,
-        TaxInclusiveAmount = TaxExclusive + tax, PayableAmount = TaxInclusive, and
-        TaxExclusive/Inclusive precede the allowance/charge totals (UBL element order).
-        AE (reverse charge, tax 0) so the whole chain is ANAF-conformant; the deep
-        tax-value recalc for standard-rate-with-allowances stays with #177.
-        """
-        doc = self._build_invoice_with_meta(
-            meta={"allowances": [{"amount_cents": 10000, "reason": "Loyalty discount"}]},
-        )
-        lmt = doc.find(f".//{{{NAMESPACES['cac']}}}LegalMonetaryTotal")
-        order = [etree.QName(c).localname for c in lmt]
-        self.assertLess(order.index("TaxExclusiveAmount"), order.index("AllowanceTotalAmount"))
-        self.assertLess(order.index("TaxInclusiveAmount"), order.index("AllowanceTotalAmount"))
-        self.assertEqual(self._lmt_amount(doc, "LineExtensionAmount"), "1000.00")
-        self.assertEqual(self._lmt_amount(doc, "TaxExclusiveAmount"), "900.00")
-        self.assertEqual(self._lmt_amount(doc, "TaxInclusiveAmount"), "900.00")
-        self.assertEqual(self._lmt_amount(doc, "AllowanceTotalAmount"), "100.00")
-        self.assertEqual(self._lmt_amount(doc, "PayableAmount"), "900.00")
-        taxable = doc.find(
-            f".//{{{NAMESPACES['cac']}}}TaxTotal/{{{NAMESPACES['cac']}}}TaxSubtotal/{{{NAMESPACES['cbc']}}}TaxableAmount"
-        )
-        self.assertEqual(taxable.text, "900.00")
+    def test_only_persisted_document_discount_can_emit_allowance(self):
+        with self.assertRaisesRegex(XMLBuilderError, "unsupported meta allowances/charges"):
+            self._build_invoice_with_meta(
+                meta={"allowances": [{"amount_cents": 10000, "reason": "Loyalty discount"}]},
+            )
 
-    def test_doc_charge_raises_tax_exclusive_amount(self):
-        """A document-level charge raises TaxExclusiveAmount; TaxInclusive stays
-        TaxExclusive + tax and PayableAmount tracks it (BR-CO-13/15). AE (tax 0)."""
-        doc = self._build_invoice_with_meta(
-            meta={"charges": [{"amount_cents": 5000, "reason": "Handling"}]},
+    def test_dormant_meta_charge_path_fails_closed(self):
+        with self.assertRaisesRegex(XMLBuilderError, "unsupported meta allowances/charges"):
+            self._build_invoice_with_meta(
+                meta={"charges": [{"amount_cents": 5000, "reason": "Handling"}]},
+            )
+
+    def test_unmodelled_line_discount_fails_closed(self):
+        invoice = InvoiceFactory(
+            customer=CustomerFactory(),
+            currency=self.currency,
+            number="INV-LINE-DISCOUNT",
+            bill_to_name="Customer SRL",
+            bill_to_country="RO",
+            bill_to_tax_id="RO87654321",
+            status="issued",
+            issued_at=timezone.now(),
+            due_at=timezone.now() + timezone.timedelta(days=30),
+            subtotal_cents=9000,
+            tax_total_cents=1710,
+            total_cents=10710,
         )
-        self.assertEqual(self._lmt_amount(doc, "TaxExclusiveAmount"), "1050.00")
-        self.assertEqual(self._lmt_amount(doc, "ChargeTotalAmount"), "50.00")
-        self.assertEqual(self._lmt_amount(doc, "TaxInclusiveAmount"), "1050.00")
-        self.assertEqual(self._lmt_amount(doc, "PayableAmount"), "1050.00")
+        InvoiceLineFactory(
+            invoice=invoice,
+            description="Hosting",
+            unit_price_cents=10000,
+            quantity=1,
+            tax_rate=Decimal("0.1900"),
+            discount_amount_cents=1000,
+        )
+
+        with self.assertRaisesRegex(XMLBuilderError, "unsupported line-level discounts"):
+            UBLInvoiceBuilder(invoice).build()
 
     def test_setup_fee_and_document_discount_reconcile(self):
         """#195/#188: the live path — a goods line + a setup-fee line + a stored
@@ -775,26 +779,11 @@ class UBLInvoiceBuilderTestCase(TestCase):
         tax_amount = doc.find(f".//{{{NAMESPACES['cac']}}}TaxTotal/{{{NAMESPACES['cbc']}}}TaxAmount")
         self.assertEqual(tax_amount.text, "209.00")
 
-    def test_invalid_allowance_amount_is_skipped_not_crash(self):
-        """A malformed amount_cents (None / non-numeric) is skipped (logged), not a
-        crash; valid sibling entries still emit and total correctly."""
-        doc = self._build_invoice_with_meta(
-            meta={
-                "allowances": [
-                    {"amount_cents": None, "reason": "broken"},
-                    {"amount_cents": "not-a-number", "reason": "also broken"},
-                    {"amount_cents": 5000, "reason": "valid"},
-                ]
-            },
-        )
-        allowances = [
-            ac
-            for ac in doc.findall(f".//{{{NAMESPACES['cac']}}}AllowanceCharge")
-            if ac.find(f"{{{NAMESPACES['cbc']}}}ChargeIndicator").text == "false"
-        ]
-        self.assertEqual(len(allowances), 1)
-        self.assertEqual(self._lmt_amount(doc, "AllowanceTotalAmount"), "50.00")
-        self.assertEqual(self._lmt_amount(doc, "TaxExclusiveAmount"), "950.00")
+    def test_dormant_meta_allowance_path_fails_closed(self):
+        with self.assertRaisesRegex(XMLBuilderError, "unsupported meta allowances/charges"):
+            self._build_invoice_with_meta(
+                meta={"allowances": [{"amount_cents": 5000, "reason": "Discount"}]},
+            )
 
     def test_document_discount_emits_allowance_and_reconciles(self):
         """#188: a stored document-level discount emits a BG-20 AllowanceCharge, and the
@@ -883,6 +872,32 @@ class UBLInvoiceBuilderTestCase(TestCase):
         self.assertEqual(self._lmt_amount(doc, "LineExtensionAmount"), "1000.00")
         self.assertEqual(self._lmt_amount(doc, "AllowanceTotalAmount"), "100.00")
         self.assertEqual(self._lmt_amount(doc, "TaxExclusiveAmount"), "900.00")
+
+    def test_nonzero_stored_discount_must_match_the_invoice_ledger(self):
+        invoice = InvoiceFactory(
+            customer=CustomerFactory(),
+            currency=self.currency,
+            number="INV-CONTRADICTORY-DISC",
+            bill_to_name="Customer",
+            bill_to_country="RO",
+            bill_to_tax_id="RO12345678",
+            status="issued",
+            issued_at=timezone.now(),
+            subtotal_cents=90000,
+            tax_total_cents=17100,
+            total_cents=107100,
+            discount_cents=5000,
+        )
+        InvoiceLineFactory(
+            invoice=invoice,
+            description="Web Hosting",
+            unit_price_cents=100000,
+            quantity=1,
+            tax_rate=Decimal("0.1900"),
+        )
+
+        with self.assertRaisesRegex(XMLBuilderError, "does not reconcile"):
+            UBLInvoiceBuilder(invoice).build()
 
     def test_payable_amount_subtracts_prepaid_payments(self):
         """#178 (correct via #189): a partially-paid invoice emits PrepaidAmount (BT-113)
@@ -1017,10 +1032,9 @@ class UBLInvoiceBuilderTestCase(TestCase):
             status="issued",
             issued_at=timezone.now(),
             due_at=timezone.now() + timezone.timedelta(days=30),
-            # Stored header (1190.00) diverges above the single line's gross (500.00).
-            subtotal_cents=100000,
-            tax_total_cents=19000,
-            total_cents=119000,
+            subtotal_cents=50000,
+            tax_total_cents=9500,
+            total_cents=59500,
         )
         InvoiceLineFactory(
             invoice=invoice,
@@ -1030,9 +1044,9 @@ class UBLInvoiceBuilderTestCase(TestCase):
             tax_rate=Decimal("0.1900"),
             tax_category_code="S",
         )
-        # Fully paid → prepaid derives from stored total_cents (1190.00), but the XML
-        # tax-inclusive is line-derived (500 net + 190 tax = 690.00).
-        with patch.object(invoice, "get_remaining_amount", return_value=0):
+        # A legacy overpayment can make the derived prepayment exceed the coherent
+        # document total; the XML still caps it at TaxInclusiveAmount (BR-CO-16).
+        with patch.object(invoice, "get_remaining_amount", return_value=-100):
             doc = etree.fromstring(UBLInvoiceBuilder(invoice).build().encode())
         prepaid = Decimal(self._lmt_amount(doc, "PrepaidAmount"))
         tax_inclusive = Decimal(self._lmt_amount(doc, "TaxInclusiveAmount"))
@@ -1326,6 +1340,84 @@ class UBLCreditNoteBuilderTestCase(TestCase):
             quantity=1,
             tax_rate=Decimal("0.1900"),  # Matches credit note's tax_total_cents=9500
         )
+
+    def test_unmodelled_line_discount_fails_closed(self):
+        self.line.discount_amount_cents = 500
+        self.line.save(update_fields=["discount_amount_cents"])
+
+        with self.assertRaisesRegex(XMLBuilderError, "unsupported line-level discounts"):
+            UBLCreditNoteBuilder(self.credit_note, self.original_invoice).build()
+
+    def test_multi_rate_credit_note_is_rejected(self):
+        """Credit notes share the builder's single-category invariant."""
+        InvoiceLineFactory(
+            invoice=self.credit_note,
+            description="Reduced-rate correction",
+            unit_price_cents=10000,
+            quantity=1,
+            tax_rate=Decimal("0.0900"),
+            tax_category_code="S",
+        )
+
+        with self.assertRaisesRegex(XMLBuilderError, "multiple VAT rates"):
+            UBLCreditNoteBuilder(self.credit_note, self.original_invoice).build()
+
+    def test_eur_credit_note_emits_tax_currency_and_accounting_tax_total(self):
+        eur = CurrencyFactory(code="EUR")
+        original = InvoiceFactory(
+            customer=self.customer,
+            currency=eur,
+            number="INV-EUR-ORIGINAL",
+            status="paid",
+            issued_at=timezone.now() - timezone.timedelta(days=30),
+        )
+        credit_note = InvoiceFactory(
+            customer=self.customer,
+            currency=eur,
+            number="CN-EUR-001",
+            bill_to_name="Customer SRL",
+            bill_to_country="RO",
+            bill_to_tax_id="RO87654321",
+            status="issued",
+            issued_at=timezone.now(),
+            subtotal_cents=10000,
+            tax_total_cents=2100,
+            total_cents=12100,
+            tax_point_date=date(2026, 7, 20),
+            exchange_to_ron=Decimal("5.00000000"),
+            exchange_rate_as_of=date(2026, 7, 20),
+            exchange_rate_source="bnr",
+            exchange_rate_source_reference="https://www.bnr.ro/nbrfxrates.xml",
+        )
+        InvoiceLineFactory(
+            invoice=credit_note,
+            description="EUR correction",
+            unit_price_cents=10000,
+            quantity=1,
+            tax_rate=Decimal("0.2100"),
+        )
+
+        doc = etree.fromstring(UBLCreditNoteBuilder(credit_note, original).build().encode())
+
+        self.assertEqual(doc.find(f"{{{NAMESPACES['cbc']}}}TaxCurrencyCode").text, "RON")
+        tax_totals = doc.findall(f"{{{NAMESPACES['cac']}}}TaxTotal")
+        self.assertEqual(len(tax_totals), 2)
+        self.assertEqual(tax_totals[0].find(f"{{{NAMESPACES['cbc']}}}TaxAmount").text, "105.00")
+        self.assertEqual(tax_totals[0].find(f"{{{NAMESPACES['cbc']}}}TaxAmount").get("currencyID"), "RON")
+        self.assertIsNone(tax_totals[0].find(f"{{{NAMESPACES['cac']}}}TaxSubtotal"))
+        self.assertEqual(tax_totals[1].find(f"{{{NAMESPACES['cbc']}}}TaxAmount").get("currencyID"), "EUR")
+
+    def test_credit_note_currency_must_match_original_invoice(self):
+        eur = CurrencyFactory(code="EUR")
+        self.credit_note.currency = eur
+        self.credit_note.tax_point_date = date(2026, 7, 20)
+        self.credit_note.exchange_to_ron = Decimal("5.00000000")
+        self.credit_note.exchange_rate_as_of = date(2026, 7, 20)
+        self.credit_note.exchange_rate_source = "bnr"
+        self.credit_note.exchange_rate_source_reference = "https://www.bnr.ro/nbrfxrates.xml"
+
+        with self.assertRaisesRegex(XMLBuilderError, "currency must match"):
+            UBLCreditNoteBuilder(self.credit_note, self.original_invoice).build()
 
     def test_credit_note_issue_dates_use_romanian_local_date(self):
         """#220: both the credit note's own BT-2 and the BillingReference IssueDate of the

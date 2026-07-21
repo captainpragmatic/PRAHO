@@ -273,6 +273,53 @@ class InvoiceTestCase(TestCase):
         self.assertEqual(invoice.efactura_id, '12345')
         self.assertTrue(invoice.efactura_sent)
 
+    def test_recalculate_totals_applies_discount_before_vat(self):
+        invoice = Invoice.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            number="INV-DISCOUNT-RECALC",
+            discount_cents=2000,
+            status="draft",
+        )
+        InvoiceLine.objects.create(
+            invoice=invoice,
+            kind="service",
+            description="Hosting",
+            quantity=Decimal("1"),
+            unit_price_cents=10000,
+            tax_rate=Decimal("0.19"),
+        )
+
+        invoice.recalculate_totals()
+
+        self.assertEqual(invoice.subtotal_cents, 8000)
+        self.assertEqual(invoice.tax_cents, 1520)
+        self.assertEqual(invoice.total_cents, 9520)
+
+    def test_recalculate_totals_caps_discount_to_gross_line_subtotal(self):
+        invoice = Invoice.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            number="INV-DISCOUNT-CAP",
+            discount_cents=20000,
+            status="draft",
+        )
+        InvoiceLine.objects.create(
+            invoice=invoice,
+            kind="service",
+            description="Hosting",
+            quantity=Decimal("1"),
+            unit_price_cents=10000,
+            tax_rate=Decimal("0.19"),
+        )
+
+        invoice.recalculate_totals()
+
+        self.assertEqual(invoice.discount_cents, 10000)
+        self.assertEqual(invoice.subtotal_cents, 0)
+        self.assertEqual(invoice.tax_cents, 0)
+        self.assertEqual(invoice.total_cents, 0)
+
 
 class InvoiceLineTestCase(TestCase):
     """Test InvoiceLine model functionality"""

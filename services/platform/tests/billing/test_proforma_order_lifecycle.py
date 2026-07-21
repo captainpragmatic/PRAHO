@@ -17,7 +17,7 @@ from django.test import TestCase
 from django.utils import timezone
 
 from apps.billing.models import Currency
-from apps.billing.proforma_models import ProformaInvoice, ProformaSequence
+from apps.billing.proforma_models import ProformaInvoice, ProformaLine, ProformaSequence
 from apps.customers.models import Customer
 from apps.orders.models import Order, OrderItem
 from apps.products.models import Product
@@ -314,6 +314,31 @@ class TestCreateFromOrder(ProformaLifecycleTestBase):
             "Proforma total should be less than full price — discount must be applied",
         )
 
+    def test_discounted_order_and_proforma_share_net_vat_and_payable_total(self):
+        """#203: the payable amount cannot change at the order/proforma boundary."""
+        from apps.billing.proforma_service import ProformaService  # noqa: PLC0415
+
+        order = self._create_order_with_items()
+        order.discount_cents = 2000
+        order.save(update_fields=["discount_cents", "updated_at"])
+        order.calculate_totals()
+        force_status(order, "awaiting_payment")
+
+        proforma = ProformaService.create_from_order(order).unwrap()
+
+        self.assertEqual(order.subtotal_cents, 10000)
+        self.assertEqual(order.discount_cents, 2000)
+        self.assertEqual(order.tax_cents, 1680)
+        self.assertEqual(order.total_cents, 9680)
+        self.assertEqual(proforma.subtotal_cents, 8000)
+        self.assertEqual(proforma.discount_cents, 2000)
+        self.assertEqual(proforma.tax_cents, 1680)
+        self.assertEqual(proforma.total_cents, 9680)
+        self.assertEqual(
+            sum(line.subtotal_cents for line in proforma.lines.all()) - proforma.discount_cents,
+            proforma.subtotal_cents,
+        )
+
     def test_proforma_stores_document_discount(self):
         """#188: create_from_order stores order.discount_cents on the proforma so the
         e-Factura can emit a BG-20 document allowance."""
@@ -421,8 +446,17 @@ class TestRecordPaymentAndConvert(ProformaLifecycleTestBase):
         from apps.billing.proforma_service import ProformaPaymentService  # noqa: PLC0415
 
         proforma = self._create_sent_proforma()
+        ProformaLine.objects.create(
+            proforma=proforma,
+            kind="service",
+            description="Discounted hosting",
+            quantity=1,
+            unit_price_cents=10000,
+            tax_rate=Decimal("0.2100"),
+        )
         proforma.discount_cents = 1500
-        proforma.save(update_fields=["discount_cents"])
+        proforma.recalculate_totals()
+        proforma.save(update_fields=["subtotal_cents", "discount_cents", "tax_cents", "total_cents"])
 
         result = ProformaPaymentService.record_payment_and_convert(
             proforma_id=str(proforma.id),
@@ -433,6 +467,38 @@ class TestRecordPaymentAndConvert(ProformaLifecycleTestBase):
         self.assertTrue(result.is_ok(), f"Expected Ok, got: {result}")
         invoice = result.unwrap()
         self.assertEqual(invoice.discount_cents, 1500)
+        self.assertEqual(invoice.subtotal_cents, 8500)
+        self.assertEqual(invoice.tax_cents, 1785)
+        self.assertEqual(invoice.total_cents, 10285)
+
+    def test_conversion_rejects_a_discount_that_does_not_reconcile_with_lines(self):
+        """A contradictory proforma must not become an immutable fiscal invoice."""
+        from apps.billing.models import Invoice, Payment  # noqa: PLC0415
+        from apps.billing.proforma_service import ProformaPaymentService  # noqa: PLC0415
+
+        proforma = self._create_sent_proforma()
+        ProformaLine.objects.create(
+            proforma=proforma,
+            kind="service",
+            description="Hosting",
+            quantity=1,
+            unit_price_cents=10000,
+            tax_rate=Decimal("0.2100"),
+        )
+        proforma.discount_cents = 1500
+        proforma.save(update_fields=["discount_cents"])
+
+        result = ProformaPaymentService.record_payment_and_convert(
+            proforma_id=str(proforma.id),
+            amount_cents=proforma.total_cents,
+            payment_method="bank",
+            created_by=self.user,
+        )
+
+        self.assertTrue(result.is_err())
+        self.assertIn("does not reconcile", result.unwrap_err())
+        self.assertFalse(Invoice.objects.exists())
+        self.assertFalse(Payment.objects.filter(proforma=proforma).exists())
 
     def test_conversion_copies_bill_to_registration_number(self):
         """#166: proforma->invoice conversion must copy bill_to_registration_number so the

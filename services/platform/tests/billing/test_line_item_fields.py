@@ -58,7 +58,7 @@ class LineItemFieldTests(TestCase):
     def test_conversion_copies_all_en16931_fields(self) -> None:
         proforma = ProformaInvoice.objects.create(
             customer=self.customer, number="PRO-CONV", currency=self.currency,
-            subtotal_cents=10000, tax_cents=2100, total_cents=12100,
+            subtotal_cents=5000, tax_cents=1050, total_cents=6050,
             bill_to_name="Test Co",
         )
         ProformaLine.objects.create(

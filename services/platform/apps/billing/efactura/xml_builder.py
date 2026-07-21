@@ -14,8 +14,8 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import date, datetime
-from decimal import Decimal, InvalidOperation
-from typing import TYPE_CHECKING, Any
+from decimal import Decimal
+from typing import TYPE_CHECKING
 
 from django.conf import settings
 from lxml import etree
@@ -27,6 +27,7 @@ from apps.billing.config import is_eu_country
 from apps.billing.efactura.settings import ro_local_date
 from apps.billing.exchange_rate_service import ExchangeRateService
 from apps.billing.fiscal_identity import normalize_business_tax_id, normalize_country_code, validated_cnp_or_empty
+from apps.common.financial_arithmetic import reconcile_document_discount
 from apps.common.tax_service import TaxService
 
 logger = logging.getLogger(__name__)
@@ -143,6 +144,47 @@ class BaseUBLBuilder:
         self.root: etree._Element = None  # type: ignore[assignment]
         self._supplier: CompanyInfo | None = None
         self._customer: CompanyInfo | None = None
+
+    def _validate_supported_document_adjustments(self, errors: list[str]) -> None:
+        """Reject the dormant, non-ledger meta path for every UBL document type."""
+        meta = getattr(self.invoice, "meta", {}) or {}
+        if meta.get("allowances") or meta.get("charges"):
+            errors.append("Invoice contains unsupported meta allowances/charges; use persisted discount_cents")
+        if self.invoice.lines.filter(discount_amount_cents__gt=0).exists():
+            errors.append("Invoice contains unsupported line-level discounts; use persisted document discount_cents")
+        try:
+            self._get_document_discount()
+        except ValueError as exc:
+            errors.append(str(exc))
+
+    def _validate_single_tax_rate(self, errors: list[str], *, document_label: str) -> None:
+        """Enforce the one-TaxSubtotal contract shared by invoice and credit-note builders."""
+        distinct_rates = {Decimal(line.tax_rate) for line in self.invoice.lines.all()}
+        if len(distinct_rates) > 1:
+            errors.append(
+                f"{document_label} has multiple VAT rates {sorted(distinct_rates)}; the e-Factura builder "
+                "supports a single rate per document (single-category invariant)"
+            )
+
+    def _validate_foreign_currency_snapshot(self, errors: list[str]) -> None:
+        """Require the immutable fiscal evidence used to calculate BT-111."""
+        currency_code = self.invoice.currency.code
+        if currency_code == "RON":
+            return
+
+        rate = getattr(self.invoice, "exchange_to_ron", None)
+        rate_as_of = getattr(self.invoice, "exchange_rate_as_of", None)
+        source = getattr(self.invoice, "exchange_rate_source", "")
+        reference = getattr(self.invoice, "exchange_rate_source_reference", "")
+        tax_point = getattr(self.invoice, "tax_point_date", None)
+        if rate is None or rate_as_of is None or not source or not reference or tax_point is None:
+            errors.append(f"Foreign-currency invoice requires a complete provenanced {currency_code}/RON snapshot")
+        elif source not in ExchangeRateService.APPROVED_SOURCES:
+            errors.append(f"Foreign-currency invoice requires an approved {currency_code}/RON source")
+        elif Decimal(str(rate)) <= 0:
+            errors.append(f"Foreign-currency invoice requires a positive {currency_code}/RON exchange rate")
+        elif rate_as_of > tax_point:
+            errors.append(f"{currency_code}/RON exchange-rate date cannot be after the invoice tax point")
 
     def _get_supplier_info(self) -> CompanyInfo:
         """Get supplier (seller) information from settings."""
@@ -335,8 +377,13 @@ class BaseUBLBuilder:
         backfill of the immutable ledger. ``discount_cents`` remains the authoritative
         stored record.
         """
-        subtotal = Decimal(int(getattr(self.invoice, "subtotal_cents", 0) or 0)) / 100
-        return max(Decimal(0), self._get_line_gross() - subtotal)
+        line_gross_cents = sum((line.subtotal_cents for line in self.invoice.lines.all()), 0)
+        discount_cents = reconcile_document_discount(
+            line_gross_cents=line_gross_cents,
+            net_subtotal_cents=int(getattr(self.invoice, "subtotal_cents", 0) or 0),
+            stored_discount_cents=int(getattr(self.invoice, "discount_cents", 0) or 0),
+        )
+        return Decimal(discount_cents) / 100
 
     def _add_discount_allowance(self) -> None:
         """Emit the stored document-level discount as a BG-20 AllowanceCharge with the
@@ -513,7 +560,8 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
 
     def _validate_invoice(self) -> None:
         """Validate invoice has required data for e-Factura."""
-        errors = []
+        errors: list[str] = []
+        self._validate_supported_document_adjustments(errors)
 
         if not self.invoice.number:
             errors.append("Invoice number is required")
@@ -536,12 +584,7 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
         # e-Factura XML cannot faithfully represent an invoice whose lines carry multiple distinct
         # VAT rates. Reject it here rather than silently emit a VAT breakdown that fails ANAF
         # arithmetic (the system issues single-rate invoices; a multi-rate one is a bug to surface).
-        distinct_rates = {Decimal(line.tax_rate) for line in self.invoice.lines.all()}
-        if len(distinct_rates) > 1:
-            errors.append(
-                f"Invoice has multiple VAT rates {sorted(distinct_rates)}; the e-Factura builder "
-                "supports a single rate per document (single-category invariant)"
-            )
+        self._validate_single_tax_rate(errors, document_label="Invoice")
 
         supplier = self._get_supplier_info()
         if not supplier.name:
@@ -552,26 +595,6 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
 
         if errors:
             raise XMLBuilderError(f"Invalid invoice data: {'; '.join(errors)}")
-
-    def _validate_foreign_currency_snapshot(self, errors: list[str]) -> None:
-        """Require the immutable fiscal evidence used to calculate BT-111."""
-        currency_code = self.invoice.currency.code
-        if currency_code == "RON":
-            return
-
-        rate = getattr(self.invoice, "exchange_to_ron", None)
-        rate_as_of = getattr(self.invoice, "exchange_rate_as_of", None)
-        source = getattr(self.invoice, "exchange_rate_source", "")
-        reference = getattr(self.invoice, "exchange_rate_source_reference", "")
-        tax_point = getattr(self.invoice, "tax_point_date", None)
-        if rate is None or rate_as_of is None or not source or not reference or tax_point is None:
-            errors.append(f"Foreign-currency invoice requires a complete provenanced {currency_code}/RON snapshot")
-        elif source not in ExchangeRateService.APPROVED_SOURCES:
-            errors.append(f"Foreign-currency invoice requires an approved {currency_code}/RON source")
-        elif Decimal(str(rate)) <= 0:
-            errors.append(f"Foreign-currency invoice requires a positive {currency_code}/RON exchange rate")
-        elif rate_as_of > tax_point:
-            errors.append(f"{currency_code}/RON exchange-rate date cannot be after the invoice tax point")
 
     def _create_root(self) -> None:
         """Create Invoice root element with namespaces."""
@@ -805,79 +828,13 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
         tax_scheme = self._add_cac(tax_category, "TaxScheme")
         self._add_cbc(tax_scheme, "ID", "VAT")
 
-    def _iter_validated_meta(self, key: str) -> list[dict[str, Any]]:
-        """Parse invoice.meta[key] (allowances/charges) into validated entries.
-
-        Each returned dict is the original entry plus a Decimal ``amount`` (major units).
-        Entries with a missing/non-numeric ``amount_cents`` or a non-positive amount are
-        skipped with a warning — so a malformed value can never crash the build, and the
-        XML emission and the totals calc always iterate the SAME list (no divergence).
-        """
-        meta = getattr(self.invoice, "meta", {}) or {}
-        out: list[dict[str, Any]] = []
-        for entry in meta.get(key, []) or []:
-            if not isinstance(entry, dict):
-                logger.warning("e-Factura: skipping non-dict %s entry: %r", key, entry)
-                continue
-            try:
-                amount = Decimal(str(entry.get("amount_cents", 0))) / 100
-            except (InvalidOperation, TypeError, ValueError):
-                logger.warning("e-Factura: skipping %s with invalid amount_cents=%r", key, entry.get("amount_cents"))
-                continue
-            if amount <= 0:
-                continue
-            out.append({**entry, "amount": amount})
-        return out
-
     def _add_document_allowances_charges(self) -> None:
-        """Add document-level AllowanceCharge elements (BG-20/BG-21): the stored document
-        discount (live) plus any meta allowances/charges (dormant).
-        """
+        """Emit only the persisted, immutable document discount allowance."""
         self._add_discount_allowance()
-        currency = self.invoice.currency.code
-
-        for allowance in self._iter_validated_meta("allowances"):
-            ac = self._add_cac(self.root, "AllowanceCharge")
-            self._add_cbc(ac, "ChargeIndicator", "false")
-            self._add_cbc(ac, "AllowanceChargeReasonCode", "95")  # Discount
-            self._add_cbc(ac, "AllowanceChargeReason", allowance.get("reason", "Discount"))
-            amount_elem = self._add_cbc(ac, "Amount", self._format_amount(allowance["amount"]))
-            amount_elem.set("currencyID", currency)
-
-            # Tax category forced to the document category + clamped, so AE/Z/etc. stay
-            # coherent (BR-AE-1) if this currently-dormant path is ever activated (#177).
-            tax_cat = self._add_cac(ac, "TaxCategory")
-            ac_category = self._get_tax_category()
-            self._add_cbc(tax_cat, "ID", ac_category)
-            ac_rate = Decimal(0) if ac_category != TAX_CATEGORY_STANDARD else self._get_tax_rate()
-            self._add_cbc(tax_cat, "Percent", self._format_percent(ac_rate))
-            scheme = self._add_cac(tax_cat, "TaxScheme")
-            self._add_cbc(scheme, "ID", "VAT")
-
-        for charge in self._iter_validated_meta("charges"):
-            ac = self._add_cac(self.root, "AllowanceCharge")
-            self._add_cbc(ac, "ChargeIndicator", "true")
-            self._add_cbc(ac, "AllowanceChargeReasonCode", "FC")  # Freight charge
-            self._add_cbc(ac, "AllowanceChargeReason", charge.get("reason", "Charge"))
-            amount_elem = self._add_cbc(ac, "Amount", self._format_amount(charge["amount"]))
-            amount_elem.set("currencyID", currency)
-
-            tax_cat = self._add_cac(ac, "TaxCategory")
-            ch_category = self._get_tax_category()
-            self._add_cbc(tax_cat, "ID", ch_category)
-            ch_rate = Decimal(0) if ch_category != TAX_CATEGORY_STANDARD else self._get_tax_rate()
-            self._add_cbc(tax_cat, "Percent", self._format_percent(ch_rate))
-            scheme = self._add_cac(tax_cat, "TaxScheme")
-            self._add_cbc(scheme, "ID", "VAT")
 
     def _get_document_level_totals(self) -> tuple[Decimal, Decimal]:
-        """Document-level allowance/charge totals (BT-107/BT-108): the stored document
-        discount plus any meta allowances; meta charges."""
-        allowance_total = self._get_document_discount() + sum(
-            (a["amount"] for a in self._iter_validated_meta("allowances")), Decimal(0)
-        )
-        charge_total = sum((c["amount"] for c in self._iter_validated_meta("charges")), Decimal(0))
-        return allowance_total, charge_total
+        """Return the one supported document allowance and no document charges."""
+        return self._get_document_discount(), Decimal(0)
 
     def _add_legal_monetary_total(self) -> None:
         """Add LegalMonetaryTotal in UBL element order with reconciled totals."""
@@ -954,14 +911,6 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
             period = self._add_cac(invoice_line, "InvoicePeriod")
             self._add_cbc(period, "StartDate", line.period_start.isoformat())
             self._add_cbc(period, "EndDate", line.period_end.isoformat())
-
-        # BT-147: Line-level discount (AllowanceCharge)
-        if line.discount_amount_cents and line.discount_amount_cents > 0:
-            allowance = self._add_cac(invoice_line, "AllowanceCharge")
-            self._add_cbc(allowance, "ChargeIndicator", "false")
-            discount_amount = Decimal(line.discount_amount_cents) / 100
-            amount_elem = self._add_cbc(allowance, "Amount", self._format_amount(discount_amount))
-            amount_elem.set("currencyID", self.invoice.currency.code)
 
         # Item
         self._add_line_item(invoice_line, line)
@@ -1058,7 +1007,10 @@ class UBLCreditNoteBuilder(BaseUBLBuilder):
 
     def _validate_invoice(self) -> None:
         """Validate credit note has required data."""
-        errors = []
+        errors: list[str] = []
+        self._validate_supported_document_adjustments(errors)
+        self._validate_single_tax_rate(errors, document_label="Credit note")
+        self._validate_foreign_currency_snapshot(errors)
 
         if not self.invoice.number:
             errors.append("Credit note number is required")
@@ -1071,6 +1023,8 @@ class UBLCreditNoteBuilder(BaseUBLBuilder):
 
         if self.original_invoice is None:
             errors.append("Original invoice reference is required for credit notes")
+        elif self.original_invoice.currency_id != self.invoice.currency_id:
+            errors.append("Credit note currency must match the original invoice currency")
 
         if errors:
             raise XMLBuilderError(f"Invalid credit note data: {'; '.join(errors)}")
@@ -1099,6 +1053,8 @@ class UBLCreditNoteBuilder(BaseUBLBuilder):
             self._add_cbc(self.root, "Note", notes[:1000])
 
         self._add_cbc(self.root, "DocumentCurrencyCode", self.invoice.currency.code)
+        if self.invoice.currency.code != "RON":
+            self._add_cbc(self.root, "TaxCurrencyCode", "RON")
 
     def _add_billing_reference(self) -> None:
         """Add BillingReference to original invoice."""
@@ -1149,6 +1105,19 @@ class UBLCreditNoteBuilder(BaseUBLBuilder):
 
     def _add_tax_total(self) -> None:
         """Add TaxTotal element."""
+        if self.invoice.currency.code != "RON":
+            accounting_tax_total = self._add_cac(self.root, "TaxTotal")
+            accounting_tax_cents = ExchangeRateService.convert_cents(
+                int(getattr(self.invoice, "tax_cents", 0)),
+                Decimal(str(self.invoice.exchange_to_ron)),
+            )
+            accounting_amount = self._add_cbc(
+                accounting_tax_total,
+                "TaxAmount",
+                self._format_amount(Decimal(accounting_tax_cents) / 100),
+            )
+            accounting_amount.set("currencyID", "RON")
+
         tax_total = self._add_cac(self.root, "TaxTotal")
 
         tax_amount = self._get_tax_amount()

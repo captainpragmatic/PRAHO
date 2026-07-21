@@ -425,6 +425,40 @@ class TestConfirmOrderConvertsProformaBeforeWebhook(CardProformaTestBase):
         self.assertEqual(payment.meta["stripe_amount_received"], 12100)
         self.assertEqual(payment.meta["stripe_currency"], "ron")
 
+    @patch("apps.billing.proforma_service.ProformaPaymentService.record_payment_and_convert")
+    def test_confirm_order_passes_frozen_proforma_total_after_order_drift(self, mock_convert: MagicMock) -> None:
+        from apps.api.orders.views import confirm_order  # noqa: PLC0415
+        from apps.common.types import Ok  # noqa: PLC0415
+
+        order = self._create_order_with_items()
+        force_status(order, "awaiting_payment")
+        proforma = self._create_sent_proforma_for_order(order)
+        payment = self._create_pending_payment("pi_testOrderDrift53", proforma=proforma)
+        force_status(payment, "succeeded")
+        order.total_cents = proforma.total_cents + 100
+        order.payment_intent_id = payment.gateway_txn_id
+        order.payment_method = "card"
+        order.save(update_fields=["total_cents", "payment_intent_id", "payment_method"])
+
+        mock_convert.return_value = Ok(MagicMock())
+        mock_gateway = MagicMock()
+        mock_gateway.confirm_payment.return_value = PaymentConfirmResult(
+            success=True,
+            status="succeeded",
+            error=None,
+            amount_received=proforma.total_cents,
+            currency="ron",
+        )
+        request = self._make_confirm_request({"payment_intent_id": payment.gateway_txn_id})
+
+        with (
+            patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)),
+            patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway", return_value=mock_gateway),
+        ):
+            confirm_order(request, str(order.id))
+
+        self.assertEqual(mock_convert.call_args.kwargs["amount_cents"], proforma.total_cents)
+
     def test_confirm_order_invoice_linked_to_order_after_conversion(self) -> None:
         """After confirm_order converts the proforma, order.invoice must be the new invoice.
 
@@ -576,6 +610,8 @@ class TestFallbackTaskUsesProformaPath(CardProformaTestBase):
 
         payment = self._create_pending_payment("pi_testFallbackTask55ab", proforma=proforma)
         force_status(payment, "succeeded")
+        order.total_cents = proforma.total_cents + 100
+        order.save(update_fields=["total_cents"])
 
         order_result: dict = {}
         results: dict = {"errors": []}
@@ -596,6 +632,7 @@ class TestFallbackTaskUsesProformaPath(CardProformaTestBase):
             str(proforma.id),
             "Fallback task must call record_payment_and_convert with the correct proforma_id",
         )
+        self.assertEqual(call_kwargs.get("amount_cents"), proforma.total_cents)
         self.assertEqual(results["errors"], [], f"Task must not produce errors: {results['errors']}")
 
     def test_task_creates_proforma_first_when_missing(self) -> None:

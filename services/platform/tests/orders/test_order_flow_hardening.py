@@ -238,6 +238,32 @@ class TestPreflightOrderService(TestCase):
             "Preflight should detect incorrect VAT amount (1900¢ != expected 2100¢)"
         )
 
+    def test_preflight_taxes_discounted_order_on_the_net_base(self) -> None:
+        """#203: a valid promoted order must pass the payable-state preflight."""
+        order = self._make_order(
+            subtotal_cents=10000,
+            discount_cents=2000,
+            tax_cents=1680,
+            total_cents=9680,
+            billing_address=_billing_address(),
+        )
+        OrderItem.objects.create(
+            order=order,
+            product=self.product,
+            product_name=self.product.name,
+            product_type=self.product.product_type,
+            quantity=1,
+            unit_price_cents=10000,
+            tax_rate=Decimal("0.2100"),
+        )
+        order.discount_cents = 2000
+        order.calculate_totals()
+
+        errors, _warnings = OrderPreflightValidationService.validate(order)
+
+        mismatch_errors = [error for error in errors if "mismatch" in error.lower()]
+        self.assertEqual(mismatch_errors, [])
+
 
 # ===============================================================================
 # BUG-10: DUPLICATE VAT AUDIT EVENT PREVENTION

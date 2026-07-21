@@ -208,7 +208,6 @@ def _revalidate_order_payment_reservation(  # noqa: PLR0913  # Keyword-only rese
             or order.proforma_id != proforma.id
             or order.customer_id != proforma.customer_id
             or order.currency_id != expected_currency_id
-            or order.total_cents != expected_amount_cents
             or proforma.status not in {"draft", "sent", "accepted"}
             or proforma.is_expired
             or proforma.currency_id != expected_currency_id
@@ -448,7 +447,8 @@ class PaymentService:
                     error="customer_id must be a valid integer",
                 )
 
-            # Security-critical: derive authoritative payment amount from the order.
+            # Security-critical: locate the order, then derive the amount from its
+            # frozen proforma billing document.
             try:
                 order = Order.objects.select_related("customer", "proforma").get(
                     id=order_id, customer_id=customer_id_int
@@ -470,23 +470,14 @@ class PaymentService:
                     error=f"Order status '{order.status}' is not eligible for payment",
                 )
 
-            expected_amount_cents = int(order.total_cents)
-            if amount_cents is not None and int(amount_cents) != expected_amount_cents:
-                return PaymentIntentResult(
-                    success=False,
-                    payment_intent_id="",
-                    client_secret=None,
-                    error="amount_cents does not match order total",
-                )
-            if expected_amount_cents <= 0:
+            proforma = order.proforma
+            if proforma is None and order.total_cents <= 0:
                 return PaymentIntentResult(
                     success=False,
                     payment_intent_id="",
                     client_secret=None,
                     error="Order does not require a payment",
                 )
-
-            proforma = order.proforma
             if proforma is None:
                 return PaymentIntentResult(
                     success=False,
@@ -497,7 +488,6 @@ class PaymentService:
             if (
                 proforma.customer_id != order.customer_id
                 or proforma.currency_id != order.currency_id
-                or proforma.total_cents != expected_amount_cents
                 or proforma.status not in {"draft", "sent", "accepted"}
                 or proforma.is_expired
             ):
@@ -508,7 +498,23 @@ class PaymentService:
                     error="Order billing snapshot does not match its payable proforma",
                 )
 
-            resolved_currency = (order.currency.code if order.currency else None) or currency or "RON"
+            expected_amount_cents = int(proforma.total_cents)
+            if amount_cents is not None and int(amount_cents) != expected_amount_cents:
+                return PaymentIntentResult(
+                    success=False,
+                    payment_intent_id="",
+                    client_secret=None,
+                    error="amount_cents does not match proforma total",
+                )
+            if expected_amount_cents <= 0:
+                return PaymentIntentResult(
+                    success=False,
+                    payment_intent_id="",
+                    client_secret=None,
+                    error="Order does not require a payment",
+                )
+
+            resolved_currency = proforma.currency.code
             resolved_order_number = order.order_number
             payment_metadata = {
                 **(metadata or {}),

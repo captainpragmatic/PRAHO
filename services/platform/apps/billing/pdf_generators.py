@@ -10,6 +10,7 @@ from collections import defaultdict
 from decimal import Decimal
 from io import BytesIO
 from pathlib import Path
+from typing import cast
 
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
@@ -21,7 +22,12 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
 
-from apps.billing.models import Invoice, ProformaInvoice
+from apps.billing.models import Invoice, InvoiceLine, ProformaInvoice, ProformaLine
+from apps.common.financial_arithmetic import (
+    allocate_document_discount,
+    calculate_line_totals,
+    reconcile_document_discount,
+)
 from apps.common.utils import format_romanian_date
 
 logger = logging.getLogger(__name__)
@@ -110,10 +116,12 @@ class RomanianDocumentPDFGenerator:
         self._render_document_footer()
 
     def _get_currency_code(self) -> str:
-        """Get the currency code from the document, defaulting to RON."""
-        if self.document.currency:
-            return self.document.currency.code
-        return "RON"
+        """Get the document's authoritative currency or fail closed."""
+        currency = getattr(self.document, "currency", None)
+        code = getattr(currency, "code", "")
+        if not code:
+            raise ValueError("Fiscal document has no authoritative currency")
+        return str(code)
 
     @staticmethod
     def _fit(text: object, max_chars: int) -> str:
@@ -393,44 +401,11 @@ class RomanianDocumentPDFGenerator:
         self,
         totals_y: float,
         vat_groups: dict[Decimal, dict[str, Decimal]],
-        discount: Decimal,
-        net: Decimal,
         currency: str,
     ) -> float:
-        """Render the VAT breakdown lines and return the updated y cursor.
-
-        With a document discount the taxable base is reduced, so a SINGLE net bucket is shown
-        (base = net subtotal, tax = invoice tax) — exactly the single TaxSubtotal the e-Factura
-        XML emits (this system is single-category). Without a discount gross == net, so the
-        richer per-rate breakdown is exact and kept.
-        """
+        """Render each net VAT-rate bucket and return the updated y cursor."""
         self.canvas.setFont(_FONT, 11)
         line_tmpl = _t("TVA {rate}%: {tax} {currency} (baza: {base} {currency})")
-        if discount > 0:
-            # Deterministically pick the dominant (largest-base) rate for the collapsed
-            # net bucket — independent of queryset ordering. Single-category invoices
-            # (the only kind this system issues) have exactly one bucket, so this is the
-            # one true rate. A discounted MULTI-rate invoice violates that invariant and
-            # the XML can't represent it either; surface it rather than silently mislabel.
-            if len(vat_groups) > 1:
-                logger.warning(
-                    "PDF VAT breakdown: document %s has a discount across %d tax rates "
-                    "(unsupported single-category invariant violation); showing dominant rate.",
-                    getattr(self.document, "number", "?"),
-                    len(vat_groups),
-                )
-            rate = max(vat_groups, key=lambda r: vat_groups[r]["base"], default=Decimal("0"))
-            self.canvas.drawString(
-                12 * cm,
-                totals_y,
-                str(line_tmpl).format(
-                    rate=self._format_vat_percent(rate),
-                    tax=f"{self.document.tax_amount:.2f}",
-                    base=f"{net:.2f}",
-                    currency=currency,
-                ),
-            )
-            return totals_y - 0.5 * cm
         for rate in sorted(vat_groups.keys()):
             group = vat_groups[rate]
             self.canvas.drawString(
@@ -446,41 +421,61 @@ class RomanianDocumentPDFGenerator:
             totals_y -= 0.5 * cm
         return totals_y
 
+    def _calculate_discounted_vat_groups(
+        self,
+    ) -> tuple[dict[Decimal, dict[str, Decimal]], bool, int, int, int]:
+        """Return net VAT buckets and reconciled gross/net/discount cents."""
+        vat_groups: dict[Decimal, dict[str, Decimal]] = defaultdict(lambda: {"base": Decimal("0"), "tax": Decimal("0")})
+        taxable_by_rate_cents: dict[Decimal, int] = defaultdict(int)
+        has_reverse_charge = False
+        lines = cast(
+            list[InvoiceLine | ProformaLine],
+            list(self.document.lines.order_by("sort_order", "pk")),
+        )
+        gross_cents = sum(line.subtotal_cents for line in lines)
+        net_cents = int(getattr(self.document, "subtotal_cents", 0) or 0)
+        discount_cents = reconcile_document_discount(
+            line_gross_cents=gross_cents,
+            net_subtotal_cents=net_cents,
+            stored_discount_cents=int(getattr(self.document, "discount_cents", 0) or 0),
+        )
+        allocations = allocate_document_discount(
+            [line.subtotal_cents for line in lines],
+            discount_cents,
+        )
+        for line, allocation in zip(lines, allocations, strict=True):
+            rate_key = Decimal(line.tax_rate)
+            taxable_cents = line.subtotal_cents - allocation
+            taxable_by_rate_cents[rate_key] += taxable_cents
+            has_reverse_charge = has_reverse_charge or getattr(line, "tax_category_code", "") == "AE"
+        for rate_key, taxable_cents in taxable_by_rate_cents.items():
+            tax_cents = calculate_line_totals(taxable_cents, rate_key).tax_cents
+            vat_groups[rate_key]["base"] = Decimal(taxable_cents) / 100
+            vat_groups[rate_key]["tax"] = Decimal(tax_cents) / 100
+        return vat_groups, has_reverse_charge, gross_cents, net_cents, discount_cents
+
     def _render_totals_section(self) -> None:
         """Render totals section with the document-level discount and a VAT breakdown that
-        reconciles with the e-Factura XML (BG-20 allowance + single net TaxSubtotal)."""
+        reconciles with the e-Factura XML (BG-20 allowance + net tax-category totals)."""
         currency = self._get_currency_code()
 
-        # VAT breakdown by rate from the GROSS line subtotals. Keyed by the Decimal
-        # tax_rate (not int(rate*100)) so e.g. 9% and 9.5% are distinct buckets.
-        vat_groups: dict[Decimal, dict[str, Decimal]] = defaultdict(lambda: {"base": Decimal("0"), "tax": Decimal("0")})
-        has_reverse_charge = False
-        gross = Decimal("0")
-
-        lines = self.document.lines.all()
-        for line in lines:
-            rate_key = Decimal(line.tax_rate)
-            vat_groups[rate_key]["base"] += line.subtotal
-            vat_groups[rate_key]["tax"] += line.line_total - line.subtotal
-            gross += line.subtotal
-
-            if getattr(line, "tax_category_code", "") == "AE":
-                has_reverse_charge = True
+        vat_groups, has_reverse_charge, gross_cents, net_cents, discount_cents = self._calculate_discounted_vat_groups()
 
         # Document-level discount (BT-92/107), DERIVED the same way the e-Factura XML
         # derives it (gross line sum minus the net header subtotal) so the PDF and XML
         # agree, including on legacy invoices. net/tax/total come from the invoice ledger.
-        net = self.document.subtotal
-        discount = max(Decimal("0"), gross - net)
+        gross = Decimal(gross_cents) / 100
+        net = Decimal(net_cents) / 100
+        discount = Decimal(discount_cents) / 100
         # For a (degenerate) line-less document fall back to the stored net so Subtotal
         # is never shown as 0.00.
         subtotal_shown = gross if gross > 0 else net
 
         # Page-break if the whole totals block would collide with the footer. The block
-        # height is variable (one VAT line when discounted, else one per rate; plus the
-        # optional discount / reverse-charge / exchange / status lines), so estimate it
+        # height is variable (one VAT line per rate plus the optional discount,
+        # reverse-charge, exchange, and status lines), so estimate it
         # from what will actually be drawn rather than a fixed guess.
-        vat_lines = 1 if discount > 0 else max(1, len(vat_groups))
+        vat_lines = max(1, len(vat_groups))
         block_lines = (
             3  # subtotal, total-VAT, grand-total
             + vat_lines
@@ -514,7 +509,7 @@ class RomanianDocumentPDFGenerator:
             totals_y -= 0.5 * cm
 
         # VAT breakdown (re-based to reconcile with the discounted total / e-Factura XML).
-        totals_y = self._render_vat_breakdown(totals_y, vat_groups, discount, net, currency)
+        totals_y = self._render_vat_breakdown(totals_y, vat_groups, currency)
 
         # Total VAT
         self.canvas.setFont(_FONT_BOLD, 11)
@@ -549,8 +544,7 @@ class RomanianDocumentPDFGenerator:
 
         # Exchange rate line for non-RON currencies
         if currency != "RON":
-            meta = self.document.meta or {}
-            exchange_rate = meta.get("exchange_rate")
+            exchange_rate = getattr(self.document, "exchange_to_ron", None)
             if exchange_rate:
                 self.canvas.setFont(_FONT, 9)
                 self.canvas.drawString(

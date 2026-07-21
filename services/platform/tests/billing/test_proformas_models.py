@@ -168,6 +168,53 @@ class ProformaInvoiceTestCase(TestCase):
         self.assertEqual(proforma.bill_to_tax_id, 'RO12345678')
         self.assertEqual(proforma.bill_to_city, 'Bucuresti')
 
+    def test_recalculate_totals_applies_discount_before_vat(self):
+        proforma = ProformaInvoice.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            number="PRO-DISCOUNT-RECALC",
+            discount_cents=2000,
+            status="draft",
+        )
+        ProformaLine.objects.create(
+            proforma=proforma,
+            kind="service",
+            description="Hosting",
+            quantity=Decimal("1"),
+            unit_price_cents=10000,
+            tax_rate=Decimal("0.19"),
+        )
+
+        proforma.recalculate_totals()
+
+        self.assertEqual(proforma.subtotal_cents, 8000)
+        self.assertEqual(proforma.tax_cents, 1520)
+        self.assertEqual(proforma.total_cents, 9520)
+
+    def test_recalculate_totals_caps_discount_to_gross_line_subtotal(self):
+        proforma = ProformaInvoice.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            number="PRO-DISCOUNT-CAP",
+            discount_cents=20000,
+            status="draft",
+        )
+        ProformaLine.objects.create(
+            proforma=proforma,
+            kind="service",
+            description="Hosting",
+            quantity=Decimal("1"),
+            unit_price_cents=10000,
+            tax_rate=Decimal("0.19"),
+        )
+
+        proforma.recalculate_totals()
+
+        self.assertEqual(proforma.discount_cents, 10000)
+        self.assertEqual(proforma.subtotal_cents, 0)
+        self.assertEqual(proforma.tax_cents, 0)
+        self.assertEqual(proforma.total_cents, 0)
+
 
 class ProformaLineTestCase(TestCase):
     """Test ProformaLine model functionality"""
