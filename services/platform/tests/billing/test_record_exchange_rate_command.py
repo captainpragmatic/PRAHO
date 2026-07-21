@@ -191,3 +191,11 @@ class RecordExchangeRateCommandTest(TestCase):
                 call_command(*invalid_args)
 
         self.assertFalse(FXRate.objects.exists())
+
+    def test_command_rejects_rate_above_storage_limit(self) -> None:
+        invalid_args = tuple("10000000000" if value == "5.0123" else value for value in self.args)
+
+        with self.assertRaisesRegex(CommandError, "must not exceed"):
+            call_command(*invalid_args)
+
+        self.assertFalse(FXRate.objects.exists())

@@ -288,6 +288,7 @@ class Invoice(models.Model):
         if "currency" in normalized_update_fields:
             normalized_update_fields.add("currency_id")
         if update_fields and not (normalized_update_fields & self._LOCKED_FIELDS):
+            self._validate_mutable_update(normalized_update_fields)
             super().save(*args, **kwargs)
             return
 
@@ -344,11 +345,26 @@ class Invoice(models.Model):
                     _("Cannot modify financial data on a locked invoice or alter its billing snapshot")
                 )
 
-        # Validate date consistency
+        self._validate_date_consistency()
+        self._log_security_validation()
+
+    def _validate_mutable_update(self, update_fields: set[str]) -> None:
+        """Validate fields allowed to bypass the locked-invoice database check."""
+        if "meta" in update_fields:
+            validate_financial_json(self.meta, "Invoice metadata")
+        if "efactura_response" in update_fields:
+            validate_financial_json(self.efactura_response, "e-Factura response")
+        if "due_at" in update_fields:
+            self._validate_date_consistency()
+        self._log_security_validation()
+
+    def _validate_date_consistency(self) -> None:
+        """Keep issue and due dates chronologically valid on every relevant save path."""
         if self.issued_at and self.due_at and self.due_at <= self.issued_at:
             raise ValidationError(_("Due date must be after issue date"))
 
-        # Log security validation
+    def _log_security_validation(self) -> None:
+        """Record successful validation for both full and optimized partial saves."""
         log_security_event(
             event_type="invoice_validation",
             details={

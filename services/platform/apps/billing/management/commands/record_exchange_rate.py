@@ -11,8 +11,17 @@ from django.db import transaction
 from django.utils import timezone
 
 from apps.audit.services import AuditService
+from apps.billing.currency_models import MAX_FX_RATE
 from apps.billing.fx_rate_ingestion import LegacyRatePromotionError, promote_legacy_rate
 from apps.billing.models import Currency, FXRate
+
+
+def _validate_rate(rate_value: Decimal) -> None:
+    """Reject values that cannot be represented safely by the FXRate model."""
+    if not rate_value.is_finite() or rate_value <= 0:
+        raise CommandError("Exchange rate must be finite and positive")
+    if rate_value > MAX_FX_RATE:
+        raise CommandError(f"Exchange rate must not exceed {MAX_FX_RATE}")
 
 
 class Command(BaseCommand):
@@ -51,8 +60,7 @@ class Command(BaseCommand):
         except (InvalidOperation, ValueError) as exc:
             raise CommandError(f"Invalid exchange-rate value or date: {exc}") from exc
 
-        if not rate_value.is_finite() or rate_value <= 0:
-            raise CommandError("Exchange rate must be finite and positive")
+        _validate_rate(rate_value)
         if base_code == quote_code:
             raise CommandError("Base and quote currencies must differ")
         if not reference:
