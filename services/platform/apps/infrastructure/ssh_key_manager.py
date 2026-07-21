@@ -309,6 +309,7 @@ class SSHKeyManager:
 
         key_pair = result.unwrap()
 
+        path: str | None = None
         try:
             # Create secure temporary file
             fd, path = tempfile.mkstemp(prefix="praho_ssh_", suffix=".key")
@@ -323,6 +324,9 @@ class SSHKeyManager:
             return Ok(Path(path))
 
         except Exception as e:
+            # #348: never leave a partial PRIVATE KEY temp file behind if the write/chmod fails.
+            if path is not None:
+                Path(path).unlink(missing_ok=True)
             logger.error(f"🚨 [SSH Manager] Failed to write key file: {e}")
             return Err(f"Failed to write key file: {e}")
 
@@ -446,6 +450,7 @@ class SSHKeyManager:
 
         key_content = result.unwrap()
 
+        path: str | None = None
         try:
             fd, path = tempfile.mkstemp(prefix="praho_master_ssh_", suffix=".key")
             with os.fdopen(fd, "w") as f:
@@ -456,6 +461,9 @@ class SSHKeyManager:
             return Ok(Path(path))
 
         except Exception as e:
+            # #348: never leave a partial master PRIVATE KEY temp file behind if the write/chmod fails.
+            if path is not None:
+                Path(path).unlink(missing_ok=True)
             return Err(f"Failed to write master key file: {e}")
 
     def get_effective_key_for_deployment(

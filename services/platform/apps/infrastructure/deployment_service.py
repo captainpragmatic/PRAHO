@@ -427,6 +427,45 @@ class NodeDeploymentService:
                     else str(deployment.panel_type)
                 )
 
+            # #347: resolve the dedicated Virtualmin API credential BEFORE the Ansible stages so the
+            # panel playbook can provision it ON the node (create the ACL user with this password).
+            # register_node stores it in the vault, so the first API call — and verify_and_activate
+            # below — authenticate. Threaded via a 0600 vars file, never the ansible command line.
+            #
+            # #348 finding #8: REUSE an existing vault credential for this node so a re-deploy is
+            # convergent ONCE A CREDENTIAL ALREADY EXISTS IN THE VAULT. create-admin tolerates an
+            # already-existing praho-api user WITHOUT resetting its password, so minting a fresh
+            # password every deploy would leave the node on the OLD password while the vault stored the
+            # NEW one -> verify_and_activate 401 -> disabled. The vault is the credential source of
+            # truth (ADR-0033). Residual edge (NOT converged): if a prior deploy created the node user
+            # but failed BEFORE the vault store, no vault entry exists, a fresh password is generated,
+            # and the node stays safely DISABLED (never active with a mismatch) until create-admin is
+            # reset on the node.
+            from apps.common.credential_vault import (  # noqa: PLC0415  # Deferred: avoids circular import
+                get_credential_vault,
+            )
+
+            virtualmin_api_username = "praho-api"
+            # The vault key MUST stay aligned with register_node (service_identifier=server.hostname)
+            # and verify_and_activate (reads by server.hostname). server.hostname is assigned
+            # =deployment.fqdn at registration, so this read key matches; keep them coupled to the same
+            # attribute if hostname derivation ever changes, or reuse silently never hits (fresh pw
+            # every re-deploy -> permanent 401/disabled).
+            _existing_cred = get_credential_vault().get_credential(
+                service_type="virtualmin",
+                service_identifier=deployment.fqdn,
+                reason=f"Node deploy credential resolution for {deployment.hostname} (#348)",
+            )
+            if _existing_cred.is_ok() and _existing_cred.unwrap()[0] and _existing_cred.unwrap()[1]:
+                virtualmin_api_username, virtualmin_api_password, _ = _existing_cred.unwrap()
+                log_deployment("info", "Reusing existing Virtualmin API credential from the vault (re-deploy)")
+            else:
+                import string  # noqa: PLC0415  # Deferred: stdlib, local use
+
+                virtualmin_api_password = "".join(
+                    secrets.choice(string.ascii_letters + string.digits + "!@#$%^&*") for _ in range(24)
+                )
+
             playbook_names = self._ansible.get_playbook_order(panel_type)
             stage_keys = ["ansible_base", "ansible_panel", "ansible_harden", "ansible_backup"]
             ansible_playbooks = list(zip(stage_keys, playbook_names, strict=False))
@@ -435,9 +474,23 @@ class NodeDeploymentService:
                 report_progress(stage_name)
                 log_deployment("info", f"Running Ansible playbook: {playbook}")
 
+                # Only the panel playbook (virtualmin.yml, the "ansible_panel" stage) provisions the
+                # ACL user, so scope the API credential to that stage. Broadcasting it to base/harden/
+                # backup would write the secret into a 0600 vars file for each and expose it to every
+                # task/callback in playbooks that never use it (#348 finding #6).
+                stage_extra_vars = (
+                    {
+                        "praho_api_user": virtualmin_api_username,
+                        "praho_api_password": virtualmin_api_password,
+                    }
+                    if stage_name == "ansible_panel"
+                    else None
+                )
+
                 playbook_result = self._ansible.run_playbook(
                     deployment=deployment,
                     playbook=playbook,
+                    extra_vars=stage_extra_vars,
                 )
 
                 if playbook_result.is_err():
@@ -508,17 +561,10 @@ class NodeDeploymentService:
             deployment.transition_to("registering")
             log_deployment("info", "Registering node as VirtualminServer")
 
-            # Generate a random password for Virtualmin admin
-            import string  # noqa: PLC0415  # Deferred: avoids circular import
-
-            admin_password = "".join(
-                secrets.choice(string.ascii_letters + string.digits + "!@#$%^&*") for _ in range(24)
-            )
-
             registration_result = self._registration.register_node(
                 deployment=deployment,
-                admin_username="root",
-                admin_password=admin_password,
+                admin_username=virtualmin_api_username,
+                admin_password=virtualmin_api_password,
                 user=user,
             )
 
@@ -530,6 +576,25 @@ class NodeDeploymentService:
                 server = registration_result.unwrap()
                 virtualmin_server_id = server.id
                 log_deployment("info", f"Registered as VirtualminServer(id={server.id})")
+                # #347: confirm the credential the playbook provisioned actually
+                # authenticates, then activate. A failed check leaves the server
+                # 'disabled' (safe, never customer-routed) — the deployment still
+                # completes; the node simply isn't customer-ready until resolved.
+                # Activation is best-effort: a failed/raised check leaves the server 'disabled'
+                # (safe, never customer-routed) but must NEVER fail an otherwise-complete deployment
+                # (#348 finding #7). verify_and_activate is total, but guard the call anyway so a
+                # future regression there can't roll back paid provisioning work.
+                try:
+                    activation = self._registration.verify_and_activate(server)
+                except Exception as activation_err:  # best-effort: activation must never be fatal to the deploy
+                    log_deployment(
+                        "warning", f"Node registered but activation raised (left disabled): {activation_err}"
+                    )
+                else:
+                    if activation.is_ok():
+                        log_deployment("info", f"VirtualminServer(id={server.id}) credential-verified and activated")
+                    else:
+                        log_deployment("warning", f"Node registered but left disabled: {activation.unwrap_err()}")
 
             stages_completed.append("registration")
 

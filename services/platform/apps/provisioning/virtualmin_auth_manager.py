@@ -30,6 +30,7 @@ from .virtualmin_gateway import (
     VirtualminGateway,
     VirtualminRateLimitedError,
     VirtualminTransientError,
+    resolve_server_credentials,
 )
 from .virtualmin_models import VirtualminServer
 from .virtualmin_validators import VirtualminValidator
@@ -42,7 +43,11 @@ AUTH_METHOD_MASTER_PROXY = "master_proxy"
 AUTH_METHOD_SSH_SUDO = "ssh_sudo"
 
 # Cache keys for auth method tracking
-CACHE_AUTH_METHOD_PREFIX = "virtualmin_auth_method_"
+# v2: bumped when ACL credential resolution moved vault-first (#348). Any pre-fix cached
+# "master_proxy is the working method" entry — set when an empty ACL field forced escalation —
+# is now ignored, so a node re-evaluates ACL-first with the repaired resolution instead of
+# persistently authenticating as master.
+CACHE_AUTH_METHOD_PREFIX = "virtualmin_auth_method_v2_"
 CACHE_AUTH_HEALTH_PREFIX = "virtualmin_auth_health_"
 _DEFAULT_CACHE_TIMEOUT = 3600  # 1 hour
 CACHE_TIMEOUT = _DEFAULT_CACHE_TIMEOUT
@@ -94,7 +99,17 @@ class AuthMethodUnavailableError(Exception):
     """An explicitly configured fallback method is unavailable on this installation."""
 
 
-AuthFailure = str | VirtualminAPIError | AuthMethodUnavailableError
+class ACLCredentialResolutionError(Exception):
+    """The node's own ACL credential could not be RESOLVED (no vault entry and no usable field).
+
+    Distinct from a 401 (credential present but rejected) and from AuthMethodUnavailableError (a
+    *fallback* method simply not configured): when PRAHO cannot even resolve a node's own ACL
+    credential, escalating to master/root would be a privilege jump we refuse. This is TERMINAL —
+    the escalation loop must NOT fall through to _execute_master_proxy on it.
+    """
+
+
+AuthFailure = str | VirtualminAPIError | AuthMethodUnavailableError | ACLCredentialResolutionError
 
 
 @dataclass
@@ -147,7 +162,7 @@ class VirtualminAuthenticationManager:
         self.server = server
         self._ssh_client: paramiko.SSHClient | None = None
 
-    def execute_virtualmin_command(
+    def execute_virtualmin_command(  # noqa: PLR0911  # Terminal-vs-escalate branches: 403 / ACL-resolution / unavailable / ambiguous-mutation / exhausted
         self, program: str, parameters: dict[str, Any], force_method: AuthMethod | None = None
     ) -> Result[Any, str]:
         """
@@ -203,6 +218,11 @@ class VirtualminAuthenticationManager:
                         # to a higher-privilege method would bypass the ACL —
                         # terminal, never fall through.
                         return Err(last_error, retriability=last_retriability)
+                    if isinstance(error, ACLCredentialResolutionError):
+                        # (#348) Could not resolve the node's OWN ACL credential. Escalating to
+                        # master/root here would send privileged credentials to a node we cannot
+                        # even authenticate to normally — refuse. Terminal, never fall through.
+                        return Err(last_error, retriability=Retriability.NOT_RETRIABLE)
                     if isinstance(error, AuthMethodUnavailableError):
                         # Method NOT configured: nothing was ever attempted, so
                         # it carries zero double-execution risk — try the next
@@ -260,13 +280,41 @@ class VirtualminAuthenticationManager:
         return handler(program, parameters)
 
     def _execute_acl_auth(self, program: str, parameters: dict[str, Any]) -> Result[Any, AuthFailure]:
-        """Execute using current ACL user authentication"""
+        """Execute using the node's ACL user, resolving its credential vault-first (ADR-0033).
+
+        The ACL credential lives in the CredentialVault (deploy-path nodes carry an empty
+        encrypted_api_password). Resolving vault-first means such a node authenticates as its real
+        ACL user instead of sending an empty password, 401-ing, and escalating to master. A
+        resolution FAILURE returns the TERMINAL ACLCredentialResolutionError so the escalation loop
+        refuses to reach master — never send root credentials to a node whose own ACL credential we
+        cannot even resolve.
+        """
         try:
-            # Use existing gateway with ACL credentials
+            from apps.common.credential_vault import (  # noqa: PLC0415  # Deferred: avoids circular import
+                get_credential_vault,
+            )
+
+            try:
+                vault = get_credential_vault()
+            except Exception:
+                # Vault unreachable → resolve from the server field only (manual servers keep
+                # working; a deploy-path node's empty field yields a terminal Err below).
+                logger.warning(f"⚠️ [Virtualmin Auth] Vault unavailable for {self.server.hostname}; trying server field")
+                vault = None
+
+            creds = resolve_server_credentials(self.server, vault=vault, reason=f"ACL auth: {program}")
+            if creds.is_err():
+                return Err(
+                    ACLCredentialResolutionError(
+                        f"No usable ACL credential for {self.server.hostname}: {creds.unwrap_err()}"
+                    )
+                )
+            acl_username, acl_password = creds.unwrap()
+
             config = VirtualminConfig.from_credentials(
                 hostname=self.server.hostname,
-                username=self.server.api_username,
-                password=self.server.get_api_password(),
+                username=acl_username,
+                password=acl_password,
                 port=self.server.api_port,
                 use_ssl=self.server.use_ssl,
                 verify_ssl=self.server.ssl_verify,

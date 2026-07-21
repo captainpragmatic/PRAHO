@@ -16,8 +16,14 @@ from apps.provisioning.virtualmin_models import VirtualminServer
 
 
 def _gateway() -> VirtualminGateway:
-    server = VirtualminServer(hostname="retry.example.com", status="active", use_ssl=False)
-    return VirtualminGateway(VirtualminConfig(server=server, verify_ssl=False))
+    server = VirtualminServer(
+        hostname="retry.example.com", status="active", use_ssl=False, api_username="retry-api"
+    )
+    server.set_api_password("retry-pw")
+    # use_credential_vault=False: these tests exercise the RETRY contract with _execute_http_request
+    # mocked, so the credential must resolve from the server field (no vault/DB) — call() now resolves
+    # auth fail-closed BEFORE the retry loop, and SimpleTestCase has no DB for a vault lookup.
+    return VirtualminGateway(VirtualminConfig(server=server, verify_ssl=False, use_credential_vault=False))
 
 
 def _response(status_code: int) -> requests.Response:
@@ -88,7 +94,9 @@ class VirtualminRetryContractTests(SimpleTestCase):
 
         with (
             patch.object(gateway, "_check_rate_limit", return_value=True),
-            patch.object(gateway, "_execute_http_request", side_effect=lambda _params: _response(503)) as request_mock,
+            patch.object(
+                gateway, "_execute_http_request", side_effect=lambda _params, auth=None: _response(503)
+            ) as request_mock,
             patch("apps.provisioning.virtualmin_gateway.time.sleep"),
         ):
             result = gateway.call("delete-domain", {"domain": "example.com"})
@@ -102,7 +110,9 @@ class VirtualminRetryContractTests(SimpleTestCase):
 
         with (
             patch.object(gateway, "_check_rate_limit", return_value=True),
-            patch.object(gateway, "_execute_http_request", side_effect=lambda _params: _response(503)) as request_mock,
+            patch.object(
+                gateway, "_execute_http_request", side_effect=lambda _params, auth=None: _response(503)
+            ) as request_mock,
             patch("apps.provisioning.virtualmin_gateway.time.sleep"),
         ):
             result = gateway.call("list-domains")

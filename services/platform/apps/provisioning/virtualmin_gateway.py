@@ -584,6 +584,70 @@ class VirtualminResponseParser:
         }
 
 
+# Couples the resolver's fail-open guard to CredentialVault.get_credential's not-found message.
+# ONLY a genuine "no vault entry" permits the legacy encrypted-field fallback; expired /
+# access-denied / decryption / DB-outage errors are TERMINAL (fail-closed) so a stale model
+# credential can never resurrect a revoked or expired vault credential (ADR-0033 vault lifecycle).
+# A typed vault-error refactor would remove this string coupling (tracked follow-up).
+_VAULT_NOT_FOUND_PREFIX = "Credential not found"
+
+
+def resolve_server_credentials(
+    server: Any,
+    *,
+    vault: CredentialVault | None = None,
+    reason: str = "Virtualmin API call",
+) -> Result[tuple[str, str], str]:
+    """ADR-0033 vault-first Virtualmin credential resolution — fail-closed.
+
+    Resolution order:
+      1. If a vault is supplied, try it. A present, non-empty (username, password) wins.
+      2. The legacy encrypted server field is used ONLY when the vault has genuinely no entry
+         (not-found) — never on expired / denied / decryption / outage, which are terminal.
+      3. Fail-closed: Err when neither source yields a NON-EMPTY (username, password).
+
+    The ``if username and password`` guards are LOAD-BEARING: get_api_password() on an empty
+    field returns "" SILENTLY (decrypt_sensitive_data("") -> "", no exception), so emptiness —
+    not an exception — is what stops an empty credential from reaching the wire.
+    """
+    if vault is not None:
+        vault_result = vault.get_credential(
+            service_type="virtualmin", service_identifier=server.hostname, reason=reason
+        )
+        if vault_result.is_ok():
+            username, password, _metadata = vault_result.unwrap()
+            if username and password:
+                logger.debug(f"🔐 [Virtualmin] Using vault credential for {server.hostname}")
+                return Ok((username, password))
+            # A vault row with an empty credential is treated as absent → try the field.
+        else:
+            err = vault_result.unwrap_err()
+            if not err.startswith(_VAULT_NOT_FOUND_PREFIX):
+                # Expired / denied / decryption / DB-outage: TERMINAL. Do NOT resurrect the field.
+                logger.warning(f"⚠️ [Virtualmin] Vault credential unusable for {server.hostname}: {err}")
+                return Err(f"Vault credential unavailable for {server.hostname}: {err}")
+            logger.debug(f"🔐 [Virtualmin] No vault entry for {server.hostname}; trying server field")
+
+    # Legacy encrypted-field fallback (manually-registered servers with no vault entry).
+    try:
+        username = getattr(server, "api_username", "") or ""
+        password = server.get_api_password() if hasattr(server, "get_api_password") else ""
+    except DecryptionError:
+        logger.error(
+            f"🔥 [Virtualmin] Credential decryption failed for {server.hostname} — encryption key may have rotated"
+        )
+        return Err("Credential decryption failed — encryption key may have rotated")
+    except Exception:
+        # SECURITY: never surface exception detail that could leak credential material.
+        logger.exception("🔥 [Virtualmin] Credential retrieval failed")
+        return Err("Credential retrieval error")
+
+    if username and password:  # LOAD-BEARING: an empty field decrypts to "" silently, never raises
+        logger.debug(f"🔐 [Virtualmin] Using server-field credential for {server.hostname}")
+        return Ok((username, password))
+    return Err("No valid credentials found in vault or server config")
+
+
 class VirtualminGateway:
     """
     Production-ready Virtualmin gateway with enterprise patterns.
@@ -629,55 +693,16 @@ class VirtualminGateway:
         return self._credential_vault
 
     def _get_credentials(self, reason: str = "Virtualmin API call") -> Result[tuple[str, str], str]:
+        """Vault-first credential resolution (ADR-0033), respecting ``use_credential_vault``.
+
+        ``from_credentials`` configs (use_credential_vault=False — the verify_and_activate probe
+        and _execute_master_proxy) resolve their DIRECT credential and never consult the vault, so
+        master-proxy escalation can never silently authenticate with the ACL vault credential.
+        Delegates to the shared ``resolve_server_credentials`` so this path and the auth manager
+        use one implementation (no parallel credential logic to drift).
         """
-        Get credentials using vault-first approach with environment fallback.
-
-        Implements the migration strategy from virtualmin_review.md:
-        1. Try credential vault first (new approach)
-        2. Fall back to environment variables (current approach)
-        3. Log which method was used for migration tracking
-        """
-
-        # Try credential vault first if enabled
-        vault = self._get_credential_vault()
-        if vault:
-            vault_result = vault.get_credential(
-                service_type="virtualmin", service_identifier=self.server.hostname, reason=reason
-            )
-
-            if vault_result.is_ok():
-                username, password, _metadata = vault_result.unwrap()
-                if username and password:
-                    logger.debug(f"🔐 [Virtualmin Gateway] Using vault credentials for {self.server.hostname}")
-                    return Ok((username, password))
-            else:
-                logger.warning(
-                    f"⚠️ [Virtualmin Gateway] Vault failed for {self.server.hostname}: {vault_result.unwrap_err()}"
-                )
-
-        # Try server-specific credentials
-        try:
-            if hasattr(self.server, "api_username") and hasattr(self.server, "get_api_password"):
-                username = self.server.api_username
-                password = self.server.get_api_password()
-
-                if username and password:
-                    logger.debug(f"🔐 [Virtualmin Gateway] Using server credentials for {self.server.hostname}")
-                    return Ok((username, password))
-
-            return Err("No valid credentials found in vault or server config")
-
-        except DecryptionError:
-            logger.error(
-                f"🔥 [Virtualmin Gateway] Credential decryption failed for {self.server.hostname}"
-                " — encryption key may have rotated"
-            )
-            return Err("Credential decryption failed — encryption key may have rotated")
-
-        except Exception:
-            # SECURITY: Don't expose exception details that could leak credential info
-            logger.exception("🔥 [Virtualmin Gateway] Credential retrieval failed")
-            return Err("Credential retrieval error")
+        vault = self._get_credential_vault() if self.config.use_credential_vault else None
+        return resolve_server_credentials(self.server, vault=vault, reason=reason)
 
     def call_with_auth_fallback(
         self, program: str, parameters: dict[str, Any] | None = None, use_fallback_auth: bool = True
@@ -751,7 +776,7 @@ class VirtualminGateway:
 
         return Ok(True)
 
-    def call(  # noqa: PLR0911  # Explicit per-stage guard returns
+    def call(  # noqa: PLR0911, C901  # Explicit per-stage guard returns (validate/health/rate-limit/auth) + retry loop
         self,
         program: str,
         params: dict[str, Any] | None = None,
@@ -828,12 +853,26 @@ class VirtualminGateway:
             f"{f' (correlation: {correlation_id})' if correlation_id else ''}"
         )
 
+        # Resolve the credential ONCE per call() — shared across retries, kept as a local (no
+        # instance residency). Fail closed: an unresolvable credential never reaches the wire.
+        auth_result = self._get_credentials(reason=f"Virtualmin {program}")
+        if auth_result.is_err():
+            return Err(
+                VirtualminAuthError(
+                    f"No usable Virtualmin credential for {self.server.hostname}: {auth_result.unwrap_err()}",
+                    self.server.hostname,
+                    program,
+                ),
+                retriability=Retriability.NOT_RETRIABLE,
+            )
+        call_auth = auth_result.unwrap()
+
         # Make API request with retries
         last_error: VirtualminAPIError | None = None
         is_read_only = program == "info" or program.startswith("list-")
         for attempt in range(VIRTUALMIN_MAX_RETRIES):
             try:
-                response = self._make_request(api_params, attempt + 1)
+                response = self._make_request(api_params, attempt + 1, auth=call_auth)
                 execution_time = time.time() - start_time
 
                 # Parse response
@@ -881,13 +920,17 @@ class VirtualminGateway:
             last_error = VirtualminTransientError(error_msg, self.server.hostname, program)
         return Err(last_error, retriability=last_error.retriability)
 
-    def _make_request(self, params: dict[str, Any], attempt: int) -> requests.Response:
+    def _make_request(
+        self, params: dict[str, Any], attempt: int, auth: tuple[str, str] | None = None
+    ) -> requests.Response:
         """
         Make HTTP request to Virtualmin API.
 
         Args:
             params: Request parameters
             attempt: Current attempt number
+            auth: (username, password) resolved once per call(); when omitted the request
+                resolves it inline (defensive — direct callers/tests), still fail-closed.
 
         Returns:
             HTTP response object
@@ -897,7 +940,7 @@ class VirtualminGateway:
             VirtualminAPIError: On API-specific errors
         """
         try:
-            response = self._execute_http_request(params)
+            response = self._execute_http_request(params, auth=auth)
             self._validate_response_size(response)
             self._validate_http_status(response)
             return response
@@ -937,8 +980,13 @@ class VirtualminGateway:
                 retriability=Retriability.UNKNOWN,
             ) from e
 
-    def _execute_http_request(self, params: dict[str, Any]) -> requests.Response:
-        """Execute HTTPS with DNS pinning and optional handshake-time certificate pinning."""
+    def _execute_http_request(self, params: dict[str, Any], auth: tuple[str, str] | None = None) -> requests.Response:
+        """Execute HTTPS with DNS pinning and optional handshake-time certificate pinning.
+
+        ``auth`` is the (username, password) resolved once per call(). When omitted (a direct
+        caller/test), it is resolved inline vault-first — fail-closed: an unresolvable credential
+        raises before the request rather than authenticating with an empty password (ADR-0033).
+        """
         if not self.server.use_ssl or not self.server.api_url.lower().startswith("https://"):
             raise VirtualminAPIError("Virtualmin API requires HTTPS", self.server.hostname)
         if not self.config.verify_ssl and not self.config.cert_fingerprint:
@@ -946,6 +994,15 @@ class VirtualminGateway:
                 "Disabling CA verification requires a pinned SHA-256 certificate fingerprint",
                 self.server.hostname,
             )
+
+        if auth is None:
+            creds = self._get_credentials(reason="Virtualmin API request")
+            if creds.is_err():
+                raise VirtualminAuthError(
+                    f"No usable Virtualmin credential for {self.server.hostname}: {creds.unwrap_err()}",
+                    self.server.hostname,
+                )
+            auth = creds.unwrap()
 
         # Get current timeout configuration (supports hot-reloading)
         timeout_config = get_virtualmin_timeouts()
@@ -967,7 +1024,7 @@ class VirtualminGateway:
             self.server.api_url,
             policy=virtualmin_policy,
             params=params,
-            auth=(self.server.api_username, self.server.get_api_password()),
+            auth=auth,
         )
 
     def _validate_response_size(self, response: requests.Response) -> None:

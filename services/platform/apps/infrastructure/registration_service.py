@@ -8,6 +8,7 @@ the deployed infrastructure.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from typing import TYPE_CHECKING
 
@@ -133,7 +134,12 @@ class NodeRegistrationService:
                     vault = get_credential_vault()
                     credential_data = CredentialData(
                         service_type="virtualmin",
-                        service_identifier=deployment.fqdn,
+                        # Couple the vault WRITE key to server.hostname — the exact key the gateway
+                        # resolver READS by (resolve_server_credentials → get_credential by
+                        # server.hostname). Equal to deployment.fqdn today, but binding them to the
+                        # same attribute prevents a future hostname-derivation change from silently
+                        # desynchronizing writes and reads (fleet-wide fail-closed 401s otherwise).
+                        service_identifier=server.hostname,
                         username=admin_username,
                         password=admin_password,
                         metadata={
@@ -170,6 +176,93 @@ class NodeRegistrationService:
         except Exception as e:
             logger.error(f"🚨 [Registration] Failed to register node {deployment.hostname}: {e}")
             return Err(f"Registration failed: {e}")
+
+    def verify_and_activate(self, server: VirtualminServer) -> Result[VirtualminServer, str]:  # noqa: PLR0911  # Guarded credential-verification workflow: one early Err per gate (vault-miss/empty-cred/handshake/not-healthy/CAS)
+        """
+        #347 GAP 2: confirm the API credential provisioned on the node actually
+        authenticates, then transition the server disabled -> active so placement
+        can use it. A failed handshake leaves it disabled with a clear reason —
+        PRAHO never activates a server it cannot authenticate to. Requires an
+        AFFIRMATIVE health result (#325 posture): a missing/non-True 'healthy' is
+        not proof and does not activate.
+        """
+        from django.utils import timezone  # noqa: PLC0415  # Deferred: local use
+
+        from apps.common.credential_vault import (  # noqa: PLC0415  # Circular: cross-app  # Deferred: avoids circular import
+            get_credential_vault,
+        )
+        from apps.provisioning.virtualmin_gateway import (  # noqa: PLC0415  # Circular: cross-app  # Deferred: avoids circular import
+            VirtualminConfig,
+            VirtualminGateway,
+            get_virtualmin_config,
+        )
+        from apps.provisioning.virtualmin_models import (  # noqa: PLC0415  # Circular: cross-app  # Deferred: avoids circular import
+            VirtualminServer as VMServer,
+        )
+
+        try:
+            # Fetch the credential PRODUCTION will use: register_node stores it in the
+            # vault (keyed by hostname) and leaves encrypted_api_password=b"", so the
+            # server's own get_api_password() is empty. Verifying against the vault
+            # credential means activation proves the node accepts EXACTLY the credential
+            # every later API call will present. A vault miss (register_node tolerates a
+            # failed store) leaves the node disabled — never activated blind.
+            vault_result = get_credential_vault().get_credential(
+                service_type="virtualmin",
+                service_identifier=server.hostname,
+                reason="Node activation credential check (#347)",
+            )
+            if vault_result.is_err():
+                return Err(f"No vault credential for {server.hostname}, leaving disabled: {vault_result.unwrap_err()}")
+            vault_username, vault_password, _meta = vault_result.unwrap()
+            if not vault_username or not vault_password:
+                return Err(f"Empty vault credential for {server.hostname}, leaving disabled")
+
+            config_data = get_virtualmin_config()
+            # Probe with the vault credential via from_credentials. It carries an
+            # active-status probe object, so the gateway's non-active guard (which exists
+            # to stop routing to not-yet-live servers) does not block the one call whose
+            # purpose is to verify a not-yet-active node. This still makes a REAL
+            # authenticated `info` call to the real node over the pinned-cert TLS policy.
+            config = VirtualminConfig.from_credentials(
+                hostname=server.hostname,
+                username=vault_username,
+                password=vault_password,
+                port=server.api_port,
+                use_ssl=server.use_ssl,
+                verify_ssl=server.ssl_verify,
+                timeout=config_data["timeout"],
+                cert_fingerprint=server.ssl_cert_fingerprint or config_data.get("pinned_cert_sha256", ""),
+            )
+            health = VirtualminGateway(config).test_connection()
+
+            if health.is_err():
+                return Err(f"Credential check failed for {server.hostname}, leaving disabled: {health.unwrap_err()}")
+            if health.unwrap().get("healthy") is not True:
+                return Err(f"Server {server.hostname} did not report healthy, leaving disabled: {health.unwrap()}")
+
+            # CAS: only a still-'disabled' server may be activated — never resurrect a
+            # 'failed'/'maintenance' server, and never race a concurrent transition.
+            updated = VMServer.objects.filter(pk=server.pk, status="disabled").update(
+                status="active", updated_at=timezone.now()
+            )
+            if not updated:
+                with contextlib.suppress(Exception):
+                    server.refresh_from_db()
+                return Err(f"Server {server.hostname} left 'disabled' before activation (now '{server.status}')")
+        except Exception as e:
+            # Any DB/gateway error during verification OR activation is a Result, never a raise: a
+            # transient failure must leave the node DISABLED (fail-safe) and NEVER crash the caller's
+            # deployment (#348 finding #7). If the CAS above already committed, the node is active
+            # regardless of this Err (still usable); a later reconcile syncs the in-memory row.
+            return Err(f"Credential verification raised for {server.hostname}: {e}")
+
+        # Activation committed. The final refresh is cosmetic — a hiccup here must NOT turn a
+        # successful activation into a reported failure.
+        with contextlib.suppress(Exception):
+            server.refresh_from_db()
+        logger.info(f"✅ [Registration] Node {server.hostname} credential-verified and activated")
+        return Ok(server)
 
     def unregister_node(
         self,
