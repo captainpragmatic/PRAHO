@@ -202,8 +202,14 @@ class WebhookEvent(models.Model):
 
     @classmethod
     def is_duplicate(cls, source: str, event_id: str) -> bool:
-        """🔍 Check if webhook has already been received"""
-        return cls.objects.filter(source=source, event_id=event_id).exists()
+        """🔍 Check if this webhook has already been processed to completion.
+
+        Only a `processed` event is a true duplicate. A `failed` or `pending` row means the sender
+        is redelivering something we have NOT successfully handled — deduping that to success
+        returns 200 and tells the sender to stop retrying, leaving the event permanently
+        unprocessed (#234). Such a redelivery must be allowed through to reprocess.
+        """
+        return cls.objects.filter(source=source, event_id=event_id, status="processed").exists()
 
     @classmethod
     def get_pending_webhooks(cls, source: str | None = None, limit: int = 100) -> QuerySet["WebhookEvent"]:
