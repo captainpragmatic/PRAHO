@@ -471,6 +471,38 @@ class TestRecordPaymentAndConvert(ProformaLifecycleTestBase):
         self.assertEqual(invoice.tax_cents, 1785)
         self.assertEqual(invoice.total_cents, 10285)
 
+    def test_conversion_derives_legacy_discount_when_storage_defaulted_to_zero(self):
+        """Pre-0025 net headers remain convertible without weakening current ledgers."""
+        from apps.billing.proforma_service import ProformaPaymentService  # noqa: PLC0415
+
+        proforma = self._create_sent_proforma(total_cents=10285)
+        proforma.subtotal_cents = 8500
+        proforma.tax_cents = 1785
+        proforma.discount_cents = 0
+        proforma.save(update_fields=["subtotal_cents", "tax_cents", "discount_cents"])
+        ProformaLine.objects.create(
+            proforma=proforma,
+            kind="service",
+            description="Legacy discounted hosting",
+            quantity=1,
+            unit_price_cents=10000,
+            tax_rate=Decimal("0.2100"),
+        )
+
+        result = ProformaPaymentService.record_payment_and_convert(
+            proforma_id=str(proforma.id),
+            amount_cents=proforma.total_cents,
+            payment_method="bank",
+            created_by=self.user,
+        )
+
+        self.assertTrue(result.is_ok(), f"Expected legacy conversion to succeed, got: {result}")
+        invoice = result.unwrap()
+        self.assertEqual(invoice.discount_cents, 1500)
+        self.assertEqual(invoice.subtotal_cents, 8500)
+        self.assertEqual(invoice.tax_cents, 1785)
+        self.assertEqual(invoice.total_cents, 10285)
+
     def test_conversion_rejects_a_discount_that_does_not_reconcile_with_lines(self):
         """A contradictory proforma must not become an immutable fiscal invoice."""
         from apps.billing.models import Invoice, Payment  # noqa: PLC0415

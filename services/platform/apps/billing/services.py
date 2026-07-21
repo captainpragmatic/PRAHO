@@ -38,7 +38,7 @@ from apps.billing.fiscal_identity import (
     validated_cnp_or_empty,
 )
 from apps.billing.models import Invoice, InvoiceLine, InvoiceSequence
-from apps.common.financial_arithmetic import calculate_document_totals
+from apps.common.financial_arithmetic import calculate_document_totals, reconcile_document_discount
 from apps.common.tax_service import CustomerVATInfo, TaxService
 from apps.common.types import Err, Ok, Result
 
@@ -385,11 +385,19 @@ class ProformaConversionService:
                 # become an immutable fiscal invoice. This prevents a stale header or a
                 # separately edited discount from being copied into contradictory records.
                 proforma_lines = list(proforma.lines.order_by("sort_order", "pk"))
+                effective_discount_cents = int(proforma.discount_cents or 0)
                 if proforma_lines:
-                    expected = calculate_document_totals(proforma_lines, proforma.discount_cents)
-                    expected_discount = min(proforma.discount_cents, expected.subtotal_cents)
+                    try:
+                        effective_discount_cents = reconcile_document_discount(
+                            line_gross_cents=sum(line.subtotal_cents for line in proforma_lines),
+                            net_subtotal_cents=int(proforma.subtotal_cents or 0),
+                            stored_discount_cents=effective_discount_cents,
+                        )
+                    except ValueError:
+                        return Err(f"Proforma {proforma.number} financial ledger does not reconcile")
+                    expected = calculate_document_totals(proforma_lines, effective_discount_cents)
                     expected_header = (
-                        expected.subtotal_cents - expected_discount,
+                        expected.subtotal_cents - effective_discount_cents,
                         expected.tax_cents,
                         expected.total_cents,
                     )
@@ -398,7 +406,7 @@ class ProformaConversionService:
                         proforma.tax_cents,
                         proforma.total_cents,
                     )
-                    if expected_header != actual_header or expected_discount != proforma.discount_cents:
+                    if expected_header != actual_header:
                         return Err(f"Proforma {proforma.number} financial ledger does not reconcile")
 
                 # Allocate a legal number only after the source document passes its
@@ -423,7 +431,7 @@ class ProformaConversionService:
                     subtotal_cents=subtotal_cents,
                     tax_cents=tax_cents,
                     total_cents=total_cents,
-                    discount_cents=proforma.discount_cents,
+                    discount_cents=effective_discount_cents,
                     due_at=tz.now() + timedelta(days=30),
                     bill_to_name=proforma.bill_to_name or "",
                     bill_to_email=proforma.bill_to_email or "",
