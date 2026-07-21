@@ -463,6 +463,10 @@ def update_consent(request: HttpRequest) -> HttpResponse:
 
         if marketing_consent != user.accepts_marketing:
             user.accepts_marketing = marketing_consent
+            # The send audience reads Customer.marketing_consent, so mirror the decision there or
+            # the change never affects what actually gets sent (#226). Applies both directions:
+            # granting re-enables, withdrawing suppresses.
+            gdpr_consent_service._propagate_marketing_consent(user, consent=marketing_consent)
             changes_made.append(f"marketing_consent_{'granted' if marketing_consent else 'withdrawn'}")
             logger.info(f"✅ [GDPR Consent] Marketing consent changed: {user.accepts_marketing} -> {marketing_consent}")
 

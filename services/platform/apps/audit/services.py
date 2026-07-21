@@ -1605,6 +1605,18 @@ class GDPRConsentService:
     - Audit trail for all consent changes
     """
 
+    @staticmethod
+    def _propagate_marketing_consent(user: User, *, consent: bool) -> None:
+        """Mirror a user's marketing-consent decision onto the customers they belong to.
+
+        The marketing send audience (notifications/tasks.py) selects on Customer.marketing_consent,
+        so a consent change on the User alone never reaches the send path (#226). Applied across the
+        user's CustomerMembership set — a user may belong to several customers.
+        """
+        from apps.customers.models import Customer  # noqa: PLC0415  # Deferred: avoids circular import
+
+        Customer.objects.filter(memberships__user=user).update(marketing_consent=consent)
+
     @classmethod
     @transaction.atomic
     def withdraw_consent(cls, user: User, consent_types: list[str], request_ip: str | None = None) -> Result[str, str]:
@@ -1621,6 +1633,10 @@ class GDPRConsentService:
             # Handle marketing consent withdrawal
             if "marketing" in consent_types and user.accepts_marketing:
                 user.accepts_marketing = False
+                # The marketing send audience filters on Customer.marketing_consent, NOT this
+                # User flag, so clearing the flag alone left the customer still receiving mail
+                # (#226). Propagate to every customer the user belongs to.
+                cls._propagate_marketing_consent(user, consent=False)
                 changes_made.append("marketing_communications")
 
             # Data processing consent withdrawal triggers anonymization
