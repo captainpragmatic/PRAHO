@@ -139,8 +139,13 @@
     - name: Create the PRAHO API administrator (dedicated ACL user, never master admin)
       # #347: PRAHO stores this same password in its vault at registration, so the
       # first API call and verify_and_activate authenticate. The password arrives
-      # via a 0600 extra-vars file (never the ansible command line) and is no_log
-      # here so it never lands in ansible output.
+      # via a 0600 extra-vars file (never the CONTROLLER's ansible command line) and
+      # is no_log here so it never lands in ansible output.
+      # RESIDUAL RISK (#348 #4): `--pass` still places the plaintext password on THIS
+      # node's process list (/proc, ps) for the brief duration of the command — no_log
+      # only hides the controller's output, not the target's argv. Accepted as low risk
+      # (freshly-provisioned, PRAHO-controlled node; short-lived command). A stdin/
+      # password-file facility is a hardening follow-up to investigate on a real node.
       # VALIDATE ON A REAL NODE: the exact `create-admin` capability flags govern
       # what PRAHO can do via the API and must be confirmed against a live
       # Virtualmin before this is trusted (part of the #347 acceptance drill).

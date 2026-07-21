@@ -185,6 +185,24 @@ class VerifyAndActivateRealHandshakeTests(TestCase):
 
     @patch("apps.provisioning.virtualmin_gateway.safe_request")
     @patch("apps.common.credential_vault.get_credential_vault")
+    def test_activation_is_total_returns_err_on_db_error(self, mock_get_vault, mock_safe_request):
+        """#348 #7: a transient DB error during the CAS update (previously OUTSIDE the try) must
+        surface as Err — the node stays disabled (fail-safe) — never propagate as an exception that
+        would crash the caller's deployment."""
+        from django.db import OperationalError  # noqa: PLC0415  # local: test-only
+
+        server = self._disabled_server()
+        mock_get_vault.return_value = self._vault()
+        mock_safe_request.return_value = self._ok_info_response()
+
+        with patch.object(VirtualminServer.objects, "filter", side_effect=OperationalError("connection lost")):
+            result = NodeRegistrationService().verify_and_activate(server)
+
+        self.assertTrue(result.is_err(), "a DB error in the CAS must be caught and returned as Err")
+        self.assertIn("raised", result.unwrap_err())
+
+    @patch("apps.provisioning.virtualmin_gateway.safe_request")
+    @patch("apps.common.credential_vault.get_credential_vault")
     def test_bad_credential_handshake_leaves_node_disabled(self, mock_get_vault, mock_safe_request):
         """Fail-safe: the node rejects the credential (real auth path, non-success info
         response) → stays disabled, never customer-routed."""

@@ -8,6 +8,7 @@ the deployed infrastructure.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from typing import TYPE_CHECKING
 
@@ -234,24 +235,32 @@ class NodeRegistrationService:
                 cert_fingerprint=server.ssl_cert_fingerprint or config_data.get("pinned_cert_sha256", ""),
             )
             health = VirtualminGateway(config).test_connection()
+
+            if health.is_err():
+                return Err(f"Credential check failed for {server.hostname}, leaving disabled: {health.unwrap_err()}")
+            if health.unwrap().get("healthy") is not True:
+                return Err(f"Server {server.hostname} did not report healthy, leaving disabled: {health.unwrap()}")
+
+            # CAS: only a still-'disabled' server may be activated — never resurrect a
+            # 'failed'/'maintenance' server, and never race a concurrent transition.
+            updated = VMServer.objects.filter(pk=server.pk, status="disabled").update(
+                status="active", updated_at=timezone.now()
+            )
+            if not updated:
+                with contextlib.suppress(Exception):
+                    server.refresh_from_db()
+                return Err(f"Server {server.hostname} left 'disabled' before activation (now '{server.status}')")
         except Exception as e:
+            # Any DB/gateway error during verification OR activation is a Result, never a raise: a
+            # transient failure must leave the node DISABLED (fail-safe) and NEVER crash the caller's
+            # deployment (#348 finding #7). If the CAS above already committed, the node is active
+            # regardless of this Err (still usable); a later reconcile syncs the in-memory row.
             return Err(f"Credential verification raised for {server.hostname}: {e}")
 
-        if health.is_err():
-            return Err(f"Credential check failed for {server.hostname}, leaving disabled: {health.unwrap_err()}")
-        if health.unwrap().get("healthy") is not True:
-            return Err(f"Server {server.hostname} did not report healthy, leaving disabled: {health.unwrap()}")
-
-        # CAS: only a still-'disabled' server may be activated — never resurrect a
-        # 'failed'/'maintenance' server, and never race a concurrent transition.
-        updated = VMServer.objects.filter(pk=server.pk, status="disabled").update(
-            status="active", updated_at=timezone.now()
-        )
-        if not updated:
+        # Activation committed. The final refresh is cosmetic — a hiccup here must NOT turn a
+        # successful activation into a reported failure.
+        with contextlib.suppress(Exception):
             server.refresh_from_db()
-            return Err(f"Server {server.hostname} left 'disabled' before activation (now '{server.status}')")
-
-        server.refresh_from_db()
         logger.info(f"✅ [Registration] Node {server.hostname} credential-verified and activated")
         return Ok(server)
 

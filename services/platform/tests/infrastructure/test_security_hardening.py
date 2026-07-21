@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -79,6 +80,28 @@ class AnsiblePlaybookBoundaryTests(SimpleTestCase):
         self.assertFalse(any(secret in a for a in argv), f"secret leaked onto the command line: {argv}")
         e_idx = argv.index("-e")
         self.assertTrue(argv[e_idx + 1].startswith("@"), f"expected -e @file, got {argv[e_idx + 1]!r}")
+
+    @patch("apps.infrastructure.ansible_service.subprocess.run")
+    def test_write_vars_file_does_not_leak_secret_temp_on_write_failure(self, _mock_run: MagicMock) -> None:
+        """#348: if writing the vars file raises mid-write, the partial 0600 secret file must NOT be
+        left behind. _write_vars_file cleans up its OWN temp before propagating — the caller's finally
+        keys cleanup on the returned path, which never binds when the write raises."""
+        service = self._service()
+        service._ssh_manager.get_private_key_file.return_value = Ok(Path("nonexistent-praho-key"))
+        deployment = MagicMock(ipv4_address="203.0.113.10", hostname="node.example.com")
+
+        tmpdir = Path(tempfile.gettempdir())
+        before = set(tmpdir.glob("praho_ansible_vars_*"))
+        with (
+            patch.object(service, "_generate_inventory", return_value=Path("nonexistent-praho-inventory")),
+            patch.object(service, "_build_vars", return_value={"praho_api_password": "secret-value"}),
+            patch("apps.infrastructure.ansible_service.json.dump", side_effect=OSError("disk full")),
+        ):
+            result = service.run_playbook(deployment, "virtualmin.yml", extra_vars={"praho_api_password": "secret-value"})
+
+        self.assertTrue(result.is_err(), "a vars-file write failure must surface as an Err")
+        leaked = set(tmpdir.glob("praho_ansible_vars_*")) - before
+        self.assertEqual(leaked, set(), f"partial-secret vars file(s) leaked in tempdir: {leaked}")
 
     @patch.dict(
         "os.environ",
@@ -257,3 +280,23 @@ class SSHKeyLifecycleAuditTests(TestCase):
         key_file = result.unwrap()
         self.addCleanup(key_file.unlink, missing_ok=True)
         mock_get_key.assert_called_once_with(deployment, None, "Ansible playbook: virtualmin_harden.yml")
+
+    def test_private_key_file_does_not_leak_secret_temp_on_write_failure(self) -> None:
+        """#348 (sibling of #5): if writing the PRIVATE KEY to its temp file raises, the partial key
+        file must NOT be left behind — get_private_key_file cleans up its own temp before returning
+        Err. The caller never sees a path to clean, so the leak would otherwise be permanent."""
+        manager = SSHKeyManager()
+        deployment = MagicMock(hostname="node.example.com")
+        key_pair = SSHKeyPair(public_key="ssh-ed25519 AAAA", private_key="PRIVATE", fingerprint="SHA256:test")
+
+        tmpdir = Path(tempfile.gettempdir())
+        before = set(tmpdir.glob("praho_ssh_*.key"))
+        with (
+            patch.object(manager, "get_deployment_key", return_value=Ok(key_pair)),
+            patch("apps.infrastructure.ssh_key_manager.os.fdopen", side_effect=OSError("disk full")),
+        ):
+            result = manager.get_private_key_file(deployment)
+
+        self.assertTrue(result.is_err())
+        leaked = set(tmpdir.glob("praho_ssh_*.key")) - before
+        self.assertEqual(leaked, set(), f"partial private-key file(s) leaked in tempdir: {leaked}")

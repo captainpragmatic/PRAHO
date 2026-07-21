@@ -146,7 +146,7 @@ class AnsibleService:
         logger.info(f"📜 [Ansible] All {len(results)} playbooks completed successfully")
         return Ok(results)
 
-    def run_playbook(  # noqa: PLR0911, PLR0912  # Explicit fail-closed boundary checks
+    def run_playbook(  # noqa: PLR0911, PLR0912, C901  # Explicit fail-closed boundary checks + guarded temp-file cleanup
         self,
         deployment: NodeDeployment,
         playbook: str,
@@ -265,12 +265,17 @@ class AnsibleService:
             logger.error(f"🚨 [Ansible] Playbook {playbook} failed: {e}")
             return Err(f"Playbook execution failed: {e}")
         finally:
-            # Cleanup any temp files that were created (key, inventory, vars).
+            # Cleanup temp files (key, inventory, vars). Remove the SECRET-bearing vars file FIRST,
+            # and guard each unlink independently so one failure can't strand the others (a lingering
+            # 0600 credential file matters more than a leftover inventory).
             local_vars = locals()
-            for _tmp_name in ("key_file", "inventory_file", "vars_file"):
+            for _tmp_name in ("vars_file", "key_file", "inventory_file"):
                 _tmp_path = local_vars.get(_tmp_name)
-                if isinstance(_tmp_path, Path) and _tmp_path.exists():
-                    _tmp_path.unlink()
+                if isinstance(_tmp_path, Path):
+                    try:
+                        _tmp_path.unlink(missing_ok=True)
+                    except OSError as _cleanup_err:
+                        logger.warning(f"⚠️ [Ansible] Could not remove temp file {_tmp_path}: {_cleanup_err}")
 
     @staticmethod
     def _write_vars_file(vars_dict: dict[str, Any]) -> Path:
@@ -279,9 +284,16 @@ class AnsibleService:
         the host's process list. The caller removes it in its finally block."""
         vars_fd, vars_path_str = tempfile.mkstemp(prefix="praho_ansible_vars_", suffix=".json")
         vars_file = Path(vars_path_str)
-        with os.fdopen(vars_fd, "w") as vars_fh:
-            json.dump(vars_dict, vars_fh)
-        os.chmod(vars_file, 0o600)
+        try:
+            with os.fdopen(vars_fd, "w") as vars_fh:
+                json.dump(vars_dict, vars_fh)
+            os.chmod(vars_file, 0o600)
+        except Exception:
+            # A raise mid-write (non-serializable vars, disk full, chmod failure) would otherwise
+            # orphan a partial-secret 0600 file: the caller keys its finally cleanup on the RETURNED
+            # path, which never binds when this raises. Clean up our own temp before propagating.
+            vars_file.unlink(missing_ok=True)
+            raise
         return vars_file
 
     @staticmethod
@@ -309,10 +321,16 @@ class AnsibleService:
 [all:vars]
 ansible_python_interpreter=/usr/bin/python3
 """
-        # Write to temp file
+        # Write to temp file. Clean up our own temp on a mid-write failure so a raise here can't
+        # orphan it — the caller keys its finally cleanup on the RETURNED path, which never binds
+        # when this raises (mirrors _write_vars_file, #348 #5).
         fd, path = tempfile.mkstemp(prefix="ansible_inv_", suffix=".ini")
-        with os.fdopen(fd, "w") as f:
-            f.write(inventory_content)
+        try:
+            with os.fdopen(fd, "w") as f:
+                f.write(inventory_content)
+        except Exception:
+            Path(path).unlink(missing_ok=True)
+            raise
 
         return Path(path)
 
