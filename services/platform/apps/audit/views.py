@@ -19,6 +19,7 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.contenttypes.models import ContentType
 from django.core.files.storage import default_storage
 from django.core.paginator import Paginator
+from django.db import transaction
 from django.db.models import Q, QuerySet
 from django.http import Http404, HttpRequest, HttpResponse, HttpResponseForbidden, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -433,6 +434,7 @@ def withdraw_consent(request: HttpRequest) -> HttpResponse:
 @login_required
 @require_POST
 @csrf_protect
+@transaction.atomic  # Keep user.accepts_marketing and the propagated Customer.marketing_consent consistent (#226).
 def update_consent(request: HttpRequest) -> HttpResponse:
     """Update specific GDPR consents"""
     user = cast(User, request.user)  # Safe due to @login_required

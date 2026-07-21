@@ -110,3 +110,40 @@ class PropagateMarketingConsentTestCase(TestCase):
 
         customer.refresh_from_db()
         self.assertFalse(customer.marketing_consent)
+
+    def test_grant_does_not_resubscribe_a_customer_where_another_member_withdrew(self) -> None:
+        """#226 review (226-A): one member's opt-in must not silently re-subscribe a shared
+        customer that another member had opted out of.
+
+        Customer.marketing_consent is a single flag shared by all members; a blind grant would
+        override the other member's withdrawal — a consent-integrity violation.
+        """
+        withdrawn_member = _make_user()
+        withdrawn_member.accepts_marketing = False
+        withdrawn_member.save(update_fields=["accepts_marketing"])
+        customer = _make_customer(withdrawn_member, marketing_consent=False)
+
+        # A second member of the SAME customer opts in.
+        opting_in_member = _make_user()
+        CustomerMembership.objects.create(customer=customer, user=opting_in_member, role="member")
+
+        GDPRConsentService._propagate_marketing_consent(opting_in_member, consent=True)
+
+        customer.refresh_from_db()
+        self.assertFalse(
+            customer.marketing_consent,
+            "granting one member's consent must not re-enable marketing over another member's withdrawal",
+        )
+
+    def test_grant_re_enables_when_no_other_member_has_withdrawn(self) -> None:
+        """The acting user's grant should re-enable a customer whose other members all consent."""
+        member = _make_user()
+        customer = _make_customer(member, marketing_consent=False)
+        # A second, still-consenting member.
+        other = _make_user()  # accepts_marketing=True by default
+        CustomerMembership.objects.create(customer=customer, user=other, role="member")
+
+        GDPRConsentService._propagate_marketing_consent(member, consent=True)
+
+        customer.refresh_from_db()
+        self.assertTrue(customer.marketing_consent)

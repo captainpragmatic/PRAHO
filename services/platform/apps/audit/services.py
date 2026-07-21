@@ -1612,10 +1612,42 @@ class GDPRConsentService:
         The marketing send audience (notifications/tasks.py) selects on Customer.marketing_consent,
         so a consent change on the User alone never reaches the send path (#226). Applied across the
         user's CustomerMembership set — a user may belong to several customers.
+
+        Direction matters, because Customer.marketing_consent is a single flag shared by every
+        member of the customer:
+
+        - Withdrawal (consent=False) is unconditional and fail-closed: one member opting out
+          suppresses that customer's marketing. That is the GDPR-safe default.
+        - Granting (consent=True) is NOT unconditional. Blindly setting the shared flag True when
+          one member opts in would silently re-subscribe another member who had previously
+          withdrawn. So a grant only re-enables a customer where NO member is currently withdrawn.
+          The acting user is treated as consenting (they just granted), even if their own row has
+          not been persisted yet at call time.
+
+        The bulk .update() intentionally bypasses the per-Customer marketing_consent signal
+        (customers/signals.py). The canonical compliance record for this change is the
+        gdpr_consent event that withdraw_consent / update_consent already log against the acting
+        user — a DPA looks for the user-attributed consent decision, not a per-customer echo — so
+        re-firing that signal for every membership would only duplicate the trail.
         """
         from apps.customers.models import Customer  # noqa: PLC0415  # Deferred: avoids circular import
+        from apps.users.models import CustomerMembership  # noqa: PLC0415  # Deferred: avoids circular import
 
-        Customer.objects.filter(memberships__user=user).update(marketing_consent=consent)
+        customer_ids = list(Customer.objects.filter(memberships__user=user).values_list("id", flat=True).distinct())
+        if not customer_ids:
+            return
+
+        if consent:
+            # Block any customer that still has a withdrawn member OTHER than the acting user
+            # (the acting user has just consented, so their own row does not block the grant).
+            blocked_ids = set(
+                CustomerMembership.objects.filter(customer_id__in=customer_ids, user__accepts_marketing=False)
+                .exclude(user_id=user.id)
+                .values_list("customer_id", flat=True)
+            )
+            customer_ids = [cid for cid in customer_ids if cid not in blocked_ids]
+
+        Customer.objects.filter(id__in=customer_ids).update(marketing_consent=consent)
 
     @classmethod
     @transaction.atomic
