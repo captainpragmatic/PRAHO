@@ -39,6 +39,7 @@ def send_email_task(  # notification template parameters  # noqa: PLR0913  # Bus
     reply_to: str | None = None,
     cc: list[str] | None = None,
     bcc: list[str] | None = None,
+    attachments: list[tuple[str, bytes, str]] | None = None,
     tags: dict[str, str] | None = None,
     track_opens: bool = True,
     track_clicks: bool = True,
@@ -103,6 +104,12 @@ def send_email_task(  # notification template parameters  # noqa: PLR0913  # Bus
                 bcc=bcc,
                 reply_to=[reply_to] if reply_to else None,
             )
+
+        # Attach files. _send_async accepted attachments but never forwarded them to this task, so
+        # a proforma email queued for async delivery arrived with no PDF (#228).
+        if attachments:
+            for filename, content, mimetype in attachments:
+                msg.attach(filename, content, mimetype)
 
         # Add ESP-specific metadata for Anymail
         # These attributes are supported when using Anymail backends

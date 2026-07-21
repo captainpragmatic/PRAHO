@@ -670,7 +670,7 @@ class EmailService:
                 reply_to=reply_to,
                 cc=cc,
                 bcc=bcc,
-                # Note: attachments not supported in async mode for now
+                attachments=attachments,
                 tags=tags,
                 track_opens=track_opens,
                 track_clicks=track_clicks,
