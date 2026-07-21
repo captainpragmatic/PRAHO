@@ -5,6 +5,7 @@ Address, payment methods, and notes models for customer contact management.
 
 from __future__ import annotations
 
+import uuid
 from typing import Any, ClassVar
 
 from django.db import models
@@ -150,12 +151,18 @@ class CustomerPaymentMethod(SoftDeleteModel):
     is_default = models.BooleanField(default=False, verbose_name=_("Implicit"))
     is_active = models.BooleanField(default=True, verbose_name=_("Activ"))
 
-    # Bank Transfer Details (AES-256-GCM encrypted at rest).
-    # NOTE: pass require_v2=True to reject v1/plaintext downgrade (review H1), but
-    # only AFTER `manage.py reencrypt_with_aad` has upgraded existing rows to v2 —
-    # it intentionally drops the legacy-plaintext backward-compat read path, so it
-    # is a deliberate maintainer decision (left False here to preserve current behavior).
-    bank_details = EncryptedJSONField(blank=True, null=True, verbose_name=_("Detalii bancare"))
+    # Stable, database-immutable identity used to bind encrypted values before
+    # an auto-increment primary key exists.
+    encryption_context_id = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+
+    # Bank Transfer Details (AES-256-GCM encrypted and row-bound at rest).
+    bank_details = EncryptedJSONField(
+        aad_context_field="encryption_context_id",
+        blank=True,
+        null=True,
+        require_v2=True,
+        verbose_name=_("Detalii bancare"),
+    )
 
     # Audit
     created_at = models.DateTimeField(auto_now_add=True)

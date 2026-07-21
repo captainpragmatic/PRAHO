@@ -370,7 +370,9 @@ class TestRefundOrder(TestCase):
     def test_refund_order_object_does_not_exist(self):
         """Order.DoesNotExist caught by refund_order (#120)."""
         with patch("apps.billing.refund_service.Order.objects") as mock_qs:
-            mock_qs.select_for_update.return_value.select_related.return_value.get.side_effect = Order.DoesNotExist("Order matching query does not exist")
+            mock_qs.select_related.return_value.get.side_effect = Order.DoesNotExist(
+                "Order matching query does not exist"
+            )
             r = RefundService.refund_order(1, {"refund_type": "full"})
             assert r.is_err()
             assert "Order not found" in r.unwrap_err()
@@ -378,7 +380,7 @@ class TestRefundOrder(TestCase):
     def test_refund_order_generic_exception_other(self):
         """Exception branch in refund_order where get raises something else."""
         with patch("apps.billing.refund_service.Order.objects") as mock_qs:
-            mock_qs.select_for_update.return_value.select_related.return_value.get.side_effect = RuntimeError("unrelated")
+            mock_qs.select_related.return_value.get.side_effect = RuntimeError("unrelated")
             r = RefundService.refund_order(1, {"refund_type": "full"})
             assert r.is_err()
             assert "internal error" in r.unwrap_err()
@@ -425,14 +427,16 @@ class TestRefundInvoice(TestCase):
     def test_refund_invoice_object_does_not_exist(self):
         """Invoice.DoesNotExist caught by refund_invoice (#120)."""
         with patch("apps.billing.refund_service.Invoice.objects") as mock_qs:
-            mock_qs.select_for_update.return_value.select_related.return_value.get.side_effect = Invoice.DoesNotExist("Invoice matching query does not exist")
+            mock_qs.select_related.return_value.get.side_effect = Invoice.DoesNotExist(
+                "Invoice matching query does not exist"
+            )
             r = RefundService.refund_invoice(1, {"refund_type": "full"})
             assert r.is_err()
             assert "Invoice not found" in r.unwrap_err()
 
     def test_refund_invoice_generic_exception_other(self):
         with patch("apps.billing.refund_service.Invoice.objects") as mock_qs:
-            mock_qs.select_for_update.return_value.select_related.return_value.get.side_effect = RuntimeError("boom")
+            mock_qs.select_related.return_value.get.side_effect = RuntimeError("boom")
             r = RefundService.refund_invoice(1, {"refund_type": "full"})
             assert r.is_err()
             assert "internal error" in r.unwrap_err()
@@ -580,6 +584,24 @@ class TestGetRefundStatistics(TestCase):
         stats = r.unwrap()
         assert stats["total_refunds"] == 1
         assert stats["total_amount"] == Decimal("50")
+
+    def test_amount_counts_only_completed_while_pending_count_covers_active_lifecycle(self):
+        c = _make_customer()
+        cur = _make_currency()
+        o = _make_order(c, cur, status="completed", total_cents=10000)
+        for status, amount in (("completed", 4000), ("processing", 3000), ("failed", 2000)):
+            Refund.objects.create(
+                customer=c, order=o, amount_cents=amount, currency=cur,
+                original_amount_cents=10000, reference_number=f"REF-{status.upper()}",
+                status=status,
+            )
+
+        stats = RefundService.get_refund_statistics().unwrap()
+
+        assert stats["total_refunds"] == 3
+        assert stats["total_amount"] == Decimal("40")
+        assert stats["pending_refunds"] == 1
+        assert stats["completed_refunds"] == 1
 
     @patch("apps.billing.refund_service.Refund.objects")
     def test_stats_exception(self, mock_qs):
@@ -1722,8 +1744,8 @@ class TestProcessBidirectionalRefund(TestCase):
             )
             assert r.is_err()
 
-    def test_entity_updates_fail(self):
-        with patch.object(RefundService, "_process_entity_updates", return_value=Err("fail")):
+    def test_settlement_projection_fail(self):
+        with patch.object(RefundService, "_project_settled_refunds", return_value=Err("fail")):
             o = _make_order(self.customer, self.currency, status="completed", total_cents=10000)
             _make_bank_payment(self.customer, self.currency, order=o)
             r = RefundService._process_bidirectional_refund(
@@ -1734,6 +1756,7 @@ class TestProcessBidirectionalRefund(TestCase):
     def test_payment_refund_err(self):
         """Payment refund errors remain errors at the orchestration boundary."""
         o = _make_order(self.customer, self.currency, status="completed", total_cents=10000)
+        _make_bank_payment(self.customer, self.currency, order=o)
         with patch.object(RefundService, "_process_payment_refund_if_exists", return_value=Err("payment fail")):
             r = RefundService._process_bidirectional_refund(
                 order=o, refund_id=uuid.uuid4(), refund_data={"amount_cents": 5000, "reason": "test"},
@@ -1804,12 +1827,12 @@ class TestRefundQueryService(TestCase):
         Refund.objects.create(
             customer=self.customer, order=o, amount_cents=5000, currency=self.currency,
             original_amount_cents=10000, reference_number=f"REF-{uuid.uuid4().hex[:8]}",
-            reason="customer_request", refund_type="partial",
+            reason="customer_request", refund_type="partial", status="completed",
         )
         Refund.objects.create(
             customer=self.customer, invoice=inv, amount_cents=10000, currency=self.currency,
             original_amount_cents=10000, reference_number=f"REF-{uuid.uuid4().hex[:8]}",
-            reason="dispute", refund_type="full",
+            reason="dispute", refund_type="full", status="completed",
         )
         r = RefundQueryService.get_refund_statistics()
         assert r.is_ok()
@@ -1822,6 +1845,25 @@ class TestRefundQueryService(TestCase):
         assert "dispute" in stats["refunds_by_reason"]
         assert "partial" in stats["refunds_by_type"]
         assert "full" in stats["refunds_by_type"]
+
+    def test_refunded_amount_and_document_counts_exclude_unsettled_attempts(self):
+        o = _make_order(self.customer, self.currency, status="completed", total_cents=10000)
+        inv = _make_invoice(self.customer, self.currency, status="paid", total_cents=10000)
+        Refund.objects.create(
+            customer=self.customer, order=o, amount_cents=4000, currency=self.currency,
+            original_amount_cents=10000, reference_number="REF-SETTLED-STATS", status="completed",
+        )
+        Refund.objects.create(
+            customer=self.customer, invoice=inv, amount_cents=6000, currency=self.currency,
+            original_amount_cents=10000, reference_number="REF-PENDING-STATS", status="processing",
+        )
+
+        stats = RefundQueryService.get_refund_statistics().unwrap()
+
+        assert stats["total_refunds"] == 2
+        assert stats["total_amount_refunded_cents"] == 4000
+        assert stats["orders_refunded"] == 1
+        assert stats["invoices_refunded"] == 0
 
     @patch("apps.billing.refund_service.Refund.objects")
     def test_get_refund_statistics_exception(self, mock_qs):

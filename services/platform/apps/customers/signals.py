@@ -574,7 +574,7 @@ def store_original_payment_values(
 
         if instance.pk:
             try:
-                original = CustomerPaymentMethod.objects.get(pk=instance.pk)
+                original = CustomerPaymentMethod.objects.defer("bank_details").get(pk=instance.pk)
                 instance._original_payment_values = {
                     "method_type": getattr(original, "method_type", None),
                     "display_name": getattr(original, "display_name", None),

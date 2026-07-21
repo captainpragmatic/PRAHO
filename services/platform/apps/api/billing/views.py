@@ -79,12 +79,16 @@ def _uuid(value: object) -> uuid.UUID | None:
 
 
 def _active_card_methods(customer: Customer) -> QuerySet[CustomerPaymentMethod]:
-    return CustomerPaymentMethod.objects.filter(
-        customer=customer,
-        method_type="stripe_card",
-        is_active=True,
-        deleted_at__isnull=True,
-    ).order_by("-is_default", "created_at")
+    return (
+        CustomerPaymentMethod.objects.filter(
+            customer=customer,
+            method_type="stripe_card",
+            is_active=True,
+            deleted_at__isnull=True,
+        )
+        .defer("bank_details")
+        .order_by("-is_default", "created_at")
+    )
 
 
 def _serialize_recurring_overview(customer: Customer) -> dict[str, Any]:
@@ -93,7 +97,9 @@ def _serialize_recurring_overview(customer: Customer) -> dict[str, Any]:
         for authorization in RecurringPaymentAuthorization.objects.filter(
             customer=customer,
             status="active",
-        ).select_related("payment_method")
+        )
+        .select_related("payment_method")
+        .defer("payment_method__bank_details")
     }
     payment_methods = []
     for method in _active_card_methods(customer):

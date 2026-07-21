@@ -15,6 +15,7 @@ from apps.common.encryption import (
     decrypt_sensitive_data,
     encrypt_sensitive_data,
 )
+from apps.common.fields import _extract_embedded_aad
 from apps.customers.models import Customer, CustomerPaymentMethod
 
 TEST_KEY = "iuTrSBoKchmRt7RiySTHNuANNDmWe_xIqZWtMQaLMXs="
@@ -67,6 +68,10 @@ class ReencryptWithAadCommandTest(TestCase):
         self.assertIsInstance(stored, str)
         assert isinstance(stored, str)
         self.assertTrue(stored.startswith(VERSIONED_V2_PREFIX))
+        self.assertEqual(
+            _extract_embedded_aad(stored),
+            f"customer_payment_methods:bank_details:{pm.encryption_context_id}".encode(),
+        )
         self.assertEqual(json.loads(decrypt_sensitive_data(stored)), VALID)
 
     def test_idempotent_second_run_is_a_true_noop(self) -> None:
@@ -133,7 +138,7 @@ class ReencryptWithAadCommandTest(TestCase):
         self.assertEqual(self._read_raw(pm.id), "aes:v2:!!!garbage!!!")  # untouched
 
     def test_transplanted_v2_row_flagged_not_skipped_as_healthy(self) -> None:
-        """A v2 blob bound to a DIFFERENT table:field decrypts but reads back None under require_v2.
+        """A v2 blob bound to a DIFFERENT table:field fails under require_v2.
 
         The command must flag it (it can't safely report 'already v2'), not skip it as healthy.
         """
@@ -144,6 +149,22 @@ class ReencryptWithAadCommandTest(TestCase):
         with self.assertRaises(CommandError):
             call_command("reencrypt_with_aad", stdout=StringIO(), stderr=StringIO())
         self.assertEqual(self._read_raw(pm.id), wrong)  # untouched (not migrated, not reported healthy)
+
+    def test_same_field_cross_row_v2_is_flagged_not_skipped_as_healthy(self) -> None:
+        source = self._make_pm("Source")
+        target = self._make_pm("Target")
+        wrong = encrypt_sensitive_data(
+            json.dumps(VALID),
+            aad=(
+                f"customer_payment_methods:bank_details:"
+                f"{source.encryption_context_id}"
+            ).encode(),
+        )
+        self._write_raw(target.id, wrong)
+
+        with self.assertRaises(CommandError):
+            call_command("reencrypt_with_aad", stdout=StringIO(), stderr=StringIO())
+        self.assertEqual(self._read_raw(target.id), wrong)
 
     def test_cas_retries_and_resolves_after_a_stale_read(self) -> None:
         """A first CAS miss (stale read) is retried against the row's real current value and migrates."""
@@ -158,9 +179,12 @@ class ReencryptWithAadCommandTest(TestCase):
         pk = pm.id
 
         def fake_read_batch(
-            _self: Command, _q_table: str, _q_col: str, _q_pk: str, last_pk: object, _batch: int
-        ) -> list[tuple[object, object]]:
-            return [(pk, stale_raw)] if last_pk is None else []
+            _self: Command,
+            _field: object,
+            last_pk: object,
+            _batch: int,
+        ) -> list[tuple[object, object, object]]:
+            return [(pk, pm.encryption_context_id, stale_raw)] if last_pk is None else []
 
         with patch.object(Command, "_read_batch", fake_read_batch):
             call_command("reencrypt_with_aad", stdout=StringIO())
@@ -180,11 +204,18 @@ class ReencryptWithAadCommandTest(TestCase):
         pk = pm.id
 
         def fake_read_batch(
-            _self: Command, _q_table: str, _q_col: str, _q_pk: str, last_pk: object, _batch: int
-        ) -> list[tuple[object, object]]:
-            return [(pk, stale_raw)] if last_pk is None else []
+            _self: Command,
+            _field: object,
+            last_pk: object,
+            _batch: int,
+        ) -> list[tuple[object, object, object]]:
+            return [(pk, pm.encryption_context_id, stale_raw)] if last_pk is None else []
 
-        def fake_read_one(_self: Command, _q_table: str, _q_col: str, _q_pk: str, _pk: object) -> object:
+        def fake_read_one(
+            _self: Command,
+            _field: object,
+            _pk: object,
+        ) -> object:
             return stale_raw  # every re-read is still stale → CAS always misses
 
         with (

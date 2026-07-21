@@ -2,13 +2,14 @@
 
 import json
 from types import SimpleNamespace
-from unittest.mock import patch
 
-from django.db import connection
+from django.db import DatabaseError, connection, transaction
 from django.test import SimpleTestCase, TestCase, override_settings
 
 from apps.common.encryption import (
     VERSIONED_V2_PREFIX,
+    DecryptionError,
+    EncryptionError,
     _clear_aesgcm_cache,
     decrypt_sensitive_data,
     encrypt_sensitive_data,
@@ -121,7 +122,7 @@ class EncryptedJSONFieldRoundtripTest(TestCase):
 
 @override_settings(ENCRYPTION_KEY=TEST_KEY)
 class EncryptedJSONFieldLegacyDataTest(TestCase):
-    """Backward compatibility with pre-existing unencrypted data."""
+    """Payment data rejects unmigrated plaintext instead of treating it as healthy."""
 
     def setUp(self) -> None:
         self.customer = Customer.objects.create(
@@ -132,8 +133,7 @@ class EncryptedJSONFieldLegacyDataTest(TestCase):
             primary_phone="+40712345679",
         )
 
-    def test_legacy_unencrypted_dict_still_readable(self) -> None:
-        """Pre-existing plaintext JSON dicts are returned as-is on read."""
+    def test_legacy_unencrypted_dict_fails_loud(self) -> None:
         # Insert plaintext JSON directly (simulating pre-encryption data)
         pm = CustomerPaymentMethod.objects.create(
             customer=self.customer,
@@ -148,13 +148,10 @@ class EncryptedJSONFieldLegacyDataTest(TestCase):
                 ['{"bank_name": "Legacy BT", "iban": "RO49BTRL1B31007593840001"}', pm.id],
             )
 
-        pm.refresh_from_db()
-        # Should be readable as a dict (backward compat)
-        self.assertIsInstance(pm.bank_details, dict)
-        self.assertEqual(pm.bank_details["bank_name"], "Legacy BT")
+        with self.assertRaises(DecryptionError):
+            CustomerPaymentMethod.objects.get(pk=pm.pk)
 
-    def test_legacy_data_encrypted_on_resave(self) -> None:
-        """Legacy plaintext data gets encrypted when re-saved."""
+    def test_failed_read_preserves_legacy_ciphertext_evidence(self) -> None:
         pm = CustomerPaymentMethod.objects.create(
             customer=self.customer,
             method_type="bank_transfer",
@@ -167,21 +164,45 @@ class EncryptedJSONFieldLegacyDataTest(TestCase):
                 "UPDATE customer_payment_methods SET bank_details = %s WHERE id = %s",
                 ['{"iban": "RO49AAAA1B31007593840000"}', pm.id],
             )
-        pm.refresh_from_db()
-        # Re-save to trigger encryption
-        pm.save()
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT bank_details FROM customer_payment_methods WHERE id = %s", [pm.id])
+            before = cursor.fetchone()[0]
 
-        # Verify raw DB now contains encrypted data
+        with self.assertRaises(DecryptionError):
+            CustomerPaymentMethod.objects.get(pk=pm.pk)
+
         with connection.cursor() as cursor:
             cursor.execute(
                 "SELECT bank_details FROM customer_payment_methods WHERE id = %s",
                 [pm.id],
             )
-            raw_value = cursor.fetchone()[0]
+            after = cursor.fetchone()[0]
+        self.assertEqual(after, before)
 
-        raw_str = raw_value if isinstance(raw_value, str) else str(raw_value)
-        self.assertIn("aes:", raw_str)
-        self.assertNotIn("RESAVE", raw_str)
+    def test_corrupt_ciphertext_fails_loud_and_remains_untouched(self) -> None:
+        pm = CustomerPaymentMethod.objects.create(
+            customer=self.customer,
+            method_type="bank_transfer",
+            display_name="Corrupt Bank",
+            bank_details=None,
+        )
+        corrupt = json.dumps("aes:v2:!!!garbage!!!")
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE customer_payment_methods SET bank_details = %s WHERE id = %s",
+                [corrupt, pm.id],
+            )
+
+        with self.assertRaises(DecryptionError):
+            CustomerPaymentMethod.objects.get(pk=pm.pk)
+
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT bank_details FROM customer_payment_methods WHERE id = %s",
+                [pm.id],
+            )
+            after = cursor.fetchone()[0]
+        self.assertEqual(after, corrupt)
 
 
 @override_settings(ENCRYPTION_KEY=TEST_KEY)
@@ -217,8 +238,7 @@ class EncryptedJSONFieldAADTest(TestCase):
         raw_str = raw_value if isinstance(raw_value, str) else str(raw_value)
         self.assertIn("aes:v2:", raw_str)
 
-    def test_aad_embedded_includes_table_and_field(self) -> None:
-        """Embedded AAD must include table name and field name for context binding."""
+    def test_first_insert_aad_uses_exact_row_encryption_identity(self) -> None:
         pm = CustomerPaymentMethod.objects.create(
             customer=self.customer,
             method_type="bank_transfer",
@@ -237,35 +257,72 @@ class EncryptedJSONFieldAADTest(TestCase):
         encrypted_str = json.loads(raw_str) if raw_str.startswith('"') else raw_str
         aad = _extract_embedded_aad(encrypted_str)
         self.assertIsNotNone(aad)
-        aad_str = aad.decode() if aad else ""
-        # AAD contains table:field: (pk may be empty on INSERT for auto-increment)
-        self.assertIn("customer_payment_methods", aad_str)
-        self.assertIn("bank_details", aad_str)
+        self.assertEqual(
+            aad,
+            f"customer_payment_methods:bank_details:{pm.encryption_context_id}".encode(),
+        )
 
-    def test_resaved_aad_includes_pk(self) -> None:
-        """After re-save, AAD includes the pk for full context binding."""
+    def test_same_field_cross_row_transplant_fails_for_models_and_values(self) -> None:
+        source = CustomerPaymentMethod.objects.create(
+            customer=self.customer,
+            method_type="bank_transfer",
+            display_name="Source",
+            bank_details={"iban": "RO49SOURCE11111111111111"},
+        )
+        target = CustomerPaymentMethod.objects.create(
+            customer=self.customer,
+            method_type="bank_transfer",
+            display_name="Target",
+            bank_details={"iban": "RO49TARGET11111111111111"},
+        )
+
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT bank_details FROM customer_payment_methods WHERE id = %s", [source.id])
+            source_raw = cursor.fetchone()[0]
+            cursor.execute(
+                "UPDATE customer_payment_methods SET bank_details = %s WHERE id = %s",
+                [source_raw, target.id],
+            )
+
+        with self.assertRaises(DecryptionError):
+            CustomerPaymentMethod.objects.get(pk=target.pk)
+        with self.assertRaises(DecryptionError):
+            CustomerPaymentMethod.objects.filter(pk=target.pk).values_list("bank_details", flat=True).get()
+
+    def test_row_encryption_identity_is_database_immutable(self) -> None:
+        source = CustomerPaymentMethod.objects.create(
+            customer=self.customer,
+            method_type="bank_transfer",
+            display_name="Identity source",
+            bank_details={"iban": "RO49SOURCE11111111111111"},
+        )
+        target = CustomerPaymentMethod.objects.create(
+            customer=self.customer,
+            method_type="bank_transfer",
+            display_name="Identity target",
+            bank_details={"iban": "RO49TARGET11111111111111"},
+        )
+
+        with self.assertRaises(DatabaseError), transaction.atomic():
+            CustomerPaymentMethod.objects.filter(pk=target.pk).update(
+                encryption_context_id=source.encryption_context_id
+            )
+        target.refresh_from_db()
+        self.assertNotEqual(target.encryption_context_id, source.encryption_context_id)
+
+    def test_values_and_values_list_preserve_valid_plaintext_shape(self) -> None:
+        details = {"bank_name": "BT", "iban": "RO49VALUE111111111111111"}
         pm = CustomerPaymentMethod.objects.create(
             customer=self.customer,
             method_type="bank_transfer",
-            display_name="Resave AAD",
-            bank_details={"iban": "RO49AAAA1111111111111111"},
+            display_name="Projection",
+            bank_details=details,
         )
-        # Re-save: now pk is known
-        pm.save()
 
-        with connection.cursor() as cursor:
-            cursor.execute(
-                "SELECT bank_details FROM customer_payment_methods WHERE id = %s",
-                [pm.id],
-            )
-            raw = cursor.fetchone()[0]
-
-        raw_str = raw if isinstance(raw, str) else str(raw)
-        encrypted_str = json.loads(raw_str) if raw_str.startswith('"') else raw_str
-        aad = _extract_embedded_aad(encrypted_str)
-        self.assertIsNotNone(aad)
-        aad_str = aad.decode() if aad else ""
-        self.assertIn(str(pm.id), aad_str)
+        projected = CustomerPaymentMethod.objects.filter(pk=pm.pk).values("bank_details").get()
+        listed = CustomerPaymentMethod.objects.filter(pk=pm.pk).values_list("bank_details", flat=True).get()
+        self.assertEqual(projected["bank_details"], details)
+        self.assertEqual(listed, details)
 
     def test_roundtrip_with_aad(self) -> None:
         """Normal save/load cycle works with AAD binding."""
@@ -307,9 +364,8 @@ class EncryptedJSONFieldRequireV2Test(TestCase):
         pm = CustomerPaymentMethod.objects.create(
             customer=self.customer, method_type="bank_transfer", display_name="V2", bank_details=details
         )
-        with patch.object(self.field, "require_v2", True):
-            pm.refresh_from_db()
-            self.assertEqual(pm.bank_details, details)
+        pm.refresh_from_db()
+        self.assertEqual(pm.bank_details, details)
 
     def test_v1_ciphertext_is_rejected(self) -> None:
         pm = CustomerPaymentMethod.objects.create(
@@ -320,9 +376,8 @@ class EncryptedJSONFieldRequireV2Test(TestCase):
         self.assertTrue(v1_cipher.startswith("aes:v1:"))
         self._write_raw(pm.id, json.dumps(v1_cipher))
 
-        with patch.object(self.field, "require_v2", True):
-            pm.refresh_from_db()
-            self.assertIsNone(pm.bank_details)
+        with self.assertRaises(DecryptionError):
+            CustomerPaymentMethod.objects.get(pk=pm.pk)
 
     def test_plaintext_is_rejected(self) -> None:
         pm = CustomerPaymentMethod.objects.create(
@@ -330,20 +385,11 @@ class EncryptedJSONFieldRequireV2Test(TestCase):
         )
         self._write_raw(pm.id, '{"iban": "RO00PLAINTEXT"}')
 
-        with patch.object(self.field, "require_v2", True):
-            pm.refresh_from_db()
-            self.assertIsNone(pm.bank_details)
+        with self.assertRaises(DecryptionError):
+            CustomerPaymentMethod.objects.get(pk=pm.pk)
 
-    def test_default_still_reads_v1_for_backward_compat(self) -> None:
-        """With require_v2 left False (default), v1 ciphertext is still readable."""
-        pm = CustomerPaymentMethod.objects.create(
-            customer=self.customer, method_type="bank_transfer", display_name="Compat", bank_details=None
-        )
-        v1_cipher = encrypt_sensitive_data(json.dumps({"iban": "RO00COMPAT"}))
-        self._write_raw(pm.id, json.dumps(v1_cipher))
-
-        pm.refresh_from_db()
-        self.assertEqual(pm.bank_details, {"iban": "RO00COMPAT"})
+    def test_customer_payment_method_requires_v2(self) -> None:
+        self.assertTrue(self.field.require_v2)
 
 
 # ===============================================================================
@@ -406,25 +452,41 @@ class EncryptedJSONFieldWritePathTest(TestCase):
             primary_phone="+40712345682",
         )
 
-    def test_queryset_update_stores_unbound_v1_and_warns(self) -> None:
-        """.update(field=dict) bypasses pre_save — stores unbound v1 WITH a warning (not silent, not raised).
-
-        Raising here would break dumpdata→loaddata (which also bypasses pre_save); silently
-        writing v1 was the original defect. The middle ground: encrypt v1 and log loudly.
-        """
+    def test_queryset_update_rejects_unbound_plaintext(self) -> None:
         pm = CustomerPaymentMethod.objects.create(
             customer=self.customer, method_type="bank_transfer", display_name="U", bank_details={}
         )
-        with self.assertLogs("apps.common.fields", level="WARNING") as logs:
+        with self.assertRaises(EncryptionError), transaction.atomic():
             CustomerPaymentMethod.objects.filter(pk=pm.pk).update(bank_details={"bank_name": "BT"})
-        self.assertTrue(any("without AAD context" in line for line in logs.output))
 
         pm.refresh_from_db()
-        self.assertEqual(pm.bank_details, {"bank_name": "BT"})  # readable (require_v2 default False)
+        self.assertEqual(pm.bank_details, {})
+
+    def test_queryset_update_rejects_prebuilt_ciphertext(self) -> None:
+        source = CustomerPaymentMethod.objects.create(
+            customer=self.customer,
+            method_type="bank_transfer",
+            display_name="Source",
+            bank_details={"iban": "RO49SOURCE11111111111111"},
+        )
+        target = CustomerPaymentMethod.objects.create(
+            customer=self.customer,
+            method_type="bank_transfer",
+            display_name="Target",
+            bank_details={"iban": "RO49TARGET11111111111111"},
+        )
         with connection.cursor() as cursor:
-            cursor.execute("SELECT bank_details FROM customer_payment_methods WHERE id = %s", [pm.id])
+            cursor.execute(
+                "SELECT bank_details FROM customer_payment_methods WHERE id = %s",
+                [source.pk],
+            )
             raw = cursor.fetchone()[0]
-        self.assertIn("aes:v1:", str(raw))  # stored unbound (v1), no AAD
+        wire = json.loads(raw) if isinstance(raw, str) and raw.startswith('"') else raw
+
+        with self.assertRaises(EncryptionError), transaction.atomic():
+            CustomerPaymentMethod.objects.filter(pk=target.pk).update(
+                bank_details=wire
+            )
 
     def test_bulk_create_roundtrips_encrypted_v2(self) -> None:
         """bulk_create DOES run pre_save, so values are encrypted (v2) and round-trip."""
@@ -445,13 +507,18 @@ class EncryptedJSONFieldWritePathTest(TestCase):
             )
         )
         self.assertEqual(len(rows), 2)
+        self.assertNotEqual(rows[0].encryption_context_id, rows[1].encryption_context_id)
         self.assertEqual(rows[0].bank_details["iban"], ibans[0])
         self.assertEqual(rows[1].bank_details["iban"], ibans[1])
         with connection.cursor() as cursor:
             cursor.execute("SELECT bank_details FROM customer_payment_methods WHERE id = %s", [rows[0].id])
             raw = cursor.fetchone()[0]
         raw_str = raw if isinstance(raw, str) else str(raw)
-        self.assertIn("aes:v2:", raw_str)
+        wire = json.loads(raw_str) if raw_str.startswith('"') else raw_str
+        self.assertEqual(
+            _extract_embedded_aad(wire),
+            f"customer_payment_methods:bank_details:{rows[0].encryption_context_id}".encode(),
+        )
 
 
 # ===============================================================================
@@ -472,3 +539,8 @@ class EncryptedJSONFieldDeconstructTest(SimpleTestCase):
         field = EncryptedJSONField()
         _name, _path, _args, kwargs = field.deconstruct()
         self.assertNotIn("require_v2", kwargs)
+
+    def test_deconstruct_preserves_aad_context_field(self) -> None:
+        field = EncryptedJSONField(aad_context_field="encryption_context_id")
+        _name, _path, _args, kwargs = field.deconstruct()
+        self.assertEqual(kwargs["aad_context_field"], "encryption_context_id")

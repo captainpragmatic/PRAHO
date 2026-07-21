@@ -137,6 +137,16 @@ class TestContactServiceCreatePaymentMethod(TestCase):
         active = ContactService.get_active_payment_methods(self.customer)
         self.assertGreater(active.count(), 0)
 
+    def test_get_active_payment_methods_defers_sensitive_bank_details(self) -> None:
+        created = ContactService.create_payment_method(
+            self.customer, self.user, "stripe_card", "Visa *9999"
+        )
+
+        payment_method = ContactService.get_active_payment_methods(self.customer).get(
+            pk=created.pk
+        )
+        self.assertIn("bank_details", payment_method.get_deferred_fields())
+
 
 class TestContactServiceCreateAddress(TestCase):
     """ContactService.create_address() — versioning and current-flag management."""

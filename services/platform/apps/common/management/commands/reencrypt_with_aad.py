@@ -1,7 +1,8 @@
 """Re-encrypt EncryptedJSONField values with AAD context binding.
 
 Migrates existing v1/legacy ciphertext (and any stored plaintext JSON) to the v2
-wire format with AAD bound to ``table:field:pk``.
+wire format with AAD bound to the field's configured stable row context (falling
+back to the primary key for compatibility fields).
 
 Design notes (why this reads raw SQL rather than the ORM):
   * ``EncryptedJSONField.from_db_value`` decrypts on read, so a value fetched via the
@@ -33,18 +34,37 @@ from __future__ import annotations
 import json
 import logging
 from collections import Counter
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, cast
 
 from django.core.management.base import BaseCommand, CommandError, CommandParser
 from django.db import connection, models
 
 from apps.common.encryption import ENCRYPTED_PREFIX, VERSIONED_V2_PREFIX, decrypt_sensitive_data, encrypt_sensitive_data
-from apps.common.fields import EncryptedJSONField, _extract_embedded_aad
+from apps.common.fields import EncryptedJSONField
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_BATCH_SIZE = 100
 MAX_CAS_ATTEMPTS = 3  # re-read + retry a row that changed under us before giving up
+
+
+@dataclass(frozen=True)
+class FieldSQL:
+    table_name: str
+    attname: str
+    q_table: str
+    q_col: str
+    q_pk: str
+    q_context: str
+
+
+@dataclass(frozen=True)
+class MigrationRow:
+    field: FieldSQL
+    expected_aad: bytes
+    pk: Any
+    raw: Any
 
 
 class Command(BaseCommand):
@@ -110,6 +130,20 @@ class Command(BaseCommand):
         pk_name = model._meta.pk.column
         quote = connection.ops.quote_name
         q_table, q_col, q_pk = quote(table_name), quote(column_name), quote(pk_name)
+        context_field = cast(
+            "models.Field[Any, Any]",
+            (model._meta.get_field(field.aad_context_field) if field.aad_context_field else model._meta.pk),
+        )
+        if context_field.column is None:
+            raise CommandError(f"AAD context field for {table_name}.{attname} has no database column")
+        field_sql = FieldSQL(
+            table_name=table_name,
+            attname=attname,
+            q_table=q_table,
+            q_col=q_col,
+            q_pk=q_pk,
+            q_context=quote(context_field.column),
+        )
 
         self.stdout.write(f"  Processing {table_name}.{column_name}...")
 
@@ -117,48 +151,70 @@ class Command(BaseCommand):
         # Reads are drained fully before any write so we never write on an open read cursor.
         last_pk: Any = None
         while True:
-            rows = self._read_batch(q_table, q_col, q_pk, last_pk, batch_size)
+            rows = self._read_batch(field_sql, last_pk, batch_size)
             if not rows:
                 break
-            for pk, raw in rows:
+            for pk, raw_context, raw in rows:
                 last_pk = pk
-                self._migrate_row(table_name, attname, q_table, q_col, q_pk, pk, raw, dry_run, totals)
+                context = context_field.to_python(raw_context)
+                if context is None:
+                    totals["corrupt"] += 1
+                    self.stdout.write(self.style.WARNING(f"    Missing AAD context {table_name}.{attname} pk={pk}"))
+                    continue
+                expected_aad = f"{table_name}:{attname}:{context}".encode()
+                self._migrate_row(
+                    MigrationRow(
+                        field=field_sql,
+                        expected_aad=expected_aad,
+                        pk=pk,
+                        raw=raw,
+                    ),
+                    dry_run,
+                    totals,
+                )
 
-    def _read_batch(self, q_table: str, q_col: str, q_pk: str, last_pk: Any, batch_size: int) -> list[tuple[Any, Any]]:
+    def _read_batch(
+        self,
+        field: FieldSQL,
+        last_pk: Any,
+        batch_size: int,
+    ) -> list[tuple[Any, Any, Any]]:
+        raw_column = f"{field.q_col}::text" if connection.vendor == "postgresql" else field.q_col
         with connection.cursor() as cursor:
             if last_pk is None:
                 cursor.execute(
-                    f"SELECT {q_pk}, {q_col} FROM {q_table} "  # noqa: S608 — identifiers are quoted model metadata
-                    f"WHERE {q_col} IS NOT NULL ORDER BY {q_pk} LIMIT %s",
+                    f"SELECT {field.q_pk}, {field.q_context}, {raw_column} "  # noqa: S608
+                    f"FROM {field.q_table} WHERE {field.q_col} IS NOT NULL "
+                    f"ORDER BY {field.q_pk} LIMIT %s",
                     [batch_size],
                 )
             else:
                 cursor.execute(
-                    f"SELECT {q_pk}, {q_col} FROM {q_table} "  # noqa: S608 — identifiers are quoted model metadata
-                    f"WHERE {q_col} IS NOT NULL AND {q_pk} > %s ORDER BY {q_pk} LIMIT %s",
+                    f"SELECT {field.q_pk}, {field.q_context}, {raw_column} "  # noqa: S608
+                    f"FROM {field.q_table} WHERE {field.q_col} IS NOT NULL "
+                    f"AND {field.q_pk} > %s ORDER BY {field.q_pk} LIMIT %s",
                     [last_pk, batch_size],
                 )
-            rows: list[tuple[Any, Any]] = cursor.fetchall()
+            rows: list[tuple[Any, Any, Any]] = cursor.fetchall()
             return rows
 
-    def _migrate_row(  # noqa: PLR0913 — cohesive per-row context, not worth a dataclass here
+    def _migrate_row(
         self,
-        table_name: str,
-        attname: str,
-        q_table: str,
-        q_col: str,
-        q_pk: str,
-        pk: Any,
-        raw: Any,
+        row: MigrationRow,
         dry_run: bool,
         totals: Counter[str],
     ) -> None:
+        raw = row.raw
         for _attempt in range(MAX_CAS_ATTEMPTS):
-            kind, new_stored = self._classify(table_name, attname, pk, raw)
+            kind, new_stored = self._classify(row.expected_aad, raw)
 
             if kind == "corrupt":
                 totals["corrupt"] += 1
-                self.stdout.write(self.style.WARNING(f"    Corrupt (unreadable) {table_name}.{attname} pk={pk}"))
+                self.stdout.write(
+                    self.style.WARNING(
+                        f"    Corrupt (unreadable) {row.field.table_name}.{row.field.attname} pk={row.pk}"
+                    )
+                )
                 return
             if kind == "skip_v2":
                 totals["skipped_v2"] += 1
@@ -166,17 +222,17 @@ class Command(BaseCommand):
 
             if dry_run:
                 totals["migrated"] += 1
-                self.stdout.write(f"    Would migrate {table_name}.{attname} pk={pk}")
+                self.stdout.write(f"    Would migrate {row.field.table_name}.{row.field.attname} pk={row.pk}")
                 return
 
             assert new_stored is not None  # kind == "migrate" guarantees this
-            if self._cas_update(q_table, q_col, q_pk, pk, new_stored, raw) == 1:
+            if self._cas_update(row.field, row.pk, new_stored, raw) == 1:
                 totals["migrated"] += 1
                 return
 
             # CAS miss: the row changed since we read it. Re-read the current value and retry
             # so we never advance past a row that is still un-migrated.
-            raw = self._read_one(q_table, q_col, q_pk, pk)
+            raw = self._read_one(row.field, row.pk)
             if raw is None:
                 totals["skipped_deleted"] += 1
                 return
@@ -184,11 +240,12 @@ class Command(BaseCommand):
         totals["unresolved"] += 1
         self.stdout.write(
             self.style.WARNING(
-                f"    Unresolved after {MAX_CAS_ATTEMPTS} attempts (row kept changing) {table_name}.{attname} pk={pk}"
+                f"    Unresolved after {MAX_CAS_ATTEMPTS} attempts (row kept changing) "
+                f"{row.field.table_name}.{row.field.attname} pk={row.pk}"
             )
         )
 
-    def _classify(self, table_name: str, attname: str, pk: Any, raw: Any) -> tuple[str, str | None]:
+    def _classify(self, expected_aad: bytes, raw: Any) -> tuple[str, str | None]:
         """Return (kind, new_stored) for a raw column value.
 
         kind is 'corrupt', 'skip_v2', or 'migrate' (new_stored set only for 'migrate').
@@ -197,20 +254,17 @@ class Command(BaseCommand):
         try:
             inner = json.loads(raw) if isinstance(raw, str) else raw
         except (ValueError, TypeError):
-            return "corrupt", None
+            if isinstance(raw, str) and raw.startswith(ENCRYPTED_PREFIX):
+                inner = raw
+            else:
+                return "corrupt", None
 
-        # Already v2 — confirm it is actually readable BY THIS FIELD before skipping, so a
-        # corrupt/tampered/transplanted v2 blob is flagged rather than reported healthy (which
-        # would read back as None under require_v2). Check both that it decrypts and that the
-        # embedded AAD prefix matches this table:field (the same cross-check from_db_value does).
+        # Already v2 — confirm it is readable under this row's exact AAD before
+        # skipping, so a corrupt, tampered, or transplanted blob is never reported healthy.
         if isinstance(inner, str) and inner.startswith(VERSIONED_V2_PREFIX):
             try:
-                decrypt_sensitive_data(inner)
+                decrypt_sensitive_data(inner, aad=expected_aad)
             except Exception:
-                return "corrupt", None
-            embedded = _extract_embedded_aad(inner)
-            expected_prefix = f"{table_name}:{attname}:".encode()
-            if embedded is None or not embedded.startswith(expected_prefix):
                 return "corrupt", None
             return "skip_v2", None
 
@@ -223,31 +277,34 @@ class Command(BaseCommand):
         else:
             plaintext_value = inner
 
-        # AAD uses attname (not the column) to match EncryptedJSONField._build_aad / the
-        # read-time prefix check; otherwise a field with db_column would migrate to an AAD
-        # the ORM rejects, reading back as None.
-        aad = f"{table_name}:{attname}:{pk}".encode()
-        new_wire = encrypt_sensitive_data(json.dumps(plaintext_value), aad=aad)
+        new_wire = encrypt_sensitive_data(json.dumps(plaintext_value), aad=expected_aad)
         return "migrate", json.dumps(new_wire)  # store as a JSON string, matching the ORM's write
 
-    def _cas_update(  # noqa: PLR0913 — cohesive quoted-identifier + value args
-        self, q_table: str, q_col: str, q_pk: str, pk: Any, new_stored: str, old_raw: Any
+    def _cas_update(
+        self,
+        field: FieldSQL,
+        pk: Any,
+        new_stored: str,
+        old_raw: Any,
     ) -> int:
         # Only overwrite if the row still holds the value we read. On PostgreSQL the jsonb
         # column is compared as text to match the value the cursor returned. A single
         # UPDATE statement is atomic on its own — no surrounding transaction needed.
-        cas = f"{q_col}::text = %s" if connection.vendor == "postgresql" else f"{q_col} = %s"
+        cas = f"{field.q_col}::text = %s" if connection.vendor == "postgresql" else f"{field.q_col} = %s"
         with connection.cursor() as cursor:
             cursor.execute(
-                f"UPDATE {q_table} SET {q_col} = %s WHERE {q_pk} = %s AND {cas}",  # noqa: S608 — quoted identifiers
+                f"UPDATE {field.q_table} SET {field.q_col} = %s "  # noqa: S608
+                f"WHERE {field.q_pk} = %s AND {cas}",
                 [new_stored, pk, old_raw],
             )
             return int(cursor.rowcount)
 
-    def _read_one(self, q_table: str, q_col: str, q_pk: str, pk: Any) -> Any:
+    def _read_one(self, field: FieldSQL, pk: Any) -> Any:
+        raw_column = f"{field.q_col}::text" if connection.vendor == "postgresql" else field.q_col
         with connection.cursor() as cursor:
             cursor.execute(
-                f"SELECT {q_col} FROM {q_table} WHERE {q_pk} = %s",  # noqa: S608 — quoted identifiers
+                f"SELECT {raw_column} FROM {field.q_table} "  # noqa: S608
+                f"WHERE {field.q_pk} = %s",
                 [pk],
             )
             row = cursor.fetchone()

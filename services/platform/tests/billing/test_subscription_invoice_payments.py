@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import uuid
 from datetime import datetime, timedelta
@@ -28,7 +29,11 @@ from apps.billing.payment_service import (
 )
 from apps.billing.proforma_models import ProformaInvoice, ProformaLine
 from apps.billing.recurring_authorization_service import RecurringPaymentAuthorizationService
-from apps.billing.recurring_billing import RecurringBillingOrchestrator, next_billing_period_end
+from apps.billing.recurring_billing import (
+    RecurringBillingOrchestrator,
+    RecurringCollectionGate,
+    next_billing_period_end,
+)
 from apps.billing.recurring_models import RecurringPaymentAuthorization
 from apps.billing.subscription_models import Subscription
 from apps.billing.subscription_service import SubscriptionLifecycleService
@@ -238,6 +243,33 @@ class _SubscriptionInvoicePaymentFixture:
 
 class SubscriptionInvoicePaymentTestCase(_SubscriptionInvoicePaymentFixture, TestCase):
     """Exercise the real invoice, Payment, and recurring-billing path."""
+
+    def _corrupt_unrelated_bank_details(self) -> None:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE customer_payment_methods SET bank_details = %s WHERE id = %s",
+                [json.dumps("aes:v2:!!!garbage!!!"), self.payment_method.pk],
+            )
+
+    def test_collection_gate_does_not_read_unrelated_bank_details(self) -> None:
+        self._corrupt_unrelated_bank_details()
+
+        result = RecurringCollectionGate.authorize_invoice(
+            self.invoice,
+            self.payment_method,
+        )
+
+        self.assertTrue(result.is_ok(), result)
+
+    def test_proforma_preparation_does_not_read_unrelated_bank_details(self) -> None:
+        now = timezone.now()
+        self._create_aligned_subscription("CORRUPT-BANK", now)
+        self._corrupt_unrelated_bank_details()
+
+        result = RecurringBillingOrchestrator.prepare_due_proformas(as_of=now)
+
+        self.assertEqual(result["proformas_created"], 1)
+        self.assertEqual(result["errors"], [])
 
     def test_due_aligned_services_share_one_cycle_linked_proforma_idempotently(self) -> None:
         now = timezone.now()

@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Refund lifecycle convergence** — refund initiation now follows the canonical Payment → Invoice → Order lock order, reserves pending as well as settled amounts, and projects balances only after gateway settlement; Stripe refund webhooks and a scheduled discovery sweep converge idempotently through one service, including dashboard-created and legacy charge refund events, while a conditional unique constraint prevents duplicate non-empty gateway refund IDs (#196, #323, #324)
 - **Provisioning retry safety** — Virtualmin and generic server gateways now classify retry outcomes explicitly; read-only calls may retry ambiguous transport failures, while mutations replay only when rejection is proven. Retriability metadata now survives gateway, authentication, service, task, job, and infrastructure boundaries, preventing lost responses or exception text from double-executing provisioning actions (#253, #254, #262)
 - **Promotion discount concurrency** — coupon application, coupon removal, and gift-card redemption now lock and refresh the order before changing its discount total, preventing concurrent redemptions from being debited or recorded while their value is lost from the order; gift cards re-validate on the locked row, enforce their start date, and refuse cards deleted mid-redemption (#310)
 - **Virtualmin provisioning pipeline** — the pipeline can now actually provision: the queued task no longer crashes on every dequeue (invalid django-q2 `retry=` kwarg), account creation no longer dies at pre-flight (wrong-class health check plus conflict/template checks that read response keys the parser never produced), and the failed-job sweep uses a leased-claim protocol with a job-aware retry that converges timed-out-but-remotely-successful creates on the existing rows instead of stranding jobs in `pending` forever. Drift records persist with real model fields instead of raising `TypeError` exactly when drift exists. Server health no longer starves placement (10-minute upserted schedule, success-only freshness stamp, streak-based reversible auto-fail instead of single-strike permanent eviction). Service suspension/termination/reactivation now propagates to Virtualmin through an idempotent on-commit reconciliation task — suspended customers no longer keep live hosting — and the ADR-0019 emergency kill switch `VIRTUALMIN_AUTO_PROVISIONING_ENABLED` exists at last (#325)
@@ -123,6 +124,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **README test badge** — updated from 5,000+ to 7,000+
 
 ### Security
+
+- **Row-bound encrypted payment data** — bank details now use v2 AES-256-GCM with exact immutable per-row AAD on first insert and every ORM projection; cross-row ciphertext transplants, downgrade/plaintext values, malformed base64, empty AAD, and decryption failures fail loudly without replacing forensic ciphertext with NULL. Existing rows are re-encrypted by a reversible fail-closed migration, Stripe-only paths defer unrelated bank data, and the key-rotation cipher cache is bounded (#205, #267, #268; ADR-0040)
 
 - **Domain webhook HMAC-SHA256 verification** — implemented signature verification for domain registrar webhooks with timing-safe comparison
 

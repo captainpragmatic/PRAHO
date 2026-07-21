@@ -13,10 +13,13 @@ Standard: NIST SP 800-38D (GCM), AES-256 (quantum-safe per NIST PQC)
 """
 
 import base64
+import hmac
 import logging
 import os
 import secrets
 import struct
+from collections import OrderedDict
+from threading import Lock
 from typing import Any
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -34,6 +37,7 @@ AES_KEY_SIZE = 32  # 256 bits
 NONCE_SIZE = 12  # 96 bits (GCM standard)
 AAD_LEN_SIZE = 2  # uint16 for AAD length
 MAX_AAD_LEN = 65535  # AAD length is encoded as uint16 (struct "!H") in the v2 wire format
+MAX_AESGCM_CACHE_SIZE = 8
 
 # --- Exceptions ---
 
@@ -47,19 +51,36 @@ class DecryptionError(Exception):
 
 
 # --- Internal state (lazy-init) ---
-_aesgcm_cache: dict[bytes, AESGCM] = {}
+_aesgcm_cache: OrderedDict[bytes, AESGCM] = OrderedDict()
+_aesgcm_cache_lock = Lock()
 
 
 def _get_aesgcm(key: bytes) -> AESGCM:
-    """Get or create a cached AESGCM instance for the given key."""
-    if key not in _aesgcm_cache:
-        _aesgcm_cache[key] = AESGCM(key)
-    return _aesgcm_cache[key]
+    """Get or create a cached AESGCM instance without retaining unlimited old keys."""
+    with _aesgcm_cache_lock:
+        cached = _aesgcm_cache.pop(key, None)
+        if cached is not None:
+            _aesgcm_cache[key] = cached
+            return cached
+        if len(_aesgcm_cache) >= MAX_AESGCM_CACHE_SIZE:
+            _aesgcm_cache.popitem(last=False)
+        created = AESGCM(key)
+        _aesgcm_cache[key] = created
+        return created
 
 
 def _clear_aesgcm_cache() -> None:
     """Clear the AESGCM cache (for testing only)."""
-    _aesgcm_cache.clear()
+    with _aesgcm_cache_lock:
+        _aesgcm_cache.clear()
+
+
+def _strict_urlsafe_b64decode(encoded: str) -> bytes:
+    """Decode RFC 4648 URL-safe base64 without silently discarding junk."""
+    try:
+        return base64.b64decode(encoded.encode("ascii"), altchars=b"-_", validate=True)
+    except (UnicodeEncodeError, ValueError) as exc:
+        raise DecryptionError("Ciphertext is not valid URL-safe base64") from exc
 
 
 # --- Key management ---
@@ -145,6 +166,9 @@ def encrypt_sensitive_data(data: str, *, aad: bytes | None = None) -> str:
     Raises:
         EncryptionError: If encryption fails.
     """
+    if aad == b"":
+        raise EncryptionError("AAD must contain at least one byte; use None for unbound v1 ciphertext")
+
     if not data:
         return ""
 
@@ -181,8 +205,8 @@ def decrypt_sensitive_data(encrypted_data: str, *, aad: bytes | None = None) -> 
 
     Args:
         encrypted_data: Encrypted string with "aes:" prefix.
-        aad: Optional AAD for v1/legacy format override. Ignored for v2
-             (AAD is embedded in the payload).
+        aad: Optional expected AAD. For v2 it must match the embedded AAD;
+             for v1/legacy it is supplied to AES-GCM as before.
 
     Returns:
         Decrypted plain text string. Empty string if input is empty.
@@ -210,13 +234,17 @@ def _parse_ciphertext(encrypted_data: str, aad_override: bytes | None) -> dict[s
     """Parse wire format and extract nonce, ciphertext+tag, and AAD."""
     if encrypted_data.startswith(VERSIONED_V2_PREFIX):
         encoded = encrypted_data[len(VERSIONED_V2_PREFIX) :]
-        raw = base64.urlsafe_b64decode(encoded)
+        raw = _strict_urlsafe_b64decode(encoded)
         if len(raw) < AAD_LEN_SIZE:
             raise DecryptionError("v2 ciphertext too short for AAD length")
         aad_len = struct.unpack("!H", raw[:AAD_LEN_SIZE])[0]
+        if aad_len == 0:
+            raise DecryptionError("v2 ciphertext must contain non-empty AAD")
         if len(raw) < AAD_LEN_SIZE + aad_len + NONCE_SIZE + 16:
             raise DecryptionError("v2 ciphertext too short")
         aad = raw[AAD_LEN_SIZE : AAD_LEN_SIZE + aad_len]
+        if aad_override is not None and not hmac.compare_digest(aad, aad_override):
+            raise DecryptionError("Ciphertext AAD does not match the expected context")
         rest = raw[AAD_LEN_SIZE + aad_len :]
         nonce = rest[:NONCE_SIZE]
         ciphertext_and_tag = rest[NONCE_SIZE:]
@@ -228,7 +256,7 @@ def _parse_ciphertext(encrypted_data: str, aad_override: bytes | None) -> dict[s
         # Legacy format: "aes:<payload>" (pre-versioning)
         encoded = encrypted_data[len(ENCRYPTED_PREFIX) :]
 
-    raw = base64.urlsafe_b64decode(encoded)
+    raw = _strict_urlsafe_b64decode(encoded)
     if len(raw) < NONCE_SIZE + 16:
         raise DecryptionError("Ciphertext too short")
     nonce = raw[:NONCE_SIZE]

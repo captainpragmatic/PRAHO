@@ -147,6 +147,11 @@ class Refund(models.Model):
                 ),
                 name="refund_status_valid_values",
             ),
+            models.UniqueConstraint(
+                fields=["gateway_refund_id"],
+                condition=~models.Q(gateway_refund_id=""),
+                name="uniq_refund_gateway_id_present",
+            ),
         ]
 
     def __str__(self) -> str:
@@ -211,7 +216,7 @@ class Refund(models.Model):
     def start_processing(self) -> None:
         """Move refund into processing."""
 
-    @transition(field=status, source="pending", target="cancelled")
+    @transition(field=status, source=["pending", "processing", "approved"], target="cancelled")
     def cancel(self) -> None:
         """Cancel the refund request."""
 
@@ -223,7 +228,7 @@ class Refund(models.Model):
     def reject(self) -> None:
         """Reject the refund."""
 
-    @transition(field=status, source="processing", target="failed")
+    @transition(field=status, source=["processing", "approved"], target="failed")
     def mark_failed(self) -> None:
         """Mark refund processing as failed."""
 
