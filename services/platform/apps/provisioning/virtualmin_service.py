@@ -82,12 +82,31 @@ class VirtualminProvisioningService:
         self.server = server
         self._gateway: VirtualminGateway | None = None
 
-    def _get_gateway(self, server: VirtualminServer | None = None) -> VirtualminGateway:
-        """Get or create gateway for server"""
+    def _get_gateway(
+        self, server: VirtualminServer | None = None, *, use_credential_vault: bool = True
+    ) -> VirtualminGateway:
+        """Get or create gateway for server.
+
+        use_credential_vault=False forces the gateway to authenticate with the server object's own
+        encrypted field instead of the vault — required by the staff "test these supplied
+        credentials" flow, which must probe the operator-entered password, not whatever the vault
+        happens to hold for that hostname. A non-vault gateway is never cached.
+        """
         target_server = server or self.server
 
         if not target_server:
             raise ValidationError(_("No server specified for gateway"))
+
+        if not use_credential_vault:
+            config_data = get_virtualmin_config()
+            config = VirtualminConfig(
+                server=target_server,
+                timeout=config_data["timeout"],
+                verify_ssl=target_server.ssl_verify,
+                cert_fingerprint=target_server.ssl_cert_fingerprint or config_data.get("pinned_cert_sha256", ""),
+                use_credential_vault=False,
+            )
+            return VirtualminGateway(config)
 
         if not self._gateway or (server and server != self.server):
             # Get configuration from SystemSettings + environment
@@ -1222,18 +1241,23 @@ class VirtualminProvisioningService:
 
         return "".join(password)
 
-    def test_server_connection(self, server: VirtualminServer) -> Result[dict[str, Any], str]:
+    def test_server_connection(
+        self, server: VirtualminServer, *, use_credential_vault: bool = True
+    ) -> Result[dict[str, Any], str]:
         """
         Test connection to Virtualmin server.
 
         Args:
             server: Server to test
+            use_credential_vault: when False, authenticate with the server object's own encrypted
+                field instead of the vault — used by the staff "test these supplied credentials"
+                flow so it probes the operator-entered password, not the vault entry for that host.
 
         Returns:
             Result with connection info or error message
         """
         try:
-            gateway = self._get_gateway(server)
+            gateway = self._get_gateway(server, use_credential_vault=use_credential_vault)
             return gateway.test_connection()
         except Exception as e:
             # Gateway setup failures (no server configured, credential decryption)

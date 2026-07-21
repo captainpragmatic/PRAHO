@@ -16,6 +16,7 @@ from django.test import TestCase, override_settings
 
 from apps.common.types import Err, Ok, Retriability, retriability_of
 from apps.provisioning.virtualmin_auth_manager import (
+    ACLCredentialResolutionError,
     AuthMethod,
     AuthMethodUnavailableError,
     VirtualminAuthenticationManager,
@@ -369,6 +370,61 @@ class AuthorizationDenialDoesNotEscalateTests(TestCase):
 
         self.assertTrue(result.is_err())
         mock_execute.assert_called_once_with(AuthMethod.ACL, "delete-domain", {})
+
+
+class ACLCredentialResolutionTerminalTests(TestCase):
+    """#348: an UNRESOLVABLE ACL credential (no vault entry AND empty encrypted field) must be
+    terminal — escalating to master would send root credentials to a node whose own ACL credential
+    PRAHO cannot even resolve. A present-but-REJECTED credential (real 401) must still escalate."""
+
+    def setUp(self) -> None:
+        self.mock_server = MagicMock()
+        self.mock_server.hostname = "node.example.com"
+        self.mock_server.id = 8
+        self.manager = VirtualminAuthenticationManager(self.mock_server)
+
+    @patch.object(VirtualminAuthenticationManager, "_cache_failed_auth_method")
+    @patch.object(VirtualminAuthenticationManager, "_get_auth_method_priority")
+    @patch.object(VirtualminAuthenticationManager, "_execute_with_method")
+    def test_unresolvable_acl_credential_is_terminal_never_escalates(
+        self,
+        mock_execute: MagicMock,
+        mock_priority: MagicMock,
+        _cache_failed: MagicMock,
+    ) -> None:
+        mock_priority.return_value = [AuthMethod.ACL, AuthMethod.MASTER_PROXY, AuthMethod.SSH_SUDO]
+        # ACL credential cannot be resolved; master would succeed but must never be reached.
+        mock_execute.side_effect = [
+            Err(ACLCredentialResolutionError("No usable ACL credential for node.example.com: Credential not found")),
+            Ok({"success": True}),
+        ]
+
+        result = self.manager.execute_virtualmin_command("list-domains", {})
+
+        self.assertTrue(result.is_err())
+        mock_execute.assert_called_once_with(AuthMethod.ACL, "list-domains", {})
+
+    @patch.object(VirtualminAuthenticationManager, "_cache_failed_auth_method")
+    @patch.object(VirtualminAuthenticationManager, "_get_auth_method_priority")
+    @patch.object(VirtualminAuthenticationManager, "_execute_with_method")
+    def test_present_but_rejected_acl_credential_still_escalates(
+        self,
+        mock_execute: MagicMock,
+        mock_priority: MagicMock,
+        _cache_failed: MagicMock,
+    ) -> None:
+        """A RESOLVED-but-wrong ACL credential (real 401) preserves the legitimate ACL→master
+        fallback — only RESOLUTION failure is terminal, not authentication rejection."""
+        mock_priority.return_value = [AuthMethod.ACL, AuthMethod.MASTER_PROXY, AuthMethod.SSH_SUDO]
+        mock_execute.side_effect = [
+            Err(VirtualminAuthError("Authentication failed - check API credentials", "node.example.com")),
+            Ok({"success": True}),
+        ]
+
+        result = self.manager.execute_virtualmin_command("list-domains", {})
+
+        self.assertTrue(result.is_ok())
+        self.assertEqual(mock_execute.call_count, 2)  # escalated ACL → master
 
 
 class GatewayHttpStatusClassificationTests(TestCase):

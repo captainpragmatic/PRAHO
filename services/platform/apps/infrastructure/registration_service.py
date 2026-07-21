@@ -133,7 +133,12 @@ class NodeRegistrationService:
                     vault = get_credential_vault()
                     credential_data = CredentialData(
                         service_type="virtualmin",
-                        service_identifier=deployment.fqdn,
+                        # Couple the vault WRITE key to server.hostname — the exact key the gateway
+                        # resolver READS by (resolve_server_credentials → get_credential by
+                        # server.hostname). Equal to deployment.fqdn today, but binding them to the
+                        # same attribute prevents a future hostname-derivation change from silently
+                        # desynchronizing writes and reads (fleet-wide fail-closed 401s otherwise).
+                        service_identifier=server.hostname,
                         username=admin_username,
                         password=admin_password,
                         metadata={

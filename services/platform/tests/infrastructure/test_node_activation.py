@@ -201,3 +201,42 @@ class VerifyAndActivateRealHandshakeTests(TestCase):
         self.assertTrue(result.is_err())
         server.refresh_from_db()
         self.assertEqual(server.status, "disabled")
+
+    @patch("apps.provisioning.virtualmin_gateway.safe_request")
+    @patch("apps.common.credential_vault.get_credential_vault")
+    def test_activated_node_provisions_with_vault_credential(self, mock_get_vault, mock_safe_request):
+        """#1 KILL-SHOT: the activation guarantee must transfer to PRODUCTION provisioning.
+
+        After verify_and_activate flips the node to active, a NORMAL provisioning gateway
+        — VirtualminConfig(server=server), the path every create-domain/backup/DR call uses,
+        NOT from_credentials — must authenticate with the VAULT credential. Pre-fix this FAILS:
+        the normal path reads server.get_api_password() which decrypts encrypted_api_password=b''
+        to '' and sends empty auth (active node, unusable credential — Codex #1). Post-fix the
+        gateway resolves the credential vault-first, so the wire carries the vault username/password.
+        """
+        server = self._disabled_server()  # encrypted_api_password=b"" — the real secret is in the vault
+        mock_get_vault.return_value = self._vault(username="praho-api", password="s3cr3t-vault-pw")
+        mock_safe_request.return_value = self._ok_info_response()
+
+        activate = NodeRegistrationService().verify_and_activate(server)
+        self.assertTrue(activate.is_ok(), activate.unwrap_err() if activate.is_err() else "")
+        server.refresh_from_db()
+        self.assertEqual(server.status, "active")
+
+        # PRODUCTION path: build a normal gateway from the persisted server row (not from_credentials).
+        from apps.provisioning.virtualmin_gateway import (  # noqa: PLC0415  # local: test-only path
+            VirtualminConfig,
+            VirtualminGateway,
+        )
+
+        mock_safe_request.reset_mock()
+        result = VirtualminGateway(VirtualminConfig(server=server)).call("info")
+
+        self.assertTrue(result.is_ok(), result.unwrap_err() if result.is_err() else "")
+        self.assertTrue(mock_safe_request.called, "normal provisioning never reached the network")
+        _args, kwargs = mock_safe_request.call_args
+        self.assertEqual(
+            kwargs["auth"],
+            ("praho-api", "s3cr3t-vault-pw"),
+            "production provisioning must authenticate with the vault credential, not the empty field",
+        )
