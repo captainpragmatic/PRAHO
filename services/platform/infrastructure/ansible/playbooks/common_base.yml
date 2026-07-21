@@ -82,8 +82,10 @@
         validate: 'sshd -t -f %s'
       loop:
         - { regexp: '^#?PermitRootLogin', line: 'PermitRootLogin {{ ssh_permit_root_login }}' }
-        - { regexp: '^#?PasswordAuthentication', line: 'PasswordAuthentication {{ ssh_password_authentication | string | lower }}' }
-        - { regexp: '^#?UseDNS', line: 'UseDNS {{ ssh_use_dns | string | lower }}' }
+        # sshd_config expects yes/no, NOT true/false — a boolean | string | lower yields
+        # "false", which `sshd -t` rejects as "unsupported option". Map booleans to yes/no.
+        - { regexp: '^#?PasswordAuthentication', line: "PasswordAuthentication {{ 'yes' if ssh_password_authentication else 'no' }}" }
+        - { regexp: '^#?UseDNS', line: "UseDNS {{ 'yes' if ssh_use_dns else 'no' }}" }
         - { regexp: '^#?MaxAuthTries', line: 'MaxAuthTries {{ ssh_max_auth_tries }}' }
       notify: Restart sshd
 
