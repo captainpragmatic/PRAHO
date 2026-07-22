@@ -15,6 +15,8 @@ from django.db import transaction
 from django.db.models import Sum
 from django.utils import timezone
 
+from apps.billing.document_adjustments import UnsupportedDocumentAdjustmentError
+
 if TYPE_CHECKING:
     from apps.customers.models import Customer
 
@@ -326,6 +328,10 @@ Best regards,
         logger.info(f"📧 [Email] Sent invoice {invoice.number} to {email}")
         return True
 
+    except UnsupportedDocumentAdjustmentError:
+        # Deterministic fail-closed guard, not a transient delivery failure: the
+        # caller must see it (and must never mark the invoice as sent).
+        raise
     except Exception as e:
         logger.error(f"🔥 [Email] Failed to send invoice {invoice.number}: {e}")
         return False

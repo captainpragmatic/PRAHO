@@ -617,10 +617,16 @@ class SendInvoiceEmailTest(TestCase):
         side_effect=UnsupportedDocumentAdjustmentError("unsupported adjustment"),
     )
     def test_pdf_validation_failure_aborts_email(self, mock_pdf: MagicMock) -> None:
-        with patch("django.core.mail.EmailMessage") as mock_email_cls:
-            result = send_invoice_email(self.invoice, recipient_email="test@example.com")
+        """Contract inverted (review of #195): the guard PROPAGATES instead of
+        collapsing into the transient False — callers must be able to tell a
+        deterministic fail-closed invoice from a mail hiccup, and must never
+        mark it sent."""
+        with (
+            patch("django.core.mail.EmailMessage") as mock_email_cls,
+            self.assertRaisesRegex(UnsupportedDocumentAdjustmentError, "unsupported adjustment"),
+        ):
+            send_invoice_email(self.invoice, recipient_email="test@example.com")
 
-        self.assertFalse(result)
         mock_pdf.assert_called_once_with(self.invoice)
         mock_email_cls.assert_not_called()
 
@@ -772,3 +778,15 @@ class GenerateVatSummaryTest(TestCase):
         self.assertEqual(result["total_sales"], Decimal("100.00"))
         # 2100 cents = 21.00 decimal
         self.assertEqual(result["total_vat"], Decimal("21.00"))
+
+
+class SendInvoiceEmailGuardPropagationTest(TestCase):
+    """The adjustment guard is deterministic, not transient: send_invoice_email
+    must propagate it so callers cannot mark the invoice sent (review of #195)."""
+
+    def test_guard_error_propagates_instead_of_returning_false(self) -> None:
+        _, invoice = _make_invoice()
+        invoice.meta = {"allowances": [{"amount_cents": 1000, "reason": "Manual"}]}
+
+        with self.assertRaisesRegex(UnsupportedDocumentAdjustmentError, "Metadata-based document allowances"):
+            send_invoice_email(invoice, recipient_email="customer@example.com")
