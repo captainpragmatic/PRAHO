@@ -92,6 +92,8 @@ def _get_session_identity(request: HttpRequest) -> tuple[int | None, int | None]
     raw_customer_id = getattr(request, "customer_id", None) or request.session.get("customer_id")
     raw_user_id = request.session.get("user_id")
 
+    if raw_customer_id is None or raw_user_id is None:
+        return None, None
     if isinstance(raw_customer_id, bool) or isinstance(raw_user_id, bool):
         return None, None
 
