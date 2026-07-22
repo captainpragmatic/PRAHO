@@ -37,25 +37,35 @@ class AnsiblePlaybookBoundaryTests(SimpleTestCase):
         service._ssh_manager.get_private_key_file.assert_not_called()
 
     @patch("apps.infrastructure.ansible_service.subprocess.run")
-    @override_settings(PRAHO_SSH_KNOWN_HOSTS_PATH="/etc/praho/known_hosts")
     def test_ansible_host_key_checking_is_enabled(self, mock_run: MagicMock) -> None:
         service = self._service()
         service._ssh_manager.get_private_key_file.return_value = Ok(Path("nonexistent-praho-key"))
         deployment = MagicMock(ipv4_address="203.0.113.10", hostname="node.example.com")
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
-        with (
-            patch.object(service, "_generate_inventory", return_value=Path("nonexistent-praho-inventory")),
-            patch.object(service, "_build_vars", return_value={}),
-        ):
-            result = service.run_playbook(deployment, "virtualmin_harden.yml")
+        # The configured trust anchor must be a real file: _build_ansible_env
+        # deliberately skips nonexistent configured paths (#367).
+        with tempfile.NamedTemporaryFile("w", suffix="_known_hosts", delete=False) as known_hosts_fh:
+            known_hosts_fh.write("# managed known_hosts\n")
+            configured_known_hosts = known_hosts_fh.name
+        try:
+            with (
+                override_settings(PRAHO_SSH_KNOWN_HOSTS_PATH=configured_known_hosts),
+                patch.object(AnsibleService, "_wait_for_ssh", return_value=Ok(True)),
+                patch.object(AnsibleService, "_scan_host_key", return_value=None),
+                patch.object(service, "_generate_inventory", return_value=Path("nonexistent-praho-inventory")),
+                patch.object(service, "_build_vars", return_value={}),
+            ):
+                result = service.run_playbook(deployment, "virtualmin_harden.yml")
 
-        self.assertTrue(result.is_ok())
-        self.assertEqual(mock_run.call_args.kwargs["env"]["ANSIBLE_HOST_KEY_CHECKING"], "True")
-        self.assertIn(
-            "UserKnownHostsFile=/etc/praho/known_hosts",
-            mock_run.call_args.kwargs["env"]["ANSIBLE_SSH_COMMON_ARGS"],
-        )
+            self.assertTrue(result.is_ok())
+            self.assertEqual(mock_run.call_args.kwargs["env"]["ANSIBLE_HOST_KEY_CHECKING"], "True")
+            self.assertIn(
+                f"UserKnownHostsFile={configured_known_hosts}",
+                mock_run.call_args.kwargs["env"]["ANSIBLE_SSH_COMMON_ARGS"],
+            )
+        finally:
+            Path(configured_known_hosts).unlink(missing_ok=True)
 
     @patch("apps.infrastructure.ansible_service.subprocess.run")
     @override_settings(PRAHO_SSH_KNOWN_HOSTS_PATH="/etc/praho/known_hosts")
@@ -70,6 +80,8 @@ class AnsiblePlaybookBoundaryTests(SimpleTestCase):
 
         secret = "SUPER-SECRET-API-PW-9f3a"  # test literal, not a real credential
         with (
+            patch.object(AnsibleService, "_wait_for_ssh", return_value=Ok(True)),
+            patch.object(AnsibleService, "_scan_host_key", return_value=None),
             patch.object(service, "_generate_inventory", return_value=Path("nonexistent-praho-inventory")),
             patch.object(service, "_build_vars", return_value={"praho_api_password": secret}),
         ):
@@ -93,6 +105,11 @@ class AnsiblePlaybookBoundaryTests(SimpleTestCase):
         tmpdir = Path(tempfile.gettempdir())
         before = set(tmpdir.glob("praho_ansible_vars_*"))
         with (
+            # Mock the SSH seams or run_playbook errs on the readiness wait BEFORE
+            # ever reaching _write_vars_file — the leak assertion would pass
+            # vacuously (and eat the full 180s socket timeout) (#367).
+            patch.object(AnsibleService, "_wait_for_ssh", return_value=Ok(True)),
+            patch.object(AnsibleService, "_scan_host_key", return_value=None),
             patch.object(service, "_generate_inventory", return_value=Path("nonexistent-praho-inventory")),
             patch.object(service, "_build_vars", return_value={"praho_api_password": "secret-value"}),
             patch("apps.infrastructure.ansible_service.json.dump", side_effect=OSError("disk full")),
@@ -100,6 +117,7 @@ class AnsiblePlaybookBoundaryTests(SimpleTestCase):
             result = service.run_playbook(deployment, "virtualmin.yml", extra_vars={"praho_api_password": "secret-value"})
 
         self.assertTrue(result.is_err(), "a vars-file write failure must surface as an Err")
+        self.assertIn("disk full", result.unwrap_err(), "the Err must come from the vars-file write, not an SSH wait")
         leaked = set(tmpdir.glob("praho_ansible_vars_*")) - before
         self.assertEqual(leaked, set(), f"partial-secret vars file(s) leaked in tempdir: {leaked}")
 
@@ -113,18 +131,177 @@ class AnsiblePlaybookBoundaryTests(SimpleTestCase):
     )
     @override_settings(PRAHO_SSH_KNOWN_HOSTS_PATH="/etc/praho/known_hosts")
     def test_ansible_environment_cannot_weaken_host_key_checking(self) -> None:
-        ansible_env = AnsibleService._build_ansible_env()
+        # The configured trust anchor must be a real file: nonexistent configured
+        # paths are deliberately skipped so a placeholder value can't inject
+        # garbage into the SSH args (#367).
+        with tempfile.NamedTemporaryFile("w", suffix="_known_hosts", delete=False) as known_hosts_fh:
+            known_hosts_fh.write("# managed known_hosts\n")
+            configured_known_hosts = known_hosts_fh.name
+        try:
+            with override_settings(PRAHO_SSH_KNOWN_HOSTS_PATH=configured_known_hosts):
+                ansible_env = AnsibleService._build_ansible_env()
 
-        self.assertNotIn("StrictHostKeyChecking=no", ansible_env["ANSIBLE_SSH_COMMON_ARGS"])
-        self.assertNotIn("/var/lib/praho/untrusted-known-hosts", ansible_env["ANSIBLE_SSH_COMMON_ARGS"])
+            self.assertNotIn("StrictHostKeyChecking=no", ansible_env["ANSIBLE_SSH_COMMON_ARGS"])
+            self.assertNotIn("/var/lib/praho/untrusted-known-hosts", ansible_env["ANSIBLE_SSH_COMMON_ARGS"])
+            self.assertIn("StrictHostKeyChecking=yes", ansible_env["ANSIBLE_SSH_COMMON_ARGS"])
+            self.assertIn(f"UserKnownHostsFile={configured_known_hosts}", ansible_env["ANSIBLE_SSH_COMMON_ARGS"])
+        finally:
+            Path(configured_known_hosts).unlink(missing_ok=True)
+
+    def test_build_env_skips_configured_known_hosts_that_does_not_exist(self) -> None:
+        """A misconfigured/placeholder path must not inject garbage into SSH args,
+        and strict host-key checking must survive the fallback (#367)."""
+        with override_settings(PRAHO_SSH_KNOWN_HOSTS_PATH="/nonexistent/praho/known_hosts"):
+            ansible_env = AnsibleService._build_ansible_env()
+
+        self.assertNotIn("UserKnownHostsFile", ansible_env["ANSIBLE_SSH_COMMON_ARGS"])
         self.assertIn("StrictHostKeyChecking=yes", ansible_env["ANSIBLE_SSH_COMMON_ARGS"])
-        self.assertIn("UserKnownHostsFile=/etc/praho/known_hosts", ansible_env["ANSIBLE_SSH_COMMON_ARGS"])
+
+    def test_build_env_prefers_fresh_scan_over_configured_when_given(self) -> None:
+        """A freshly-pinned known_hosts (managed TOFU for a NEW node) takes
+        precedence — run_playbook only supplies one when the configured anchor
+        does not already cover the node."""
+        with tempfile.NamedTemporaryFile("w", suffix="_known_hosts", delete=False) as known_hosts_fh:
+            known_hosts_fh.write("# managed known_hosts\n")
+            configured_known_hosts = known_hosts_fh.name
+        fresh_scan = Path(tempfile.gettempdir()) / "praho_fresh_scan"
+        try:
+            with override_settings(PRAHO_SSH_KNOWN_HOSTS_PATH=configured_known_hosts):
+                ansible_env = AnsibleService._build_ansible_env(known_hosts_file=fresh_scan)
+
+            self.assertIn(f"UserKnownHostsFile={fresh_scan}", ansible_env["ANSIBLE_SSH_COMMON_ARGS"])
+            self.assertNotIn(configured_known_hosts, ansible_env["ANSIBLE_SSH_COMMON_ARGS"])
+        finally:
+            Path(configured_known_hosts).unlink(missing_ok=True)
 
     def test_repository_ansible_config_does_not_disable_host_key_checking(self) -> None:
         config = (ANSIBLE_BASE_PATH / "ansible.cfg").read_text()
 
         self.assertIn("host_key_checking = True", config)
         self.assertNotIn("StrictHostKeyChecking=no", config)
+
+
+class AnsibleTrustPrecedenceTests(SimpleTestCase):
+    """TOFU is only sound on FIRST use — configured trust outranks re-scans."""
+
+    def _service(self) -> AnsibleService:
+        service = object.__new__(AnsibleService)
+        service.timeout = 30
+        service._ansible_path = "/usr/bin/ansible-playbook"
+        service._ssh_manager = MagicMock()
+        return service
+
+    @patch("apps.infrastructure.ansible_service.subprocess.run")
+    def test_configured_trust_outranks_tofu_rescan(self, mock_run: MagicMock) -> None:
+        """#367 review: when the operator's known_hosts already covers the node,
+        a fresh network scan must NOT outrank it — otherwise an active MITM at
+        re-run time silently defeats the pinned key."""
+        service = self._service()
+        service._ssh_manager.get_private_key_file.return_value = Ok(Path("nonexistent-praho-key"))
+        deployment = MagicMock(ipv4_address="203.0.113.10", hostname="node.example.com")
+        # Covers-lookup (ssh-keygen -F) and the ansible run share this mock:
+        # non-empty stdout + rc=0 means "the configured file covers the node".
+        mock_run.return_value = MagicMock(returncode=0, stdout="203.0.113.10 ssh-ed25519 AAAA\n", stderr="")
+
+        with tempfile.NamedTemporaryFile("w", suffix="_known_hosts", delete=False) as known_hosts_fh:
+            known_hosts_fh.write("203.0.113.10 ssh-ed25519 AAAAconfigured\n")
+            configured_known_hosts = known_hosts_fh.name
+        try:
+            with (
+                override_settings(PRAHO_SSH_KNOWN_HOSTS_PATH=configured_known_hosts),
+                patch.object(AnsibleService, "_wait_for_ssh", return_value=Ok(True)),
+                patch.object(AnsibleService, "_scan_host_key") as mock_scan,
+                patch.object(service, "_generate_inventory", return_value=Path("nonexistent-praho-inventory")),
+                patch.object(service, "_build_vars", return_value={}),
+            ):
+                result = service.run_playbook(deployment, "virtualmin.yml")
+
+            self.assertTrue(result.is_ok())
+            mock_scan.assert_not_called()
+            self.assertIn(
+                f"UserKnownHostsFile={configured_known_hosts}",
+                mock_run.call_args.kwargs["env"]["ANSIBLE_SSH_COMMON_ARGS"],
+            )
+        finally:
+            Path(configured_known_hosts).unlink(missing_ok=True)
+
+    def test_uncovered_node_falls_back_to_tofu_scan(self) -> None:
+        """A genuinely new node (not in the configured anchor) still gets the
+        managed TOFU scan — that is the case #367 exists to fix."""
+        service = self._service()
+        service._ssh_manager.get_private_key_file.return_value = Ok(Path("nonexistent-praho-key"))
+        deployment = MagicMock(ipv4_address="203.0.113.10", hostname="node.example.com")
+
+        with (
+            patch.object(AnsibleService, "_configured_known_hosts_covers", return_value=False),
+            patch.object(AnsibleService, "_wait_for_ssh", return_value=Ok(True)),
+            patch.object(AnsibleService, "_scan_host_key", return_value=None) as mock_scan,
+            patch.object(service, "_generate_inventory", return_value=Path("nonexistent-praho-inventory")),
+            patch.object(service, "_build_vars", return_value={}),
+            patch("apps.infrastructure.ansible_service.subprocess.run") as mock_run,
+        ):
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            result = service.run_playbook(deployment, "virtualmin.yml")
+
+        self.assertTrue(result.is_ok())
+        mock_scan.assert_called_once_with("203.0.113.10")
+
+    def test_configured_known_hosts_covers_real_lookup(self) -> None:
+        """The covers-check uses real ssh-keygen -F semantics (handles hashed
+        hostnames), not naive substring matching."""
+        key_line = "203.0.113.10 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPrahoTestKeyPrahoTestKeyPrahoTestKeyPra\n"
+        with tempfile.NamedTemporaryFile("w", suffix="_known_hosts", delete=False) as known_hosts_fh:
+            known_hosts_fh.write(key_line)
+            configured_known_hosts = known_hosts_fh.name
+        try:
+            with override_settings(PRAHO_SSH_KNOWN_HOSTS_PATH=configured_known_hosts):
+                self.assertTrue(AnsibleService._configured_known_hosts_covers("203.0.113.10"))
+                self.assertFalse(AnsibleService._configured_known_hosts_covers("203.0.113.99"))
+            with override_settings(PRAHO_SSH_KNOWN_HOSTS_PATH="/nonexistent/praho/known_hosts"):
+                self.assertFalse(AnsibleService._configured_known_hosts_covers("203.0.113.10"))
+        finally:
+            Path(configured_known_hosts).unlink(missing_ok=True)
+
+
+class AnsibleSSHSeamTests(SimpleTestCase):
+    """Contracts for the SSH-readiness wait and host-key pinning seams."""
+
+    def test_wait_for_ssh_returns_ok_when_port_accepts(self) -> None:
+        with patch("apps.infrastructure.ansible_service.socket.socket") as mock_socket:
+            mock_socket.return_value.connect.return_value = None
+            result = AnsibleService._wait_for_ssh("203.0.113.10", timeout=1, interval=0.01)
+        self.assertTrue(result.is_ok())
+
+    def test_wait_for_ssh_fails_loudly_after_deadline(self) -> None:
+        with patch("apps.infrastructure.ansible_service.socket.socket") as mock_socket:
+            mock_socket.return_value.connect.side_effect = OSError("refused")
+            result = AnsibleService._wait_for_ssh("203.0.113.10", timeout=0.05, interval=0.01)
+        self.assertTrue(result.is_err())
+        self.assertIn("not SSH-reachable", result.unwrap_err())
+
+    def test_scan_host_key_pins_key_with_0600(self) -> None:
+        scanned = "203.0.113.10 ssh-ed25519 AAAAtestkey\n"
+        path: Path | None = None
+        try:
+            with patch("apps.infrastructure.ansible_service.subprocess.run") as mock_run:
+                mock_run.return_value = MagicMock(returncode=0, stdout=scanned, stderr="")
+                path = AnsibleService._scan_host_key("203.0.113.10")
+            self.assertIsNotNone(path)
+            assert path is not None  # narrow for the type checker
+            self.assertEqual(path.read_text(), scanned)
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        finally:
+            if path is not None:
+                path.unlink(missing_ok=True)
+
+    def test_scan_host_key_failure_leaves_no_temp_file(self) -> None:
+        tmp_dir = Path(tempfile.gettempdir())
+        before = set(tmp_dir.glob("praho_known_hosts_*"))
+        with patch("apps.infrastructure.ansible_service.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="scan failed")
+            path = AnsibleService._scan_host_key("203.0.113.10")
+        self.assertIsNone(path)
+        self.assertEqual(set(tmp_dir.glob("praho_known_hosts_*")) - before, set())
 
 
 class InfrastructureSSHTrustTests(SimpleTestCase):

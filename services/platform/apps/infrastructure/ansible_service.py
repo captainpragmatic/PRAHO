@@ -199,9 +199,13 @@ class AnsibleService:
             ssh_wait = self._wait_for_ssh(deployment.ipv4_address)
             if ssh_wait.is_err():
                 return Err(ssh_wait.unwrap_err())
-            # Pin the node's host key now that it is reachable (managed TOFU for a new node),
-            # so StrictHostKeyChecking=yes can verify against a real, freshly-scanned key.
-            known_hosts_file = self._scan_host_key(deployment.ipv4_address)
+            # Managed TOFU is only sound on FIRST use: when the operator's configured
+            # known_hosts already covers this node, that pinned key must outrank any
+            # fresh network scan — otherwise an active MITM at re-run time silently
+            # replaces the trust anchor. Scan-and-pin only for genuinely new nodes.
+            known_hosts_file = None
+            if not self._configured_known_hosts_covers(deployment.ipv4_address):
+                known_hosts_file = self._scan_host_key(deployment.ipv4_address)
 
             # Generate inventory
             inventory_file = self._generate_inventory(deployment)
@@ -361,6 +365,31 @@ class AnsibleService:
             known_hosts_arg = f"-o UserKnownHostsFile={shlex.quote(known_hosts_path)}"
             ansible_env["ANSIBLE_SSH_COMMON_ARGS"] = f"{ansible_env['ANSIBLE_SSH_COMMON_ARGS']} {known_hosts_arg}"
         return ansible_env
+
+    @staticmethod
+    def _configured_known_hosts_covers(ip: str) -> bool:
+        """True when the operator-configured known_hosts has a key for this node.
+
+        Uses ``ssh-keygen -F`` (handles hashed hostnames) rather than substring
+        matching. When the lookup tooling itself fails, returns True — keeping
+        the stricter configured anchor is the fail-closed choice; a missing key
+        then fails the SSH host-key check loudly instead of silently re-pinning.
+        """
+        configured = str(getattr(settings, "PRAHO_SSH_KNOWN_HOSTS_PATH", "")).strip()
+        if not configured or not Path(configured).is_file():
+            return False
+        keygen_bin = shutil.which("ssh-keygen") or "ssh-keygen"
+        try:
+            lookup = subprocess.run(  # noqa: S603  # ssh-keygen -F on a PRAHO-managed file
+                [keygen_bin, "-F", ip, "-f", configured],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return True
+        return lookup.returncode == 0 and bool(lookup.stdout.strip())
 
     @staticmethod
     def _wait_for_ssh(ip: str, port: int = 22, timeout: int = 180, interval: float = 3.0) -> Result[bool, str]:
