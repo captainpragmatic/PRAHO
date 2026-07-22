@@ -376,16 +376,17 @@ class RecurringBillingOrchestrator:
                         with transaction.atomic():
                             first_subscription = grouped_items[0][0]
                             customer = first_subscription.customer
+                            billing_address = customer.get_billing_address()
+                            bill_to_country = billing_country_code(getattr(billing_address, "country", ""))
                             vat_result = TaxService.calculate_vat_for_document(
                                 subtotal_cents=sum(item[0].total_price_cents for item in grouped_items),
-                                customer_info=_build_customer_vat_info(customer),
+                                customer_info=_build_customer_vat_info(customer, country=bill_to_country),
                             )
                             vat_rate = (vat_result.vat_rate / Decimal("100")).quantize(Decimal("0.0001"))
                             tax_category = _derive_tax_category(vat_result)
 
                             sequence, _ = ProformaSequence.objects.get_or_create(scope="default")
                             sequence = ProformaSequence.objects.select_for_update(of=("self",)).get(pk=sequence.pk)
-                            billing_address = customer.get_billing_address()
                             try:
                                 tax_profile = customer.tax_profile
                             except Exception:
@@ -411,7 +412,7 @@ class RecurringBillingOrchestrator:
                                 bill_to_city=getattr(billing_address, "city", "") or "",
                                 bill_to_region=getattr(billing_address, "county", "") or "",
                                 bill_to_postal=getattr(billing_address, "postal_code", "") or "",
-                                bill_to_country=billing_country_code(getattr(billing_address, "country", "")),
+                                bill_to_country=bill_to_country,
                                 meta={
                                     "type": "recurring",
                                     "source": "recurring_billing",

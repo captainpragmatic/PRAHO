@@ -232,7 +232,7 @@ def handle_tax_profile_changes(
             "cui": instance.cui,
             "vat_number": instance.vat_number,
             "is_vat_payer": instance.is_vat_payer,
-            "vat_rate": float(instance.vat_rate),
+            "vat_rate": float(instance.vat_rate) if instance.vat_rate is not None else None,
             "reverse_charge_eligible": instance.reverse_charge_eligible,
         }
 
@@ -283,7 +283,7 @@ def handle_tax_profile_changes(
                 evidence={
                     "cui": instance.cui,
                     "is_vat_payer": instance.is_vat_payer,
-                    "vat_rate": float(instance.vat_rate),
+                    "vat_rate": float(instance.vat_rate) if instance.vat_rate is not None else None,
                     "customer_id": str(instance.customer.id),
                 },
             )
@@ -316,7 +316,7 @@ def store_original_tax_values(sender: type[CustomerTaxProfile], instance: Custom
                     "cui": getattr(original, "cui", None),
                     "vat_number": getattr(original, "vat_number", None),
                     "is_vat_payer": getattr(original, "is_vat_payer", None),
-                    "vat_rate": float(getattr(original, "vat_rate", 0)),
+                    "vat_rate": float(original.vat_rate) if original.vat_rate is not None else None,
                     "reverse_charge_eligible": getattr(original, "reverse_charge_eligible", None),
                 }
             except CustomerTaxProfile.DoesNotExist:

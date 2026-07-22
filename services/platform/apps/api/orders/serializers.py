@@ -6,6 +6,7 @@ DRF serializers for order and product catalog endpoints with Romanian compliance
 import json
 import logging
 import traceback
+from decimal import Decimal
 from typing import Any
 
 from django.utils.translation import gettext_lazy as _
@@ -257,7 +258,12 @@ class CartCalculationOutputSerializer(serializers.Serializer):
     subtotal_cents = serializers.IntegerField()
     tax_cents = serializers.IntegerField()
     total_cents = serializers.IntegerField()
-    vat_rate_percent = serializers.IntegerField(required=False, default=0)
+    vat_rate_percent = serializers.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        min_value=Decimal("0"),
+        max_value=Decimal("100"),
+    )
     currency = serializers.CharField(max_length=3)
     warnings = serializers.ListField(child=serializers.DictField(), default=list)
 

@@ -4,6 +4,7 @@ Tests authentication, authorization, multi-tenant access, and view functionality
 """
 
 import uuid
+from decimal import Decimal
 
 from django.contrib.messages import get_messages
 from django.test import Client, TestCase
@@ -12,9 +13,48 @@ from django.urls import reverse
 from apps.billing.models import Currency
 from apps.customers.models import Customer, CustomerTaxProfile
 from apps.orders.models import Order, OrderItem, OrderStatusHistory
+from apps.orders.views import _get_vat_rate_for_order
 from apps.products.models import Product, ProductPrice
 from apps.users.models import CustomerMembership, User
 from tests.helpers.fsm_helpers import force_status
+
+
+class OrderItemVATRateResolutionTestCase(TestCase):
+    """Staff item edits must reuse the order's fiscal country and explicit overrides."""
+
+    def setUp(self):
+        self.currency, _ = Currency.objects.get_or_create(
+            code="RON",
+            defaults={"symbol": "lei", "decimals": 2},
+        )
+        self.customer = Customer.objects.create(
+            name="Foreign Customer",
+            customer_type="company",
+            status="active",
+            primary_email="foreign@example.test",
+        )
+        self.tax_profile = CustomerTaxProfile.objects.create(customer=self.customer)
+        self.order = Order.objects.create(
+            customer=self.customer,
+            order_number="ORD-VAT-SNAPSHOT-001",
+            currency=self.currency,
+            billing_address={"country": "DE", "company_name": "Foreign Customer"},
+        )
+
+    def test_uses_order_billing_country_snapshot(self):
+        self.assertEqual(_get_vat_rate_for_order(self.order), Decimal("0.1900"))
+
+    def test_uses_explicit_customer_rate_override(self):
+        self.tax_profile.vat_rate = Decimal("19.50")
+        self.tax_profile.save(update_fields=["vat_rate"])
+
+        self.assertEqual(_get_vat_rate_for_order(self.order), Decimal("0.1950"))
+
+    def test_preserves_explicit_zero_rate_override(self):
+        self.tax_profile.vat_rate = Decimal("0.00")
+        self.tax_profile.save(update_fields=["vat_rate"])
+
+        self.assertEqual(_get_vat_rate_for_order(self.order), Decimal("0.0000"))
 
 
 class OrderViewsAuthenticationTestCase(TestCase):
@@ -265,6 +305,7 @@ class OrderDetailViewTestCase(TestCase):
             product_type="hosting",
             quantity=1,
             unit_price_cents=10000,
+            tax_rate="0.2100",
             provisioning_status="pending"  # OrderItem.provisioning_status "pending" is still valid
         )
 

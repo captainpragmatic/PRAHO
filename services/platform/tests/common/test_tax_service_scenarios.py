@@ -147,6 +147,44 @@ class TaxServiceScenarioTests(TestCase):
         self.assertEqual(result.vat_number, "FR12345678901")
         self.assertEqual(result.vat_cents, 0)
 
+    def test_romanian_operator_customer_country_matrix(self) -> None:
+        """Current RO policy covers EU B2C, configured non-EU, and verified EU B2B."""
+        for country_code in ("RS", "GB"):
+            TaxRule.objects.create(
+                country_code=country_code,
+                tax_type="vat",
+                rate=Decimal("0.0000"),
+                valid_from=date(2020, 1, 1),
+                is_eu_member=False,
+            )
+
+        cases: tuple[tuple[str, CustomerVATInfo, VATScenario, str, int], ...] = (
+            ("German consumer", {"country": "DE", "is_business": False}, VATScenario.EU_B2C, "19.0", 1900),
+            ("French consumer", {"country": "FR", "is_business": False}, VATScenario.EU_B2C, "20.0", 2000),
+            ("Serbian consumer", {"country": "RS", "is_business": False}, VATScenario.NON_EU_ZERO_VAT, "0.0", 0),
+            ("UK consumer", {"country": "GB", "is_business": False}, VATScenario.NON_EU_ZERO_VAT, "0.0", 0),
+            (
+                "VIES-eligible French business",
+                {
+                    "country": "FR",
+                    "is_business": True,
+                    "vat_number": "FR12345678901",
+                    "reverse_charge_eligible": True,
+                },
+                VATScenario.EU_B2B_REVERSE_CHARGE,
+                "0.0",
+                0,
+            ),
+        )
+
+        for label, info, scenario, rate, vat_cents in cases:
+            with self.subTest(label=label):
+                result = TaxService.calculate_vat_for_document(10000, info)
+                self.assertEqual(result.scenario, scenario)
+                self.assertEqual(result.vat_rate, Decimal(rate))
+                self.assertEqual(result.vat_cents, vat_cents)
+                self.assertEqual(result.total_cents, 10000 + vat_cents)
+
     # ── Scenario 5: Non-EU Zero VAT ──────────────────────────────────────────
 
     def test_non_eu_zero_vat_with_seeded_rule(self) -> None:

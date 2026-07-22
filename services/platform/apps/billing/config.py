@@ -7,7 +7,7 @@ to ensure DRY compliance and easy maintenance.
 
 import logging
 from datetime import datetime, timedelta
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 
 from django.conf import settings
 from django.utils import timezone
@@ -34,22 +34,6 @@ def _get_positive_int(setting_name: str, default: int) -> int:
     return max(1, result)  # Ensure at least 1
 
 
-def _get_decimal_rate(setting_name: str, default: str) -> Decimal:
-    """Get a decimal rate (0-1) from settings with validation."""
-    value = getattr(settings, setting_name, default)
-    try:
-        # Always convert to string first to avoid float precision issues
-        result = Decimal(str(value))
-    except (TypeError, ValueError, InvalidOperation):
-        result = Decimal(default)
-    # Clamp to valid rate range
-    if result < Decimal("0"):
-        return Decimal("0")
-    if result > Decimal("1"):
-        return Decimal("1")
-    return result
-
-
 # ===============================================================================
 # COMPANY & LOCALE DEFAULTS
 # ===============================================================================
@@ -60,13 +44,6 @@ DEFAULT_COUNTRY_CODE = getattr(settings, "BILLING_DEFAULT_COUNTRY", "RO") or "RO
 # Default currency
 DEFAULT_CURRENCY_CODE = getattr(settings, "BILLING_DEFAULT_CURRENCY", "RON") or "RON"
 
-
-# ===============================================================================
-# TAX CONFIGURATION
-# ===============================================================================
-
-# Romanian VAT standard rate (fallback if TaxRule not configured)
-DEFAULT_VAT_RATE = _get_decimal_rate("BILLING_DEFAULT_VAT_RATE", "0.21")
 
 # EU countries for VAT purposes
 EU_COUNTRY_CODES = frozenset(

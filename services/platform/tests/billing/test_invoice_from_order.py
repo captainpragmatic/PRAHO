@@ -8,16 +8,21 @@ This drives the legacy order→invoice path end-to-end so the crash can't recur.
 
 from __future__ import annotations
 
+from datetime import date
 from decimal import Decimal
 
 import pytest
 from django.test import TestCase
+from django.utils import timezone
 
 from apps.billing.invoice_models import InvoiceSequence
 from apps.billing.models import Currency
 from apps.billing.services import InvoiceService
-from apps.customers.models import Customer
+from apps.billing.tax_models import TaxRule
+from apps.common.tax_service import TaxService
+from apps.customers.models import Customer, CustomerTaxProfile
 from apps.orders.models import Order, OrderItem
+from apps.orders.services import OrderCreateData, OrderService
 from apps.products.models import Product
 
 
@@ -129,6 +134,93 @@ class CreateInvoiceFromOrderTests(TestCase):
         self.assertEqual(invoice.bill_to_city, "Berlin")
         self.assertEqual(invoice.bill_to_region, "Berlin")
         self.assertEqual(invoice.bill_to_postal, "10117")
+
+    def test_romanian_operator_order_to_invoice_country_matrix(self) -> None:
+        for country_code in ("RS", "GB"):
+            TaxRule.objects.create(
+                country_code=country_code,
+                tax_type="vat",
+                rate=Decimal("0.0000"),
+                valid_from=date(2020, 1, 1),
+                is_eu_member=False,
+            )
+
+        cases = (
+            ("DE", False, "", False, 1900, Decimal("0.1900")),
+            ("FR", False, "", False, 2000, Decimal("0.2000")),
+            ("RS", False, "", False, 0, Decimal("0.0000")),
+            ("GB", False, "", False, 0, Decimal("0.0000")),
+            ("FR", True, "FR12345678901", True, 0, Decimal("0.0000")),
+        )
+
+        for index, (country, is_business, vat_number, reverse_charge, tax_cents, tax_rate) in enumerate(cases):
+            with self.subTest(country=country, is_business=is_business):
+                customer = Customer.objects.create(
+                    name=f"Matrix customer {index}",
+                    customer_type="company" if is_business else "individual",
+                    company_name=f"Matrix company {index}" if is_business else "",
+                    status="active",
+                    primary_email=f"matrix-{index}@example.test",
+                )
+                tax_profile = CustomerTaxProfile.objects.create(
+                    customer=customer,
+                    is_vat_payer=is_business,
+                    vat_number=vat_number,
+                    reverse_charge_eligible=reverse_charge,
+                    vies_verification_status=(
+                        CustomerTaxProfile.VIESVerificationStatus.VALID
+                        if reverse_charge
+                        else CustomerTaxProfile.VIESVerificationStatus.NOT_APPLICABLE
+                    ),
+                    vies_verified_at=timezone.now() if reverse_charge else None,
+                )
+                self.assertIsNone(tax_profile.vat_rate)
+                self.assertEqual(customer.get_tax_profile(), tax_profile)
+                if country in {"RS", "GB"}:
+                    self.assertEqual(TaxService.get_vat_rate(country), Decimal("0.00"))
+                billing_name = customer.company_name or customer.name
+                order_result = OrderService.create_order(
+                    OrderCreateData(
+                        customer=customer,
+                        items=[
+                            {
+                                "product_id": self.product.id,
+                                "quantity": 1,
+                                "unit_price_cents": 10_000,
+                                "description": self.product.name,
+                            }
+                        ],
+                        billing_address={
+                            "company_name": customer.company_name,
+                            "contact_name": customer.name,
+                            "email": customer.primary_email,
+                            "country": country,
+                            "vat_number": vat_number,
+                        },
+                        currency=self.currency.code,
+                    )
+                )
+
+                self.assertTrue(order_result.is_ok(), order_result)
+                order = order_result.unwrap()
+                self.assertEqual(order.subtotal_cents, 10_000)
+                self.assertEqual(order.tax_cents, tax_cents)
+                self.assertEqual(order.total_cents, 10_000 + tax_cents)
+                order_line = order.items.get()
+                self.assertEqual(order_line.tax_rate, tax_rate)
+                self.assertEqual(order_line.tax_cents, tax_cents)
+
+                invoice_result = InvoiceService().create_from_order(order)
+                self.assertTrue(invoice_result.is_ok(), invoice_result)
+                invoice = invoice_result.unwrap()
+                self.assertEqual(invoice.bill_to_name, billing_name)
+                self.assertEqual(invoice.bill_to_country, country)
+                self.assertEqual(invoice.subtotal_cents, 10_000)
+                self.assertEqual(invoice.tax_cents, tax_cents)
+                self.assertEqual(invoice.total_cents, 10_000 + tax_cents)
+                invoice_line = invoice.lines.get()
+                self.assertEqual(invoice_line.tax_rate, tax_rate)
+                self.assertEqual(invoice_line.tax_cents, tax_cents)
 
     def test_create_from_order_does_not_double_tax_header(self) -> None:
         """The invoice header VAT must be computed on the NET base (gross line subtotal), not on

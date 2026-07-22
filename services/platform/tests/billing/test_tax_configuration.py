@@ -31,7 +31,7 @@ from django.core.exceptions import ValidationError
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
-from apps.billing.config import DEFAULT_VAT_RATE, get_vat_rate, is_eu_country
+from apps.billing.config import get_vat_rate, is_eu_country
 from apps.billing.invoice_models import Invoice, InvoiceLine
 from apps.billing.models import Currency, ProformaInvoice
 from apps.billing.tax_models import TaxRule
@@ -278,14 +278,17 @@ class BillingConfigDelegationTests(TestCase):
     def setUp(self) -> None:
         cache.clear()
 
-    def test_default_vat_rate_is_021(self) -> None:
-        """DEFAULT_VAT_RATE constant is 0.21 (not stale 0.19)."""
-        self.assertEqual(DEFAULT_VAT_RATE, Decimal("0.21"))
-
     def test_get_vat_rate_returns_decimal(self) -> None:
         """get_vat_rate() returns rate as decimal (0.21, not 21.0)."""
         rate = get_vat_rate("RO")
         self.assertEqual(rate, Decimal("0.21"))
+
+    def test_dormant_vat_summary_api_is_not_exposed(self) -> None:
+        """VAT reporting must not expose a second, known-wrong aggregation engine."""
+        from apps.billing import invoice_service, services  # noqa: PLC0415
+
+        self.assertFalse(hasattr(invoice_service, "generate_vat_summary"))
+        self.assertFalse(hasattr(services, "generate_vat_summary"))
 
     def test_get_vat_rate_defaults_to_romania(self) -> None:
         """get_vat_rate(None) defaults to Romanian rate."""
@@ -744,7 +747,7 @@ class OrderVATCalculatorTests(TestCase):
 
 
 class CustomerTaxProfileDefaultTests(TestCase):
-    """Test CustomerTaxProfile model defaults match current rates."""
+    """Test CustomerTaxProfile distinguishes country rules from explicit overrides."""
 
     def setUp(self) -> None:
         self.customer = Customer.objects.create(
@@ -753,10 +756,10 @@ class CustomerTaxProfileDefaultTests(TestCase):
             status="active",
         )
 
-    def test_new_tax_profile_defaults_to_21(self) -> None:
-        """New CustomerTaxProfile defaults to 21% (not stale 19%)."""
+    def test_new_tax_profile_has_no_rate_override(self) -> None:
+        """A new profile delegates rate resolution to TaxService."""
         profile = CustomerTaxProfile.objects.create(customer=self.customer)
-        self.assertEqual(profile.vat_rate, Decimal("21.00"))
+        self.assertIsNone(profile.vat_rate)
 
     def test_existing_19_rate_preserved(self) -> None:
         """Customers with explicit 19% rate keep their stored value."""

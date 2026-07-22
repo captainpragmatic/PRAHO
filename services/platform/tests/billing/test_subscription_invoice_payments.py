@@ -8,6 +8,7 @@ import logging
 import uuid
 from datetime import datetime, timedelta
 from decimal import Decimal
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 from zoneinfo import ZoneInfo
 
@@ -343,6 +344,39 @@ class SubscriptionInvoicePaymentTestCase(_SubscriptionInvoicePaymentFixture, Tes
 
         cycle = BillingCycle.objects.get(subscription=subscription)
         self.assertEqual(cycle.proforma.bill_to_country, "RO")
+
+    def test_recurring_proforma_uses_one_address_for_tax_and_snapshot(self) -> None:
+        romanian_address = SimpleNamespace(
+            address_line1="Strada Test 1",
+            address_line2="",
+            city="Bucharest",
+            county="Bucharest",
+            postal_code="010101",
+            country="România",
+        )
+        german_address = SimpleNamespace(
+            address_line1="Teststrasse 2",
+            address_line2="",
+            city="Berlin",
+            county="Berlin",
+            postal_code="10115",
+            country="Germany",
+        )
+        now = timezone.now()
+        subscription = self._create_aligned_subscription("ONE-ADDRESS", now)
+
+        with patch.object(
+            Customer,
+            "get_billing_address",
+            side_effect=[romanian_address, german_address],
+        ) as get_billing_address:
+            result = RecurringBillingOrchestrator.prepare_due_proformas(as_of=now)
+
+        self.assertEqual(result["proformas_created"], 1)
+        self.assertEqual(get_billing_address.call_count, 1)
+        cycle = BillingCycle.objects.get(subscription=subscription)
+        self.assertEqual(cycle.proforma.bill_to_country, "RO")
+        self.assertEqual(cycle.proforma.tax_cents, 2_100)
 
     def test_recurring_run_reports_active_auto_renew_service_without_subscription(self) -> None:
         now = timezone.now()

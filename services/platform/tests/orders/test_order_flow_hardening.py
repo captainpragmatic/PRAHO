@@ -74,7 +74,6 @@ def _make_customer(primary_email: str = 'firma@test.ro') -> Customer:
         cui='RO12345678',
         vat_number='RO12345678',
         is_vat_payer=True,
-        # vat_rate defaults to Decimal("21.00") per model definition
     )
     return customer
 

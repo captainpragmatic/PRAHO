@@ -137,16 +137,19 @@ class StripeGateway(BasePaymentGateway):
             PaymentIntentResult with client_secret for frontend
         """
         try:
+            # A document can contain multiple tax rates. Never let free-form
+            # gateway metadata pretend that one scalar rate is authoritative.
+            safe_metadata = {key: value for key, value in (metadata or {}).items() if key != "vat_rate"}
+
             # Prepare payment intent parameters
             payment_intent_params = {
                 "amount": amount_cents,
                 "currency": currency.lower(),
                 "automatic_payment_methods": {"enabled": True},
                 "metadata": {
-                    **(metadata or {}),
+                    **safe_metadata,
                     "praho_order_id": order_id,
                     "platform": "PRAHO",
-                    "vat_rate": "21%",  # Romanian VAT rate
                 },
                 # Romanian business compliance
                 "statement_descriptor_suffix": "PRAHO",
