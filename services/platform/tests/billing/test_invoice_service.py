@@ -2,13 +2,12 @@
 Comprehensive tests for apps/billing/invoice_service.py.
 
 Coverage targets: BillingAnalyticsService (4 static methods),
-generate_invoice_pdf, _generate_placeholder_pdf, generate_e_factura_xml,
-send_invoice_email, generate_vat_summary.
+generate_invoice_pdf, generate_e_factura_xml, send_invoice_email,
+generate_vat_summary.
 """
 
 from __future__ import annotations
 
-import io
 from datetime import datetime
 from decimal import Decimal
 from unittest.mock import MagicMock, Mock, patch
@@ -16,10 +15,10 @@ from unittest.mock import MagicMock, Mock, patch
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
+from apps.billing.document_adjustments import UnsupportedDocumentAdjustmentError
 from apps.billing.invoice_models import Invoice
 from apps.billing.invoice_service import (
     BillingAnalyticsService,
-    _generate_placeholder_pdf,
     generate_e_factura_xml,
     generate_invoice_pdf,
     generate_vat_summary,
@@ -473,107 +472,24 @@ class AdjustCustomerLtvTest(TestCase):
 
 
 class GenerateInvoicePdfTest(TestCase):
-    """generate_invoice_pdf — weasyprint unavailable → placeholder; available → real PDF."""
+    """generate_invoice_pdf delegates to the canonical guarded renderer."""
 
-    def test_weasyprint_not_installed_returns_placeholder_bytes(self) -> None:
+    @patch("apps.billing.pdf_generators.generate_invoice_pdf", return_value=b"%PDF-canonical")
+    def test_delegates_to_canonical_generator(self, mock_generate: MagicMock) -> None:
         _, invoice = _make_invoice()
 
-        # weasyprint is not properly installed in test env; exercises ImportError path
         result = generate_invoice_pdf(invoice)
 
-        self.assertIsInstance(result, bytes)
-        self.assertIn(invoice.number.encode(), result)
+        self.assertEqual(result, b"%PDF-canonical")
+        mock_generate.assert_called_once_with(invoice)
 
-    def test_weasyprint_available_renders_pdf(self) -> None:
+    def test_metadata_adjustment_is_rejected_on_email_pdf_path(self) -> None:
+        """Invoice email attachments must enforce the canonical PDF adjustment invariant."""
         _, invoice = _make_invoice()
+        invoice.meta = {"allowances": [{"amount_cents": 1000, "reason": "Manual"}]}
 
-        fake_pdf_bytes = b"%PDF-1.4 fake-content"
-        fake_html_instance = Mock()
-
-        def write_to_buf(buf: object) -> None:
-            if isinstance(buf, io.BytesIO):
-                buf.write(fake_pdf_bytes)
-
-        fake_html_instance.write_pdf.side_effect = write_to_buf
-        fake_html_class = Mock(return_value=fake_html_instance)
-        fake_weasyprint = Mock()
-        fake_weasyprint.HTML = fake_html_class
-
-        with (
-            patch.dict("sys.modules", {"weasyprint": fake_weasyprint}),
-            patch("apps.billing.invoice_service.render_to_string", return_value="<html><body></body></html>"),
-        ):
-            result = generate_invoice_pdf(invoice)
-
-        self.assertIsInstance(result, bytes)
-
-    def test_exception_during_rendering_falls_back_to_placeholder(self) -> None:
-        _, invoice = _make_invoice()
-
-        fake_html_class = Mock(side_effect=RuntimeError("render exploded"))
-        fake_weasyprint = Mock()
-        fake_weasyprint.HTML = fake_html_class
-
-        with (
-            patch.dict("sys.modules", {"weasyprint": fake_weasyprint}),
-            patch("apps.billing.invoice_service.render_to_string", return_value="<html/>"),
-        ):
-            result = generate_invoice_pdf(invoice)
-
-        self.assertIsInstance(result, bytes)
-        self.assertIn(invoice.number.encode(), result)
-
-
-# ===============================================================================
-# _generate_placeholder_pdf
-# ===============================================================================
-
-
-class GeneratePlaceholderPdfTest(TestCase):
-    """_generate_placeholder_pdf — returns bytes with invoice number and customer."""
-
-    def test_contains_invoice_number(self) -> None:
-        _, invoice = _make_invoice(number="INV-PH-007")
-
-        result = _generate_placeholder_pdf(invoice)
-
-        self.assertIsInstance(result, bytes)
-        self.assertIn(b"INV-PH-007", result)
-
-    def test_contains_customer_display_name(self) -> None:
-        _, invoice = _make_invoice(customer_name="Placeholder SRL")
-
-        result = _generate_placeholder_pdf(invoice)
-
-        self.assertIn(b"Placeholder SRL", result)
-
-    def test_contains_formatted_amount(self) -> None:
-        # total = 10000 + 2100 = 12100 → 121.00
-        _, invoice = _make_invoice(subtotal_cents=10000, tax_cents=2100)
-
-        result = _generate_placeholder_pdf(invoice)
-
-        self.assertIn(b"121.00", result)
-
-    def test_customer_none_returns_na(self) -> None:
-        invoice = Mock()
-        invoice.number = "INV-NO-CUST"
-        invoice.customer = None
-        invoice.total_cents = 5000
-        invoice.created_at = timezone.now()
-
-        result = _generate_placeholder_pdf(invoice)
-
-        self.assertIn(b"N/A", result)
-
-    def test_created_at_none_returns_na_for_date(self) -> None:
-        _, invoice = _make_invoice()
-        invoice.created_at = None
-
-        result = _generate_placeholder_pdf(invoice)
-
-        self.assertIn(b"N/A", result)
-
+        with self.assertRaisesRegex(UnsupportedDocumentAdjustmentError, "Metadata-based document allowances"):
+            generate_invoice_pdf(invoice)
 
 # ===============================================================================
 # generate_e_factura_xml
@@ -695,6 +611,18 @@ class SendInvoiceEmailTest(TestCase):
             result = send_invoice_email(self.invoice, recipient_email="test@example.com")
 
         self.assertFalse(result)
+
+    @patch(
+        "apps.billing.invoice_service.generate_invoice_pdf",
+        side_effect=UnsupportedDocumentAdjustmentError("unsupported adjustment"),
+    )
+    def test_pdf_validation_failure_aborts_email(self, mock_pdf: MagicMock) -> None:
+        with patch("django.core.mail.EmailMessage") as mock_email_cls:
+            result = send_invoice_email(self.invoice, recipient_email="test@example.com")
+
+        self.assertFalse(result)
+        mock_pdf.assert_called_once_with(self.invoice)
+        mock_email_cls.assert_not_called()
 
     @patch("apps.billing.invoice_service.generate_invoice_pdf", return_value=b"pdf-bytes")
     def test_email_subject_contains_invoice_number(self, mock_pdf: MagicMock) -> None:

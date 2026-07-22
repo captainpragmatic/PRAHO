@@ -636,12 +636,7 @@ class UBLInvoiceBuilderTestCase(TestCase):
     def _build_invoice_with_meta(
         self, *, meta, bill_to_country="DE", bill_to_tax_id="DE123456789", subtotal_cents=100000, tax_total_cents=0
     ):
-        """Build an invoice doc with in-memory `meta` (allowances/charges).
-
-        The Invoice model has no `meta` field, so the document-level allowance/charge
-        path is dormant in production; setting it on the instance exercises that path.
-        Defaults model an AE (EU reverse-charge, tax 0) invoice; total = subtotal + tax.
-        """
+        """Build an invoice carrying unsupported metadata-based financial adjustments."""
         invoice = InvoiceFactory(
             customer=CustomerFactory(),
             currency=self.currency,
@@ -673,40 +668,81 @@ class UBLInvoiceBuilderTestCase(TestCase):
     def _lmt_amount(self, doc, name):
         return doc.find(f".//{{{NAMESPACES['cac']}}}LegalMonetaryTotal/{{{NAMESPACES['cbc']}}}{name}").text
 
-    def test_doc_allowance_reconciles_totals_and_orders_elements(self):
-        """BR-CO-13/15 + UBL order: a document-level allowance nets TaxExclusiveAmount,
-        TaxInclusiveAmount = TaxExclusive + tax, PayableAmount = TaxInclusive, and
-        TaxExclusive/Inclusive precede the allowance/charge totals (UBL element order).
-        AE (reverse charge, tax 0) so the whole chain is ANAF-conformant; the deep
-        tax-value recalc for standard-rate-with-allowances stays with #177.
-        """
-        doc = self._build_invoice_with_meta(
-            meta={"allowances": [{"amount_cents": 10000, "reason": "Loyalty discount"}]},
-        )
-        lmt = doc.find(f".//{{{NAMESPACES['cac']}}}LegalMonetaryTotal")
-        order = [etree.QName(c).localname for c in lmt]
-        self.assertLess(order.index("TaxExclusiveAmount"), order.index("AllowanceTotalAmount"))
-        self.assertLess(order.index("TaxInclusiveAmount"), order.index("AllowanceTotalAmount"))
-        self.assertEqual(self._lmt_amount(doc, "LineExtensionAmount"), "1000.00")
-        self.assertEqual(self._lmt_amount(doc, "TaxExclusiveAmount"), "900.00")
-        self.assertEqual(self._lmt_amount(doc, "TaxInclusiveAmount"), "900.00")
-        self.assertEqual(self._lmt_amount(doc, "AllowanceTotalAmount"), "100.00")
-        self.assertEqual(self._lmt_amount(doc, "PayableAmount"), "900.00")
-        taxable = doc.find(
-            f".//{{{NAMESPACES['cac']}}}TaxTotal/{{{NAMESPACES['cac']}}}TaxSubtotal/{{{NAMESPACES['cbc']}}}TaxableAmount"
-        )
-        self.assertEqual(taxable.text, "900.00")
+    def test_metadata_allowance_is_rejected_before_serialization(self):
+        """Unledgered metadata allowances must never become authoritative XML amounts."""
+        with self.assertRaisesRegex(XMLBuilderError, "Metadata-based document allowances"):
+            self._build_invoice_with_meta(
+                meta={"allowances": [{"amount_cents": 10000, "reason": "Loyalty discount"}]},
+            )
 
-    def test_doc_charge_raises_tax_exclusive_amount(self):
-        """A document-level charge raises TaxExclusiveAmount; TaxInclusive stays
-        TaxExclusive + tax and PayableAmount tracks it (BR-CO-13/15). AE (tax 0)."""
-        doc = self._build_invoice_with_meta(
-            meta={"charges": [{"amount_cents": 5000, "reason": "Handling"}]},
+    def test_metadata_charge_is_rejected_before_serialization(self):
+        """Unledgered metadata charges must never become authoritative XML amounts."""
+        with self.assertRaisesRegex(XMLBuilderError, "Metadata-based document charges"):
+            self._build_invoice_with_meta(
+                meta={"charges": [{"amount_cents": 5000, "reason": "Handling"}]},
+            )
+
+    def test_empty_metadata_adjustment_containers_are_supported(self):
+        """Empty reserved metadata keys carry no money and must not block valid XML."""
+        self.invoice.meta = {"allowances": [], "charges": []}
+
+        xml = UBLInvoiceBuilder(self.invoice).build()
+
+        self.assertIn("<cbc:ID>INV-2024-001</cbc:ID>", xml)
+
+    def test_line_discount_is_rejected_before_serialization(self):
+        """A dormant line discount cannot be emitted when ledger totals ignore it."""
+        invoice = InvoiceFactory(
+            customer=CustomerFactory(),
+            currency=self.currency,
+            number="INV-LINE-DISCOUNT",
+            bill_to_name="Customer SRL",
+            bill_to_country="RO",
+            bill_to_tax_id="RO87654321",
+            status="issued",
+            issued_at=timezone.now(),
+            subtotal_cents=100000,
+            tax_total_cents=19000,
+            total_cents=119000,
         )
-        self.assertEqual(self._lmt_amount(doc, "TaxExclusiveAmount"), "1050.00")
-        self.assertEqual(self._lmt_amount(doc, "ChargeTotalAmount"), "50.00")
-        self.assertEqual(self._lmt_amount(doc, "TaxInclusiveAmount"), "1050.00")
-        self.assertEqual(self._lmt_amount(doc, "PayableAmount"), "1050.00")
+        InvoiceLineFactory(
+            invoice=invoice,
+            description="Discounted hosting",
+            unit_price_cents=100000,
+            quantity=1,
+            tax_rate=Decimal("0.1900"),
+            discount_amount_cents=10000,
+        )
+
+        with self.assertRaisesRegex(XMLBuilderError, "Line-level discounts"):
+            UBLInvoiceBuilder(invoice).build()
+
+    def test_negative_line_discount_is_rejected_before_serialization(self):
+        """A malformed negative line discount cannot bypass the zero-only invariant."""
+        invoice = InvoiceFactory(
+            customer=CustomerFactory(),
+            currency=self.currency,
+            number="INV-NEGATIVE-LINE-DISCOUNT",
+            bill_to_name="Customer SRL",
+            bill_to_country="RO",
+            bill_to_tax_id="RO87654321",
+            status="issued",
+            issued_at=timezone.now(),
+            subtotal_cents=100000,
+            tax_total_cents=19000,
+            total_cents=119000,
+        )
+        InvoiceLineFactory(
+            invoice=invoice,
+            description="Malformed discount",
+            unit_price_cents=100000,
+            quantity=1,
+            tax_rate=Decimal("0.1900"),
+            discount_amount_cents=-1,
+        )
+
+        with self.assertRaisesRegex(XMLBuilderError, "Line-level discounts"):
+            UBLInvoiceBuilder(invoice).build()
 
     def test_setup_fee_and_document_discount_reconcile(self):
         """#195/#188: the live path — a goods line + a setup-fee line + a stored
@@ -774,27 +810,6 @@ class UBLInvoiceBuilderTestCase(TestCase):
         self.assertEqual(taxable.text, "1100.00")
         tax_amount = doc.find(f".//{{{NAMESPACES['cac']}}}TaxTotal/{{{NAMESPACES['cbc']}}}TaxAmount")
         self.assertEqual(tax_amount.text, "209.00")
-
-    def test_invalid_allowance_amount_is_skipped_not_crash(self):
-        """A malformed amount_cents (None / non-numeric) is skipped (logged), not a
-        crash; valid sibling entries still emit and total correctly."""
-        doc = self._build_invoice_with_meta(
-            meta={
-                "allowances": [
-                    {"amount_cents": None, "reason": "broken"},
-                    {"amount_cents": "not-a-number", "reason": "also broken"},
-                    {"amount_cents": 5000, "reason": "valid"},
-                ]
-            },
-        )
-        allowances = [
-            ac
-            for ac in doc.findall(f".//{{{NAMESPACES['cac']}}}AllowanceCharge")
-            if ac.find(f"{{{NAMESPACES['cbc']}}}ChargeIndicator").text == "false"
-        ]
-        self.assertEqual(len(allowances), 1)
-        self.assertEqual(self._lmt_amount(doc, "AllowanceTotalAmount"), "50.00")
-        self.assertEqual(self._lmt_amount(doc, "TaxExclusiveAmount"), "950.00")
 
     def test_document_discount_emits_allowance_and_reconciles(self):
         """#188: a stored document-level discount emits a BG-20 AllowanceCharge, and the
@@ -1355,6 +1370,21 @@ class UBLCreditNoteBuilderTestCase(TestCase):
 
         with self.assertRaisesRegex(XMLBuilderError, "credit note"):
             UBLCreditNoteBuilder(fc_credit_note, self.original_invoice).build()
+
+    def test_metadata_adjustment_is_rejected_before_credit_note_serialization(self):
+        """Credit notes must reject the same unledgered metadata adjustments as invoices."""
+        self.credit_note.meta = {"allowances": [{"amount_cents": 1000, "reason": "Manual"}]}
+
+        with self.assertRaisesRegex(XMLBuilderError, "Metadata-based document allowances"):
+            UBLCreditNoteBuilder(self.credit_note, self.original_invoice).build()
+
+    def test_line_discount_is_rejected_before_credit_note_serialization(self):
+        """Credit notes cannot serialize line discounts absent from their ledger totals."""
+        self.line.discount_amount_cents = 1000
+        self.line.save()
+
+        with self.assertRaisesRegex(XMLBuilderError, "Line-level discounts"):
+            UBLCreditNoteBuilder(self.credit_note, self.original_invoice).build()
 
     def test_credit_note_issue_dates_use_romanian_local_date(self):
         """#220: both the credit note's own BT-2 and the BillingReference IssueDate of the
