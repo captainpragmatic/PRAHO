@@ -160,3 +160,13 @@ class OrderTimeoutTestCase(TestCase):
         self._run()
 
         self.assertEqual(self._status(order), "awaiting_payment")
+
+    def test_unknown_nonempty_payment_method_is_treated_as_offline(self) -> None:
+        """Fail-open must cover NOVEL methods too, not just the empty string: a
+        method this code has never heard of must get the customer-safe offline
+        window, never the aggressive card sweep (review of #222)."""
+        order = self._order(payment_method="sepa_debit", hours_old=25, with_proforma_valid_days=30)
+
+        self._run()
+
+        self.assertEqual(self._status(order), "awaiting_payment")

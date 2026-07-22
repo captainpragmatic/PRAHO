@@ -60,9 +60,11 @@ TASK_TIME_LIMIT = _DEFAULT_TASK_TIME_LIMIT
 _DEFAULT_CARD_ORDER_TIMEOUT_HOURS = 24
 _DEFAULT_BANK_TRANSFER_ORDER_TIMEOUT_HOURS = 72
 
-# Methods whose payment legitimately arrives over days, not seconds. An empty method is unknown, so
-# it is treated as offline — better to sweep it late than cancel a paying customer mid-wire.
-_OFFLINE_PAYMENT_METHODS = frozenset({"bank_transfer", "manual", ""})
+# Methods known to settle immediately (or fail fast) get the tight sweep. EVERYTHING else —
+# bank_transfer, manual, empty, or any method this code has never heard of — is treated as
+# offline: better to sweep late than cancel a paying customer mid-wire. A positive allowlist
+# keeps future payment methods on the customer-safe path by default.
+_IMMEDIATE_PAYMENT_METHODS = frozenset({"card", "paypal", "crypto", "wallet"})
 
 
 def get_card_order_timeout_hours() -> int:
@@ -92,7 +94,7 @@ def _order_timeout_deadline(order: Order) -> tuple[Any, str]:
     customer was actually emailed; if there is no proforma to anchor on, a longer fallback window.
     Card-like methods keep the tight window they always had.
     """
-    if (order.payment_method or "") in _OFFLINE_PAYMENT_METHODS:
+    if (order.payment_method or "") not in _IMMEDIATE_PAYMENT_METHODS:
         proforma = order.proforma  # already select_related-loaded in process_pending_orders
         if proforma and proforma.valid_until:
             return proforma.valid_until, "proforma_valid_until"
