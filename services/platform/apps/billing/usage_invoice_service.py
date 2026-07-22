@@ -17,7 +17,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
-from django.core.exceptions import ObjectDoesNotExist
+from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.db import transaction
 from django.db.models import Exists, Max, OuterRef, Sum
 from django.utils import timezone
@@ -398,6 +398,9 @@ class UsageInvoiceService:
             except TransitionNotAllowed:
                 logger.warning("⚠️ [Invoice] Cannot issue invoice %s from status '%s'", invoice.number, invoice.status)
                 return Err(f"Cannot issue invoice {invoice.number} from status '{invoice.status}'")
+            except ValidationError as exc:
+                logger.warning("⚠️ [Invoice] Fiscal issuance validation failed for %s: %s", invoice.number, exc)
+                return Err(f"Cannot issue invoice {invoice.number}: {'; '.join(exc.messages)}")
             # Note: issue() FSM transition already sets issued_at and locked_at
             invoice.save()
 
@@ -498,7 +501,16 @@ class UsageBillingService:
             zero_usage_result = UsageBillingService._finalize_zero_usage_cycle(str(cycle_id))
             if zero_usage_result is not False:
                 continue
-            result = invoice_service.generate_invoice_from_cycle(str(cycle_id))
+            try:
+                result = invoice_service.generate_invoice_from_cycle(str(cycle_id))
+            except (ValidationError, TransitionNotAllowed) as exc:
+                # A fiscally fail-closed cycle (e.g. missing provenanced FX rate)
+                # must not head-of-line-block the batch. Catching OUTSIDE the
+                # callee's transaction.atomic lets its writes roll back via
+                # exception propagation before we continue.
+                errors += 1
+                logger.error(f"Error generating invoice for cycle {cycle_id}: {exc}")
+                continue
             if result.is_ok():
                 invoice_id = result.unwrap().get("invoice_id")
                 if not invoice_id:

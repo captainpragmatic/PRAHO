@@ -297,6 +297,34 @@ class TestH2InvoiceSaveOptimization(TestCase):
             f"but found {len(immutability_queries)} query(ies): {immutability_queries}",
         )
 
+    def test_due_date_update_still_runs_date_validation(self):
+        """The no-query immutability optimization must not bypass ordinary validation."""
+        original_due_at = self.invoice.due_at
+        self.invoice.due_at = self.invoice.issued_at
+
+        with self.assertRaisesRegex(ValidationError, "Due date must be after issue date"):
+            self.invoice.save(update_fields=["due_at"])
+
+        self.invoice.refresh_from_db()
+        self.assertEqual(self.invoice.due_at, original_due_at)
+
+    def test_metadata_update_still_runs_json_validation(self):
+        """Optimized metadata saves retain the financial JSON size guard."""
+        self.invoice.meta = {"payload": "x" * 6000}
+
+        with self.assertRaises(ValidationError):
+            self.invoice.save(update_fields=["meta"])
+
+    @patch("apps.billing.invoice_models.log_security_event")
+    def test_non_financial_update_still_logs_security_validation(self, security_log: MagicMock):
+        """Optimized partial saves must retain the successful-validation audit event."""
+        self.invoice.meta = {"test": True}
+
+        self.invoice.save(update_fields=["meta"])
+
+        security_log.assert_called_once()
+        self.assertEqual(security_log.call_args.kwargs["event_type"], "invoice_validation")
+
     def test_financial_update_still_blocked_on_locked_invoice(self):
         """Saving a financial field on a locked invoice must still raise ValidationError."""
         self.assertIsNotNone(self.invoice.locked_at)

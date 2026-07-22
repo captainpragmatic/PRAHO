@@ -28,7 +28,7 @@ class InvoiceTestCase(TestCase):
 
     def setUp(self):
         """Create test data for invoice tests"""
-        self.currency, _ = Currency.objects.get_or_create(code='EUR', defaults={'symbol': '€', 'decimals': 2})
+        self.currency, _ = Currency.objects.get_or_create(code='RON', defaults={'symbol': 'lei', 'decimals': 2})
         self.customer = Customer.objects.create(
             customer_type='company',
             company_name='Test Company SRL',
@@ -423,7 +423,7 @@ class InvoiceFSMTestCase(TestCase):
     """Test Invoice FSM transitions and immutability"""
 
     def setUp(self):
-        self.currency, _ = Currency.objects.get_or_create(code='EUR', defaults={'symbol': '€', 'decimals': 2})
+        self.currency, _ = Currency.objects.get_or_create(code='RON', defaults={'symbol': 'lei', 'decimals': 2})
         self.customer = Customer.objects.create(
             customer_type='company',
             company_name='FSM Test SRL',

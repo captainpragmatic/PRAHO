@@ -1248,6 +1248,79 @@ class UsageInvoiceServiceTestCase(TestCase):
         self.assertTrue(result.is_err())
         self.assertIn("not found", result.error.lower())
 
+    def test_generate_pending_invoices_isolates_foreign_currency_cycle_failures(self):
+        """One EUR cycle without a provenanced rate must not stall the batch.
+
+        The healthy RON cycle still invoices, the EUR cycle is counted as an
+        error, and its partial writes (invoice, lines, aggregation flips) roll
+        back — nothing may commit when issue() fails fiscally.
+        """
+        eur, _ = Currency.objects.get_or_create(code="EUR", defaults={"symbol": "€", "decimals": 2})
+        now = timezone.now()
+        eur_subscription = Subscription.objects.create(
+            customer=self.customer,
+            product=self.product,
+            currency=eur,
+            subscription_number="SUB-INV-EUR",
+            status="active",
+            billing_cycle="monthly",
+            unit_price_cents=2999,
+            current_period_start=now - timedelta(days=30),
+            current_period_end=now,
+            next_billing_date=now,
+        )
+        eur_cycle = BillingCycle.objects.create(
+            subscription=eur_subscription,
+            period_start=now - timedelta(days=30),
+            period_end=now,
+            status="closed",
+            base_charge_cents=2999,
+            usage_charge_cents=1300,
+        )
+        eur_aggregation = UsageAggregation.objects.create(
+            meter=self.meter,
+            customer=self.customer,
+            subscription=eur_subscription,
+            billing_cycle=eur_cycle,
+            period_start=now - timedelta(days=30),
+            period_end=now,
+            total_value=Decimal("80"),
+            billable_value=Decimal("80"),
+            included_allowance=Decimal("40"),
+            overage_value=Decimal("40"),
+            charge_cents=1300,
+            status="rated",
+        )
+
+        generated, errors = UsageBillingService.generate_pending_invoices()
+
+        self.assertEqual((generated, errors), (1, 1))
+        eur_cycle.refresh_from_db()
+        self.billing_cycle.refresh_from_db()
+        eur_aggregation.refresh_from_db()
+        self.assertIsNone(eur_cycle.usage_invoice)
+        self.assertIsNotNone(self.billing_cycle.usage_invoice)
+        self.assertFalse(Invoice.objects.filter(currency=eur).exists())
+        self.assertEqual(eur_aggregation.status, "rated")
+
+    def test_issue_foreign_currency_invoice_without_rate_returns_error(self):
+        eur, _ = Currency.objects.get_or_create(code="EUR", defaults={"symbol": "EUR", "decimals": 2})
+        invoice = Invoice.objects.create(
+            customer=self.customer,
+            currency=eur,
+            number="INV-MISSING-FX",
+            subtotal_cents=1000,
+            tax_cents=210,
+            total_cents=1210,
+        )
+
+        result = self.service.issue_invoice(str(invoice.id))
+
+        self.assertTrue(result.is_err())
+        self.assertIn("exchange rate", result.unwrap_err().lower())
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.status, "draft")
+
 
 class UsageAlertServiceTestCase(TestCase):
     """Test UsageAlertService functionality."""

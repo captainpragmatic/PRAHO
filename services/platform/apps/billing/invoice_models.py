@@ -112,8 +112,11 @@ class Invoice(models.Model):
     # Currency and amounts (cents for precision)
     currency = models.ForeignKey(Currency, on_delete=models.PROTECT)
     exchange_to_ron = models.DecimalField(
-        max_digits=18, decimal_places=6, null=True, blank=True, help_text=_("Exchange rate to RON at time of invoice")
+        max_digits=18, decimal_places=8, null=True, blank=True, help_text=_("Exchange rate to RON at time of invoice")
     )
+    exchange_rate_as_of = models.DateField(null=True, blank=True)
+    exchange_rate_source = models.CharField(max_length=32, blank=True)
+    exchange_rate_source_reference = models.CharField(max_length=500, blank=True)
     subtotal_cents = models.BigIntegerField(default=0)
     tax_cents = models.BigIntegerField(default=0)
     total_cents = models.BigIntegerField(default=0)
@@ -123,6 +126,11 @@ class Invoice(models.Model):
 
     # Dates
     issued_at = models.DateTimeField(null=True, blank=True)
+    tax_point_date = models.DateField(
+        null=True,
+        blank=True,
+        help_text=_("VAT tax point used to select the immutable exchange-rate snapshot"),
+    )
     due_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -241,14 +249,46 @@ class Invoice(models.Model):
             "bill_to_country",
         }
     )
-    _LOCKED_FIELDS: ClassVar[frozenset[str]] = _FINANCIAL_FIELDS | _BILLING_SNAPSHOT_FIELDS
+    _FISCAL_SNAPSHOT_FIELDS: ClassVar[frozenset[str]] = frozenset(
+        {
+            "currency_id",
+            "exchange_to_ron",
+            "exchange_rate_as_of",
+            "exchange_rate_source",
+            "exchange_rate_source_reference",
+            "issued_at",
+            "tax_point_date",
+        }
+    )
+    _LOCKED_FIELDS: ClassVar[frozenset[str]] = _FINANCIAL_FIELDS | _BILLING_SNAPSHOT_FIELDS | _FISCAL_SNAPSHOT_FIELDS
+
+    _ISSUE_TRANSITION_FIELDS: ClassVar[frozenset[str]] = frozenset(
+        {
+            "issued_at",
+            "locked_at",
+            "tax_point_date",
+            "exchange_to_ron",
+            "exchange_rate_as_of",
+            "exchange_rate_source",
+            "exchange_rate_source_reference",
+        }
+    )
 
     def save(self, *args: Any, **kwargs: Any) -> None:
         """Calculate subtotal from total and tax on save with validation"""
         update_fields = kwargs.get("update_fields")
+        if update_fields and self.status == "issued" and "status" in update_fields and self.locked_at is not None:
+            # A status-only save after issue() must not create an issued row without
+            # the fiscal timestamps and exchange-rate evidence set by the transition.
+            update_fields = set(update_fields) | self._ISSUE_TRANSITION_FIELDS
+            kwargs["update_fields"] = update_fields
         # H2 fix: Skip clean() when update_fields contains no locked fields.
         # This avoids the immutability DB query on status/meta-only saves.
-        if update_fields and not (set(update_fields) & self._LOCKED_FIELDS):
+        normalized_update_fields = set(update_fields or ())
+        if "currency" in normalized_update_fields:
+            normalized_update_fields.add("currency_id")
+        if update_fields and not (normalized_update_fields & self._LOCKED_FIELDS):
+            self._validate_mutable_update(normalized_update_fields)
             super().save(*args, **kwargs)
             return
 
@@ -305,11 +345,26 @@ class Invoice(models.Model):
                     _("Cannot modify financial data on a locked invoice or alter its billing snapshot")
                 )
 
-        # Validate date consistency
+        self._validate_date_consistency()
+        self._log_security_validation()
+
+    def _validate_mutable_update(self, update_fields: set[str]) -> None:
+        """Validate fields allowed to bypass the locked-invoice database check."""
+        if "meta" in update_fields:
+            validate_financial_json(self.meta, "Invoice metadata")
+        if "efactura_response" in update_fields:
+            validate_financial_json(self.efactura_response, "e-Factura response")
+        if "due_at" in update_fields:
+            self._validate_date_consistency()
+        self._log_security_validation()
+
+    def _validate_date_consistency(self) -> None:
+        """Keep issue and due dates chronologically valid on every relevant save path."""
         if self.issued_at and self.due_at and self.due_at <= self.issued_at:
             raise ValidationError(_("Due date must be after issue date"))
 
-        # Log security validation
+    def _log_security_validation(self) -> None:
+        """Record successful validation for both full and optimized partial saves."""
         log_security_event(
             event_type="invoice_validation",
             details={
@@ -391,9 +446,34 @@ class Invoice(models.Model):
 
     @transition(field=status, source="draft", target="issued")
     def issue(self) -> None:
-        """Issue the invoice — sets timestamps and locks financial fields."""
+        """Issue the invoice and freeze its tax point and FX evidence."""
         if not self.issued_at:
             self.issued_at = timezone.now()
+        if self.tax_point_date is None:
+            issued_at = self.issued_at
+            assert issued_at is not None  # Set immediately above for a draft invoice.
+            if timezone.is_naive(issued_at):
+                issued_at = timezone.make_aware(issued_at)
+            self.tax_point_date = timezone.localdate(issued_at)
+
+        if self.currency_id == "RON":
+            self.exchange_to_ron = None
+            self.exchange_rate_as_of = None
+            self.exchange_rate_source = ""
+            self.exchange_rate_source_reference = ""
+        else:
+            from apps.billing.exchange_rate_service import ExchangeRateError, ExchangeRateService  # noqa: PLC0415
+
+            try:
+                snapshot = ExchangeRateService.resolve(self.currency_id, "RON", self.tax_point_date)
+            except ExchangeRateError as exc:
+                raise ValidationError(
+                    {"exchange_to_ron": _("Cannot issue foreign-currency invoice: %(error)s") % {"error": str(exc)}}
+                ) from exc
+            self.exchange_to_ron = snapshot.rate
+            self.exchange_rate_as_of = snapshot.as_of
+            self.exchange_rate_source = snapshot.source
+            self.exchange_rate_source_reference = snapshot.source_reference
         self.locked_at = timezone.now()
 
     @transition(field=status, source=["issued", "overdue"], target="paid")

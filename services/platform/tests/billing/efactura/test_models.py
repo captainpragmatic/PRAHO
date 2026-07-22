@@ -143,6 +143,22 @@ class EFacturaDocumentModelTestCase(TestCase):
         self.assertIsNotNone(document.next_retry_at)
         self.assertEqual(document.last_error, "Network timeout")
 
+    def test_mark_local_error_is_not_retryable(self):
+        document = EFacturaDocument.objects.create(invoice=self.invoice)
+        force_status(document, EFacturaStatus.QUEUED.value)
+        document.save()
+        errors = [{"code": "BR-01", "message": "ID missing"}]
+
+        document.mark_local_error("Native validation failed", errors)
+        document.save()
+        document.refresh_from_db()
+
+        self.assertEqual(document.status, EFacturaStatus.ERROR.value)
+        self.assertEqual(document.validation_errors, errors)
+        self.assertEqual(document.retry_count, 0)
+        self.assertIsNone(document.next_retry_at)
+        self.assertFalse(document.can_retry)
+
     def test_max_retries_exceeded(self):
         """Test that next_retry_at is None after max retries."""
         document = EFacturaDocument.objects.create(
@@ -178,10 +194,49 @@ class EFacturaDocumentModelTestCase(TestCase):
         self.assertFalse(document.can_retry)
 
         force_status(document, EFacturaStatus.ERROR.value)
+        document.next_retry_at = timezone.now()
         self.assertTrue(document.can_retry)
 
         document.retry_count = EFacturaDocument.MAX_RETRIES
         self.assertFalse(document.can_retry)
+
+    def test_local_error_document_supports_manual_requeue_after_fix(self):
+        """A deterministic local failure is never auto-retried, but an operator
+        must be able to requeue it once the root cause is fixed (statutory
+        five-working-day submission deadline)."""
+        document = EFacturaDocument.objects.create(invoice=self.invoice)
+        force_status(document, EFacturaStatus.QUEUED.value)
+        document.mark_local_error("XML validation failed")
+        document.save()
+        document.refresh_from_db()
+
+        self.assertFalse(document.can_retry)
+        self.assertTrue(document.can_requeue_after_fix)
+
+    def test_exhausted_network_retries_do_not_qualify_for_requeue(self):
+        """The requeue valve is scoped to local errors, not exhausted backoff."""
+        document = EFacturaDocument.objects.create(
+            invoice=self.invoice,
+            retry_count=EFacturaDocument.MAX_RETRIES,
+        )
+        force_status(document, EFacturaStatus.QUEUED.value)
+        document.mark_error("Final network error")
+        document.save()
+        document.refresh_from_db()
+
+        self.assertFalse(document.can_retry)
+        self.assertFalse(document.can_requeue_after_fix)
+
+    def test_scheduled_backoff_document_is_not_requeue_eligible(self):
+        """A doc still inside automatic backoff uses can_retry, not the valve."""
+        document = EFacturaDocument.objects.create(invoice=self.invoice)
+        force_status(document, EFacturaStatus.QUEUED.value)
+        document.mark_error("Transient network error")
+        document.save()
+        document.refresh_from_db()
+
+        self.assertTrue(document.can_retry)
+        self.assertFalse(document.can_requeue_after_fix)
 
     def test_submission_deadline(self):
         """Test submission deadline calculation."""

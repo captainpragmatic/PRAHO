@@ -124,6 +124,116 @@ class CIUSROValidatorTestCase(TestCase):
     </cac:InvoiceLine>
 </Invoice>"""
 
+    def _get_minimal_valid_eur_xml(self, *, accounting_first: bool = True) -> str:
+        xml = self._get_minimal_valid_xml().replace('currencyID="RON"', 'currencyID="EUR"')
+        xml = xml.replace(
+            "<cbc:DocumentCurrencyCode>RON</cbc:DocumentCurrencyCode>",
+            "<cbc:DocumentCurrencyCode>EUR</cbc:DocumentCurrencyCode>\n"
+            "    <cbc:TaxCurrencyCode>RON</cbc:TaxCurrencyCode>",
+        )
+        accounting_total = (
+            '    <cac:TaxTotal>\n        <cbc:TaxAmount currencyID="RON">950.00</cbc:TaxAmount>\n    </cac:TaxTotal>\n'
+        )
+        document_marker = "    <cac:TaxTotal>\n"
+        if accounting_first:
+            return xml.replace(document_marker, accounting_total + document_marker, 1)
+        return xml.replace(
+            "    </cac:TaxTotal>\n    <cac:LegalMonetaryTotal>",
+            "    </cac:TaxTotal>\n" + accounting_total + "    <cac:LegalMonetaryTotal>",
+            1,
+        )
+
+    def test_valid_foreign_currency_totals_are_selected_by_shape_not_order(self):
+        for accounting_first in (True, False):
+            with self.subTest(accounting_first=accounting_first):
+                result = self.validator.validate(self._get_minimal_valid_eur_xml(accounting_first=accounting_first))
+                self.assertTrue(result.is_valid, [str(error) for error in result.errors])
+
+    def test_br_ro_030_requires_ron_tax_currency_for_non_ron_invoice(self):
+        xml = self._get_minimal_valid_eur_xml().replace("    <cbc:TaxCurrencyCode>RON</cbc:TaxCurrencyCode>\n", "")
+
+        result = self.validator.validate(xml)
+
+        self.assertTrue(any(error.code == "BR-RO-030" for error in result.errors))
+
+    def test_ron_invoice_rejects_tax_currency_and_accounting_total(self):
+        xml = self._get_minimal_valid_xml().replace(
+            "<cbc:DocumentCurrencyCode>RON</cbc:DocumentCurrencyCode>",
+            "<cbc:DocumentCurrencyCode>RON</cbc:DocumentCurrencyCode>\n"
+            "    <cbc:TaxCurrencyCode>RON</cbc:TaxCurrencyCode>",
+        )
+
+        result = self.validator.validate(xml)
+
+        self.assertTrue(any(error.code == "BR-RO-030" for error in result.errors))
+
+    def test_r054_rejects_duplicate_accounting_total(self):
+        xml = self._get_minimal_valid_eur_xml()
+        accounting = (
+            '    <cac:TaxTotal>\n        <cbc:TaxAmount currencyID="RON">950.00</cbc:TaxAmount>\n    </cac:TaxTotal>\n'
+        )
+        xml = xml.replace(accounting, accounting + accounting, 1)
+
+        result = self.validator.validate(xml)
+
+        self.assertTrue(any(error.code == "R054" for error in result.errors))
+
+    def test_r053_and_r054_reject_tax_subtotal_under_accounting_total(self):
+        xml = self._get_minimal_valid_eur_xml().replace(
+            '<cbc:TaxAmount currencyID="RON">950.00</cbc:TaxAmount>',
+            '<cbc:TaxAmount currencyID="RON">950.00</cbc:TaxAmount><cac:TaxSubtotal/>',
+            1,
+        )
+
+        result = self.validator.validate(xml)
+
+        codes = {error.code for error in result.errors}
+        self.assertIn("R053", codes)
+        self.assertIn("R054", codes)
+
+    def test_r055_rejects_opposite_tax_total_signs(self):
+        xml = self._get_minimal_valid_eur_xml().replace(
+            '<cbc:TaxAmount currencyID="RON">950.00</cbc:TaxAmount>',
+            '<cbc:TaxAmount currencyID="RON">-950.00</cbc:TaxAmount>',
+            1,
+        )
+
+        result = self.validator.validate(xml)
+
+        self.assertTrue(any(error.code == "R055" for error in result.errors))
+
+    def test_r051_rejects_non_document_currency_amounts(self):
+        xml = self._get_minimal_valid_eur_xml().replace(
+            '<cbc:PayableAmount currencyID="EUR">1190.00</cbc:PayableAmount>',
+            '<cbc:PayableAmount currencyID="USD">1190.00</cbc:PayableAmount>',
+        )
+
+        result = self.validator.validate(xml)
+
+        self.assertTrue(any(error.code == "R051" for error in result.errors))
+
+    def test_br_53_rejects_accounting_total_with_wrong_currency(self):
+        xml = self._get_minimal_valid_eur_xml().replace(
+            '<cbc:TaxAmount currencyID="RON">950.00</cbc:TaxAmount>',
+            '<cbc:TaxAmount currencyID="USD">950.00</cbc:TaxAmount>',
+            1,
+        )
+
+        result = self.validator.validate(xml)
+
+        self.assertTrue(any(error.code == "BR-53" for error in result.errors))
+
+    def test_br_dec_15_rejects_bt111_over_precision(self):
+        xml = self._get_minimal_valid_eur_xml().replace(
+            '<cbc:TaxAmount currencyID="RON">950.00</cbc:TaxAmount>',
+            '<cbc:TaxAmount currencyID="RON">950.000</cbc:TaxAmount>',
+            1,
+        )
+
+        result = self.validator.validate(xml)
+
+        self.assertTrue(any(error.code == "BR-DEC-15" for error in result.errors))
+
     def test_validate_valid_xml(self):
         """Test that valid XML passes validation."""
         xml = self._get_minimal_valid_xml()
@@ -155,9 +265,7 @@ class CIUSROValidatorTestCase(TestCase):
 
     def test_br_co_16_payable_must_equal_inclusive_minus_prepaid(self):
         """BR-CO-16: PayableAmount must equal TaxInclusiveAmount - PrepaidAmount."""
-        xml = self._get_minimal_valid_xml().replace(
-            ">1190.00</cbc:PayableAmount>", ">1000.00</cbc:PayableAmount>"
-        )
+        xml = self._get_minimal_valid_xml().replace(">1190.00</cbc:PayableAmount>", ">1000.00</cbc:PayableAmount>")
         result = self.validator.validate(xml)
         self.assertFalse(result.is_valid)
         self.assertTrue(any(e.code == "BR-CO-16" for e in result.errors), [e.code for e in result.errors])
@@ -221,9 +329,9 @@ class CIUSROValidatorTestCase(TestCase):
         """BR-CL-22: an exemption code that merely starts with VATEX- but isn't in the codelist
         (e.g. VATEX-NOT-REAL) must be rejected, not accepted."""
         xml = self._get_minimal_valid_xml().replace(
-            '<cac:TaxCategory>\n                <cbc:ID>S</cbc:ID>\n                <cbc:Percent>19.00</cbc:Percent>',
-            '<cac:TaxCategory>\n                <cbc:ID>AE</cbc:ID>\n                <cbc:Percent>0.00</cbc:Percent>\n'
-            '                <cbc:TaxExemptionReasonCode>VATEX-NOT-REAL</cbc:TaxExemptionReasonCode>',
+            "<cac:TaxCategory>\n                <cbc:ID>S</cbc:ID>\n                <cbc:Percent>19.00</cbc:Percent>",
+            "<cac:TaxCategory>\n                <cbc:ID>AE</cbc:ID>\n                <cbc:Percent>0.00</cbc:Percent>\n"
+            "                <cbc:TaxExemptionReasonCode>VATEX-NOT-REAL</cbc:TaxExemptionReasonCode>",
         )
         result = self.validator.validate(xml)
         self.assertFalse(result.is_valid)
@@ -239,10 +347,7 @@ class CIUSROValidatorTestCase(TestCase):
 
     def test_validate_missing_invoice_id(self):
         """Test that missing Invoice ID is detected."""
-        xml = self._get_minimal_valid_xml().replace(
-            "<cbc:ID>INV-2024-001</cbc:ID>",
-            "<cbc:ID></cbc:ID>"
-        )
+        xml = self._get_minimal_valid_xml().replace("<cbc:ID>INV-2024-001</cbc:ID>", "<cbc:ID></cbc:ID>")
         result = self.validator.validate(xml)
 
         self.assertFalse(result.is_valid)
@@ -250,10 +355,7 @@ class CIUSROValidatorTestCase(TestCase):
 
     def test_validate_missing_issue_date(self):
         """Test that missing Issue Date is detected."""
-        xml = self._get_minimal_valid_xml().replace(
-            "<cbc:IssueDate>2024-12-26</cbc:IssueDate>",
-            ""
-        )
+        xml = self._get_minimal_valid_xml().replace("<cbc:IssueDate>2024-12-26</cbc:IssueDate>", "")
         result = self.validator.validate(xml)
 
         self.assertFalse(result.is_valid)
@@ -262,8 +364,7 @@ class CIUSROValidatorTestCase(TestCase):
     def test_validate_invalid_date_format(self):
         """Test that invalid date format is detected."""
         xml = self._get_minimal_valid_xml().replace(
-            "<cbc:IssueDate>2024-12-26</cbc:IssueDate>",
-            "<cbc:IssueDate>26/12/2024</cbc:IssueDate>"
+            "<cbc:IssueDate>2024-12-26</cbc:IssueDate>", "<cbc:IssueDate>26/12/2024</cbc:IssueDate>"
         )
         result = self.validator.validate(xml)
 
@@ -272,10 +373,7 @@ class CIUSROValidatorTestCase(TestCase):
 
     def test_validate_missing_invoice_type_code(self):
         """Test that missing Invoice Type Code is detected."""
-        xml = self._get_minimal_valid_xml().replace(
-            "<cbc:InvoiceTypeCode>380</cbc:InvoiceTypeCode>",
-            ""
-        )
+        xml = self._get_minimal_valid_xml().replace("<cbc:InvoiceTypeCode>380</cbc:InvoiceTypeCode>", "")
         result = self.validator.validate(xml)
 
         self.assertFalse(result.is_valid)
@@ -283,10 +381,7 @@ class CIUSROValidatorTestCase(TestCase):
 
     def test_validate_missing_document_currency(self):
         """Test that missing Document Currency is detected."""
-        xml = self._get_minimal_valid_xml().replace(
-            "<cbc:DocumentCurrencyCode>RON</cbc:DocumentCurrencyCode>",
-            ""
-        )
+        xml = self._get_minimal_valid_xml().replace("<cbc:DocumentCurrencyCode>RON</cbc:DocumentCurrencyCode>", "")
         result = self.validator.validate(xml)
 
         self.assertFalse(result.is_valid)
@@ -296,9 +391,7 @@ class CIUSROValidatorTestCase(TestCase):
         """Test that missing Supplier Party is detected."""
         xml = self._get_minimal_valid_xml()
         # Remove entire supplier party (simplified for test)
-        xml = xml.replace("<cac:AccountingSupplierParty>", "<!--").replace(
-            "</cac:AccountingSupplierParty>", "-->"
-        )
+        xml = xml.replace("<cac:AccountingSupplierParty>", "<!--").replace("</cac:AccountingSupplierParty>", "-->")
         result = self.validator.validate(xml)
 
         self.assertFalse(result.is_valid)
@@ -307,9 +400,7 @@ class CIUSROValidatorTestCase(TestCase):
     def test_validate_missing_customer_party(self):
         """Test that missing Customer Party is detected."""
         xml = self._get_minimal_valid_xml()
-        xml = xml.replace("<cac:AccountingCustomerParty>", "<!--").replace(
-            "</cac:AccountingCustomerParty>", "-->"
-        )
+        xml = xml.replace("<cac:AccountingCustomerParty>", "<!--").replace("</cac:AccountingCustomerParty>", "-->")
         result = self.validator.validate(xml)
 
         self.assertFalse(result.is_valid)
@@ -318,9 +409,7 @@ class CIUSROValidatorTestCase(TestCase):
     def test_validate_missing_tax_total(self):
         """Test that missing Tax Total is detected."""
         xml = self._get_minimal_valid_xml()
-        xml = xml.replace("<cac:TaxTotal>", "<!--").replace(
-            "</cac:TaxTotal>", "-->"
-        )
+        xml = xml.replace("<cac:TaxTotal>", "<!--").replace("</cac:TaxTotal>", "-->")
         result = self.validator.validate(xml)
 
         self.assertFalse(result.is_valid)
@@ -329,9 +418,7 @@ class CIUSROValidatorTestCase(TestCase):
     def test_validate_missing_monetary_total(self):
         """Test that missing Monetary Total is detected."""
         xml = self._get_minimal_valid_xml()
-        xml = xml.replace("<cac:LegalMonetaryTotal>", "<!--").replace(
-            "</cac:LegalMonetaryTotal>", "-->"
-        )
+        xml = xml.replace("<cac:LegalMonetaryTotal>", "<!--").replace("</cac:LegalMonetaryTotal>", "-->")
         result = self.validator.validate(xml)
 
         self.assertFalse(result.is_valid)
@@ -340,9 +427,7 @@ class CIUSROValidatorTestCase(TestCase):
     def test_validate_missing_invoice_line(self):
         """Test that missing Invoice Line is detected."""
         xml = self._get_minimal_valid_xml()
-        xml = xml.replace("<cac:InvoiceLine>", "<!--").replace(
-            "</cac:InvoiceLine>", "-->"
-        )
+        xml = xml.replace("<cac:InvoiceLine>", "<!--").replace("</cac:InvoiceLine>", "-->")
         result = self.validator.validate(xml)
 
         self.assertFalse(result.is_valid)
@@ -384,12 +469,7 @@ class CIUSROValidatorTestCase(TestCase):
 
     def test_validation_error_to_dict(self):
         """Test ValidationError serialization."""
-        error = ValidationError(
-            code="BR-01",
-            message="ID missing",
-            location="/Invoice/ID",
-            severity="error"
-        )
+        error = ValidationError(code="BR-01", message="ID missing", location="/Invoice/ID", severity="error")
 
         data = error.to_dict()
 

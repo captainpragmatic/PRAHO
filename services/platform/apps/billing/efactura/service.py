@@ -96,22 +96,20 @@ class EFacturaService:
     # --- Main Workflow Methods ---
 
     @transaction.atomic
-    def submit_invoice(self, invoice: Invoice, validate_first: bool = False) -> SubmissionResult:  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-step business logic
+    def submit_invoice(self, invoice: Invoice) -> SubmissionResult:  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-step business logic
         """
         Submit an invoice to e-Factura.
 
         This method:
         1. Creates or gets EFacturaDocument
         2. Generates XML
-        3. Validates XML (optional)
+        3. Validates XML with the native CIUS-RO business-rule validator
         4. Submits to ANAF
         5. Updates document status
         6. Logs audit events
 
         Args:
             invoice: Invoice to submit
-            validate_first: Whether to validate XML before submission
-
         Returns:
             SubmissionResult with success/failure info
         """
@@ -158,21 +156,15 @@ class EFacturaService:
 
             # Generate XML
             xml_content = self._generate_xml(invoice, document)
-            if not xml_content:
-                return SubmissionResult.error("Failed to generate XML")
 
-            # Validate if requested
-            if validate_first:
-                validation = self._validate_xml(xml_content)
-                if not validation.is_valid:
-                    error_dicts = [e.to_dict() for e in validation.errors]
-                    document.mark_error(f"XML validation failed: {len(validation.errors)} errors")
-                    document.save()
-                    self._log_audit_event(invoice, document, "efactura_validation_failed")
-                    return SubmissionResult.error(
-                        f"XML validation failed: {len(validation.errors)} errors",
-                        errors=error_dicts,
-                    )
+            validation = self._validate_xml(xml_content)
+            if not validation.is_valid:
+                error_dicts = [e.to_dict() for e in validation.errors]
+                error_message = f"XML validation failed: {len(validation.errors)} errors"
+                document.mark_local_error(error_message, error_dicts)
+                document.save()
+                self._log_audit_event(invoice, document, "efactura_validation_failed")
+                return SubmissionResult.error(error_message, errors=error_dicts)
 
             # Consumer invoices use ANAF's dedicated endpoint. Since 1 June 2026, Romanian
             # consumers who do not provide a fiscal identifier are represented in the UBL buyer
@@ -202,7 +194,7 @@ class EFacturaService:
         except XMLBuilderError as e:
             logger.error(f"XML generation failed for invoice {invoice.number}: {e}")
             if document:
-                document.mark_error(str(e))
+                document.mark_local_error(str(e))
                 document.save()
             return SubmissionResult.error(f"XML generation failed: {e}")
 
@@ -318,14 +310,14 @@ class EFacturaService:
         Returns:
             SubmissionResult
         """
-        if not document.can_retry:
+        if not (document.can_retry or document.can_requeue_after_fix):
             return SubmissionResult.error("Document cannot be retried (max retries exceeded or wrong status)")
 
         with transaction.atomic():
             # Use FSM transition to queue for resubmission
             document.mark_queued()
             document.save()
-            return self.submit_invoice(document.invoice, validate_first=True)
+            return self.submit_invoice(document.invoice)
 
     # --- Batch Operations ---
 
@@ -475,7 +467,7 @@ class EFacturaService:
         )
         return document
 
-    def _generate_xml(self, invoice: Invoice, document: EFacturaDocument) -> str | None:
+    def _generate_xml(self, invoice: Invoice, document: EFacturaDocument) -> str:
         """Generate UBL XML for invoice."""
         try:
             builder: UBLInvoiceBuilder | UBLCreditNoteBuilder
