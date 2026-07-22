@@ -117,7 +117,8 @@ class SecurityHeadersMiddleware:
         # Content Security Policy.
         # 'unsafe-inline' AND 'unsafe-eval' are both required until the CSP-hardening
         # migration (#206 / #284) lands. Do NOT drop either in isolation:
-        #   - 'unsafe-inline': inline <script>/<style> not yet fully nonce-migrated (#104 [M7]).
+        #   - 'unsafe-inline': nonce attributes landed (#104 [M7] step 1), but inline event
+        #     handlers (onclick=, onkeydown=) cannot carry nonces and remain in templates.
         #   - 'unsafe-eval': Alpine.js (standard build) compiles directive expressions via
         #     new Function(), and htmx hx-on:: handlers eval their bodies. Removing it needs
         #     BOTH frameworks refactored (Alpine CSP build + htmx hx-on -> nonce'd scripts) —
