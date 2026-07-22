@@ -10,6 +10,7 @@ from unittest.mock import patch
 from django.core.management import CommandError, call_command
 from django.test import TestCase
 
+from apps.billing.management.commands.record_exchange_rate import Command
 from apps.billing.models import Currency, FXRate
 
 
@@ -172,6 +173,19 @@ class RecordExchangeRateCommandTest(TestCase):
         self.assertEqual(FXRate.objects.count(), 1)
         audit_log.assert_not_called()
         self.assertIn("already recorded", output.getvalue())
+
+    def test_as_of_documents_legal_validity_semantics(self) -> None:
+        """--as-of is the date the rate is LEGALLY VALID, never the publication date.
+
+        Art. 290(2) methodological norms: the BNR rate communicated on day D
+        applies from the next banking day. resolve() selects the latest row
+        with as_of <= tax point, so a publication-date convention would freeze
+        a one-day-wrong rate into the immutable invoice snapshot.
+        """
+        parser = Command().create_parser("manage.py", "record_exchange_rate")
+        as_of_action = next(action for action in parser._actions if action.dest == "as_of")
+        self.assertIn("valid", as_of_action.help.lower())
+        self.assertNotIn("published rate date", as_of_action.help.lower())
 
     def test_command_rejects_non_statutory_source(self) -> None:
         """Only institutions, not ingestion mechanisms, are valid sources."""

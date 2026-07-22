@@ -1327,6 +1327,35 @@ class UBLCreditNoteBuilderTestCase(TestCase):
             tax_rate=Decimal("0.1900"),  # Matches credit note's tax_total_cents=9500
         )
 
+    def test_foreign_currency_credit_note_is_rejected_before_serialization(self):
+        """FC credit notes are unsupported (#219): fail closed in the builder
+        with an honest message instead of persisting invalid XML and letting
+        the validator misdiagnose it as a missing TaxCurrencyCode."""
+        eur = CurrencyFactory(code="EUR")
+        fc_credit_note = InvoiceFactory(
+            customer=self.customer,
+            currency=eur,
+            number="CN-EUR-001",
+            bill_to_name="Customer SRL",
+            bill_to_country="RO",
+            bill_to_tax_id="RO87654321",
+            status="issued",
+            issued_at=timezone.now(),
+            subtotal_cents=50000,
+            tax_total_cents=9500,
+            total_cents=59500,
+        )
+        InvoiceLineFactory(
+            invoice=fc_credit_note,
+            description="FC refund",
+            unit_price_cents=50000,
+            quantity=1,
+            tax_rate=Decimal("0.1900"),
+        )
+
+        with self.assertRaisesRegex(XMLBuilderError, "credit note"):
+            UBLCreditNoteBuilder(fc_credit_note, self.original_invoice).build()
+
     def test_credit_note_issue_dates_use_romanian_local_date(self):
         """#220: both the credit note's own BT-2 and the BillingReference IssueDate of the
         referenced original invoice must be Romanian calendar dates.

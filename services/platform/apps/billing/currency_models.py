@@ -57,7 +57,12 @@ class FXRate(models.Model):
         decimal_places=8,
         validators=[MinValueValidator(Decimal("0.00000001")), MaxValueValidator(MAX_FX_RATE)],
     )
-    as_of = models.DateField()
+    as_of = models.DateField(
+        help_text=_(
+            "Date this rate is legally valid for VAT purposes, not the publication "
+            "date. A BNR rate communicated on day D applies from the next banking day."
+        )
+    )
     source = models.CharField(max_length=32, choices=Source.choices, default=Source.LEGACY_UNKNOWN)
     source_reference = models.CharField(max_length=500, blank=True)
     fetched_at = models.DateTimeField(null=True, blank=True)

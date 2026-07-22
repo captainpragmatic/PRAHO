@@ -2113,7 +2113,7 @@ def efactura_document_detail(request: HttpRequest, pk: str) -> HttpResponse:
         "document": document,
         "invoice": document.invoice,
         "webhook_events": webhook_events,
-        "can_retry": document.can_retry,
+        "can_retry": document.can_retry or document.can_requeue_after_fix,
         "is_terminal": document.is_terminal,
         "submission_deadline": document.submission_deadline,
         "is_deadline_approaching": document.is_deadline_approaching,
@@ -2156,7 +2156,7 @@ def efactura_retry(request: HttpRequest, pk: str) -> HttpResponse:
 
     document = get_object_or_404(EFacturaDocument, pk=pk)
 
-    if not document.can_retry:
+    if not (document.can_retry or document.can_requeue_after_fix):
         messages.error(request, _("This document cannot be retried."))
         return redirect("billing:efactura_document_detail", pk=pk)
 

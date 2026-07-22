@@ -24,10 +24,13 @@ under Peppol UBL-CR-490.
 
 An FX row means exactly `1 base currency = rate quote currency`. Issuance looks
 up only the requested direction; it never silently inverts a rate. Every new
-rate used for issuance records its effective date, approved source, source
-reference, and acquisition time. Historical rows migrate as `legacy_unknown`
-and cannot be consumed for new issuance until an operator supplies trustworthy
-provenance.
+rate used for issuance records its legal validity date, approved source, source
+reference, and acquisition time. `as_of` is the date the rate is legally valid
+for VAT, never the publication date: a BNR rate communicated on day D applies
+from the next banking day (article 290(2) methodological norms), and the
+operator or importer recording the row performs that translation. Historical
+rows migrate as `legacy_unknown` and cannot be consumed for new issuance until
+an operator supplies trustworthy provenance.
 
 The database rejects non-finite or non-positive rates and pairs whose base and quote currency
 are equal. A migration fails closed when invalid historical data exists rather
@@ -70,8 +73,8 @@ invoice-snapshot contract.
 - Foreign-currency VAT is reproducible from an immutable, provenanced record.
 - Missing or dubious FX data blocks issuance instead of silently defaulting to
   RON or inventing provenance.
-- Weekend and holiday issuance can use the last published rate valid on the tax
-  point date.
+- Weekend and holiday issuance can use the most recent rate still legally valid
+  on the tax point date.
 - The XML representation follows the accounting-currency rules without adding
   a prohibited UBL exchange-rate element.
 

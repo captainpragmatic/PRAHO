@@ -73,3 +73,12 @@ class FXRateConstraintTestCase(TestCase):
         self.assertEqual(fx_rate.source, FXRate.Source.BNR)
         self.assertEqual(fx_rate.source_reference, "https://www.bnr.ro/nbrfxrates.xml")
         self.assertEqual(fx_rate.fetched_at, fetched_at)
+
+
+class FXRateAsOfSemanticsTestCase(TestCase):
+    """as_of is the legal validity date — the field itself must say so."""
+
+    def test_as_of_field_documents_validity_date_semantics(self) -> None:
+        help_text = str(FXRate._meta.get_field("as_of").help_text).lower()
+        self.assertIn("valid", help_text)
+        self.assertNotIn("publication date", help_text.replace("not the publication date", ""))

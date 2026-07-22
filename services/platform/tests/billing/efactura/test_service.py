@@ -426,11 +426,27 @@ class EFacturaRetryTestCase(TestCase):
         """Test retry when document cannot be retried."""
         mock_doc = Mock(spec=EFacturaDocument)
         mock_doc.can_retry = False
+        mock_doc.can_requeue_after_fix = False
 
         result = self.service.retry_failed_submission(mock_doc)
 
         self.assertFalse(result.success)
         self.assertIn("cannot be retried", result.error_message.lower())
+
+    @patch.object(EFacturaService, "submit_invoice")
+    def test_retry_accepts_requeue_eligible_local_error(self, mock_submit):
+        """A local-error document requeues once the operator fixed the cause."""
+        mock_doc = Mock(spec=EFacturaDocument)
+        mock_doc.can_retry = False
+        mock_doc.can_requeue_after_fix = True
+        mock_doc.invoice = Mock()
+        mock_submit.return_value = SubmissionResult.ok(mock_doc)
+
+        result = self.service.retry_failed_submission(mock_doc)
+
+        self.assertTrue(result.success)
+        mock_doc.mark_queued.assert_called_once()
+        mock_doc.save.assert_called_once()
 
     @patch.object(EFacturaService, "submit_invoice")
     def test_retry_success(self, mock_submit):

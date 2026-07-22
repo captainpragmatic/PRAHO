@@ -1072,6 +1072,12 @@ class UBLCreditNoteBuilder(BaseUBLBuilder):
         if self.original_invoice is None:
             errors.append("Original invoice reference is required for credit notes")
 
+        if self.invoice.currency.code != "RON":
+            # The credit note builder cannot yet emit the RON accounting totals
+            # BR-RO-030/BR-53 require (fiscal credit-note ledger, #219). Fail
+            # here with an honest message instead of persisting invalid XML.
+            errors.append("Foreign-currency credit notes are not supported yet; RON only")
+
         if errors:
             raise XMLBuilderError(f"Invalid credit note data: {'; '.join(errors)}")
 

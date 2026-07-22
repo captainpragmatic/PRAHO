@@ -73,6 +73,16 @@ class Migration(migrations.Migration):
         ),
         migrations.AlterField(
             model_name="fxrate",
+            name="as_of",
+            field=models.DateField(
+                help_text=(
+                    "Date this rate is legally valid for VAT purposes, not the publication "
+                    "date. A BNR rate communicated on day D applies from the next banking day."
+                )
+            ),
+        ),
+        migrations.AlterField(
+            model_name="fxrate",
             name="rate",
             field=models.DecimalField(
                 decimal_places=8,

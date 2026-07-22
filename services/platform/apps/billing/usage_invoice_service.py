@@ -501,7 +501,16 @@ class UsageBillingService:
             zero_usage_result = UsageBillingService._finalize_zero_usage_cycle(str(cycle_id))
             if zero_usage_result is not False:
                 continue
-            result = invoice_service.generate_invoice_from_cycle(str(cycle_id))
+            try:
+                result = invoice_service.generate_invoice_from_cycle(str(cycle_id))
+            except (ValidationError, TransitionNotAllowed) as exc:
+                # A fiscally fail-closed cycle (e.g. missing provenanced FX rate)
+                # must not head-of-line-block the batch. Catching OUTSIDE the
+                # callee's transaction.atomic lets its writes roll back via
+                # exception propagation before we continue.
+                errors += 1
+                logger.error(f"Error generating invoice for cycle {cycle_id}: {exc}")
+                continue
             if result.is_ok():
                 invoice_id = result.unwrap().get("invoice_id")
                 if not invoice_id:

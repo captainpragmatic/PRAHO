@@ -31,7 +31,16 @@ class Command(BaseCommand):
         parser.add_argument("--base", required=True, help="Base ISO 4217 code, e.g. EUR")
         parser.add_argument("--quote", required=True, help="Quote ISO 4217 code, e.g. RON")
         parser.add_argument("--rate", required=True, help="Quote units for one base unit")
-        parser.add_argument("--as-of", required=True, dest="as_of", help="Published rate date (YYYY-MM-DD)")
+        parser.add_argument(
+            "--as-of",
+            required=True,
+            dest="as_of",
+            help=(
+                "Date the rate is legally valid for VAT (YYYY-MM-DD). A BNR rate "
+                "communicated on day D applies from the next banking day — enter "
+                "the validity date, not the publication date (art. 290(2) norms)."
+            ),
+        )
         parser.add_argument(
             "--source",
             required=True,

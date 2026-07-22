@@ -310,7 +310,7 @@ class EFacturaService:
         Returns:
             SubmissionResult
         """
-        if not document.can_retry:
+        if not (document.can_retry or document.can_requeue_after_fix):
             return SubmissionResult.error("Document cannot be retried (max retries exceeded or wrong status)")
 
         with transaction.atomic():

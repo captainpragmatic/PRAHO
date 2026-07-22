@@ -8,6 +8,12 @@ from uuid import uuid4
 from django.contrib.auth import get_user_model
 from django.test import Client, TestCase
 from django.urls import reverse
+from django.utils import timezone
+
+from apps.billing.efactura.models import EFacturaDocument, EFacturaStatus
+from apps.billing.models import Currency, Invoice
+from apps.customers.models import Customer
+from tests.helpers.fsm_helpers import force_status
 
 User = get_user_model()
 
@@ -130,3 +136,30 @@ class EfacturaRetryViewTestCase(TestCase):
             reverse("billing:efactura_retry", kwargs={"pk": fake_uuid})
         )
         self.assertEqual(response.status_code, 405)
+
+    @patch("apps.billing.efactura.service.EFacturaService")
+    def test_retry_allows_requeue_of_local_error_document(self, mock_service_class):
+        """A local-error doc (never auto-retried) must accept operator requeue."""
+        currency, _ = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei", "decimals": 2})
+        customer = Customer.objects.create(name="Requeue SRL", customer_type="company", status="active")
+        invoice = Invoice.objects.create(
+            customer=customer,
+            number="INV-REQUEUE-1",
+            currency=currency,
+            subtotal_cents=1000,
+            tax_cents=210,
+            total_cents=1210,
+            issued_at=timezone.now(),
+        )
+        document = EFacturaDocument.objects.create(invoice=invoice)
+        force_status(document, EFacturaStatus.QUEUED.value)
+        document.mark_local_error("XML validation failed")
+        document.save()
+
+        mock_service = mock_service_class.return_value
+        mock_service.retry_failed_submission.return_value = Mock(success=True)
+
+        response = self.client.post(reverse("billing:efactura_retry", kwargs={"pk": str(document.pk)}))
+
+        self.assertEqual(response.status_code, 302)
+        mock_service.retry_failed_submission.assert_called_once()

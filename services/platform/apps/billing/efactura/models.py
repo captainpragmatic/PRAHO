@@ -443,6 +443,21 @@ class EFacturaDocument(models.Model):
         )
 
     @property
+    def can_requeue_after_fix(self) -> bool:
+        """Operator valve for deterministic local failures (never auto-retried).
+
+        mark_local_error() clears next_retry_at so sweeps skip the document;
+        once the root cause is fixed (rate recorded, data reconciled, code
+        deployed) staff may requeue a fresh attempt within the retry budget —
+        the statutory submission deadline does not wait for a shell session.
+        """
+        return (
+            self.status == EFacturaStatus.ERROR.value
+            and self.next_retry_at is None
+            and self.retry_count < self.MAX_RETRIES
+        )
+
+    @property
     def submission_deadline(self) -> datetime.datetime | None:
         """Calculate the submission deadline from the invoice issue date.
 
