@@ -3,6 +3,7 @@
 # ===============================================================================
 
 import logging
+from typing import Any
 
 from django.contrib import messages
 from django.http import HttpRequest, HttpResponse
@@ -89,8 +90,14 @@ def _validated_status_filter(raw: str) -> str:
 
 def _get_session_identity(request: HttpRequest) -> tuple[int | None, int | None]:
     """Return validated customer and user IDs for authenticated Platform calls."""
-    raw_customer_id = getattr(request, "customer_id", None) or request.session.get("customer_id")
-    raw_user_id = request.session.get("user_id")
+    missing = object()
+    raw_customer_id: Any = getattr(request, "customer_id", missing)
+    if raw_customer_id is missing:
+        raw_customer_id = request.session.get("customer_id")
+
+    raw_user_id: Any = getattr(request, "user_id", missing)
+    if raw_user_id is missing:
+        raw_user_id = request.session.get("user_id")
 
     if raw_customer_id is None or raw_user_id is None:
         return None, None

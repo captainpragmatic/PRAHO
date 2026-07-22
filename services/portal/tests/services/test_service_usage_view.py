@@ -44,6 +44,34 @@ class ServiceUsageIdentityTests(SimpleTestCase):
         mock_get_usage.assert_called_once_with(202, 7, 55, period="30d")
 
     @patch("apps.services.views.services_api.get_service_usage")
+    def test_uses_middleware_normalized_user_id_for_legacy_session(self, mock_get_usage: MagicMock) -> None:
+        mock_get_usage.return_value = {"bandwidth_used": 12, "storage_used": 3}
+        request = self._request(customer_id=7, user_id=None)
+        request.customer_id = "202"
+        request.user_id = "7"
+
+        response = service_usage(request, service_id=55)
+
+        self.assertEqual(response.status_code, 200)
+        mock_get_usage.assert_called_once_with(202, 7, 55, period="30d")
+
+    @patch("apps.services.views.services_api.get_service_usage")
+    def test_invalid_request_customer_id_does_not_fall_back_to_session(
+        self, mock_get_usage: MagicMock
+    ) -> None:
+        for invalid_customer_id in (0, ""):
+            with self.subTest(customer_id=invalid_customer_id):
+                mock_get_usage.reset_mock()
+                request = self._request(customer_id=101, user_id=7)
+                request.customer_id = invalid_customer_id
+
+                response = service_usage(request, service_id=55)
+
+                self.assertEqual(response.status_code, 302)
+                self.assertEqual(response.url, "/login/")
+                mock_get_usage.assert_not_called()
+
+    @patch("apps.services.views.services_api.get_service_usage")
     def test_invalid_or_missing_identity_redirects_without_platform_call(self, mock_get_usage: MagicMock) -> None:
         invalid_identities = [
             (None, 7),
