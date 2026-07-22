@@ -114,16 +114,24 @@ class SecurityHeadersMiddleware:
     def __call__(self, request: HttpRequest) -> HttpResponse:
         response = self.get_response(request)
 
-        # Content Security Policy — unsafe-inline until templates are migrated
-        # to nonce attributes (see #104 [M7]). CSPNonceMiddleware + context
-        # processor are deployed; nonce injection into CSP deferred until all
-        # inline <script>/<style> tags carry nonce="{{ csp_nonce }}".
+        # Content Security Policy.
+        # 'unsafe-inline' AND 'unsafe-eval' are both required until the CSP-hardening
+        # migration (#206 / #284) lands. Do NOT drop either in isolation:
+        #   - 'unsafe-inline': nonce attributes landed (#104 [M7] step 1), but inline event
+        #     handlers (onclick=, onkeydown=) cannot carry nonces and remain in templates.
+        #   - 'unsafe-eval': Alpine.js (standard build) compiles directive expressions via
+        #     new Function(), and htmx hx-on:: handlers eval their bodies. Removing it needs
+        #     BOTH frameworks refactored (Alpine CSP build + htmx hx-on -> nonce'd scripts) —
+        #     tracked in #206/#284. Dropping it alone silently breaks ALL admin-UI interactivity
+        #     (deploy form, modals, dropdowns) with only a console CSP error to show for it.
+        # The customer portal already serves the same 'unsafe-eval' policy for its Stripe/Alpine
+        # flows; this keeps the (VPN-gated) internal platform at parity, not silently broken.
         if not response.get("Content-Security-Policy"):
             csp = (
                 "default-src 'self'; "
                 "style-src 'self' 'unsafe-inline' fonts.googleapis.com; "
                 "font-src 'self' fonts.gstatic.com; "
-                "script-src 'self' 'unsafe-inline'; "
+                "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
                 "img-src 'self' data: https:; "
                 "connect-src 'self'; "
                 "object-src 'none'; "

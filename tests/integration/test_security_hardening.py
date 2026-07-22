@@ -545,3 +545,31 @@ class TestTokenRevocationLogic:
         assert "request.auth" in body, (
             "revoke_token should use request.auth (already resolved by TokenAuthentication)"
         )
+
+
+# ---------------------------------------------------------------------------
+# 6. CSP has exactly one owner per service — never the nginx proxy
+# ---------------------------------------------------------------------------
+
+
+class TestProxyCSPOwnership:
+    """The SSL proxy must not serve its own Content-Security-Policy.
+
+    Browsers enforce the INTERSECTION of multiple CSP headers, so a proxy-level
+    policy silently overrides the per-service Django middlewares. The nginx
+    copy demonstrably drifted (stale CDN whitelists, missing 'unsafe-eval' and
+    js.stripe.com), breaking Alpine on the platform and Stripe on the portal
+    in the documented SSL deployment. CSP is owned by each service's
+    middleware; the proxy owns transport-level headers only (#206 / #284).
+    """
+
+    @pytest.mark.integration
+    @pytest.mark.security
+    def test_nginx_ssl_conf_does_not_set_csp(self):
+        nginx_conf = PROJECT_ROOT / "deploy" / "nginx" / "nginx-ssl.conf"
+        content = nginx_conf.read_text()
+        assert "add_header Content-Security-Policy" not in content, (
+            "nginx-ssl.conf must not add a Content-Security-Policy header: "
+            "browsers enforce the intersection with the Django-served CSP, and "
+            "the proxy copy has repeatedly drifted from the app policies"
+        )
