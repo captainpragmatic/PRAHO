@@ -518,6 +518,9 @@ def _row_context(definition: SettingDef, row: SystemSetting | None) -> dict[str,
         "key": definition.key,
         "current": current,
         "current_json": json.dumps(current, ensure_ascii=False, default=str),
+        # The reset control JSON.parses data-default, so every input kind needs
+        # the CATALOG default as JSON — never the baseline/current value.
+        "default_json": json.dumps(definition.default, ensure_ascii=False, default=str),
         "baseline": row.updated_at.isoformat() if row is not None else "",
         "modified": row is not None and row.get_typed_value() != definition.default,
         "configured": configured,

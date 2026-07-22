@@ -5,8 +5,11 @@ write-only secrets, role gating, search, history, automation.
 
 from __future__ import annotations
 
+import html as html_lib
 import json
+import re
 
+from django.template.loader import render_to_string
 from django.test import Client, TestCase
 from django.urls import reverse
 
@@ -231,3 +234,86 @@ class SecretEndpointTests(TestCase):
             {"value": "45"},
         )
         self.assertEqual(response.status_code, 404)
+
+
+class SettingRowDefaultAttributeTests(TestCase):
+    """data-default must always be the JSON-encoded CATALOG default: the reset
+    control JSON.parses it unconditionally (review of #377). A bare string
+    throws, and a baseline-sourced value resets to the modified value."""
+
+    def setUp(self) -> None:
+        self.admin = create_admin_user(username="default_attr_admin")
+        self.client.force_login(self.admin)
+
+    def _data_default_for(self, content: str, key: str) -> object:
+        match = re.search(rf'id="field-{re.escape(key)}"[^>]*data-default=(\'[^\']*\'|"[^"]*")', content)
+        self.assertIsNotNone(match, f"no data-default found for {key}")
+        raw = html_lib.unescape(match.group(1)[1:-1])
+        return json.loads(raw)
+
+    def test_select_default_is_valid_json(self) -> None:
+        response = self.client.get(reverse("settings:group", args=["efactura"]))
+
+        value = self._data_default_for(response.content.decode(), "efactura.environment")
+        self.assertEqual(value, "test")
+
+    def test_list_default_is_the_catalog_default_not_the_current_value(self) -> None:
+        SettingsService.update_setting("tickets.allowed_file_extensions", [".zip"])
+        response = self.client.get(reverse("settings:group", args=["support"]))
+
+        value = self._data_default_for(response.content.decode(), "tickets.allowed_file_extensions")
+        self.assertEqual(value, [".pdf", ".txt", ".png", ".jpg", ".jpeg", ".doc", ".docx"])
+
+
+class HistoryDrawerFalsyDiffTests(TestCase):
+    """A True→False or 10→0 change must still render its diff (review of #377)."""
+
+    def test_falsy_new_value_still_renders_the_diff(self) -> None:
+        html = render_to_string(
+            "settings/partials/history_drawer.html",
+            {"events": [{"old_values": {"value": "True"}, "new_values": {"value": "False"}}]},
+        )
+        self.assertIn("True", html)
+        self.assertIn("False", html)
+
+    def test_zero_transition_still_renders_the_diff(self) -> None:
+        html = render_to_string(
+            "settings/partials/history_drawer.html",
+            {"events": [{"old_values": {"value": 10}, "new_values": {"value": 0}}]},
+        )
+        self.assertIn("10", html)
+
+
+class MaintenanceBannerTests(TestCase):
+    """The staff banner must actually render when maintenance mode is active
+    (review of #377): the template read a context variable nothing provided."""
+
+    def test_staff_sees_the_banner_when_maintenance_is_active(self) -> None:
+        admin = create_admin_user(username="banner_admin")
+        self.client.force_login(admin)
+        SettingsService.update_setting("system.maintenance_mode", True)
+
+        response = self.client.get(reverse("settings:home"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Maintenance mode is active")
+
+    def test_banner_renders_on_non_settings_pages_too(self) -> None:
+        """The banner must warn staff EVERYWHERE, not only inside the settings
+        module — its variable must come from a registered context processor."""
+        admin = create_admin_user(username="banner_admin_global")
+        self.client.force_login(admin)
+        SettingsService.update_setting("system.maintenance_mode", True)
+
+        response = self.client.get(reverse("dashboard"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Maintenance mode is active")
+
+    def test_no_banner_when_maintenance_is_off(self) -> None:
+        admin = create_admin_user(username="banner_admin_off")
+        self.client.force_login(admin)
+
+        response = self.client.get(reverse("settings:home"))
+
+        self.assertNotContains(response, "Maintenance mode is active")

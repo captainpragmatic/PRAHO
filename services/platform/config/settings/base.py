@@ -97,6 +97,10 @@ TEMPLATES = [
                 "apps.common.context_processors.romanian_business_context",
                 "apps.common.context_processors.navigation_dropdowns",
                 "apps.common.context_processors.csp_nonce",
+                # Staff maintenance banner (base.html) needs system_status on every
+                # page, not only inside the settings module. Cache-first read: the
+                # warm path costs zero queries (#377 review).
+                "apps.common.context_processors.system_status",
             ],
         },
     },

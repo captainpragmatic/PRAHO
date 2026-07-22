@@ -131,14 +131,20 @@ def navigation_context(request: HttpRequest) -> dict[str, Any]:
 
 
 def system_status(request: HttpRequest) -> dict[str, Any]:
-    """System status information"""
+    """System status information.
+
+    maintenance_mode is exposed TOP-LEVEL on purpose: the dashboard view passes
+    its own "system_status" widget list, which shadows this processor's dict on
+    that page (view context beats processors), silently hiding the staff banner.
+    """
     return {
+        "maintenance_mode": _maintenance_mode_active(),
         "system_status": {
             "maintenance_mode": _maintenance_mode_active(),
             "read_only_mode": getattr(settings, "READ_ONLY_MODE", False),
             "debug_mode": settings.DEBUG,
             "environment": getattr(settings, "ENVIRONMENT", "development"),
-        }
+        },
     }
 
 

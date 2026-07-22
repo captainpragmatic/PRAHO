@@ -237,7 +237,7 @@ class SettingsService:
         return SettingValidationError(key=key, field="value", message=message, code="validation_error")
 
     @classmethod
-    def _write_setting_locked(  # noqa: PLR0913  # Keyword-only write context (actor, reason, change set)
+    def _write_setting_locked(  # noqa: PLR0911, PLR0913  # Distinct validation/conflict outcomes; keyword-only write context
         cls,
         key: str,
         value: Any,
@@ -261,6 +261,10 @@ class SettingsService:
             data_type = definition.data_type if definition else cls._infer_data_type(value)
             try:
                 coerced = cls._coerce_value(key, data_type, value)
+                # Catalog rules apply on the FIRST write too — the creation branch
+                # must not persist an out-of-range value just because the row did
+                # not exist yet (review of #377).
+                cls._apply_rules(key, validation_rules_for_key(key), coerced)
             except ValidationError as e:
                 return Err(cls._validation_error(key, e))
             try:
@@ -284,6 +288,10 @@ class SettingsService:
                         "old_value": None,
                         "new_value": "(hidden)" if setting.is_sensitive else str(coerced),
                     }
+                    try:
+                        setting.full_clean()
+                    except ValidationError as e:
+                        return Err(cls._validation_error(key, e))
                     setting.save()
             except IntegrityError:
                 if require_absent_on_create:

@@ -14,7 +14,7 @@ from unittest.mock import patch
 
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
-from django.db import connection, transaction
+from django.db import DatabaseError, connection, transaction
 from django.test import TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
 
@@ -354,3 +354,43 @@ class ChangeSetPostgresConcurrencyTests(TransactionTestCase):
             SystemSetting.objects.get(key="billing.proforma_validity_days").value,
         }
         self.assertIn(values, [{21, 45}, {28, 60}])
+
+
+class CreationPathValidationTests(TestCase):
+    """Catalog rules must apply on the FIRST write too (review of #377): the
+    creation branch coerced but never ran _apply_rules or full_clean, so a
+    staff write could persist an out-of-range value before the row existed."""
+
+    def test_first_write_enforces_catalog_rules(self) -> None:
+        SystemSetting.objects.filter(key="audit.compliant_score_threshold").delete()
+
+        result = SettingsService.update_setting("audit.compliant_score_threshold", -5)
+
+        self.assertTrue(result.is_err(), "an out-of-range first write must be rejected")
+        self.assertFalse(
+            SystemSetting.objects.filter(key="audit.compliant_score_threshold").exists(),
+            "no row may be created from a value that fails catalog rules",
+        )
+
+    def test_first_write_accepts_a_valid_value(self) -> None:
+        SystemSetting.objects.filter(key="audit.compliant_score_threshold").delete()
+
+        result = SettingsService.update_setting("audit.compliant_score_threshold", 85)
+
+        self.assertTrue(result.is_ok())
+
+
+class AuditFailureIsolationTests(TestCase):
+    """A failing audit write must neither poison nor roll back the setting change (fail-open)."""
+
+    def test_audit_db_failure_does_not_poison_setting_write(self) -> None:
+        _make_setting("billing.proforma_validity_days", 30, "integer")
+        with patch(
+            "apps.settings.signals.AuditService.log_simple_event",
+            side_effect=DatabaseError("audit table unavailable"),
+        ):
+            result = SettingsService.update_setting("billing.proforma_validity_days", 45)
+            self.assertTrue(result.is_ok())
+
+        row = SystemSetting.objects.get(key="billing.proforma_validity_days")
+        self.assertEqual(row.get_typed_value(), 45)
