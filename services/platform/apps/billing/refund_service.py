@@ -18,7 +18,7 @@ from django_fsm import ConcurrentTransition, TransitionNotAllowed
 
 from apps.billing.gateways.base import GATEWAY_PAYMENT_METHODS, PaymentGatewayFactory
 from apps.billing.models import Invoice, Payment, Refund, RefundStatusHistory, log_security_event
-from apps.common.types import Err, Ok, Result
+from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 from apps.orders.models import Order
 
 logger = logging.getLogger(__name__)
@@ -888,7 +888,10 @@ class RefundService:
             )
             if refund_result.is_err():
                 transaction.set_rollback(True)
-                return refund_result  # type: ignore[return-value]
+                # The public refund path is gateway-first. Deliberately discard
+                # the helper's local-write retriability: replaying the whole
+                # customer refund is not proven safe after money moved.
+                return Err(refund_result.unwrap_err())
 
             refund = refund_result.unwrap()
             status_result = RefundService._advance_refund_status(
@@ -1032,18 +1035,24 @@ class RefundService:
 
             return Ok(refund)
 
+        except (OperationalError, InterfaceError):
+            logger.exception("Refund record creation failed due to a transient database error")
+            return Err("Failed to process bidirectional refund", retriability=Retriability.RETRIABLE)
         except IntegrityError:
             # FK constraint violated — catches both SQLite and PostgreSQL (#120)
             entity_label = "order" if order else "invoice"
             entity_pk = order.pk if order else (invoice.pk if invoice else "unknown")
             logger.exception("Refund record creation failed: FK constraint for %s_id=%s", entity_label, entity_pk)
-            return Err("Failed to process bidirectional refund")
+            return Err("Failed to process bidirectional refund", retriability=Retriability.NOT_RETRIABLE)
         except ValueError:
             # Django ORM assignment error (e.g. assigning wrong type to FK field) (#120)
             entity_label = "order" if order else "invoice"
             entity_pk = order.pk if order else (invoice.pk if invoice else "unknown")
             logger.exception("Refund record creation failed: assignment error for %s_id=%s", entity_label, entity_pk)
-            return Err("Order update failed" if order else "Invoice update failed")
+            return Err(
+                "Order update failed" if order else "Invoice update failed",
+                retriability=Retriability.NOT_RETRIABLE,
+            )
         except Exception:
             entity_label = "order" if order else "invoice"
             entity_pk = order.pk if order else (invoice.pk if invoice else "unknown")
@@ -1055,7 +1064,10 @@ class RefundService:
         """Advance the Refund FSM from authoritative processor status."""
         normalized = "canceled" if gateway_status == "cancelled" else gateway_status
         if normalized not in {"pending", "requires_action", "succeeded", "failed", "canceled"}:
-            return Err(f"Unsupported gateway refund status: {gateway_status}")
+            return Err(
+                f"Unsupported gateway refund status: {gateway_status}",
+                retriability=Retriability.NOT_RETRIABLE,
+            )
 
         expected_terminal = {"succeeded": "completed", "failed": "failed", "canceled": "cancelled"}
         current_status = str(refund.status)
@@ -1067,7 +1079,10 @@ class RefundService:
             if normalized in {"pending", "requires_action"}:
                 return Ok(refund)
             if expected_terminal.get(normalized) != current_status:
-                return Err(f"Refund state mismatch: cannot apply '{gateway_status}' to '{current_status}'")
+                return Err(
+                    f"Refund state mismatch: cannot apply '{gateway_status}' to '{current_status}'",
+                    retriability=Retriability.NOT_RETRIABLE,
+                )
             return Ok(refund)
 
         def apply_transition(method_name: str) -> None:
@@ -1101,7 +1116,10 @@ class RefundService:
             for transition in transition_paths[normalized].get(str(refund.status), ()):
                 apply_transition(transition)
         except (TransitionNotAllowed, ConcurrentTransition) as exc:
-            return Err(f"Refund state transition failed: {exc}")
+            retriability = (
+                Retriability.RETRIABLE if isinstance(exc, ConcurrentTransition) else Retriability.NOT_RETRIABLE
+            )
+            return Err(f"Refund state transition failed: {exc}", retriability=retriability)
 
         refund.metadata = {**(refund.metadata or {}), "gateway_status": normalized}
         update_fields = ["metadata", "updated_at"]
@@ -1125,7 +1143,10 @@ class RefundService:
             ("partially_refunded", "refunded"): "complete_refund",
         }.get((str(payment.status), target))
         if transition is None:
-            return Err(f"Cannot project payment {payment.pk} from {payment.status!r} to {target!r}")
+            return Err(
+                f"Cannot project payment {payment.pk} from {payment.status!r} to {target!r}",
+                retriability=Retriability.NOT_RETRIABLE,
+            )
         getattr(payment, transition)()
         payment.save(update_fields=["status", "updated_at"])
         return Ok(True)
@@ -1144,7 +1165,10 @@ class RefundService:
             ("partially_refunded", "refunded"): "refund_invoice",
         }.get((str(invoice.status), target))
         if transition is None:
-            return Err(f"Cannot project invoice {invoice.pk} from {invoice.status!r} to {target!r}")
+            return Err(
+                f"Cannot project invoice {invoice.pk} from {invoice.status!r} to {target!r}",
+                retriability=Retriability.NOT_RETRIABLE,
+            )
         getattr(invoice, transition)()
         invoice.save(update_fields=["status", "updated_at"])
         return Ok(True)
@@ -1190,7 +1214,10 @@ class RefundService:
             )
             payment_projection = RefundService._apply_payment_refund_projection(payment, payment_target)
             if payment_projection.is_err():
-                return Err(payment_projection.unwrap_err())
+                return Err(
+                    payment_projection.unwrap_err(),
+                    retriability=retriability_of(payment_projection),
+                )
             payment_changed = payment_projection.unwrap()
 
             if invoice is None:
@@ -1211,9 +1238,20 @@ class RefundService:
             )
             invoice_projection = RefundService._apply_invoice_refund_projection(invoice, invoice_target)
             if invoice_projection.is_err():
-                return Err(invoice_projection.unwrap_err())
+                return Err(
+                    invoice_projection.unwrap_err(),
+                    retriability=retriability_of(invoice_projection),
+                )
             invoice_changed = invoice_projection.unwrap()
             return Ok({"payment": payment_changed, "invoice": invoice_changed})
+        except (OperationalError, InterfaceError) as exc:
+            logger.exception(
+                "Refund settlement projection hit a transient database error for payment_id=%s", payment.pk
+            )
+            return Err(
+                f"Refund settlement projection failed: {exc}",
+                retriability=Retriability.RETRIABLE,
+            )
         except Exception as exc:
             logger.exception("Refund settlement projection failed for payment_id=%s", payment.pk)
             return Err(f"Refund settlement projection failed: {exc}")
@@ -1885,6 +1923,14 @@ class RefundConvergenceService:
     """Converge gateway refund facts into PRAHO's refund ledger."""
 
     @staticmethod
+    def _permanent_error(message: str) -> Err[str]:
+        return Err(message, retriability=Retriability.NOT_RETRIABLE)
+
+    @staticmethod
+    def _retryable_error(message: str) -> Err[str]:
+        return Err(message, retriability=Retriability.RETRIABLE)
+
+    @staticmethod
     def _lock_related_order(
         payment: Payment,
         preferred_order_id: uuid.UUID | None,
@@ -1912,18 +1958,20 @@ class RefundConvergenceService:
                     .order_by("id")[:2]
                 )
         except (TypeError, ValueError):
-            return Err("Payment has an invalid order linkage")
+            return RefundConvergenceService._permanent_error("Payment has an invalid order linkage")
         if not candidates:
             return Ok(None)
         if len(candidates) > 1:
-            return Err("Payment resolves to multiple orders during refund reconciliation")
+            return RefundConvergenceService._permanent_error(
+                "Payment resolves to multiple orders during refund reconciliation"
+            )
 
         order = candidates[0]
         metadata_matches = str((payment.meta or {}).get("order_id", "")) == str(order.pk)
         proforma_matches = payment.proforma_id is not None and payment.proforma_id == order.proforma_id
         invoice_matches = payment.invoice_id is not None and payment.invoice_id == order.invoice_id
         if not (metadata_matches or proforma_matches or invoice_matches):
-            return Err("Gateway refund order does not match the payment linkage")
+            return RefundConvergenceService._permanent_error("Gateway refund order does not match the payment linkage")
         return Ok(order)
 
     @staticmethod
@@ -1936,15 +1984,19 @@ class RefundConvergenceService:
     ) -> Result[None, str]:
         """Validate and attach a legacy refund before projecting its state."""
         if refund.payment_id not in (None, payment.id):
-            return Err("Gateway refund is linked to a different payment")
+            return RefundConvergenceService._permanent_error("Gateway refund is linked to a different payment")
         if refund.customer_id != payment.customer_id or refund.currency_id != payment.currency_id:
-            return Err("Gateway refund customer or currency linkage mismatch")
+            return RefundConvergenceService._permanent_error("Gateway refund customer or currency linkage mismatch")
         if refund.amount_cents != amount_cents:
-            return Err(f"Gateway refund amount mismatch: expected {refund.amount_cents}, received {amount_cents}")
+            return RefundConvergenceService._permanent_error(
+                f"Gateway refund amount mismatch: expected {refund.amount_cents}, received {amount_cents}"
+            )
         if refund.invoice_id is not None and (invoice is None or refund.invoice_id != invoice.id):
-            return Err("Gateway refund invoice does not match the payment linkage")
+            return RefundConvergenceService._permanent_error(
+                "Gateway refund invoice does not match the payment linkage"
+            )
         if refund.order_id is not None and (order is None or refund.order_id != order.id):
-            return Err("Gateway refund order does not match the payment linkage")
+            return RefundConvergenceService._permanent_error("Gateway refund order does not match the payment linkage")
         if refund.payment_id is None:
             refund.payment = payment
             refund.save(update_fields=["payment", "updated_at"])
@@ -1960,18 +2012,18 @@ class RefundConvergenceService:
         currency = facts.get("currency")
         gateway_status = facts.get("status")
         if not isinstance(refund_id, str) or not refund_id:
-            return Err("Gateway refund ID is missing")
+            return RefundConvergenceService._permanent_error("Gateway refund ID is missing")
         if not isinstance(payment_intent_id, str) or not payment_intent_id:
-            return Err("Gateway refund PaymentIntent is missing")
+            return RefundConvergenceService._permanent_error("Gateway refund PaymentIntent is missing")
         if isinstance(amount_cents, bool) or not isinstance(amount_cents, int) or amount_cents <= 0:
-            return Err("Gateway refund amount must be a positive integer")
+            return RefundConvergenceService._permanent_error("Gateway refund amount must be a positive integer")
         if not isinstance(currency, str) or not currency:
-            return Err("Gateway refund currency is missing")
+            return RefundConvergenceService._permanent_error("Gateway refund currency is missing")
         if not isinstance(gateway_status, str):
-            return Err("Gateway refund status is missing")
+            return RefundConvergenceService._permanent_error("Gateway refund status is missing")
         event_created = facts.get("event_created")
         if event_created is not None and (isinstance(event_created, bool) or not isinstance(event_created, int)):
-            return Err("Gateway refund event timestamp is invalid")
+            return RefundConvergenceService._permanent_error("Gateway refund event timestamp is invalid")
 
         try:
             with transaction.atomic():
@@ -1985,9 +2037,9 @@ class RefundConvergenceService:
                 if payment is None:
                     return Ok(None)
                 if payment.gateway_txn_id != payment_intent_id:
-                    return Err("Gateway refund PaymentIntent mismatch")
+                    return RefundConvergenceService._permanent_error("Gateway refund PaymentIntent mismatch")
                 if payment.currency.code.upper() != currency.upper():
-                    return Err(
+                    return RefundConvergenceService._permanent_error(
                         f"Gateway refund currency mismatch: expected {payment.currency.code.upper()}, received {currency!r}"
                     )
 
@@ -1995,10 +2047,12 @@ class RefundConvergenceService:
                 # may have created the Refund while this transaction was waiting.
                 snapshot = snapshot_query.values("id", "payment_id", "invoice_id", "order_id").first()
                 if snapshot and snapshot["payment_id"] not in (None, payment.id):
-                    return Err("Gateway refund is linked to a different payment")
+                    return RefundConvergenceService._permanent_error("Gateway refund is linked to a different payment")
                 snapshot_invoice_id = snapshot["invoice_id"] if snapshot else None
                 if snapshot_invoice_id and payment.invoice_id and snapshot_invoice_id != payment.invoice_id:
-                    return Err("Gateway refund invoice does not match the payment linkage")
+                    return RefundConvergenceService._permanent_error(
+                        "Gateway refund invoice does not match the payment linkage"
+                    )
                 invoice_id = payment.invoice_id or snapshot_invoice_id
                 invoice = (
                     Invoice.objects.select_for_update(of=("self",)).get(pk=invoice_id)
@@ -2013,7 +2067,10 @@ class RefundConvergenceService:
                     else RefundConvergenceService._lock_related_order(payment, preferred_order_id)
                 )
                 if order_result.is_err():
-                    return Err(order_result.unwrap_err())
+                    return Err(
+                        order_result.unwrap_err(),
+                        retriability=retriability_of(order_result),
+                    )
                 order = order_result.unwrap()
 
                 refund = (
@@ -2030,7 +2087,10 @@ class RefundConvergenceService:
                         amount_cents,
                     )
                     if validation.is_err():
-                        return Err(validation.unwrap_err())
+                        return Err(
+                            validation.unwrap_err(),
+                            retriability=retriability_of(validation),
+                        )
 
                     previous_created = (refund.metadata or {}).get("gateway_event_created")
                     if (
@@ -2041,10 +2101,14 @@ class RefundConvergenceService:
                         return Ok(refund)
                 else:
                     if order is None and invoice is None:
-                        return Err("Known payment has no order or invoice for refund reconciliation")
+                        return RefundConvergenceService._permanent_error(
+                            "Known payment has no order or invoice for refund reconciliation"
+                        )
                     remaining = RefundService._get_remaining_payment_refund_amount(payment)
                     if remaining is None or amount_cents > remaining:
-                        return Err(f"Gateway refund amount exceeds refundable balance: {amount_cents} > {remaining}")
+                        return RefundConvergenceService._permanent_error(
+                            f"Gateway refund amount exceeds refundable balance: {amount_cents} > {remaining}"
+                        )
                     reason_map = {
                         "duplicate": "duplicate_payment",
                         "fraudulent": "fraud",
@@ -2072,7 +2136,10 @@ class RefundConvergenceService:
                         # OR a clean no-write state; flag uniformly so convergence never
                         # commits a half-written refund (mirrors _process_bidirectional_refund).
                         transaction.set_rollback(True)
-                        return Err(create_result.unwrap_err())
+                        return Err(
+                            create_result.unwrap_err(),
+                            retriability=retriability_of(create_result),
+                        )
                     refund = create_result.unwrap()
 
                 state_result = RefundService._advance_refund_status(refund, gateway_status)
@@ -2081,7 +2148,10 @@ class RefundConvergenceService:
                     # (and _validate_existing_refund may have attached the payment); a
                     # plain return Err would commit that partial state.
                     transaction.set_rollback(True)
-                    return Err(state_result.unwrap_err())
+                    return Err(
+                        state_result.unwrap_err(),
+                        retriability=retriability_of(state_result),
+                    )
                 refund = state_result.unwrap()
                 metadata = dict(refund.metadata or {})
                 event_id = facts.get("event_id")
@@ -2101,8 +2171,14 @@ class RefundConvergenceService:
                     # on the Invoice. Roll back so the ledger row and its projection stay
                     # consistent (an idempotent retry re-converges cleanly).
                     transaction.set_rollback(True)
-                    return Err(projection.unwrap_err())
+                    return Err(
+                        projection.unwrap_err(),
+                        retriability=retriability_of(projection),
+                    )
                 return Ok(refund)
+        except (OperationalError, InterfaceError) as exc:
+            logger.exception("Refund convergence hit a transient database error for gateway_refund_id=%s", refund_id)
+            return RefundConvergenceService._retryable_error(f"Refund convergence failed: {exc}")
         except Exception as exc:
             logger.exception("Refund convergence failed for gateway_refund_id=%s", refund_id)
             return Err(f"Refund convergence failed: {exc}")
