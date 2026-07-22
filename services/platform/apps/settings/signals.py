@@ -70,21 +70,27 @@ def handle_setting_saved(sender: Any, instance: SystemSetting, created: bool, **
             old_values = {"value": context.get("old_value")}
             new_values = {"value": context.get("new_value")}
 
-        AuditService.log_simple_event(
-            event_type=action,
-            user=user,
-            content_object=instance,
-            description=f"System setting {action}: {instance.key}",
-            old_values=old_values,
-            new_values=new_values,
-            metadata=metadata,
-        )
+        # Savepoint isolation (customers/signals.py pattern): a DB-level audit failure
+        # must not poison the caller's transaction — catching the Python exception alone
+        # does not recover the connection.
+        with transaction.atomic():
+            AuditService.log_simple_event(
+                event_type=action,
+                user=user,
+                content_object=instance,
+                description=f"System setting {action}: {instance.key}",
+                old_values=old_values,
+                new_values=new_values,
+                metadata=metadata,
+            )
 
-        logger.info(
-            "✅ [Settings Signal] Setting %s %s: %s",
-            instance.key,
-            action,
-            instance.get_display_value() if not instance.is_sensitive else "(hidden)",
+        transaction.on_commit(
+            lambda: logger.info(
+                "✅ [Settings Signal] Setting %s %s: %s",
+                instance.key,
+                action,
+                instance.get_display_value() if not instance.is_sensitive else "(hidden)",
+            )
         )
 
         # Notify only after the surrounding transaction commits — a later failure
@@ -109,17 +115,18 @@ def handle_setting_deleted(sender: Any, instance: SystemSetting, **kwargs: Any) 
         transaction.on_commit(lambda key=instance.key: SettingsService._clear_setting_cache(key))
 
         # Log audit event
-        AuditService.log_simple_event(
-            event_type="delete",
-            user=None,
-            content_object=instance,
-            description=f"System setting deleted: {instance.key}",
-            metadata={
-                "setting_key": instance.key,
-                "category": instance.category,
-                "data_type": instance.data_type,
-            },
-        )
+        with transaction.atomic():
+            AuditService.log_simple_event(
+                event_type="delete",
+                user=None,
+                content_object=instance,
+                description=f"System setting deleted: {instance.key}",
+                metadata={
+                    "setting_key": instance.key,
+                    "category": instance.category,
+                    "data_type": instance.data_type,
+                },
+            )
 
         logger.warning("⚠️ [Settings Signal] Setting %s deleted", instance.key)
 

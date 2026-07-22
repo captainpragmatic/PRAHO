@@ -394,3 +394,60 @@ class AuditFailureIsolationTests(TestCase):
 
         row = SystemSetting.objects.get(key="billing.proforma_validity_days")
         self.assertEqual(row.get_typed_value(), 45)
+
+
+class AuditFailureResilienceTests(TransactionTestCase):
+    """A DB-level audit failure must not take the settings write down with it.
+
+    The audit call runs inside a savepoint with the failure contained
+    (customers/signals.py pattern): blocking a staff write — e.g. the
+    maintenance-mode toggle during an incident — because the audit INSERT
+    failed would turn an observability problem into an availability one.
+    The failure is still screamed to the log.
+    """
+
+    def test_setting_write_survives_audit_database_failure(self) -> None:
+        with patch(
+            "apps.settings.signals.AuditService.log_simple_event",
+            side_effect=DatabaseError("audit table unavailable"),
+        ):
+            result = SettingsService.update_setting("audit.compliant_score_threshold", 77)
+
+        self.assertTrue(result.is_ok(), f"the write must survive an audit failure: {result}")
+        self.assertEqual(
+            SettingsService.get_setting("audit.compliant_score_threshold"),
+            77,
+            "the value must be persisted and readable after the audit failure",
+        )
+
+    def test_setting_delete_survives_audit_database_failure(self) -> None:
+        SettingsService.update_setting("audit.compliant_score_threshold", 66)
+        with patch(
+            "apps.settings.signals.AuditService.log_simple_event",
+            side_effect=DatabaseError("audit table unavailable"),
+        ):
+            deleted, _ = SystemSetting.objects.filter(key="audit.compliant_score_threshold").delete()
+
+        self.assertEqual(deleted, 1, "the delete must survive an audit failure")
+
+    def test_audit_db_failure_does_not_poison_the_callers_transaction(self) -> None:
+        """PostgreSQL-only discriminator: without the savepoint around the audit
+        call, a DB-level failure there puts the connection in
+        InFailedSqlTransaction and the CALLER's next query explodes even though
+        the signal handler caught the Python exception."""
+        if connection.vendor != "postgresql":
+            self.skipTest("connection poisoning is a PostgreSQL transaction behavior")
+
+        def broken_audit(**kwargs: Any) -> None:
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT * FROM praho_no_such_table")
+
+        with (
+            patch("apps.settings.signals.AuditService.log_simple_event", side_effect=broken_audit),
+            transaction.atomic(),
+        ):
+            result = SettingsService.update_setting("audit.compliant_score_threshold", 55)
+            # Without savepoint isolation this next query raises InFailedSqlTransaction.
+            SystemSetting.objects.filter(key="audit.compliant_score_threshold").exists()
+
+        self.assertTrue(result.is_ok())
