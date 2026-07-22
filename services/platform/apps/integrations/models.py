@@ -162,11 +162,17 @@ class WebhookEvent(models.Model):
         return hashlib.sha256(signature.encode()).hexdigest() == self.signature_hash
 
     def mark_processed(self, save: bool = True) -> None:
-        """✅ Mark webhook as successfully processed"""
+        """✅ Mark webhook as successfully processed, clearing live failure state.
+
+        A reprocessed row (#234) must not keep advertising its old error and a
+        scheduled retry; retry_count stays as attempt history.
+        """
         self.status = "processed"
         self.processed_at = timezone.now()
+        self.error_message = ""
+        self.next_retry_at = None
         if save:
-            self.save(update_fields=["status", "processed_at", "updated_at"])
+            self.save(update_fields=["status", "processed_at", "error_message", "next_retry_at", "updated_at"])
 
     def mark_failed(self, error_message: str, save: bool = True) -> None:
         """❌ Mark webhook as failed with error details"""
@@ -202,8 +208,15 @@ class WebhookEvent(models.Model):
 
     @classmethod
     def is_duplicate(cls, source: str, event_id: str) -> bool:
-        """🔍 Check if webhook has already been received"""
-        return cls.objects.filter(source=source, event_id=event_id).exists()
+        """🔍 Check if this webhook has already been processed to completion.
+
+        Only a `processed` event is a true duplicate. A `failed` or `pending` row means the sender
+        is redelivering something we have NOT successfully handled — deduping that to success
+        returns 200 and tells the sender to stop retrying, leaving the event unprocessed until an
+        operator runs the manual retry command (#234). Such a redelivery must be allowed through
+        to reprocess.
+        """
+        return cls.objects.filter(source=source, event_id=event_id, status="processed").exists()
 
     @classmethod
     def get_pending_webhooks(cls, source: str | None = None, limit: int = 100) -> QuerySet["WebhookEvent"]:

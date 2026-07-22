@@ -205,7 +205,7 @@ class BaseWebhookProcessor(ABC):
 
         return Ok(context)
 
-    def _create_and_process_event(self, context: WebhookContext) -> Result[WebhookProcessingResult, str]:
+    def _create_and_process_event(self, context: WebhookContext) -> Result[WebhookProcessingResult, str]:  # noqa: PLR0911  # Each return is a distinct dedup/race/failure outcome
         """Step 5: Create webhook event record and process it.
 
         Uses database unique constraint (source, event_id) to prevent race conditions.
@@ -222,30 +222,51 @@ class BaseWebhookProcessor(ABC):
         # source_name is guaranteed to be not None after __init__ validation
         assert self.source_name is not None
 
+        signature_hash = hashlib.sha256(context.signature.encode()).hexdigest() if context.signature else ""
+
         try:
             with transaction.atomic():
-                # Use select_for_update with NOWAIT or try-create pattern
-                # The unique_together constraint on (source, event_id) prevents duplicates
-                webhook_event = WebhookEvent.objects.create(
+                # get_or_create keyed on the unique (source, event_id): a first delivery inserts a
+                # pending row; a redelivery of a non-processed event returns the existing one so it
+                # can be reprocessed in place rather than colliding with the constraint (#234).
+                # _check_duplicates has already filtered out events that reached "processed", so
+                # anything reaching here is either new or a previously-failed/pending redelivery.
+                webhook_event, created = WebhookEvent.objects.select_for_update().get_or_create(
                     source=self.source_name,
                     event_id=event_id,
-                    event_type=event_type,
-                    payload=context.payload,
-                    signature_hash=(
-                        hashlib.sha256(context.signature.encode()).hexdigest() if context.signature else ""
-                    ),
-                    ip_address=context.ip_address,
-                    user_agent=context.user_agent or "",  # Convert None to empty string for TextField
-                    headers=self._sanitize_headers(context.headers),
-                    status="pending",
+                    defaults={
+                        "event_type": event_type,
+                        "payload": context.payload,
+                        "signature_hash": signature_hash,
+                        "ip_address": context.ip_address,
+                        "user_agent": context.user_agent or "",
+                        "headers": self._sanitize_headers(context.headers),
+                        "status": "pending",
+                    },
                 )
+
+                # A concurrent request may have processed it between the duplicate check and the
+                # row lock; re-check under the lock so we never re-run a completed handler. Note
+                # this only guards against re-running a *completed* handler: two concurrent
+                # redeliveries of a still-failed event can both reach handle_event, so handlers
+                # must be idempotent (the payment handlers converge on gateway state and are). The
+                # manual retry command (process_webhooks) already reprocessed failed events through
+                # the same path, so this is a pre-existing contract, not a new requirement.
+                if not created and webhook_event.status == "processed":
+                    logger.info(f"🔄 Webhook {self.source_name}:{event_id} already processed - skipping")
+                    return Ok(
+                        WebhookProcessingResult.success_result(
+                            f"⏭️ Duplicate webhook skipped: {event_id}", webhook_event
+                        )
+                    )
 
                 try:
                     success, message = self.handle_event(webhook_event)
 
                     if success:
                         webhook_event.mark_processed()
-                        logger.info(f"✅ Processed {self.source_name} webhook {event_id}: {message}")
+                        verb = "Processed" if created else "Reprocessed"
+                        logger.info(f"✅ {verb} {self.source_name} webhook {event_id}: {message}")
                         return Ok(WebhookProcessingResult.success_result(message, webhook_event))
                     else:
                         webhook_event.mark_failed(message)
@@ -260,11 +281,21 @@ class BaseWebhookProcessor(ABC):
                     return Ok(WebhookProcessingResult.error_result(error_msg, webhook_event))
 
         except IntegrityError:
-            # Race condition: another request created this event first
-            # This is expected behavior - treat as duplicate
-            logger.info(f"🔄 Duplicate webhook {self.source_name}:{event_id} detected via constraint - skipping")
-            existing = WebhookEvent.objects.get(source=self.source_name, event_id=event_id)
-            return Ok(WebhookProcessingResult.success_result(f"⏭️ Duplicate webhook skipped: {event_id}", existing))
+            # get_or_create handles the (source, event_id) race internally, so this backstop is
+            # near-unreachable; it stays as belt-and-braces. Re-read the row and only treat a
+            # completed one as a duplicate. A non-processed row returns an error so the sender keeps
+            # retrying rather than being told the event succeeded. The message is intentionally
+            # generic (no internal state) since it reaches the external caller.
+            logger.info(f"🔄 Concurrent webhook {self.source_name}:{event_id} detected via constraint")
+            try:
+                existing = WebhookEvent.objects.get(source=self.source_name, event_id=event_id)
+            except WebhookEvent.DoesNotExist:
+                # The conflicting transaction hasn't committed yet (or the IntegrityError came
+                # from a different constraint) — tell the sender to retry rather than crash.
+                return Ok(WebhookProcessingResult.error_result("Webhook is being processed; please retry"))
+            if existing.status == "processed":
+                return Ok(WebhookProcessingResult.success_result(f"⏭️ Duplicate webhook skipped: {event_id}", existing))
+            return Ok(WebhookProcessingResult.error_result("Webhook is being processed; please retry", existing))
 
     def extract_event_id(self, payload: dict[str, Any]) -> str | None:
         """🔍 Extract unique event ID from payload - override in subclasses"""
