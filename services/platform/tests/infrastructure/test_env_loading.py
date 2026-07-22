@@ -25,8 +25,11 @@ _SETTINGS_DIR = Path(__file__).resolve().parents[2] / "config" / "settings"
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 
 # An empty-value var followed by an inline comment: KEY=   # note. dotenv 1.x keeps the comment
-# text as the VALUE for these (#364), so the templates must never ship this pattern.
-_EMPTY_VALUE_INLINE_COMMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=[ \t]*#")
+# text as the VALUE for these (#364), so the templates must never ship this pattern. Also catch
+# the leading-whitespace and `export KEY=` variants — dotenv leaks the comment for those too, so
+# the hygiene guardrail must reject them in future edits even though the current templates use
+# neither.
+_EMPTY_VALUE_INLINE_COMMENT = re.compile(r"^\s*(?:export\s+)?[A-Za-z_][A-Za-z0-9_]*=[ \t]*#")
 
 
 class TestEnvLoading(TestCase):
@@ -127,6 +130,17 @@ class TestCommentPollutedEnvGuard(TestCase):
             self.assertEqual(removed, [])
             self.assertEqual(os.environ["DJANGO_SECRET_KEY"], "realsecret")
 
+    def test_hash_leading_value_is_treated_as_pollution(self) -> None:
+        """Documented limitation (#364): a `#`-leading value is indistinguishable from a leaked
+        comment at the value level, so the guard unsets it too. Dev-only and fails safe (unset,
+        never a wrong value); no config key here legitimately starts with `#`."""
+        path = self._env_file("SOME_COLOR=#ffffff\n")
+        with mock.patch.dict(os.environ, {"SOME_COLOR": "#ffffff"}, clear=False):
+            removed = self._guard(Path(path))
+
+            self.assertEqual(removed, ["SOME_COLOR"])
+            self.assertNotIn("SOME_COLOR", os.environ)
+
     def test_does_not_strip_var_set_in_real_environment(self) -> None:
         """override=False: a var already in the real environment keeps its real value even if the
         file has a comment-polluted line for the same key."""
@@ -155,3 +169,20 @@ class TestEnvTemplateHygiene(TestCase):
             "empty-value vars with inline comments corrupt to '# ...' under dotenv (#364); "
             "move the comment to its own line:\n" + "\n".join(offenders),
         )
+
+    def test_pattern_catches_export_and_indented_variants(self) -> None:
+        """The guardrail must reject the variants dotenv also leaks, not just the bare form."""
+        for line in (
+            "KEY=   # note",
+            "KEY=# note",
+            "\tKEY=   # note",
+            "  KEY= # note",
+            "export KEY=   # note",
+        ):
+            self.assertIsNotNone(_EMPTY_VALUE_INLINE_COMMENT.match(line), line)
+        for ok in (
+            "KEY=value   # note",  # non-empty value: dotenv strips the comment, fine
+            "# a standalone comment line",
+            "KEY=",
+        ):
+            self.assertIsNone(_EMPTY_VALUE_INLINE_COMMENT.match(ok), ok)
