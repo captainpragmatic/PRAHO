@@ -15,6 +15,7 @@ from django.utils import timezone
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 
+from apps.billing.document_adjustments import UnsupportedDocumentAdjustmentError
 from apps.billing.models import Currency, Invoice, InvoiceLine, ProformaInvoice, ProformaLine
 from apps.billing.pdf_generators import (
     _FONT_DIR,
@@ -78,6 +79,30 @@ class BaseRomanianDocumentPDFGeneratorTestCase(TestCase):
         self.assertIsInstance(generator.canvas, canvas.Canvas)
         self.assertEqual(generator.width, A4[0])
         self.assertEqual(generator.height, A4[1])
+
+    def test_invoice_pdf_rejects_metadata_adjustment(self):
+        """PDF output cannot ignore a metadata allowance that XML might treat as money."""
+        self.invoice.meta = {'allowances': [{'amount_cents': 1000, 'reason': 'Manual'}]}
+        generator = RomanianInvoicePDFGenerator(self.invoice)
+
+        with self.assertRaisesRegex(UnsupportedDocumentAdjustmentError, 'Metadata-based document allowances'):
+            generator._create_pdf_document()
+
+    def test_invoice_pdf_rejects_line_discount(self):
+        """PDF output cannot ignore a line discount absent from ledger arithmetic."""
+        self.invoice.lines.update(discount_amount_cents=1000)
+        generator = RomanianInvoicePDFGenerator(self.invoice)
+
+        with self.assertRaisesRegex(UnsupportedDocumentAdjustmentError, 'Line-level discounts'):
+            generator._create_pdf_document()
+
+    def test_invoice_pdf_supports_empty_adjustments_and_zero_line_discount(self):
+        """The zero-adjustment boundary remains a valid document."""
+        self.invoice.meta = {'allowances': [], 'charges': []}
+        self.invoice.lines.update(discount_amount_cents=0)
+        generator = RomanianInvoicePDFGenerator(self.invoice)
+
+        generator._create_pdf_document()
 
     def test_invoice_dates_rendered_in_romanian_local_calendar(self):
         """#286: the PDF must print the Romanian calendar date, not the UTC one.
@@ -515,6 +540,22 @@ class RomanianProformaPDFGeneratorTestCase(TestCase):
 
         # Verify buffer has content after saving
         self.assertGreater(len(generator.buffer.getvalue()), 0)
+
+    def test_proforma_pdf_rejects_metadata_adjustment(self):
+        """Proforma PDFs enforce the same metadata-adjustment rule as invoice PDFs."""
+        self.proforma.meta = {'charges': [{'amount_cents': 1000, 'reason': 'Manual'}]}
+        generator = RomanianProformaPDFGenerator(self.proforma)
+
+        with self.assertRaisesRegex(UnsupportedDocumentAdjustmentError, 'Metadata-based document charges'):
+            generator._create_pdf_document()
+
+    def test_proforma_pdf_rejects_line_discount(self):
+        """Proforma PDFs reject line discounts the persisted totals do not apply."""
+        self.proforma.lines.update(discount_amount_cents=1000)
+        generator = RomanianProformaPDFGenerator(self.proforma)
+
+        with self.assertRaisesRegex(UnsupportedDocumentAdjustmentError, 'Line-level discounts'):
+            generator._create_pdf_document()
 
 
 class PDFGenerationErrorHandlingTestCase(TestCase):

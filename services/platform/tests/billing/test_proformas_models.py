@@ -6,6 +6,7 @@ from datetime import timedelta
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
 from django.test import TestCase
 from django.utils import timezone
 
@@ -147,6 +148,105 @@ class ProformaInvoiceTestCase(TestCase):
 
         self.assertEqual(proforma.meta['source'], 'web')
         self.assertEqual(proforma.meta['campaign'], 'spring2024')
+
+    def test_recalculate_totals_rejects_document_discount_before_mutation(self):
+        """Recalculation must not erase a document discount from proforma totals."""
+        proforma = ProformaInvoice.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            number='PRO-DISCOUNT',
+            subtotal_cents=8_000,
+            tax_cents=1_680,
+            total_cents=9_680,
+            discount_cents=2_000,
+        )
+        ProformaLine.objects.create(
+            proforma=proforma,
+            kind='service',
+            description='Discounted hosting',
+            quantity=Decimal('1.000'),
+            unit_price_cents=10_000,
+            tax_rate=Decimal('0.2100'),
+        )
+        original_totals = (proforma.subtotal_cents, proforma.tax_cents, proforma.total_cents)
+
+        with self.assertRaisesMessage(ValidationError, 'discounted proforma'):
+            proforma.recalculate_totals()
+
+        self.assertEqual(
+            (proforma.subtotal_cents, proforma.tax_cents, proforma.total_cents),
+            original_totals,
+        )
+
+    def test_recalculate_totals_rejects_sent_proforma_before_mutation(self):
+        """Sent proforma totals are no longer eligible for recalculation."""
+        proforma = ProformaInvoice.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            number='PRO-SENT',
+            subtotal_cents=5_000,
+            tax_cents=1_050,
+            total_cents=6_050,
+        )
+        ProformaLine.objects.create(
+            proforma=proforma,
+            kind='service',
+            description='Sent hosting',
+            quantity=Decimal('1.000'),
+            unit_price_cents=10_000,
+            tax_rate=Decimal('0.2100'),
+        )
+        proforma.send_proforma()
+        proforma.save(update_fields=['status'])
+        original_totals = (proforma.subtotal_cents, proforma.tax_cents, proforma.total_cents)
+
+        with self.assertRaisesMessage(ValidationError, 'draft proforma'):
+            proforma.recalculate_totals()
+
+        self.assertEqual(
+            (proforma.subtotal_cents, proforma.tax_cents, proforma.total_cents),
+            original_totals,
+        )
+
+    def test_recalculate_totals_rejects_metadata_charge(self):
+        """Unledgered metadata charges cannot participate in proforma arithmetic."""
+        proforma = ProformaInvoice.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            number='PRO-META-CHARGE',
+            meta={'charges': [{'amount_cents': 1_000, 'reason': 'Manual fee'}]},
+        )
+        ProformaLine.objects.create(
+            proforma=proforma,
+            kind='service',
+            description='Hosting',
+            quantity=Decimal('1.000'),
+            unit_price_cents=10_000,
+            tax_rate=Decimal('0.2100'),
+        )
+
+        with self.assertRaisesMessage(ValidationError, 'Metadata-based document charges'):
+            proforma.recalculate_totals()
+
+    def test_recalculate_totals_rejects_line_discount(self):
+        """Dormant line-discount fields cannot silently diverge from proforma totals."""
+        proforma = ProformaInvoice.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            number='PRO-LINE-DISCOUNT',
+        )
+        ProformaLine.objects.create(
+            proforma=proforma,
+            kind='service',
+            description='Hosting',
+            quantity=Decimal('1.000'),
+            unit_price_cents=10_000,
+            tax_rate=Decimal('0.2100'),
+            discount_amount_cents=1_000,
+        )
+
+        with self.assertRaisesMessage(ValidationError, 'Line-level discounts'):
+            proforma.recalculate_totals()
 
     def test_proforma_invoice_billing_address(self):
         """Test billing address snapshot fields"""

@@ -3,12 +3,14 @@
 # ===============================================================================
 
 from decimal import Decimal
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.contrib.messages.middleware import MessageMiddleware
 from django.contrib.sessions.middleware import SessionMiddleware
 from django.http import Http404, HttpResponse
 from django.test import RequestFactory, TestCase
+from django.urls import reverse
 from django.utils import timezone
 
 from apps.billing.models import (
@@ -409,3 +411,45 @@ class InvoiceSendViewsTestCase(TestCase):
         # Draft invoices should not be sendable
         self.assertEqual(draft_invoice.status, 'draft')
         # Add actual validation tests when implementing the send functionality
+
+
+class InvoiceSendGuardTestCase(TestCase):
+    """A guarded (unsupported-adjustment) invoice must never be marked sent.
+
+    The renderer fails closed, but the send view stamped sent_at and fired the
+    notification email unconditionally — recording a send that never happened
+    (review of #195).
+    """
+
+    def setUp(self):
+        self.currency, _ = Currency.objects.get_or_create(code='RON', defaults={'symbol': 'lei', 'decimals': 2})
+        self.customer = Customer.objects.create(
+            customer_type='company',
+            company_name='Send Guard Test SRL',
+            status='active',
+            primary_email='sendguard@test.ro',
+        )
+        self.user = User.objects.create_user(email='send_guard@test.ro', password='testpass')
+        self.user.staff_role = 'billing'
+        self.user.save()
+        CustomerMembership.objects.create(user=self.user, customer=self.customer, role='admin')
+
+        self.invoice = Invoice.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            number='INV-SEND-GUARD-001',
+            subtotal_cents=10000,
+            tax_cents=2100,
+            total_cents=12100,
+            meta={"allowances": [{"amount_cents": 1000, "reason": "Manual"}]},
+        )
+        self.client.force_login(self.user)
+
+    @patch("apps.notifications.services.EmailService.send_invoice_created")
+    def test_guarded_invoice_is_not_marked_sent(self, mock_notification):
+        response = self.client.post(reverse('billing:invoice_send', kwargs={'pk': self.invoice.pk}))
+
+        self.assertEqual(response.status_code, 422)
+        self.invoice.refresh_from_db()
+        self.assertIsNone(self.invoice.sent_at, "a guarded invoice must not be stamped sent")
+        mock_notification.assert_not_called()

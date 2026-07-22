@@ -11,11 +11,10 @@ Reference:
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
 from datetime import date, datetime
-from decimal import Decimal, InvalidOperation
-from typing import TYPE_CHECKING, Any
+from decimal import Decimal
+from typing import TYPE_CHECKING
 
 from django.conf import settings
 from lxml import etree
@@ -24,12 +23,14 @@ if TYPE_CHECKING:
     from apps.billing.invoice_models import Invoice, InvoiceLine
 
 from apps.billing.config import is_eu_country
+from apps.billing.document_adjustments import (
+    UnsupportedDocumentAdjustmentError,
+    validate_no_unsupported_adjustments,
+)
 from apps.billing.efactura.settings import ro_local_date
 from apps.billing.exchange_rate_service import ExchangeRateService
 from apps.billing.fiscal_identity import normalize_business_tax_id, normalize_country_code, validated_cnp_or_empty
 from apps.common.tax_service import TaxService
-
-logger = logging.getLogger(__name__)
 
 # UBL 2.1 Namespaces
 NAMESPACES = {
@@ -338,8 +339,18 @@ class BaseUBLBuilder:
         subtotal = Decimal(int(getattr(self.invoice, "subtotal_cents", 0) or 0)) / 100
         return max(Decimal(0), self._get_line_gross() - subtotal)
 
+    def _validate_supported_adjustments(self, errors: list[str]) -> None:
+        """Collect unsupported adjustment errors before any XML is emitted."""
+        try:
+            validate_no_unsupported_adjustments(
+                meta=self.invoice.meta,
+                line_discount_cents=self.invoice.lines.values_list("discount_amount_cents", flat=True),
+            )
+        except UnsupportedDocumentAdjustmentError as exc:
+            errors.append(str(exc))
+
     def _add_discount_allowance(self) -> None:
-        """Emit the stored document-level discount as a BG-20 AllowanceCharge with the
+        """Emit the ledger-reconciled document discount as a BG-20 AllowanceCharge with the
         document tax category (reason code 95 = Discount). No-op when discount is zero.
         """
         discount = self._get_document_discount()
@@ -530,6 +541,7 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
         if not self.invoice.lines.exists():
             errors.append("Invoice must have at least one line item")
 
+        self._validate_supported_adjustments(errors)
         self._validate_foreign_currency_snapshot(errors)
 
         # Single-category invariant: the builder emits ONE TaxSubtotal at one document rate, so the
@@ -805,79 +817,13 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
         tax_scheme = self._add_cac(tax_category, "TaxScheme")
         self._add_cbc(tax_scheme, "ID", "VAT")
 
-    def _iter_validated_meta(self, key: str) -> list[dict[str, Any]]:
-        """Parse invoice.meta[key] (allowances/charges) into validated entries.
-
-        Each returned dict is the original entry plus a Decimal ``amount`` (major units).
-        Entries with a missing/non-numeric ``amount_cents`` or a non-positive amount are
-        skipped with a warning — so a malformed value can never crash the build, and the
-        XML emission and the totals calc always iterate the SAME list (no divergence).
-        """
-        meta = getattr(self.invoice, "meta", {}) or {}
-        out: list[dict[str, Any]] = []
-        for entry in meta.get(key, []) or []:
-            if not isinstance(entry, dict):
-                logger.warning("e-Factura: skipping non-dict %s entry: %r", key, entry)
-                continue
-            try:
-                amount = Decimal(str(entry.get("amount_cents", 0))) / 100
-            except (InvalidOperation, TypeError, ValueError):
-                logger.warning("e-Factura: skipping %s with invalid amount_cents=%r", key, entry.get("amount_cents"))
-                continue
-            if amount <= 0:
-                continue
-            out.append({**entry, "amount": amount})
-        return out
-
     def _add_document_allowances_charges(self) -> None:
-        """Add document-level AllowanceCharge elements (BG-20/BG-21): the stored document
-        discount (live) plus any meta allowances/charges (dormant).
-        """
+        """Add the ledger-reconciled document discount as a BG-20 AllowanceCharge."""
         self._add_discount_allowance()
-        currency = self.invoice.currency.code
-
-        for allowance in self._iter_validated_meta("allowances"):
-            ac = self._add_cac(self.root, "AllowanceCharge")
-            self._add_cbc(ac, "ChargeIndicator", "false")
-            self._add_cbc(ac, "AllowanceChargeReasonCode", "95")  # Discount
-            self._add_cbc(ac, "AllowanceChargeReason", allowance.get("reason", "Discount"))
-            amount_elem = self._add_cbc(ac, "Amount", self._format_amount(allowance["amount"]))
-            amount_elem.set("currencyID", currency)
-
-            # Tax category forced to the document category + clamped, so AE/Z/etc. stay
-            # coherent (BR-AE-1) if this currently-dormant path is ever activated (#177).
-            tax_cat = self._add_cac(ac, "TaxCategory")
-            ac_category = self._get_tax_category()
-            self._add_cbc(tax_cat, "ID", ac_category)
-            ac_rate = Decimal(0) if ac_category != TAX_CATEGORY_STANDARD else self._get_tax_rate()
-            self._add_cbc(tax_cat, "Percent", self._format_percent(ac_rate))
-            scheme = self._add_cac(tax_cat, "TaxScheme")
-            self._add_cbc(scheme, "ID", "VAT")
-
-        for charge in self._iter_validated_meta("charges"):
-            ac = self._add_cac(self.root, "AllowanceCharge")
-            self._add_cbc(ac, "ChargeIndicator", "true")
-            self._add_cbc(ac, "AllowanceChargeReasonCode", "FC")  # Freight charge
-            self._add_cbc(ac, "AllowanceChargeReason", charge.get("reason", "Charge"))
-            amount_elem = self._add_cbc(ac, "Amount", self._format_amount(charge["amount"]))
-            amount_elem.set("currencyID", currency)
-
-            tax_cat = self._add_cac(ac, "TaxCategory")
-            ch_category = self._get_tax_category()
-            self._add_cbc(tax_cat, "ID", ch_category)
-            ch_rate = Decimal(0) if ch_category != TAX_CATEGORY_STANDARD else self._get_tax_rate()
-            self._add_cbc(tax_cat, "Percent", self._format_percent(ch_rate))
-            scheme = self._add_cac(tax_cat, "TaxScheme")
-            self._add_cbc(scheme, "ID", "VAT")
 
     def _get_document_level_totals(self) -> tuple[Decimal, Decimal]:
-        """Document-level allowance/charge totals (BT-107/BT-108): the stored document
-        discount plus any meta allowances; meta charges."""
-        allowance_total = self._get_document_discount() + sum(
-            (a["amount"] for a in self._iter_validated_meta("allowances")), Decimal(0)
-        )
-        charge_total = sum((c["amount"] for c in self._iter_validated_meta("charges")), Decimal(0))
-        return allowance_total, charge_total
+        """Return ledger-backed document allowance and charge totals (BT-107/BT-108)."""
+        return self._get_document_discount(), Decimal(0)
 
     def _add_legal_monetary_total(self) -> None:
         """Add LegalMonetaryTotal in UBL element order with reconciled totals."""
@@ -954,14 +900,6 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
             period = self._add_cac(invoice_line, "InvoicePeriod")
             self._add_cbc(period, "StartDate", line.period_start.isoformat())
             self._add_cbc(period, "EndDate", line.period_end.isoformat())
-
-        # BT-147: Line-level discount (AllowanceCharge)
-        if line.discount_amount_cents and line.discount_amount_cents > 0:
-            allowance = self._add_cac(invoice_line, "AllowanceCharge")
-            self._add_cbc(allowance, "ChargeIndicator", "false")
-            discount_amount = Decimal(line.discount_amount_cents) / 100
-            amount_elem = self._add_cbc(allowance, "Amount", self._format_amount(discount_amount))
-            amount_elem.set("currencyID", self.invoice.currency.code)
 
         # Item
         self._add_line_item(invoice_line, line)
@@ -1077,6 +1015,8 @@ class UBLCreditNoteBuilder(BaseUBLBuilder):
             # BR-RO-030/BR-53 require (fiscal credit-note ledger, #219). Fail
             # here with an honest message instead of persisting invalid XML.
             errors.append("Foreign-currency credit notes are not supported yet; RON only")
+
+        self._validate_supported_adjustments(errors)
 
         if errors:
             raise XMLBuilderError(f"Invalid credit note data: {'; '.join(errors)}")

@@ -9,7 +9,7 @@ import logging
 from collections.abc import Iterable
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Any, ClassVar
+from typing import Any, ClassVar, cast
 
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
@@ -18,6 +18,10 @@ from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from django_fsm import FSMField, TransitionNotAllowed, transition
 
+from apps.billing.document_adjustments import (
+    UnsupportedDocumentAdjustmentError,
+    validate_no_unsupported_adjustments,
+)
 from apps.billing.validators import (
     MAX_ADDRESS_FIELD_LENGTH,
     validate_financial_amount,
@@ -25,7 +29,7 @@ from apps.billing.validators import (
     validate_financial_text_field,
 )
 from apps.common.cnp_validator import validate_cnp
-from apps.common.financial_arithmetic import calculate_document_totals, calculate_line_totals
+from apps.common.financial_arithmetic import HasLineTotals, calculate_document_totals, calculate_line_totals
 from apps.common.validators import log_security_event
 
 from .currency_models import Currency
@@ -398,7 +402,21 @@ class Invoice(models.Model):
         Recalculate document totals from line items.
         Ensures end-to-end consistency: subtotal = Σ(line subtotals), tax = Σ(line taxes)
         """
-        totals = calculate_document_totals(list(self.lines.all()))
+        if self.status != "draft" or self.locked_at is not None:
+            raise ValidationError(_("Only an unlocked draft invoice can be recalculated."))
+        if self.discount_cents:
+            raise ValidationError(_("A discounted invoice cannot be recalculated from undiscounted line totals."))
+
+        lines = list(self.lines.all())
+        try:
+            validate_no_unsupported_adjustments(
+                meta=self.meta,
+                line_discount_cents=(line.discount_amount_cents for line in lines),
+            )
+        except UnsupportedDocumentAdjustmentError as exc:
+            raise ValidationError(str(exc)) from exc
+
+        totals = calculate_document_totals(cast(list[HasLineTotals], lines))
         self.subtotal_cents = totals.subtotal_cents
         self.tax_cents = totals.tax_cents
         self.total_cents = totals.total_cents

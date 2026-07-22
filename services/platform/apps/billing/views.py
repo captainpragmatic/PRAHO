@@ -1273,11 +1273,25 @@ def invoice_send(request: HttpRequest, pk: int) -> HttpResponse:
         return JsonResponse({"error": "Unauthorized"}, status=403)
 
     if request.method == "POST":
+        from apps.billing.document_adjustments import (  # noqa: PLC0415  # Deferred: avoids circular import
+            UnsupportedDocumentAdjustmentError,
+        )
         from apps.billing.invoice_service import send_invoice_email  # noqa: PLC0415  # Deferred: avoids circular import
         from apps.notifications.services import EmailService  # noqa: PLC0415  # Deferred: avoids circular import
 
         # Send via both the direct email and template-based notification
-        email_sent = send_invoice_email(invoice)
+        try:
+            email_sent = send_invoice_email(invoice)
+        except UnsupportedDocumentAdjustmentError as exc:
+            # Deterministic fail-closed guard: nothing was sent — do not stamp
+            # sent_at or fire the notification for a send that never happened.
+            messages.error(
+                request,
+                _("⚠️ Invoice #{invoice_number} cannot be emailed: {error}").format(
+                    invoice_number=invoice.number, error=str(exc)
+                ),
+            )
+            return JsonResponse({"error": str(exc)}, status=422)
         EmailService.send_invoice_created(invoice)
 
         invoice.sent_at = timezone.now()

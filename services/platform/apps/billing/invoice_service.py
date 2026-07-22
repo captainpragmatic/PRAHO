@@ -5,7 +5,6 @@ Business logic for invoice management and Romanian e-Factura compliance.
 
 from __future__ import annotations
 
-import io
 import logging
 from datetime import datetime
 from decimal import Decimal
@@ -14,8 +13,9 @@ from typing import TYPE_CHECKING, Any
 from django.conf import settings
 from django.db import transaction
 from django.db.models import Sum
-from django.template.loader import render_to_string
 from django.utils import timezone
+
+from apps.billing.document_adjustments import UnsupportedDocumentAdjustmentError
 
 if TYPE_CHECKING:
     from apps.customers.models import Customer
@@ -241,64 +241,14 @@ class BillingAnalyticsService:
 
 
 def generate_invoice_pdf(invoice: Invoice) -> bytes:
+    """Generate an invoice PDF through the canonical Romanian document renderer.
+
+    PDF generation errors intentionally propagate so callers cannot replace a
+    legally significant invoice with an unvalidated placeholder attachment.
     """
-    Generate PDF for an invoice.
+    from apps.billing.pdf_generators import generate_invoice_pdf as generate_canonical_pdf  # noqa: PLC0415
 
-    Args:
-        invoice: Invoice instance to generate PDF for
-
-    Returns:
-        PDF content as bytes
-    """
-    try:
-        # Try to use weasyprint for PDF generation
-        try:
-            from weasyprint import (  # noqa: PLC0415  # Deferred: avoids circular import
-                HTML,  # Deferred: optional heavy dependency  # Deferred: avoids circular import
-            )
-        except ImportError:
-            logger.warning("⚠️ [PDF] weasyprint not installed, returning placeholder PDF")
-            return _generate_placeholder_pdf(invoice)
-
-        # Render HTML template
-        context = {
-            "invoice": invoice,
-            "company": {
-                "name": getattr(settings, "COMPANY_NAME", "PRAHO Platform"),
-                "address": getattr(settings, "COMPANY_ADDRESS", ""),
-                "vat_number": getattr(settings, "COMPANY_VAT_NUMBER", ""),
-                "bank_details": getattr(settings, "COMPANY_BANK_DETAILS", ""),
-            },
-            "customer": invoice.customer,
-            "items": invoice.items.all() if hasattr(invoice, "items") else [],
-        }
-
-        html_content = render_to_string("billing/invoice_pdf.html", context)
-
-        # Generate PDF
-        pdf_file = io.BytesIO()
-        HTML(string=html_content).write_pdf(pdf_file)
-        pdf_content = pdf_file.getvalue()
-
-        logger.info(f"📄 [PDF] Generated PDF for invoice {invoice.number} ({len(pdf_content)} bytes)")
-        return pdf_content
-
-    except Exception as e:
-        logger.error(f"🔥 [PDF] Failed to generate PDF for invoice {invoice.number}: {e}")
-        return _generate_placeholder_pdf(invoice)
-
-
-def _generate_placeholder_pdf(invoice: Invoice) -> bytes:
-    """Generate a simple placeholder PDF when weasyprint is not available."""
-    # Return a minimal PDF structure
-    content = f"""Invoice: {invoice.number}
-Customer: {invoice.customer.get_display_name() if invoice.customer else "N/A"}
-Amount: {Decimal(invoice.total_cents) / 100:.2f}
-Date: {timezone.localtime(invoice.created_at).strftime("%Y-%m-%d") if invoice.created_at else "N/A"}
-
-This is a placeholder PDF. Install weasyprint for proper PDF generation.
-"""
-    return content.encode("utf-8")
+    return generate_canonical_pdf(invoice)
 
 
 def generate_e_factura_xml(invoice: Invoice) -> str:
@@ -378,6 +328,10 @@ Best regards,
         logger.info(f"📧 [Email] Sent invoice {invoice.number} to {email}")
         return True
 
+    except UnsupportedDocumentAdjustmentError:
+        # Deterministic fail-closed guard, not a transient delivery failure: the
+        # caller must see it (and must never mark the invoice as sent).
+        raise
     except Exception as e:
         logger.error(f"🔥 [Email] Failed to send invoice {invoice.number}: {e}")
         return False

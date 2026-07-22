@@ -21,6 +21,7 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
 
+from apps.billing.document_adjustments import validate_no_unsupported_adjustments
 from apps.billing.models import Invoice, ProformaInvoice
 from apps.common.utils import format_romanian_date
 
@@ -102,6 +103,10 @@ class RomanianDocumentPDFGenerator:
 
     def _create_pdf_document(self) -> None:
         """Create the complete PDF document."""
+        validate_no_unsupported_adjustments(
+            meta=self.document.meta,
+            line_discount_cents=self.document.lines.values_list("discount_amount_cents", flat=True),
+        )
         self._setup_document_header()
         self._render_company_information()
         self._render_client_information()

@@ -502,6 +502,109 @@ class InvoiceImmutabilityTests(TestCase):
         self.assertEqual(invoice.tax_cents, 3150)  # 2100 + 1050
         self.assertEqual(invoice.total_cents, 18150)
 
+    def test_recalculate_totals_rejects_document_discount_before_mutation(self) -> None:
+        """Recalculation must not silently replace discounted ledger totals with gross line totals."""
+        invoice = Invoice.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            number="INV-TEST-DISCOUNT",
+            status="draft",
+            subtotal_cents=8_000,
+            tax_cents=1_680,
+            total_cents=9_680,
+            discount_cents=2_000,
+        )
+        InvoiceLine.objects.create(
+            invoice=invoice,
+            kind="service",
+            description="Discounted hosting",
+            quantity=Decimal("1.000"),
+            unit_price_cents=10_000,
+            tax_rate=Decimal("0.2100"),
+        )
+        original_totals = (invoice.subtotal_cents, invoice.tax_cents, invoice.total_cents)
+
+        with self.assertRaisesMessage(ValidationError, "discounted invoice"):
+            invoice.recalculate_totals()
+
+        self.assertEqual(
+            (invoice.subtotal_cents, invoice.tax_cents, invoice.total_cents),
+            original_totals,
+        )
+
+    def test_recalculate_totals_rejects_locked_invoice_before_mutation(self) -> None:
+        """Issued invoice ledger totals cannot be recalculated even when its lines are unchanged."""
+        invoice = Invoice.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            number="INV-TEST-ISSUED",
+            status="draft",
+            subtotal_cents=5_000,
+            tax_cents=1_050,
+            total_cents=6_050,
+        )
+        InvoiceLine.objects.create(
+            invoice=invoice,
+            kind="service",
+            description="Issued hosting",
+            quantity=Decimal("1.000"),
+            unit_price_cents=10_000,
+            tax_rate=Decimal("0.2100"),
+        )
+        invoice.issue()
+        invoice.save()
+        original_totals = (invoice.subtotal_cents, invoice.tax_cents, invoice.total_cents)
+
+        with self.assertRaisesMessage(ValidationError, "unlocked draft invoice"):
+            invoice.recalculate_totals()
+
+        self.assertEqual(
+            (invoice.subtotal_cents, invoice.tax_cents, invoice.total_cents),
+            original_totals,
+        )
+
+    def test_recalculate_totals_rejects_metadata_allowance(self) -> None:
+        """Unledgered metadata allowances cannot participate in invoice arithmetic."""
+        invoice = Invoice.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            number="INV-TEST-META-ALLOWANCE",
+            status="draft",
+            meta={"allowances": [{"amount_cents": 1_000, "reason": "Promotion"}]},
+        )
+        InvoiceLine.objects.create(
+            invoice=invoice,
+            kind="service",
+            description="Hosting",
+            quantity=Decimal("1.000"),
+            unit_price_cents=10_000,
+            tax_rate=Decimal("0.2100"),
+        )
+
+        with self.assertRaisesMessage(ValidationError, "Metadata-based document allowances"):
+            invoice.recalculate_totals()
+
+    def test_recalculate_totals_rejects_line_discount(self) -> None:
+        """Dormant line-discount fields cannot silently diverge from ledger totals."""
+        invoice = Invoice.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            number="INV-TEST-LINE-DISCOUNT",
+            status="draft",
+        )
+        InvoiceLine.objects.create(
+            invoice=invoice,
+            kind="service",
+            description="Hosting",
+            quantity=Decimal("1.000"),
+            unit_price_cents=10_000,
+            tax_rate=Decimal("0.2100"),
+            discount_amount_cents=1_000,
+        )
+
+        with self.assertRaisesMessage(ValidationError, "Line-level discounts"):
+            invoice.recalculate_totals()
+
 
 # ===============================================================================
 # SECTION 5: ORDER VAT CALCULATOR — EU COMPLIANCE SCENARIOS
