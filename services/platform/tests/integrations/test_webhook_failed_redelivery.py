@@ -2,14 +2,17 @@
 Tests for webhook redelivery of failed events (#234).
 
 A duplicate check that treats a FAILED event the same as a PROCESSED one returns HTTP 200 to the
-sender on retry, so the sender (Stripe) stops retrying and the event is never reprocessed — a
-payment webhook that hit a transient error is left permanently unhandled.
+sender on retry, so the sender (Stripe) stops retrying and the event is never reprocessed
+automatically — a payment webhook that hit a transient error stays unhandled until an operator
+runs the manual retry command.
 """
 
 from __future__ import annotations
 
 from typing import Any
+from unittest.mock import patch
 
+from django.db import IntegrityError
 from django.test import TestCase
 
 from apps.integrations.models import WebhookEvent
@@ -94,3 +97,34 @@ class WebhookFailedRedeliveryTestCase(TestCase):
         self.assertFalse(WebhookEvent.is_duplicate("test", "evt_failed"))
         self.assertFalse(WebhookEvent.is_duplicate("test", "evt_pending"))
         self.assertTrue(WebhookEvent.is_duplicate("test", "evt_done"))
+
+    def test_successful_reprocess_clears_stale_failure_metadata(self) -> None:
+        """A reprocessed row must not keep advertising the old failure: a
+        'processed' event showing an error_message and a scheduled retry reads
+        as inconsistent state to operators (review of #234)."""
+        self._deliver(_ScriptedProcessor(should_succeed=False))
+        success, _message, event = self._deliver(_ScriptedProcessor(should_succeed=True))
+
+        self.assertTrue(success)
+        event.refresh_from_db()
+        self.assertEqual(event.status, "processed")
+        self.assertEqual(event.error_message, "")
+        self.assertIsNone(event.next_retry_at)
+        # retry_count stays as attempt history — only the live failure state clears.
+        self.assertEqual(event.retry_count, 1)
+
+    def test_integrity_backstop_survives_vanished_row(self) -> None:
+        """If the IntegrityError backstop cannot re-read the conflicting row
+        (other transaction uncommitted, or a different constraint fired), it
+        must return an error so the sender retries — not crash with
+        DoesNotExist (review of #234)."""
+        processor = _ScriptedProcessor(should_succeed=True)
+        with patch(
+            "apps.integrations.webhooks.base.WebhookEvent.objects.select_for_update",
+            side_effect=IntegrityError("simulated constraint race"),
+        ):
+            success, message, _event = self._deliver(processor)
+
+        self.assertFalse(success)
+        self.assertEqual(processor.handle_calls, 0)
+        self.assertIn("retry", message.lower())

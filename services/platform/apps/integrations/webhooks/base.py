@@ -205,7 +205,7 @@ class BaseWebhookProcessor(ABC):
 
         return Ok(context)
 
-    def _create_and_process_event(self, context: WebhookContext) -> Result[WebhookProcessingResult, str]:
+    def _create_and_process_event(self, context: WebhookContext) -> Result[WebhookProcessingResult, str]:  # noqa: PLR0911  # Each return is a distinct dedup/race/failure outcome
         """Step 5: Create webhook event record and process it.
 
         Uses database unique constraint (source, event_id) to prevent race conditions.
@@ -250,8 +250,8 @@ class BaseWebhookProcessor(ABC):
                 # this only guards against re-running a *completed* handler: two concurrent
                 # redeliveries of a still-failed event can both reach handle_event, so handlers
                 # must be idempotent (the payment handlers converge on gateway state and are). The
-                # retry cron already reprocessed failed events through the same path, so this is a
-                # pre-existing contract, not a new requirement.
+                # manual retry command (process_webhooks) already reprocessed failed events through
+                # the same path, so this is a pre-existing contract, not a new requirement.
                 if not created and webhook_event.status == "processed":
                     logger.info(f"🔄 Webhook {self.source_name}:{event_id} already processed - skipping")
                     return Ok(
@@ -287,7 +287,12 @@ class BaseWebhookProcessor(ABC):
             # retrying rather than being told the event succeeded. The message is intentionally
             # generic (no internal state) since it reaches the external caller.
             logger.info(f"🔄 Concurrent webhook {self.source_name}:{event_id} detected via constraint")
-            existing = WebhookEvent.objects.get(source=self.source_name, event_id=event_id)
+            try:
+                existing = WebhookEvent.objects.get(source=self.source_name, event_id=event_id)
+            except WebhookEvent.DoesNotExist:
+                # The conflicting transaction hasn't committed yet (or the IntegrityError came
+                # from a different constraint) — tell the sender to retry rather than crash.
+                return Ok(WebhookProcessingResult.error_result("Webhook is being processed; please retry"))
             if existing.status == "processed":
                 return Ok(WebhookProcessingResult.success_result(f"⏭️ Duplicate webhook skipped: {event_id}", existing))
             return Ok(WebhookProcessingResult.error_result("Webhook is being processed; please retry", existing))
