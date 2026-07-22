@@ -519,6 +519,9 @@ def update_consent(request: HttpRequest) -> HttpResponse:
 
     except Exception as e:
         logger.error(f"🔥 [GDPR Consent] Update failed for {user.email}: {e}", exc_info=True)
+        # Rendering an error response without raising would COMMIT any propagation
+        # already written while the user flag never persisted — roll back.
+        transaction.set_rollback(True)
         messages.error(request, _("An error occurred while updating your privacy preferences. Please try again."))
 
     # For HTMX requests, return the updated dashboard HTML

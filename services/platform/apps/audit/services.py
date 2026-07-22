@@ -1561,6 +1561,11 @@ class GDPRDeletionService:
 
             user.save()
 
+            # Sibling of #226: the send audience reads Customer.marketing_consent, so an
+            # anonymized user's suppression must reach their customers too — an erased user
+            # whose address is the customer contact must not keep receiving marketing.
+            GDPRConsentService._propagate_marketing_consent(user, consent=False)
+
             # Anonymize audit logs (IP addresses only)
             AuditEvent.objects.filter(user=user).update(
                 ip_address=cls.ANONYMIZATION_MAP["ip_address"](), user_agent="Anonymized"
@@ -1624,30 +1629,42 @@ class GDPRConsentService:
           The acting user is treated as consenting (they just granted), even if their own row has
           not been persisted yet at call time.
 
-        The bulk .update() intentionally bypasses the per-Customer marketing_consent signal
-        (customers/signals.py). The canonical compliance record for this change is the
-        gdpr_consent event that withdraw_consent / update_consent already log against the acting
-        user — a DPA looks for the user-attributed consent decision, not a per-customer echo — so
-        re-firing that signal for every membership would only duplicate the trail.
+        Only ACTIVE memberships participate, in both directions: a user removed from a
+        customer neither suppresses it nor blocks its re-enable with a stale withdrawal.
+
+        Each customer is saved individually (not bulk-updated) with _consent_source set, so
+        the per-Customer marketing_consent signal (customers/signals.py) records the flip on
+        the customer's own consent trail with GDPR Art. 7 source attribution — complementing,
+        not duplicating, the user-attributed gdpr_consent event the callers log.
         """
         from apps.customers.models import Customer  # noqa: PLC0415  # Deferred: avoids circular import
         from apps.users.models import CustomerMembership  # noqa: PLC0415  # Deferred: avoids circular import
 
-        customer_ids = list(Customer.objects.filter(memberships__user=user).values_list("id", flat=True).distinct())
+        customer_ids = list(
+            Customer.objects.filter(memberships__user=user, memberships__is_active=True)
+            .values_list("id", flat=True)
+            .distinct()
+        )
         if not customer_ids:
             return
 
         if consent:
-            # Block any customer that still has a withdrawn member OTHER than the acting user
-            # (the acting user has just consented, so their own row does not block the grant).
+            # Block any customer that still has a withdrawn ACTIVE member OTHER than the acting
+            # user (the acting user has just consented, so their own row does not block the grant).
             blocked_ids = set(
-                CustomerMembership.objects.filter(customer_id__in=customer_ids, user__accepts_marketing=False)
+                CustomerMembership.objects.filter(
+                    customer_id__in=customer_ids, is_active=True, user__accepts_marketing=False
+                )
                 .exclude(user_id=user.id)
                 .values_list("customer_id", flat=True)
             )
             customer_ids = [cid for cid in customer_ids if cid not in blocked_ids]
 
-        Customer.objects.filter(id__in=customer_ids).update(marketing_consent=consent)
+        for customer in Customer.objects.filter(id__in=customer_ids).exclude(marketing_consent=consent):
+            customer.marketing_consent = consent
+            customer._consent_source = "gdpr_consent_service"  # type: ignore[attr-defined]  # transient signal-instance attr; read via getattr in customers.signals
+            customer._consent_category = "marketing"  # type: ignore[attr-defined]  # transient signal-instance attr; read via getattr in customers.signals
+            customer.save(update_fields=["marketing_consent", "updated_at"])
 
     @classmethod
     @transaction.atomic
@@ -1679,6 +1696,9 @@ class GDPRConsentService:
                 )
                 if deletion_result.is_err():
                     error_msg = deletion_result.error if hasattr(deletion_result, "error") else str(deletion_result)
+                    # Err without raising would COMMIT the marketing propagation above
+                    # while the user flag never persists — roll the whole withdrawal back.
+                    transaction.set_rollback(True)
                     return Err(f"Failed to process consent withdrawal: {error_msg}")
 
                 # Immediately process the deletion request
@@ -1687,6 +1707,9 @@ class GDPRConsentService:
                 process_result = GDPRDeletionService.process_deletion_request(deletion_request)
                 if process_result.is_err():
                     error_msg = process_result.error if hasattr(process_result, "error") else str(process_result)
+                    # Err without raising would COMMIT the marketing propagation above
+                    # while the user flag never persists — roll the whole withdrawal back.
+                    transaction.set_rollback(True)
                     return Err(f"Failed to anonymize user data: {error_msg}")
 
                 changes_made.append("data_processing")
@@ -1715,6 +1738,8 @@ class GDPRConsentService:
 
         except Exception as e:
             logger.error(f"🔥 [GDPR Consent] Failed to withdraw consent for {user.email}: {e}")
+            # Err without raising would COMMIT any propagation already written — roll back.
+            transaction.set_rollback(True)
             return Err(f"Consent withdrawal failed: {e!s}")
 
     @classmethod

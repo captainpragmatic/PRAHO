@@ -9,10 +9,13 @@ two, so withdrawing marketing consent was a functional no-op — the customer ke
 from __future__ import annotations
 
 import uuid
+from unittest.mock import patch
 
 from django.test import TestCase
 
-from apps.audit.services import GDPRConsentService
+from apps.audit.models import ComplianceLog
+from apps.audit.services import GDPRConsentService, GDPRDeletionService
+from apps.common.types import Err as ErrResult
 from apps.customers.models import Customer
 from apps.users.models import CustomerMembership, User
 
@@ -125,7 +128,7 @@ class PropagateMarketingConsentTestCase(TestCase):
 
         # A second member of the SAME customer opts in.
         opting_in_member = _make_user()
-        CustomerMembership.objects.create(customer=customer, user=opting_in_member, role="member")
+        CustomerMembership.objects.create(customer=customer, user=opting_in_member, role="viewer")
 
         GDPRConsentService._propagate_marketing_consent(opting_in_member, consent=True)
 
@@ -141,9 +144,98 @@ class PropagateMarketingConsentTestCase(TestCase):
         customer = _make_customer(member, marketing_consent=False)
         # A second, still-consenting member.
         other = _make_user()  # accepts_marketing=True by default
-        CustomerMembership.objects.create(customer=customer, user=other, role="member")
+        CustomerMembership.objects.create(customer=customer, user=other, role="viewer")
 
         GDPRConsentService._propagate_marketing_consent(member, consent=True)
 
         customer.refresh_from_db()
         self.assertTrue(customer.marketing_consent)
+
+
+class PropagationHardeningTestCase(TestCase):
+    """Review hardening of the #226 propagation (membership state, audit, rollback)."""
+
+    def test_withdrawal_ignores_inactive_memberships(self) -> None:
+        """A deactivated membership no longer speaks for the customer: the user's
+        withdrawal must not suppress a customer they were removed from."""
+        user = _make_user()
+        active_customer = _make_customer(user)
+        former_customer = Customer.objects.create(
+            name="Former SRL",
+            company_name="Former SRL",
+            customer_type="company",
+            status="active",
+            marketing_consent=True,
+        )
+        CustomerMembership.objects.create(
+            customer=former_customer, user=user, role="viewer", is_active=False
+        )
+
+        GDPRConsentService.withdraw_consent(user, ["marketing"])
+
+        active_customer.refresh_from_db()
+        former_customer.refresh_from_db()
+        self.assertFalse(active_customer.marketing_consent)
+        self.assertTrue(former_customer.marketing_consent, "an inactive membership must not propagate")
+
+    def test_inactive_withdrawn_member_does_not_block_regrant(self) -> None:
+        """A deactivated member's old withdrawal must not permanently veto the
+        customer's re-enable."""
+        withdrawn_former_member = _make_user()
+        withdrawn_former_member.accepts_marketing = False
+        withdrawn_former_member.save(update_fields=["accepts_marketing"])
+        customer = _make_customer(withdrawn_former_member, marketing_consent=False)
+        CustomerMembership.objects.filter(customer=customer, user=withdrawn_former_member).update(is_active=False)
+
+        acting_member = _make_user()
+        CustomerMembership.objects.create(customer=customer, user=acting_member, role="viewer")
+
+        GDPRConsentService._propagate_marketing_consent(acting_member, consent=True)
+
+        customer.refresh_from_db()
+        self.assertTrue(customer.marketing_consent, "an inactive member's withdrawal must not block the grant")
+
+    def test_data_processing_withdrawal_also_suppresses_marketing(self) -> None:
+        """Sibling of #226: anonymization sets User.accepts_marketing=False, so it
+        must propagate the suppression too — an erased user whose address is the
+        customer contact must not keep receiving marketing."""
+        user = _make_user()
+        customer = _make_customer(user)
+
+        result = GDPRConsentService.withdraw_consent(user, ["data_processing"])
+
+        self.assertTrue(result.is_ok(), f"withdrawal failed: {result}")
+        customer.refresh_from_db()
+        self.assertFalse(customer.marketing_consent)
+
+    def test_gdpr_flip_writes_per_customer_compliance_record(self) -> None:
+        """The per-customer consent trail (customers/signals.py, GDPR Art. 7
+        attribution) must include GDPR-initiated flips — bulk update() left the
+        customer's own trail blind to them."""
+        user = _make_user()
+        customer = _make_customer(user)
+
+        GDPRConsentService.withdraw_consent(user, ["marketing"])
+
+        record = ComplianceLog.objects.filter(
+            compliance_type="marketing_consent", reference_id=f"customer_{customer.id}"
+        ).first()
+        self.assertIsNotNone(record, "the customer's consent trail must record the GDPR-initiated flip")
+
+    def test_failed_anonymization_rolls_back_marketing_propagation(self) -> None:
+        """withdraw_consent returns Err inside its transaction; the customer
+        suppression written before the failure must roll back with it, never
+        half-commit (user flag unsaved, customer flag flipped)."""
+        user = _make_user()
+        customer = _make_customer(user)
+
+        with patch.object(
+            GDPRDeletionService, "process_deletion_request", return_value=ErrResult("anonymization backend down")
+        ):
+            result = GDPRConsentService.withdraw_consent(user, ["marketing", "data_processing"])
+
+        self.assertTrue(result.is_err())
+        user.refresh_from_db()
+        customer.refresh_from_db()
+        self.assertTrue(user.accepts_marketing, "user flag must not persist on a failed withdrawal")
+        self.assertTrue(customer.marketing_consent, "customer suppression must roll back with the failed withdrawal")
