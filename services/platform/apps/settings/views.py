@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 import logging
-from decimal import Decimal
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from django.contrib.auth.decorators import login_required, user_passes_test
@@ -84,119 +83,63 @@ def public_settings_api(request: HttpRequest) -> JsonResponse:
 # ===============================================================================
 
 
+def _api_setting_payload(setting: SystemSetting) -> dict[str, Any]:
+    """Serialize one setting for the staff API — sensitive values are never disclosed"""
+    return {
+        "value": None if setting.is_sensitive else setting.value,
+        "configured": setting.value is not None,
+        "is_sensitive": setting.is_sensitive,
+        "data_type": setting.data_type,
+        "description": setting.description,
+        "is_required": setting.is_required,
+        "requires_restart": setting.requires_restart,
+    }
+
+
 @method_decorator([login_required, user_passes_test(is_staff_user)], name="dispatch")
 class SettingsAPIView(View):
     """
-    ⚙️ Staff API for system settings management
+    ⚙️ Staff read-only API for system settings
 
-    Provides CRUD operations for system settings with proper authentication,
-    validation, and audit logging.
+    Writes go exclusively through the change-set endpoint and the admin-only
+    credential endpoints — this API never mutates and never discloses
+    sensitive values (not even ciphertext).
     """
 
-    http_method_names: ClassVar[list[str]] = ["get", "post", "put", "delete"]
+    http_method_names: ClassVar[list[str]] = ["get"]
 
     def get(self, request: HttpRequest, key: str | None = None) -> JsonResponse:
         """
         🔍 Get setting value(s)
 
-        GET /api/settings/ - Get all settings
+        GET /api/settings/ - Get all settings grouped by category
         GET /api/settings/billing.proforma_validity_days/ - Get specific setting
         """
         try:
             if key:
-                # Get specific setting
                 setting = get_object_or_404(SystemSetting, key=key, is_active=True)
+                payload = _api_setting_payload(setting)
+                payload["key"] = setting.key
+                payload["category"] = setting.category
+                payload["updated_at"] = setting.updated_at.isoformat()
+                return JsonResponse({"success": True, "setting": payload})
 
-                return JsonResponse(
-                    {
-                        "success": True,
-                        "setting": {
-                            "key": setting.key,
-                            "value": setting.value,
-                            "data_type": setting.data_type,
-                            "description": setting.description,
-                            "category": setting.category.name if setting.category else None,
-                            "is_required": setting.is_required,
-                            "requires_restart": setting.requires_restart,
-                            "updated_at": setting.updated_at.isoformat(),
-                        },
-                    }
+            # SystemSetting.category is a plain CharField — group by its value
+            result: dict[str, Any] = {}
+            for setting in SystemSetting.objects.filter(is_active=True).order_by("category", "key"):
+                bucket = result.setdefault(
+                    setting.category,
+                    {"name": setting.category.replace("_", " ").title(), "settings": {}},
                 )
-            else:
-                # Get all settings grouped by category
-                categories = SettingCategory.objects.filter(is_active=True).prefetch_related("settings")
+                bucket["settings"][setting.key] = _api_setting_payload(setting)
 
-                result: dict[str, Any] = {}
-                for category in categories:
-                    result[category.key] = {"name": category.name, "description": category.description, "settings": {}}
-
-                    for setting in category.settings.filter(is_active=True):
-                        result[category.key]["settings"][setting.key] = {
-                            "value": setting.value,
-                            "data_type": setting.data_type,
-                            "description": setting.description,
-                            "is_required": setting.is_required,
-                            "requires_restart": setting.requires_restart,
-                        }
-
-                return JsonResponse({"success": True, "categories": result})
+            return JsonResponse({"success": True, "categories": result})
 
         except Http404:
             return JsonResponse({"success": False, "error": f'Setting "{key}" not found'}, status=404)
         except Exception as e:
             logger.error(f"💥 Error getting settings: {e}")
             return JsonResponse({"success": False, "error": "Failed to retrieve settings"}, status=500)
-
-    def post(self, request: HttpRequest) -> JsonResponse:
-        """
-        💾 Update setting value
-
-        POST /api/settings/
-        Body: {
-            "key": "billing.proforma_validity_days",
-            "value": 45,
-            "reason": "Extended validity for Q4 promotion"
-        }
-        """
-        try:
-            data = json.loads(request.body)
-            key = data.get("key")
-            value = data.get("value")
-            reason = data.get("reason", "")
-
-            if not key:
-                return JsonResponse({"success": False, "error": "Setting key is required"}, status=400)
-
-            settings_service = SettingsService
-            user_id = (
-                request.user.id if hasattr(request.user, "id") and not isinstance(request.user, AnonymousUser) else None
-            )
-            result = settings_service.update_setting(key, value, user_id, reason)
-
-            if isinstance(result, Ok):
-                # Log security event
-                log_security_event(
-                    event_type="setting_updated",
-                    details={
-                        "key": key,
-                        "new_value": value,
-                        "reason": reason,
-                        "resource_type": "SystemSetting",
-                        "resource_id": key,
-                        "user": user_id,
-                    },
-                    request_ip=request.META.get("REMOTE_ADDR"),
-                )
-
-                return JsonResponse({"success": True, "message": f'Setting "{key}" updated successfully'})
-            else:
-                return JsonResponse({"success": False, "error": result.error}, status=400)
-
-        except json.JSONDecodeError:
-            return JsonResponse({"success": False, "error": "Invalid JSON in request body"}, status=400)
-        except Exception as e:
-            logger.error(f"💥 Error updating setting: {e}")
-            return JsonResponse({"success": False, "error": "Failed to update setting"}, status=500)
 
 
 # ===============================================================================
@@ -205,7 +148,6 @@ class SettingsAPIView(View):
 
 
 @user_passes_test(is_staff_user)
-@login_required
 @login_required
 @require_http_methods(["GET"])
 def category_settings_api(request: HttpRequest, category_key: str) -> JsonResponse:
@@ -332,33 +274,24 @@ class SettingsManagementView(TemplateView):
         return context
 
 
-def _convert_setting_value(value: str, data_type: str) -> Any:
-    """🔄 Convert POST value based on setting data type"""
-    if data_type == "boolean":
-        return value.lower() in ("true", "1", "on", "yes")
-    elif data_type == "integer":
-        return int(value)
-    elif data_type == "decimal":
-        return Decimal(value)
-    return value
-
-
 def _update_category_settings(request: HttpRequest, category_key: str) -> JsonResponse:
     """💾 Handle POST request to update category settings"""
     updated_count = 0
     errors = []
+    user_id = request.user.id if hasattr(request.user, "id") and not isinstance(request.user, AnonymousUser) else None
 
     for key, value in request.POST.items():
         if not key.startswith("setting_"):
             continue
 
         setting_key = key[8:]  # Remove 'setting_' prefix
-        try:
-            setting = SystemSetting.objects.get(key=setting_key, category=category_key)
-            converted_value = _convert_setting_value(str(value), setting.data_type)
-            SettingsService.set_setting(setting_key, converted_value)
+        if not SystemSetting.objects.filter(key=setting_key, category=category_key).exists():
+            errors.append(f"Error updating {setting_key}")
+            continue
+        result = SettingsService.update_setting(setting_key, str(value), user_id, "Category settings update")
+        if isinstance(result, Ok):
             updated_count += 1
-        except (SystemSetting.DoesNotExist, ValueError, TypeError):
+        else:
             # SECURITY: Don't expose internal error details
             errors.append(f"Error updating {setting_key}")
 
@@ -410,7 +343,6 @@ def category_management_partial(request: HttpRequest, category_key: str) -> Http
 
 
 @user_passes_test(is_staff_user)
-@login_required
 @login_required
 @require_http_methods(["POST"])
 def refresh_cache(request: HttpRequest) -> JsonResponse:

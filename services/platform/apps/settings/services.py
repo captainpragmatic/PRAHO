@@ -8,9 +8,11 @@ from __future__ import annotations
 import decimal
 import json
 import logging
-from dataclasses import dataclass
+import re
+import uuid
+from dataclasses import dataclass, field
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any, ClassVar, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Final, cast
 
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
@@ -37,6 +39,18 @@ SettingValue = str | int | bool | Decimal | list[Any] | dict[str, Any] | None
 # Settings validation constants
 SETTING_KEY_PARTS_COUNT = 2  # Expected parts in a setting key (category.name)
 
+# Registry defaults are cached briefly so a later row creation becomes visible fast
+DEFAULT_FALLBACK_CACHE_TIMEOUT = 300
+
+# Distinguishes "cached None" from a cache miss; never stored, only used as cache.get default
+_CACHE_MISS: Final = object()
+
+# Sensitive-key name patterns — single sensitivity authority until the catalog lands
+_SENSITIVE_KEY_PATTERNS: Final[tuple[str, ...]] = ("password", "secret", "key", "token", "credential")
+
+_TRUTHY_STRINGS: Final = frozenset({"true", "1", "on", "yes"})
+_FALSY_STRINGS: Final = frozenset({"false", "0", "off", "no", ""})
+
 
 @dataclass
 class SettingUpdate:
@@ -56,6 +70,31 @@ class SettingValidationError:
     field: str
     message: str
     code: str
+
+
+@dataclass
+class ChangeSetConflict:
+    """⚠️ Change-set entry whose baseline no longer matches the database"""
+
+    key: str
+    server_updated_at: str | None
+
+
+@dataclass
+class ChangeSetError:
+    """🚨 Aggregate failure of a change-set application"""
+
+    code: str  # "empty" | "validation" | "conflict"
+    errors: list[SettingValidationError] = field(default_factory=list)
+    conflicts: list[ChangeSetConflict] = field(default_factory=list)
+
+
+@dataclass
+class ChangeSetOutcome:
+    """✅ Applied change set — fresh rows for the UI to rebaseline on"""
+
+    change_set_id: str
+    settings: dict[str, SystemSetting]
 
 
 class SettingsService:
@@ -361,90 +400,214 @@ class SettingsService:
         Returns:
             Setting value or default
         """
-        # Generate cache key first (needed for both paths)
+        # Cache first (ADR-0015 tier order). Sensitive settings are never written
+        # to the cache, so a cache hit is always safe to return directly.
         cache_key = cls._get_cache_key(key)
+        cached_value = cache.get(cache_key, _CACHE_MISS, version=cls.CACHE_VERSION)
+        if cached_value is not _CACHE_MISS:
+            logger.debug("✅ [Settings] Cache hit for key: %s", key)
+            return cast("SettingValue", cached_value)
 
-        # Get from database first to check if sensitive
         try:
             setting = SystemSetting.objects.get(key=key)
-
-            # For sensitive settings, always query database (no caching)
-            if setting.is_sensitive:
-                value = setting.get_typed_value()
-                logger.debug("⚡ [Settings] Database hit for key: %s (sensitive, not cached)", key)
-                return value
-
-            # For non-sensitive settings, use cache
-            cached_value = cache.get(cache_key, version=cls.CACHE_VERSION)
-
-            if cached_value is not None:
-                logger.debug("✅ [Settings] Cache hit for key: %s", key)
-                return cast("SettingValue", cached_value)
-            # Cache miss - get value and cache it
-            value = setting.get_typed_value()
-            cache.set(cache_key, value, timeout=cls.CACHE_TIMEOUT, version=cls.CACHE_VERSION)
-            logger.debug("⚡ [Settings] Database hit for key: %s (cached)", key)
-
-            return value
-
         except SystemSetting.DoesNotExist:
-            # Use default from DEFAULT_SETTINGS or provided default
             fallback_value = cls.DEFAULT_SETTINGS.get(key, default)
-
-            # Cache the default value temporarily
-            cache.set(
-                cache_key,
-                fallback_value,
-                timeout=300,  # 5 minutes for defaults
-                version=cls.CACHE_VERSION,
-            )
-
+            cache.set(cache_key, fallback_value, timeout=DEFAULT_FALLBACK_CACHE_TIMEOUT, version=cls.CACHE_VERSION)
             logger.warning("⚠️ [Settings] Using default for missing key: %s", key)
             return cast("SettingValue", fallback_value)
 
+        if setting.is_sensitive:
+            logger.debug("⚡ [Settings] Database hit for key: %s (sensitive, not cached)", key)
+            return setting.get_typed_value()
+
+        value = setting.get_typed_value()
+        cache.set(cache_key, value, timeout=cls.CACHE_TIMEOUT, version=cls.CACHE_VERSION)
+        logger.debug("⚡ [Settings] Database hit for key: %s (cached)", key)
+        return value
+
     @classmethod
-    @monitor_performance()
-    def set_setting(cls, key: str, value: Any) -> None:
+    def _is_sensitive_key(cls, key: str) -> bool:
+        """Name-pattern sensitivity authority (replaced by the catalog flag in the catalog commit)"""
+        return any(pattern in key.lower() for pattern in _SENSITIVE_KEY_PATTERNS)
+
+    @classmethod
+    def _coerce_value(cls, key: str, data_type: str, value: Any) -> Any:  # noqa: C901, PLR0911, PLR0912  # Canonical per-type coercion table
         """
-        🔧 Set setting value and update cache
+        🔬 Coerce raw input to the canonical Python value for data_type.
 
-        Args:
-            key: Setting key (e.g., "billing.proforma_validity_days")
-            value: New value to set
+        Strict on purpose: bool is not an integer, decimals must be finite,
+        lists must parse to lists. Raises ValidationError with a clear message.
+        """
+        if data_type == "boolean":
+            if isinstance(value, bool):
+                return value
+            if isinstance(value, str):
+                lowered = value.strip().lower()
+                if lowered in _TRUTHY_STRINGS:
+                    return True
+                if lowered in _FALSY_STRINGS:
+                    return False
+            raise ValidationError(_("%(key)s: value must be a boolean") % {"key": key})
+        if data_type == "integer":
+            if isinstance(value, bool):
+                raise ValidationError(_("%(key)s: value must be an integer, not a boolean") % {"key": key})
+            if isinstance(value, int):
+                return value
+            if isinstance(value, str):
+                try:
+                    return int(value.strip())
+                except ValueError as e:
+                    raise ValidationError(_("%(key)s: value must be an integer") % {"key": key}) from e
+            raise ValidationError(_("%(key)s: value must be an integer") % {"key": key})
+        if data_type == "decimal":
+            if isinstance(value, bool):
+                raise ValidationError(_("%(key)s: value must be a decimal number") % {"key": key})
+            try:
+                decimal_value = Decimal(str(value).strip())
+            except decimal.InvalidOperation as e:
+                raise ValidationError(_("%(key)s: value must be a decimal number") % {"key": key}) from e
+            if not decimal_value.is_finite():
+                raise ValidationError(_("%(key)s: decimal value must be finite") % {"key": key})
+            return decimal_value
+        if data_type in ("list", "json"):
+            parsed = _safe_json_loads(value) if isinstance(value, str) else value
+            if data_type == "list" and not isinstance(parsed, list):
+                raise ValidationError(_("%(key)s: value must be a JSON list") % {"key": key})
+            return parsed
+        # string
+        if not isinstance(value, str):
+            raise ValidationError(_("%(key)s: value must be a string") % {"key": key})
+        return value
 
-        Raises:
-            SystemSetting.DoesNotExist: If setting doesn't exist
-            ValidationError: If value is invalid for the setting type
+    @classmethod
+    def _validation_rules_for(cls, setting: SystemSetting) -> dict[str, Any]:
+        """Validation-rule source (flips to the settings catalog in the catalog commit)"""
+        return setting.validation_rules or {}
+
+    @classmethod
+    def _apply_rules(cls, key: str, rules: dict[str, Any], value: Any) -> None:
+        """📏 Enforce min/max/choices/pattern rules against a coerced value"""
+        if not rules:
+            return
+        minimum = rules.get("min")
+        if minimum is not None and isinstance(value, int | Decimal) and value < Decimal(str(minimum)):
+            raise ValidationError(_("%(key)s: value must be at least %(min)s") % {"key": key, "min": minimum})
+        maximum = rules.get("max")
+        if maximum is not None and isinstance(value, int | Decimal) and value > Decimal(str(maximum)):
+            raise ValidationError(_("%(key)s: value must be at most %(max)s") % {"key": key, "max": maximum})
+        choices = rules.get("choices")
+        if choices is not None and value not in choices:
+            raise ValidationError(
+                _("%(key)s: value must be one of %(choices)s") % {"key": key, "choices": ", ".join(map(str, choices))}
+            )
+        pattern = rules.get("pattern")
+        if pattern is not None and isinstance(value, str) and re.fullmatch(pattern, value) is None:
+            raise ValidationError(_("%(key)s: value does not match the required pattern") % {"key": key})
+
+    @classmethod
+    def _validation_error(cls, key: str, exc: ValidationError) -> SettingValidationError:
+        """Convert a Django ValidationError into the service error dataclass"""
+        message = str(exc.message_dict) if hasattr(exc, "message_dict") else "; ".join(exc.messages)
+        return SettingValidationError(key=key, field="value", message=message, code="validation_error")
+
+    @classmethod
+    def _write_setting_locked(  # noqa: PLR0913  # Keyword-only write context (actor, reason, change set)
+        cls,
+        key: str,
+        value: Any,
+        *,
+        user_id: int | None = None,
+        reason: str | None = None,
+        change_set_id: str | None = None,
+        require_absent_on_create: bool = False,
+    ) -> Result[SystemSetting, SettingValidationError]:
+        """
+        🔒 Write one setting under row lock. The caller owns the enclosing transaction.
+
+        No retry decorator and no broad exception handling here — callers decide
+        retry and rollback policy. Creation happens inside a savepoint so a lost
+        create race cannot poison the caller's transaction.
         """
         try:
-            with transaction.atomic():
-                # Serialize every settings write; the recurring kill switch shares this row
-                # lock with final off-session authorization and gateway submission.
+            setting = SystemSetting.objects.select_for_update(of=("self",)).get(key=key)
+        except SystemSetting.DoesNotExist:
+            data_type = cls._infer_data_type(cls.DEFAULT_SETTINGS.get(key, value))
+            try:
+                coerced = cls._coerce_value(key, data_type, value)
+            except ValidationError as e:
+                return Err(cls._validation_error(key, e))
+            try:
+                with transaction.atomic():
+                    setting = SystemSetting(
+                        key=key,
+                        name=cls._generate_name_from_key(key),
+                        description=f"System setting: {key}",
+                        category=key.split(".", maxsplit=1)[0] if "." in key else "system",
+                        data_type=data_type,
+                        value=cls._prepare_value_for_json(coerced, data_type),
+                        default_value=cls._prepare_value_for_json(cls.DEFAULT_SETTINGS.get(key, coerced), data_type),
+                        # Stamp sensitivity BEFORE the first save so the initial write
+                        # is encrypted and never enters the cache as a plain value.
+                        is_sensitive=cls._is_sensitive_key(key),
+                    )
+                    setting._audit_context = {
+                        "user_id": user_id,
+                        "reason": reason,
+                        "change_set_id": change_set_id,
+                        "old_value": None,
+                        "new_value": "(hidden)" if setting.is_sensitive else str(coerced),
+                    }
+                    setting.save()
+            except IntegrityError:
+                if require_absent_on_create:
+                    return Err(
+                        SettingValidationError(
+                            key=key,
+                            field="baseline",
+                            message="Setting was created concurrently",
+                            code="create_conflict",
+                        )
+                    )
                 setting = SystemSetting.objects.select_for_update(of=("self",)).get(key=key)
+            else:
+                cls._log_setting_write(setting, user_id=user_id, reason=reason)
+                return Ok(setting)
 
-                # Validate and convert value based on data type
-                if setting.data_type == "boolean":
-                    value = value.lower() in ("true", "1", "on", "yes") if isinstance(value, str) else bool(value)
-                elif setting.data_type == "integer":
-                    value = int(value)
-                elif setting.data_type == "decimal":
-                    value = Decimal(str(value))
-                elif (setting.data_type in {"list", "json"}) and isinstance(value, str):
-                    value = json.loads(value)
-                # string type needs no conversion
+        # str() forces lazy translation proxies (boolean displays are gettext-lazy) into
+        # real strings — raw proxies fail JSON serialization at the audit INSERT.
+        old_display = str(setting.get_display_value())
+        try:
+            coerced = cls._coerce_value(key, setting.data_type, value)
+            cls._apply_rules(key, cls._validation_rules_for(setting), coerced)
+        except ValidationError as e:
+            return Err(cls._validation_error(key, e))
 
-                # Prepare value for JSON serialization
-                json_value = cls._prepare_value_for_json(value, setting.data_type)
+        setting.value = cls._prepare_value_for_json(coerced, setting.data_type)
+        setting._audit_context = {
+            "user_id": user_id,
+            "reason": reason,
+            "change_set_id": change_set_id,
+            "old_value": old_display,
+            "new_value": str(setting.get_display_value()),
+        }
+        try:
+            setting.full_clean()
+        except ValidationError as e:
+            return Err(cls._validation_error(key, e))
+        setting.save(update_fields=["value", "updated_at"])
+        cls._log_setting_write(setting, user_id=user_id, reason=reason)
+        return Ok(setting)
 
-                # Update the setting value
-                setting.value = json_value
-                setting.save()
-
-            logger.info("⚡ [Settings] Updated %s = %s", key, value)
-
-        except Exception as e:
-            logger.error("💥 [Settings] Error setting %s: %s", key, e)
-            raise
+    @classmethod
+    def _log_setting_write(cls, setting: SystemSetting, *, user_id: int | None, reason: str | None) -> None:
+        """Log a settings write with sensitive values masked"""
+        logger.info(
+            "✅ [Settings] Updated setting %s to %s by user %s: %s",
+            setting.key,
+            setting.get_display_value(),
+            user_id or "system",
+            reason or "no reason provided",
+        )
 
     @classmethod
     @monitor_performance()
@@ -517,65 +680,125 @@ class SettingsService:
             Result with updated setting or validation error
         """
         try:
-            # Infer data type
-            data_type = cls._infer_data_type(value)
-
-            # Prepare values for JSON serialization
-            json_value = cls._prepare_value_for_json(value, data_type)
-            json_default = cls._prepare_value_for_json(cls.DEFAULT_SETTINGS.get(key, value), data_type)
-
-            # Try to get existing setting with lock first (most common case)
-            try:
-                setting = SystemSetting.objects.select_for_update().get(key=key)
-                created = False
-            except SystemSetting.DoesNotExist:
-                # Setting doesn't exist - create it with proper race condition handling
-                try:
-                    setting = SystemSetting.objects.create(
-                        key=key,
-                        name=cls._generate_name_from_key(key),
-                        description=f"System setting: {key}",
-                        category=key.split(".", maxsplit=1)[0] if "." in key else "system",
-                        data_type=data_type,
-                        value=json_value,
-                        default_value=json_default,
-                    )
-                    created = True
-                except IntegrityError:
-                    # Another process created it - get it with lock
-                    setting = SystemSetting.objects.select_for_update().get(key=key)
-                    created = False
-
-            if not created:
-                # Prepare value for JSON serialization
-                json_value = cls._prepare_value_for_json(value, setting.data_type)
-                # Update existing setting
-                setting.value = json_value
-                setting.full_clean()  # Validate
-                setting.save(update_fields=["value", "updated_at"])
-
-            # Log the change
-            logger.info(
-                "✅ [Settings] Updated setting %s to %s by user %s: %s",
-                key,
-                value if not setting.is_sensitive else "(hidden)",
-                user_id or "system",
-                reason or "no reason provided",
-            )
-
-            return Ok(setting)
-
-        except ValidationError as e:
-            error_msg = str(e.message_dict) if hasattr(e, "message_dict") else str(e)
-            logger.error("🔥 [Settings] Validation error for %s: %s", key, error_msg)
-
-            return Err(SettingValidationError(key=key, field="value", message=error_msg, code="validation_error"))
-
+            return cls._write_setting_locked(key, value, user_id=user_id, reason=reason)
         except Exception as e:
             logger.error("🔥 [Settings] Unexpected error updating %s: %s", key, str(e))
             return Err(
                 SettingValidationError(key=key, field="system", message=f"Unexpected error: {e!s}", code="system_error")
             )
+
+    @classmethod
+    @monitor_performance()
+    def apply_change_set(  # noqa: C901, PLR0912  # Validation, locking, and write phases in one auditable unit
+        cls,
+        changes: dict[str, Any],
+        baselines: dict[str, str | None],
+        user_id: int | None = None,
+        reason: str | None = None,
+    ) -> Result[ChangeSetOutcome, ChangeSetError]:
+        """
+        📦 Apply a set of non-sensitive setting changes atomically.
+
+        All-or-nothing: static validation first, then all target rows are locked
+        in deterministic key order, baselines are compared under lock (verbatim
+        ISO-string comparison against updated_at), and only then are writes made.
+        Any failure rolls the whole set back. Sensitive keys are rejected —
+        secrets change only through the dedicated credential endpoints.
+
+        Baselines: the server-rendered `updated_at.isoformat()` per key, or None
+        when the form was rendered without a database row for that key.
+        """
+        if not changes:
+            return Err(ChangeSetError(code="empty"))
+
+        errors: list[SettingValidationError] = []
+        for key, value in changes.items():
+            if key not in cls.DEFAULT_SETTINGS:
+                errors.append(
+                    SettingValidationError(key=key, field="key", message="Unknown setting key", code="unknown_key")
+                )
+                continue
+            if cls._is_sensitive_key(key):
+                errors.append(
+                    SettingValidationError(
+                        key=key,
+                        field="key",
+                        message="Sensitive settings change only through the credential endpoints",
+                        code="sensitive_key",
+                    )
+                )
+                continue
+            try:
+                cls._coerce_value(key, cls._infer_data_type(cls.DEFAULT_SETTINGS[key]), value)
+            except ValidationError as e:
+                errors.append(cls._validation_error(key, e))
+        if errors:
+            return Err(ChangeSetError(code="validation", errors=errors))
+
+        change_set_id = str(uuid.uuid4())
+        applied: dict[str, SystemSetting] = {}
+        conflicts: list[ChangeSetConflict] = []
+        with transaction.atomic():
+            sorted_keys = sorted(changes)
+            locked = {
+                setting.key: setting
+                for setting in SystemSetting.objects.select_for_update(of=("self",))
+                .filter(key__in=sorted_keys)
+                .order_by("key")
+            }
+            for key in sorted_keys:
+                row = locked.get(key)
+                baseline = baselines.get(key)
+                if row is None:
+                    if baseline is not None:
+                        conflicts.append(ChangeSetConflict(key=key, server_updated_at=None))
+                elif row.is_sensitive:
+                    errors.append(
+                        SettingValidationError(
+                            key=key,
+                            field="key",
+                            message="Sensitive settings change only through the credential endpoints",
+                            code="sensitive_key",
+                        )
+                    )
+                elif baseline is None or baseline != row.updated_at.isoformat():
+                    conflicts.append(ChangeSetConflict(key=key, server_updated_at=row.updated_at.isoformat()))
+            if errors or conflicts:
+                transaction.set_rollback(True)
+                return Err(
+                    ChangeSetError(code="conflict" if conflicts else "validation", errors=errors, conflicts=conflicts)
+                )
+
+            for key in sorted_keys:
+                result = cls._write_setting_locked(
+                    key,
+                    changes[key],
+                    user_id=user_id,
+                    reason=reason,
+                    change_set_id=change_set_id,
+                    require_absent_on_create=key not in locked,
+                )
+                match result:
+                    case Ok(setting):
+                        applied[key] = setting
+                    case Err(error):
+                        transaction.set_rollback(True)
+                        if error.code == "create_conflict":
+                            return Err(
+                                ChangeSetError(
+                                    code="conflict",
+                                    conflicts=[ChangeSetConflict(key=key, server_updated_at=None)],
+                                )
+                            )
+                        return Err(ChangeSetError(code="validation", errors=[error]))
+
+        logger.info(
+            "✅ [Settings] Applied change set %s (%d settings) by user %s",
+            change_set_id,
+            len(applied),
+            user_id or "system",
+        )
+        return Ok(ChangeSetOutcome(change_set_id=change_set_id, settings=applied))
 
     @classmethod
     def _prepare_value_for_json(cls, value: Any, data_type: str) -> Any:

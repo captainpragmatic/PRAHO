@@ -76,6 +76,10 @@ class SettingCategory(models.Model):
 class SystemSetting(models.Model):
     """⚙️ System setting with type validation and caching support"""
 
+    # Transient audit context attached by SettingsService writes just before save;
+    # consumed (and cleared) by the post_save signal to attribute the audit event.
+    _audit_context: dict[str, Any] | None = None
+
     # Data type choices for validation
     DATA_TYPE_CHOICES: ClassVar[list[tuple[str, str]]] = [
         ("string", cast(str, _("String"))),

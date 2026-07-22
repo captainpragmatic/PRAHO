@@ -285,9 +285,8 @@ class Command(BaseCommand):
         return key in required_settings
 
     def _is_sensitive_setting(self, key: str) -> bool:
-        """Check if setting contains sensitive data"""
-        sensitive_patterns = ["password", "secret", "key", "token", "credential"]
-        return any(pattern in key.lower() for pattern in sensitive_patterns)
+        """Check if setting contains sensitive data (single authority: the service)"""
+        return SettingsService._is_sensitive_key(key)
 
     def _get_help_text(self, key: str) -> str:
         """Get help text for setting"""
