@@ -34,8 +34,13 @@
       args:
         creates: /usr/share/webmin/virtual-server
       register: virtualmin_install
+      # Fire-and-forget (poll: 0): the virtualmin installer runs ~40 min and restarts
+      # services/networking, dropping the SSH connection. With a non-zero poll ansible would
+      # both block on (and auto-clean) the async job, making the async_status wait below fail
+      # with "could not find job". poll: 0 + async_status (each poll a fresh connection) is the
+      # robust pattern for a long, connection-disrupting install.
       async: 2400  # 40 minutes timeout
-      poll: 30
+      poll: 0
       when: not virtualmin_installed.stat.exists
 
     - name: Wait for Virtualmin installation to complete
@@ -45,7 +50,34 @@
       until: job_result.finished
       retries: 80
       delay: 30
+      # VERIFY the install actually succeeded. Without this the play marches on to
+      # create-admin even when virtualmin-install.sh fast-fails, producing the opaque
+      # "[Errno 2] No such file or directory: virtualmin" far from the real cause. On
+      # failure, surface the installer's own stdout/stderr tail so the reason is visible.
+      # The async_status result carries the installer's own rc/stdout/stderr, so this
+      # failure surfaces the real reason (visible in the captured play output) instead of
+      # the opaque "virtualmin: No such file or directory" three tasks later.
+      failed_when:
+        - job_result.finished
+        - (job_result.rc | default(1)) != 0
       when: virtualmin_install is defined and virtualmin_install.ansible_job_id is defined
+
+    - name: Confirm Virtualmin actually installed
+      # The installer can exit 0 without installing (e.g. a soft precheck bail-out), so verify
+      # the real artifact exists rather than trusting rc alone — otherwise create-admin fails
+      # later with the opaque "virtualmin: No such file or directory".
+      ansible.builtin.stat:
+        path: /usr/share/webmin/virtual-server
+      register: vmin_installed_check
+
+    - name: Fail with installer output if Virtualmin did not install
+      ansible.builtin.fail:
+        msg: >-
+          Virtualmin did NOT install (/usr/share/webmin/virtual-server missing after the installer
+          returned rc={{ job_result.rc | default('n/a') }}).
+          STDOUT_TAIL:: {{ (job_result.stdout | default(''))[-1800:] }}
+          STDERR_TAIL:: {{ (job_result.stderr | default(''))[-1000:] }}
+      when: not vmin_installed_check.stat.exists
 
     - name: Remove install script
       ansible.builtin.file:
