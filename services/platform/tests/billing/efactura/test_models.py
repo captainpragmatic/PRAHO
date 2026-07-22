@@ -55,6 +55,22 @@ class EFacturaDocumentModelTestCase(TestCase):
         self.assertNotEqual(document.xml_hash, "")
         self.assertEqual(len(document.xml_hash), 64)  # SHA-256
 
+    def test_partial_save_does_not_recompute_an_unpersisted_xml_hash(self):
+        document = EFacturaDocument.objects.create(
+            invoice=self.invoice,
+            xml_content="<Invoice>Persisted</Invoice>",
+        )
+        persisted_hash = document.xml_hash
+
+        document.xml_content = "<Invoice>In memory only</Invoice>"
+        document.updated_at = timezone.now()
+        document.save(update_fields=["updated_at"])
+
+        self.assertEqual(document.xml_hash, persisted_hash)
+        persisted = EFacturaDocument.objects.get(pk=document.pk)
+        self.assertEqual(persisted.xml_content, "<Invoice>Persisted</Invoice>")
+        self.assertEqual(persisted.xml_hash, persisted_hash)
+
     def test_verify_xml_integrity(self):
         """Test XML integrity verification."""
         document = EFacturaDocument.objects.create(
@@ -325,6 +341,20 @@ class EFacturaDocumentModelTestCase(TestCase):
         archives = EFacturaDocument.get_missing_response_archives()
 
         self.assertEqual(list(archives), [missing])
+
+    def test_get_missing_response_archives_preserves_unverified_legacy_evidence(self):
+        EFacturaDocument.objects.create(
+            invoice=self.invoice,
+            status=EFacturaStatus.ACCEPTED.value,
+            anaf_download_id="DOWNLOAD-LEGACY",
+            response_archive="efactura/pdf/2026/07/legacy-response.pdf",
+            response_archive_sha256="",
+            response_archive_downloaded_at=None,
+        )
+
+        archives = EFacturaDocument.get_missing_response_archives()
+
+        self.assertEqual(list(archives), [])
 
     def test_get_ready_for_retry(self):
         """Test querying documents ready for retry."""

@@ -352,7 +352,8 @@ class EFacturaDocument(models.Model):
             ):
                 raise ValidationError(_("Claimed e-Factura XML content and hash are immutable"))
 
-        self.xml_hash = self._compute_xml_hash() if self.xml_content else ""
+        if xml_write:
+            self.xml_hash = self._compute_xml_hash() if self.xml_content else ""
         if update_fields is not None and "xml_content" in update_fields:
             kwargs["update_fields"] = set(update_fields) | {"xml_hash"}
         super().save(*args, **kwargs)
@@ -549,18 +550,13 @@ class EFacturaDocument(models.Model):
 
     @classmethod
     def get_missing_response_archives(cls, limit: int = 100) -> models.QuerySet[EFacturaDocument]:
-        """Get accepted documents whose ANAF response evidence still needs archiving."""
+        """Get accepted documents that have no archived ANAF response bytes."""
         return (
             cls.objects.filter(
                 status=EFacturaStatus.ACCEPTED.value,
                 anaf_download_id__gt="",
             )
-            .filter(
-                Q(response_archive__isnull=True)
-                | Q(response_archive="")
-                | Q(response_archive_sha256="")
-                | Q(response_archive_downloaded_at__isnull=True)
-            )
+            .filter(Q(response_archive__isnull=True) | Q(response_archive=""))
             .order_by("response_at", "created_at")[:limit]
         )
 
