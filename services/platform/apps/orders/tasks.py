@@ -218,7 +218,7 @@ def process_pending_orders() -> dict[str, Any]:  # noqa: C901, PLR0912  # Comple
                             _process_cancelled_invoice(order, now, order_result, results)
 
                     # Order without invoice — route through the proforma path
-                    elif order.total_cents > 0:
+                    elif order.proforma is not None or order.total_cents > 0:
                         _convert_proforma_or_create_invoice(order, order_result, results)
 
                     else:
@@ -518,7 +518,7 @@ def _convert_proforma_or_create_invoice(order: Order, order_result: dict[str, An
 
             convert_result = ProformaPaymentService.record_payment_and_convert(
                 proforma_id=str(order.proforma.id),
-                amount_cents=order.total_cents,
+                amount_cents=order.proforma.total_cents,
                 payment_method=succeeded_payment.payment_method or "stripe",
                 existing_payment=succeeded_payment,
             )

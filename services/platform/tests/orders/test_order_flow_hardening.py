@@ -238,6 +238,63 @@ class TestPreflightOrderService(TestCase):
             "Preflight should detect incorrect VAT amount (1900¢ != expected 2100¢)"
         )
 
+    def test_preflight_taxes_discounted_order_on_the_net_base(self) -> None:
+        """#203: a valid promoted order must pass payable-state preflight."""
+        order = self._make_order(
+            subtotal_cents=10000,
+            discount_cents=2000,
+            tax_cents=1680,
+            total_cents=9680,
+            billing_address=_billing_address(),
+        )
+        OrderItem.objects.create(
+            order=order,
+            product=self.product,
+            product_name=self.product.name,
+            product_type=self.product.product_type,
+            quantity=1,
+            unit_price_cents=10000,
+            tax_rate=Decimal("0.2100"),
+        )
+        order.discount_cents = 2000
+        order.calculate_totals()
+        order._preflight_vat_result = (  # type: ignore[attr-defined]  # test-only stale cache
+            OrderVATCalculator.calculate_vat(
+                subtotal_cents=10000,
+                customer_info={
+                    "country": "RO",
+                    "is_business": True,
+                    "vat_number": "RO12345678",
+                    "customer_id": str(self.customer.id),
+                    "order_id": str(order.id),
+                },
+            )
+        )
+
+        errors, _warnings = OrderPreflightValidationService.validate(order)
+
+        self.assertEqual(order.tax_cents, 1680)
+        self.assertEqual(order.total_cents, 9680)
+        self.assertEqual([error for error in errors if "mismatch" in error.lower()], [])
+
+    def test_preflight_rejects_discount_across_multiple_tax_rates(self) -> None:
+        """#203: a document allowance needs an explicit per-rate allocation ledger."""
+        order = self._make_order(discount_cents=1000)
+        for tax_rate in (Decimal("0.2100"), Decimal("0.1100")):
+            OrderItem.objects.create(
+                order=order,
+                product=self.product,
+                product_name=self.product.name,
+                product_type=self.product.product_type,
+                quantity=1,
+                unit_price_cents=5000,
+                tax_rate=tax_rate,
+            )
+
+        errors, _warnings = OrderPreflightValidationService.validate(order)
+
+        self.assertTrue(any("single tax rate" in error.lower() for error in errors), errors)
+
 
 # ===============================================================================
 # BUG-10: DUPLICATE VAT AUDIT EVENT PREVENTION
@@ -285,6 +342,7 @@ class TestDuplicateVATAuditPrevention(TestCase):
         )
         # Simulate the service attaching the pre-computed result
         order._preflight_vat_result = pre_computed  # type: ignore[attr-defined]  # test-only hook for preflight validation
+        order._preflight_subtotal_cents = 10000  # type: ignore[attr-defined]  # temp-order subtotal paired with cache
 
         # Count AuditEvents before validate()
         before_count = AuditEvent.objects.filter(action='order_vat_calculation').count()

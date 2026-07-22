@@ -38,6 +38,7 @@ from apps.billing.fiscal_identity import (
     validated_cnp_or_empty,
 )
 from apps.billing.models import Invoice, InvoiceLine, InvoiceSequence
+from apps.common.financial_arithmetic import calculate_document_totals
 from apps.common.tax_service import CustomerVATInfo, TaxService
 from apps.common.types import Err, Ok, Result
 
@@ -116,6 +117,12 @@ class InvoiceService:
         """
         try:
             with transaction.atomic():
+                order_items = tuple(order.items.all())
+                requested_discount_cents = int(getattr(order, "discount_cents", 0) or 0)
+                source_totals = calculate_document_totals(order_items, requested_discount_cents)
+                taxable_subtotal_cents = source_totals.total_cents - source_totals.tax_cents
+                order_discount_cents = source_totals.subtotal_cents - taxable_subtotal_cents
+
                 # Get invoice sequence with lock to prevent race conditions
                 # Using select_for_update ensures only one process generates a number at a time
                 try:
@@ -132,8 +139,6 @@ class InvoiceService:
                 # document discount), mirroring the proforma conversion path. order.total_cents
                 # is the GROSS tax-INCLUSIVE total — feeding it here re-applied VAT on top of an
                 # already-taxed amount and double-taxed the invoice header.
-                order_discount_cents = int(getattr(order, "discount_cents", 0) or 0)
-                taxable_subtotal_cents = max(0, int(order.subtotal_cents) - order_discount_cents)
                 billing_address = order.billing_address or {}
                 bill_to_country = billing_country_code(billing_address.get("country"))
                 vat_result = TaxService.calculate_vat_for_document(
@@ -178,7 +183,7 @@ class InvoiceService:
                 # InvoiceLine.save() recomputes tax_cents/line_total_cents from the subtotal
                 # (qty*unit_price) and tax_rate, so only the inputs are set here.
                 vat_rate_decimal = (vat_result.vat_rate / Decimal("100")).quantize(Decimal("0.0001"))
-                for item in order.items.all():
+                for item in order_items:
                     InvoiceLine.objects.create(
                         invoice=invoice,
                         kind="service",

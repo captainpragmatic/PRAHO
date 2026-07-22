@@ -192,14 +192,16 @@ class PaymentIntentStatusGuardTests(TestCase):
         self.assertFalse(Payment.objects.exists())
         mock_gw_factory.create_gateway.assert_not_called()
 
+    @patch("apps.billing.payment_service.log_security_event", MagicMock())
     @patch("apps.billing.payment_service.PaymentGatewayFactory")
-    def test_order_proforma_total_must_match_authoritative_order_total(self, mock_gw_factory: MagicMock) -> None:
-        mock_gw_factory.create_gateway.return_value.create_payment_intent.return_value = {
-            "success": False,
-            "payment_intent_id": "",
-            "client_secret": None,
-            "error": "gateway should not be called",
+    def test_order_intent_uses_frozen_proforma_total_after_order_drift(self, mock_gw_factory: MagicMock) -> None:
+        gateway = MagicMock()
+        gateway.create_payment_intent.return_value = {
+            "success": True,
+            "payment_intent_id": "pi_frozen_proforma",
+            "client_secret": "sec_frozen_proforma",
         }
+        mock_gw_factory.create_gateway.return_value = gateway
         order = _create_order(self.customer, status="awaiting_payment", total_cents=25000)
         assert order.proforma is not None
         order.proforma.total_cents = 24999
@@ -210,10 +212,39 @@ class PaymentIntentStatusGuardTests(TestCase):
             customer_id=str(self.customer.id),
         )
 
-        self.assertFalse(result["success"])
-        self.assertIn("does not match", result["error"] or "")
-        self.assertFalse(Payment.objects.exists())
-        mock_gw_factory.create_gateway.assert_not_called()
+        self.assertTrue(result["success"])
+        gateway.create_payment_intent.assert_called_once()
+        self.assertEqual(gateway.create_payment_intent.call_args.kwargs["amount_cents"], 24999)
+        self.assertEqual(Payment.objects.get().amount_cents, 24999)
+
+    @patch("apps.billing.payment_service.log_security_event", MagicMock())
+    @patch("apps.billing.payment_service.PaymentGatewayFactory.create_gateway")
+    def test_order_total_drift_during_reservation_does_not_override_proforma(
+        self,
+        mock_create_gateway: MagicMock,
+    ) -> None:
+        order = _create_order(self.customer, status="awaiting_payment", total_cents=25000)
+        assert order.proforma is not None
+        gateway = MagicMock()
+        gateway.create_payment_intent.return_value = {
+            "success": True,
+            "payment_intent_id": "pi_order_drift",
+            "client_secret": "sec_order_drift",
+        }
+
+        def drift_order_before_gateway(_gateway_name: str) -> MagicMock:
+            Order.objects.filter(pk=order.pk).update(total_cents=26000)
+            return gateway
+
+        mock_create_gateway.side_effect = drift_order_before_gateway
+
+        result = PaymentService.create_payment_intent_direct(
+            order_id=str(order.id),
+            customer_id=str(self.customer.id),
+        )
+
+        self.assertTrue(result["success"])
+        self.assertEqual(gateway.create_payment_intent.call_args.kwargs["amount_cents"], 25000)
 
     @patch("apps.billing.payment_service.PaymentGatewayFactory.create_gateway")
     def test_order_intent_aborts_when_proforma_changes_before_gateway_call(

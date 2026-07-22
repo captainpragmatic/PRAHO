@@ -163,6 +163,26 @@ class CreateInvoiceFromOrderTests(TestCase):
         self.assertEqual(invoice.subtotal_cents, 9000)                  # net = gross(10000) - discount(1000)
         self.assertEqual(invoice.subtotal_cents + invoice.tax_cents, invoice.total_cents)
 
+    def test_discounted_mixed_rate_order_cannot_issue_invoice(self) -> None:
+        """#203: direct invoice recovery obeys the same single-rate allowance rule."""
+        order = self._order()
+        OrderItem.objects.create(
+            order=order,
+            product=self.product,
+            product_name="Reduced-rate service",
+            product_type=self.product.product_type,
+            quantity=1,
+            unit_price_cents=5000,
+            tax_rate=Decimal("0.1100"),
+        )
+        order.discount_cents = 1000
+        order.save(update_fields=["discount_cents", "updated_at"])
+
+        result = InvoiceService().create_from_order(order)
+
+        self.assertTrue(result.is_err())
+        self.assertIn("single tax rate", result.unwrap_err())
+
     def test_create_from_order_includes_setup_fee_line(self) -> None:
         """A setup fee must become its own invoice line so the lines reconcile with the header
         subtotal (which counts setup via OrderItem.subtotal_cents) — otherwise Σ lines < header

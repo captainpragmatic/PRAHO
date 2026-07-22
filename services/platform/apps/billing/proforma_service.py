@@ -150,9 +150,16 @@ class ProformaService:
             ProformaLine,
             ProformaSequence,
         )
+        from apps.common.financial_arithmetic import calculate_document_totals  # noqa: PLC0415
         from apps.common.tax_service import TaxService  # noqa: PLC0415
 
         try:
+            order_items = tuple(order.items.select_related("product"))
+            requested_discount_cents = int(getattr(order, "discount_cents", 0) or 0)
+            source_totals = calculate_document_totals(order_items, requested_discount_cents)
+            taxable_subtotal = source_totals.total_cents - source_totals.tax_cents
+            discount_cents = source_totals.subtotal_cents - taxable_subtotal
+
             # Get proforma sequence with lock to prevent race conditions.
             # get_or_create is not atomic with respect to the row lock, so we
             # re-fetch with select_for_update after creation to hold the lock.
@@ -186,8 +193,6 @@ class ProformaService:
             # the proforma reflects the actual amount the customer owes.
             from apps.billing.services import _build_customer_vat_info  # noqa: PLC0415
 
-            discount_cents = int(getattr(order, "discount_cents", 0) or 0)
-            taxable_subtotal = max(0, int(order.subtotal_cents) - discount_cents)
             vat_result = TaxService.calculate_vat_for_document(
                 subtotal_cents=taxable_subtotal,
                 customer_info=_build_customer_vat_info(
@@ -220,7 +225,7 @@ class ProformaService:
             # Create proforma lines from order items
             vat_rate_decimal = (vat_result.vat_rate / Decimal("100")).quantize(Decimal("0.0001"))
             sort_order = 0
-            for item in order.items.all():
+            for item in order_items:
                 billing_period = getattr(item, "billing_period", "") or ""
                 # Period bounds are DateFields emitted VERBATIM into the e-Factura XML as
                 # InvoicePeriod (BT-134/135), so the Romanian calendar day must be fixed here

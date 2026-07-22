@@ -425,6 +425,93 @@ class TestConfirmOrderConvertsProformaBeforeWebhook(CardProformaTestBase):
         self.assertEqual(payment.meta["stripe_amount_received"], 12100)
         self.assertEqual(payment.meta["stripe_currency"], "ron")
 
+    @patch("apps.billing.proforma_service.ProformaPaymentService.record_payment_and_convert")
+    def test_confirm_order_passes_frozen_proforma_total_after_order_drift(self, mock_convert: MagicMock) -> None:
+        from apps.api.orders.views import confirm_order  # noqa: PLC0415
+        from apps.common.types import Ok  # noqa: PLC0415
+
+        order = self._create_order_with_items()
+        force_status(order, "awaiting_payment")
+        proforma = self._create_sent_proforma_for_order(order)
+        payment = self._create_pending_payment("pi_testOrderDrift53", proforma=proforma)
+        order.total_cents = proforma.total_cents + 100
+        order.payment_intent_id = payment.gateway_txn_id
+        order.payment_method = "card"
+        order.save(update_fields=["total_cents", "payment_intent_id", "payment_method"])
+        order.refresh_from_db()
+        self.assertEqual(order.status, "awaiting_payment")
+
+        mock_convert.return_value = Ok(MagicMock())
+        mock_gateway = MagicMock()
+        mock_gateway.confirm_payment.return_value = PaymentConfirmResult(
+            success=True,
+            status="succeeded",
+            error=None,
+            amount_received=proforma.total_cents,
+            currency="ron",
+        )
+        request = self._make_confirm_request({"payment_intent_id": payment.gateway_txn_id})
+
+        with (
+            patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)),
+            patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway", return_value=mock_gateway),
+            patch(
+                "apps.billing.payment_convergence.PaymentSuccessService.converge_gateway_success",
+                return_value=Ok(payment),
+            ),
+            patch("apps.orders.services.OrderPaymentConfirmationService.confirm_order", return_value=Ok(order)),
+        ):
+            response = confirm_order(request, str(order.id))
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(mock_convert.call_args.kwargs["amount_cents"], proforma.total_cents)
+
+    @patch("apps.billing.proforma_service.ProformaPaymentService.record_payment_and_convert")
+    def test_confirm_order_rejects_proforma_drift_after_stripe_verification(self, mock_convert: MagicMock) -> None:
+        from apps.api.orders.views import confirm_order  # noqa: PLC0415
+        from apps.common.types import Ok  # noqa: PLC0415
+
+        order = self._create_order_with_items()
+        force_status(order, "awaiting_payment")
+        proforma = self._create_sent_proforma_for_order(order)
+        verified_total_cents = proforma.total_cents
+        payment = self._create_pending_payment("pi_testProformaDrift53", proforma=proforma)
+        order.payment_intent_id = payment.gateway_txn_id
+        order.payment_method = "card"
+        order.save(update_fields=["payment_intent_id", "payment_method"])
+        order.refresh_from_db()
+        self.assertEqual(order.status, "awaiting_payment")
+
+        def confirm_then_drift(_payment_intent_id: str) -> PaymentConfirmResult:
+            ProformaInvoice.objects.filter(pk=proforma.pk).update(total_cents=verified_total_cents + 100)
+            return PaymentConfirmResult(
+                success=True,
+                status="succeeded",
+                error=None,
+                amount_received=verified_total_cents,
+                currency="ron",
+            )
+
+        mock_gateway = MagicMock()
+        mock_gateway.confirm_payment.side_effect = confirm_then_drift
+        mock_convert.return_value = Ok(MagicMock())
+        request = self._make_confirm_request({"payment_intent_id": payment.gateway_txn_id})
+
+        with (
+            patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)),
+            patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway", return_value=mock_gateway),
+            patch(
+                "apps.billing.payment_convergence.PaymentSuccessService.converge_gateway_success",
+                return_value=Ok(payment),
+            ),
+            patch("apps.orders.services.OrderPaymentConfirmationService.confirm_order", return_value=Ok(order)),
+        ):
+            response = confirm_order(request, str(order.id))
+
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("changed after payment verification", response.data["error"])
+        mock_convert.assert_not_called()
+
     def test_confirm_order_invoice_linked_to_order_after_conversion(self) -> None:
         """After confirm_order converts the proforma, order.invoice must be the new invoice.
 
@@ -557,6 +644,26 @@ class TestConfirmOrderIdempotentAfterWebhook(CardProformaTestBase):
 class TestFallbackTaskUsesProformaPath(CardProformaTestBase):
     """Phase 3 verification: fallback task routes through proforma conversion when applicable."""
 
+    def test_task_uses_positive_proforma_when_order_total_drifted_to_zero(self) -> None:
+        """A frozen positive proforma must never be dispatched as a free order."""
+        from apps.orders.tasks import process_pending_orders  # noqa: PLC0415
+
+        order = self._create_order_with_items()
+        force_status(order, "awaiting_payment")
+        self._create_sent_proforma_for_order(order)
+        order.total_cents = 0
+        order.save(update_fields=["total_cents"])
+
+        with (
+            patch("apps.orders.tasks._convert_proforma_or_create_invoice") as mock_convert,
+            patch("apps.orders.tasks._process_free_order") as mock_free,
+        ):
+            result = process_pending_orders()
+
+        self.assertTrue(result["success"])
+        mock_convert.assert_called_once()
+        mock_free.assert_not_called()
+
     def test_task_calls_record_payment_and_convert_for_proforma_order(self) -> None:
         """When order has proforma + succeeded payment, fallback task converts via proforma path.
 
@@ -576,6 +683,8 @@ class TestFallbackTaskUsesProformaPath(CardProformaTestBase):
 
         payment = self._create_pending_payment("pi_testFallbackTask55ab", proforma=proforma)
         force_status(payment, "succeeded")
+        order.total_cents = proforma.total_cents + 100
+        order.save(update_fields=["total_cents"])
 
         order_result: dict = {}
         results: dict = {"errors": []}
@@ -596,6 +705,7 @@ class TestFallbackTaskUsesProformaPath(CardProformaTestBase):
             str(proforma.id),
             "Fallback task must call record_payment_and_convert with the correct proforma_id",
         )
+        self.assertEqual(call_kwargs.get("amount_cents"), proforma.total_cents)
         self.assertEqual(results["errors"], [], f"Task must not produce errors: {results['errors']}")
 
     def test_task_creates_proforma_first_when_missing(self) -> None:
@@ -727,6 +837,8 @@ class TestCreatePaymentIntentDirectNoProforma(CardProformaTestBase):
         OrderItem.objects.filter(order=order).update(
             unit_price_cents=0, tax_cents=0, line_total_cents=0
         )
+        Order.objects.filter(pk=order.pk).update(subtotal_cents=0, tax_cents=0, total_cents=0)
+        order.refresh_from_db()
         self.assertIsNone(order.proforma, "Precondition: free order has no proforma")
 
         from apps.billing.payment_service import PaymentService  # noqa: PLC0415
@@ -739,7 +851,6 @@ class TestCreatePaymentIntentDirectNoProforma(CardProformaTestBase):
             gateway="stripe",
         )
 
-        # Free order: no warning expected (total_cents == 0 triggers the no-proforma guard
-        # only when total > 0). Result may succeed or indicate nothing to charge.
-        # The key assertion: no exception raised.
-        self.assertIsInstance(result, dict, "create_payment_intent_direct must return a dict")
+        self.assertFalse(result["success"])
+        self.assertIn("does not require a payment", result["error"])
+        mock_create_gateway.assert_not_called()

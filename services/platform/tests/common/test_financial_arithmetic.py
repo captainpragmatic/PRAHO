@@ -81,15 +81,35 @@ class CalculateDocumentTotalsTests(SimpleTestCase):
         self.assertEqual(result.tax_cents, 1520)
         self.assertEqual(result.total_cents, 9520)
 
-    def test_with_discount(self):
-        items = [_FakeItem(subtotal_cents=10000, tax_cents=1900)]
-        result = calculate_document_totals(items, discount_cents=2000)
-        self.assertEqual(result.total_cents, 9900)
+    def test_discount_reduces_taxable_base_before_vat(self):
+        items = [_FakeItem(subtotal_cents=10000, tax_cents=1900, tax_rate=Decimal("0.19"))]
 
-    def test_discount_exceeding_total_floors_at_zero(self):
-        items = [_FakeItem(subtotal_cents=1000, tax_cents=190)]
+        result = calculate_document_totals(items, discount_cents=2000)
+
+        self.assertEqual(result.subtotal_cents, 10000)
+        self.assertEqual(result.tax_cents, 1520)
+        self.assertEqual(result.total_cents, 9520)
+
+    def test_discount_exceeding_subtotal_floors_tax_and_total_at_zero(self):
+        items = [_FakeItem(subtotal_cents=1000, tax_cents=190, tax_rate=Decimal("0.19"))]
         result = calculate_document_totals(items, discount_cents=5000)
+        self.assertEqual(result.tax_cents, 0)
         self.assertEqual(result.total_cents, 0)
+
+    def test_negative_discount_is_rejected(self):
+        items = [_FakeItem(subtotal_cents=1000, tax_cents=190, tax_rate=Decimal("0.19"))]
+
+        with self.assertRaisesRegex(ValueError, "cannot be negative"):
+            calculate_document_totals(items, discount_cents=-1)
+
+    def test_discounted_mixed_rate_document_is_rejected(self):
+        items = [
+            _FakeItem(subtotal_cents=10000, tax_cents=2100, tax_rate=Decimal("0.21")),
+            _FakeItem(subtotal_cents=5000, tax_cents=550, tax_rate=Decimal("0.11")),
+        ]
+
+        with self.assertRaisesRegex(ValueError, "single tax rate"):
+            calculate_document_totals(items, discount_cents=3000)
 
     def test_empty_items(self):
         result = calculate_document_totals([])
@@ -106,9 +126,10 @@ class CalculateDocumentTotalsTests(SimpleTestCase):
 class _FakeItem:
     """Satisfies HasLineTotals protocol for testing."""
 
-    def __init__(self, subtotal_cents: int, tax_cents: int) -> None:
+    def __init__(self, subtotal_cents: int, tax_cents: int, tax_rate: Decimal = Decimal("0")) -> None:
         self._subtotal_cents = subtotal_cents
         self._tax_cents = tax_cents
+        self._tax_rate = tax_rate
 
     @property
     def subtotal_cents(self) -> int:
@@ -117,3 +138,7 @@ class _FakeItem:
     @property
     def tax_cents(self) -> int:
         return self._tax_cents
+
+    @property
+    def tax_rate(self) -> Decimal:
+        return self._tax_rate
