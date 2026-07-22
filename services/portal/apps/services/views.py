@@ -87,6 +87,25 @@ def _validated_status_filter(raw: str) -> str:
     return raw if raw in _VALID_STATUS_FILTERS else ""
 
 
+def _get_session_identity(request: HttpRequest) -> tuple[int | None, int | None]:
+    """Return validated customer and user IDs for authenticated Platform calls."""
+    raw_customer_id = getattr(request, "customer_id", None) or request.session.get("customer_id")
+    raw_user_id = request.session.get("user_id")
+
+    if isinstance(raw_customer_id, bool) or isinstance(raw_user_id, bool):
+        return None, None
+
+    try:
+        customer_id = int(raw_customer_id)
+        user_id = int(raw_user_id)
+    except (TypeError, ValueError):
+        return None, None
+
+    if customer_id <= 0 or user_id <= 0:
+        return None, None
+    return customer_id, user_id
+
+
 def _filter_services_by_query(services: list[dict], query: str) -> list[dict]:
     """Client-side search filtering across all visible and detail fields."""
     query_lower = query.lower()
@@ -149,8 +168,7 @@ def service_list(request: HttpRequest) -> HttpResponse:
     Customer services list view - shows only customer's hosting services.
     Supports filtering by status and search.
     """
-    customer_id = getattr(request, "customer_id", None) or request.session.get("customer_id")
-    user_id = request.session.get("user_id")
+    customer_id, user_id = _get_session_identity(request)
     if not customer_id or not user_id:
         return redirect("/login/")
 
@@ -218,8 +236,7 @@ def service_search_api(request: HttpRequest) -> HttpResponse:
     HTMX search endpoint for live service filtering.
     Returns filtered services table partial.
     """
-    customer_id = getattr(request, "customer_id", None) or request.session.get("customer_id")
-    user_id = request.session.get("user_id")
+    customer_id, user_id = _get_session_identity(request)
     if not customer_id or not user_id:
         return redirect("/login/")
 
@@ -272,8 +289,7 @@ def service_detail(request: HttpRequest, service_id: int) -> HttpResponse:
     Only accessible by service owner (customer).
     """
     # Check authentication via Django session
-    customer_id = getattr(request, "customer_id", None) or request.session.get("customer_id")
-    user_id = request.session.get("user_id")
+    customer_id, user_id = _get_session_identity(request)
     if not customer_id or not user_id:
         return redirect("/login/")
 
@@ -310,14 +326,11 @@ def service_detail(request: HttpRequest, service_id: int) -> HttpResponse:
 
 
 def service_usage(request: HttpRequest, service_id: int) -> HttpResponse:
-    # Check authentication via Django session
-    customer_id = getattr(request, "customer_id", None) or request.session.get("customer_id")
-    if not customer_id:
+    """HTMX endpoint for service usage data with different time periods."""
+    customer_id, user_id = _get_session_identity(request)
+    if not customer_id or not user_id:
         return redirect("/login/")
-    """
-    HTMX endpoint for service usage data with different time periods.
-    """
-    customer_id = getattr(request, "customer_id", None) or request.session.get("customer_id")
+
     period = request.GET.get("period", "30d")
 
     # Validate period
@@ -326,7 +339,7 @@ def service_usage(request: HttpRequest, service_id: int) -> HttpResponse:
         period = "30d"
 
     try:
-        usage = services_api.get_service_usage(int(customer_id or 0), int(customer_id or 0), service_id, period=period)
+        usage = services_api.get_service_usage(customer_id, user_id, service_id, period=period)
 
         return render(
             request, "services/partials/usage_chart.html", {"usage": usage, "period": period, "service_id": service_id}
@@ -349,8 +362,7 @@ def service_request_action(request: HttpRequest, service_id: int) -> HttpRespons
     Creates requests that require staff approval.
     """
     # Check authentication via Django session
-    customer_id = getattr(request, "customer_id", None) or request.session.get("customer_id")
-    user_id = request.session.get("user_id")
+    customer_id, user_id = _get_session_identity(request)
     if not customer_id or not user_id:
         return redirect("/login/")
 
@@ -435,8 +447,7 @@ def services_dashboard_widget(request: HttpRequest) -> HttpResponse:
     Used in main dashboard view.
     """
     # Check authentication via Django session
-    customer_id = getattr(request, "customer_id", None) or request.session.get("customer_id")
-    user_id = request.session.get("user_id")
+    customer_id, user_id = _get_session_identity(request)
     if not customer_id or not user_id:
         return redirect("/login/")
 
