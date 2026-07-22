@@ -36,6 +36,7 @@ from apps.audit.siem import (
     SyslogFormatter,
     get_siem_service,
 )
+from apps.common.types import Err
 from apps.settings.services import SettingsService
 
 _DEFAULT_MAX_VIOLATIONS_DISPLAYED = 10
@@ -231,26 +232,32 @@ class Command(BaseCommand):
                 self.stdout.write(f"  ... and {len(report.violations) - MAX_VIOLATIONS_DISPLAYED} more")
 
     def handle_verify_integrity(self, options: dict[str, Any]) -> None:
-        """Verify audit log integrity"""
-        self.stdout.write(self.style.NOTICE("Verifying audit log integrity..."))
+        """Verify audit event integrity via the real verifier; non-zero exit on failure."""
+        from apps.audit.services import AuditIntegrityService  # noqa: PLC0415  # Deferred: avoids circular import
 
-        siem = get_siem_service()
+        self.stdout.write(self.style.NOTICE("Verifying audit log integrity..."))
 
         period_end = timezone.now()
         period_start = period_end - timedelta(days=options["days"])
-
-        is_valid, errors = siem.verify_log_integrity(period_start, period_end)
+        result = AuditIntegrityService.verify_audit_integrity(period_start, period_end)
 
         self.stdout.write("")
-        if is_valid:
+        if isinstance(result, Err):
+            self.stdout.write(self.style.ERROR(f"Integrity verification FAILED TO RUN: {result.error}"))
+            raise CommandError("integrity verification errored")
+
+        check = result.value
+        self.stdout.write(f"Period: {period_start.date()} to {period_end.date()}")
+        self.stdout.write(f"Records checked: {check.records_checked}")
+        if check.status == "healthy":
             self.stdout.write(self.style.SUCCESS("Audit log integrity VERIFIED"))
-            self.stdout.write(f"Period: {period_start.date()} to {period_end.date()}")
-            self.stdout.write("No integrity issues detected.")
-        else:
-            self.stdout.write(self.style.ERROR("Audit log integrity FAILED"))
-            self.stdout.write(f"Found {len(errors)} integrity issues:")
-            for error in errors:
-                self.stdout.write(f"  - {error}")
+            return
+        self.stdout.write(
+            self.style.ERROR(f"Audit log integrity: {check.status.upper()} ({check.issues_found} issues)")
+        )
+        for finding in check.findings[:20]:
+            self.stdout.write(f"  - {finding.get('type')}: {finding.get('description')}")
+        raise CommandError(f"integrity status: {check.status}")
 
     def handle_apply_retention(self, options: dict[str, Any]) -> None:
         """Apply log retention policies"""

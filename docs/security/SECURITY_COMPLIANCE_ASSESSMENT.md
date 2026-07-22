@@ -296,7 +296,7 @@ Both systems use **AES-256-GCM** (NIST SP 800-38D). For full standards mapping, 
 
 ### 5.2 File Integrity Monitoring (FIM)
 
-**Location:** `apps/audit/file_integrity_service.py`
+**Location:** `apps/audit/run_file_integrity_check (apps/audit/tasks.py)`
 
 | Feature | Status |
 |---------|--------|
@@ -318,7 +318,7 @@ python manage.py run_integrity_check --type all --period 24h
 
 **Status: Framework ready, not operationally deployed.**
 
-Code exists (`apps/audit/siem.py` + `apps/audit/siem_integration.py`) with support for Splunk, Elasticsearch, Datadog, Sumo Logic, and Generic Webhook providers. Includes CEF, LEEF, JSON, SYSLOG, and OCSF format export, batch/real-time modes, and HMAC webhook signing. However, no external SIEM endpoint is currently configured or deployed in production.
+Code exists (`apps/audit/siem.py` + `apps/audit/siem.py (format renderers + on-demand export; no in-app transport)`) with support for Splunk, Elasticsearch, Datadog, Sumo Logic, and Generic Webhook providers. Includes CEF, LEEF, JSON, SYSLOG, and OCSF format export, batch/real-time modes, and HMAC webhook signing. However, no external SIEM endpoint is currently configured or deployed in production.
 
 | Feature | Code Status | Deployed |
 |---------|-------------|----------|
@@ -346,7 +346,7 @@ Code exists (`apps/audit/siem.py` + `apps/audit/siem_integration.py`) with suppo
 | Feature | Status |
 |---------|--------|
 | Immutable Records | Implemented — audit events cannot be modified |
-| Hash Chain | Framework exists in `siem_integration.py`, not deployed |
+| Hash Chain | Framework exists in `siem.py (format renderers + on-demand export; no in-app transport)`, not deployed |
 | Write-Once Storage (WORM) | Not implemented |
 | External Replication | Not implemented |
 

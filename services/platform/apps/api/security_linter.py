@@ -36,7 +36,6 @@ _OUTBOUND_HTTP_ALLOWLIST: frozenset[str] = frozenset(
         "efactura",
         "secure_gateway",
         "vultr_service",
-        "siem_integration",
         "webhooks",
         "api_client",
         "connection_pool",

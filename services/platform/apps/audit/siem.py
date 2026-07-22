@@ -17,21 +17,16 @@ import json
 import logging
 import os
 import socket
-import ssl
-import threading
-import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum, StrEnum
-from queue import Empty, Full, Queue
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from django.conf import settings
 from django.core.cache import cache
-from django.utils import timezone
 
 from apps.audit.models import AuditEvent
-from apps.common.outbound_http import OutboundPolicy, OutboundSecurityError, validate_and_resolve
+from apps.common.outbound_http import OutboundPolicy
 
 if TYPE_CHECKING:
     pass
@@ -522,111 +517,6 @@ class OCSFFormatter(SIEMLogFormatter):
 # =============================================================================
 
 
-class SIEMTransport:
-    """Transport layer for sending logs to SIEM systems"""
-
-    def __init__(self, config: SIEMConfig):
-        self.config = config
-        self._socket: socket.socket | None = None
-        self._lock = threading.Lock()
-
-    def _validate_target(self) -> bool:
-        """Validate SIEM target is not a private/internal IP."""
-        try:
-            scheme = "tls" if self.config.use_tls else self.config.protocol
-            validate_and_resolve(
-                f"{scheme}://{self.config.host}:{self.config.port}/",
-                policy=SIEM_SOCKET_POLICY,
-            )
-            return True
-        except OutboundSecurityError as exc:
-            logger.warning("⚠️ [SIEM] Blocked connection to %s:%s — %s", self.config.host, self.config.port, exc)
-            return False
-
-    def connect(self) -> bool:
-        """Establish connection to SIEM"""
-        try:
-            with self._lock:
-                if self._socket:
-                    return True
-
-                if not self._validate_target():
-                    return False
-
-                if self.config.protocol in ("tcp", "tls"):
-                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                    sock.settimeout(10)
-
-                    if self.config.use_tls:
-                        context = ssl.create_default_context()
-                        if self.config.certificate_path:
-                            context.load_cert_chain(self.config.certificate_path)
-                        sock = context.wrap_socket(sock, server_hostname=self.config.host)
-
-                    sock.connect((self.config.host, self.config.port))
-                    self._socket = sock
-
-                elif self.config.protocol == "udp":
-                    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                    sock.settimeout(10)
-                    self._socket = sock
-
-                logger.info(f"✅ [SIEM] Connected to {self.config.host}:{self.config.port}")
-                return True
-
-        except Exception as e:
-            logger.error(f"🔥 [SIEM] Connection failed: {e}")
-            return False
-
-    def disconnect(self) -> None:
-        """Close SIEM connection"""
-        with self._lock:
-            if self._socket:
-                try:
-                    self._socket.close()
-                except OSError as exc:
-                    logger.debug(f"⚠️ [SIEM] Socket close error during disconnect: {exc}")
-                self._socket = None
-
-    def send(self, message: str) -> bool:
-        """Send log message to SIEM"""
-        for attempt in range(self.config.max_retries):
-            try:
-                if not self._socket and not self.connect():
-                    continue
-
-                data = (message + "\n").encode("utf-8")
-
-                with self._lock:
-                    if self.config.protocol == "udp":
-                        self._socket.sendto(data, (self.config.host, self.config.port))  # type: ignore[union-attr]
-                    else:
-                        self._socket.sendall(data)  # type: ignore[union-attr]
-
-                return True
-
-            except Exception as e:
-                logger.warning(f"⚠️ [SIEM] Send attempt {attempt + 1} failed: {e}")
-                self.disconnect()
-                if attempt < self.config.max_retries - 1:
-                    time.sleep(self.config.retry_delay * (attempt + 1))
-
-        return False
-
-    def send_batch(self, messages: list[str]) -> int:
-        """Send batch of messages, returns count of successful sends"""
-        successful = 0
-        for message in messages:
-            if self.send(message):
-                successful += 1
-        return successful
-
-
-# =============================================================================
-# HASH CHAIN FOR TAMPER-PROOF LOGGING
-# =============================================================================
-
-
 class HashChainManager:
     """
     Manages cryptographic hash chain for tamper-proof logging.
@@ -724,14 +614,15 @@ class HashChainManager:
 
 class SIEMService:
     """
-    Main SIEM integration service for centralized security logging.
+    SIEM formatting service for on-demand export (ADR-0043).
 
-    Features:
-    - Multiple SIEM format support (CEF, LEEF, JSON, Syslog, OCSF)
-    - Asynchronous log forwarding with buffering
-    - Tamper-proof hash chain
-    - Compliance framework tagging
-    - Real-time security monitoring
+    The audit module stands alone: SIEM integration is the structured JSON log
+    stream (logging_formatters.SIEMJSONFormatter, wired in prod/staging LOGGING)
+    plus the manual `audit_compliance export-events` file export this class
+    supports. Real-time network push is deliberately not implemented.
+
+    Features: format renderers (CEF, LEEF, JSON, Syslog, OCSF), compliance
+    framework tagging, and the keyed hash chain primitives (see #313).
     """
 
     FORMATTERS: ClassVar[dict[SIEMFormat, type[SIEMLogFormatter]]] = {
@@ -758,102 +649,7 @@ class SIEMService:
     def __init__(self, config: SIEMConfig | None = None):
         self.config = config or get_siem_config()
         self.formatter = self.FORMATTERS[self.config.format]()
-        self.transport = SIEMTransport(self.config)
         self.hash_chain = HashChainManager()
-
-        # Buffering for async forwarding
-        self._buffer: Queue[str] = Queue(maxsize=self.config.buffer_size)
-        self._flush_thread: threading.Thread | None = None
-        self._running = False
-
-    def start(self) -> None:
-        """Start background log forwarding"""
-        if not self.config.enabled:
-            logger.info("ℹ️ [SIEM] SIEM integration is disabled")  # noqa: RUF001  # Intentional: emoji logging
-            return
-
-        self._running = True
-        self._flush_thread = threading.Thread(target=self._flush_loop, daemon=True)
-        self._flush_thread.start()
-        logger.info("✅ [SIEM] Background log forwarding started")
-
-    def stop(self) -> None:
-        """Stop background log forwarding"""
-        self._running = False
-        if self._flush_thread:
-            self._flush_thread.join(timeout=5)
-        self.transport.disconnect()
-        logger.info("🛑 [SIEM] Background log forwarding stopped")
-
-    def _flush_loop(self) -> None:
-        """Background thread for flushing log buffer"""
-        while self._running:
-            try:
-                self._flush_buffer()
-                time.sleep(self.config.flush_interval)
-            except Exception as e:
-                logger.error(f"🔥 [SIEM] Flush loop error: {e}")
-
-    def _flush_buffer(self) -> None:
-        """Flush buffered logs to SIEM"""
-        batch: list[str] = []
-        while not self._buffer.empty() and len(batch) < self.config.batch_size:
-            try:
-                batch.append(self._buffer.get_nowait())
-            except Empty:
-                break
-
-        if batch:
-            successful = self.transport.send_batch(batch)
-            logger.debug(f"📤 [SIEM] Flushed {successful}/{len(batch)} log entries")
-
-    def log_audit_event(self, audit_event: AuditEvent) -> bool:
-        """
-        Log an audit event to SIEM.
-
-        Args:
-            audit_event: AuditEvent model instance
-
-        Returns:
-            True if successfully queued/sent
-        """
-        if not self.config.enabled:
-            return True  # Silently skip if disabled
-
-        try:
-            # Check severity filter
-            if not self._passes_severity_filter(audit_event.severity):
-                return True
-
-            # Check category filter
-            if not self._passes_category_filter(audit_event.category):
-                return True
-
-            # Convert to SIEM log entry
-            entry = self._create_log_entry(audit_event)
-
-            # Compute hash chain
-            if self.config.enable_hash_chain:
-                self.hash_chain.compute_entry_hash(entry)
-
-            # Format for SIEM
-            formatted = self.formatter.format(entry, self.config)
-
-            # Queue for sending
-            if self.config.protocol == "file":
-                self._write_to_file(formatted)
-            else:
-                try:
-                    self._buffer.put_nowait(formatted)
-                except Full:
-                    # Buffer full - send synchronously
-                    return self.transport.send(formatted)
-
-            return True
-
-        except Exception as e:
-            logger.error(f"🔥 [SIEM] Failed to log audit event: {e}")
-            return False
 
     def _create_log_entry(self, audit_event: AuditEvent) -> SIEMLogEntry:
         """Convert AuditEvent to SIEMLogEntry"""
@@ -883,73 +679,6 @@ class SIEMService:
             compliance_frameworks=compliance_frameworks,
         )
 
-    def _passes_severity_filter(self, severity: str) -> bool:
-        """Check if severity passes minimum severity filter"""
-        severity_order = ["low", "medium", "high", "critical"]
-        min_idx = severity_order.index(self.config.min_severity)
-        event_idx = severity_order.index(severity)
-        return event_idx >= min_idx
-
-    def _passes_category_filter(self, category: str) -> bool:
-        """Check if category passes include/exclude filters"""
-        if self.config.include_categories:
-            return category in self.config.include_categories
-        if self.config.exclude_categories:
-            return category not in self.config.exclude_categories
-        return True
-
-    def _write_to_file(self, formatted: str) -> None:
-        """Write log entry to file (for file-based SIEM integration)"""
-        log_dir = getattr(settings, "SIEM_LOG_DIR", "/var/log/praho/siem")
-        os.makedirs(log_dir, exist_ok=True)
-
-        log_file = os.path.join(log_dir, f"audit-{timezone.now().strftime('%Y-%m-%d')}.log")
-
-        with open(log_file, "a", encoding="utf-8") as f:
-            f.write(formatted + "\n")
-
-    def verify_log_integrity(self, start_date: datetime, end_date: datetime) -> tuple[bool, list[str]]:
-        """
-        Verify integrity of audit logs for a date range.
-
-        Args:
-            start_date: Start of verification period
-            end_date: End of verification period
-
-        Returns:
-            Tuple of (is_valid, list_of_errors)
-        """
-        # Fetch events in order
-        events = AuditEvent.objects.filter(timestamp__gte=start_date, timestamp__lte=end_date).order_by("timestamp")
-
-        errors = []
-        prev_hash = ""
-
-        for event in events:
-            entry = self._create_log_entry(event)
-
-            # Get stored hash from metadata
-            stored_hash = event.metadata.get("siem_hash", "")
-            stored_sequence = event.metadata.get("siem_sequence", 0)
-            stored_prev_hash = event.metadata.get("siem_prev_hash", "")
-
-            if stored_hash:
-                # Verify chain link
-                if stored_prev_hash != prev_hash:
-                    errors.append(f"Event {event.id}: Chain link broken at sequence {stored_sequence}")
-
-                # Verify hash
-                entry.previous_hash = stored_prev_hash
-                entry.sequence_number = stored_sequence
-                computed_hash = entry.compute_hash(self.hash_chain.secret_key)
-
-                if stored_hash != computed_hash:
-                    errors.append(f"Event {event.id}: Hash mismatch - possible tampering")
-
-                prev_hash = stored_hash
-
-        return len(errors) == 0, errors
-
 
 # =============================================================================
 # GLOBAL SIEM INSTANCE
@@ -965,8 +694,3 @@ def get_siem_service() -> SIEMService:
     if _siem_service is None:
         _siem_service = SIEMService()
     return _siem_service
-
-
-def log_to_siem(audit_event: AuditEvent) -> bool:
-    """Convenience function to log audit event to SIEM"""
-    return get_siem_service().log_audit_event(audit_event)

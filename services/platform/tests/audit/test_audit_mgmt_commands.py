@@ -9,12 +9,15 @@ from __future__ import annotations
 
 import json
 from io import StringIO
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
 from django.contrib.auth import get_user_model
-from django.core.management import call_command
+from django.core.management import CommandError, call_command
 from django.test import TestCase
+
+from apps.common.types import Err, Ok
 
 User = get_user_model()
 
@@ -129,23 +132,46 @@ class TestAuditComplianceCommand(TestCase):
 
     # --- verify-integrity subcommand ---
 
-    @patch("apps.audit.management.commands.audit_compliance.get_siem_service")
-    def test_verify_integrity_valid(self, mock_get_siem):
-        mock_siem = mock_get_siem.return_value
-        mock_siem.verify_log_integrity.return_value = (True, [])
+    @staticmethod
+    def _integrity_check(**overrides):
+        defaults = {"status": "healthy", "records_checked": 10, "issues_found": 0, "findings": []}
+        defaults.update(overrides)
+        return SimpleNamespace(**defaults)
+
+    @patch("apps.audit.services.AuditIntegrityService.verify_audit_integrity")
+    def test_verify_integrity_valid(self, mock_verify):
+        mock_verify.return_value = Ok(self._integrity_check())
 
         out, _ = self._call("verify-integrity")
         assert "VERIFIED" in out
+        assert "Records checked: 10" in out
 
-    @patch("apps.audit.management.commands.audit_compliance.get_siem_service")
-    def test_verify_integrity_failed(self, mock_get_siem):
-        mock_siem = mock_get_siem.return_value
-        mock_siem.verify_log_integrity.return_value = (False, ["gap at seq 42", "hash mismatch"])
+    @patch("apps.audit.services.AuditIntegrityService.verify_audit_integrity")
+    def test_verify_integrity_failed(self, mock_verify):
+        mock_verify.return_value = Ok(self._integrity_check(
+            status="compromised",
+            issues_found=2,
+            findings=[
+                {"type": "hash_chain_gap", "description": "gap at seq 42"},
+                {"type": "hash_mismatch", "description": "hash mismatch"},
+            ],
+        ))
 
-        out, _ = self._call("verify-integrity", "--days=3")
-        assert "FAILED" in out
-        assert "gap at seq 42" in out
-        assert "2 integrity issues" in out
+        out = StringIO()
+        with pytest.raises(CommandError, match="compromised"):
+            call_command("audit_compliance", "verify-integrity", "--days=3", stdout=out)
+        assert "COMPROMISED (2 issues)" in out.getvalue()
+        assert "gap at seq 42" in out.getvalue()
+
+    @patch("apps.audit.services.AuditIntegrityService.verify_audit_integrity")
+    def test_verify_integrity_errored(self, mock_verify):
+        """A verifier that cannot run must exit non-zero, never report success."""
+        mock_verify.return_value = Err("db unavailable")
+
+        out = StringIO()
+        with pytest.raises(CommandError, match="errored"):
+            call_command("audit_compliance", "verify-integrity", stdout=out)
+        assert "FAILED TO RUN" in out.getvalue()
 
     # --- apply-retention subcommand ---
 

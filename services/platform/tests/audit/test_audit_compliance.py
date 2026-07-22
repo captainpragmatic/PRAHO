@@ -18,7 +18,7 @@ import uuid
 from datetime import timedelta
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.contrib.contenttypes.models import ContentType
@@ -44,6 +44,7 @@ from apps.audit.compliance import (
     generate_compliance_report,
 )
 from apps.audit.models import AuditEvent
+from apps.common.types import Err, Ok
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -493,31 +494,60 @@ class TestComplianceReportServiceGenerateReport(TestCase):
             self.assertEqual(gdpr_section.metrics["data_export_requests"], 1)
             self.assertEqual(gdpr_section.metrics["data_deletion_requests"], 1)
 
+    @staticmethod
+    def _integrity_check(**overrides: Any) -> SimpleNamespace:
+        defaults: dict[str, Any] = {"status": "healthy", "records_checked": 10, "issues_found": 0, "findings": []}
+        defaults.update(overrides)
+        return SimpleNamespace(**defaults)
+
     def test_generate_log_integrity_valid(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             svc = self._service(tmpdir)
             start, end = make_period()
-            mock_siem = MagicMock()
-            mock_siem.verify_log_integrity.return_value = (True, [])
-            with patch("apps.audit.siem.get_siem_service", return_value=mock_siem):
+            with patch(
+                "apps.audit.services.AuditIntegrityService.verify_audit_integrity",
+                return_value=Ok(self._integrity_check()),
+            ):
                 report = svc.generate_report(ReportType.LOG_INTEGRITY, start, end)
             section = next(s for s in report.sections if s.title == "Log Integrity Verification")
             self.assertEqual(section.status, "compliant")
-            self.assertEqual(section.metrics["integrity_errors"], 0)
+            self.assertEqual(section.metrics["integrity_issues"], 0)
+            self.assertEqual(section.metrics["logs_verified"], 10)
             self.assertEqual(len(report.violations), 0)
 
     def test_generate_log_integrity_invalid(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             svc = self._service(tmpdir)
             start, end = make_period()
-            mock_siem = MagicMock()
-            mock_siem.verify_log_integrity.return_value = (False, ["hash mismatch at event 42"])
-            with patch("apps.audit.siem.get_siem_service", return_value=mock_siem):
+            check = self._integrity_check(
+                status="compromised",
+                issues_found=1,
+                findings=[{"type": "hash_mismatch", "description": "hash mismatch at event 42"}],
+            )
+            with patch(
+                "apps.audit.services.AuditIntegrityService.verify_audit_integrity",
+                return_value=Ok(check),
+            ):
                 report = svc.generate_report(ReportType.LOG_INTEGRITY, start, end)
             section = next(s for s in report.sections if s.title == "Log Integrity Verification")
             self.assertEqual(section.status, "non_compliant")
-            self.assertEqual(section.metrics["integrity_errors"], 1)
-            # A violation should be added
+            self.assertEqual(section.metrics["integrity_issues"], 1)
+            integrity_violations = [v for v in report.violations if v.control_id == "A.12.4.2"]
+            self.assertGreaterEqual(len(integrity_violations), 1)
+
+    def test_generate_log_integrity_error_is_non_compliant(self) -> None:
+        """A verifier that fails to run must surface as non-compliance, never silent success."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            svc = self._service(tmpdir)
+            start, end = make_period()
+            with patch(
+                "apps.audit.services.AuditIntegrityService.verify_audit_integrity",
+                return_value=Err("db unavailable"),
+            ):
+                report = svc.generate_report(ReportType.LOG_INTEGRITY, start, end)
+            section = next(s for s in report.sections if s.title == "Log Integrity Verification")
+            self.assertEqual(section.status, "non_compliant")
+            self.assertIn("failed to run", str(section.findings))
             integrity_violations = [v for v in report.violations if v.control_id == "A.12.4.2"]
             self.assertGreaterEqual(len(integrity_violations), 1)
 

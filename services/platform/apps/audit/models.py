@@ -800,37 +800,6 @@ class ComplianceLog(models.Model):
         return f"{self.compliance_type}: {self.reference_id}"
 
 
-class SIEMHashChainState(models.Model):
-    """
-    Track SIEM hash chain state for tamper-proof logging.
-
-    This model maintains the cryptographic hash chain state
-    to ensure log integrity and detect tampering.
-    """
-
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-
-    # Chain state
-    sequence_number = models.BigIntegerField(default=0, db_index=True)
-    last_hash = models.CharField(max_length=128, blank=True)
-    last_event_id = models.UUIDField(null=True, blank=True)
-
-    # Timestamps
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    # Configuration
-    hash_algorithm = models.CharField(max_length=20, default="sha256")
-    is_active = models.BooleanField(default=True)
-
-    class Meta:
-        db_table = "audit_siem_hash_chain_states"
-        ordering: ClassVar[tuple[str, ...]] = ("-updated_at",)
-
-    def __str__(self) -> str:
-        return f"HashChain #{self.sequence_number} ({self.hash_algorithm})"
-
-
 class ComplianceReportRecord(models.Model):
     """Track generated compliance reports for audit trail."""
 
@@ -903,63 +872,6 @@ class ComplianceReportRecord(models.Model):
 
     def __str__(self) -> str:
         return f"{self.report_type} report ({self.overall_status}) - {self.generated_at.date()}"
-
-
-class SIEMExportLog(models.Model):
-    """Track SIEM export operations for monitoring."""
-
-    STATUS_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
-        ("pending", "Pending"),
-        ("in_progress", "In Progress"),
-        ("completed", "Completed"),
-        ("failed", "Failed"),
-    )
-
-    FORMAT_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
-        ("cef", "CEF (ArcSight/Splunk)"),
-        ("leef", "LEEF (IBM QRadar)"),
-        ("json", "JSON (ELK/Graylog)"),
-        ("syslog", "Syslog (RFC 5424)"),
-        ("ocsf", "OCSF"),
-    )
-
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-
-    # Export details
-    export_format = models.CharField(max_length=10, choices=FORMAT_CHOICES)
-    destination = models.CharField(max_length=255)  # Host:port or file path
-
-    # Period
-    period_start = models.DateTimeField()
-    period_end = models.DateTimeField()
-
-    # Status
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
-    started_at = models.DateTimeField(null=True, blank=True)
-    completed_at = models.DateTimeField(null=True, blank=True)
-
-    # Results
-    events_exported = models.PositiveIntegerField(default=0)
-    events_failed = models.PositiveIntegerField(default=0)
-    bytes_transferred = models.BigIntegerField(default=0)
-
-    # Error handling
-    error_message = models.TextField(blank=True)
-    retry_count = models.PositiveIntegerField(default=0)
-
-    # Metadata
-    metadata = models.JSONField(default=dict, blank=True)
-
-    class Meta:
-        db_table = "audit_siem_export_logs"
-        ordering: ClassVar[tuple[str, ...]] = ("-started_at",)
-        indexes: ClassVar[tuple[models.Index, ...]] = (
-            models.Index(fields=["status", "-started_at"]),
-            models.Index(fields=["export_format", "-started_at"]),
-        )
-
-    def __str__(self) -> str:
-        return f"SIEM Export ({self.export_format}) - {self.status}"
 
 
 class CookieConsent(models.Model):

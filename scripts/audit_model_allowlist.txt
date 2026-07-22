@@ -23,8 +23,6 @@ audit.ComplianceLog             # compliance audit trail
 audit.ComplianceReportRecord    # compliance report output
 audit.CookieConsent             # consent record (IS the compliance trail)
 audit.DataExport                # GDPR export record
-audit.SIEMExportLog             # SIEM export tracking
-audit.SIEMHashChainState        # SIEM hash chain state
 
 # ── 2. Append-only history/log models (these ARE the audit trail) ─────────────
 billing.RefundNote              # append-only notes on refunds

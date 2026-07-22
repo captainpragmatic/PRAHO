@@ -27,6 +27,7 @@ from django.db.models import Q
 from django.utils import timezone
 
 from apps.common.partitioning import EventPartitionService
+from apps.common.types import Ok
 
 if TYPE_CHECKING:
     pass
@@ -665,45 +666,52 @@ class ComplianceReportService:
         )
 
     def _generate_log_integrity(self, report: ComplianceReport, events: list[Any]) -> None:
-        """Generate log integrity verification section"""
-        from apps.audit.siem import get_siem_service  # noqa: PLC0415  # Deferred: avoids circular import
+        """Generate log integrity verification section from the real verifier."""
+        from apps.audit.services import AuditIntegrityService  # noqa: PLC0415  # Deferred: avoids circular import
 
-        siem = get_siem_service()
+        result = AuditIntegrityService.verify_audit_integrity(
+            report.period_start, report.period_end, check_type="hash_verification"
+        )
 
-        # Verify hash chain integrity
-        is_valid, errors = siem.verify_log_integrity(report.period_start, report.period_end)
+        if isinstance(result, Ok):
+            check = result.value
+            status = "compliant" if check.status == "healthy" else "non_compliant"
+            metrics = {"logs_verified": check.records_checked, "integrity_issues": check.issues_found}
+            findings = list(check.findings)
+        else:
+            # A verification that could not run is a finding, never silent compliance
+            status = "non_compliant"
+            metrics = {"logs_verified": 0, "integrity_issues": 1}
+            findings = [{"error": f"integrity verification failed to run: {result.error}"}]
+
+        if status == "non_compliant":
+            report.violations.append(
+                ComplianceViolation(
+                    framework="iso27001",
+                    control_id="A.12.4.2",
+                    description="Audit log integrity verification failed",
+                    severity="critical",
+                    detected_at=timezone.now(),
+                    evidence={"findings": findings[:10]},
+                    remediation="Investigate integrity findings; restore from trusted backups if tampering is confirmed",
+                )
+            )
 
         report.sections.append(
             ComplianceReportSection(
                 title="Log Integrity Verification",
-                description="Verification of audit log integrity using hash chain",
-                status="compliant" if is_valid else "non_compliant",
-                metrics={
-                    "logs_verified": len(events),
-                    "integrity_errors": len(errors),
-                },
-                findings=[{"error": error} for error in errors],
+                description="Verification of audit event integrity hashes",
+                status=status,
+                metrics=metrics,
+                findings=findings,
                 recommendations=[
-                    "Investigate any hash chain integrity failures",
-                    "Ensure log storage is protected from modification",
+                    "Investigate any integrity findings immediately",
+                    "Ensure audit storage is protected from modification",
                 ]
-                if errors
+                if findings
                 else [],
             )
         )
-
-        if errors:
-            report.violations.append(
-                ComplianceViolation(
-                    framework="ISO27001",
-                    control_id="A.12.4.2",
-                    description="Log integrity verification failed",
-                    severity="critical",
-                    detected_at=timezone.now(),
-                    evidence={"errors": errors},
-                    remediation="Investigate potential log tampering",
-                )
-            )
 
     def _generate_retention_compliance(self, report: ComplianceReport, events: list[Any]) -> None:
         """Generate retention compliance section"""
