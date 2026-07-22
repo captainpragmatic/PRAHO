@@ -1,0 +1,72 @@
+{% extends 'base.html' %}
+{% load i18n %}
+{% load ui_components %}
+
+{% block title %}{% trans "Settings" %} - PRAHO Platform{% endblock %}
+
+{% block content %}
+<div class="px-4 py-6">
+  <div class="grid grid-cols-12 gap-6">
+    {% include 'settings/partials/_sidebar.html' %}
+
+    <main class="col-span-12 lg:col-span-9 space-y-6">
+      {% trans "Settings" as page_title %}
+      {% page_header title=page_title subtitle=_("Business policy, integrations, and platform configuration") icon="settings" %}{% end_page_header %}
+
+      {% if maintenance_active %}
+      {% trans "Maintenance mode is active — customers receive a 503." as maint_note %}
+      {% alert maint_note variant="warning" %}
+      {% endif %}
+
+      <div class="grid grid-cols-2 lg:grid-cols-5 gap-4">
+        {% for state in integration_state %}
+        <a href="{% url 'settings:group' state.group.slug %}" class="bg-slate-800 rounded-lg border border-slate-700 hover:border-blue-500 transition-colors p-4">
+          <p class="text-sm font-medium text-white truncate">{{ state.group.label }}</p>
+          {% if state.configured %}
+          <p class="mt-1 text-xs text-green-400">● {% trans "Configured" %}</p>
+          {% else %}
+          <p class="mt-1 text-xs text-amber-400">○ {% trans "Not configured" %}</p>
+          {% endif %}
+        </a>
+        {% endfor %}
+      </div>
+
+      {% trans "Recent configuration changes" as recent_title %}
+      {% section_card title=recent_title %}
+        {% if recent_events %}
+        <ul class="divide-y divide-slate-700/50">
+          {% for event in recent_events %}
+          <li class="py-2.5 flex items-center justify-between gap-3 text-sm">
+            <div class="min-w-0">
+              <code class="text-xs text-blue-300 font-mono">{{ event.metadata.setting_key }}</code>
+              <span class="text-slate-400 ml-2">{{ event.get_action_display }}</span>
+              {% if event.metadata.reason %}
+              <span class="text-slate-500 ml-2 truncate">“{{ event.metadata.reason }}”</span>
+              {% endif %}
+            </div>
+            <div class="text-xs text-slate-500 whitespace-nowrap">
+              {% if event.user %}{{ event.user.email }} ·{% endif %}
+              {{ event.timestamp|timesince }} {% trans "ago" %}
+            </div>
+          </li>
+          {% endfor %}
+        </ul>
+        {% else %}
+        <p class="text-sm text-slate-400">{% trans "No configuration changes recorded yet." %}</p>
+        {% endif %}
+      {% end_section_card %}
+
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        {% trans "Customized settings" as stat_modified %}
+        {% stat_tile label=stat_modified value=modified_count icon="settings" %}
+        <a href="{% url 'settings:automation' %}" class="bg-slate-800 rounded-lg border border-slate-700 hover:border-blue-500 transition-colors p-4 flex items-center">
+          <span class="text-sm text-slate-300">⏱️ {% trans "Automation & schedule health" %}</span>
+        </a>
+        <a href="{% url 'billing:invoice_list' %}" class="bg-slate-800 rounded-lg border border-slate-700 hover:border-blue-500 transition-colors p-4 flex items-center">
+          <span class="text-sm text-slate-300">🧾 {% trans "Related: tax rules & invoice sequences" %}</span>
+        </a>
+      </div>
+    </main>
+  </div>
+</div>
+{% endblock %}

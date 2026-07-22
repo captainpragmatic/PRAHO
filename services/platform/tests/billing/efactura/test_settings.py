@@ -32,6 +32,7 @@ from apps.billing.efactura.settings import (
     VATRateConfig,
     ro_local_date,
 )
+from apps.settings.catalog import CATALOG_BY_KEY
 from apps.settings.models import SystemSetting
 
 
@@ -455,32 +456,27 @@ class ConstantsTestCase(TestCase):
                     )
 
 
-class EFacturaSettingsCommandTestCase(TestCase):
-    def test_discoverable_setup_command_does_not_restore_invalid_compliance_gates(self) -> None:
-        output = StringIO()
+class EFacturaSettingsCatalogTestCase(TestCase):
+    """The settings catalog absorbed the e-Factura namespace (ADR-0040)."""
 
-        call_command("setup_efactura_settings", dry_run=True, force=False, stdout=output)
+    def test_catalog_does_not_restore_invalid_compliance_gates(self) -> None:
+        self.assertNotIn("efactura.b2b.enabled", CATALOG_BY_KEY)
+        self.assertNotIn("efactura.b2c.enabled", CATALOG_BY_KEY)
 
-        rendered = output.getvalue()
-        self.assertNotIn("efactura.b2b.enabled", rendered)
-        self.assertNotIn("efactura.b2c.enabled", rendered)
-
-    def test_setup_command_covers_every_runtime_efactura_setting(self) -> None:
-        output = StringIO()
-
-        call_command("setup_efactura_settings", dry_run=True, force=False, stdout=output)
-
-        rendered_keys = {
-            line.split(": ", maxsplit=1)[1].split(" = ", maxsplit=1)[0]
-            for line in output.getvalue().splitlines()
-            if line.startswith("[DRY-RUN]")
+    def test_catalog_mirrors_every_runtime_efactura_setting(self) -> None:
+        """The catalog's e-Factura entries must stay identical to EFACTURA_DEFAULTS."""
+        catalog_efactura = {
+            key: definition.default for key, definition in CATALOG_BY_KEY.items() if key.startswith("efactura.")
         }
-        self.assertEqual(rendered_keys, set(EFACTURA_DEFAULTS))
+        self.assertEqual(catalog_efactura, dict(EFACTURA_DEFAULTS))
 
-    def test_setup_command_persists_every_runtime_efactura_setting(self) -> None:
-        call_command("setup_efactura_settings", stdout=StringIO())
+    def test_catalog_sync_persists_every_runtime_efactura_setting(self) -> None:
+        call_command("setup_default_settings", stdout=StringIO())
 
         persisted_keys = set(
             SystemSetting.objects.filter(key__startswith="efactura.").values_list("key", flat=True)
         )
         self.assertEqual(persisted_keys, set(EFACTURA_DEFAULTS))
+
+    def test_catalog_marks_client_secret_sensitive(self) -> None:
+        self.assertTrue(CATALOG_BY_KEY["efactura.oauth.client_secret"].sensitive)

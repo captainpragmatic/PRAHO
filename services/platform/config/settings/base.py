@@ -71,6 +71,7 @@ MIDDLEWARE: list[str] = [
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
+    "apps.common.middleware.MaintenanceModeMiddleware",  # 503 for non-staff while maintenance mode is active
     "apps.common.middleware.StaffOnlyPlatformMiddleware",  # Block customer access to platform (after AuthenticationMiddleware and MessageMiddleware)
     "apps.common.middleware.PortalServiceHMACMiddleware",  # HMAC auth for portal API requests (after AuthenticationMiddleware)
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
@@ -96,6 +97,10 @@ TEMPLATES = [
                 "apps.common.context_processors.romanian_business_context",
                 "apps.common.context_processors.navigation_dropdowns",
                 "apps.common.context_processors.csp_nonce",
+                # Staff maintenance banner (base.html) needs system_status on every
+                # page, not only inside the settings module. Cache-first read: the
+                # warm path costs zero queries (#377 review).
+                "apps.common.context_processors.system_status",
             ],
         },
     },
@@ -156,6 +161,14 @@ PASSWORD_HASHERS = [
 ]
 
 # Authentication URLs
+# Deployment-tier maintenance override (ADR-0015): when the env var is set it wins
+# over the system.maintenance_mode runtime setting; unset means "defer to runtime".
+MAINTENANCE_MODE: bool | None = (
+    os.environ["MAINTENANCE_MODE"].strip().lower() in ("true", "1", "on", "yes")
+    if "MAINTENANCE_MODE" in os.environ
+    else None
+)
+
 LOGIN_URL = "/auth/login/"
 LOGIN_REDIRECT_URL = "/dashboard/"
 LOGOUT_REDIRECT_URL = "/"

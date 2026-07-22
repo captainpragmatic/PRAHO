@@ -89,6 +89,7 @@ MIDDLEWARE = [
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
+    "apps.common.middleware.MaintenanceModeMiddleware",  # 503 for non-staff while maintenance mode is active
     "apps.common.middleware.StaffOnlyPlatformMiddleware",  # After auth — blocks non-staff
     "apps.common.middleware.PortalServiceHMACMiddleware",  # After auth — staff bypass needs request.user
     "django.middleware.clickjacking.XFrameOptionsMiddleware",

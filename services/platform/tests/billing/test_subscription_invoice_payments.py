@@ -2820,7 +2820,8 @@ class RecurringChargeAbandonGuardTests(_SubscriptionInvoicePaymentFixture, TestC
         )
 
     def _disable_kill_switch(self) -> None:
-        SettingsService.set_setting("billing.recurring_auto_collection_enabled", False)
+        result = SettingsService.update_setting("billing.recurring_auto_collection_enabled", False)
+        assert result.is_ok(), f"Failed to disable recurring collection: {result}"
 
     def test_resumed_reservation_is_not_abandoned_when_collection_disabled(self) -> None:
         self._disable_kill_switch()

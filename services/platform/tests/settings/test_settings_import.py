@@ -15,7 +15,8 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client, TestCase
 from django.urls import reverse
 
-from apps.settings.models import SettingCategory, SystemSetting
+from apps.settings.models import SystemSetting
+from apps.settings.services import SettingsService
 
 User = get_user_model()
 
@@ -39,7 +40,6 @@ class SettingsImportTests(TestCase):
         self.url = reverse("settings:import_settings")
 
         # Create a known setting in the DB so we can test importing against it
-        self.category = SettingCategory.objects.create(key="billing", name="Billing")
         SystemSetting.objects.create(
             key="billing.proforma_validity_days",
             name="Proforma Validity Days",
@@ -238,3 +238,41 @@ class SettingsImportTests(TestCase):
         self.assertEqual(response.status_code, 400)
         data = response.json()
         self.assertIn("settings", data["error"].lower())
+
+
+class ExportImportRoundTripTests(TestCase):
+    """Export → import restores values; retired keys skip with a reason (ADR-0042)."""
+
+    def setUp(self) -> None:
+        self.admin = User.objects.create_user(
+            email="roundtrip-admin@test.ro", password="TestPass123!", is_staff=True, staff_role="admin"
+        )
+        self.client.force_login(self.admin)
+
+    def test_round_trip_restores_values(self) -> None:
+        result = SettingsService.update_setting("billing.proforma_validity_days", 45)
+        self.assertTrue(result.is_ok())
+
+        export = self.client.get(reverse("settings:export_settings"))
+        self.assertEqual(export.status_code, 200)
+        payload = json.loads(export.content)
+
+        result = SettingsService.update_setting("billing.proforma_validity_days", 60)
+        self.assertTrue(result.is_ok())
+
+        response = self.client.post(
+            reverse("settings:import_settings"), data=json.dumps(payload), content_type="application/json"
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(SettingsService.get_setting("billing.proforma_validity_days"), 45)
+
+    def test_retired_keys_import_as_skipped_with_reason(self) -> None:
+        legacy_export = {"settings": [{"key": "billing.vat_rate", "value": "0.19"}]}
+        response = self.client.post(
+            reverse("settings:import_settings"), data=json.dumps(legacy_export), content_type="application/json"
+        )
+        body = response.json()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(body["imported"], 0)
+        self.assertEqual(body["skipped"][0]["key"], "billing.vat_rate")
+        self.assertIn("unknown", body["skipped"][0]["reason"])

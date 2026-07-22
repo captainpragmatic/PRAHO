@@ -245,7 +245,8 @@ class RecurringCollectionPostgresConcurrencyTests(_SubscriptionInvoicePaymentFix
             original_save(setting, *args, **kwargs)
 
         def disable_collection() -> None:
-            SettingsService.set_setting("billing.recurring_auto_collection_enabled", False)
+            result = SettingsService.update_setting("billing.recurring_auto_collection_enabled", False)
+            assert result.is_ok(), f"Failed to disable recurring collection: {result}"
 
         def charge() -> PaymentIntentResult:
             return self._charge_invoice(

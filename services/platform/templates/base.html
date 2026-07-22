@@ -161,6 +161,12 @@
     </nav>
     {% endif %}
 
+    {% if maintenance_mode and user.is_staff_user %}
+    <div class="bg-amber-500/15 border-b border-amber-500/40 text-amber-300 text-sm px-4 py-2 text-center">
+      🚧 {% trans "Maintenance mode is active — customers are receiving a 503. Disable it under Settings → Maintenance & Availability." %}
+    </div>
+    {% endif %}
+
     <!-- Toast Messages -->
     {% if messages %}
     <div id="toast-container" class="fixed top-4 lg:top-20 left-1/2 transform -translate-x-1/2 z-50 space-y-2">

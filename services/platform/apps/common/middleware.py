@@ -774,3 +774,64 @@ class StaffOnlyPlatformMiddleware:
                 request, _("❌ Customers cannot access the platform. Please use the customer portal instead.")
             )
             return redirect("users:login")
+
+
+class MaintenanceModeMiddleware:
+    """
+    🚧 Platform-wide maintenance gate (ADR-0042).
+
+    When maintenance mode is active, non-staff requests receive a 503 with
+    Retry-After; staff pass through (base template shows them a banner).
+
+    Resolution order (ADR-0015): the MAINTENANCE_MODE deployment setting wins
+    when set; otherwise the system.maintenance_mode runtime setting applies
+    (cache-first read — one cache lookup per request).
+    """
+
+    # Paths that must stay reachable during maintenance
+    EXEMPT_PREFIXES = (
+        "/auth/",  # login/logout/password reset
+        "/static/",
+        "/media/",
+        "/i18n/",
+        "/settings/api/health/",
+    )
+
+    def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]) -> None:
+        self.get_response = get_response
+
+    def __call__(self, request: HttpRequest) -> HttpResponse:
+        if self._maintenance_active() and not self._is_exempt(request):
+            user = getattr(request, "user", None)
+            if user is None or not getattr(user, "is_staff_user", False):
+                return self._maintenance_response()
+        return self.get_response(request)
+
+    @staticmethod
+    def _maintenance_active() -> bool:
+        deployment_override = getattr(settings, "MAINTENANCE_MODE", None)
+        if deployment_override is not None:
+            return bool(deployment_override)
+        from apps.settings.services import SettingsService  # noqa: PLC0415  # Cross-app import (ADR-0007)
+
+        return SettingsService.get_boolean_setting("system.maintenance_mode", False)
+
+    @classmethod
+    def _is_exempt(cls, request: HttpRequest) -> bool:
+        return request.path.startswith(cls.EXEMPT_PREFIXES)
+
+    @staticmethod
+    def _maintenance_response() -> HttpResponse:
+        response = HttpResponse(
+            '<!doctype html><html><head><title>503</title></head><body style="font-family:system-ui;'
+            "background:#0f172a;color:#e2e8f0;display:flex;align-items:center;justify-content:center;"
+            'height:100vh;margin:0"><div style="text-align:center"><h1>🚧 '
+            + str(_("Scheduled maintenance"))
+            + "</h1><p>"
+            + str(_("The platform is temporarily unavailable. Please try again in a few minutes."))
+            + "</p></div></body></html>",
+            status=503,
+            content_type="text/html",
+        )
+        response["Retry-After"] = "600"
+        return response

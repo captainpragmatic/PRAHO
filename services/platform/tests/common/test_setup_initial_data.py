@@ -20,7 +20,6 @@ class SetupInitialDataTestCase(TestCase):
         call_command("setup_initial_data", stdout=out)
 
         called_commands = [c[0][0] for c in mock_call.call_args_list]
-        self.assertIn("setup_settings_categories", called_commands)
         self.assertIn("setup_default_settings", called_commands)
         self.assertIn("setup_scheduled_tasks", called_commands)
         self.assertIn("setup_email_templates", called_commands)
@@ -77,7 +76,6 @@ class SetupInitialDataTestCase(TestCase):
             call_command("setup_initial_data", tier="core", stdout=out)
 
         called_commands = [c[0][0] for c in mock_call.call_args_list]
-        self.assertIn("setup_settings_categories", called_commands)
         self.assertNotIn("setup_tax_rules", called_commands)
 
     @patch("apps.common.management.commands.setup_initial_data.call_command")
@@ -108,5 +106,4 @@ class SetupInitialDataTestCase(TestCase):
             call_command("setup_initial_data", all=True, stdout=out)
 
         called_commands = [c[0][0] for c in mock_call.call_args_list]
-        self.assertIn("setup_settings_categories", called_commands)
         self.assertIn("setup_tax_rules", called_commands)

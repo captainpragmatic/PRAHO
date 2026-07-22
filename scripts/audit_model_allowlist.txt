@@ -48,7 +48,6 @@ domains.TLDRegistrarAssignment  # TLD-to-registrar mapping
 products.ProductBundle          # product bundle definition
 products.ProductBundleItem      # bundle membership (child of ProductBundle)
 products.ProductRelationship    # product relationship metadata
-settings.SettingCategory        # setting category taxonomy
 tickets.SupportCategory         # support category taxonomy
 
 # ── 4. Detail/child models (audited via parent signal) ────────────────────────

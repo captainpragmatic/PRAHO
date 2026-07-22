@@ -387,10 +387,14 @@ class EFacturaSettings:
 
     def _get_setting(self, key: str, default: Any = None) -> Any:
         """Get setting with fallback chain: DB -> Django settings -> default."""
-        # Try database settings first
+        # Try database settings first — row-only read: the settings catalog now
+        # registers the e-Factura namespace, so a service-level read would return
+        # the catalog default and preempt the Django-settings tier below.
         if self.settings_service:
             try:
-                value = self.settings_service.get_setting(key, None)
+                from apps.settings.models import SystemSetting  # noqa: PLC0415  # Deferred: avoids circular import
+
+                value = SystemSetting.get_value_by_key(key, None)
                 if value is not None:
                     return value
             except Exception as e:

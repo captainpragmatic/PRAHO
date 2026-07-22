@@ -27,7 +27,6 @@ import apps.common.constants as constants_mod
 from apps.common.constants import (
     DEFAULT_PAGE_SIZE,
     INVOICE_DUE_DAYS_DEFAULT,
-    PAYMENT_GRACE_PERIOD_DAYS,
     PROFORMA_VALIDITY_DAYS,
 )
 from apps.settings.services import SettingsService
@@ -69,16 +68,6 @@ class BillingTermDefaultsConsistencyTest(TestCase):
             INVOICE_DUE_DAYS_DEFAULT,
             settings_default,
             f"constants.INVOICE_DUE_DAYS_DEFAULT ({INVOICE_DUE_DAYS_DEFAULT}) != "
-            f"SettingsService default ({settings_default})",
-        )
-
-    def test_payment_grace_period_matches(self) -> None:
-        """PAYMENT_GRACE_PERIOD_DAYS must match SettingsService default."""
-        settings_default = SettingsService.DEFAULT_SETTINGS["billing.payment_grace_period_days"]
-        self.assertEqual(
-            PAYMENT_GRACE_PERIOD_DAYS,
-            settings_default,
-            f"constants.PAYMENT_GRACE_PERIOD_DAYS ({PAYMENT_GRACE_PERIOD_DAYS}) != "
             f"SettingsService default ({settings_default})",
         )
 

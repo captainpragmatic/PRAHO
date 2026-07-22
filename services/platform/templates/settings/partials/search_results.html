@@ -1,0 +1,13 @@
+{% load i18n %}
+{% if query %}
+<div class="mb-4 bg-slate-900/80 border border-slate-700 rounded-lg divide-y divide-slate-700/50 max-h-72 overflow-y-auto">
+  {% for result in results %}
+  <a href="{% url 'settings:group' result.group.slug %}#setting-{{ result.definition.key }}" class="block px-3 py-2 hover:bg-slate-700/50">
+    <p class="text-sm text-white">{{ result.definition.label }}</p>
+    <p class="text-xs text-slate-500"><code class="font-mono">{{ result.definition.key }}</code> · {{ result.group.label }}</p>
+  </a>
+  {% empty %}
+  <p class="px-3 py-2 text-sm text-slate-400">{% trans "No settings match" %} “{{ query }}”</p>
+  {% endfor %}
+</div>
+{% endif %}

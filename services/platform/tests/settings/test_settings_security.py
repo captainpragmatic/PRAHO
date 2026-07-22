@@ -6,14 +6,15 @@ Verifies all OWASP Top 10 security fixes are working correctly.
 """
 
 import json
-from django.test import TestCase, Client
-from django.urls import reverse
+
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
+from django.test import Client, TestCase
+from django.urls import reverse
 
-from apps.settings.models import SystemSetting, SettingCategory
 from apps.common.encryption import encrypt_value, is_encrypted
-from apps.settings.services import SettingsService
+from apps.settings.models import SystemSetting
+from apps.settings.services import SettingsService, _safe_json_loads
 
 User = get_user_model()
 
@@ -23,15 +24,7 @@ class EncryptionSecurityTests(TestCase):
 
     def setUp(self):
         self.admin_user = User.objects.create_user(
-            email="admin@test.com",
-            password="testpass123",
-            is_staff=True,
-            is_superuser=True
-        )
-
-        self.category = SettingCategory.objects.create(
-            key="security",
-            name="Security Settings"
+            email="admin@test.com", password="testpass123", is_staff=True, is_superuser=True
         )
 
     def test_sensitive_setting_encryption_on_save(self):
@@ -44,7 +37,7 @@ class EncryptionSecurityTests(TestCase):
             value="secret_api_key_123",
             default_value="default_key",
             is_sensitive=True,
-            category="security"
+            category="security",
         )
 
         # Value should be encrypted in database
@@ -65,7 +58,7 @@ class EncryptionSecurityTests(TestCase):
             value=30,
             default_value=10,
             is_sensitive=False,
-            category="system"
+            category="system",
         )
 
         # Value should not be encrypted
@@ -83,7 +76,7 @@ class EncryptionSecurityTests(TestCase):
             value="supersecret123",
             default_value="default_password",
             is_sensitive=True,
-            category="security"
+            category="security",
         )
 
         # Display value should be hidden
@@ -115,33 +108,14 @@ class ExportSecurityTests(TestCase):
 
     def setUp(self):
         self.admin_user = User.objects.create_user(
-            email="admin@test.com",
-            password="testpass123",
-            is_staff=True,
-            is_superuser=True
+            email="admin@test.com", password="testpass123", is_staff=True, is_superuser=True
         )
 
-        self.staff_user = User.objects.create_user(
-            email="staff@test.com",
-            password="testpass123",
-            is_staff=True
-        )
+        self.staff_user = User.objects.create_user(email="staff@test.com", password="testpass123", is_staff=True)
 
-        self.regular_user = User.objects.create_user(
-            email="user@test.com",
-            password="testpass123"
-        )
-
-        self.category = SettingCategory.objects.create(
-            key="security",
-            name="Security Settings"
-        )
+        self.regular_user = User.objects.create_user(email="user@test.com", password="testpass123")
 
         # Create system category for the system setting
-        self.system_category = SettingCategory.objects.create(
-            key="system",
-            name="System Settings"
-        )
 
         # Create sensitive setting
         self.sensitive_setting = SystemSetting.objects.create(
@@ -152,7 +126,7 @@ class ExportSecurityTests(TestCase):
             value="secret_key_123",
             default_value="default_key",
             is_sensitive=True,
-            category="security"
+            category="security",
         )
 
         # Create non-sensitive setting
@@ -164,14 +138,14 @@ class ExportSecurityTests(TestCase):
             value=30,
             default_value=10,
             is_sensitive=False,
-            category="system"
+            category="system",
         )
 
     def test_standard_export_excludes_sensitive_settings(self):
         """🔒 Test that standard export excludes sensitive settings"""
         self.client.force_login(self.admin_user)
 
-        response = self.client.get(reverse('settings:export_settings'))
+        response = self.client.get(reverse("settings:export_settings"))
         self.assertEqual(response.status_code, 200)
 
         data = json.loads(response.content)
@@ -193,7 +167,7 @@ class ExportSecurityTests(TestCase):
         """🔒 Test that full export includes all settings (admin-only)"""
         self.client.force_login(self.admin_user)
 
-        response = self.client.get(reverse('settings:export_settings_full'))
+        response = self.client.get(reverse("settings:export_settings_full"))
         self.assertEqual(response.status_code, 200)
 
         data = json.loads(response.content)
@@ -221,43 +195,43 @@ class ExportSecurityTests(TestCase):
     def test_export_access_control(self):
         """🔒 Test that standard export requires login but allows any authenticated user"""
         # Test unauthorized access
-        response = self.client.get(reverse('settings:export_settings'))
+        response = self.client.get(reverse("settings:export_settings"))
         self.assertEqual(response.status_code, 302)  # Redirect to login
 
         # Test regular user access (should be allowed for standard export)
         self.client.force_login(self.regular_user)
-        response = self.client.get(reverse('settings:export_settings'))
+        response = self.client.get(reverse("settings:export_settings"))
         self.assertEqual(response.status_code, 200)  # Regular users can access standard export
 
         # Test staff user access (should be allowed)
         self.client.force_login(self.staff_user)
-        response = self.client.get(reverse('settings:export_settings'))
+        response = self.client.get(reverse("settings:export_settings"))
         self.assertEqual(response.status_code, 200)  # Staff can access standard export
 
         # Test admin user access (should work)
         self.client.force_login(self.admin_user)
-        response = self.client.get(reverse('settings:export_settings'))
+        response = self.client.get(reverse("settings:export_settings"))
         self.assertEqual(response.status_code, 200)
 
     def test_full_export_access_control(self):
         """🔒 Test that full export endpoint requires admin access"""
         # Test unauthorized access
-        response = self.client.get(reverse('settings:export_settings_full'))
+        response = self.client.get(reverse("settings:export_settings_full"))
         self.assertEqual(response.status_code, 302)  # Redirect to login
 
         # Test regular user access (should be denied)
         self.client.force_login(self.regular_user)
-        response = self.client.get(reverse('settings:export_settings_full'))
+        response = self.client.get(reverse("settings:export_settings_full"))
         self.assertEqual(response.status_code, 403)  # Forbidden
 
         # Test staff user access (should be denied - admin required)
         self.client.force_login(self.staff_user)
-        response = self.client.get(reverse('settings:export_settings_full'))
+        response = self.client.get(reverse("settings:export_settings_full"))
         self.assertEqual(response.status_code, 403)  # Forbidden
 
         # Test admin user access (should work)
         self.client.force_login(self.admin_user)
-        response = self.client.get(reverse('settings:export_settings_full'))
+        response = self.client.get(reverse("settings:export_settings_full"))
         self.assertEqual(response.status_code, 200)
 
 
@@ -266,10 +240,7 @@ class CachingSecurityTests(TestCase):
 
     def setUp(self):
         self.admin_user = User.objects.create_user(
-            email="admin@test.com",
-            password="testpass123",
-            is_staff=True,
-            is_superuser=True
+            email="admin@test.com", password="testpass123", is_staff=True, is_superuser=True
         )
 
         # Create sensitive setting
@@ -281,7 +252,7 @@ class CachingSecurityTests(TestCase):
             value="secret_key_123",
             default_value="default_key",
             is_sensitive=True,
-            category="security"
+            category="security",
         )
 
         # Create non-sensitive setting
@@ -293,7 +264,7 @@ class CachingSecurityTests(TestCase):
             value=30,
             default_value=10,
             is_sensitive=False,
-            category="system"
+            category="system",
         )
 
     def test_sensitive_settings_not_cached(self):
@@ -330,15 +301,7 @@ class InputValidationSecurityTests(TestCase):
 
     def setUp(self):
         self.admin_user = User.objects.create_user(
-            email="admin@test.com",
-            password="testpass123",
-            is_staff=True,
-            is_superuser=True
-        )
-
-        self.category = SettingCategory.objects.create(
-            key="security",
-            name="Security Settings"
+            email="admin@test.com", password="testpass123", is_staff=True, is_superuser=True
         )
 
     def test_category_key_validation_prevents_path_traversal(self):
@@ -356,18 +319,15 @@ class InputValidationSecurityTests(TestCase):
 
         for malicious_key in malicious_keys:
             # Use direct URL instead of reverse to avoid URL validation issues
-            response = self.client.get(f"/app/settings/manage/category/{malicious_key}/")
+            response = self.client.get(f"/settings/{malicious_key}/")
             # Should return 400 Bad Request or 404 for invalid category
-            self.assertIn(response.status_code, [400, 404],
-                         f"Failed to reject malicious key: {malicious_key}")
+            self.assertIn(response.status_code, [400, 404], f"Failed to reject malicious key: {malicious_key}")
 
     def test_json_size_limit_prevents_dos(self):
         """🔒 Test that JSON size limits prevent DoS attacks"""
         # This would test the _safe_json_loads function with oversized JSON
-        from apps.settings.services import _safe_json_loads
-
         # Test oversized JSON (exceed 1MB limit)
-        large_json = '{"data": "' + 'x' * 1200000 + '"}'  # 1.2MB+ JSON
+        large_json = '{"data": "' + "x" * 1200000 + '"}'  # 1.2MB+ JSON
 
         with self.assertRaises(ValidationError) as cm:
             _safe_json_loads(large_json)
@@ -376,10 +336,8 @@ class InputValidationSecurityTests(TestCase):
 
     def test_json_depth_limit_prevents_stack_overflow(self):
         """🔒 Test that JSON depth limits prevent stack overflow attacks"""
-        from apps.settings.services import _safe_json_loads
-
         # Create deeply nested JSON (>10 levels)
-        nested_json = '{"a":' * 15 + '"value"' + '}' * 15
+        nested_json = '{"a":' * 15 + '"value"' + "}" * 15
 
         with self.assertRaises(ValidationError) as cm:
             _safe_json_loads(nested_json)
@@ -387,29 +345,38 @@ class InputValidationSecurityTests(TestCase):
         self.assertIn("JSON too deeply nested", str(cm.exception))
 
 
-class CategoryManagementStaffCheckTests(TestCase):
-    """H2: category_management_partial must require staff user."""
+class GroupPageStaffCheckTests(TestCase):
+    """H2: the settings group pages must require a staff user."""
 
     def setUp(self) -> None:
         self.client = Client()
         self.non_staff = User.objects.create_user(
-            email="customer@test.ro", password="TestPass123!",
+            email="customer@test.ro",
+            password="TestPass123!",
             is_staff=False,
         )
         self.staff_user = User.objects.create_user(
-            email="staff@test.ro", password="TestPass123!",
-            is_staff=True, staff_role="admin",
-        )
-        SettingCategory.objects.get_or_create(
-            key="test_billing", defaults={"name": "Test Billing", "is_active": True}
+            email="staff@test.ro",
+            password="TestPass123!",
+            is_staff=True,
+            staff_role="admin",
         )
 
     def test_non_staff_get_redirected(self) -> None:
         self.client.force_login(self.non_staff)
-        response = self.client.get("/settings/manage/category/test_billing/")
+        response = self.client.get("/settings/billing/")
         self.assertIn(response.status_code, [302, 403])
 
-    def test_non_staff_post_rejected(self) -> None:
+    def test_non_staff_save_rejected(self) -> None:
         self.client.force_login(self.non_staff)
-        response = self.client.post("/settings/manage/category/test_billing/", data={"setting_foo": "bar"})
+        response = self.client.post(
+            "/settings/save/",
+            data='{"changes": {"billing.proforma_validity_days": 45}, "baselines": {}}',
+            content_type="application/json",
+        )
         self.assertIn(response.status_code, [302, 403])
+
+    def test_staff_can_open_business_group(self) -> None:
+        self.client.force_login(self.staff_user)
+        response = self.client.get("/settings/billing/")
+        self.assertEqual(response.status_code, 200)

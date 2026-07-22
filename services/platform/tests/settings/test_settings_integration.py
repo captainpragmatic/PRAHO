@@ -24,11 +24,13 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import transaction
 from django.test import TestCase
 
+from apps.billing.views import _get_max_payment_amount_cents
+from apps.promotions.models import get_max_discount_percent
 from apps.settings.models import SystemSetting
 from apps.settings.services import SettingsService
 from apps.tickets.monitoring import SecurityEventTracker
 from apps.tickets.security import TicketAttachmentSecurityScanner
-
+from apps.users.services import SessionSecurityService
 
 # ── Tickets ───────────────────────────────────────────────────────────────────
 
@@ -117,14 +119,10 @@ class BillingSettingsIntegration(TestCase):
 
     def test_max_payment_amount_default(self) -> None:
         """No DB record -> _get_max_payment_amount_cents() returns 100_000_000."""
-        from apps.billing.views import _get_max_payment_amount_cents
-
         self.assertEqual(_get_max_payment_amount_cents(), 100_000_000)
 
     def test_max_payment_amount_override(self) -> None:
         """DB set to 50_000_000 -> _get_max_payment_amount_cents() returns 50M."""
-        from apps.billing.views import _get_max_payment_amount_cents
-
         SettingsService.update_setting(
             key="billing.max_payment_amount_cents",
             value=50_000_000,
@@ -137,7 +135,7 @@ class BillingSettingsIntegration(TestCase):
 class SettingsCacheInvalidationTests(TestCase):
     """Settings cache invalidation must happen after the database commit."""
 
-    def test_set_setting_defers_cache_delete_until_commit(self) -> None:
+    def test_update_setting_defers_cache_delete_until_commit(self) -> None:
         SystemSetting.objects.create(
             key="billing.recurring_auto_collection_enabled",
             name="Recurring auto-collection enabled",
@@ -151,10 +149,11 @@ class SettingsCacheInvalidationTests(TestCase):
             patch("apps.settings.services.cache.delete") as mock_cache_delete,
             self.captureOnCommitCallbacks(execute=True) as callbacks,
         ):
-            SettingsService.set_setting("billing.recurring_auto_collection_enabled", False)
+            result = SettingsService.update_setting("billing.recurring_auto_collection_enabled", False)
+            self.assertTrue(result.is_ok())
             mock_cache_delete.assert_not_called()
 
-        self.assertEqual(len(callbacks), 1)
+        self.assertGreaterEqual(len(callbacks), 1)
         mock_cache_delete.assert_called_once_with(
             SettingsService._get_cache_key("billing.recurring_auto_collection_enabled"),
             version=SettingsService.CACHE_VERSION,
@@ -176,7 +175,8 @@ class SettingsCacheInvalidationTests(TestCase):
             self.assertRaises(RuntimeError),
             transaction.atomic(),
         ):
-            SettingsService.set_setting("billing.recurring_auto_collection_enabled", False)
+            result = SettingsService.update_setting("billing.recurring_auto_collection_enabled", False)
+            self.assertTrue(result.is_ok())
             raise RuntimeError("force rollback")
 
         self.assertEqual(callbacks, [])
@@ -196,8 +196,6 @@ class UsersSettingsIntegration(TestCase):
 
     def test_admin_timeout_override(self) -> None:
         """DB set to 15 -> _get_timeout_policies() uses 15*60=900 for 'sensitive'."""
-        from apps.users.services import SessionSecurityService
-
         SettingsService.update_setting(
             key="users.admin_session_timeout_minutes",
             value=15,
@@ -209,8 +207,6 @@ class UsersSettingsIntegration(TestCase):
 
     def test_admin_timeout_default_policy(self) -> None:
         """No DB record -> _get_timeout_policies() uses 30*60=1800 for 'sensitive'."""
-        from apps.users.services import SessionSecurityService
-
         policies = SessionSecurityService._get_timeout_policies()
         self.assertEqual(policies["sensitive"], 30 * 60)  # 1800 seconds
 
@@ -316,14 +312,10 @@ class PromotionsSettingsIntegration(TestCase):
 
     def test_max_discount_default(self) -> None:
         """No DB record -> get_max_discount_percent() returns 100."""
-        from apps.promotions.models import get_max_discount_percent
-
         self.assertEqual(get_max_discount_percent(), Decimal("100"))
 
     def test_max_discount_override(self) -> None:
         """DB set to 50 -> get_max_discount_percent() returns 50."""
-        from apps.promotions.models import get_max_discount_percent
-
         SettingsService.update_setting(
             key="promotions.max_discount_percent",
             value=50,
@@ -356,14 +348,14 @@ class DefaultSettingsCompleteness(TestCase):
     """Verify structural integrity of DEFAULT_SETTINGS registry."""
 
     def test_all_keys_have_category_prefix(self) -> None:
-        """Every key in DEFAULT_SETTINGS follows 'category.name' format."""
+        """Every key follows 'category.name' or 'category.section.name' (e-Factura) format."""
         for key in SettingsService.DEFAULT_SETTINGS:
             with self.subTest(key=key):
                 parts = key.split(".")
-                self.assertEqual(
+                self.assertIn(
                     len(parts),
-                    2,
-                    f"Key '{key}' must have exactly one dot separating category.name",
+                    (2, 3),
+                    f"Key '{key}' must be category.name or category.section.name",
                 )
                 self.assertTrue(
                     parts[0].replace("_", "").isalnum(),

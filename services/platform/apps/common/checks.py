@@ -15,17 +15,25 @@ from django.core.checks import Warning as DjangoWarning
 # Constants
 SSL_HEADER_TUPLE_LENGTH = 2
 MIN_HSTS_SECONDS = 300  # 5 minutes minimum
-_DEFAULT_MAX_SESSION_AGE_HOURS = 86400  # 24 hours in seconds
-MAX_SESSION_AGE_HOURS = _DEFAULT_MAX_SESSION_AGE_HOURS
+_DEFAULT_MAX_SESSION_AGE_SECONDS = 86400  # 24 hours
+MAX_SESSION_AGE_SECONDS = _DEFAULT_MAX_SESSION_AGE_SECONDS
 
 
-def get_max_session_age_hours() -> int:
-    """Get max session age hours from SettingsService (runtime)."""
+def get_max_session_age_seconds() -> int:
+    """Max allowed session age (seconds) from SettingsService, safe pre-migrate."""
+    from django.core.exceptions import ImproperlyConfigured  # noqa: PLC0415
+    from django.db import DatabaseError  # noqa: PLC0415
+
     from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
-        SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
+        SettingsService,
     )
 
-    return SettingsService.get_integer_setting("security.max_session_age_seconds", _DEFAULT_MAX_SESSION_AGE_HOURS)
+    try:
+        return SettingsService.get_integer_setting("security.max_session_age_seconds", _DEFAULT_MAX_SESSION_AGE_SECONDS)
+    except (DatabaseError, ImproperlyConfigured):
+        # System checks can run before migrations or with a deliberately broken
+        # cache config — fall back to the code default
+        return _DEFAULT_MAX_SESSION_AGE_SECONDS
 
 
 def _validate_proxy_entries(trusted_proxies: list[Any]) -> list[Any]:
@@ -494,7 +502,7 @@ def check_session_security_configuration(app_configs: Any, **kwargs: Any) -> lis
 
         # Check session timeout
         session_age = getattr(settings, "SESSION_COOKIE_AGE", 1209600)  # Django default: 2 weeks
-        if session_age > MAX_SESSION_AGE_HOURS:  # More than 24 hours
+        if session_age > get_max_session_age_seconds():  # Default: 24 hours
             errors.append(
                 DjangoWarning(
                     f"Session timeout very long for production: {session_age} seconds",

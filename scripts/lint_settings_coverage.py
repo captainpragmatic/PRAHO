@@ -39,6 +39,12 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 APPS_DIR = PROJECT_ROOT / "services" / "platform" / "apps"
 TEMPLATES_DIR = PROJECT_ROOT / "services" / "platform" / "templates"
 SETTINGS_SERVICE_FILE = APPS_DIR / "settings" / "services.py"
+CATALOG_FILE = APPS_DIR / "settings" / "catalog.py"
+
+# Shared tokenize-based extraction (same module the consumer-contract test uses)
+sys.path.insert(0, str(PROJECT_ROOT / "services" / "platform"))
+from apps.settings.key_scan import extract_catalog_defaults, extract_string_literals
+
 SETUP_DEFAULTS_GLOB = "setup_default_settings.py"
 
 DEFAULT_ALLOWLIST = PROJECT_ROOT / "scripts" / "settings_allowlist.txt"
@@ -130,43 +136,9 @@ def load_allowlist(path: Path) -> tuple[set[str], set[str]]:
 
 
 def extract_default_settings(services_file: Path) -> dict[str, Any]:
-    """Parse DEFAULT_SETTINGS dict from services.py using AST.
-
-    Returns dict mapping setting keys to their default values.
-    """
-    defaults: dict[str, Any] = {}
-    if not services_file.exists():
-        return defaults
-
-    source = services_file.read_text(encoding="utf-8")
-    try:
-        tree = ast.parse(source, filename=str(services_file))
-    except SyntaxError:
-        return defaults
-
-    for node in ast.walk(tree):
-        # Find: DEFAULT_SETTINGS: ClassVar[...] = { ... }
-        if not isinstance(node, ast.Assign | ast.AnnAssign):
-            continue
-
-        # Get the target name
-        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
-            target_name = node.target.id
-            value_node = node.value
-        elif isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
-            target_name = node.targets[0].id
-            value_node = node.value
-        else:
-            continue
-
-        if target_name != "DEFAULT_SETTINGS" or not isinstance(value_node, ast.Dict):
-            continue
-
-        for key_node, val_node in zip(value_node.keys, value_node.values, strict=False):
-            if isinstance(key_node, ast.Constant) and isinstance(key_node.value, str):
-                defaults[key_node.value] = _ast_const_to_python(val_node)
-
-    return defaults
+    """Setting keys + defaults from the catalog (services.py DEFAULT_SETTINGS derives from it)."""
+    del services_file  # signature kept for call-site compatibility
+    return extract_catalog_defaults(CATALOG_FILE)
 
 
 def _ast_const_to_python(node: ast.expr) -> Any:
@@ -196,9 +168,7 @@ def iter_python_files(root: Path) -> list[Path]:
     files: list[Path] = []
     for current_root, dirs, filenames in os.walk(root):
         dirs[:] = [d for d in dirs if d not in EXCLUDE_DIRS and not d.startswith(".")]
-        for filename in filenames:
-            if filename.endswith(".py"):
-                files.append(Path(current_root) / filename)
+        files.extend(Path(current_root) / filename for filename in filenames if filename.endswith(".py"))
     return sorted(files)
 
 
@@ -209,9 +179,7 @@ def iter_template_files(root: Path) -> list[Path]:
         return files
     for current_root, dirs, filenames in os.walk(root):
         dirs[:] = [d for d in dirs if not d.startswith(".")]
-        for filename in filenames:
-            if filename.endswith(".html"):
-                files.append(Path(current_root) / filename)
+        files.extend(Path(current_root) / filename for filename in filenames if filename.endswith(".html"))
     return sorted(files)
 
 
@@ -325,7 +293,7 @@ def collect_settings_calls(app_files: list[Path]) -> list[SettingsCallSite]:
 # ─── Check 1: Orphan Settings ────────────────────────────────────────────────
 
 
-def check_orphan_settings(
+def check_orphan_settings(  # noqa: PLR0913  # Aggregates all guardrail inputs
     defaults: dict[str, Any],
     app_files: list[Path],
     template_files: list[Path],
@@ -340,19 +308,19 @@ def check_orphan_settings(
     used_keys = {c.key for c in call_sites}
 
     # Build corpus from non-infrastructure files for substring fallback
+    settings_app_dir = (APPS_DIR / "settings").resolve()
     skip_files = {services_file.resolve()}
     for f in app_files:
-        if f.name == SETUP_DEFAULTS_GLOB:
+        if f.name == SETUP_DEFAULTS_GLOB or f.resolve().is_relative_to(settings_app_dir):
             skip_files.add(f.resolve())
 
-    corpus_parts: list[str] = []
+    literal_corpus: set[str] = set()
     for f in app_files:
         if f.resolve() in skip_files:
             continue
-        try:
-            corpus_parts.append(f.read_text(encoding="utf-8"))
-        except (OSError, UnicodeDecodeError):
-            continue
+        literal_corpus |= extract_string_literals(f)
+
+    corpus_parts: list[str] = []
 
     # Also include template content (settings used in Django templates)
     for f in template_files:
@@ -369,11 +337,10 @@ def check_orphan_settings(
         # Primary check: is this key in any SettingsService call?
         if key in used_keys:
             continue
-        # Fallback: exact quoted-string search in corpus (catches template TODOs, comments, etc.)
-        # Use quoted form to avoid substring matches like "billing.vat_rate" inside "billing.vat_rate_effective"
-        if f'"{key}"' in corpus or f"'{key}'" in corpus:
+        # Python literal corpus (tokenized — a comment mention can never count as usage)
+        if key in literal_corpus:
             continue
-        # Also check unquoted (template references like company.email_dpo)
+        # Template corpus (raw text: template tags reference keys unquoted)
         if key in corpus:
             continue
         findings.append(

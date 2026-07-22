@@ -8,9 +8,11 @@ from __future__ import annotations
 import decimal
 import json
 import logging
-from dataclasses import dataclass
+import re
+import uuid
+from dataclasses import dataclass, field
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any, ClassVar, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Final, cast
 
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
@@ -24,6 +26,8 @@ from apps.common.security_decorators import (
 )
 from apps.common.types import Err, Ok, Result
 
+from .catalog import CATALOG_BY_KEY, is_sensitive_key, validation_rules_for_key
+from .catalog import DEFAULTS as CATALOG_DEFAULTS
 from .models import SystemSetting
 
 if TYPE_CHECKING:
@@ -35,7 +39,17 @@ logger = logging.getLogger(__name__)
 SettingValue = str | int | bool | Decimal | list[Any] | dict[str, Any] | None
 
 # Settings validation constants
-SETTING_KEY_PARTS_COUNT = 2  # Expected parts in a setting key (category.name)
+SETTING_KEY_MIN_PARTS = 2  # category.name
+SETTING_KEY_MAX_PARTS = 3  # category.section.name (e-Factura namespace)
+
+# Registry defaults are cached briefly so a later row creation becomes visible fast
+DEFAULT_FALLBACK_CACHE_TIMEOUT = 300
+
+# Distinguishes "cached None" from a cache miss; never stored, only used as cache.get default
+_CACHE_MISS: Final = object()
+
+_TRUTHY_STRINGS: Final = frozenset({"true", "1", "on", "yes"})
+_FALSY_STRINGS: Final = frozenset({"false", "0", "off", "no", ""})
 
 
 @dataclass
@@ -58,6 +72,31 @@ class SettingValidationError:
     code: str
 
 
+@dataclass
+class ChangeSetConflict:
+    """⚠️ Change-set entry whose baseline no longer matches the database"""
+
+    key: str
+    server_updated_at: str | None
+
+
+@dataclass
+class ChangeSetError:
+    """🚨 Aggregate failure of a change-set application"""
+
+    code: str  # "empty" | "validation" | "conflict"
+    errors: list[SettingValidationError] = field(default_factory=list)
+    conflicts: list[ChangeSetConflict] = field(default_factory=list)
+
+
+@dataclass
+class ChangeSetOutcome:
+    """✅ Applied change set — fresh rows for the UI to rebaseline on"""
+
+    change_set_id: str
+    settings: dict[str, SystemSetting]
+
+
 class SettingsService:
     """⚙️ Centralized settings management with caching and validation"""
 
@@ -66,282 +105,8 @@ class SettingsService:
     CACHE_TIMEOUT: ClassVar[int] = 3600  # 1 hour
     CACHE_VERSION: ClassVar[int] = 1
 
-    # Default settings values
-    DEFAULT_SETTINGS: ClassVar[dict[str, Any]] = {
-        # ── Company & Branding ──────────────────────────────────────────
-        "company.legal_name": "PragmaticHost SRL",
-        "company.registration_number": "",
-        "company.address": "",
-        "company.email_contact": "contact@pragmatichost.com",
-        "company.email_support": "support@pragmatichost.com",
-        "company.email_privacy": "privacy@pragmatichost.com",
-        "company.email_dpo": "dpo@pragmatichost.com",
-        "company.email_noreply": "noreply@pragmatichost.com",
-        "company.phone": "",
-        # ── Billing & Invoicing ─────────────────────────────────────────
-        "billing.proforma_validity_days": 30,
-        "billing.payment_grace_period_days": 5,
-        "billing.invoice_payment_terms_days": 14,
-        "billing.vat_rate": "0.21",
-        "billing.max_payment_amount_cents": 100000000,
-        "billing.payment_retry_attempts": 3,
-        "billing.payment_retry_delay_hours": 24,
-        "billing.negative_balance_threshold": "-100.00",
-        "billing.subscription_grace_period_days": 7,
-        "billing.max_payment_retry_attempts": 5,
-        "billing.efactura_submission_deadline_days": 5,
-        "billing.efactura_deadline_warning_hours": 24,
-        "billing.efactura_batch_size": 100,
-        "billing.efactura_api_max_retries": 3,
-        "billing.efactura_api_timeout_seconds": 30,
-        "billing.event_grace_period_hours": 24,
-        "billing.future_event_drift_minutes": 5,
-        "billing.alert_cooldown_hours": 24,
-        "billing.task_retry_delay_seconds": 300,
-        "billing.task_max_retries": 3,
-        "billing.credit_consecutive_bonus_6": 10,
-        "billing.credit_consecutive_bonus_12": 20,
-        "billing.large_credit_limit_threshold": 10000,
-        "billing.extended_payment_terms_threshold": 60,
-        "billing.metering_task_timeout": 300,
-        "billing.max_payment_retries": 5,
-        "billing.recurring_auto_collection_enabled": False,
-        # ── Users & Authentication ──────────────────────────────────────
-        "users.session_timeout_minutes": 120,
-        "users.mfa_required_for_staff": True,
-        # users.password_reset_timeout_hours removed — Django's PASSWORD_RESET_TIMEOUT (base.py) is authoritative
-        "users.max_login_attempts": 5,
-        "users.account_lockout_duration_minutes": 15,
-        "users.admin_session_timeout_minutes": 30,
-        "users.shared_device_timeout_minutes": 15,
-        "users.backup_code_count": 10,
-        "users.credential_max_age_days": 90,
-        "users.credential_rotation_retry_limit": 3,
-        "users.login_rate_limit_per_hour": 5,
-        "users.security_lockout_failure_threshold": 5,
-        # ── Customers & CRM ───────────────────────────────────────────
-        "customers.orders_high_threshold": 10,
-        "customers.orders_medium_threshold": 5,
-        "customers.orders_low_threshold": 2,
-        "customers.payment_rate_excellent": 95,
-        "customers.payment_rate_good": 80,
-        "customers.payment_rate_fair": 60,
-        "customers.services_high_threshold": 3,
-        "customers.services_medium_threshold": 2,
-        "customers.task_soft_time_limit": 300,
-        "customers.task_time_limit": 600,
-        "customers.engagement_order_weight": 40,
-        "customers.engagement_recency_weight": 30,
-        "customers.engagement_activity_weight": 30,
-        "customers.base_credit_score": 750,
-        "customers.credit_adjustments": {
-            "positive_payment": 15,
-            "early_payment": 25,
-            "failed_payment": -50,
-            "late_payment": -30,
-            "chargeback": -100,
-            "refund_issued": -10,
-            "account_age_bonus": 5,
-            "order_completed": 5,
-        },
-        # ── Domain Management ───────────────────────────────────────────
-        "domains.registration_enabled": True,
-        "domains.auto_renewal_enabled": True,
-        "domains.renewal_notice_days": 30,
-        "domains.expiry_critical_days": 7,
-        "domains.expiry_warning_days": 30,
-        "domains.max_per_package": 100,
-        "domains.max_subdomains_per_domain": 50,
-        "domains.whois_privacy_price_cents": 500,
-        # ── Orders ─────────────────────────────────────────────────────
-        "orders.max_payment_failures_before_fail": 3,
-        "orders.task_soft_time_limit": 600,
-        "orders.task_time_limit": 900,
-        "orders.max_search_query_length": 200,
-        "orders.max_price_override_cents": 50000000,
-        "orders.max_price_override_multiplier": 10,
-        "orders.card_timeout_hours": 24,
-        "orders.bank_transfer_timeout_hours": 72,
-        # ── Service Provisioning ────────────────────────────────────────
-        "provisioning.auto_setup_enabled": True,
-        "provisioning.setup_timeout_minutes": 30,
-        "provisioning.suspend_timeout_minutes": 15,
-        "provisioning.terminate_timeout_minutes": 60,
-        "provisioning.default_disk_quota_gb": 10,
-        "provisioning.default_bandwidth_quota_gb": 100,
-        "provisioning.max_email_accounts_per_package": 50,
-        "provisioning.recovery_excellent_threshold": 95,
-        "provisioning.recovery_good_threshold": 90,
-        "provisioning.recovery_warning_threshold": 80,
-        "provisioning.max_backup_size_gb": 50,
-        "provisioning.backup_retention_days": 90,
-        "provisioning.high_value_plan_threshold_cents": 50000,
-        "provisioning.resource_usage_alert_threshold": 85,
-        "provisioning.server_overload_threshold": 90,
-        "provisioning.long_provisioning_threshold_minutes": 30,
-        "provisioning.cache_timeout": 3600,
-        "provisioning.ssh_timeout": 30,
-        "provisioning.sudo_command_timeout": 60,
-        "provisioning.max_username_uniqueness_attempts": 10,
-        "provisioning.task_soft_time_limit": 600,
-        "provisioning.task_time_limit": 1200,
-        "provisioning.bulk_operation_threshold": 10,
-        "provisioning.max_concurrent_health_checks": 5,
-        "provisioning.health_check_timeout_seconds": 10,
-        "provisioning.overall_health_check_timeout": 30,
-        "provisioning.max_error_display": 10,
-        # ── Virtualmin Integration ──────────────────────────────────────
-        "virtualmin.hostname": "localhost",
-        "virtualmin.port": 10000,
-        "virtualmin.ssl_verify": True,
-        "virtualmin.request_timeout_seconds": 30,
-        "virtualmin.max_retries": 3,
-        "virtualmin.rate_limit_qps": 10,
-        "virtualmin.connection_pool_size": 10,
-        "virtualmin.rate_limit_max_calls_per_hour": 100,
-        "virtualmin.auth_health_check_interval_seconds": 3600,
-        "virtualmin.auth_fallback_enabled": True,
-        "virtualmin.backup_retention_days": 7,
-        "virtualmin.backup_compression_enabled": True,
-        "virtualmin.domain_quota_default_mb": 1000,
-        "virtualmin.bandwidth_quota_default_mb": 10000,
-        "virtualmin.mysql_enabled": True,
-        "virtualmin.postgresql_enabled": False,
-        "virtualmin.php_version_default": "8.1",
-        "virtualmin.ssl_auto_renewal_enabled": True,
-        "virtualmin.monitoring_enabled": True,
-        "virtualmin.log_retention_days": 30,
-        "virtualmin.ssh_username": "virtualmin-praho",
-        "virtualmin.api_endpoint_path": "/virtual-server/remote.cgi",
-        "virtualmin.use_ssl": True,
-        # ── Support & Tickets ───────────────────────────────────────────
-        "tickets.sla_critical_response_hours": 1,
-        "tickets.sla_high_response_hours": 4,
-        "tickets.sla_standard_response_hours": 24,
-        "tickets.sla_low_response_hours": 72,
-        "tickets.auto_escalation_hours": 48,
-        "tickets.max_reassignments": 3,
-        "tickets.max_file_size_bytes": 2097152,
-        "tickets.allowed_file_extensions": [".pdf", ".txt", ".png", ".jpg", ".jpeg", ".doc", ".docx"],
-        "tickets.max_attachments_per_ticket": 5,
-        "tickets.security_alert_threshold": 5,
-        # ── Security & Access ───────────────────────────────────────────
-        "security.rate_limit_per_hour": 1000,
-        "security.require_2fa_for_admin": True,
-        "security.api_burst_limit": 50,
-        "security.max_customer_lookups_per_hour": 20,
-        "security.suspicious_ip_threshold": 3,
-        "security.registration_rate_limit_per_ip": 5,
-        "security.invitation_rate_limit_per_user": 10,
-        "security.company_check_rate_limit_per_ip": 30,
-        "security.session_validation_rate_limit": 60,
-        "security.max_session_age_seconds": 86400,
-        # ── Monitoring & Alerts ─────────────────────────────────────────
-        "monitoring.cpu_warning_threshold": 80,
-        "monitoring.memory_warning_threshold": 85,
-        "monitoring.disk_warning_threshold": 90,
-        "monitoring.alert_cooldown_minutes": 60,
-        "monitoring.health_check_interval_minutes": 5,
-        # ── Notifications ───────────────────────────────────────────────
-        "notifications.email_enabled": True,
-        "notifications.sms_enabled": False,
-        "notifications.max_recipients_per_batch": 50,
-        "notifications.email_batch_size": 50,
-        "notifications.digest_frequency_hours": 24,
-        "notifications.max_history": 1000,
-        "notifications.email_max_retries": 3,
-        "notifications.max_template_size": 102400,
-        "notifications.max_subject_length": 200,
-        "notifications.max_name_length": 100,
-        # ── GDPR & Data Retention ───────────────────────────────────────
-        "gdpr.data_retention_years": 7,
-        "gdpr.log_retention_months": 12,
-        "gdpr.export_retention_days": 30,
-        "gdpr.audit_log_retention_years": 10,
-        "gdpr.failed_login_retention_months": 6,
-        # ── Audit & Compliance ─────────────────────────────────────────
-        "audit.compliant_score_threshold": 90,
-        "audit.partial_score_threshold": 70,
-        "audit.max_violations_displayed": 10,
-        "audit.high_complexity_filter_threshold": 5,
-        "audit.webhook_healthy_response_threshold": 300,
-        "audit.webhook_max_retry_threshold": 5,
-        "audit.webhook_suspicious_retry_threshold": 3,
-        "audit.file_hash_cache_timeout": 2592000,
-        "audit.max_files_displayed": 5,
-        "audit.notify_on_critical_alerts": True,
-        "audit.notify_on_file_integrity_alerts": True,
-        # ── External Integrations ───────────────────────────────────────
-        "integrations.stripe_secret_key": "",
-        "integrations.stripe_publishable_key": "",
-        "integrations.stripe_webhook_secret": "",
-        "integrations.stripe_enabled": False,
-        "integrations.webhook_retry_attempts": 5,
-        "integrations.webhook_timeout_seconds": 30,
-        "integrations.webhook_batch_size": 50,
-        "integrations.api_request_timeout_seconds": 30,
-        "integrations.api_connection_timeout_seconds": 10,
-        # ── UI & Display ────────────────────────────────────────────────
-        "ui.default_page_size": 20,
-        "ui.max_page_size": 100,
-        "ui.min_page_size": 5,
-        "ui.max_attachment_size_mb": 25,
-        # ── Products ───────────────────────────────────────────────────
-        "products.max_json_content_size": 102400,
-        "products.max_price_cents": 10000000000,
-        # ── Promotions & Discounts ──────────────────────────────────────
-        "promotions.max_discount_percent": 100,
-        "promotions.max_discount_amount_cents": 100000000,
-        "promotions.max_coupon_batch_size": 1000,
-        "promotions.max_code_generation_attempts": 100,
-        # ── Common & Performance ───────────────────────────────────────
-        "common.cache_timeout_short": 60,
-        "common.cache_timeout_medium": 300,
-        "common.cache_timeout_long": 3600,
-        "common.cache_timeout_very_long": 86400,
-        "common.query_warning_threshold": 10,
-        "common.max_header_json_length": 1000,
-        "common.sql_display_limit": 200,
-        "common.max_summarized_args": 3,
-        "common.value_summary_limit": 50,
-        "common.default_orphans": 3,
-        "common.proximity_line_threshold": 5,
-        # ── Infrastructure ─────────────────────────────────────────────
-        "infrastructure.do_action_timeout_seconds": 300,
-        "infrastructure.health_check_timeout_seconds": 10,
-        "infrastructure.network_probe_timeout_seconds": 10,
-        "infrastructure.consecutive_failure_threshold": 3,
-        "infrastructure.vultr_poll_timeout_seconds": 300,
-        "infrastructure.remediation_boot_grace_seconds": 30,
-        "infrastructure.remediation_verify_max_wait_seconds": 150,
-        "infrastructure.remediation_verify_poll_interval_seconds": 10,
-        "infrastructure.remediation_stale_after_minutes": 30,
-        # ── System Configuration ────────────────────────────────────────
-        "system.maintenance_mode": False,
-        "system.backup_retention_days": 30,
-        # ── Node Deployment ─────────────────────────────────────────────
-        "node_deployment.terraform_state_backend": "local",
-        "node_deployment.terraform_s3_bucket": "",
-        "node_deployment.terraform_s3_region": "eu-west-1",
-        "node_deployment.terraform_s3_key_prefix": "praho/nodes/",
-        "node_deployment.dns_default_zone": "",
-        "node_deployment.dns_cloudflare_zone_id": "",
-        "node_deployment.dns_cloudflare_api_token": "",
-        "node_deployment.default_provider": "hetzner",
-        "node_deployment.default_region": "fsn1",
-        "node_deployment.default_environment": "prd",
-        "node_deployment.backup_enabled": True,
-        "node_deployment.backup_storage": "local",
-        "node_deployment.backup_s3_bucket": "",
-        "node_deployment.backup_retention_days": 7,
-        "node_deployment.backup_schedule": "0 2 * * *",
-        "node_deployment.timeout_terraform_apply": 600,
-        "node_deployment.timeout_ansible_playbook": 1800,
-        "node_deployment.timeout_validation": 300,
-        "node_deployment.enabled": True,
-        "node_deployment.auto_registration": True,
-        "node_deployment.cost_tracking_enabled": True,
-    }
+    # Single source of truth: the settings catalog (ADR-0042)
+    DEFAULT_SETTINGS: ClassVar[dict[str, Any]] = dict(CATALOG_DEFAULTS)
 
     @classmethod
     def _get_cache_key(cls, key: str) -> str:
@@ -361,90 +126,223 @@ class SettingsService:
         Returns:
             Setting value or default
         """
-        # Generate cache key first (needed for both paths)
+        # Cache first (ADR-0015 tier order). Sensitive settings are never written
+        # to the cache, so a cache hit is always safe to return directly.
         cache_key = cls._get_cache_key(key)
+        cached_value = cache.get(cache_key, _CACHE_MISS, version=cls.CACHE_VERSION)
+        if cached_value is not _CACHE_MISS:
+            logger.debug("✅ [Settings] Cache hit for key: %s", key)
+            return cast("SettingValue", cached_value)
 
-        # Get from database first to check if sensitive
         try:
             setting = SystemSetting.objects.get(key=key)
-
-            # For sensitive settings, always query database (no caching)
-            if setting.is_sensitive:
-                value = setting.get_typed_value()
-                logger.debug("⚡ [Settings] Database hit for key: %s (sensitive, not cached)", key)
-                return value
-
-            # For non-sensitive settings, use cache
-            cached_value = cache.get(cache_key, version=cls.CACHE_VERSION)
-
-            if cached_value is not None:
-                logger.debug("✅ [Settings] Cache hit for key: %s", key)
-                return cast("SettingValue", cached_value)
-            # Cache miss - get value and cache it
-            value = setting.get_typed_value()
-            cache.set(cache_key, value, timeout=cls.CACHE_TIMEOUT, version=cls.CACHE_VERSION)
-            logger.debug("⚡ [Settings] Database hit for key: %s (cached)", key)
-
-            return value
-
         except SystemSetting.DoesNotExist:
-            # Use default from DEFAULT_SETTINGS or provided default
             fallback_value = cls.DEFAULT_SETTINGS.get(key, default)
-
-            # Cache the default value temporarily
-            cache.set(
-                cache_key,
-                fallback_value,
-                timeout=300,  # 5 minutes for defaults
-                version=cls.CACHE_VERSION,
-            )
-
+            cache.set(cache_key, fallback_value, timeout=DEFAULT_FALLBACK_CACHE_TIMEOUT, version=cls.CACHE_VERSION)
             logger.warning("⚠️ [Settings] Using default for missing key: %s", key)
             return cast("SettingValue", fallback_value)
 
+        if setting.is_sensitive:
+            logger.debug("⚡ [Settings] Database hit for key: %s (sensitive, not cached)", key)
+            return setting.get_typed_value()
+
+        value = setting.get_typed_value()
+        cache.set(cache_key, value, timeout=cls.CACHE_TIMEOUT, version=cls.CACHE_VERSION)
+        logger.debug("⚡ [Settings] Database hit for key: %s (cached)", key)
+        return value
+
     @classmethod
-    @monitor_performance()
-    def set_setting(cls, key: str, value: Any) -> None:
+    def _is_sensitive_key(cls, key: str) -> bool:
+        """Catalog-flag sensitivity (name-pattern fallback for unknown ad-hoc keys)"""
+        return is_sensitive_key(key)
+
+    @classmethod
+    def _coerce_value(cls, key: str, data_type: str, value: Any) -> Any:  # noqa: C901, PLR0911, PLR0912  # Canonical per-type coercion table
         """
-        🔧 Set setting value and update cache
+        🔬 Coerce raw input to the canonical Python value for data_type.
 
-        Args:
-            key: Setting key (e.g., "billing.proforma_validity_days")
-            value: New value to set
+        Strict on purpose: bool is not an integer, decimals must be finite,
+        lists must parse to lists. Raises ValidationError with a clear message.
+        """
+        if data_type == "boolean":
+            if isinstance(value, bool):
+                return value
+            if isinstance(value, str):
+                lowered = value.strip().lower()
+                if lowered in _TRUTHY_STRINGS:
+                    return True
+                if lowered in _FALSY_STRINGS:
+                    return False
+            raise ValidationError(_("%(key)s: value must be a boolean") % {"key": key})
+        if data_type == "integer":
+            if isinstance(value, bool):
+                raise ValidationError(_("%(key)s: value must be an integer, not a boolean") % {"key": key})
+            if isinstance(value, int):
+                return value
+            if isinstance(value, str):
+                try:
+                    return int(value.strip())
+                except ValueError as e:
+                    raise ValidationError(_("%(key)s: value must be an integer") % {"key": key}) from e
+            raise ValidationError(_("%(key)s: value must be an integer") % {"key": key})
+        if data_type == "decimal":
+            if isinstance(value, bool):
+                raise ValidationError(_("%(key)s: value must be a decimal number") % {"key": key})
+            try:
+                decimal_value = Decimal(str(value).strip())
+            except decimal.InvalidOperation as e:
+                raise ValidationError(_("%(key)s: value must be a decimal number") % {"key": key}) from e
+            if not decimal_value.is_finite():
+                raise ValidationError(_("%(key)s: decimal value must be finite") % {"key": key})
+            return decimal_value
+        if data_type in ("list", "json"):
+            parsed = _safe_json_loads(value) if isinstance(value, str) else value
+            if data_type == "list" and not isinstance(parsed, list):
+                raise ValidationError(_("%(key)s: value must be a JSON list") % {"key": key})
+            return parsed
+        # string
+        if not isinstance(value, str):
+            raise ValidationError(_("%(key)s: value must be a string") % {"key": key})
+        return value
 
-        Raises:
-            SystemSetting.DoesNotExist: If setting doesn't exist
-            ValidationError: If value is invalid for the setting type
+    @classmethod
+    def _validation_rules_for(cls, setting: SystemSetting) -> dict[str, Any]:
+        """Catalog-owned validation rules (the model's validation_rules field is retired)"""
+        return validation_rules_for_key(setting.key)
+
+    @classmethod
+    def _apply_rules(cls, key: str, rules: dict[str, Any], value: Any) -> None:
+        """📏 Enforce min/max/choices/pattern rules against a coerced value"""
+        if not rules:
+            return
+        minimum = rules.get("min")
+        if minimum is not None and isinstance(value, int | Decimal) and value < Decimal(str(minimum)):
+            raise ValidationError(_("%(key)s: value must be at least %(min)s") % {"key": key, "min": minimum})
+        maximum = rules.get("max")
+        if maximum is not None and isinstance(value, int | Decimal) and value > Decimal(str(maximum)):
+            raise ValidationError(_("%(key)s: value must be at most %(max)s") % {"key": key, "max": maximum})
+        choices = rules.get("choices")
+        if choices is not None and value not in choices:
+            raise ValidationError(
+                _("%(key)s: value must be one of %(choices)s") % {"key": key, "choices": ", ".join(map(str, choices))}
+            )
+        pattern = rules.get("pattern")
+        if pattern is not None and isinstance(value, str) and re.fullmatch(pattern, value) is None:
+            raise ValidationError(_("%(key)s: value does not match the required pattern") % {"key": key})
+
+    @classmethod
+    def _validation_error(cls, key: str, exc: ValidationError) -> SettingValidationError:
+        """Convert a Django ValidationError into the service error dataclass"""
+        message = str(exc.message_dict) if hasattr(exc, "message_dict") else "; ".join(exc.messages)
+        return SettingValidationError(key=key, field="value", message=message, code="validation_error")
+
+    @classmethod
+    def _write_setting_locked(  # noqa: PLR0911, PLR0913  # Distinct validation/conflict outcomes; keyword-only write context
+        cls,
+        key: str,
+        value: Any,
+        *,
+        user_id: int | None = None,
+        reason: str | None = None,
+        change_set_id: str | None = None,
+        require_absent_on_create: bool = False,
+    ) -> Result[SystemSetting, SettingValidationError]:
+        """
+        🔒 Write one setting under row lock. The caller owns the enclosing transaction.
+
+        No retry decorator and no broad exception handling here — callers decide
+        retry and rollback policy. Creation happens inside a savepoint so a lost
+        create race cannot poison the caller's transaction.
         """
         try:
-            with transaction.atomic():
-                # Serialize every settings write; the recurring kill switch shares this row
-                # lock with final off-session authorization and gateway submission.
+            setting = SystemSetting.objects.select_for_update(of=("self",)).get(key=key)
+        except SystemSetting.DoesNotExist:
+            definition = CATALOG_BY_KEY.get(key)
+            data_type = definition.data_type if definition else cls._infer_data_type(value)
+            try:
+                coerced = cls._coerce_value(key, data_type, value)
+                # Catalog rules apply on the FIRST write too — the creation branch
+                # must not persist an out-of-range value just because the row did
+                # not exist yet (review of #377).
+                cls._apply_rules(key, validation_rules_for_key(key), coerced)
+            except ValidationError as e:
+                return Err(cls._validation_error(key, e))
+            try:
+                with transaction.atomic():
+                    setting = SystemSetting(
+                        key=key,
+                        name=cls._generate_name_from_key(key),
+                        description=f"System setting: {key}",
+                        category=key.split(".", maxsplit=1)[0] if "." in key else "system",
+                        data_type=data_type,
+                        value=cls._prepare_value_for_json(coerced, data_type),
+                        default_value=cls._prepare_value_for_json(cls.DEFAULT_SETTINGS.get(key, coerced), data_type),
+                        # Stamp sensitivity BEFORE the first save so the initial write
+                        # is encrypted and never enters the cache as a plain value.
+                        is_sensitive=cls._is_sensitive_key(key),
+                    )
+                    setting._audit_context = {
+                        "user_id": user_id,
+                        "reason": reason,
+                        "change_set_id": change_set_id,
+                        "old_value": None,
+                        "new_value": "(hidden)" if setting.is_sensitive else str(coerced),
+                    }
+                    try:
+                        setting.full_clean()
+                    except ValidationError as e:
+                        return Err(cls._validation_error(key, e))
+                    setting.save()
+            except IntegrityError:
+                if require_absent_on_create:
+                    return Err(
+                        SettingValidationError(
+                            key=key,
+                            field="baseline",
+                            message="Setting was created concurrently",
+                            code="create_conflict",
+                        )
+                    )
                 setting = SystemSetting.objects.select_for_update(of=("self",)).get(key=key)
+            else:
+                cls._log_setting_write(setting, user_id=user_id, reason=reason)
+                return Ok(setting)
 
-                # Validate and convert value based on data type
-                if setting.data_type == "boolean":
-                    value = value.lower() in ("true", "1", "on", "yes") if isinstance(value, str) else bool(value)
-                elif setting.data_type == "integer":
-                    value = int(value)
-                elif setting.data_type == "decimal":
-                    value = Decimal(str(value))
-                elif (setting.data_type in {"list", "json"}) and isinstance(value, str):
-                    value = json.loads(value)
-                # string type needs no conversion
+        # str() forces lazy translation proxies (boolean displays are gettext-lazy) into
+        # real strings — raw proxies fail JSON serialization at the audit INSERT.
+        old_display = str(setting.get_display_value())
+        try:
+            coerced = cls._coerce_value(key, setting.data_type, value)
+            cls._apply_rules(key, cls._validation_rules_for(setting), coerced)
+        except ValidationError as e:
+            return Err(cls._validation_error(key, e))
 
-                # Prepare value for JSON serialization
-                json_value = cls._prepare_value_for_json(value, setting.data_type)
+        setting.value = cls._prepare_value_for_json(coerced, setting.data_type)
+        setting._audit_context = {
+            "user_id": user_id,
+            "reason": reason,
+            "change_set_id": change_set_id,
+            "old_value": old_display,
+            "new_value": str(setting.get_display_value()),
+        }
+        try:
+            setting.full_clean()
+        except ValidationError as e:
+            return Err(cls._validation_error(key, e))
+        setting.save(update_fields=["value", "updated_at"])
+        cls._log_setting_write(setting, user_id=user_id, reason=reason)
+        return Ok(setting)
 
-                # Update the setting value
-                setting.value = json_value
-                setting.save()
-
-            logger.info("⚡ [Settings] Updated %s = %s", key, value)
-
-        except Exception as e:
-            logger.error("💥 [Settings] Error setting %s: %s", key, e)
-            raise
+    @classmethod
+    def _log_setting_write(cls, setting: SystemSetting, *, user_id: int | None, reason: str | None) -> None:
+        """Log a settings write with sensitive values masked"""
+        logger.info(
+            "✅ [Settings] Updated setting %s to %s by user %s: %s",
+            setting.key,
+            setting.get_display_value(),
+            user_id or "system",
+            reason or "no reason provided",
+        )
 
     @classmethod
     @monitor_performance()
@@ -517,65 +415,125 @@ class SettingsService:
             Result with updated setting or validation error
         """
         try:
-            # Infer data type
-            data_type = cls._infer_data_type(value)
-
-            # Prepare values for JSON serialization
-            json_value = cls._prepare_value_for_json(value, data_type)
-            json_default = cls._prepare_value_for_json(cls.DEFAULT_SETTINGS.get(key, value), data_type)
-
-            # Try to get existing setting with lock first (most common case)
-            try:
-                setting = SystemSetting.objects.select_for_update().get(key=key)
-                created = False
-            except SystemSetting.DoesNotExist:
-                # Setting doesn't exist - create it with proper race condition handling
-                try:
-                    setting = SystemSetting.objects.create(
-                        key=key,
-                        name=cls._generate_name_from_key(key),
-                        description=f"System setting: {key}",
-                        category=key.split(".", maxsplit=1)[0] if "." in key else "system",
-                        data_type=data_type,
-                        value=json_value,
-                        default_value=json_default,
-                    )
-                    created = True
-                except IntegrityError:
-                    # Another process created it - get it with lock
-                    setting = SystemSetting.objects.select_for_update().get(key=key)
-                    created = False
-
-            if not created:
-                # Prepare value for JSON serialization
-                json_value = cls._prepare_value_for_json(value, setting.data_type)
-                # Update existing setting
-                setting.value = json_value
-                setting.full_clean()  # Validate
-                setting.save(update_fields=["value", "updated_at"])
-
-            # Log the change
-            logger.info(
-                "✅ [Settings] Updated setting %s to %s by user %s: %s",
-                key,
-                value if not setting.is_sensitive else "(hidden)",
-                user_id or "system",
-                reason or "no reason provided",
-            )
-
-            return Ok(setting)
-
-        except ValidationError as e:
-            error_msg = str(e.message_dict) if hasattr(e, "message_dict") else str(e)
-            logger.error("🔥 [Settings] Validation error for %s: %s", key, error_msg)
-
-            return Err(SettingValidationError(key=key, field="value", message=error_msg, code="validation_error"))
-
+            return cls._write_setting_locked(key, value, user_id=user_id, reason=reason)
         except Exception as e:
             logger.error("🔥 [Settings] Unexpected error updating %s: %s", key, str(e))
             return Err(
                 SettingValidationError(key=key, field="system", message=f"Unexpected error: {e!s}", code="system_error")
             )
+
+    @classmethod
+    @monitor_performance()
+    def apply_change_set(  # noqa: C901, PLR0912  # Validation, locking, and write phases in one auditable unit
+        cls,
+        changes: dict[str, Any],
+        baselines: dict[str, str | None],
+        user_id: int | None = None,
+        reason: str | None = None,
+    ) -> Result[ChangeSetOutcome, ChangeSetError]:
+        """
+        📦 Apply a set of non-sensitive setting changes atomically.
+
+        All-or-nothing: static validation first, then all target rows are locked
+        in deterministic key order, baselines are compared under lock (verbatim
+        ISO-string comparison against updated_at), and only then are writes made.
+        Any failure rolls the whole set back. Sensitive keys are rejected —
+        secrets change only through the dedicated credential endpoints.
+
+        Baselines: the server-rendered `updated_at.isoformat()` per key, or None
+        when the form was rendered without a database row for that key.
+        """
+        if not changes:
+            return Err(ChangeSetError(code="empty"))
+
+        errors: list[SettingValidationError] = []
+        for key, value in changes.items():
+            if key not in cls.DEFAULT_SETTINGS:
+                errors.append(
+                    SettingValidationError(key=key, field="key", message="Unknown setting key", code="unknown_key")
+                )
+                continue
+            if cls._is_sensitive_key(key):
+                errors.append(
+                    SettingValidationError(
+                        key=key,
+                        field="key",
+                        message="Sensitive settings change only through the credential endpoints",
+                        code="sensitive_key",
+                    )
+                )
+                continue
+            try:
+                cls._coerce_value(key, CATALOG_BY_KEY[key].data_type, value)
+            except ValidationError as e:
+                errors.append(cls._validation_error(key, e))
+        if errors:
+            return Err(ChangeSetError(code="validation", errors=errors))
+
+        change_set_id = str(uuid.uuid4())
+        applied: dict[str, SystemSetting] = {}
+        conflicts: list[ChangeSetConflict] = []
+        with transaction.atomic():
+            sorted_keys = sorted(changes)
+            locked = {
+                setting.key: setting
+                for setting in SystemSetting.objects.select_for_update(of=("self",))
+                .filter(key__in=sorted_keys)
+                .order_by("key")
+            }
+            for key in sorted_keys:
+                row = locked.get(key)
+                baseline = baselines.get(key)
+                if row is None:
+                    if baseline is not None:
+                        conflicts.append(ChangeSetConflict(key=key, server_updated_at=None))
+                elif row.is_sensitive:
+                    errors.append(
+                        SettingValidationError(
+                            key=key,
+                            field="key",
+                            message="Sensitive settings change only through the credential endpoints",
+                            code="sensitive_key",
+                        )
+                    )
+                elif baseline is None or baseline != row.updated_at.isoformat():
+                    conflicts.append(ChangeSetConflict(key=key, server_updated_at=row.updated_at.isoformat()))
+            if errors or conflicts:
+                transaction.set_rollback(True)
+                return Err(
+                    ChangeSetError(code="conflict" if conflicts else "validation", errors=errors, conflicts=conflicts)
+                )
+
+            for key in sorted_keys:
+                result = cls._write_setting_locked(
+                    key,
+                    changes[key],
+                    user_id=user_id,
+                    reason=reason,
+                    change_set_id=change_set_id,
+                    require_absent_on_create=key not in locked,
+                )
+                match result:
+                    case Ok(setting):
+                        applied[key] = setting
+                    case Err(error):
+                        transaction.set_rollback(True)
+                        if error.code == "create_conflict":
+                            return Err(
+                                ChangeSetError(
+                                    code="conflict",
+                                    conflicts=[ChangeSetConflict(key=key, server_updated_at=None)],
+                                )
+                            )
+                        return Err(ChangeSetError(code="validation", errors=[error]))
+
+        logger.info(
+            "✅ [Settings] Applied change set %s (%d settings) by user %s",
+            change_set_id,
+            len(applied),
+            user_id or "system",
+        )
+        return Ok(ChangeSetOutcome(change_set_id=change_set_id, settings=applied))
 
     @classmethod
     def _prepare_value_for_json(cls, value: Any, data_type: str) -> Any:
@@ -732,11 +690,11 @@ class SettingsService:
             return False
 
         parts = key.split(".")
-        if len(parts) != SETTING_KEY_PARTS_COUNT:
+        if not (SETTING_KEY_MIN_PARTS <= len(parts) <= SETTING_KEY_MAX_PARTS):
             return False
 
-        category, name = parts
-        return category.isalnum() and name.replace("_", "").replace("-", "").isalnum()
+        category = parts[0]
+        return category.isalnum() and all(part.replace("_", "").replace("-", "").isalnum() for part in parts[1:])
 
     @classmethod
     def get_settings_info(cls) -> dict[str, dict[str, Any]]:

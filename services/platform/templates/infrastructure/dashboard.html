@@ -181,7 +181,7 @@
                             <span class="mr-3">{% icon "globe" css_class="text-slate-400" %}</span>
                             <span class="text-white">{% trans "Regions" %}</span>
                         </a>
-                        <a href="{% url 'settings:manage' %}?tab=node_deployment"
+                        <a href="{% url 'settings:group' 'node-deployment' %}"
                            class="flex items-center p-3 bg-slate-700/50 rounded-lg hover:bg-slate-700 transition-colors">
                             <span class="mr-3">{% icon "settings" css_class="text-slate-400" %}</span>
                             <span class="text-white">{% trans "Settings" %}</span>

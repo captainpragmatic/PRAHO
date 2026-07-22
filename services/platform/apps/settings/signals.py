@@ -43,21 +43,41 @@ def handle_setting_saved(sender: Any, instance: SystemSetting, created: bool, **
         # transactions; an early reader could otherwise repopulate the old value.
         transaction.on_commit(lambda key=instance.key: SettingsService._clear_setting_cache(key))
 
-        # Log audit event
+        # Service writes attach a transient context (actor, reason, change set,
+        # old/new display values); direct ORM writes fall back to an unattributed event.
+        context = instance._audit_context
+        instance._audit_context = None
+
         action = "create" if created else "update"
+        user = None
+        metadata = {
+            "setting_key": instance.key,
+            "category": instance.category,
+            "is_sensitive": instance.is_sensitive,
+            "is_required": instance.is_required,
+            "setting_value": instance.get_display_value() if not instance.is_sensitive else "(hidden)",
+            "data_type": instance.data_type,
+        }
+        old_values: dict[str, Any] | None = None
+        new_values: dict[str, Any] | None = None
+        if context is not None:
+            if context.get("user_id") is not None:
+                from apps.users.models import User  # noqa: PLC0415  # Function-level cross-app import (ADR-0007)
+
+                user = User.objects.filter(pk=context["user_id"]).first()
+            metadata["reason"] = context.get("reason")
+            metadata["change_set_id"] = context.get("change_set_id")
+            old_values = {"value": context.get("old_value")}
+            new_values = {"value": context.get("new_value")}
+
         AuditService.log_simple_event(
             event_type=action,
-            user=None,
+            user=user,
             content_object=instance,
             description=f"System setting {action}: {instance.key}",
-            metadata={
-                "setting_key": instance.key,
-                "category": instance.category,
-                "is_sensitive": instance.is_sensitive,
-                "is_required": instance.is_required,
-                "setting_value": instance.get_display_value() if not instance.is_sensitive else "(hidden)",
-                "data_type": instance.data_type,
-            },
+            old_values=old_values,
+            new_values=new_values,
+            metadata=metadata,
         )
 
         logger.info(
@@ -67,9 +87,10 @@ def handle_setting_saved(sender: Any, instance: SystemSetting, created: bool, **
             instance.get_display_value() if not instance.is_sensitive else "(hidden)",
         )
 
-        # Send notifications for critical settings changes
+        # Notify only after the surrounding transaction commits — a later failure
+        # in a multi-key change set must not alert on a rolled-back change.
         if _is_critical_setting(instance.key):
-            _send_critical_setting_notification(instance, action)
+            transaction.on_commit(lambda: _send_critical_setting_notification(instance, action))
 
     except Exception as e:
         logger.error("🔥 [Settings Signal] Error handling save for setting %s: %s", instance.key, str(e))
@@ -114,20 +135,12 @@ def _is_critical_setting(key: str) -> bool:
     """
     🚨 Check if a setting is considered critical
 
-    Critical settings are those that significantly affect system behavior
-    and should trigger notifications when changed.
+    Critical settings significantly affect system behavior and trigger
+    admin notifications when changed. The catalog owns the flag.
     """
-    critical_settings = {
-        "system.maintenance_mode",
-        "security.require_2fa_for_admin",
-        "users.mfa_required_for_staff",
-        "billing.payment_grace_period_days",
-        "domains.registration_enabled",
-        "provisioning.auto_setup_enabled",
-        "notifications.email_enabled",
-    }
+    from .catalog import CRITICAL_KEYS  # noqa: PLC0415  # Deferred: keeps signal import light
 
-    return key in critical_settings
+    return key in CRITICAL_KEYS
 
 
 def _send_critical_setting_notification(setting: SystemSetting, action: str) -> None:
@@ -160,11 +173,10 @@ def _send_critical_setting_notification(setting: SystemSetting, action: str) -> 
             )
 
         # Send to system administrators
-        NotificationService.send_admin_notification(
+        NotificationService.send_admin_alert(
             subject=subject,
             message=message,
-            category="system_settings",
-            priority="high",
+            alert_type="critical",
             metadata={
                 "setting_key": setting.key,
                 "action": action,
