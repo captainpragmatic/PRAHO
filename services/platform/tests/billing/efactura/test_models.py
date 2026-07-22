@@ -4,6 +4,7 @@ Tests for EFacturaDocument model.
 
 from datetime import timedelta
 from unittest.mock import patch
+from uuid import uuid4
 
 from django.test import TestCase
 from django.utils import timezone
@@ -79,8 +80,15 @@ class EFacturaDocumentModelTestCase(TestCase):
     def test_mark_submitted(self):
         """Test marking document as submitted."""
         document = EFacturaDocument.objects.create(invoice=self.invoice)
-        # Walk FSM path: draft → queued → submitted
+        # Walk FSM path: draft → queued → uploading → submitted
         document.mark_queued()
+        document.save()
+        claimed_at = timezone.now()
+        document.mark_uploading(
+            claim_token=uuid4(),
+            claimed_at=claimed_at,
+            claim_expires_at=claimed_at + timedelta(minutes=10),
+        )
         document.save()
         document.mark_submitted("12345")
         document.save()
@@ -89,6 +97,9 @@ class EFacturaDocumentModelTestCase(TestCase):
         self.assertEqual(document.status, EFacturaStatus.SUBMITTED.value)
         self.assertEqual(document.anaf_upload_index, "12345")
         self.assertIsNotNone(document.submitted_at)
+        self.assertIsNone(document.submission_claim_token)
+        self.assertEqual(document.submission_claimed_at, claimed_at)
+        self.assertEqual(document.submission_claim_expires_at, claimed_at + timedelta(minutes=10))
 
     def test_mark_accepted(self):
         """Test marking document as accepted."""
@@ -303,6 +314,17 @@ class EFacturaDocumentModelTestCase(TestCase):
 
         awaiting = EFacturaDocument.get_awaiting_response()
         self.assertEqual(awaiting.count(), 1)
+
+    def test_get_missing_response_archives_only_returns_accepted_documents_without_evidence(self):
+        missing = EFacturaDocument.objects.create(
+            invoice=self.invoice,
+            status=EFacturaStatus.ACCEPTED.value,
+            anaf_download_id="DOWNLOAD-MISSING",
+        )
+
+        archives = EFacturaDocument.get_missing_response_archives()
+
+        self.assertEqual(list(archives), [missing])
 
     def test_get_ready_for_retry(self):
         """Test querying documents ready for retry."""

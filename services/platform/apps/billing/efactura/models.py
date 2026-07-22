@@ -13,12 +13,14 @@ from __future__ import annotations
 
 import datetime
 import hashlib
+import hmac
 import uuid
 from datetime import timedelta
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import Q
 from django.utils import timezone
@@ -37,11 +39,13 @@ class EFacturaStatus(StrEnum):
 
     DRAFT = "draft"  # XML generated, not submitted
     QUEUED = "queued"  # In Django-Q queue waiting for submission
+    UPLOADING = "uploading"  # A committed worker claim owns the ANAF POST
     SUBMITTED = "submitted"  # Sent to ANAF, awaiting validation
     PROCESSING = "processing"  # ANAF is validating
     ACCEPTED = "accepted"  # ANAF accepted (valid e-Factura)
     REJECTED = "rejected"  # ANAF rejected (validation errors)
     ERROR = "error"  # System error (network, auth, etc.)
+    OUTCOME_UNKNOWN = "outcome_unknown"  # POST may have landed; reconcile before retry
 
     @classmethod
     def choices(cls) -> list[tuple[str, str]]:
@@ -50,7 +54,7 @@ class EFacturaStatus(StrEnum):
     @classmethod
     def terminal_statuses(cls) -> set[str]:
         """Statuses that don't require further processing."""
-        return {cls.ACCEPTED.value, cls.REJECTED.value}
+        return {cls.ACCEPTED.value, cls.REJECTED.value, cls.OUTCOME_UNKNOWN.value}
 
     @classmethod
     def retryable_statuses(cls) -> set[str]:
@@ -168,11 +172,23 @@ class EFacturaDocument(models.Model):
         help_text=_("List of validation errors from ANAF"),
     )
 
-    signed_pdf = models.FileField(
-        upload_to="efactura/pdf/%Y/%m/",
+    response_archive = models.FileField(
+        upload_to="efactura/responses/%Y/%m/",
         blank=True,
         null=True,
-        help_text=_("ANAF-signed PDF visualization"),
+        help_text=_("Exact ZIP archive returned by ANAF /descarcare"),
+    )
+
+    response_archive_sha256 = models.CharField(
+        max_length=64,
+        blank=True,
+        help_text=_("SHA-256 digest of the exact ANAF response archive bytes"),
+    )
+
+    response_archive_downloaded_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text=_("When the validated ANAF response archive was stored"),
     )
 
     # Timestamps
@@ -211,6 +227,27 @@ class EFacturaDocument(models.Model):
         help_text=_("Last error message for debugging"),
     )
 
+    submission_claim_token = models.UUIDField(
+        null=True,
+        blank=True,
+        editable=False,
+        help_text=_("Opaque owner token for the active ANAF upload claim"),
+    )
+
+    submission_claimed_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        editable=False,
+        help_text=_("When the most recent ANAF upload claim was acquired"),
+    )
+
+    submission_claim_expires_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        editable=False,
+        help_text=_("When the most recent ANAF upload claim ownership lease expires"),
+    )
+
     # Environment tracking
     environment = models.CharField(
         max_length=20,
@@ -246,6 +283,11 @@ class EFacturaDocument(models.Model):
             models.Index(fields=["anaf_upload_index"], name="efactura_upload_idx"),
             # Query by invoice
             models.Index(fields=["invoice"], name="efactura_invoice_idx"),
+            models.Index(
+                fields=["status", "submission_claim_expires_at"],
+                name="efactura_claim_expiry_idx",
+                condition=Q(status="uploading", submission_claim_expires_at__isnull=False),
+            ),
         ]
 
         constraints = [
@@ -264,15 +306,55 @@ class EFacturaDocument(models.Model):
                 condition=Q(status__in=[s.value for s in EFacturaStatus]),
                 name="efactura_valid_status",
             ),
+            models.CheckConstraint(
+                condition=(
+                    Q(
+                        status=EFacturaStatus.UPLOADING.value,
+                        submission_claim_token__isnull=False,
+                        submission_claimed_at__isnull=False,
+                        submission_claim_expires_at__isnull=False,
+                    )
+                    | Q(
+                        ~Q(status=EFacturaStatus.UPLOADING.value),
+                        submission_claim_token__isnull=True,
+                    )
+                ),
+                name="efactura_claim_state_consistent",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    Q(submission_claimed_at__isnull=True, submission_claim_expires_at__isnull=True)
+                    | Q(
+                        submission_claimed_at__isnull=False,
+                        submission_claim_expires_at__isnull=False,
+                        submission_claim_expires_at__gt=models.F("submission_claimed_at"),
+                    )
+                ),
+                name="efactura_claim_expiry_after_start",
+            ),
         ]
 
     def __str__(self) -> str:
         return f"e-Factura {self.invoice.number} [{self.status}]"
 
     def save(self, *args: Any, **kwargs: Any) -> None:
-        """Save with XML hash computation."""
-        if self.xml_content and not self.xml_hash:
-            self.xml_hash = self._compute_xml_hash()
+        """Save with an atomic XML hash and post-claim immutability guard."""
+        update_fields = kwargs.get("update_fields")
+        xml_write = update_fields is None or "xml_content" in update_fields or "xml_hash" in update_fields
+        if self.pk and xml_write:
+            stored = (
+                type(self).objects.filter(pk=self.pk).values("submission_claimed_at", "xml_content", "xml_hash").first()
+            )
+            if (
+                stored
+                and stored["submission_claimed_at"] is not None
+                and (stored["xml_content"] != self.xml_content or stored["xml_hash"] != self.xml_hash)
+            ):
+                raise ValidationError(_("Claimed e-Factura XML content and hash are immutable"))
+
+        self.xml_hash = self._compute_xml_hash() if self.xml_content else ""
+        if update_fields is not None and "xml_content" in update_fields:
+            kwargs["update_fields"] = set(update_fields) | {"xml_hash"}
         super().save(*args, **kwargs)
 
     def refresh_from_db(
@@ -306,6 +388,19 @@ class EFacturaDocument(models.Model):
             return False
         return self._compute_xml_hash() == self.xml_hash
 
+    def verify_response_archive_integrity(self) -> bool:
+        """Verify the archived ANAF ZIP still matches its recorded digest."""
+        if not self.response_archive or not self.response_archive_sha256:
+            return False
+        try:
+            digest = hashlib.sha256()
+            with self.response_archive.open("rb") as archive:
+                for chunk in archive.chunks():
+                    digest.update(chunk)
+        except (OSError, ValueError):
+            return False
+        return hmac.compare_digest(digest.hexdigest(), self.response_archive_sha256)
+
     # --- FSM Status Transition Methods (ADR-0034) ---
 
     @transition(
@@ -316,11 +411,32 @@ class EFacturaDocument(models.Model):
     def mark_queued(self) -> None:
         """Queue document for submission. Also used for retry from error state."""
 
-    @transition(field=status, source=EFacturaStatus.QUEUED.value, target=EFacturaStatus.SUBMITTED.value)
+    @transition(field=status, source=EFacturaStatus.QUEUED.value, target=EFacturaStatus.UPLOADING.value)
+    def mark_uploading(
+        self,
+        *,
+        claim_token: uuid.UUID,
+        claimed_at: datetime.datetime,
+        claim_expires_at: datetime.datetime,
+    ) -> None:
+        """Commit exclusive ownership before the worker performs the ANAF POST."""
+        self.submission_claim_token = claim_token
+        self.submission_claimed_at = claimed_at
+        self.submission_claim_expires_at = claim_expires_at
+
+    def _release_submission_claim(self) -> None:
+        """Release ownership while retaining the historical claim timestamps."""
+        self.submission_claim_token = None
+
+    @transition(field=status, source=EFacturaStatus.UPLOADING.value, target=EFacturaStatus.SUBMITTED.value)
     def mark_submitted(self, upload_index: str) -> None:
         """Mark document as submitted to ANAF."""
         self.anaf_upload_index = upload_index
         self.submitted_at = timezone.now()
+        self.last_error = ""
+        self.validation_errors = []
+        self.next_retry_at = None
+        self._release_submission_claim()
 
     @transition(field=status, source=EFacturaStatus.SUBMITTED.value, target=EFacturaStatus.PROCESSING.value)
     def mark_processing(self) -> None:
@@ -359,6 +475,7 @@ class EFacturaDocument(models.Model):
         source=[
             EFacturaStatus.DRAFT.value,
             EFacturaStatus.QUEUED.value,
+            EFacturaStatus.UPLOADING.value,
             EFacturaStatus.SUBMITTED.value,
             EFacturaStatus.PROCESSING.value,
         ],
@@ -368,6 +485,7 @@ class EFacturaDocument(models.Model):
         """Mark document as having an error, schedule retry if possible."""
         self.last_error = error_message
         self.retry_count += 1
+        self._release_submission_claim()
 
         # Schedule retry with exponential backoff
         if self.retry_count <= self.MAX_RETRIES:
@@ -379,7 +497,18 @@ class EFacturaDocument(models.Model):
 
     @transition(
         field=status,
-        source=[EFacturaStatus.DRAFT.value, EFacturaStatus.QUEUED.value],
+        source=EFacturaStatus.UPLOADING.value,
+        target=EFacturaStatus.OUTCOME_UNKNOWN.value,
+    )
+    def mark_outcome_unknown(self, error_message: str) -> None:
+        """Quarantine a POST whose remote application cannot be proved either way."""
+        self.last_error = error_message
+        self.next_retry_at = None
+        self.submission_claim_token = None
+
+    @transition(
+        field=status,
+        source=[EFacturaStatus.DRAFT.value, EFacturaStatus.QUEUED.value, EFacturaStatus.ERROR.value],
         target=EFacturaStatus.ERROR.value,
     )
     def mark_local_error(self, error_message: str, errors: list[dict[str, Any]] | None = None) -> None:
@@ -400,8 +529,16 @@ class EFacturaDocument(models.Model):
 
     @classmethod
     def get_pending_submissions(cls, limit: int = 100) -> models.QuerySet[EFacturaDocument]:
-        """Get documents queued for submission."""
-        return cls.objects.filter(status=EFacturaStatus.QUEUED.value).order_by("created_at")[:limit]
+        """Get queued work plus expired claims that must be quarantined, never replayed."""
+        now = timezone.now()
+        return cls.objects.filter(
+            Q(status=EFacturaStatus.QUEUED.value)
+            | Q(
+                status=EFacturaStatus.UPLOADING.value,
+                submission_claim_expires_at__isnull=False,
+                submission_claim_expires_at__lte=now,
+            )
+        ).order_by("created_at")[:limit]
 
     @classmethod
     def get_awaiting_response(cls, limit: int = 100) -> models.QuerySet[EFacturaDocument]:
@@ -409,6 +546,23 @@ class EFacturaDocument(models.Model):
         return cls.objects.filter(
             status__in=[EFacturaStatus.SUBMITTED.value, EFacturaStatus.PROCESSING.value]
         ).order_by("submitted_at")[:limit]
+
+    @classmethod
+    def get_missing_response_archives(cls, limit: int = 100) -> models.QuerySet[EFacturaDocument]:
+        """Get accepted documents whose ANAF response evidence still needs archiving."""
+        return (
+            cls.objects.filter(
+                status=EFacturaStatus.ACCEPTED.value,
+                anaf_download_id__gt="",
+            )
+            .filter(
+                Q(response_archive__isnull=True)
+                | Q(response_archive="")
+                | Q(response_archive_sha256="")
+                | Q(response_archive_downloaded_at__isnull=True)
+            )
+            .order_by("response_at", "created_at")[:limit]
+        )
 
     @classmethod
     def get_ready_for_retry(cls) -> models.QuerySet[EFacturaDocument]:

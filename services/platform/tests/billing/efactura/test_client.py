@@ -26,6 +26,10 @@ from apps.billing.efactura.client import (
     UploadResponse,
     extract_zip_members,
     find_sealed_xml,
+    validate_response_archive,
+)
+from apps.billing.efactura.client import (
+    ValidationError as EFacturaValidationError,
 )
 
 _FIXTURES = Path(__file__).parent / "fixtures"
@@ -354,11 +358,13 @@ class EFacturaClientTestCase(TestCase):
 
     def test_upload_invoice_invalid_config(self):
         """Test upload with invalid config."""
-        client = EFacturaClient(EFacturaConfig(
-            client_id="",
-            client_secret="",
-            company_cui="",
-        ))
+        client = EFacturaClient(
+            EFacturaConfig(
+                client_id="",
+                client_secret="",
+                company_cui="",
+            )
+        )
         result = client.upload_invoice("<Invoice/>")
         self.assertFalse(result.success)
         self.assertIn("Invalid", result.message)
@@ -415,9 +421,7 @@ class EFacturaClientTestCase(TestCase):
 
         mock_response = Mock()
         mock_response.text = '{"mesaje": [{"id": "msg-1", "tip": "factura"}]}'
-        mock_response.json.return_value = {
-            "mesaje": [{"id": "msg-1", "tip": "factura", "cif": "12345678"}]
-        }
+        mock_response.json.return_value = {"mesaje": [{"id": "msg-1", "tip": "factura", "cif": "12345678"}]}
         mock_request.return_value = mock_response
 
         result = self.client.list_messages(days=30)
@@ -562,6 +566,63 @@ class EFacturaClientTestCase(TestCase):
 
         # Should have retried max_retries times
         self.assertEqual(mock_safe_request.call_count, self.config.max_retries)
+
+    @patch("apps.billing.efactura.client.EFacturaClient._get_access_token", return_value="test-token")
+    @patch("apps.billing.efactura.client.safe_request")
+    @patch("apps.billing.efactura.client.time.sleep")
+    def test_upload_timeout_is_never_replayed(self, mock_sleep, mock_safe_request, _mock_token):
+        """A timed-out mutating POST may have landed at ANAF and must run only once."""
+        import requests
+
+        mock_safe_request.side_effect = requests.Timeout("response lost")
+
+        with self.assertRaisesRegex(NetworkError, "outcome is unknown"):
+            self.client.upload_invoice("<Invoice/>")
+
+        self.assertEqual(mock_safe_request.call_count, 1)
+        mock_sleep.assert_not_called()
+
+    @patch("apps.billing.efactura.client.EFacturaClient._get_access_token", return_value="test-token")
+    @patch("apps.billing.efactura.client.safe_request")
+    def test_upload_server_error_is_an_ambiguous_outcome(self, mock_safe_request, _mock_token):
+        response = Mock(status_code=503, text="service unavailable", headers={})
+        mock_safe_request.return_value = response
+
+        with self.assertRaisesRegex(NetworkError, "outcome is unknown"):
+            self.client.upload_invoice("<Invoice/>")
+
+        self.assertEqual(mock_safe_request.call_count, 1)
+
+    @patch("apps.billing.efactura.client.EFacturaClient._get_access_token", return_value="test-token")
+    @patch("apps.billing.efactura.client.safe_request")
+    def test_upload_success_without_index_is_an_ambiguous_outcome(self, mock_safe_request, _mock_token):
+        response = Mock(
+            status_code=200,
+            text='<header ExecutionStatus="0"/>',
+            headers={},
+        )
+        mock_safe_request.return_value = response
+
+        with self.assertRaisesRegex(NetworkError, "did not prove acceptance or rejection"):
+            self.client.upload_invoice("<Invoice/>")
+
+        self.assertEqual(mock_safe_request.call_count, 1)
+
+    @patch("apps.billing.efactura.client.EFacturaClient._get_access_token", return_value="test-token")
+    @patch("apps.billing.efactura.client.safe_request")
+    def test_any_successful_http_status_without_index_is_ambiguous(self, mock_safe_request, _mock_token):
+        """Every 2xx can mean ANAF accepted the POST; missing proof must quarantine it."""
+        mock_safe_request.return_value = Mock(
+            status_code=202,
+            text="",
+            headers={},
+            json=Mock(return_value={}),
+        )
+
+        with self.assertRaisesRegex(NetworkError, "did not prove acceptance or rejection"):
+            self.client.upload_invoice("<Invoice/>")
+
+        self.assertEqual(mock_safe_request.call_count, 1)
 
     @patch("apps.billing.efactura.client.EFacturaClient._get_access_token")
     @patch("apps.billing.efactura.client.EFacturaClient._request_with_retry")
@@ -766,8 +827,7 @@ class AuthenticationFlowTestCase(TestCase):
 class ExtractZipMembersTestCase(TestCase):
     """ANAF /descarcare returns a ZIP (original XML + MF electronic seal). We must READ it.
 
-    Persisting the sealed XML as the legal archival original is tracked separately (#123); these
-    tests only verify extraction.
+    Extraction is bounded and in-memory; the service-layer tests prove exact-byte archival.
     """
 
     @staticmethod
@@ -801,6 +861,41 @@ class ExtractZipMembersTestCase(TestCase):
     def test_non_zip_payload_raises(self):
         with self.assertRaises(zipfile.BadZipFile):
             extract_zip_members(b"this is not a zip archive")
+
+    def test_response_archive_member_limit_is_enforced(self):
+        content = self._zip({f"member-{index}.txt": b"x" for index in range(21)})
+
+        with self.assertRaisesRegex(EFacturaValidationError, "too many members"):
+            validate_response_archive(content)
+
+    def test_response_archive_uncompressed_size_limit_is_enforced(self):
+        content = self._zip({"invoice.xml": b"12345"})
+
+        with (
+            patch("apps.billing.efactura.client.MAX_RESPONSE_ARCHIVE_UNCOMPRESSED_BYTES", 4),
+            self.assertRaisesRegex(EFacturaValidationError, "uncompressed size limit"),
+        ):
+            validate_response_archive(content)
+
+    def test_response_archive_duplicate_names_are_rejected(self):
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf, self.assertWarns(UserWarning):
+            zf.writestr("invoice.xml", b"<Invoice/>")
+            zf.writestr("invoice.xml", b"<Invoice/>")
+
+        with self.assertRaisesRegex(EFacturaValidationError, "duplicate member names"):
+            validate_response_archive(buf.getvalue())
+
+    def test_response_archive_encrypted_members_are_rejected(self):
+        content = self._zip({"invoice.xml": b"<Invoice/>"})
+        encrypted_member = zipfile.ZipInfo("invoice.xml")
+        encrypted_member.flag_bits = 0x1
+
+        with (
+            patch.object(zipfile.ZipFile, "infolist", return_value=[encrypted_member]),
+            self.assertRaisesRegex(EFacturaValidationError, "encrypted members"),
+        ):
+            validate_response_archive(content)
 
 
 @unittest.skipUnless(

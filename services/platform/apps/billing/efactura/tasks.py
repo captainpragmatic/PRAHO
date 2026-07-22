@@ -87,22 +87,29 @@ def submit_efactura_task(invoice_id: str) -> dict[str, Any]:
     result = service.submit_invoice(invoice)
 
     if result.success:
-        logger.info(f"[e-Factura Task] Successfully submitted invoice {invoice.number}")
+        document_status = result.document_status
+        message = (
+            "e-Factura submission completed"
+            if result.registered_with_anaf
+            else "e-Factura submission is already in progress"
+        )
+        logger.info(f"[e-Factura Task] {message} for invoice {invoice.number}")
         return {
             "success": True,
             "invoice_id": invoice_id,
             "invoice_number": invoice.number,
-            "upload_index": result.document.anaf_upload_index if result.document else None,
+            "status": document_status,
+            "message": message,
+            "upload_index": (result.document.anaf_upload_index or None) if result.document else None,
         }
-    else:
-        logger.warning(f"[e-Factura Task] Failed to submit invoice {invoice.number}: {result.error_message}")
-        return {
-            "success": False,
-            "invoice_id": invoice_id,
-            "invoice_number": invoice.number,
-            "error": result.error_message,
-            "errors": result.errors,
-        }
+    logger.warning(f"[e-Factura Task] Failed to submit invoice {invoice.number}: {result.error_message}")
+    return {
+        "success": False,
+        "invoice_id": invoice_id,
+        "invoice_number": invoice.number,
+        "error": result.error_message,
+        "errors": result.errors,
+    }
 
 
 def poll_efactura_status_task(document_id: str) -> dict[str, Any]:
@@ -294,10 +301,25 @@ def download_efactura_response_task(document_id: str) -> dict[str, Any]:
         return {
             "success": True,
             "document_id": document_id,
-            "file_path": document.signed_pdf.path if document.signed_pdf else None,
+            "file_path": document.response_archive.name if document.response_archive else None,
         }
     else:
         return {"success": False, "error": "Download failed"}
+
+
+def archive_missing_efactura_responses_task() -> dict[str, Any]:
+    """Daily recovery for accepted documents whose ANAF ZIP evidence is missing."""
+    logger.info("[e-Factura Task] Recovering missing ANAF response archives")
+    if EFacturaService is None:
+        raise RuntimeError("EFacturaService unavailable")
+
+    results = EFacturaService().process_missing_response_archives()
+    logger.info(f"[e-Factura Task] Response archive recovery complete: {results}")
+    return {
+        "success": True,
+        "timestamp": timezone.now().isoformat(),
+        **results,
+    }
 
 
 def _create_deadline_alerts(approaching_documents: list[Any]) -> None:
@@ -369,6 +391,16 @@ def schedule_efactura_tasks() -> None:
             name="efactura_check_deadlines",
             defaults={
                 "func": "apps.billing.efactura.tasks.check_efactura_deadlines_task",
+                "schedule_type": Schedule.DAILY,
+            },
+        )
+
+        # Recover accepted response ZIPs missed because of a worker/storage failure. Daily cadence
+        # stays below ANAF's per-message download quota while providing automatic healing.
+        Schedule.objects.update_or_create(
+            name="efactura_archive_missing_responses",
+            defaults={
+                "func": "apps.billing.efactura.tasks.archive_missing_efactura_responses_task",
                 "schedule_type": Schedule.DAILY,
             },
         )

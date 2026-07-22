@@ -328,7 +328,9 @@ class EFacturaService:
         service = CanonicalEFacturaService()
         result = service.submit_invoice(invoice)
         if result.success:
-            _services_logger.info(f"✅ [e-Factura] Submitted invoice {invoice.number}")
+            _services_logger.info(
+                f"✅ [e-Factura] Processed invoice {invoice.number} with status {result.document_status or 'unknown'}"
+            )
             return Ok(True)
         return Err(result.error_message or "e-Factura submission failed")
 

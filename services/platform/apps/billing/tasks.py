@@ -78,10 +78,12 @@ def submit_efactura(invoice_id: str) -> dict[str, Any]:
         submission_result = service.submit_invoice(invoice)
         if not submission_result.success:
             logger.error(f"🔥 [e-Factura] Submission failed for {invoice.number}: {submission_result.error_message}")
-        else:
+        elif submission_result.registered_with_anaf:
             logger.info(f"✅ [e-Factura] Submitted invoice {invoice.number} to ANAF")
             invoice.meta = {**(invoice.meta or {}), "efactura_submitted": True}
             invoice.save(update_fields=["meta"])
+        else:
+            logger.info(f"⏳ [e-Factura] Submission already in progress for invoice {invoice.number}")
 
         # Log the submission attempt
         AuditService.log_simple_event(
@@ -110,7 +112,12 @@ def submit_efactura(invoice_id: str) -> dict[str, Any]:
             "success": True,
             "invoice_id": str(invoice.id),
             "invoice_number": invoice.number,
-            "message": "e-Factura submission completed",
+            "status": submission_result.document_status,
+            "message": (
+                "e-Factura submission completed"
+                if submission_result.registered_with_anaf
+                else "e-Factura submission is already in progress"
+            ),
         }
 
     except Invoice.DoesNotExist:

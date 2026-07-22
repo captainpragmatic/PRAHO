@@ -31,6 +31,7 @@ import requests
 from django.conf import settings
 from django.core.cache import cache
 from django.utils import timezone
+from django.utils.translation import gettext as _
 
 from apps.common.outbound_http import OutboundPolicy, safe_request
 from apps.settings.services import SettingsService
@@ -46,6 +47,8 @@ EFACTURA_POLICY = OutboundPolicy(
 
 # Maximum Retry-After sleep to prevent unbounded waits
 MAX_RETRY_AFTER_SECONDS = 120
+MAX_RESPONSE_ARCHIVE_MEMBERS = 20
+MAX_RESPONSE_ARCHIVE_UNCOMPRESSED_BYTES = 25 * 1024 * 1024
 
 
 class EFacturaEnvironment(StrEnum):
@@ -154,6 +157,7 @@ class UploadResponse:
     message: str = ""
     errors: list[str] = field(default_factory=list)
     raw_response: dict[str, Any] = field(default_factory=dict)
+    outcome_is_known: bool = True
 
     @classmethod
     def from_response(cls, response: requests.Response) -> UploadResponse:
@@ -178,8 +182,9 @@ class UploadResponse:
             return None
         from lxml import etree  # noqa: PLC0415  # local import keeps lxml off the hot path
 
+        parser = etree.XMLParser(resolve_entities=False, no_network=True, huge_tree=False)
         try:
-            root = etree.fromstring(stripped.encode("utf-8"))
+            root = etree.fromstring(stripped.encode("utf-8"), parser=parser)
         except (etree.XMLSyntaxError, ValueError):
             return None
         if etree.QName(root).localname != "header":
@@ -205,6 +210,15 @@ class UploadResponse:
                 upload_index=upload_index,
                 message="Upload accepted for processing",
                 raw_response=raw,
+            )
+        if exec_status == "0":
+            message = "ANAF reported upload success without index_incarcare"
+            return cls(
+                success=False,
+                message=message,
+                errors=[message],
+                raw_response=raw,
+                outcome_is_known=False,
             )
         if not errors:
             errors = [f"ANAF upload rejected (ExecutionStatus={exec_status!r}, no index_incarcare)"]
@@ -240,6 +254,7 @@ class UploadResponse:
             message=data.get("message", "Upload failed"),
             errors=errors,
             raw_response=data,
+            outcome_is_known=not (HTTPStatus.OK <= response.status_code < HTTPStatus.MULTIPLE_CHOICES),
         )
 
     @classmethod
@@ -348,9 +363,8 @@ def extract_zip_members(content: bytes) -> dict[str, bytes]:
     """Extract the members of an ANAF ``/descarcare`` ZIP.
 
     A successful download returns a ZIP containing the original invoice XML plus the Ministry of
-    Finance electronic seal (``semnatura_*.xml``). Returns a ``{filename: bytes}`` map. This only
-    READS the archive — persisting the sealed XML as the legal original (10-year archival) is
-    tracked separately; do not add storage here (#123 plan, Phase 3).
+    Finance electronic seal (``semnatura_*.xml``). Returns a ``{filename: bytes}`` map. This helper
+    only reads in-memory members; the service layer owns exact-byte archival and integrity metadata.
 
     Raises:
         zipfile.BadZipFile: if ``content`` is not a valid ZIP.
@@ -359,7 +373,17 @@ def extract_zip_members(content: bytes) -> dict[str, bytes]:
     import zipfile  # noqa: PLC0415
 
     with zipfile.ZipFile(io.BytesIO(content)) as zf:
-        return {name: zf.read(name) for name in zf.namelist()}
+        members = zf.infolist()
+        if len(members) > MAX_RESPONSE_ARCHIVE_MEMBERS:
+            raise RuntimeError("ANAF response archive contains too many members")
+        if len({member.filename for member in members}) != len(members):
+            raise RuntimeError("ANAF response archive contains duplicate member names")
+        if any(member.flag_bits & 0x1 for member in members):
+            raise RuntimeError("ANAF response archive contains encrypted members")
+        total_size = sum(member.file_size for member in members)
+        if total_size > MAX_RESPONSE_ARCHIVE_UNCOMPRESSED_BYTES:
+            raise RuntimeError("ANAF response archive exceeds the uncompressed size limit")
+        return {member.filename: zf.read(member) for member in members if not member.is_dir()}
 
 
 def find_sealed_xml(members: dict[str, bytes]) -> bytes | None:
@@ -367,11 +391,61 @@ def find_sealed_xml(members: dict[str, bytes]) -> bytes | None:
 
     Heuristic: the sealed original is the ``.xml`` member that is NOT the ``semnatura_*`` signature.
     """
+    from pathlib import PurePosixPath  # noqa: PLC0415
+
     for name, data in members.items():
-        lower = name.lower()
-        if lower.endswith(".xml") and not lower.startswith("semnatura"):
+        lower = PurePosixPath(name).name.lower()
+        if lower.endswith(".xml") and not lower.startswith("semnatura_"):
             return data
     return None
+
+
+def validate_response_archive(content: bytes) -> None:
+    """Validate the in-memory shape of an ANAF ``/descarcare`` response ZIP.
+
+    Accepted responses must contain a well-formed fiscal XML payload and the Ministry of Finance
+    ``semnatura_*.xml`` electronic-signature payload. Members are never extracted to disk.
+
+    Raises:
+        ValidationError: if the bytes are not a readable archive with both expected XML payloads.
+    """
+    if not isinstance(content, bytes):
+        raise ValidationError(_("ANAF response archive body must be bytes"))
+
+    import zipfile  # noqa: PLC0415
+    from pathlib import PurePosixPath  # noqa: PLC0415
+
+    from lxml import etree  # noqa: PLC0415
+
+    try:
+        members = extract_zip_members(content)
+    except RuntimeError as exc:
+        raise ValidationError(str(exc)) from exc
+    except (zipfile.BadZipFile, OSError) as exc:
+        raise ValidationError(_("ANAF response is not a readable ZIP archive")) from exc
+
+    invoice_xml: bytes | None = None
+    signature_xml: bytes | None = None
+    for name, payload in members.items():
+        basename = PurePosixPath(name).name.lower()
+        if not basename.endswith(".xml"):
+            continue
+        if basename.startswith("semnatura_"):
+            signature_xml = payload
+        elif invoice_xml is None:
+            invoice_xml = payload
+
+    if invoice_xml is None:
+        raise ValidationError(_("ANAF response archive does not contain the fiscal XML payload"))
+    if signature_xml is None:
+        raise ValidationError(_("ANAF response archive does not contain the Ministry signature XML"))
+
+    parser = etree.XMLParser(resolve_entities=False, no_network=True, huge_tree=False)
+    for label, payload in (("fiscal", invoice_xml), ("signature", signature_xml)):
+        try:
+            etree.fromstring(payload, parser=parser)
+        except (etree.XMLSyntaxError, ValueError) as exc:
+            raise ValidationError(f"ANAF response archive contains malformed {label} XML") from exc
 
 
 class EFacturaClient:
@@ -633,6 +707,7 @@ class EFacturaClient:
             response = self._request_with_retry(
                 "POST",
                 f"{self.config.base_url}{endpoint_path}",
+                retry_network_errors=False,
                 params=params,
                 data=xml_content.encode("utf-8"),
                 headers={
@@ -641,7 +716,16 @@ class EFacturaClient:
                 },
             )
 
+            if (
+                response.status_code == HTTPStatus.REQUEST_TIMEOUT
+                or response.status_code >= HTTPStatus.INTERNAL_SERVER_ERROR
+            ):
+                raise NetworkError(f"e-Factura upload outcome is unknown after HTTP {response.status_code}")
+
             result = UploadResponse.from_response(response)
+
+            if not result.outcome_is_known:
+                raise NetworkError("e-Factura upload response did not prove acceptance or rejection")
 
             if result.success:
                 logger.info(f"e-Factura uploaded successfully: {result.upload_index}")
@@ -702,13 +786,13 @@ class EFacturaClient:
         """
         Download processed e-Factura response.
 
-        This returns the signed PDF or error details after processing.
+        ANAF returns the exact response ZIP containing fiscal and signature XML payloads.
 
         Args:
             download_id: The id_descarcare from status response
 
         Returns:
-            Response content as bytes (usually ZIP containing PDF)
+            Exact response ZIP bytes
 
         Raises:
             NetworkError: If download fails
@@ -909,9 +993,16 @@ class EFacturaClient:
         self,
         method: str,
         url: str,
+        *,
+        retry_network_errors: bool = True,
         **kwargs: Any,
     ) -> requests.Response:
-        """Make HTTP request with retry logic via safe_request()."""
+        """Make an HTTP request, retrying only when replay safety is explicit.
+
+        Mutating e-Factura uploads pass ``retry_network_errors=False`` because a timeout or
+        connection loss cannot prove that ANAF did not accept the POST. Explicit 429 responses
+        remain safe to replay because the provider positively refused that attempt.
+        """
         # Merge default headers with caller-provided headers
         merged_headers = {**self._default_headers, **kwargs.pop("headers", {})}
         last_error: Exception | None = None
@@ -922,6 +1013,8 @@ class EFacturaClient:
 
                 # Check for rate limiting
                 if response.status_code == HTTPStatus.TOO_MANY_REQUESTS:
+                    if attempt >= self.config.max_retries - 1:
+                        return response
                     retry_after = min(
                         int(response.headers.get("Retry-After", 60)),
                         MAX_RETRY_AFTER_SECONDS,
@@ -937,9 +1030,13 @@ class EFacturaClient:
             except requests.Timeout as e:
                 last_error = e
                 logger.warning(f"⚠️ [e-Factura] Request timeout (attempt {attempt + 1}/{self.config.max_retries})")
+                if not retry_network_errors:
+                    raise NetworkError("e-Factura request outcome is unknown after timeout") from e
             except requests.ConnectionError as e:
                 last_error = e
                 logger.warning(f"⚠️ [e-Factura] Connection error (attempt {attempt + 1}/{self.config.max_retries})")
+                if not retry_network_errors:
+                    raise NetworkError("e-Factura request outcome is unknown after connection failure") from e
 
             # Wait before retry (exponential backoff)
             if attempt < self.config.max_retries - 1:
