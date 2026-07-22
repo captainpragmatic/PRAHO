@@ -374,6 +374,32 @@ class CouponService:
         return valid_items
 
     @classmethod
+    def _already_discounted_in_subset(cls, order: Order, items: list[OrderItem]) -> int:
+        """
+        Cents already discounted by earlier coupons that landed on ANY of ``items``.
+
+        #311: the stacking cap must measure a coupon's headroom against prior discounts on its
+        OWN targeted subset, not the order-wide total. A prior redemption whose items are disjoint
+        from ``items`` consumes none of this subset's headroom (the #311 bug was subtracting it
+        anyway, wrongly zeroing product-restricted coupons on other items). When a prior redemption
+        overlaps, its full ``discount_cents`` is counted — there is no per-item discount split, so
+        this is the conservative bound that keeps the #303 no-over-discount guarantee on shared
+        items.
+        """
+        item_ids = {str(i.id) for i in items}
+        if not item_ids:
+            return 0
+        total = 0
+        for redemption in CouponRedemption.objects.filter(order=order, status="applied").only(
+            "discount_cents", "applied_to_items"
+        ):
+            applied = redemption.applied_to_items or []
+            if item_ids.intersection(str(x) for x in applied):
+                # Clamp per redemption: a corrupt negative discount must not inflate the headroom.
+                total += max(0, int(redemption.discount_cents or 0))
+        return total
+
+    @classmethod
     def calculate_discount(
         cls,
         coupon: Coupon,
@@ -462,13 +488,14 @@ class CouponService:
             discount_cents = coupon.max_discount_cents
             breakdown["capped_at"] = coupon.max_discount_cents
 
-        # Ensure the discount doesn't exceed what is still discountable on the order.
+        # Ensure the discount doesn't exceed what is still discountable on THIS coupon's items.
         # Capping against the full base let every stacked coupon claim the whole subtotal
         # independently: two stackable 60% coupons summed to 120% and the order went free (#231).
-        # The cap has to be the base MINUS whatever earlier coupons already took.
-        # Clamped at zero: a negative stored discount (corrupt/legacy data) must not
-        # INFLATE the remaining headroom past the base.
-        already_discounted_cents = max(0, int(getattr(order, "discount_cents", 0) or 0))
+        # The cap has to be the base MINUS whatever earlier coupons already took FROM THESE ITEMS.
+        # #311: subtracting the order-wide discount_cents wrongly zeroed a coupon whose items were
+        # disjoint from an earlier coupon's; measure prior discounts within this subset instead.
+        # Per-redemption clamping keeps a corrupt negative discount from inflating the headroom.
+        already_discounted_cents = cls._already_discounted_in_subset(order, items)
         remaining_discountable_cents = max(0, base_amount_cents - already_discounted_cents)
         if discount_cents > remaining_discountable_cents:
             discount_cents = remaining_discountable_cents
@@ -555,8 +582,17 @@ class CouponService:
                 error_message=validation.error_message,
             )
 
-        # Calculate discount with cached items
-        discount_result = cls.calculate_discount(locked_coupon, order, items=cached_items)
+        # Calculate discount over the coupon's eligible item subset, not every order item.
+        # #311: a product-restricted coupon must discount (and record applied_to_items for) only
+        # the items it targets. Passing all cached_items here made the discount span the whole
+        # order regardless of restrictions AND recorded every item as targeted, which in turn
+        # defeated the per-subset stacking cap. Honour applies_to_all_products / restrictions the
+        # same way calculate_discount does when items is None, but off the already-locked cache.
+        if locked_coupon.applies_to_all_products:
+            eligible_items = cached_items
+        else:
+            eligible_items = cls._filter_valid_items_for_coupon(locked_coupon, cached_items)
+        discount_result = cls.calculate_discount(locked_coupon, order, items=eligible_items)
 
         # Create redemption record
         redemption = CouponRedemption.objects.create(  # type: ignore[misc]
