@@ -474,13 +474,50 @@ class Order(ConcurrentTransitionMixin, models.Model):
         """
         Recalculate order totals from line items.
         Should be called after adding/removing/updating items.
+
+        #329: read discount_cents under an Order-row lock so a total is never computed against a
+        stale discount. Promotions (coupon/gift-card) commit discount_cents under the same
+        ``select_for_update(of=("self",))`` lock; without re-reading it here, an OrderItem
+        create/delete recompute running on a stale in-memory Order would write a total_cents that
+        disagrees with the committed discount until the next recompute. Mirrors the locking+fallback
+        of ``_locked_latest_order_number`` so it also works in autocommit and on sqlite.
         """
-        totals = calculate_document_totals(list(self.items.all()), self.discount_cents)
-        self.subtotal_cents = totals.subtotal_cents
-        self.discount_cents = min(self.discount_cents, totals.subtotal_cents)
-        self.tax_cents = totals.tax_cents
-        self.total_cents = totals.total_cents
-        self.save(update_fields=["subtotal_cents", "discount_cents", "tax_cents", "total_cents"])
+
+        def _apply(discount_cents: int, *, persist: bool) -> None:
+            totals = calculate_document_totals(list(self.items.all()), discount_cents)
+            self.subtotal_cents = totals.subtotal_cents
+            # #203: a discount must never exceed the item subtotal (clamp against the freshly
+            # computed subtotal, then persist the clamped value alongside the derived totals).
+            self.discount_cents = min(discount_cents, totals.subtotal_cents)
+            self.tax_cents = totals.tax_cents
+            self.total_cents = totals.total_cents
+            if persist:
+                self.save(update_fields=["subtotal_cents", "discount_cents", "tax_cents", "total_cents"])
+
+        try:
+            with transaction.atomic():
+                committed_discount = (
+                    Order.objects.select_for_update(of=("self",))
+                    .filter(pk=self.pk)
+                    .values_list("discount_cents", flat=True)
+                    .first()
+                )
+                if committed_discount is None:
+                    # The row is gone (deleted concurrently) or never persisted — recompute the
+                    # in-memory totals from the in-memory discount, but there is nothing to save.
+                    _apply(self.discount_cents, persist=False)
+                else:
+                    _apply(committed_discount, persist=True)
+        except (NotSupportedError, DatabaseError):
+            # Backend without row locking (or select_for_update outside a usable transaction):
+            # recompute from the in-memory discount. Log on non-sqlite, where this is a real
+            # TOCTOU exposure rather than an expected limitation.
+            if connection.vendor != "sqlite":
+                logger.error(
+                    "⚠️ [Order] calculate_totals could not lock %s — total may race a discount write",
+                    self.pk,
+                )
+            _apply(self.discount_cents, persist=True)
 
     # =========================================================================
     # FSM TRANSITIONS — Phase A rename (Order-Proforma-Invoice lifecycle)
