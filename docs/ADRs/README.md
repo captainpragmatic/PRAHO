@@ -13,7 +13,7 @@ providing a historical record of why the system is built the way it is.
 ## How to Create a New ADR
 
 1. Create a new file: `ADR-XXXX-short-descriptive-title.md`
-2. Use the next available number (currently: **ADR-0042**)
+2. Use the next available number (currently: **ADR-0043**)
 3. Follow the standard format: Status, Date, Authors, Context, Decision, Consequences
 4. Set status to **Proposed** initially, then update to **Accepted** after team review
 
@@ -70,6 +70,7 @@ providing a historical record of why the system is built the way it is.
 | [ADR-0039](ADR-0039-praho-owned-recurring-billing.md) | PRAHO-Owned Recurring Billing | Accepted | 2026-07 |
 | [ADR-0040](ADR-0040-row-bound-encrypted-json-fields.md) | Row-Bound Encrypted JSON Fields | Accepted | 2026-07 |
 | [ADR-0041](ADR-0041-foreign-currency-efactura-accounting.md) | Foreign-Currency e-Factura Accounting | Accepted | 2026-07 |
+| [ADR-0042](ADR-0042-settings-catalog-and-consumer-contract.md) | Settings Catalog, Three-Surface UI, and Consumer Contract | Accepted | 2026-07-22 |
 
 ### 🟡 Partially Superseded
 

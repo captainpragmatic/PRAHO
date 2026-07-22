@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Settings catalog with a consumer contract** — every runtime setting is declared once in `apps/settings/catalog.py` (type, default, UI placement, input kind, sensitivity, criticality, validation) and a tokenize-based guardrail shared by CI lint and tests fails the build when a catalog key has no consumer or a consumed key is undeclared; 68 decoy settings that changed nothing (including the misleading editable VAT rate) were retired with a data migration, and 8 consumed-but-undefined keys (including the S3 backup credentials that silently resolved to None) are now declared (#238, #326)
+- **Three-surface settings UI** — one `/settings/` experience with Business, Integrations, and Platform zones: dirty-only atomic change-set saves with optimistic-concurrency baselines and audit reasons, write-only credentials with test-connection actions, catalog-driven search with deep links, per-setting audit history, and an Automation page showing every scheduled task with its last outcome; booleans can finally be switched off, JSON values round-trip, and secrets are never rendered or logged
+- **Enforced maintenance mode** — a staff-exempt 503 middleware driven by the `system.maintenance_mode` runtime setting with an environment override, replacing a decorative flag whose gate was never invoked
+
 - **Customer-controlled recurring payments** — customer owners and billing members can authorize a saved card through a verified Stripe SetupIntent after the current terms version is accepted server-side and bound to the exact accepting principal and terms hash, enroll or remove individual services, and withdraw authorization without cancelling sibling services; PRAHO preserves the exact accepted agreement text with its version, hash, actor, timestamp, IP address, and user agent, and groups compatible renewals into one proforma and charge
 
 ### Changed

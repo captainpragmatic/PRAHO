@@ -477,7 +477,7 @@ def import_settings(request: HttpRequest) -> JsonResponse:
 
 
 # ===============================================================================
-# SETTINGS UI (three-surface IA: Business / Integrations / Platform — ADR-0040)
+# SETTINGS UI (three-surface IA: Business / Integrations / Platform — ADR-0042)
 # ===============================================================================
 
 INTEGRATION_GROUPS = ("stripe", "virtualmin", "efactura", "node-deployment", "backup")

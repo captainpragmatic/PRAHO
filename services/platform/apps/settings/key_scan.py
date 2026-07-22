@@ -1,5 +1,5 @@
 """
-Shared settings-key extraction used by both guardrails (ADR-0040):
+Shared settings-key extraction used by both guardrails (ADR-0042):
 scripts/lint_settings_coverage.py and tests/settings/test_catalog_consumer_contract.py.
 
 Python sources are scanned via tokenize so string literals in comments can never
@@ -64,3 +64,26 @@ def iter_scannable_python_files(root: Path) -> list[Path]:
         for path in sorted(root.rglob("*.py"))
         if not any(part in EXCLUDED_DIR_NAMES for part in path.relative_to(root).parts)
     ]
+
+
+SETTINGS_READ_METHODS = frozenset(
+    {"get_setting", "get_boolean_setting", "get_integer_setting", "get_decimal_setting", "get_list_setting"}
+)
+
+
+def extract_settings_call_keys(path: Path) -> set[str]:
+    """Keys passed as literal first arguments to SettingsService read methods"""
+    keys: set[str] = set()
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+    except (OSError, SyntaxError, UnicodeDecodeError):
+        return keys
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
+            continue
+        if node.func.attr not in SETTINGS_READ_METHODS or not node.args:
+            continue
+        first = node.args[0]
+        if isinstance(first, ast.Constant) and isinstance(first.value, str):
+            keys.add(first.value)
+    return keys

@@ -778,7 +778,7 @@ class StaffOnlyPlatformMiddleware:
 
 class MaintenanceModeMiddleware:
     """
-    🚧 Platform-wide maintenance gate (ADR-0040).
+    🚧 Platform-wide maintenance gate (ADR-0042).
 
     When maintenance mode is active, non-staff requests receive a 503 with
     Retry-After; staff pass through (base template shows them a banner).

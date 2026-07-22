@@ -1,5 +1,5 @@
 """
-Settings catalog — the single source of truth for runtime settings (ADR-0040).
+Settings catalog — the single source of truth for runtime settings (ADR-0042).
 
 Every runtime setting the platform exposes is declared here: key, type, default,
 UI placement (zone → group → section), input kind, sensitivity, criticality, and

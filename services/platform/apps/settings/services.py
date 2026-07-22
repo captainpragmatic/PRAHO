@@ -105,7 +105,7 @@ class SettingsService:
     CACHE_TIMEOUT: ClassVar[int] = 3600  # 1 hour
     CACHE_VERSION: ClassVar[int] = 1
 
-    # Single source of truth: the settings catalog (ADR-0040)
+    # Single source of truth: the settings catalog (ADR-0042)
     DEFAULT_SETTINGS: ClassVar[dict[str, Any]] = dict(CATALOG_DEFAULTS)
 
     @classmethod

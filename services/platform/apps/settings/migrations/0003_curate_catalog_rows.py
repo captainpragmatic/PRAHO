@@ -1,5 +1,5 @@
 """
-Catalog curation data migration (ADR-0040).
+Catalog curation data migration (ADR-0042).
 
 1. Deletes SystemSetting rows for retired keys — settings the wiring census
    proved are consumed by nothing ("decoy settings"), including billing.vat_rate

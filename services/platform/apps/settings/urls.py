@@ -1,7 +1,7 @@
 """
 URL Configuration for PRAHO System Settings
 
-Three-surface settings UI (ADR-0040) plus the read-only staff API and
+Three-surface settings UI (ADR-0042) plus the read-only staff API and
 export/import utilities. Literal routes come before the group catch-all.
 """
 
