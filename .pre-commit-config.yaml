@@ -150,6 +150,15 @@ repos:
         pass_filenames: false
         stages: [pre-commit]
 
+      # Cross-app model import regression check (ADR-0007)
+      - id: cross-app-model-import-check
+        name: "Architecture: Cross-App Model Import Check"
+        entry: scripts/run_project_python
+        args: [scripts/lint_cross_app_model_imports.py]
+        language: system
+        files: ^services/platform/apps/.*\.py$
+        pass_filenames: false
+
       # FSM guardrail lint — detects FSM bypass patterns (ADR-0034)
       - id: fsm-guardrail-check
         name: "FSM: Guardrail Lint (ADR-0034)"
