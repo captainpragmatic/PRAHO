@@ -201,7 +201,10 @@ class ChangeSetTests(TestCase):
 
         result = SettingsService.apply_change_set(
             {"billing.invoice_payment_terms_days": 30, "billing.proforma_validity_days": 60},
-            {"billing.invoice_payment_terms_days": stale, "billing.proforma_validity_days": self._baseline(self.proforma)},
+            {
+                "billing.invoice_payment_terms_days": stale,
+                "billing.proforma_validity_days": self._baseline(self.proforma),
+            },
         )
 
         self.assertFalse(result.is_ok())
@@ -219,11 +222,9 @@ class ChangeSetTests(TestCase):
         self.assertEqual(result.error.code, "conflict")
 
     def test_write_stage_failure_rolls_back_entire_set(self) -> None:
-        self.terms.validation_rules = {"min": 7}
-        self.terms.save(update_fields=["validation_rules"])
-
+        # -1 violates the catalog rule {"min": 0} at the write stage (static phase only coerces)
         result = SettingsService.apply_change_set(
-            {"billing.invoice_payment_terms_days": 0, "billing.proforma_validity_days": 60},
+            {"billing.invoice_payment_terms_days": -1, "billing.proforma_validity_days": 60},
             {
                 "billing.invoice_payment_terms_days": self._baseline(self.terms),
                 "billing.proforma_validity_days": self._baseline(self.proforma),
@@ -288,9 +289,7 @@ class SettingsApiReadOnlyTests(TestCase):
         self.assertNotIn("super-secret", response.content.decode())
 
     def test_detail_redacts_sensitive_value(self) -> None:
-        response = self.client.get(
-            reverse("settings:setting_detail_api", args=["integrations.api_probe_secret_key"])
-        )
+        response = self.client.get(reverse("settings:setting_detail_api", args=["integrations.api_probe_secret_key"]))
         self.assertEqual(response.status_code, 200)
         self.assertIsNone(response.json()["setting"]["value"])
         self.assertNotIn("super-secret", response.content.decode())

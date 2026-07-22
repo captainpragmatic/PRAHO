@@ -37,26 +37,37 @@ class TestSettingsAPIAuditTrail(TestCase):
         # Clear events from setup
         AuditEvent.objects.all().delete()
 
-    def test_update_setting_via_api_creates_audit_event(self) -> None:
-        """POST /settings/api/ → SystemSetting.save() → AuditEvent."""
-        response = self.client.post(
-            "/settings/api/",
-            data=json.dumps({
-                "key": "test.e2e_setting",
-                "value": "updated_via_api",
-                "reason": "E2E audit test",
-            }),
-            content_type="application/json",
-        )
+    def test_update_setting_creates_attributed_audit_event(self) -> None:
+        """Hardened write path → SystemSetting.save() → attributed AuditEvent.
 
-        self.assertEqual(response.status_code, 200, response.content)
+        The staff API is read-only since the settings overhaul; writes go
+        through SettingsService (change-set/credential endpoints in the UI).
+        """
+        from apps.settings.services import SettingsService
+
+        result = SettingsService.update_setting(
+            "test.e2e_setting", "updated_via_service", user_id=self.staff.id, reason="E2E audit test"
+        )
+        self.assertTrue(result.is_ok())
 
         ct = ContentType.objects.get_for_model(SystemSetting)
         events = AuditEvent.objects.filter(
             content_type=ct,
             object_id=str(self.setting.pk),
         )
-        self.assertTrue(events.exists(), "No AuditEvent after updating setting via API")
+        self.assertTrue(events.exists(), "No AuditEvent after updating setting")
+        event = events.latest("timestamp")
+        self.assertEqual(event.user, self.staff)
+        self.assertEqual(event.metadata.get("reason"), "E2E audit test")
+
+    def test_settings_api_write_methods_are_rejected(self) -> None:
+        """The staff settings API must stay read-only (405 on POST)."""
+        response = self.client.post(
+            "/settings/api/",
+            data=json.dumps({"key": "test.e2e_setting", "value": "nope"}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 405)
 
 
 @override_settings(DISABLE_AUDIT_SIGNALS=False)

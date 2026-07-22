@@ -11,6 +11,16 @@ from django.http import HttpRequest
 from apps.common.tax_service import TaxService
 
 
+def _maintenance_mode_active() -> bool:
+    """Deployment override wins when set; otherwise the runtime setting (cache-first)."""
+    deployment_override = getattr(settings, "MAINTENANCE_MODE", None)
+    if deployment_override is not None:
+        return bool(deployment_override)
+    from apps.settings.services import SettingsService  # noqa: PLC0415  # Function-level cross-app import (ADR-0007)
+
+    return SettingsService.get_boolean_setting("system.maintenance_mode", False)
+
+
 def romanian_business_context(request: HttpRequest) -> dict[str, Any]:
     """Romanian business information for templates"""
     return {
@@ -124,7 +134,7 @@ def system_status(request: HttpRequest) -> dict[str, Any]:
     """System status information"""
     return {
         "system_status": {
-            "maintenance_mode": getattr(settings, "MAINTENANCE_MODE", False),
+            "maintenance_mode": _maintenance_mode_active(),
             "read_only_mode": getattr(settings, "READ_ONLY_MODE", False),
             "debug_mode": settings.DEBUG,
             "environment": getattr(settings, "ENVIRONMENT", "development"),

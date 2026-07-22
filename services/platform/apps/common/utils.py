@@ -13,12 +13,10 @@ from functools import wraps
 from typing import Any, TypeVar
 from zoneinfo import ZoneInfo
 
-from django.conf import settings
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
-from django.http import HttpRequest, HttpResponse, JsonResponse
+from django.http import HttpRequest, JsonResponse
 from django.utils import timezone
-from django.utils.translation import gettext_lazy as _
 
 # Type variable for function decorators
 F = TypeVar("F", bound=Callable[..., Any])
@@ -211,24 +209,3 @@ def json_error(message: str, code: str = "ERROR", status: int = 400) -> JsonResp
         },
         status=status,
     )
-
-
-# ===============================================================================
-# MAINTENANCE MODE
-# ===============================================================================
-
-
-def maintenance_mode_check(view_func: Callable[..., Any]) -> Callable[..., Any]:
-    """Check if system is in maintenance mode"""
-
-    @wraps(view_func)
-    def wrapper(request: HttpRequest, *args: Any, **kwargs: Any) -> Any:
-        if getattr(settings, "MAINTENANCE_MODE", False) and not request.user.is_staff:
-            return HttpResponse(
-                _("System is under maintenance. Please try again later."),
-                status=503,
-                content_type="text/plain",
-            )
-        return view_func(request, *args, **kwargs)
-
-    return wrapper

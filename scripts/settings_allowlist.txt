@@ -88,54 +88,19 @@ DEFAULT_QUOTAS
 # Wire them up to runtime code, then remove from this list.
 
 # ── Company / branding (pending template context processor) ──────────────────
-company.legal_name
-company.registration_number
-company.address
-company.email_contact
-company.email_support
-company.email_privacy
-company.email_dpo
-company.email_noreply
-company.phone
 
 # ── Billing (pending feature wiring) ─────────────────────────────────────────
-billing.negative_balance_threshold
 
 # ── Domains (pending feature wiring) ─────────────────────────────────────────
-domains.auto_renewal_enabled
-domains.renewal_notice_days
 
 # ── Node deployment (pending feature build-out) ──────────────────────────────
-node_deployment.auto_registration
-node_deployment.cost_tracking_enabled
-node_deployment.default_environment
-node_deployment.default_provider
-node_deployment.default_region
-node_deployment.timeout_ansible_playbook
-node_deployment.timeout_terraform_apply
-node_deployment.timeout_validation
 
 # ── Notifications (pending feature wiring) ───────────────────────────────────
-notifications.max_recipients_per_batch
-notifications.sms_enabled
 
 # ── Provisioning (pending feature wiring) ────────────────────────────────────
-provisioning.long_provisioning_threshold_minutes
-provisioning.resource_usage_alert_threshold
-provisioning.server_overload_threshold
 
 # ── Security (pending feature wiring) ────────────────────────────────────────
-security.registration_rate_limit_per_ip
-security.invitation_rate_limit_per_user
-security.session_validation_rate_limit
 
 # ── System (pending feature wiring) ──────────────────────────────────────────
-system.backup_retention_days
 
 # ── Users (pending runtime wiring) ───────────────────────────────────────────
-users.backup_code_count
-users.credential_max_age_days
-users.credential_rotation_retry_limit
-users.login_rate_limit_per_hour
-users.mfa_required_for_staff
-users.security_lockout_failure_threshold

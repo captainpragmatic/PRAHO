@@ -50,9 +50,9 @@ class OrderProcessingResults(TypedDict):
 # Task configuration
 TASK_RETRY_DELAY = 300  # 5 minutes
 TASK_MAX_RETRIES = 2
-_DEFAULT_TASK_SOFT_TIME_LIMIT = 300  # 5 minutes
+_DEFAULT_TASK_SOFT_TIME_LIMIT = 600  # 10 minutes (catalog default)
 TASK_SOFT_TIME_LIMIT = _DEFAULT_TASK_SOFT_TIME_LIMIT
-_DEFAULT_TASK_TIME_LIMIT = 600  # 10 minutes
+_DEFAULT_TASK_TIME_LIMIT = 900  # 15 minutes (catalog default)
 TASK_TIME_LIMIT = _DEFAULT_TASK_TIME_LIMIT
 
 # Order auto-cancellation timeouts (#222). Card/immediate methods fail fast, so a tight window is

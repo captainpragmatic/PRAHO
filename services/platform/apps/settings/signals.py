@@ -135,20 +135,12 @@ def _is_critical_setting(key: str) -> bool:
     """
     🚨 Check if a setting is considered critical
 
-    Critical settings are those that significantly affect system behavior
-    and should trigger notifications when changed.
+    Critical settings significantly affect system behavior and trigger
+    admin notifications when changed. The catalog owns the flag.
     """
-    critical_settings = {
-        "system.maintenance_mode",
-        "security.require_2fa_for_admin",
-        "users.mfa_required_for_staff",
-        "billing.payment_grace_period_days",
-        "domains.registration_enabled",
-        "provisioning.auto_setup_enabled",
-        "notifications.email_enabled",
-    }
+    from .catalog import CRITICAL_KEYS  # noqa: PLC0415  # Deferred: keeps signal import light
 
-    return key in critical_settings
+    return key in CRITICAL_KEYS
 
 
 def _send_critical_setting_notification(setting: SystemSetting, action: str) -> None:
