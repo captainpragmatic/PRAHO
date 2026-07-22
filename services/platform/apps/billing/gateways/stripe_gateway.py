@@ -418,9 +418,10 @@ class StripeGateway(BasePaymentGateway):
             if amount_cents is not None:
                 params["amount"] = amount_cents
             if idempotency_key:
-                # A retry after an uncertain outcome (timeout) must replay the SAME refund,
-                # not create a second one — the key is derived from the payment's ledger
-                # state, so it is stable across retries of the same logical refund.
+                # A retry after an uncertain outcome (timeout) must replay the SAME refund, not
+                # create a second one. The caller anchors this key to a persisted pre-gateway refund
+                # intent (#342), so it stays stable across retries of the same logical refund even
+                # when a sibling refund commits in between.
                 params["idempotency_key"] = idempotency_key
 
             refund = self._stripe.Refund.create(**params)

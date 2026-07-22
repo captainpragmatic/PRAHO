@@ -30,6 +30,11 @@ class Refund(models.Model):
     """
 
     STATUS_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
+        # "initiated" is a pre-gateway intent: the row is persisted BEFORE the gateway call so its
+        # stable id anchors the idempotency key (#342). It is deliberately excluded from the
+        # refunded-balance aggregate (see _REFUND_RESERVING_STATUSES) so an in-flight intent never
+        # over-counts the payment's refunded amount.
+        ("initiated", _("Initiated")),
         ("pending", _("Pending")),
         ("processing", _("Processing")),
         ("approved", _("Approved")),
@@ -82,6 +87,16 @@ class Refund(models.Model):
     # External references
     gateway_refund_id = models.CharField(max_length=255, blank=True, help_text=_("Payment gateway refund ID"))
     reference_number = models.CharField(max_length=100, unique=True, help_text=_("Unique refund reference number"))
+    # #342: stable idempotency key persisted BEFORE the gateway call. The gateway refund is keyed
+    # off this so a retry of the same logical refund replays rather than re-charging. Null for rows
+    # created outside the intent path (legacy, convergence, non-gateway); unique when present.
+    idempotency_key = models.CharField(  # noqa: DJ001  # nullable so the partial-unique index treats "no key" as distinct
+        max_length=100,
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text=_("Stable pre-gateway idempotency key (#342)"),
+    )
 
     # Descriptive fields
     reason_description = models.TextField(blank=True, help_text=_("Detailed reason for refund"))
@@ -136,6 +151,7 @@ class Refund(models.Model):
             models.CheckConstraint(
                 condition=models.Q(
                     status__in=[
+                        "initiated",
                         "pending",
                         "processing",
                         "approved",
@@ -151,6 +167,12 @@ class Refund(models.Model):
                 fields=["gateway_refund_id"],
                 condition=~models.Q(gateway_refund_id=""),
                 name="uniq_refund_gateway_id_present",
+            ),
+            # #342: at most one refund per stable idempotency key.
+            models.UniqueConstraint(
+                fields=["idempotency_key"],
+                condition=models.Q(idempotency_key__isnull=False),
+                name="uniq_refund_idempotency_key_present",
             ),
         ]
 
@@ -211,6 +233,15 @@ class Refund(models.Model):
     # =========================================================================
     # FSM TRANSITION METHODS
     # =========================================================================
+
+    @transition(field=status, source="initiated", target="pending")
+    def activate(self) -> None:
+        """Promote a pre-gateway intent (#342) to the normal pending lifecycle once the gateway
+        refund has been dispatched."""
+
+    @transition(field=status, source=["initiated", "pending", "processing", "approved"], target="cancelled")
+    def cancel_intent(self) -> None:
+        """Cancel a refund from any pre-terminal state, including an unfulfilled intent (#342)."""
 
     @transition(field=status, source="pending", target="processing")
     def start_processing(self) -> None:

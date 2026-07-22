@@ -843,6 +843,35 @@ class RefundService:
                 return Err(invoice_result.unwrap_err())
             invoice_for_processing = invoice_result.unwrap()
 
+            # #342: materialise a refund intent and take its DETERMINISTIC idempotency key
+            # (refund:{payment}:{reference}). The key — not row survival — is what makes a retry of
+            # the same logical refund replay at the gateway instead of re-charging, even when a
+            # sibling refund commits in between. Only for real gateway-backed payments; the intent's
+            # `initiated` status is excluded from the refunded-balance aggregate.
+            intent_key: str | None = None
+            if isinstance(payment, Payment) and payment.pk:
+                # A full refund arrives with amount 0 ("whole remaining"); the intent needs a
+                # positive placeholder — the actual gateway-processed amount overwrites it when the
+                # intent is advanced in _create_refund_record. For the retry-match, what matters is
+                # that the same reference maps to the same key, not the exact placeholder amount.
+                intent_amount = refund_amount_cents if refund_amount_cents > 0 else original_cents
+                intent_result = RefundService._get_or_create_refund_intent(
+                    payment=payment,
+                    order=order,
+                    invoice=invoice,
+                    amount_cents=intent_amount,
+                    original_cents=original_cents,
+                    refund_data=refund_data,
+                    refund_id=refund_id,
+                )
+                if intent_result.is_err():
+                    transaction.set_rollback(True)
+                    return Err(intent_result.unwrap_err())
+                intent = intent_result.unwrap()
+                intent_key = intent.idempotency_key
+                # Ensure the durable Refund row we advance later is this intent row.
+                refund_id = intent.id
+
             # Resolve and refund the authoritative payment before any durable
             # Refund or Invoice mutation. This helper also locks the Payment row.
             payment_result = RefundService._process_payment_refund_if_exists(
@@ -850,6 +879,7 @@ class RefundService:
                 invoice_for_processing,
                 refund_data,
                 payment=payment,
+                idempotency_key=intent_key,
             )
             if payment_result.is_err():
                 transaction.set_rollback(True)
@@ -978,6 +1008,94 @@ class RefundService:
             return Err("Failed to lock linked invoice for refund")
 
     @staticmethod
+    def _refund_intent_key(payment: Any, refund_data: RefundData | None, refund_id: Any) -> str:
+        """Stable idempotency key for a logical refund (#342).
+
+        A caller retrying the SAME logical refund passes the same ``reference`` in refund_data, so
+        the key is stable across the retry and the persisted intent is found again. Absent a
+        reference, fall back to the per-call refund_id — those refunds get a fresh key per attempt
+        (the previous behaviour), which is acceptable: only referenced refunds opt into cross-retry
+        idempotency.
+        """
+        reference = (refund_data or {}).get("reference")
+        anchor = str(reference) if reference else str(refund_id)
+        return f"refund:{payment.id}:{anchor}"
+
+    @staticmethod
+    def _get_or_create_refund_intent(  # noqa: PLR0913  # keyword-only refund-linkage fields
+        *,
+        payment: Any,
+        order: Any,
+        invoice: Any,
+        amount_cents: int,
+        original_cents: int,
+        refund_data: RefundData | None,
+        refund_id: Any,
+    ) -> Result[Refund, str]:
+        """Materialise a refund intent and return its **deterministic** idempotency key (#342).
+
+        What actually closes the double-refund window is that the gateway key is a pure function of
+        ``(payment.id, reference)`` (see ``_refund_intent_key``): a retry of the same logical refund
+        recomputes the SAME key regardless of intervening sibling refunds, so the gateway replays
+        instead of re-charging. The persisted row is the durable ledger/audit record for that key and
+        the anchor the gateway-refund id is later attached to (kept as one row via the in-place
+        advance in ``_create_refund_record``), NOT what carries the idempotency guarantee.
+
+        Note on transactions: callers run this inside the outer refund ``atomic`` block, so the inner
+        ``atomic`` here is a SAVEPOINT — if the outer transaction rolls back (gateway succeeded, local
+        settlement failed) this row is discarded along with it. That is fine: the key is deterministic,
+        so the retry recreates an equivalent intent and reaches the gateway with the identical key.
+
+        Status ``initiated`` is excluded from the refunded-balance aggregate, so an in-flight intent
+        never over-counts the payment's refunded amount (which would itself shift the key).
+
+        LIMITATION: idempotency protection applies only when the caller supplies a ``reference``.
+        Without one the key falls back to the per-call ``refund_id`` (previous behaviour), so an
+        unreferenced retry is a distinct logical refund and is NOT deduplicated at the gateway.
+        """
+        key = RefundService._refund_intent_key(payment, refund_data, refund_id)
+        currency = payment.currency if payment else (order.currency if order else invoice.currency)
+        # order XOR invoice is enforced by a CHECK constraint; the order path is order-linked by
+        # schema even when a resolved invoice is updated alongside (see _create_refund_record).
+        try:
+            with transaction.atomic():
+                intent, created = Refund.objects.get_or_create(
+                    idempotency_key=key,
+                    defaults={
+                        "id": refund_id,
+                        "customer": order.customer if order else invoice.customer,
+                        "order": order,
+                        "invoice": invoice,
+                        "payment": payment,
+                        "amount_cents": amount_cents,
+                        "currency": currency,
+                        "original_amount_cents": original_cents,
+                        "refund_type": (refund_data or {}).get("refund_type", "full"),
+                        "reason": str((refund_data or {}).get("reason", "customer_request")),
+                        "reason_description": str((refund_data or {}).get("notes", "")),
+                        "reference_number": (refund_data or {}).get("reference") or f"REF-{refund_id}",
+                        "status": "initiated",
+                        "created_by": (refund_data or {}).get("initiated_by"),
+                    },
+                )
+        except IntegrityError:
+            # A concurrent creator won the get_or_create race, or reference_number collided; re-read.
+            try:
+                intent = Refund.objects.get(idempotency_key=key)
+                created = False
+            except Refund.DoesNotExist:
+                logger.exception("Refund intent creation failed for payment_id=%s", getattr(payment, "pk", None))
+                return Err("Failed to initiate refund")
+
+        if not created and intent.status == "initiated" and intent.amount_cents != amount_cents:
+            # Same reference reused for a DIFFERENT amount, before the original ever reached the
+            # gateway, is a caller error — not the same refund. (Once the intent has advanced past
+            # `initiated` its amount reflects the gateway-processed value, so we do not compare then:
+            # a retry of an already-progressed refund should converge, not be rejected.)
+            return Err("Refund reference already used for a different amount; use a new reference")
+        return Ok(intent)
+
+    @staticmethod
     def _create_refund_record(params: RefundRecordParams) -> Result[Refund, str]:
         """Create refund record with error handling"""
         try:
@@ -994,25 +1112,52 @@ class RefundService:
             # operation, not an assumed platform default.
             currency = payment.currency if payment else (order.currency if order else invoice.currency)
 
-            refund = Refund.objects.create(
-                id=refund_id,
-                customer=order.customer if order else invoice.customer,
-                order=order,
-                invoice=invoice,
-                payment=payment,
-                amount_cents=refund_amount_cents,
-                currency=currency,
-                original_amount_cents=original_cents,
-                refund_type=refund_data.get("refund_type", "full") if refund_data else "full",
-                reason=str(refund_data.get("reason", "customer_request")) if refund_data else "customer_request",
-                reason_description=str(refund_data.get("notes", "")) if refund_data else "",
-                reference_number=refund_data.get("reference", f"REF-{refund_id}")
-                if refund_data
-                else f"REF-{refund_id}",
-                status="pending",
-                gateway_refund_id=gateway_refund_id,
-                created_by=refund_data.get("initiated_by") if refund_data else None,  # type: ignore[misc]
-            )
+            # #342: if a pre-gateway intent row already exists for this refund_id, advance it in
+            # place (initiated -> pending) instead of inserting a second row — so Refund.id stays
+            # equal to the intent id and convergence (which matches on gateway_refund_id) updates
+            # the same row. Fall back to a plain create for the no-intent paths (non-gateway,
+            # convergence, legacy callers).
+            intent = Refund.objects.filter(id=refund_id, status="initiated").first()
+            if intent is not None:
+                intent.activate()  # initiated -> pending
+                intent.payment = payment
+                intent.amount_cents = refund_amount_cents
+                intent.original_amount_cents = original_cents
+                intent.gateway_refund_id = gateway_refund_id
+                intent.save(
+                    update_fields=[
+                        "status",
+                        "payment",
+                        "amount_cents",
+                        "original_amount_cents",
+                        "gateway_refund_id",
+                        "processed_at",
+                        "updated_at",
+                    ]
+                )
+                refund = intent
+            else:
+                refund = Refund.objects.create(
+                    id=refund_id,
+                    customer=order.customer if order else invoice.customer,
+                    order=order,
+                    invoice=invoice,
+                    payment=payment,
+                    amount_cents=refund_amount_cents,
+                    currency=currency,
+                    original_amount_cents=original_cents,
+                    refund_type=refund_data.get("refund_type", "full") if refund_data else "full",
+                    reason=str(refund_data.get("reason", "customer_request")) if refund_data else "customer_request",
+                    reason_description=str(refund_data.get("notes", "")) if refund_data else "",
+                    reference_number=refund_data.get("reference", f"REF-{refund_id}")
+                    if refund_data
+                    else f"REF-{refund_id}",
+                    status="pending",
+                    gateway_refund_id=gateway_refund_id,
+                    # RefundData.get returns Any; created_by is an optional User FK — mypy can't
+                    # narrow the dict value to User|None here.
+                    created_by=refund_data.get("initiated_by") if refund_data else None,  # type: ignore[misc]  # dict-Any -> optional FK
+                )
 
             # Create status history (ADR-0016: audit trail must not be silently dropped).
             # The savepoint is what makes this catch real: a failed statement inside the
@@ -1284,6 +1429,7 @@ class RefundService:
         refund_data: RefundData | None,
         *,
         payment: Payment | None = None,
+        idempotency_key: str | None = None,
     ) -> Result[dict[str, Any], str]:
         """Resolve and refund the single authoritative payment for an entity."""
         if payment is None:
@@ -1297,6 +1443,7 @@ class RefundService:
             refund_data,
             payment_locked=True,
             defer_settlement=True,
+            idempotency_key=idempotency_key,
         )
         if gateway_result.is_err():
             return Err(gateway_result.unwrap_err())
@@ -1675,6 +1822,7 @@ class RefundService:
         refund_amount_cents = kwargs.get("refund_amount_cents")
         payment_locked = bool(kwargs.get("payment_locked", False))
         defer_settlement = bool(kwargs.get("defer_settlement", False))
+        idempotency_key = kwargs.get("idempotency_key")  # #342: stable pre-gateway intent key
 
         # If payment not passed directly, resolve it through the same
         # authoritative document relations used by the public refund flow.
@@ -1718,7 +1866,9 @@ class RefundService:
             )
 
             # GATEWAY-FIRST: call gateway before updating local state to prevent accounting drift
-            gateway_result = RefundService._execute_gateway_refund(payment, effective_amount, effective_amount)
+            gateway_result = RefundService._execute_gateway_refund(
+                payment, effective_amount, effective_amount, idempotency_key=idempotency_key
+            )
             if gateway_result.is_err():
                 return gateway_result
 
@@ -1800,9 +1950,18 @@ class RefundService:
 
     @staticmethod
     def _execute_gateway_refund(
-        payment: Any, refund_amount_cents: int | None, effective_amount: int
+        payment: Any,
+        refund_amount_cents: int | None,
+        effective_amount: int,
+        idempotency_key: str | None = None,
     ) -> Result[dict[str, Any], str]:
-        """Execute refund via payment gateway or return local success for non-gateway payments."""
+        """Execute refund via payment gateway or return local success for non-gateway payments.
+
+        #342: ``idempotency_key`` is the stable key of a pre-gateway refund intent. When provided, it
+        is passed to the gateway verbatim so a retry of the same logical refund replays rather than
+        re-charging. When absent (legacy/no-intent callers), a reconstructible key is derived — see
+        below — preserving the previous behaviour for those paths.
+        """
         payment_method = getattr(payment, "payment_method", "")
         gateway_txn_id = getattr(payment, "gateway_txn_id", "")
 
@@ -1833,20 +1992,21 @@ class RefundService:
             )
 
         gateway = PaymentGatewayFactory.create_gateway(payment.payment_method)
-        # Reconstructible idempotency key: the same logical refund derives the same key so a
-        # retry replays the same gateway refund, while a distinct partial gets a fresh key.
-        # LIMITATION: the key is derived from the payment's CURRENT refunded balance and
-        # terminal-attempt count, so it is stable only while no OTHER refund on this payment
-        # commits between the original attempt and the retry — intervening activity shifts
-        # already_refunded and mints a new key, which can re-execute the refund at the gateway.
-        # A fully stable key needs a persisted pre-gateway refund intent (tracked as a
-        # follow-up). The webhook + reconciliation convergence backstop the residual window.
-        remaining = RefundService._get_remaining_payment_refund_amount(payment)
-        already_refunded = (payment.amount_cents - remaining) if remaining is not None else 0
-        terminal_attempts = payment.refunds.filter(status__in=("failed", "cancelled", "rejected")).count()
-        # No length slice: the readable key is ~81 chars max (well under Stripe's 255 limit);
-        # a [:64] slice could truncate away amount/terminal_attempts and collide distinct refunds.
-        refund_idempotency_key = f"refund:{payment.id}:{already_refunded}:{effective_amount}:{terminal_attempts}"
+        if idempotency_key:
+            # #342: the intent's DETERMINISTIC key (derived from payment.id + the caller's
+            # reference). A retry of the same logical refund recomputes the identical key even if a
+            # sibling refund committed in between, so the gateway replays instead of re-charging.
+            refund_idempotency_key = idempotency_key
+        else:
+            # Legacy fallback for callers that did not create an intent (e.g. direct-call tests).
+            # LIMITATION: derived from the payment's CURRENT refunded balance and terminal-attempt
+            # count, so it is stable only while no OTHER refund on this payment commits between the
+            # original attempt and the retry. The intent path above removes this window; the webhook
+            # + reconciliation convergence backstop the residual case for these legacy callers.
+            remaining = RefundService._get_remaining_payment_refund_amount(payment)
+            already_refunded = (payment.amount_cents - remaining) if remaining is not None else 0
+            terminal_attempts = payment.refunds.filter(status__in=("failed", "cancelled", "rejected")).count()
+            refund_idempotency_key = f"refund:{payment.id}:{already_refunded}:{effective_amount}:{terminal_attempts}"
         refund_result = gateway.refund_payment(
             gateway_txn_id=payment.gateway_txn_id,
             amount_cents=refund_amount_cents,

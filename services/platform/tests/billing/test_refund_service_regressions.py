@@ -1008,6 +1008,8 @@ class TestCreateRefundRecord(TestCase):
         from apps.billing.refund_service import RefundRecordParams  # noqa: PLC0415
 
         with patch("apps.billing.refund_service.Refund.objects") as mock_qs:
+            # No pre-gateway intent exists → exercise the create branch (#342).
+            mock_qs.filter.return_value.first.return_value = None
             mock_qs.create.side_effect = IntegrityError("insert violates foreign key constraint")
             params = RefundRecordParams(
                 refund_id=uuid.uuid4(), order=MagicMock(), invoice=None,
@@ -1022,6 +1024,7 @@ class TestCreateRefundRecord(TestCase):
         # #120: use ValueError (Django ORM assignment error type), not string matching
         from apps.billing.refund_service import RefundRecordParams  # noqa: PLC0415
         with patch("apps.billing.refund_service.Refund.objects") as mock_qs:
+            mock_qs.filter.return_value.first.return_value = None
             mock_qs.create.side_effect = ValueError("Cannot assign value to FK field")
             params = RefundRecordParams(
                 refund_id=uuid.uuid4(), order=MagicMock(), invoice=None,
@@ -1036,6 +1039,7 @@ class TestCreateRefundRecord(TestCase):
         # #120: use ValueError (Django ORM assignment error type), not string matching
         from apps.billing.refund_service import RefundRecordParams  # noqa: PLC0415
         with patch("apps.billing.refund_service.Refund.objects") as mock_qs:
+            mock_qs.filter.return_value.first.return_value = None
             mock_qs.create.side_effect = ValueError("Cannot assign value to FK field")
             params = RefundRecordParams(
                 refund_id=uuid.uuid4(), order=None, invoice=MagicMock(),
@@ -1049,6 +1053,7 @@ class TestCreateRefundRecord(TestCase):
     def test_generic_error(self):
         from apps.billing.refund_service import RefundRecordParams  # noqa: PLC0415
         with patch("apps.billing.refund_service.Refund.objects") as mock_qs:
+            mock_qs.filter.return_value.first.return_value = None
             mock_qs.create.side_effect = Exception("something else broke")
             params = RefundRecordParams(
                 refund_id=uuid.uuid4(), order=MagicMock(), invoice=None,
@@ -1066,6 +1071,7 @@ class TestCreateRefundRecord(TestCase):
         from apps.billing.refund_service import RefundRecordParams  # noqa: PLC0415
 
         with patch("apps.billing.refund_service.Refund.objects") as mock_qs:
+            mock_qs.filter.return_value.first.return_value = None
             mock_qs.create.side_effect = Exception("unexpected db failure")
             order_mock = MagicMock()
             order_mock.pk = 999
@@ -1088,6 +1094,7 @@ class TestCreateRefundRecord(TestCase):
         from apps.billing.refund_service import RefundRecordParams  # noqa: PLC0415
 
         with patch("apps.billing.refund_service.Refund.objects") as mock_qs:
+            mock_qs.filter.return_value.first.return_value = None
             mock_qs.create.side_effect = IntegrityError("insert violates foreign key constraint")
             order_mock = MagicMock()
             order_mock.pk = 888
