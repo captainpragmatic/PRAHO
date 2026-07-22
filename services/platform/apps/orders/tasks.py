@@ -55,6 +55,52 @@ TASK_SOFT_TIME_LIMIT = _DEFAULT_TASK_SOFT_TIME_LIMIT
 _DEFAULT_TASK_TIME_LIMIT = 600  # 10 minutes
 TASK_TIME_LIMIT = _DEFAULT_TASK_TIME_LIMIT
 
+# Order auto-cancellation timeouts (#222). Card/immediate methods fail fast, so a tight window is
+# fine. Offline methods settle over 1-3 business days, so they must not be swept at 24h.
+_DEFAULT_CARD_ORDER_TIMEOUT_HOURS = 24
+_DEFAULT_BANK_TRANSFER_ORDER_TIMEOUT_HOURS = 72
+
+# Methods known to settle immediately (or fail fast) get the tight sweep. EVERYTHING else —
+# bank_transfer, manual, empty, or any method this code has never heard of — is treated as
+# offline: better to sweep late than cancel a paying customer mid-wire. A positive allowlist
+# keeps future payment methods on the customer-safe path by default.
+_IMMEDIATE_PAYMENT_METHODS = frozenset({"card", "paypal", "crypto", "wallet"})
+
+
+def get_card_order_timeout_hours() -> int:
+    """Auto-cancel window for card/immediate orders, in hours (runtime)."""
+    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+        SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
+    )
+
+    return SettingsService.get_integer_setting("orders.card_timeout_hours", _DEFAULT_CARD_ORDER_TIMEOUT_HOURS)
+
+
+def get_bank_transfer_order_timeout_hours() -> int:
+    """Fallback auto-cancel window for offline orders with no proforma, in hours (runtime)."""
+    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+        SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
+    )
+
+    return SettingsService.get_integer_setting(
+        "orders.bank_transfer_timeout_hours", _DEFAULT_BANK_TRANSFER_ORDER_TIMEOUT_HOURS
+    )
+
+
+def _order_timeout_deadline(order: Order) -> tuple[Any, str]:
+    """Return (deadline, basis) for auto-cancelling an awaiting-payment order.
+
+    Offline methods (bank transfer / manual / unknown) are given the window of the proforma the
+    customer was actually emailed; if there is no proforma to anchor on, a longer fallback window.
+    Card-like methods keep the tight window they always had.
+    """
+    if (order.payment_method or "") not in _IMMEDIATE_PAYMENT_METHODS:
+        proforma = order.proforma  # already select_related-loaded in process_pending_orders
+        if proforma and proforma.valid_until:
+            return proforma.valid_until, "proforma_valid_until"
+        return order.created_at + timedelta(hours=get_bank_transfer_order_timeout_hours()), "bank_transfer_fallback"
+    return order.created_at + timedelta(hours=get_card_order_timeout_hours()), "card_timeout"
+
 
 def get_max_payment_failures_before_order_fail() -> int:
     """Get max payment failures before order fail from SettingsService (runtime)."""
@@ -314,9 +360,9 @@ def _add_updated_order_result(
 
 def _handle_order_timeout(order: Order, now: Any, order_result: dict[str, Any], results: dict[str, Any]) -> bool:
     """Handle order timeout logic."""
-    timeout_threshold = order.created_at + timedelta(hours=24)
+    deadline, timeout_basis = _order_timeout_deadline(order)
 
-    if now <= timeout_threshold:
+    if now <= deadline:
         return False
 
     # Cancel timed out orders — route through service layer to create OrderStatusHistory
@@ -350,7 +396,9 @@ def _handle_order_timeout(order: Order, now: Any, order_result: dict[str, Any], 
             "order_id": str(order.id),
             "order_number": order.order_number,
             "customer_id": str(order.customer.id),
-            "timeout_hours": 24,
+            "payment_method": order.payment_method or "",
+            "timeout_basis": timeout_basis,
+            "deadline": deadline.isoformat(),
             "created_at": order.created_at.isoformat(),
             "cancelled_at": now.isoformat(),
             "source_app": "orders",

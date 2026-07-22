@@ -160,6 +160,8 @@ class SettingsService:
         "orders.max_search_query_length": 200,
         "orders.max_price_override_cents": 50000000,
         "orders.max_price_override_multiplier": 10,
+        "orders.card_timeout_hours": 24,
+        "orders.bank_transfer_timeout_hours": 72,
         # ── Service Provisioning ────────────────────────────────────────
         "provisioning.auto_setup_enabled": True,
         "provisioning.setup_timeout_minutes": 30,
