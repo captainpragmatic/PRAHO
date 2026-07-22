@@ -451,3 +451,29 @@ class AuditFailureResilienceTests(TransactionTestCase):
             SystemSetting.objects.filter(key="audit.compliant_score_threshold").exists()
 
         self.assertTrue(result.is_ok())
+
+
+class DeferredLogCaptureTests(TestCase):
+    """The on_commit success log must report the value of the save that
+    scheduled it, not whatever the instance holds at commit time (two saves of
+    one key in a single transaction previously both logged the final value)."""
+
+    def test_each_save_logs_its_own_value(self) -> None:
+        setting = SettingsService.update_setting("audit.compliant_score_threshold", 41).unwrap()
+
+        with (
+            self.assertLogs("apps.settings.signals", level="INFO") as logs,
+            self.captureOnCommitCallbacks(execute=True),
+            transaction.atomic(),
+        ):
+            # The SAME instance saved twice in one transaction: a closure
+            # over the instance would log the final value for BOTH lines.
+            setting.value = 43
+            setting.save()
+            setting.value = 44
+            setting.save()
+
+        setting_lines = [line for line in logs.output if "audit.compliant_score_threshold" in line]
+        self.assertEqual(len(setting_lines), 2)
+        self.assertIn("43", setting_lines[0], "the first save must log ITS value, not the final one")
+        self.assertIn("44", setting_lines[1])
