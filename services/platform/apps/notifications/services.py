@@ -434,6 +434,12 @@ class EmailService:
                     body_html=body_html,
                     from_email=from_email,
                     reply_to=reply_to,
+                    cc=cc,
+                    bcc=bcc,
+                    attachments=attachments,
+                    tags=tags,
+                    track_opens=track_opens,
+                    track_clicks=track_clicks,
                     customer=customer,
                     sent_by=sent_by,
                     template_key=template_key,
@@ -717,12 +723,23 @@ class EmailService:
         body_html: str | None = None,
         from_email: str | None = None,
         reply_to: str | None = None,
+        cc: list[str] | None = None,
+        bcc: list[str] | None = None,
+        attachments: list[tuple[str, bytes, str]] | None = None,
+        tags: dict[str, str] | None = None,
+        track_opens: bool = True,
+        track_clicks: bool = True,
         customer: Customer | None = None,
         sent_by: User | None = None,
         template_key: str | None = None,
         priority: str = "normal",
     ) -> EmailResult:
-        """Queue email for later retry due to rate limiting."""
+        """Queue email for later retry due to rate limiting.
+
+        Forwards the FULL email — cc, bcc, attachments, tags, tracking — to the
+        queued task; the rate-limited path previously degraded the email
+        silently (#228 sibling).
+        """
         from_email = from_email or settings.DEFAULT_FROM_EMAIL
         provider = getattr(settings, "EMAIL_PROVIDER", "smtp")
 
@@ -758,6 +775,12 @@ class EmailService:
                 body_html=body_html,
                 from_email=from_email,
                 reply_to=reply_to,
+                cc=cc,
+                bcc=bcc,
+                attachments=attachments,
+                tags=tags,
+                track_opens=track_opens,
+                track_clicks=track_clicks,
                 schedule=timedelta(seconds=retry_delay),
                 task_name=f"email_retry:{template_key or 'direct'}:{to[0][:10]}",
             )
