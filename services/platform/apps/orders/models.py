@@ -477,9 +477,10 @@ class Order(ConcurrentTransitionMixin, models.Model):
         """
         totals = calculate_document_totals(list(self.items.all()), self.discount_cents)
         self.subtotal_cents = totals.subtotal_cents
+        self.discount_cents = min(self.discount_cents, totals.subtotal_cents)
         self.tax_cents = totals.tax_cents
         self.total_cents = totals.total_cents
-        self.save(update_fields=["subtotal_cents", "tax_cents", "total_cents"])
+        self.save(update_fields=["subtotal_cents", "discount_cents", "tax_cents", "total_cents"])
 
     # =========================================================================
     # FSM TRANSITIONS — Phase A rename (Order-Proforma-Invoice lifecycle)

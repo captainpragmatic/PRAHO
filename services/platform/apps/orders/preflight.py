@@ -12,6 +12,8 @@ import logging
 
 from django.utils.translation import gettext_lazy as _
 
+from apps.common.financial_arithmetic import calculate_document_totals
+
 from .models import Order
 from .vat_rules import CustomerVATInfo, OrderVATCalculator
 
@@ -22,12 +24,13 @@ class OrderPreflightValidationService:
     """Run comprehensive checks before an order becomes payable."""
 
     @staticmethod
-    def validate(  # noqa: C901, PLR0912  # Complexity: multi-step business logic
+    def validate(  # noqa: C901, PLR0912, PLR0915  # Cohesive validation pipeline; steps share accumulated findings
         order: Order,
     ) -> tuple[list[str], list[str]]:  # Complexity: order processing pipeline  # Complexity: multi-step business logic
         """Return (errors, warnings) for the given order."""
         errors: list[str] = []
         warnings: list[str] = []
+        order_items = tuple(order.items.select_related("product"))
 
         # 1) Customer and billing snapshot completeness
         billing = order.billing_address or {}
@@ -59,7 +62,7 @@ class OrderPreflightValidationService:
             warnings.append(str(_("Romanian business without VAT number - verify tax profile")))
 
         # 2) Pricing snapshots and product state per item
-        for item in order.items.select_related("product"):
+        for item in order_items:
             # Non-negative prices
             if int(item.unit_price_cents) < 0 or int(item.setup_cents) < 0:
                 errors.append(str(_("Item '{}': invalid pricing (negative values)").format(item.product_name)))
@@ -92,12 +95,20 @@ class OrderPreflightValidationService:
             else:
                 # Compute subtotal from items (unit * qty + setup)
                 subtotal_cents = 0
-                for item in order.items.all():
+                for item in order_items:
                     subtotal_cents += (int(item.unit_price_cents) * int(item.quantity)) + int(item.setup_cents)
 
+            discount_cents = int(getattr(order, "discount_cents", 0) or 0)
+            if discount_cents < 0:
+                raise ValueError("Order discount cannot be negative")
+            if discount_cents and order_items:
+                calculate_document_totals(order_items, discount_cents)
+            taxable_subtotal_cents = max(0, int(subtotal_cents) - discount_cents)
+
             # Reuse pre-computed VAT result when available (avoids duplicate calculation — B5/BUG-10)
-            if hasattr(order, "_preflight_vat_result"):
-                vat_result = order._preflight_vat_result
+            cached_vat_result = getattr(order, "_preflight_vat_result", None)
+            if cached_vat_result is not None and int(cached_vat_result.subtotal_cents) == taxable_subtotal_cents:
+                vat_result = cached_vat_result
             else:
                 customer_vat_info: CustomerVATInfo = {
                     "country": country,
@@ -107,7 +118,7 @@ class OrderPreflightValidationService:
                     "order_id": str(order.id),
                 }
                 vat_result = OrderVATCalculator.calculate_vat(
-                    subtotal_cents=subtotal_cents, customer_info=customer_vat_info
+                    subtotal_cents=taxable_subtotal_cents, customer_info=customer_vat_info
                 )
 
             expected_tax_cents = int(vat_result.vat_cents)
@@ -125,10 +136,13 @@ class OrderPreflightValidationService:
                 errors.append(
                     str(
                         _("Total mismatch: order={}¢ vs computed={}¢ (subtotal={}¢)").format(
-                            order.total_cents, expected_total_cents, subtotal_cents
+                            order.total_cents, expected_total_cents, taxable_subtotal_cents
                         )
                     )
                 )
+        except ValueError as exc:
+            logger.warning("Order totals validation rejected order %s: %s", order.id, exc)
+            errors.append(str(exc))
         except Exception as exc:
             logger.exception("Order VAT validation failed: %s", exc)
             errors.append(str(_("Failed to validate VAT and totals")))

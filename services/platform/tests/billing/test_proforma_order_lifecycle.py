@@ -314,6 +314,55 @@ class TestCreateFromOrder(ProformaLifecycleTestBase):
             "Proforma total should be less than full price — discount must be applied",
         )
 
+    def test_discounted_order_and_proforma_share_net_vat_and_payable_total(self):
+        """#203: the payable amount cannot change at the order/proforma boundary."""
+        from apps.billing.proforma_service import ProformaService  # noqa: PLC0415
+
+        order = self._create_order_with_items()
+        order.discount_cents = 2000
+        order.save(update_fields=["discount_cents", "updated_at"])
+        order.calculate_totals()
+        force_status(order, "awaiting_payment")
+
+        proforma = ProformaService.create_from_order(order).unwrap()
+
+        self.assertEqual(order.subtotal_cents, 10000)
+        self.assertEqual(order.discount_cents, 2000)
+        self.assertEqual(order.tax_cents, 1680)
+        self.assertEqual(order.total_cents, 9680)
+        self.assertEqual(proforma.subtotal_cents, 8000)
+        self.assertEqual(proforma.discount_cents, 2000)
+        self.assertEqual(proforma.tax_cents, 1680)
+        self.assertEqual(proforma.total_cents, 9680)
+        self.assertEqual(
+            sum(line.subtotal_cents for line in proforma.lines.all()) - proforma.discount_cents,
+            proforma.subtotal_cents,
+        )
+
+    def test_discounted_mixed_rate_order_cannot_issue_proforma(self):
+        """#203: proforma issuance fails closed without per-rate discount allocation."""
+        from apps.billing.proforma_service import ProformaService  # noqa: PLC0415
+
+        order = self._create_order_with_items()
+        OrderItem.objects.create(
+            order=order,
+            product=self.product,
+            product_name="Reduced-rate service",
+            product_type=self.product.product_type,
+            quantity=1,
+            unit_price_cents=5000,
+            tax_rate=Decimal("0.1100"),
+        )
+        order.discount_cents = 1000
+        order.save(update_fields=["discount_cents", "updated_at"])
+        force_status(order, "awaiting_payment")
+
+        result = ProformaService.create_from_order(order)
+
+        self.assertTrue(result.is_err())
+        self.assertIn("single tax rate", result.unwrap_err())
+        self.assertFalse(ProformaInvoice.objects.filter(orders=order).exists())
+
     def test_proforma_stores_document_discount(self):
         """#188: create_from_order stores order.discount_cents on the proforma so the
         e-Factura can emit a BG-20 document allowance."""

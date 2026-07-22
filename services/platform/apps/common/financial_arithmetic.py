@@ -11,19 +11,23 @@ All monetary values are integers in cents to avoid floating-point issues (ADR-00
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from decimal import ROUND_HALF_EVEN, Decimal
 from typing import Protocol
 
 
 class HasLineTotals(Protocol):
-    """Protocol for line items with subtotal_cents and tax_cents."""
+    """Protocol for line items with taxable amounts and their explicit VAT rate."""
 
     @property
     def subtotal_cents(self) -> int: ...
 
     @property
     def tax_cents(self) -> int: ...
+
+    @property
+    def tax_rate(self) -> Decimal: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,21 +65,39 @@ def calculate_line_totals(subtotal_cents: int, tax_rate: Decimal | str) -> LineT
 
 
 def calculate_document_totals(
-    items: list[HasLineTotals],
+    items: Sequence[HasLineTotals],
     discount_cents: int = 0,
 ) -> DocumentTotals:
-    """Calculate totals for a document (order, invoice, proforma) from its line items.
+    """Calculate document totals, applying an allowance before VAT.
+
+    Undiscounted documents preserve the persisted per-line tax sum. Discounted
+    orders currently support one explicit tax rate, matching PRAHO's order VAT
+    scenario and the single BG-20 allowance emitted downstream. Mixed-rate
+    allowances must fail closed until their per-category ledger is represented.
 
     Args:
         items: Line items implementing HasLineTotals protocol.
         discount_cents: Document-level discount in cents (default 0).
 
     Returns:
-        DocumentTotals with subtotal_cents, tax_cents, and total_cents (floored at 0).
+        Gross subtotal, tax on the allowance-reduced base, and payable total.
     """
+    if discount_cents < 0:
+        raise ValueError("Document discount cannot be negative")
+
     subtotal_cents = sum(item.subtotal_cents for item in items)
-    tax_cents = sum(item.tax_cents for item in items)
-    total_cents = max(0, subtotal_cents + tax_cents - discount_cents)
+    effective_discount_cents = min(discount_cents, subtotal_cents)
+
+    if effective_discount_cents:
+        tax_rates = {Decimal(str(item.tax_rate)) for item in items}
+        if len(tax_rates) != 1:
+            raise ValueError("A discounted document must use a single tax rate")
+        taxable_subtotal_cents = subtotal_cents - effective_discount_cents
+        tax_cents = calculate_line_totals(taxable_subtotal_cents, tax_rates.pop()).tax_cents
+    else:
+        tax_cents = sum(item.tax_cents for item in items)
+
+    total_cents = subtotal_cents - effective_discount_cents + tax_cents
     return DocumentTotals(
         subtotal_cents=subtotal_cents,
         tax_cents=tax_cents,
