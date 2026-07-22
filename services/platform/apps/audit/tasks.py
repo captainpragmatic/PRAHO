@@ -20,7 +20,6 @@ from pathlib import Path
 from typing import Any
 
 from django.conf import settings
-from django.core.cache import cache
 from django.utils import timezone
 
 from apps.audit.models import AuditAlert, AuditIntegrityCheck
@@ -29,20 +28,8 @@ from apps.common.types import Ok
 
 logger = logging.getLogger(__name__)
 
-# Cache keys for file integrity monitoring
-FILE_HASH_CACHE_PREFIX = "file_integrity_hash:"
-_DEFAULT_FILE_HASH_CACHE_TIMEOUT = 86400 * 30  # 30 days
-FILE_HASH_CACHE_TIMEOUT = _DEFAULT_FILE_HASH_CACHE_TIMEOUT
-
 _DEFAULT_MAX_FILES_DISPLAYED = 5
 MAX_FILES_DISPLAYED = _DEFAULT_MAX_FILES_DISPLAYED
-
-
-def get_file_hash_cache_timeout() -> int:
-    """Get file hash cache timeout from SettingsService (runtime)."""
-    from apps.settings.services import SettingsService  # noqa: PLC0415  # Deferred: avoids circular import
-
-    return SettingsService.get_integer_setting("audit.file_hash_cache_timeout", _DEFAULT_FILE_HASH_CACHE_TIMEOUT)
 
 
 def get_max_files_displayed() -> int:
@@ -153,16 +140,21 @@ def run_integrity_check(
 
 def run_file_integrity_check() -> dict[str, Any]:
     """
-    Monitor critical application files for unauthorized changes.
+    Monitor critical application files for unauthorized changes (W10).
 
-    Tracks hashes of:
-    - Configuration files
-    - Security-related Python modules
-    - Static assets integrity
+    Diffs the durable FileIntegrityBaseline set against disk BOTH ways:
+    - changed file -> compromised + alert
+    - file on disk but not in baseline -> warning (new file)
+    - baseline entry with no file on disk -> warning (missing file)
+    - hashing failure -> error
+    - empty baseline set -> error (nothing was verified; run --rebaseline first)
 
-    Returns:
-        Dictionary with file integrity results
+    Baselines NEVER mutate during a check - only an explicit rebaseline (deploy
+    runbook step) rewrites them. A cache flush used to silently re-baseline every
+    file, which is exactly when an attacker would want it to.
     """
+    from apps.audit.models import FileIntegrityBaseline  # noqa: PLC0415  # Deferred: avoids circular import
+
     results: dict[str, Any] = {
         "task": "run_file_integrity_check",
         "started_at": timezone.now().isoformat(),
@@ -170,11 +162,77 @@ def run_file_integrity_check() -> dict[str, Any]:
         "changes_detected": [],
         "new_files": [],
         "missing_files": [],
+        "hash_errors": [],
         "status": "healthy",
     }
 
-    # Define critical files to monitor
+    baselines = dict(FileIntegrityBaseline.objects.values_list("path", "sha256"))
+    if not baselines:
+        results["status"] = "error"
+        results["error"] = "No file-integrity baselines exist - run 'run_integrity_check --rebaseline' after deploy"
+        logger.error("🔥 [File Integrity] No baselines - nothing was verified")
+        _log_file_integrity_check(results)
+        return results
+
     base_dir = Path(settings.BASE_DIR)
+    seen_paths = set()
+
+    for file_path in _monitored_files(base_dir):
+        results["files_checked"] += 1
+        relative_path = str(file_path.relative_to(base_dir))
+        seen_paths.add(relative_path)
+
+        try:
+            current_hash = _calculate_file_hash(file_path)
+        except Exception as e:
+            results["hash_errors"].append({"path": relative_path, "error": str(e)})
+            results["status"] = "error"
+            logger.error(f"🔥 [File Integrity] Error hashing {relative_path}: {e}")
+            continue
+
+        baseline_hash = baselines.get(relative_path)
+        if baseline_hash is None:
+            results["new_files"].append(
+                {
+                    "path": relative_path,
+                    "hash": current_hash[:16] + "...",
+                    "detected_at": timezone.now().isoformat(),
+                }
+            )
+            if results["status"] == "healthy":
+                results["status"] = "warning"
+            logger.warning(f"⚠️ [File Integrity] Unbaselined file: {relative_path}")
+        elif baseline_hash != current_hash:
+            results["changes_detected"].append(
+                {
+                    "path": relative_path,
+                    "previous_hash": baseline_hash[:16] + "...",
+                    "current_hash": current_hash[:16] + "...",
+                    "detected_at": timezone.now().isoformat(),
+                }
+            )
+            if results["status"] != "error":
+                results["status"] = "compromised"
+            logger.warning(f"⚠️ [File Integrity] Change detected: {relative_path}")
+
+    for missing_path in sorted(set(baselines) - seen_paths):
+        results["missing_files"].append({"path": missing_path, "detected_at": timezone.now().isoformat()})
+        if results["status"] == "healthy":
+            results["status"] = "warning"
+        logger.warning(f"⚠️ [File Integrity] Baselined file missing from disk: {missing_path}")
+
+    results["completed_at"] = timezone.now().isoformat()
+
+    if results["changes_detected"]:
+        _create_file_integrity_alert(results)
+
+    _log_file_integrity_check(results)
+
+    return results
+
+
+def _monitored_files(base_dir: Path) -> list[Path]:
+    """Resolve the critical-file patterns to real files on disk."""
     critical_patterns = [
         # Configuration files
         "config/settings/*.py",
@@ -193,64 +251,99 @@ def run_file_integrity_check() -> dict[str, Any]:
         "apps/users/views.py",
         "apps/users/models.py",
     ]
-
+    files: list[Path] = []
     for pattern in critical_patterns:
-        for file_path in base_dir.glob(pattern):
-            if not file_path.is_file():
-                continue
+        files.extend(fp for fp in base_dir.glob(pattern) if fp.is_file())
+    return files
 
-            results["files_checked"] += 1
-            relative_path = str(file_path.relative_to(base_dir))
 
-            try:
-                # Calculate current hash
-                current_hash = _calculate_file_hash(file_path)
+def rebaseline_file_integrity() -> dict[str, Any]:
+    """Atomically replace the whole baseline set with the current disk state.
 
-                # Get stored hash
-                cache_key = f"{FILE_HASH_CACHE_PREFIX}{relative_path}"
-                stored_hash = cache.get(cache_key)
+    Deploy runbook step: run after every release (and after provisioning
+    AUDIT_INTEGRITY_SECRET) so legitimate code changes do not alarm forever.
+    """
+    from django.db import transaction  # noqa: PLC0415
 
-                if stored_hash is None:
-                    # First time seeing this file
-                    cache.set(cache_key, current_hash, FILE_HASH_CACHE_TIMEOUT)
-                    results["new_files"].append(
-                        {
-                            "path": relative_path,
-                            "hash": current_hash[:16] + "...",
-                            "detected_at": timezone.now().isoformat(),
-                        }
-                    )
-                    logger.info(f"[File Integrity] New file tracked: {relative_path}")
+    from apps.audit.models import FileIntegrityBaseline  # noqa: PLC0415  # Deferred: avoids circular import
 
-                elif stored_hash != current_hash:
-                    # File has changed
-                    results["changes_detected"].append(
-                        {
-                            "path": relative_path,
-                            "previous_hash": stored_hash[:16] + "...",
-                            "current_hash": current_hash[:16] + "...",
-                            "detected_at": timezone.now().isoformat(),
-                        }
-                    )
-                    results["status"] = "warning"
+    base_dir = Path(settings.BASE_DIR)
+    entries = []
+    errors = []
+    for file_path in _monitored_files(base_dir):
+        relative_path = str(file_path.relative_to(base_dir))
+        try:
+            entries.append(FileIntegrityBaseline(path=relative_path, sha256=_calculate_file_hash(file_path)))
+        except Exception as e:
+            errors.append({"path": relative_path, "error": str(e)})
 
-                    # Update stored hash
-                    cache.set(cache_key, current_hash, FILE_HASH_CACHE_TIMEOUT)
+    with transaction.atomic():
+        FileIntegrityBaseline.objects.all().delete()
+        FileIntegrityBaseline.objects.bulk_create(entries)
 
-                    logger.warning(f"[File Integrity] Change detected: {relative_path}")
+    logger.info(f"✅ [File Integrity] Rebaselined {len(entries)} files ({len(errors)} errors)")
+    return {"baselined": len(entries), "errors": errors, "rebaselined_at": timezone.now().isoformat()}
 
-            except Exception as e:
-                logger.error(f"[File Integrity] Error checking {relative_path}: {e}")
 
-    results["completed_at"] = timezone.now().isoformat()
+def run_retention_policies() -> dict[str, Any]:
+    """Scheduled entry point for retention enforcement (weekly)."""
+    from apps.audit.services import AuditRetentionService  # noqa: PLC0415  # Deferred: avoids circular import
+    from apps.common.types import Ok  # noqa: PLC0415
 
-    # Create integrity check record
-    if results["changes_detected"]:
-        _create_file_integrity_alert(results)
+    result = AuditRetentionService.apply_retention_policies()
+    if isinstance(result, Ok):
+        return result.value
+    logger.error(f"🔥 [Retention Task] {result.error}")
+    return {"error": result.error}
 
-    # Log file integrity check to audit
-    _log_file_integrity_check(results)
 
+def setup_audit_scheduled_tasks() -> dict[str, str]:
+    """Register the audit module's schedules (M6: the single scheduling vehicle).
+
+    Integrity daily, retention weekly, integrity-check cleanup weekly, file
+    integrity daily. Also retires schedules registered under earlier names so
+    the same function never runs twice on overlapping cadences.
+    """
+    from django_q.models import Schedule  # noqa: PLC0415  # Deferred: optional dependency
+
+    # Names from the pre-consolidation era (run_integrity_check --schedule)
+    Schedule.objects.filter(
+        name__in=[
+            "audit_integrity_hourly",
+            "audit_integrity_daily",
+            "audit_integrity_weekly",
+            "file_integrity_monitoring",
+        ]
+    ).delete()
+
+    desired: dict[str, dict[str, Any]] = {
+        "audit-integrity-daily": {
+            "func": "apps.audit.tasks.run_integrity_check",
+            "args": "('all', '24h')",
+            "schedule_type": Schedule.DAILY,
+            "repeats": -1,
+        },
+        "audit-retention-weekly": {
+            "func": "apps.audit.tasks.run_retention_policies",
+            "schedule_type": Schedule.WEEKLY,
+            "repeats": -1,
+        },
+        "audit-integrity-cleanup-weekly": {
+            "func": "apps.audit.tasks.cleanup_old_integrity_checks",
+            "schedule_type": Schedule.WEEKLY,
+            "repeats": -1,
+        },
+        "audit-file-integrity-daily": {
+            "func": "apps.audit.tasks.run_file_integrity_check",
+            "schedule_type": Schedule.DAILY,
+            "repeats": -1,
+        },
+    }
+
+    results: dict[str, str] = {}
+    for name, defaults in desired.items():
+        _, created = Schedule.objects.get_or_create(name=name, defaults=defaults)
+        results[name] = "created" if created else "already_exists"
     return results
 
 

@@ -691,8 +691,9 @@ class AuditIntegrityCheck(models.Model):
 class AuditRetentionPolicy(models.Model):
     """Define retention policies for different types of audit events."""
 
+    # "archive" was removed deliberately: it only flipped a metadata flag while claiming
+    # cold storage, a silent no-op. Real cold-storage archive is future work (ADR-0043).
     RETENTION_ACTION_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
-        ("archive", "Archive to Cold Storage"),
         ("delete", "Permanent Deletion"),
         ("anonymize", "Anonymize Sensitive Data"),
     )
@@ -707,7 +708,7 @@ class AuditRetentionPolicy(models.Model):
 
     # Retention rules
     retention_days = models.PositiveIntegerField()  # Days to keep in active storage
-    action = models.CharField(max_length=20, choices=RETENTION_ACTION_CHOICES, default="archive")
+    action = models.CharField(max_length=20, choices=RETENTION_ACTION_CHOICES, default="anonymize")
 
     # Compliance requirements
     legal_basis = models.CharField(max_length=200, blank=True)  # Romanian law reference
@@ -726,9 +727,63 @@ class AuditRetentionPolicy(models.Model):
             models.Index(fields=["category", "severity"]),
             models.Index(fields=["is_active", "retention_days"]),
         )
+        constraints: ClassVar[tuple[models.BaseConstraint, ...]] = (
+            # A mandatory policy that is inactive would be a legal requirement quietly
+            # switched off - the DB refuses the state outright (W6).
+            models.CheckConstraint(
+                condition=models.Q(is_mandatory=False) | models.Q(is_active=True),
+                name="audit_retention_mandatory_implies_active",
+            ),
+            # Exactly one active policy may claim a (category, severity) slot; the seeder
+            # resolves conflicts deterministically instead of racing at apply time.
+            models.UniqueConstraint(
+                fields=("category", "severity"),
+                condition=models.Q(is_active=True),
+                name="audit_retention_one_active_per_scope",
+            ),
+        )
 
     def __str__(self) -> str:
         return f"{self.name} ({self.retention_days} days)"
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        if not self._state.adding and not _mutation_allowed():
+            original = type(self)._default_manager.filter(pk=self.pk).first()
+            if original is not None and original.is_mandatory and (not self.is_active or not self.is_mandatory):
+                raise AuditImmutabilityError(
+                    "Mandatory retention policies cannot be deactivated or demoted outside "
+                    "the audit_mutation_allowed() escape hatch"
+                )
+        super().save(*args, **kwargs)
+
+    def delete(self, *args: Any, **kwargs: Any) -> tuple[int, dict[str, int]]:
+        if self.is_mandatory and not _mutation_allowed():
+            raise AuditImmutabilityError(
+                "Mandatory retention policies cannot be deleted outside the audit_mutation_allowed() escape hatch"
+            )
+        return super().delete(*args, **kwargs)
+
+
+class FileIntegrityBaseline(models.Model):
+    """Durable baseline hash for one monitored file (W10).
+
+    Replaces the evictable-cache baselines: a cache flush used to silently re-baseline
+    every monitored file, which is exactly when an attacker would want it to. Rows are
+    written ONLY by an explicit rebaseline (deploy runbook step), never during checks.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    path = models.CharField(max_length=500, unique=True)  # relative to BASE_DIR
+    sha256 = models.CharField(max_length=64)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "audit_file_integrity_baselines"
+        ordering: ClassVar[tuple[str, ...]] = ("path",)
+
+    def __str__(self) -> str:
+        return f"{self.path} ({self.sha256[:12]}...)"
 
 
 class AuditSearchQuery(models.Model):

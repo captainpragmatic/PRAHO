@@ -3738,16 +3738,38 @@ class AuditIntegrityService:
 
 class AuditRetentionService:
     """
-    📅 Audit log retention management service
+    📅 Audit log retention management service (ADR-0043)
 
-    Features:
-    - Configurable retention periods by event category/severity
-    - Automatic archiving of old audit logs
-    - Romanian legal compliance (gdpr.data_retention_years, default 7 years)
-    - GDPR right-to-erasure implementation
-    - Bulk deletion with approval workflows
-    - Archive storage and retrieval system
+    Policy-driven (AuditRetentionPolicy rows), with two enforced invariants:
+    - financial evidence survives at least the Romanian legal minimum regardless of
+      what a policy says (effective cutoff = max(policy retention, legal minimum));
+    - anonymization is a full identity scrub with an explicit post-state, re-stamped
+      with a fresh v2 MAC, idempotent across runs.
     """
+
+    # Legea contabilității: financial/tax records keep 10 years. A policy may demand
+    # MORE retention, never less - the guard applies max(policy, this) per event.
+    FINANCIAL_RETENTION_MINIMUM_DAYS = 3653
+
+    # Content types whose object_id identifies a person; anonymization replaces the
+    # reference with a sentinel so the row stops pointing at the data subject.
+    PERSON_BEARING_MODELS: ClassVar[frozenset[tuple[str, str]]] = frozenset(
+        {
+            ("users", "user"),
+            ("users", "userprofile"),
+            ("customers", "customer"),
+            ("customers", "customertaxprofile"),
+            ("customers", "customerbillingprofile"),
+            ("customers", "customeraddress"),
+        }
+    )
+    ANONYMIZED_OBJECT_SENTINEL = "anonymized"
+
+    # Metadata keys that survive anonymization. An ALLOWLIST by design: a blocklist
+    # scrub silently retains any identifying key nobody thought to enumerate.
+    ANONYMIZE_METADATA_ALLOWLIST: ClassVar[frozenset[str]] = frozenset(
+        {"category", "severity", "source_app", "is_sensitive", "requires_review"}
+    )
 
     @classmethod
     def apply_retention_policies(cls) -> Result[dict[str, Any], str]:
@@ -3758,7 +3780,6 @@ class AuditRetentionService:
             results: dict[str, Any] = {
                 "policies_applied": 0,
                 "events_processed": 0,
-                "events_archived": 0,
                 "events_deleted": 0,
                 "events_anonymized": 0,
                 "errors": [],
@@ -3769,7 +3790,6 @@ class AuditRetentionService:
                     result = cls._apply_single_policy(policy)
                     results["policies_applied"] += 1
                     results["events_processed"] += result.get("processed", 0)
-                    results["events_archived"] += result.get("archived", 0)
                     results["events_deleted"] += result.get("deleted", 0)
                     results["events_anonymized"] += result.get("anonymized", 0)
 
@@ -3800,122 +3820,195 @@ class AuditRetentionService:
     @classmethod
     @transaction.atomic
     def _apply_single_policy(cls, policy: AuditRetentionPolicy) -> dict[str, int]:
-        """Apply a single retention policy."""
+        """Apply a single retention policy. The action EXECUTES after retention_days;
+        mandatory policies protect against weaker replacement, not against running."""
 
-        # Calculate cutoff date
         cutoff_date = timezone.now() - timedelta(days=policy.retention_days)
 
-        # Build query for events to process
         queryset = AuditEvent.objects.filter(timestamp__lt=cutoff_date, category=policy.category)
-
-        # Add severity filter if specified
         if policy.severity:
             queryset = queryset.filter(severity=policy.severity)
+        if policy.action == "anonymize":
+            # Idempotency (W4): already-anonymized rows never re-enter the pipeline,
+            # so a second weekly run performs zero mutations and emits no event.
+            # has_key, not __anonymized=True: SQL three-valued logic makes exclude()
+            # on a missing JSON key drop exactly the un-anonymized rows we want.
+            queryset = queryset.exclude(metadata__has_key="anonymized")
 
         events_to_process = list(queryset)
-        result = {"processed": len(events_to_process), "archived": 0, "deleted": 0, "anonymized": 0}
+        result = {"processed": len(events_to_process), "deleted": 0, "anonymized": 0}
 
         if not events_to_process:
             return result
 
-        # Apply retention action
-        if policy.action == "archive":
-            result["archived"] = cls._archive_events(events_to_process)
-        elif policy.action == "delete":
+        if policy.action == "delete":
             result["deleted"] = cls._delete_events(events_to_process, policy)
         elif policy.action == "anonymize":
             result["anonymized"] = cls._anonymize_events(events_to_process)
+        else:
+            # A stale row with a removed action (e.g. "archive") must surface as a
+            # per-policy error, never quietly process zero events.
+            raise ValueError(f"Unknown retention action {policy.action!r} on policy {policy.name}")
 
         return result
 
     @classmethod
-    def _archive_events(cls, events: list[AuditEvent]) -> int:
-        """Archive events to cold storage (placeholder - implement with actual storage)."""
-
-        # For now, mark events as archived in metadata
-        # In production, this would move data to cold storage (S3, etc.)
-        archived_count = 0
-
-        with audit_mutation_allowed("retention_archive"):
-            for event in events:
-                event.metadata["archived"] = True
-                event.metadata["archived_at"] = timezone.now().isoformat()
-                event.save(update_fields=["metadata"])
-                archived_count += 1
-
-        return archived_count
-
-    @classmethod
     def _delete_events(cls, events: list[AuditEvent], policy: AuditRetentionPolicy) -> int:
-        """Delete events (only if not mandatory retention)."""
+        """Delete events, holding financial evidence to the legal minimum (W5).
 
-        # Additional safety check for mandatory retention
-        if policy.is_mandatory:
-            logger.warning(f"⚠️ [Retention] Attempted deletion with mandatory policy: {policy.name}")
-            return 0
+        Effective cutoff per financial event = max(policy retention, legal minimum):
+        financial records OLDER than the minimum are deletable; younger are protected
+        even when the policy window has passed.
+        """
+        financial_cutoff = timezone.now() - timedelta(
+            days=max(policy.retention_days, cls.FINANCIAL_RETENTION_MINIMUM_DAYS)
+        )
 
-        # Check Romanian compliance (gdpr.data_retention_years, default 7 years)
-        financial_events = [e for e in events if cls._is_financial_record(e)]
-        if financial_events:
+        deletable_ids = []
+        blocked = 0
+        for event in events:
+            if cls._is_financial_record(event) and event.timestamp >= financial_cutoff:
+                blocked += 1
+                continue
+            deletable_ids.append(event.id)
+
+        if blocked:
             logger.warning(
-                f"⚠️ [Retention] Blocked deletion of {len(financial_events)} financial records (Romanian compliance)"
+                f"⚠️ [Retention] Held {blocked} financial records under the "
+                f"{cls.FINANCIAL_RETENTION_MINIMUM_DAYS}-day legal minimum (policy {policy.name})"
             )
-            # Remove financial events from deletion list
-            events = [e for e in events if not cls._is_financial_record(e)]
 
         deleted_count = 0
-        event_ids = [e.id for e in events]
-
-        if event_ids:
+        if deletable_ids:
             with audit_mutation_allowed("retention_delete"):
-                deleted_count = AuditEvent.objects.filter(id__in=event_ids).delete()[0]
+                deleted_count = AuditEvent.objects.filter(id__in=deletable_ids).delete()[0]
 
         return deleted_count
 
     @classmethod
     def _anonymize_events(cls, events: list[AuditEvent]) -> int:
-        """Anonymize sensitive data in events."""
+        """Anonymize events to an explicit post-state, then re-stamp (Codex C3).
 
+        Post-anonymization invariant: user cleared, request/session identifiers
+        cleared, network identity cleared, person-bearing object references replaced
+        with a sentinel, free-text evidence stubbed, metadata reduced to the
+        allowlist. The row is then re-stamped with a fresh v2 MAC (metadata is
+        MAC-covered, so the re-stamp is what keeps the row verifiable).
+        """
         anonymized_count = 0
+        anonymized_at = timezone.now().isoformat()
 
-        for event in events:
-            # Anonymize IP addresses
-            if event.ip_address:
-                event.ip_address = "0.0.0.0"
+        with audit_mutation_allowed("retention_anonymize"):
+            for event in events:
+                metadata = event.metadata if isinstance(event.metadata, dict) else {}
+                if metadata.get("anonymized"):
+                    continue
 
-            # Anonymize user agent
-            if event.user_agent:
-                event.user_agent = "Anonymized"
+                event.user = None
+                event.ip_address = None
+                event.user_agent = ""
+                event.request_id = ""
+                event.session_key = ""
+                if (event.content_type.app_label, event.content_type.model) in cls.PERSON_BEARING_MODELS:
+                    event.object_id = cls.ANONYMIZED_OBJECT_SENTINEL
+                event.description = "Anonymized under retention policy"
+                event.old_values = {"anonymized": True}
+                event.new_values = {"anonymized": True}
+                event.metadata = {
+                    **{k: v for k, v in metadata.items() if k in cls.ANONYMIZE_METADATA_ALLOWLIST},
+                    "anonymized": True,
+                    "anonymized_at": anonymized_at,
+                }
+                # Fresh v2 stamp over the anonymized content - without it the scrub
+                # itself would read as tampering on the next verification sweep.
+                event.metadata.update(AuditIntegrityService.integrity_stamp_marker(event))
+                event.save()
+                anonymized_count += 1
 
-            # Remove sensitive metadata
-            if event.metadata:
-                sensitive_keys = ["user_email", "phone", "real_name", "address"]
-                for key in sensitive_keys:
-                    if key in event.metadata:
-                        event.metadata[key] = "Anonymized"
-
-            event.metadata["anonymized"] = True
-            event.metadata["anonymized_at"] = timezone.now().isoformat()
-            with audit_mutation_allowed("retention_anonymize"):
-                event.save(update_fields=["ip_address", "user_agent", "metadata"])
-            anonymized_count += 1
+        if anonymized_count:
+            AuditService.log_simple_event(
+                event_type="data_anonymization_completed",
+                user=None,
+                content_object=None,
+                description=f"Retention anonymization completed: {anonymized_count} events scrubbed",
+                actor_type="system",
+                metadata={"anonymized_count": anonymized_count, "category": "privacy"},
+            )
 
         return anonymized_count
 
     @classmethod
     def _is_financial_record(cls, event: AuditEvent) -> bool:
-        """Check if event is a financial record requiring extended retention (see gdpr.data_retention_years)."""
+        """Financial evidence requiring the legal retention minimum.
 
-        financial_actions = [
+        Explicit actions and document prefixes only - the old category catch-all
+        made EVERY business_operation event "financial" and blocked all deletion.
+        """
+        financial_actions = {
             "invoice_created",
             "invoice_paid",
+            "invoice_issued",
+            "invoice_voided",
             "payment_succeeded",
-            "proforma_created",
-            "credit_added",
+            "payment_failed",
+            "payment_refunded",
             "vat_calculation_applied",
-        ]
+        }
+        financial_prefixes = ("invoice_", "payment_", "proforma_", "credit_", "efactura_")
 
-        return event.action in financial_actions or event.category == "business_operation"
+        return event.action in financial_actions or event.action.startswith(financial_prefixes)
+
+    @classmethod
+    def get_retention_status(cls) -> dict[str, Any]:
+        """Retention status per active policy plus partition health (M4).
+
+        Preserves the historical caller contract: entries keyed by scope with
+        retention_days / action / events_past_retention / compliance_status, and
+        table:* entries for partition status.
+        """
+        from apps.common.partitioning import EventPartitionService  # noqa: PLC0415  # ADR-0007
+
+        status: dict[str, Any] = {}
+
+        for policy in AuditRetentionPolicy.objects.filter(is_active=True):
+            cutoff_date = timezone.now() - timedelta(days=policy.retention_days)
+            scope = AuditEvent.objects.filter(category=policy.category)
+            past = scope.filter(timestamp__lt=cutoff_date)
+            if policy.severity:
+                scope = scope.filter(severity=policy.severity)
+                past = past.filter(severity=policy.severity)
+            if policy.action == "anonymize":
+                past = past.exclude(metadata__has_key="anonymized")
+
+            key = f"{policy.category}/{policy.severity}" if policy.severity else policy.category
+            past_count = past.count()
+            status[key] = {
+                "policy": policy.name,
+                "retention_days": policy.retention_days,
+                "action": policy.action,
+                "legal_basis": policy.legal_basis,
+                "is_mandatory": policy.is_mandatory,
+                "total_events": scope.count(),
+                "events_past_retention": past_count,
+                "compliance_status": "compliant" if past_count == 0 else "action_required",
+            }
+
+        partition_status = EventPartitionService().get_status()
+        # "partitioned" / "unsupported_backend" → compliant (working as designed)
+        _compliant_statuses = {"partitioned", "unsupported_backend"}
+        for table_name, table_details in partition_status.items():
+            raw_status = table_details.get("status", "unknown")
+            status[f"table:{table_name}"] = {
+                "retention_days": table_details.get("archive_retention_days"),
+                "action": "partition_rotation",
+                "legal_basis": "Operational partition retention",
+                "total_partitions": len(table_details.get("attached_partitions", [])),
+                "partitions_past_retention": 0,
+                "compliance_status": "compliant" if raw_status in _compliant_statuses else "action_required",
+                "partition_status": table_details,
+            }
+
+        return status
 
 
 # ===============================================================================

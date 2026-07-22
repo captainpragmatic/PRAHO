@@ -826,16 +826,21 @@ class TestAuditRetentionService(TestCase):
             AuditEvent.objects.filter(pk=event.pk).update(timestamp=timezone.now() - timedelta(days=days_ago))
         return event
 
-    def test_apply_retention_policies_archive(self):
-        _policy = AuditRetentionPolicy.objects.create(
-            name="archive_auth", category="authentication", retention_days=30, action="archive", is_active=True
+    def test_apply_retention_policies_unknown_action_is_per_policy_error(self):
+        """A stale action value (e.g. the removed "archive") must be a loud per-policy
+        error, never a silent zero-action pass."""
+        policy = AuditRetentionPolicy.objects.create(
+            name="stale_archive", category="authentication", retention_days=30, action="anonymize", is_active=True
         )
+        # Bypass model validation the way a legacy row would: straight column write.
+        AuditRetentionPolicy.objects.filter(pk=policy.pk).update(action="archive")
         self._create_old_event(days_ago=60)
+
         result = AuditRetentionService.apply_retention_policies()
         self.assertTrue(result.is_ok())
         data = result.unwrap()
-        self.assertEqual(data["policies_applied"], 1)
-        self.assertGreaterEqual(data["events_archived"], 1)
+        self.assertEqual(len(data["errors"]), 1)
+        self.assertIn("archive", data["errors"][0])
 
     def test_apply_retention_policies_delete_non_mandatory(self):
         _policy = AuditRetentionPolicy.objects.create(
@@ -852,7 +857,10 @@ class TestAuditRetentionService(TestCase):
         data = result.unwrap()
         self.assertGreaterEqual(data["events_deleted"], 1)
 
-    def test_apply_retention_policies_delete_mandatory_blocked(self):
+    def test_mandatory_policy_executes_after_retention(self):
+        """W6 semantics flip: is_mandatory protects the POLICY from weaker replacement;
+        it does not stop the action from running. The old code returned 0 for mandatory
+        delete policies, which meant the legally mandated cleanup never happened."""
         _policy = AuditRetentionPolicy.objects.create(
             name="delete_mandatory",
             category="authentication",
@@ -865,27 +873,62 @@ class TestAuditRetentionService(TestCase):
         result = AuditRetentionService.apply_retention_policies()
         self.assertTrue(result.is_ok())
         data = result.unwrap()
-        self.assertEqual(data["events_deleted"], 0)
+        self.assertEqual(data["events_deleted"], 1)
 
     def test_apply_retention_policies_anonymize(self):
         _policy = AuditRetentionPolicy.objects.create(
             name="anonymize_auth", category="authentication", retention_days=30, action="anonymize", is_active=True
         )
-        event = self._create_old_event(days_ago=60, ip_address="1.2.3.4", user_agent="TestBrowser")
+        event = self._create_old_event(
+            days_ago=60, ip_address="1.2.3.4", user_agent="TestBrowser", request_id="req-1", session_key="sess-1"
+        )
         result = AuditRetentionService.apply_retention_policies()
         self.assertTrue(result.is_ok())
         data = result.unwrap()
         self.assertGreaterEqual(data["events_anonymized"], 1)
         event.refresh_from_db()
-        self.assertEqual(event.ip_address, "0.0.0.0")
+        # Explicit post-anonymization invariant (Codex C3)
+        self.assertIsNone(event.user_id)
+        self.assertIsNone(event.ip_address)
+        self.assertEqual(event.user_agent, "")
+        self.assertEqual(event.request_id, "")
+        self.assertEqual(event.session_key, "")
+        self.assertEqual(event.object_id, "anonymized")  # User content type is person-bearing
+        self.assertEqual(event.description, "Anonymized under retention policy")
+        self.assertTrue(event.metadata["anonymized"])
+
+    def test_anonymized_row_restamped_and_verifies(self):
+        """The scrub itself must not read as tampering on the next sweep."""
+        _policy = AuditRetentionPolicy.objects.create(
+            name="anonymize_auth", category="authentication", retention_days=30, action="anonymize", is_active=True
+        )
+        event = self._create_old_event(days_ago=60, ip_address="1.2.3.4")
+        AuditRetentionService.apply_retention_policies()
+        event.refresh_from_db()
+        self.assertEqual(AuditIntegrityService._verify_hash_chain([event]), [])
+
+    def test_anonymize_is_idempotent(self):
+        """W4: a second run performs zero mutations and emits no completion event."""
+        _policy = AuditRetentionPolicy.objects.create(
+            name="anonymize_auth", category="authentication", retention_days=30, action="anonymize", is_active=True
+        )
+        self._create_old_event(days_ago=60)
+        first = AuditRetentionService.apply_retention_policies().unwrap()
+        self.assertEqual(first["events_anonymized"], 1)
+
+        completion_count = AuditEvent.objects.filter(action="data_anonymization_completed").count()
+        second = AuditRetentionService.apply_retention_policies().unwrap()
+        self.assertEqual(second["events_anonymized"], 0)
+        self.assertEqual(second["events_processed"], 0)
+        self.assertEqual(AuditEvent.objects.filter(action="data_anonymization_completed").count(), completion_count)
 
     def test_apply_retention_policies_with_severity_filter(self):
         _policy = AuditRetentionPolicy.objects.create(
-            name="archive_low",
+            name="delete_low",
             category="authentication",
             severity="low",
             retention_days=30,
-            action="archive",
+            action="delete",
             is_active=True,
         )
         self._create_old_event(days_ago=60, severity="low")
@@ -893,14 +936,14 @@ class TestAuditRetentionService(TestCase):
         result = AuditRetentionService.apply_retention_policies()
         self.assertTrue(result.is_ok())
         data = result.unwrap()
-        self.assertEqual(data["events_archived"], 1)
+        self.assertEqual(data["events_deleted"], 1)
 
     def test_apply_retention_policies_no_events_to_process(self):
         AuditRetentionPolicy.objects.create(
             name="empty_policy",
             category="authentication",
             retention_days=30,
-            action="archive",
+            action="anonymize",
             is_active=True,
         )
         result = AuditRetentionService.apply_retention_policies()
@@ -908,8 +951,8 @@ class TestAuditRetentionService(TestCase):
         data = result.unwrap()
         self.assertEqual(data["events_processed"], 0)
 
-    def test_delete_events_financial_records_blocked(self):
-        """Financial records should be excluded from deletion."""
+    def test_delete_events_financial_records_blocked_inside_legal_minimum(self):
+        """Financial evidence younger than the legal minimum survives the policy window."""
         _policy = AuditRetentionPolicy.objects.create(
             name="delete_biz",
             category="business_operation",
@@ -924,7 +967,28 @@ class TestAuditRetentionService(TestCase):
         data = result.unwrap()
         self.assertEqual(data["events_deleted"], 0)
 
+    def test_delete_events_financial_records_deletable_past_legal_minimum(self):
+        """W5 boundary: financial evidence OLDER than the legal minimum is deletable -
+        the guard is an effective cutoff, not an immortality clause."""
+        _policy = AuditRetentionPolicy.objects.create(
+            name="delete_biz",
+            category="business_operation",
+            retention_days=30,
+            action="delete",
+            is_active=True,
+        )
+        self._create_old_event(
+            days_ago=AuditRetentionService.FINANCIAL_RETENTION_MINIMUM_DAYS + 30,
+            action="invoice_created",
+            category="business_operation",
+        )
+        result = AuditRetentionService.apply_retention_policies()
+        data = result.unwrap()
+        self.assertEqual(data["events_deleted"], 1)
+
     def test_anonymize_events_with_sensitive_metadata(self):
+        """Metadata survives by ALLOWLIST only - unenumerated keys are dropped, not
+        scrubbed in place (a blocklist retains anything nobody thought of)."""
         _policy = AuditRetentionPolicy.objects.create(
             name="anon_test",
             category="authentication",
@@ -934,14 +998,16 @@ class TestAuditRetentionService(TestCase):
         )
         event = self._create_old_event(
             days_ago=60,
-            metadata={"user_email": "test@example.com", "phone": "123", "normal_key": "keep"},
+            metadata={"user_email": "test@example.com", "phone": "123", "source_app": "users"},
         )
         result = AuditRetentionService.apply_retention_policies()
         self.assertTrue(result.is_ok())
         event.refresh_from_db()
-        self.assertEqual(event.metadata["user_email"], "Anonymized")
-        self.assertEqual(event.metadata["phone"], "Anonymized")
+        self.assertNotIn("user_email", event.metadata)
+        self.assertNotIn("phone", event.metadata)
+        self.assertEqual(event.metadata["source_app"], "users")  # allowlisted operational key
         self.assertTrue(event.metadata["anonymized"])
+        self.assertNotIn("test@example.com", str(event.metadata))
 
     def test_is_financial_record(self):
         ct = ContentType.objects.get_for_model(User)
@@ -949,8 +1015,12 @@ class TestAuditRetentionService(TestCase):
         self.assertTrue(AuditRetentionService._is_financial_record(event))
         event2 = AuditEvent(action="login_success", category="authentication", content_type=ct, object_id="1")
         self.assertFalse(AuditRetentionService._is_financial_record(event2))
+        # The category catch-all is gone: business_operation alone is not financial
         event3 = AuditEvent(action="random_action", category="business_operation", content_type=ct, object_id="1")
-        self.assertTrue(AuditRetentionService._is_financial_record(event3))
+        self.assertFalse(AuditRetentionService._is_financial_record(event3))
+        # Document prefixes are
+        event4 = AuditEvent(action="efactura_submitted", category="integration", content_type=ct, object_id="1")
+        self.assertTrue(AuditRetentionService._is_financial_record(event4))
 
 
 class TestAuditSearchService(TestCase):

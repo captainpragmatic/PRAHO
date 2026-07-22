@@ -127,18 +127,6 @@ CATALOG: tuple[SettingDef, ...] = (
         validation={"min": 0},
     ),
     SettingDef(
-        key="audit.file_hash_cache_timeout",
-        data_type="integer",
-        default=2592000,
-        group="advanced",
-        section=_("Audit"),
-        label=_("File hash cache timeout"),
-        unit="seconds",
-        input_kind="number",
-        advanced=True,
-        validation={"min": 0},
-    ),
-    SettingDef(
         key="audit.high_complexity_filter_threshold",
         data_type="integer",
         default=5,

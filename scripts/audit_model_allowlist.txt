@@ -17,6 +17,7 @@
 audit.AuditEvent                # the audit trail itself
 audit.AuditAlert                # audit subsystem alert record
 audit.AuditIntegrityCheck       # audit chain integrity verification
+audit.FileIntegrityBaseline     # file-integrity baseline hashes (audit infrastructure)
 audit.AuditRetentionPolicy      # audit data retention configuration
 audit.AuditSearchQuery          # audit search log
 audit.ComplianceLog             # compliance audit trail
