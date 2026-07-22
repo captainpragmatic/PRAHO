@@ -13,7 +13,7 @@ from django.test import TestCase
 from django.utils import timezone
 
 from apps.billing.models import Currency, Invoice, Payment, ProformaInvoice, Refund, RefundStatusHistory
-from apps.billing.refund_service import Err, RefundData, RefundService
+from apps.billing.refund_service import Err, RefundConvergenceService, RefundData, RefundService
 from apps.common.types import Retriability
 from apps.customers.models import Customer
 from apps.orders.models import Order
@@ -81,7 +81,7 @@ class RefundGatewayIntegrityTests(TestCase):
             "notes": "Issue #212 regression",
         }
 
-    def test_invoice_gateway_failure_rolls_back_every_local_refund_change(self) -> None:
+    def test_invoice_gateway_failure_preserves_durable_refund_intent(self) -> None:
         invoice = self._make_invoice()
         payment = self._make_payment(invoice, transaction_id="pi_gateway_failure")
         gateway = MagicMock()
@@ -109,7 +109,11 @@ class RefundGatewayIntegrityTests(TestCase):
         self.assertEqual(invoice.status, "paid")
         self.assertEqual(payment.status, "succeeded")
         self.assertEqual(payment.meta, {})
-        self.assertFalse(Refund.objects.filter(invoice=invoice).exists())
+        refund = Refund.objects.get(invoice=invoice, payment=payment)
+        self.assertEqual(refund.status, "pending")
+        self.assertEqual(refund.amount_cents, 10_000)
+        self.assertEqual(refund.gateway_refund_id, "")
+        self.assertEqual(gateway.refund_payment.call_args.kwargs["idempotency_key"], f"refund:{refund.id}")
 
     def test_immediate_terminal_gateway_failure_is_persisted_but_reported_as_failure(self) -> None:
         invoice = self._make_invoice()
@@ -205,7 +209,18 @@ class RefundGatewayIntegrityTests(TestCase):
     def test_direct_order_orchestration_locks_linked_invoice_before_gateway(self) -> None:
         invoice = self._make_invoice()
         order = self._make_order(invoice)
-        self._make_payment(invoice, transaction_id="pi_direct_order_lock")
+        payment = self._make_payment(invoice, transaction_id="pi_direct_order_lock")
+        refund_intent = Refund.objects.create(
+            customer=self.customer,
+            order=order,
+            payment=payment,
+            amount_cents=10_000,
+            currency=self.currency,
+            original_amount_cents=10_000,
+            refund_type="full",
+            status="pending",
+            gateway_refund_id="",
+        )
         order._state.fields_cache.pop("invoice", None)
         gateway = MagicMock()
         gateway_response = {
@@ -227,8 +242,9 @@ class RefundGatewayIntegrityTests(TestCase):
             gateway.refund_payment.side_effect = refund_after_invoice_lock
             result = RefundService._process_bidirectional_refund(
                 order=order,
-                refund_id=uuid.uuid4(),
+                refund_id=refund_intent.id,
                 refund_data=self._refund_data(),
+                reserved_refund=refund_intent,
             )
 
         self.assertTrue(result.is_ok(), result.unwrap_err() if result.is_err() else "")
@@ -926,7 +942,7 @@ class RefundGatewayIntegrityTests(TestCase):
                 reference_number="REF-GATEWAY-TWO",
             )
 
-    def test_failed_refund_gets_a_new_idempotency_key_but_unknown_outcome_reuses_key(self) -> None:
+    def test_gateway_refund_requires_and_reuses_durable_intent_identity(self) -> None:
         invoice = self._make_invoice()
         payment = self._make_payment(invoice, transaction_id="pi_retry_keys")
         gateway = MagicMock()
@@ -937,29 +953,175 @@ class RefundGatewayIntegrityTests(TestCase):
             "status": "pending",
             "error": None,
         }
+        first_intent = Refund.objects.create(
+            customer=self.customer,
+            invoice=invoice,
+            payment=payment,
+            amount_cents=1_000,
+            currency=self.currency,
+            original_amount_cents=payment.amount_cents,
+            refund_type="partial",
+            status="pending",
+            gateway_refund_id="",
+            reference_number="REF-FIRST-INTENT",
+        )
+        second_intent = Refund.objects.create(
+            customer=self.customer,
+            invoice=invoice,
+            payment=payment,
+            amount_cents=1_000,
+            currency=self.currency,
+            original_amount_cents=payment.amount_cents,
+            refund_type="partial",
+            status="pending",
+            gateway_refund_id="",
+            reference_number="REF-SECOND-INTENT",
+        )
+        unpersisted_intent_id = uuid.uuid4()
 
         with patch("apps.billing.refund_service.PaymentGatewayFactory.create_gateway", return_value=gateway):
-            first = RefundService._execute_gateway_refund(payment, 1_000, 1_000)
-            unknown_retry = RefundService._execute_gateway_refund(payment, 1_000, 1_000)
+            missing_intent = RefundService._execute_gateway_refund(payment, 1_000, 1_000)
+            unpersisted_intent = RefundService._execute_gateway_refund(
+                payment, 1_000, 1_000, refund_intent_id=unpersisted_intent_id
+            )
+            first = RefundService._execute_gateway_refund(
+                payment, 1_000, 1_000, refund_intent_id=first_intent.id
+            )
+            unknown_retry = RefundService._execute_gateway_refund(
+                payment, 1_000, 1_000, refund_intent_id=first_intent.id
+            )
+            distinct_refund = RefundService._execute_gateway_refund(
+                payment, 1_000, 1_000, refund_intent_id=second_intent.id
+            )
+
+        self.assertTrue(missing_intent.is_err())
+        self.assertIn("durable Refund intent", missing_intent.unwrap_err())
+        self.assertTrue(unpersisted_intent.is_err())
+        self.assertIn("durable Refund intent", unpersisted_intent.unwrap_err())
+        self.assertTrue(first.is_ok())
+        self.assertTrue(unknown_retry.is_ok())
+        self.assertTrue(distinct_refund.is_ok())
+        keys = [call.kwargs["idempotency_key"] for call in gateway.refund_payment.call_args_list]
+        self.assertEqual(
+            keys,
+            [f"refund:{first_intent.id}", f"refund:{first_intent.id}", f"refund:{second_intent.id}"],
+        )
+
+    def test_retry_after_local_rollback_reuses_durable_intent_despite_intervening_refund(self) -> None:
+        """A response-loss retry must keep A's identity after refund B changes the ledger."""
+        invoice = self._make_invoice(total_cents=10_000)
+        payment = self._make_payment(invoice, transaction_id="pi_durable_refund_intent")
+        gateway = MagicMock()
+        gateway.refund_payment.return_value = {
+            "success": True,
+            "refund_id": "re_durable_refund_a",
+            "amount_refunded_cents": 5_000,
+            "status": "succeeded",
+            "error": None,
+        }
+        partial: RefundData = {
+            "refund_type": "partial",
+            "amount_cents": 5_000,
+            "reason": "customer_request",
+        }
+
+        with patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway", return_value=gateway):
+            with patch.object(RefundService, "_advance_refund_status", return_value=Err("local settlement failed")):
+                first = RefundService.refund_invoice(invoice.id, dict(partial))
+
+            self.assertTrue(first.is_err())
+            intent = Refund.objects.get(
+                invoice=invoice,
+                payment=payment,
+                amount_cents=5_000,
+                gateway_refund_id="",
+                status="pending",
+            )
+
             Refund.objects.create(
                 customer=self.customer,
                 invoice=invoice,
                 payment=payment,
-                amount_cents=1_000,
+                amount_cents=2_500,
                 currency=self.currency,
                 original_amount_cents=payment.amount_cents,
-                status="failed",
-                gateway_refund_id="re_failed_attempt",
-                reference_number="REF-FAILED-ATTEMPT",
+                status="completed",
+                gateway_refund_id="re_intervening_refund_b",
+                reference_number="REF-INTERVENING-B",
             )
-            terminal_retry = RefundService._execute_gateway_refund(payment, 1_000, 1_000)
 
-        self.assertTrue(first.is_ok())
-        self.assertTrue(unknown_retry.is_ok())
-        self.assertTrue(terminal_retry.is_ok())
+            retried = RefundService.refund_invoice(invoice.id, dict(partial))
+
+        self.assertTrue(retried.is_ok(), retried.unwrap_err() if retried.is_err() else "")
+        self.assertEqual(Refund.objects.get(gateway_refund_id="re_durable_refund_a").id, intent.id)
         keys = [call.kwargs["idempotency_key"] for call in gateway.refund_payment.call_args_list]
-        self.assertEqual(keys[0], keys[1])
-        self.assertNotEqual(keys[1], keys[2])
+        self.assertEqual(keys, [f"refund:{intent.id}", f"refund:{intent.id}"])
+
+    def test_gateway_discovery_attaches_response_loss_fact_to_durable_intent(self) -> None:
+        invoice = self._make_invoice(total_cents=10_000)
+        payment = self._make_payment(invoice, transaction_id="pi_discovered_intent")
+        intent = Refund.objects.create(
+            customer=self.customer,
+            invoice=invoice,
+            payment=payment,
+            amount_cents=4_000,
+            currency=self.currency,
+            original_amount_cents=payment.amount_cents,
+            refund_type="partial",
+            status="pending",
+            gateway_refund_id="",
+            reference_number="REF-DISCOVERED-INTENT",
+        )
+
+        result = RefundConvergenceService.converge_gateway_refund(
+            {
+                "refund_id": "re_discovered_intent",
+                "payment_intent_id": "pi_discovered_intent",
+                "amount_cents": 4_000,
+                "currency": "ron",
+                "status": "succeeded",
+            }
+        )
+
+        self.assertTrue(result.is_ok(), result.unwrap_err() if result.is_err() else "")
+        recovered = result.unwrap()
+        self.assertIsNotNone(recovered)
+        self.assertEqual(recovered.id, intent.id)
+        self.assertEqual(Refund.objects.filter(payment=payment).count(), 1)
+        intent.refresh_from_db()
+        payment.refresh_from_db()
+        invoice.refresh_from_db()
+        self.assertEqual(intent.gateway_refund_id, "re_discovered_intent")
+        self.assertEqual(intent.status, "completed")
+        self.assertEqual(payment.status, "partially_refunded")
+        self.assertEqual(invoice.status, "partially_refunded")
+
+    def test_stale_unknown_outcome_fails_closed_before_gateway_retry(self) -> None:
+        invoice = self._make_invoice(total_cents=10_000)
+        payment = self._make_payment(invoice, transaction_id="pi_stale_intent")
+        intent = Refund.objects.create(
+            customer=self.customer,
+            invoice=invoice,
+            payment=payment,
+            amount_cents=4_000,
+            currency=self.currency,
+            original_amount_cents=payment.amount_cents,
+            refund_type="partial",
+            status="pending",
+            gateway_refund_id="",
+            reference_number="REF-STALE-INTENT",
+        )
+        Refund.objects.filter(pk=intent.pk).update(created_at=timezone.now() - timedelta(hours=24))
+
+        with patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway") as gateway_factory:
+            result = RefundService.refund_invoice(
+                invoice.id,
+                {"refund_type": "partial", "amount_cents": 4_000, "reason": "customer_request"},
+            )
+
+        self.assertTrue(result.is_err())
+        self.assertIn("manual reconciliation", result.unwrap_err().lower())
+        gateway_factory.assert_not_called()
 
     def test_refund_eligibility_counts_only_live_or_completed_attempts(self) -> None:
         invoice = self._make_invoice()
@@ -1163,14 +1325,7 @@ class RefundGatewayIntegrityTests(TestCase):
         self.assertFalse(Refund.objects.filter(invoice=invoice).exists())
 
     def test_post_gateway_exception_rolls_back_payment_and_invoice_status(self) -> None:
-        """A crash after gateway success must not commit a half-written refund.
-
-        The payment status update fires a post_save signal that cascades the
-        invoice to refunded BEFORE the Refund row exists. If a later step dies
-        with a non-database exception, the swallowed-exception Err return must
-        mark the surrounding transaction for rollback — otherwise both
-        documents commit as refunded with zero Refund rows and no audit trail.
-        """
+        """A settlement crash preserves the command but rolls back projections."""
         invoice = self._make_invoice()
         payment = self._make_payment(invoice, transaction_id="pi_post_gateway_crash")
         gateway = MagicMock()
@@ -1184,7 +1339,7 @@ class RefundGatewayIntegrityTests(TestCase):
 
         with (
             patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway", return_value=gateway),
-            patch.object(RefundService, "_create_refund_record", side_effect=RuntimeError("post-gateway crash")),
+            patch.object(RefundService, "_advance_refund_status", side_effect=RuntimeError("post-gateway crash")),
         ):
             result = RefundService.refund_invoice(invoice.id, self._refund_data())
 
@@ -1194,7 +1349,10 @@ class RefundGatewayIntegrityTests(TestCase):
         self.assertEqual(invoice.status, "paid")
         self.assertEqual(payment.status, "succeeded")
         self.assertEqual(payment.meta, {})
-        self.assertFalse(Refund.objects.exists())
+        intent = Refund.objects.get(invoice=invoice, payment=payment)
+        self.assertEqual(intent.status, "pending")
+        self.assertEqual(intent.gateway_refund_id, "")
+        self.assertEqual(gateway.refund_payment.call_args.kwargs["idempotency_key"], f"refund:{intent.id}")
 
     def test_post_gateway_err_return_rolls_back_payment_and_invoice_status(self) -> None:
         """An Err RETURN (not an exception) after gateway success must also roll back."""
@@ -1211,9 +1369,7 @@ class RefundGatewayIntegrityTests(TestCase):
 
         with (
             patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway", return_value=gateway),
-            patch.object(
-                RefundService, "_create_refund_record", return_value=Err("simulated record failure")
-            ),
+            patch.object(RefundService, "_advance_refund_status", return_value=Err("simulated status failure")),
         ):
             result = RefundService.refund_invoice(invoice.id, self._refund_data())
 
@@ -1222,7 +1378,9 @@ class RefundGatewayIntegrityTests(TestCase):
         payment.refresh_from_db()
         self.assertEqual(invoice.status, "paid")
         self.assertEqual(payment.status, "succeeded")
-        self.assertFalse(Refund.objects.exists())
+        intent = Refund.objects.get(invoice=invoice, payment=payment)
+        self.assertEqual(intent.status, "pending")
+        self.assertEqual(intent.gateway_refund_id, "")
 
 
 class RefundConvergenceHardeningTests(TestCase):

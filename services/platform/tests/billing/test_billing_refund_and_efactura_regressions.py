@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 from django.test import TestCase
 
 from apps.billing.gateways.stripe_gateway import StripeGateway
-from apps.billing.models import Payment
+from apps.billing.models import Payment, Refund
 from apps.billing.proforma_service import generate_proforma_pdf, send_proforma_email
 from apps.billing.refund_service import RefundService
 from tests.factories.billing_factories import create_currency, create_customer, create_invoice
@@ -360,6 +360,19 @@ class GatewayFirstRefundTests(TestCase):
         self.currency = create_currency("USD")
         self.invoice = create_invoice(self.customer, self.currency, number="INV-REFUND-001", total_cents=5000)
 
+    def _create_refund_intent(self, payment: Payment, amount_cents: int = 5000) -> Refund:
+        return Refund.objects.create(
+            customer=self.customer,
+            invoice=self.invoice,
+            payment=payment,
+            amount_cents=amount_cents,
+            currency=self.currency,
+            original_amount_cents=payment.amount_cents,
+            refund_type="full" if amount_cents == payment.amount_cents else "partial",
+            status="pending",
+            gateway_refund_id="",
+        )
+
     def test_gateway_failure_does_not_update_payment_status(self):
         """When Stripe refund fails, payment.status must remain 'succeeded'."""
         payment = Payment.objects.create(
@@ -371,6 +384,7 @@ class GatewayFirstRefundTests(TestCase):
             payment_method="stripe",
             gateway_txn_id="pi_test_fail",
         )
+        refund_intent = self._create_refund_intent(payment)
 
         mock_gateway = MagicMock()
         mock_gateway.refund_payment.return_value = {
@@ -385,7 +399,7 @@ class GatewayFirstRefundTests(TestCase):
             patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway", return_value=mock_gateway),
             patch("apps.common.validators.log_security_event"),
         ):
-            result = RefundService._process_payment_refund(payment)
+            result = RefundService._process_payment_refund(payment, refund_intent_id=refund_intent.id)
 
         self.assertTrue(result.is_err())
         payment.refresh_from_db()
@@ -402,6 +416,7 @@ class GatewayFirstRefundTests(TestCase):
             payment_method="stripe",
             gateway_txn_id="pi_test_success",
         )
+        refund_intent = self._create_refund_intent(payment)
 
         mock_gateway = MagicMock()
         mock_gateway.refund_payment.return_value = {
@@ -420,6 +435,7 @@ class GatewayFirstRefundTests(TestCase):
                 payment,
                 refund_data={"refund_type": "full", "amount_cents": 5000},
                 refund_amount_cents=5000,
+                refund_intent_id=refund_intent.id,
             )
 
         self.assertTrue(result.is_ok())

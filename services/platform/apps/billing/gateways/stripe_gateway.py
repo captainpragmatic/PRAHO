@@ -419,8 +419,8 @@ class StripeGateway(BasePaymentGateway):
                 params["amount"] = amount_cents
             if idempotency_key:
                 # A retry after an uncertain outcome (timeout) must replay the SAME refund,
-                # not create a second one — the key is derived from the payment's ledger
-                # state, so it is stable across retries of the same logical refund.
+                # not create a second one. RefundService derives this from the committed
+                # PRAHO Refund UUID, independent of later ledger changes.
                 params["idempotency_key"] = idempotency_key
 
             refund = self._stripe.Refund.create(**params)
