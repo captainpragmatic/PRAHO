@@ -1,9 +1,13 @@
 {% load i18n %}
-<aside class="col-span-12 lg:col-span-3">
+<aside class="col-span-12 lg:col-span-3" x-data="{ navOpen: window.innerWidth >= 1024 }">
   <div class="bg-slate-800 rounded-lg border border-slate-700 p-4 lg:sticky lg:top-4">
+    <button type="button" class="lg:hidden w-full flex items-center justify-between text-sm font-medium text-white mb-3" @click="navOpen = !navOpen">
+      <span>☰ {% trans "Settings menu" %}</span>
+      <span x-text="navOpen ? '−' : '+'"></span>
+    </button>
     <input type="search" name="q" placeholder="{% trans 'Search settings…' %}" autocomplete="off" class="w-full px-3 py-2 mb-4 bg-slate-900/60 border border-slate-600 rounded-lg text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500" hx-get="{% url 'settings:search' %}" hx-trigger="input changed delay:300ms" hx-target="#search-results" hx-swap="innerHTML">
     <div id="search-results"></div>
-    <nav class="space-y-5">
+    <nav class="space-y-5" x-show="navOpen" x-cloak x-transition.opacity>
       {% for zone in nav_zones %}
       <div>
         <p class="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">{{ zone.label }}</p>

@@ -40,6 +40,19 @@
       discard() { window.location.reload() },
       async save() {
         if (!this.dirtyCount || this.saving) return
+        const criticalDirty = Array.from(
+          this.$root.querySelectorAll('[data-setting-field][data-critical]')
+        ).filter(el => this.dirty[el.dataset.key]).map(el => el.dataset.key)
+        if (criticalDirty.length && !this._criticalOk) {
+          this.$dispatch('confirm-dangerous-action', {
+            title: '{% trans "Critical setting change" %}',
+            message: '{% trans "You are changing critical platform behaviour:" %}<br><code>' + criticalDirty.join('</code><br><code>') + '</code>',
+            confirmText: 'CONFIRM',
+            action: () => { this._criticalOk = true; this.save() },
+          })
+          return
+        }
+        this._criticalOk = false
         this.saving = true
         this.errors = {}
         this.conflicts = []
@@ -71,7 +84,7 @@
             })
             this.dirty = {}
             this.reason = ''
-            window.showToast && window.showToast('{% trans "Settings saved" %}', 'success')
+            window.showToast && window.showToast('success', '{% trans "Settings saved" %}')
           } else if (response.status === 409) {
             this.conflicts = data.conflicts || []
           } else {

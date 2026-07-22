@@ -489,7 +489,7 @@ SEARCH_MAX_RESULTS = 30
 INTEGRATION_SOURCE_NOTES: dict[str, Any] = {
     "virtualmin": _(
         "Server credentials are vault-managed per server (ADR-0033) and are not edited here — "
-        "these settings tune connection and provisioning behaviour."
+        "these settings tune connection and provisioning behavior."
     ),
     "efactura": _(
         "Values here are database settings with a deployment fallback: when a key has no row, "
@@ -533,7 +533,11 @@ def _group_sections(slug: str) -> list[dict[str, Any]]:
     sections: dict[str, list[dict[str, Any]]] = {}
     for definition in definitions:
         sections.setdefault(str(definition.section), []).append(_row_context(definition, rows.get(definition.key)))
-    return [{"title": title, "rows": rows_} for title, rows_ in sections.items()]
+    # Explicit section order first (GroupDef.section_order), then any remainder alphabetically
+    preferred = [str(title) for title in GROUPS_BY_SLUG[slug].section_order]
+    ordered = [title for title in preferred if title in sections]
+    ordered += sorted(title for title in sections if title not in ordered)
+    return [{"title": title, "rows": sections[title]} for title in ordered]
 
 
 def _sidebar_context(active_slug: str | None, user: Any) -> dict[str, Any]:
@@ -769,15 +773,33 @@ def settings_search(request: HttpRequest) -> HttpResponse:
     results: list[dict[str, Any]] = []
     if len(query) >= SEARCH_MIN_QUERY_LENGTH:
         show_admin = _is_admin(request.user)
+        scored: list[tuple[int, int, int, str, dict[str, Any]]] = []
         for definition in CATALOG:
             group = GROUPS_BY_SLUG[definition.group]
             if group.zone != ZONE_BUSINESS and not show_admin:
                 continue
-            haystack = f"{definition.key} {definition.label} {definition.help_text}".lower()
-            if query in haystack:
-                results.append({"definition": definition, "group": group})
-            if len(results) >= SEARCH_MAX_RESULTS:
-                break
+            label = str(definition.label).lower()
+            if query in label:
+                field_rank = 0
+            elif query in definition.key:
+                field_rank = 1
+            elif query in str(definition.help_text).lower():
+                field_rank = 2
+            else:
+                continue
+            # Operator-policy results outrank tuning internals
+            zone_rank = 0 if group.zone == ZONE_BUSINESS else 1
+            scored.append(
+                (
+                    zone_rank,
+                    int(definition.advanced),
+                    field_rank,
+                    definition.key,
+                    {"definition": definition, "group": group},
+                )
+            )
+        scored.sort(key=lambda item: item[:4])
+        results = [entry for *_ranks, entry in scored[:SEARCH_MAX_RESULTS]]
     return render(request, "settings/partials/search_results.html", {"results": results, "query": query})
 
 
