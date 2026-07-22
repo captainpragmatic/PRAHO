@@ -484,18 +484,15 @@ def services_dashboard_widget(request: HttpRequest) -> HttpResponse:
 
 
 def service_plans(request: HttpRequest) -> HttpResponse:
-    # Check authentication via Django session
-    customer_id = getattr(request, "customer_id", None) or request.session.get("customer_id")
-    if not customer_id:
+    """View available hosting plans for customer (for new orders or upgrades)."""
+    customer_id, user_id = _get_session_identity(request)
+    if not customer_id or not user_id:
         return redirect("/login/")
-    """
-    View available hosting plans for customer (for new orders or upgrades).
-    """
-    customer_id = getattr(request, "customer_id", None) or request.session.get("customer_id")
+
     service_type = request.GET.get("type", "")
 
     try:
-        plans = services_api.get_available_plans(int(customer_id or 0), service_type)
+        plans = services_api.get_available_plans(customer_id, service_type)
 
         context = {
             "plans": plans,
