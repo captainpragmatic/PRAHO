@@ -116,6 +116,8 @@ def run_integrity_check(
 
                 if check.status == "compromised":
                     results["status"] = "compromised"
+                elif check.status == "error" and results["status"] != "compromised":
+                    results["status"] = "error"
                 elif check.status == "warning" and results["status"] == "healthy":
                     results["status"] = "warning"
 
@@ -415,7 +417,7 @@ def cleanup_old_integrity_checks(days: int = 90) -> dict[str, Any]:
     return {
         "deleted_count": deleted_count,
         "cutoff_date": cutoff.isoformat(),
-        "kept_statuses": ["warning", "compromised"],
+        "kept_statuses": ["warning", "compromised", "error"],
     }
 
 
@@ -448,7 +450,7 @@ def generate_integrity_report(period_days: int = 30) -> dict[str, Any]:
     total_issues = 0
 
     # Aggregate by status
-    for status in ["healthy", "warning", "compromised"]:
+    for status in ["healthy", "warning", "compromised", "error"]:
         count = checks.filter(status=status).count()
         by_status[status] = count
 
@@ -467,7 +469,7 @@ def generate_integrity_report(period_days: int = 30) -> dict[str, Any]:
     report["total_issues"] = total_issues
 
     # Get critical events
-    critical_checks = checks.filter(status="compromised").order_by("-checked_at")[:10]
+    critical_checks = checks.filter(status__in=["compromised", "error"]).order_by("-checked_at")[:10]
     report["critical_events"] = [
         {
             "id": str(c.id),

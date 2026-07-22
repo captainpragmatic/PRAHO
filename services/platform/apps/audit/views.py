@@ -1165,10 +1165,11 @@ def integrity_dashboard(request: HttpRequest) -> HttpResponse:
     healthy_checks = AuditIntegrityCheck.objects.filter(status="healthy").count()
     warning_checks = AuditIntegrityCheck.objects.filter(status="warning").count()
     compromised_checks = AuditIntegrityCheck.objects.filter(status="compromised").count()
+    error_checks = AuditIntegrityCheck.objects.filter(status="error").count()
 
     # Recent issues
     recent_issues = AuditIntegrityCheck.objects.filter(
-        status__in=["warning", "compromised"], checked_at__gte=timezone.now() - timedelta(days=7)
+        status__in=["warning", "compromised", "error"], checked_at__gte=timezone.now() - timedelta(days=7)
     ).order_by("-checked_at")[:10]
 
     context = {
@@ -1178,6 +1179,7 @@ def integrity_dashboard(request: HttpRequest) -> HttpResponse:
             "healthy_checks": healthy_checks,
             "warning_checks": warning_checks,
             "compromised_checks": compromised_checks,
+            "error_checks": error_checks,
             "health_percentage": (healthy_checks / total_checks * 100) if total_checks > 0 else 0,
         },
         "recent_issues": recent_issues,

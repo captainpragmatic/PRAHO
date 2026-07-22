@@ -17,19 +17,13 @@ from unittest.mock import patch
 
 import pyotp
 from django.contrib.auth import get_user_model
-
 from django.contrib.sessions.backends.db import SessionStore
 from django.core.cache import cache
 from django.test import RequestFactory, TestCase, override_settings
 from django.utils import timezone
-
-from config.settings.test import LOCMEM_TEST_CACHE
-
 from django.utils.functional import Promise
 
-from apps.audit.models import AuditEvent
-from apps.common.request_ip import get_safe_client_ip
-from apps.users.views import TWO_FACTOR_STEPS
+from apps.audit.models import AuditEvent, audit_mutation_allowed
 from apps.users.mfa import (
     BackupCodeService,
     MFAService,
@@ -37,6 +31,8 @@ from apps.users.mfa import (
     WebAuthnCredential,
     WebAuthnService,
 )
+from apps.users.views import TWO_FACTOR_STEPS
+from config.settings.test import LOCMEM_TEST_CACHE
 
 User = get_user_model()
 
@@ -45,27 +41,24 @@ class WebAuthnCredentialModelTestCase(TestCase):
     """🔐 Test WebAuthn credential model functionality"""
 
     def setUp(self):
-        self.user = User.objects.create_user(
-            email='test@example.com',
-            password='testpass123'
-        )
+        self.user = User.objects.create_user(email="test@example.com", password="testpass123")
 
     def test_create_webauthn_credential(self):
         """Test basic WebAuthn credential creation"""
         credential = WebAuthnCredential.objects.create(
             user=self.user,
-            credential_id='test_credential_id',
-            public_key='test_public_key',
-            name='Test Device',
-            device_type='smartphone'
+            credential_id="test_credential_id",
+            public_key="test_public_key",
+            name="Test Device",
+            device_type="smartphone",
         )
 
         self.assertEqual(credential.user, self.user)
-        self.assertEqual(credential.credential_id, 'test_credential_id')
-        self.assertEqual(credential.public_key, 'test_public_key')
-        self.assertEqual(credential.name, 'Test Device')
-        self.assertEqual(credential.device_type, 'smartphone')
-        self.assertEqual(credential.credential_type, 'public-key')
+        self.assertEqual(credential.credential_id, "test_credential_id")
+        self.assertEqual(credential.public_key, "test_public_key")
+        self.assertEqual(credential.name, "Test Device")
+        self.assertEqual(credential.device_type, "smartphone")
+        self.assertEqual(credential.credential_type, "public-key")
         self.assertTrue(credential.is_active)
         self.assertEqual(credential.sign_count, 0)
 
@@ -73,31 +66,20 @@ class WebAuthnCredentialModelTestCase(TestCase):
         """Test valid credential type choices"""
         # Test public-key type
         credential1 = WebAuthnCredential.objects.create(
-            user=self.user,
-            credential_id='cred1',
-            public_key='key1',
-            name='Device 1',
-            credential_type='public-key'
+            user=self.user, credential_id="cred1", public_key="key1", name="Device 1", credential_type="public-key"
         )
-        self.assertEqual(credential1.credential_type, 'public-key')
+        self.assertEqual(credential1.credential_type, "public-key")
 
         # Test passkey type
         credential2 = WebAuthnCredential.objects.create(
-            user=self.user,
-            credential_id='cred2',
-            public_key='key2',
-            name='Device 2',
-            credential_type='passkey'
+            user=self.user, credential_id="cred2", public_key="key2", name="Device 2", credential_type="passkey"
         )
-        self.assertEqual(credential2.credential_type, 'passkey')
+        self.assertEqual(credential2.credential_type, "passkey")
 
     def test_webauthn_credential_str_representation(self):
         """Test string representation"""
         credential = WebAuthnCredential.objects.create(
-            user=self.user,
-            credential_id='test_cred',
-            public_key='test_key',
-            name='Test Device'
+            user=self.user, credential_id="test_cred", public_key="test_key", name="Test Device"
         )
         expected = f"Test Device ({self.user.email})"
         self.assertEqual(str(credential), expected)
@@ -105,10 +87,7 @@ class WebAuthnCredentialModelTestCase(TestCase):
     def test_webauthn_credential_mark_as_used(self):
         """Test marking credential as used"""
         credential = WebAuthnCredential.objects.create(
-            user=self.user,
-            credential_id='test_cred',
-            public_key='test_key',
-            name='Test Device'
+            user=self.user, credential_id="test_cred", public_key="test_key", name="Test Device"
         )
 
         # Initially no last_used timestamp
@@ -120,19 +99,12 @@ class WebAuthnCredentialModelTestCase(TestCase):
 
         # Should have timestamp
         self.assertIsNotNone(credential.last_used)
-        self.assertAlmostEqual(
-            credential.last_used,
-            timezone.now(),
-            delta=timezone.timedelta(seconds=5)
-        )
+        self.assertAlmostEqual(credential.last_used, timezone.now(), delta=timezone.timedelta(seconds=5))
 
     def test_webauthn_credential_user_relationship(self):
         """Test user relationship and cascade delete"""
         credential = WebAuthnCredential.objects.create(
-            user=self.user,
-            credential_id='test_cred',
-            public_key='test_key',
-            name='Test Device'
+            user=self.user, credential_id="test_cred", public_key="test_key", name="Test Device"
         )
 
         # Verify relationship
@@ -143,9 +115,7 @@ class WebAuthnCredentialModelTestCase(TestCase):
         self.user.delete()
 
         # Credential should be deleted
-        self.assertFalse(
-            WebAuthnCredential.objects.filter(user_id=user_id).exists()
-        )
+        self.assertFalse(WebAuthnCredential.objects.filter(user_id=user_id).exists())
 
 
 @override_settings(CACHES=LOCMEM_TEST_CACHE)
@@ -154,10 +124,7 @@ class TOTPServiceTestCase(TestCase):
 
     def setUp(self):
         self.user = User.objects.create_user(
-            email='test@example.com',
-            password='testpass123',
-            first_name='Test',
-            last_name='User'
+            email="test@example.com", password="testpass123", first_name="Test", last_name="User"
         )
         self.factory = RequestFactory()
         cache.clear()  # Clear cache for each test
@@ -193,7 +160,7 @@ class TOTPServiceTestCase(TestCase):
         valid_token = totp.now()
 
         # Verify token
-        request = self.factory.get('/')
+        request = self.factory.get("/")
         result = TOTPService.verify_token(self.user, valid_token, request)
 
         self.assertTrue(result)
@@ -210,7 +177,7 @@ class TOTPServiceTestCase(TestCase):
         totp = pyotp.TOTP(secret)
         valid_token = totp.now()
 
-        request = self.factory.get('/')
+        request = self.factory.get("/")
 
         # First use should succeed
         result1 = TOTPService.verify_token(self.user, valid_token, request)
@@ -227,7 +194,7 @@ class TOTPServiceTestCase(TestCase):
         totp = pyotp.TOTP(secret)
         valid_token = totp.now()
 
-        request = self.factory.get('/')
+        request = self.factory.get("/")
         result = TOTPService.verify_token(self.user, valid_token, request)
 
         self.assertFalse(result)
@@ -235,11 +202,11 @@ class TOTPServiceTestCase(TestCase):
     def test_verify_token_no_secret(self):
         """Test token verification when user has no secret"""
         self.user.two_factor_enabled = True
-        self.user.two_factor_secret = ''
+        self.user.two_factor_secret = ""
         self.user.save()
 
-        request = self.factory.get('/')
-        result = TOTPService.verify_token(self.user, '123456', request)
+        request = self.factory.get("/")
+        result = TOTPService.verify_token(self.user, "123456", request)
 
         self.assertFalse(result)
 
@@ -251,21 +218,21 @@ class TOTPServiceTestCase(TestCase):
         self.user.two_factor_enabled = True
         self.user.save()
 
-        request = self.factory.get('/')
-        result = TOTPService.verify_token(self.user, '000000', request)
+        request = self.factory.get("/")
+        result = TOTPService.verify_token(self.user, "000000", request)
 
         self.assertFalse(result)
 
-    @patch('apps.users.mfa.logger')
+    @patch("apps.users.mfa.logger")
     def test_verify_token_exception_handling(self, mock_logger):
         """Test token verification exception handling"""
         # Setup user with invalid secret to trigger exception
-        self.user.two_factor_secret = 'invalid_secret'
+        self.user.two_factor_secret = "invalid_secret"
         self.user.two_factor_enabled = True
         self.user.save()
 
-        request = self.factory.get('/')
-        result = TOTPService.verify_token(self.user, '123456', request)
+        request = self.factory.get("/")
+        result = TOTPService.verify_token(self.user, "123456", request)
 
         self.assertFalse(result)
         mock_logger.error.assert_called_once()
@@ -287,7 +254,7 @@ class TOTPServiceTestCase(TestCase):
     def test_totp_configuration_constants(self):
         """Test TOTP configuration constants"""
         # Verify default settings
-        self.assertEqual(TOTPService.TOTP_ISSUER_NAME, 'PRAHO Platform')
+        self.assertEqual(TOTPService.TOTP_ISSUER_NAME, "PRAHO Platform")
         self.assertEqual(TOTPService.TOTP_PERIOD, 30)
         self.assertEqual(TOTPService.TOTP_DIGITS, 6)
         self.assertEqual(TOTPService.TIME_WINDOW_TOLERANCE, 1)
@@ -298,10 +265,7 @@ class BackupCodeServiceTestCase(TestCase):
 
     def setUp(self):
         self.user = User.objects.create_user(
-            email='test@example.com',
-            password='testpass123',
-            first_name='Test',
-            last_name='User'
+            email="test@example.com", password="testpass123", first_name="Test", last_name="User"
         )
 
     def test_generate_codes(self):
@@ -360,13 +324,13 @@ class BackupCodeServiceTestCase(TestCase):
         BackupCodeService.generate_codes(self.user)
 
         # Try invalid code
-        result = BackupCodeService.verify_and_consume_code(self.user, 'INVALID1')
+        result = BackupCodeService.verify_and_consume_code(self.user, "INVALID1")
 
         self.assertFalse(result)
 
     def test_verify_and_consume_code_no_codes(self):
         """Test verification when user has no backup codes"""
-        result = BackupCodeService.verify_and_consume_code(self.user, 'TEST1234')
+        result = BackupCodeService.verify_and_consume_code(self.user, "TEST1234")
 
         self.assertFalse(result)
 
@@ -397,13 +361,10 @@ class WebAuthnServiceTestCase(TestCase):
 
     def setUp(self):
         self.user = User.objects.create_user(
-            email='test@example.com',
-            password='testpass123',
-            first_name='Test',
-            last_name='User'
+            email="test@example.com", password="testpass123", first_name="Test", last_name="User"
         )
         self.factory = RequestFactory()
-        self.request = self.factory.get('/')
+        self.request = self.factory.get("/")
         self.request.session = SessionStore()
 
     def test_is_supported(self):
@@ -416,13 +377,13 @@ class WebAuthnServiceTestCase(TestCase):
         """Test WebAuthn registration options"""
         result = WebAuthnService.generate_registration_options(self.request, self.user)
         self.assertIsInstance(result, dict)
-        self.assertIn('challenge', result)
-        self.assertIn('rp', result)
-        self.assertIn('user', result)
+        self.assertIn("challenge", result)
+        self.assertIn("rp", result)
+        self.assertIn("user", result)
 
     def test_verify_registration_not_implemented(self):
         """Test WebAuthn registration verification (not implemented)"""
-        credential_data = {'test': 'data'}
+        credential_data = {"test": "data"}
         result = WebAuthnService.verify_registration(self.user, credential_data)
         self.assertFalse(result)
 
@@ -430,12 +391,12 @@ class WebAuthnServiceTestCase(TestCase):
         """Test WebAuthn authentication options"""
         result = WebAuthnService.generate_authentication_options(self.request, self.user)
         self.assertIsInstance(result, dict)
-        self.assertIn('challenge', result)
-        self.assertIn('allowCredentials', result)
+        self.assertIn("challenge", result)
+        self.assertIn("allowCredentials", result)
 
     def test_verify_authentication_not_implemented(self):
         """Test WebAuthn authentication verification (not implemented)"""
-        auth_data = {'test': 'data'}
+        auth_data = {"test": "data"}
         result = WebAuthnService.verify_authentication(self.user, auth_data)
         self.assertFalse(result)
 
@@ -447,35 +408,33 @@ class MFAServiceTestCase(TestCase):
     def setUp(self):
         cache.clear()
         self.user = User.objects.create_user(
-            email='test@example.com',
-            password='testpass123',
-            first_name='Test',
-            last_name='User'
+            email="test@example.com", password="testpass123", first_name="Test", last_name="User"
         )
         self.factory = RequestFactory()
         cache.clear()
 
         # Clear audit logs
-        AuditEvent.objects.all().delete()
+        with audit_mutation_allowed("test fixture"):
+            AuditEvent.objects.all().delete()
 
-    @patch('apps.users.mfa.BackupCodeService.generate_codes')
-    @patch('apps.users.mfa.TOTPService.generate_secret')
+    @patch("apps.users.mfa.BackupCodeService.generate_codes")
+    @patch("apps.users.mfa.TOTPService.generate_secret")
     def test_enable_totp_success(self, mock_generate_secret, mock_generate_codes):
         """Test successful TOTP enablement"""
         # Mock return values
-        test_secret = 'TESTSECRET123456'
-        test_codes = ['CODE1234', 'CODE5678']
+        test_secret = "TESTSECRET123456"
+        test_codes = ["CODE1234", "CODE5678"]
         mock_generate_secret.return_value = test_secret
         mock_generate_codes.return_value = test_codes
 
         # Create request with session
-        request = self.factory.post('/')
+        request = self.factory.post("/")
         session = SessionStore()
         session.create()
         request.session = session
 
         # Enable TOTP
-        secret, backup_codes = MFAService.enable_totp(self.user, request)        # Verify results
+        secret, backup_codes = MFAService.enable_totp(self.user, request)  # Verify results
         self.assertEqual(secret, test_secret)
         self.assertEqual(backup_codes, test_codes)
 
@@ -485,10 +444,7 @@ class MFAServiceTestCase(TestCase):
         self.assertEqual(self.user.two_factor_secret, test_secret)
 
         # Verify audit log
-        audit_logs = AuditEvent.objects.filter(
-            user=self.user,
-            action='2fa_enabled'
-        )
+        audit_logs = AuditEvent.objects.filter(user=self.user, action="2fa_enabled")
         self.assertEqual(audit_logs.count(), 1)
 
         audit_log = audit_logs.first()
@@ -499,10 +455,10 @@ class MFAServiceTestCase(TestCase):
         """Test enabling TOTP when already enabled"""
         # Enable TOTP first
         self.user.two_factor_enabled = True
-        self.user.two_factor_secret = 'existing_secret'
+        self.user.two_factor_secret = "existing_secret"
         self.user.save()
 
-        request = self.factory.post('/')
+        request = self.factory.post("/")
 
         # Try to enable again
         with self.assertRaises(ValueError) as context:
@@ -514,11 +470,11 @@ class MFAServiceTestCase(TestCase):
         """Test successful TOTP disabling"""
         # Setup enabled TOTP
         self.user.two_factor_enabled = True
-        self.user.two_factor_secret = 'test_secret'
-        self.user.backup_tokens = [{'code': 'TEST1234', 'used': False}]
+        self.user.two_factor_secret = "test_secret"
+        self.user.backup_tokens = [{"code": "TEST1234", "used": False}]
         self.user.save()
 
-        request = self.factory.post('/')
+        request = self.factory.post("/")
 
         # Disable TOTP
         result = MFAService.disable_totp(self.user, request=request)
@@ -528,19 +484,16 @@ class MFAServiceTestCase(TestCase):
         # Verify user state
         self.user.refresh_from_db()
         self.assertFalse(self.user.two_factor_enabled)
-        self.assertEqual(self.user.two_factor_secret, '')
+        self.assertEqual(self.user.two_factor_secret, "")
         self.assertEqual(self.user.backup_tokens, [])
 
         # Verify audit log
-        audit_logs = AuditEvent.objects.filter(
-            user=self.user,
-            action='2fa_disabled'
-        )
+        audit_logs = AuditEvent.objects.filter(user=self.user, action="2fa_disabled")
         self.assertEqual(audit_logs.count(), 1)
 
     def test_disable_totp_not_enabled(self):
         """Test disabling TOTP when not enabled"""
-        request = self.factory.post('/')
+        request = self.factory.post("/")
 
         with self.assertRaises(ValueError) as cm:
             MFAService.disable_totp(self.user, request=request)
@@ -551,32 +504,23 @@ class MFAServiceTestCase(TestCase):
         """Test TOTP disabling by admin user"""
         # Setup enabled TOTP
         self.user.two_factor_enabled = True
-        self.user.two_factor_secret = 'test_secret'
+        self.user.two_factor_secret = "test_secret"
         self.user.save()
 
         # Create admin user
-        admin_user = User.objects.create_user(
-            email='admin@example.com',
-            password='adminpass123',
-            is_staff=True
-        )
+        admin_user = User.objects.create_user(email="admin@example.com", password="adminpass123", is_staff=True)
 
-        request = self.factory.post('/')
+        request = self.factory.post("/")
 
         # Disable TOTP as admin
-        result = MFAService.disable_totp(
-            self.user,
-            admin_user=admin_user,
-            reason="Security incident",
-            request=request
-        )
+        result = MFAService.disable_totp(self.user, admin_user=admin_user, reason="Security incident", request=request)
 
         self.assertTrue(result)
 
         # Verify audit log includes admin info
         audit_logs = AuditEvent.objects.filter(
             user=self.user,
-            action='2fa_admin_reset'  # Should be 2fa_admin_reset, not 2fa_disabled
+            action="2fa_admin_reset",  # Should be 2fa_admin_reset, not 2fa_disabled
         )
         audit_log = audit_logs.first()
         self.assertIsNotNone(audit_log)
@@ -589,7 +533,7 @@ class MFAServiceTestCase(TestCase):
         self.user.two_factor_enabled = True
         self.user.save()
 
-        request = self.factory.post('/')
+        request = self.factory.post("/")
 
         codes = MFAService.generate_backup_codes(self.user, request)
 
@@ -598,10 +542,7 @@ class MFAServiceTestCase(TestCase):
         self.assertEqual(len(codes), 8)  # 8 codes, not 10
 
         # Verify audit log
-        audit_logs = AuditEvent.objects.filter(
-            user=self.user,
-            action='2fa_backup_codes_generated'
-        )
+        audit_logs = AuditEvent.objects.filter(user=self.user, action="2fa_backup_codes_generated")
         self.assertEqual(audit_logs.count(), 1)
 
     def test_verify_mfa_code_totp_success(self):
@@ -616,15 +557,15 @@ class MFAServiceTestCase(TestCase):
         totp = pyotp.TOTP(secret)
         valid_token = totp.now()
 
-        request = self.factory.post('/')
+        request = self.factory.post("/")
 
         # Verify MFA code
         result = MFAService.verify_mfa_code(self.user, valid_token, request)
 
-        self.assertTrue(result['success'])
-        self.assertEqual(result['method'], 'totp')
-        self.assertFalse(result['rate_limited'])
-        self.assertFalse(result['replay_detected'])
+        self.assertTrue(result["success"])
+        self.assertEqual(result["method"], "totp")
+        self.assertFalse(result["rate_limited"])
+        self.assertFalse(result["replay_detected"])
 
     def test_verify_mfa_code_backup_success(self):
         """Test successful MFA verification with backup code"""
@@ -637,14 +578,14 @@ class MFAServiceTestCase(TestCase):
         self.user.save()  # Save the backup codes
         test_code = codes[0]
 
-        request = self.factory.post('/')
+        request = self.factory.post("/")
 
         # Verify backup code
         result = MFAService.verify_mfa_code(self.user, test_code, request)
 
-        self.assertTrue(result['success'])
-        self.assertEqual(result['method'], 'backup_code')
-        self.assertIsInstance(result['remaining_backup_codes'], int)
+        self.assertTrue(result["success"])
+        self.assertEqual(result["method"], "backup_code")
+        self.assertIsInstance(result["remaining_backup_codes"], int)
 
     def test_verify_mfa_code_rate_limiting(self):
         """Test MFA verification rate limiting"""
@@ -654,14 +595,14 @@ class MFAServiceTestCase(TestCase):
         self.user.two_factor_enabled = True
         self.user.save()
 
-        request = self.factory.post('/')
+        request = self.factory.post("/")
 
         # Mock rate limit check to return False
-        with patch.object(MFAService, '_check_rate_limit', return_value=False):
-            result = MFAService.verify_mfa_code(self.user, '123456', request)
+        with patch.object(MFAService, "_check_rate_limit", return_value=False):
+            result = MFAService.verify_mfa_code(self.user, "123456", request)
 
-        self.assertFalse(result['success'])
-        self.assertTrue(result['rate_limited'])
+        self.assertFalse(result["success"])
+        self.assertTrue(result["rate_limited"])
 
     def test_verify_mfa_code_invalid(self):
         """Test MFA verification with invalid code"""
@@ -671,28 +612,28 @@ class MFAServiceTestCase(TestCase):
         self.user.two_factor_enabled = True
         self.user.save()
 
-        request = self.factory.post('/')
+        request = self.factory.post("/")
 
         # Try invalid code
-        result = MFAService.verify_mfa_code(self.user, '000000', request)
+        result = MFAService.verify_mfa_code(self.user, "000000", request)
 
-        self.assertFalse(result['success'])
-        self.assertIsNone(result['method'])
+        self.assertFalse(result["success"])
+        self.assertIsNone(result["method"])
 
     def test_get_user_mfa_status(self):
         """Test getting user MFA status"""
         # Test disabled state
         status = MFAService.get_user_mfa_status(self.user)
 
-        self.assertFalse(status['totp_enabled'])
-        self.assertEqual(status['backup_codes_count'], 0)
-        self.assertEqual(status['webauthn_credentials'], 0)
+        self.assertFalse(status["totp_enabled"])
+        self.assertEqual(status["backup_codes_count"], 0)
+        self.assertEqual(status["webauthn_credentials"], 0)
         # When no TOTP enabled, methods_available should be empty
-        self.assertEqual(status['methods_available'], [])
+        self.assertEqual(status["methods_available"], [])
 
         # Enable TOTP and add backup codes
         self.user.two_factor_enabled = True
-        self.user.two_factor_secret = 'test_secret'
+        self.user.two_factor_secret = "test_secret"
         self.user.save()
 
         BackupCodeService.generate_codes(self.user)
@@ -700,17 +641,14 @@ class MFAServiceTestCase(TestCase):
 
         # Create WebAuthn credential
         WebAuthnCredential.objects.create(
-            user=self.user,
-            credential_id='test_cred',
-            public_key='test_key',
-            name='Test Device'
+            user=self.user, credential_id="test_cred", public_key="test_key", name="Test Device"
         )
 
         status = MFAService.get_user_mfa_status(self.user)
 
-        self.assertTrue(status['totp_enabled'])
-        self.assertEqual(status['backup_codes_count'], 8)  # Use correct key and count
-        self.assertEqual(status['webauthn_credentials'], 1)
+        self.assertTrue(status["totp_enabled"])
+        self.assertEqual(status["backup_codes_count"], 8)  # Use correct key and count
+        self.assertEqual(status["webauthn_credentials"], 1)
 
     def test_check_rate_limit(self):
         """Test MFA rate limiting functionality"""
@@ -736,15 +674,15 @@ class MFAServiceTestCase(TestCase):
         self.user.save()
 
         methods = MFAService._get_available_methods(self.user)
-        self.assertIn('totp', methods)
+        self.assertIn("totp", methods)
 
         # Add backup codes
         BackupCodeService.generate_codes(self.user)
         self.user.save()
 
         methods = MFAService._get_available_methods(self.user)
-        self.assertIn('totp', methods)
-        self.assertIn('backup_codes', methods)
+        self.assertIn("totp", methods)
+        self.assertIn("backup_codes", methods)
 
 
 @override_settings(CACHES=LOCMEM_TEST_CACHE)
@@ -753,10 +691,7 @@ class MFASecurityTestCase(TestCase):
 
     def setUp(self):
         self.user = User.objects.create_user(
-            email='test@example.com',
-            password='testpass123',
-            first_name='Test',
-            last_name='User'
+            email="test@example.com", password="testpass123", first_name="Test", last_name="User"
         )
         self.factory = RequestFactory()
         cache.clear()
@@ -773,7 +708,7 @@ class MFASecurityTestCase(TestCase):
         totp = pyotp.TOTP(secret)
         valid_token = totp.now()
 
-        request = self.factory.get('/')
+        request = self.factory.get("/")
 
         # Simulate concurrent verification attempts
         result1 = TOTPService.verify_token(self.user, valid_token, request)
@@ -789,26 +724,19 @@ class MFASecurityTestCase(TestCase):
         original_code = codes[0]
 
         # Test different cases
-        result1 = BackupCodeService.verify_and_consume_code(
-            self.user,
-            original_code.lower()
-        )
+        result1 = BackupCodeService.verify_and_consume_code(self.user, original_code.lower())
         self.assertTrue(result1)
 
         # Generate new codes for next test
         codes = BackupCodeService.generate_codes(self.user)
         original_code = codes[0]
 
-        result2 = BackupCodeService.verify_and_consume_code(
-            self.user,
-            original_code.upper()
-        )
+        result2 = BackupCodeService.verify_and_consume_code(self.user, original_code.upper())
         self.assertTrue(result2)
 
     def test_mfa_with_encryption_key_missing(self):
         """Test MFA behavior when encryption key is missing"""
-        with patch('apps.common.encryption.get_encryption_key', return_value=None), \
-             self.assertRaises(Exception):
+        with patch("apps.common.encryption.get_encryption_key", return_value=None), self.assertRaises(Exception):
             # Should handle gracefully when encryption is not available
             MFAService.enable_totp(self.user)
 
@@ -823,7 +751,7 @@ class MFASecurityTestCase(TestCase):
         # Create TOTP instance
         totp = pyotp.TOTP(secret)
 
-        request = self.factory.get('/')
+        request = self.factory.get("/")
 
         # Test current time window
         current_token = totp.now()
@@ -841,16 +769,16 @@ class MFASecurityTestCase(TestCase):
         # The important thing is it doesn't crash
         self.assertIsInstance(result2, bool)
 
-    @patch('apps.users.mfa.logger')
+    @patch("apps.users.mfa.logger")
     def test_mfa_error_logging(self, mock_logger):
         """Test proper error logging in MFA operations"""
         # Test TOTP verification with malformed secret
-        self.user.two_factor_secret = 'invalid_base32!'
+        self.user.two_factor_secret = "invalid_base32!"
         self.user.two_factor_enabled = True
         self.user.save()
 
-        request = self.factory.get('/')
-        result = TOTPService.verify_token(self.user, '123456', request)
+        request = self.factory.get("/")
+        result = TOTPService.verify_token(self.user, "123456", request)
 
         self.assertFalse(result)
         mock_logger.error.assert_called_once()
@@ -861,18 +789,19 @@ class MFASecurityTestCase(TestCase):
 
         for code in codes:
             # Should be 8 digits
-            self.assertRegex(code, r'^[0-9]{8}$')
+            self.assertRegex(code, r"^[0-9]{8}$")
 
     def test_mfa_audit_trail_integrity(self):
         """Test MFA operations create proper audit trails"""
         # Create request with session
-        request = self.factory.post('/')
+        request = self.factory.post("/")
         session = SessionStore()
         session.create()
         request.session = session
 
         # Clear existing logs
-        AuditEvent.objects.all().delete()
+        with audit_mutation_allowed("test fixture"):
+            AuditEvent.objects.all().delete()
 
         # Enable TOTP
         MFAService.enable_totp(self.user, request)
@@ -884,9 +813,9 @@ class MFASecurityTestCase(TestCase):
         MFAService.disable_totp(self.user, request=request)
 
         # Verify audit trail (exclude profile_updated events as they're triggered by model saves)
-        audit_logs = AuditEvent.objects.filter(user=self.user).exclude(action='profile_updated').order_by('timestamp')
+        audit_logs = AuditEvent.objects.filter(user=self.user).exclude(action="profile_updated").order_by("timestamp")
 
-        expected_actions = ['2fa_enabled', '2fa_backup_codes_generated', '2fa_disabled']
+        expected_actions = ["2fa_enabled", "2fa_backup_codes_generated", "2fa_disabled"]
         actual_actions = [log.action for log in audit_logs]
 
         self.assertEqual(actual_actions, expected_actions)
@@ -905,27 +834,25 @@ class MFAIntegrationTestCase(TestCase):
 
     def setUp(self):
         self.user = User.objects.create_user(
-            email='test@example.com',
-            password='testpass123',
-            first_name='Test',
-            last_name='User'
+            email="test@example.com", password="testpass123", first_name="Test", last_name="User"
         )
         self.factory = RequestFactory()
         cache.clear()
-        AuditEvent.objects.all().delete()
+        with audit_mutation_allowed("test fixture"):
+            AuditEvent.objects.all().delete()
 
     def test_complete_mfa_setup_and_usage_workflow(self):
         """Test complete MFA setup and usage workflow"""
         # Create request with session
-        request = self.factory.post('/')
+        request = self.factory.post("/")
         session = SessionStore()
         session.create()
         request.session = session
 
         # 1. Check initial MFA status
         status = MFAService.get_user_mfa_status(self.user)
-        self.assertFalse(status['totp_enabled'])
-        self.assertEqual(status['backup_codes_count'], 0)
+        self.assertFalse(status["totp_enabled"])
+        self.assertEqual(status["backup_codes_count"], 0)
 
         # 2. Enable TOTP
         secret, backup_codes = MFAService.enable_totp(self.user, request)
@@ -934,33 +861,33 @@ class MFAIntegrationTestCase(TestCase):
 
         # 3. Check updated MFA status
         status = MFAService.get_user_mfa_status(self.user)
-        self.assertTrue(status['totp_enabled'])
-        self.assertEqual(status['backup_codes_count'], 8)  # Use correct key
+        self.assertTrue(status["totp_enabled"])
+        self.assertEqual(status["backup_codes_count"], 8)  # Use correct key
 
         # 4. Verify TOTP token
         totp = pyotp.TOTP(secret)
         valid_token = totp.now()
 
         result = MFAService.verify_mfa_code(self.user, valid_token, request)
-        self.assertTrue(result['success'])
-        self.assertEqual(result['method'], 'totp')
+        self.assertTrue(result["success"])
+        self.assertEqual(result["method"], "totp")
 
         # 5. Use a backup code
         backup_code = backup_codes[0]
         result = MFAService.verify_mfa_code(self.user, backup_code, request)
-        self.assertTrue(result['success'])
-        self.assertEqual(result['method'], 'backup_code')
+        self.assertTrue(result["success"])
+        self.assertEqual(result["method"], "backup_code")
 
         # 6. Check backup codes remaining
         status = MFAService.get_user_mfa_status(self.user)
-        self.assertEqual(status['backup_codes_count'], 7)  # Should be 7 after using 1
+        self.assertEqual(status["backup_codes_count"], 7)  # Should be 7 after using 1
 
         # 7. Generate new backup codes
         new_codes = MFAService.generate_backup_codes(self.user, request)
         self.assertEqual(len(new_codes), 8)  # 8 codes, not 10
 
         status = MFAService.get_user_mfa_status(self.user)
-        self.assertEqual(status['backup_codes_count'], 8)  # Use correct key
+        self.assertEqual(status["backup_codes_count"], 8)  # Use correct key
 
         # 8. Disable TOTP
         result = MFAService.disable_totp(self.user, request=request)
@@ -968,18 +895,18 @@ class MFAIntegrationTestCase(TestCase):
 
         # 9. Verify final status
         status = MFAService.get_user_mfa_status(self.user)
-        self.assertFalse(status['totp_enabled'])
-        self.assertEqual(status['backup_codes_count'], 0)  # Use correct key
+        self.assertFalse(status["totp_enabled"])
+        self.assertEqual(status["backup_codes_count"], 0)  # Use correct key
 
         # 10. Verify complete audit trail (exclude profile_updated events as they're triggered by model saves)
-        audit_logs = AuditEvent.objects.filter(user=self.user).exclude(action='profile_updated').order_by('timestamp')
+        audit_logs = AuditEvent.objects.filter(user=self.user).exclude(action="profile_updated").order_by("timestamp")
         expected_actions = [
-            '2fa_enabled',                    # Enable TOTP
-            '2fa_verification_success',       # TOTP verification
-            '2fa_backup_code_used',          # Backup code verification
-            '2fa_verification_success',       # Backup code verification also logs success
-            '2fa_backup_codes_generated',    # Generate new backup codes
-            '2fa_disabled'                   # Disable TOTP
+            "2fa_enabled",  # Enable TOTP
+            "2fa_verification_success",  # TOTP verification
+            "2fa_backup_code_used",  # Backup code verification
+            "2fa_verification_success",  # Backup code verification also logs success
+            "2fa_backup_codes_generated",  # Generate new backup codes
+            "2fa_disabled",  # Disable TOTP
         ]
         actual_actions = [log.action for log in audit_logs]
         self.assertEqual(actual_actions, expected_actions)

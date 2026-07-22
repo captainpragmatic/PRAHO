@@ -793,14 +793,17 @@ def log_security_event(
         if user_email:
             metadata["user_email"] = user_email
 
-        AuditService.log_simple_event(
-            event_type=event_type,
-            user=None,
-            content_object=None,
-            description=f"Security event: {event_type}",
-            metadata=metadata,
-            ip_address=request_ip,
-            actor_type="system",
-        )
+        # Savepoint: a failed audit INSERT must not poison the caller's transaction -
+        # this fallback is called from inside request handlers mid-transaction.
+        with transaction.atomic():
+            AuditService.log_simple_event(
+                event_type=event_type,
+                user=None,
+                content_object=None,
+                description=f"Security event: {event_type}",
+                metadata=metadata,
+                ip_address=request_ip,
+                actor_type="system",
+            )
     except Exception:
         logger.warning(f"🚨 [Security] {event_type}: {details} from IP: {request_ip}")

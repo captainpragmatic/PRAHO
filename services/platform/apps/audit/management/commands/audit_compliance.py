@@ -252,6 +252,11 @@ class Command(BaseCommand):
         if check.status == "healthy":
             self.stdout.write(self.style.SUCCESS("Audit log integrity VERIFIED"))
             return
+        if check.status == "warning":
+            self.stdout.write(self.style.WARNING(f"Audit log integrity: WARNING ({check.issues_found} issues)"))
+            for finding in check.findings[:20]:
+                self.stdout.write(f"  - {finding.get('type')}: {finding.get('description')}")
+            return
         self.stdout.write(
             self.style.ERROR(f"Audit log integrity: {check.status.upper()} ({check.issues_found} issues)")
         )

@@ -70,15 +70,19 @@ def handle_setting_saved(sender: Any, instance: SystemSetting, created: bool, **
             old_values = {"value": context.get("old_value")}
             new_values = {"value": context.get("new_value")}
 
-        AuditService.log_simple_event(
-            event_type=action,
-            user=user,
-            content_object=instance,
-            description=f"System setting {action}: {instance.key}",
-            old_values=old_values,
-            new_values=new_values,
-            metadata=metadata,
-        )
+        # Savepoint: a failed audit INSERT inside this swallowing handler would otherwise
+        # mark the caller's transaction needs-rollback and silently undo the setting write
+        # (the lazy-proxy incident: UPDATE -> ROLLBACK TO SAVEPOINT with no error surfaced).
+        with transaction.atomic():
+            AuditService.log_simple_event(
+                event_type=action,
+                user=user,
+                content_object=instance,
+                description=f"System setting {action}: {instance.key}",
+                old_values=old_values,
+                new_values=new_values,
+                metadata=metadata,
+            )
 
         logger.info(
             "✅ [Settings Signal] Setting %s %s: %s",
@@ -108,18 +112,20 @@ def handle_setting_deleted(sender: Any, instance: SystemSetting, **kwargs: Any) 
     try:
         transaction.on_commit(lambda key=instance.key: SettingsService._clear_setting_cache(key))
 
-        # Log audit event
-        AuditService.log_simple_event(
-            event_type="delete",
-            user=None,
-            content_object=instance,
-            description=f"System setting deleted: {instance.key}",
-            metadata={
-                "setting_key": instance.key,
-                "category": instance.category,
-                "data_type": instance.data_type,
-            },
-        )
+        # Savepoint: same rationale as handle_setting_saved - audit failure must not
+        # poison the caller's transaction.
+        with transaction.atomic():
+            AuditService.log_simple_event(
+                event_type="delete",
+                user=None,
+                content_object=instance,
+                description=f"System setting deleted: {instance.key}",
+                metadata={
+                    "setting_key": instance.key,
+                    "category": instance.category,
+                    "data_type": instance.data_type,
+                },
+            )
 
         logger.warning("⚠️ [Settings Signal] Setting %s deleted", instance.key)
 

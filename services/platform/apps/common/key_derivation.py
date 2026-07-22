@@ -19,6 +19,7 @@ _DOMAIN_ENV_VARS: dict[str, str] = {
     "unsubscribe": "UNSUBSCRIBE_TOKEN_SECRET",
     "siem-hash-chain": "SIEM_HASH_CHAIN_SECRET",
     "sensitive-data-hash": "SENSITIVE_DATA_HASH_KEY",
+    "audit-integrity": "AUDIT_INTEGRITY_SECRET",
 }
 
 VALID_DOMAINS: frozenset[str] = frozenset(_DOMAIN_ENV_VARS.keys())
@@ -55,6 +56,21 @@ def derive_key(domain: str) -> bytes:
     if not settings.SECRET_KEY:  # noqa: SECRET_KEY — this IS the key derivation module
         raise ImproperlyConfigured("SECRET_KEY must be configured for key derivation")
     return hkdf.derive(settings.SECRET_KEY.encode())  # noqa: SECRET_KEY — HKDF input material
+
+
+def derive_key_with_material(domain: str, material: str) -> bytes:
+    """Derive a domain key from explicitly supplied material (key-rotation slots).
+
+    Same HKDF construction as derive_key with the domain fixed in `info`, so the same
+    material yields the same key regardless of which env slot supplies it - moving a
+    secret from AUDIT_INTEGRITY_SECRET to *_PREVIOUS must not change the derived key.
+    """
+    if domain not in VALID_DOMAINS:
+        raise ValueError(f"Unknown key derivation domain '{domain}'. Valid: {sorted(VALID_DOMAINS)}")
+    if len(material) < MIN_ENV_KEY_LENGTH:
+        raise ImproperlyConfigured(f"Key material for '{domain}' must be at least {MIN_ENV_KEY_LENGTH} characters")
+    hkdf = HKDF(algorithm=SHA256(), length=32, salt=None, info=f"praho-{domain}".encode())
+    return hkdf.derive(material.encode("utf-8"))
 
 
 def get_key_hex(domain: str) -> str:

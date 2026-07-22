@@ -1067,12 +1067,15 @@ class LogRetentionService:
         """Archive events to cold storage"""
         # In production, export to S3/GCS cold storage tier
         # For now, mark as archived in metadata
+        from apps.audit.models import audit_mutation_allowed  # noqa: PLC0415  # Deferred: avoids circular import
+
         count = 0
-        for event in events.iterator():
-            event.metadata["archived"] = True
-            event.metadata["archived_at"] = timezone.now().isoformat()
-            event.save(update_fields=["metadata"])
-            count += 1
+        with audit_mutation_allowed("retention_archive"):
+            for event in events.iterator():
+                event.metadata["archived"] = True
+                event.metadata["archived_at"] = timezone.now().isoformat()
+                event.save(update_fields=["metadata"])
+                count += 1
 
         return count
 
@@ -1083,33 +1086,42 @@ class LogRetentionService:
             Q(severity="critical") | Q(category__in=["security_event", "compliance", "data_protection"])
         )
 
+        from apps.audit.models import audit_mutation_allowed  # noqa: PLC0415  # Deferred: avoids circular import
+
         count: int = safe_to_delete.count()
-        safe_to_delete.delete()
+        with audit_mutation_allowed("retention_delete"):
+            safe_to_delete.delete()
 
         return count
 
     def _anonymize_events(self, events: Any) -> int:
         """Anonymize sensitive data in events"""
+        from apps.audit.models import audit_mutation_allowed  # noqa: PLC0415  # Deferred: avoids circular import
+
         count = 0
-        for event in events.iterator():
-            # Anonymize user-identifying information
-            if event.user:
-                event.metadata["original_user_id"] = str(event.user_id)
-                event.user = None
-
-            # Anonymize IP addresses
-            if event.ip_address:
-                event.metadata["had_ip"] = True
-                event.ip_address = None
-
-            # Clear sensitive metadata
-            if "email" in str(event.metadata):
-                event.metadata["email_anonymized"] = True
-
-            event.save()
-            count += 1
+        with audit_mutation_allowed("retention_anonymize"):
+            for event in events.iterator():
+                self._anonymize_single_event(event)
+                count += 1
 
         return count
+
+    @staticmethod
+    def _anonymize_single_event(event: Any) -> None:
+        if event.user:
+            event.metadata["original_user_id"] = str(event.user_id)
+            event.user = None
+
+        # Anonymize IP addresses
+        if event.ip_address:
+            event.metadata["had_ip"] = True
+            event.ip_address = None
+
+        # Clear sensitive metadata
+        if "email" in str(event.metadata):
+            event.metadata["email_anonymized"] = True
+
+        event.save()
 
     def get_retention_status(self) -> dict[str, Any]:
         """Get current retention status for all categories"""

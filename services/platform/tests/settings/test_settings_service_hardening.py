@@ -14,7 +14,7 @@ from unittest.mock import patch
 
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
-from django.db import DatabaseError, connection, transaction
+from django.db import connection, transaction
 from django.test import TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
 
@@ -384,10 +384,21 @@ class AuditFailureIsolationTests(TestCase):
     """A failing audit write must neither poison nor roll back the setting change (fail-open)."""
 
     def test_audit_db_failure_does_not_poison_setting_write(self) -> None:
+        """Revert-proof form: the audit failure executes REAL failing SQL, so the
+        connection is genuinely marked needs-rollback. Only the signal handler's
+        savepoint clears it - remove that savepoint and the setting write (and this
+        test's read-back) dies with TransactionManagementError."""
         _make_setting("billing.proforma_validity_days", 30, "integer")
+
+        def _poisoning_audit_failure(*args: Any, **kwargs: Any) -> None:
+            # A failing ORM save sets needs_rollback via mark_for_rollback_on_error -
+            # the exact mechanism of the lazy-proxy incident (a raw cursor error would
+            # not set the flag on SQLite and the test would pass vacuously).
+            AuditEvent.objects.create(metadata={"unserializable": object()})
+
         with patch(
             "apps.settings.signals.AuditService.log_simple_event",
-            side_effect=DatabaseError("audit table unavailable"),
+            side_effect=_poisoning_audit_failure,
         ):
             result = SettingsService.update_setting("billing.proforma_validity_days", 45)
             self.assertTrue(result.is_ok())

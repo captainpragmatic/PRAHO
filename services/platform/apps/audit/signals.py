@@ -21,13 +21,12 @@ from django.http import HttpRequest
 from apps.common.request_ip import get_safe_client_ip
 from apps.users.models import CustomerMembership, User, UserProfile
 
-from .models import AuditEvent
+from .models import AuditEvent, audit_mutation_allowed
 from .services import AuditContext, AuditEventData, AuditService
 
 # Bumped when _calculate_event_hash changes shape, so old hashes are not compared against a new
 # algorithm and misreported as tampering. Its presence also marks an event as belonging to the
 # hashed era: a row without it predates #217 and is unverifiable rather than tampered.
-AUDIT_INTEGRITY_HASH_VERSION = 1
 
 
 @dataclass
@@ -797,15 +796,14 @@ def stamp_audit_event_integrity_hash(sender: Any, instance: AuditEvent, created:
     base_metadata = instance.metadata if isinstance(instance.metadata, dict) else {}
     try:
         metadata = dict(base_metadata)
-        metadata["integrity_hash"] = AuditIntegrityService._calculate_event_hash(instance)
-        metadata["integrity_hash_version"] = AUDIT_INTEGRITY_HASH_VERSION
+        metadata.update(AuditIntegrityService.integrity_stamp_marker(instance))
         # QuerySet.update() cannot re-enter this handler (updates emit no post_save), and a
         # nested atomic() is essential, not decorative: a DB error in this statement marks the
         # CALLER's connection needs_rollback, and this handler fires inside money-moving atomic
         # blocks (order confirmation). Without the savepoint, swallowing the exception below
         # would let the caller "commit" a transaction Django then silently rolls back — the
         # exact SFH-3 failure mode (audit failure must never undo a financial transaction).
-        with atomic():
+        with atomic(), audit_mutation_allowed("integrity_stamp"):
             AuditEvent.objects.filter(pk=instance.pk).update(metadata=metadata)
         instance.metadata = metadata
     except Exception as e:
@@ -816,9 +814,9 @@ def stamp_audit_event_integrity_hash(sender: Any, instance: AuditEvent, created:
         # pre-hashing legacy row and demotes to an info-level "unverifiable" finding, which
         # is precisely the low-visibility outcome #217 exists to eliminate.
         try:
-            with atomic():
+            with atomic(), audit_mutation_allowed("integrity_stamp"):
                 AuditEvent.objects.filter(pk=instance.pk).update(
-                    metadata={**base_metadata, "integrity_hash_version": AUDIT_INTEGRITY_HASH_VERSION}
+                    metadata={**base_metadata, "integrity_hash_version": AuditIntegrityService.HASH_VERSION}
                 )
         except Exception:
             logger.error(f"🔥 [Audit Integrity] Could not mark event {instance.pk} for critical follow-up")

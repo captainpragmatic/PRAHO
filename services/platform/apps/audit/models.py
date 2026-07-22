@@ -5,7 +5,10 @@ Implements Romanian compliance requirements and security audit trails.
 
 from __future__ import annotations
 
+import threading
 import uuid
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
 from typing import Any, ClassVar, TypedDict
 
 from django.contrib.auth import get_user_model
@@ -15,6 +18,63 @@ from django.db import models
 from django.utils.translation import gettext_lazy as _
 
 User = get_user_model()
+
+# ===============================================================================
+# AUDIT EVENT IMMUTABILITY GUARD (ADR-0016 / ADR-0043)
+# ===============================================================================
+
+_audit_mutation_context = threading.local()
+
+
+class AuditImmutabilityError(Exception):
+    """Raised when AuditEvent rows are mutated outside audit_mutation_allowed()."""
+
+
+@contextmanager
+def audit_mutation_allowed(reason: str) -> Iterator[None]:
+    """Escape hatch for the audit immutability guard.
+
+    AuditEvent rows are append-only evidence. Every legitimate mutator enters this
+    context at its call site with an auditable reason (GDPR anonymization/erasure,
+    retention enforcement, integrity stamping/restamping, password-reset cleanup);
+    any other ORM mutation raises AuditImmutabilityError. The guard is an ORM-layer
+    defense - raw SQL and _base_manager (framework FK cascades) bypass it, which is
+    what the integrity MAC exists to catch.
+    """
+    previous = getattr(_audit_mutation_context, "reason", None)
+    _audit_mutation_context.reason = reason
+    try:
+        yield
+    finally:
+        _audit_mutation_context.reason = previous
+
+
+def _mutation_allowed() -> bool:
+    return getattr(_audit_mutation_context, "reason", None) is not None
+
+
+class AuditEventQuerySet(models.QuerySet["AuditEvent"]):
+    """QuerySet that blocks bulk mutation of audit evidence outside the escape hatch."""
+
+    def update(self, **kwargs: Any) -> int:
+        self._guard("update()")
+        return super().update(**kwargs)
+
+    def bulk_update(self, objs: Iterable[AuditEvent], fields: Iterable[str], batch_size: int | None = None) -> int:
+        self._guard("bulk_update()")
+        return super().bulk_update(objs, fields, batch_size=batch_size)
+
+    def delete(self) -> tuple[int, dict[str, int]]:
+        self._guard("delete()")
+        return super().delete()
+
+    @staticmethod
+    def _guard(operation: str) -> None:
+        if not _mutation_allowed():
+            raise AuditImmutabilityError(
+                f"AuditEvent is append-only; {operation} requires the audit_mutation_allowed() escape hatch"
+            )
+
 
 # ===============================================================================
 # TypedDict Definitions for JSON Fields
@@ -468,7 +528,9 @@ class AuditEvent(models.Model):
 
     # What object (generic foreign key)
     # Support both integer and UUID primary keys (CharField for mixed PK types)
-    content_type = models.ForeignKey(ContentType, on_delete=models.CASCADE)
+    # PROTECT: cascading a ContentType delete must never silently erase audit evidence.
+    # remove_stale_contenttypes requires an explicit retention decision first (ADR-0043).
+    content_type = models.ForeignKey(ContentType, on_delete=models.PROTECT)
     object_id = models.CharField(max_length=36, db_index=True)  # 36 chars for UUIDs, integers fit fine
     content_object = GenericForeignKey("content_type", "object_id")
 
@@ -484,7 +546,13 @@ class AuditEvent(models.Model):
     # Additional metadata
     metadata = models.JSONField(default=dict, blank=True)
 
+    objects: ClassVar[models.Manager[AuditEvent]] = AuditEventQuerySet.as_manager()
+
     class Meta:
+        # base_manager_name deliberately NOT set to "objects": Django's deletion
+        # collector runs FK cascades (User SET_NULL) through _base_manager, which must
+        # stay a plain Manager or every user deletion would trip the guard. user_id is
+        # outside the v2 MAC payload precisely so that cascade cannot break stamps.
         db_table = "audit_events"
         ordering: ClassVar[tuple[str, ...]] = ("-timestamp",)
         indexes: ClassVar[tuple[models.Index, ...]] = (
@@ -514,6 +582,20 @@ class AuditEvent(models.Model):
 
     def __str__(self) -> str:
         return f"{self.action} on {self.content_type} by {self.user or 'System'}"
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        if not self._state.adding and not _mutation_allowed():
+            raise AuditImmutabilityError(
+                "AuditEvent is append-only; save() on an existing row requires audit_mutation_allowed()"
+            )
+        super().save(*args, **kwargs)
+
+    def delete(self, *args: Any, **kwargs: Any) -> tuple[int, dict[str, int]]:
+        if not _mutation_allowed():
+            raise AuditImmutabilityError(
+                "AuditEvent is append-only; delete() requires the audit_mutation_allowed() escape hatch"
+            )
+        return super().delete(*args, **kwargs)
 
 
 class DataExport(models.Model):
@@ -568,6 +650,9 @@ class AuditIntegrityCheck(models.Model):
         ("healthy", "Healthy"),
         ("warning", "Warning"),
         ("compromised", "Compromised"),
+        # The check itself failed to run - distinct from a clean or tampered result;
+        # dashboards must count these instead of defaulting to healthy (W3).
+        ("error", "Error"),
     )
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

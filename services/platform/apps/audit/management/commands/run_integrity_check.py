@@ -180,6 +180,7 @@ class Command(BaseCommand):
                 "healthy": self.style.SUCCESS,
                 "warning": self.style.WARNING,
                 "compromised": self.style.ERROR,
+                "error": self.style.ERROR,
             }.get(check.status, self.style.NOTICE)
 
             self.stdout.write(
