@@ -19,6 +19,7 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.contenttypes.models import ContentType
 from django.core.files.storage import default_storage
 from django.core.paginator import Paginator
+from django.db import transaction
 from django.db.models import Q, QuerySet
 from django.http import Http404, HttpRequest, HttpResponse, HttpResponseForbidden, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -433,6 +434,7 @@ def withdraw_consent(request: HttpRequest) -> HttpResponse:
 @login_required
 @require_POST
 @csrf_protect
+@transaction.atomic  # Keep user.accepts_marketing and the propagated Customer.marketing_consent consistent (#226).
 def update_consent(request: HttpRequest) -> HttpResponse:
     """Update specific GDPR consents"""
     user = cast(User, request.user)  # Safe due to @login_required
@@ -463,6 +465,10 @@ def update_consent(request: HttpRequest) -> HttpResponse:
 
         if marketing_consent != user.accepts_marketing:
             user.accepts_marketing = marketing_consent
+            # The send audience reads Customer.marketing_consent, so mirror the decision there or
+            # the change never affects what actually gets sent (#226). Applies both directions:
+            # granting re-enables, withdrawing suppresses.
+            gdpr_consent_service._propagate_marketing_consent(user, consent=marketing_consent)
             changes_made.append(f"marketing_consent_{'granted' if marketing_consent else 'withdrawn'}")
             logger.info(f"✅ [GDPR Consent] Marketing consent changed: {user.accepts_marketing} -> {marketing_consent}")
 
@@ -513,6 +519,9 @@ def update_consent(request: HttpRequest) -> HttpResponse:
 
     except Exception as e:
         logger.error(f"🔥 [GDPR Consent] Update failed for {user.email}: {e}", exc_info=True)
+        # Rendering an error response without raising would COMMIT any propagation
+        # already written while the user flag never persisted — roll back.
+        transaction.set_rollback(True)
         messages.error(request, _("An error occurred while updating your privacy preferences. Please try again."))
 
     # For HTMX requests, return the updated dashboard HTML

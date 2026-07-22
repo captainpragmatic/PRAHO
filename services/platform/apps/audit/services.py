@@ -1561,6 +1561,11 @@ class GDPRDeletionService:
 
             user.save()
 
+            # Sibling of #226: the send audience reads Customer.marketing_consent, so an
+            # anonymized user's suppression must reach their customers too — an erased user
+            # whose address is the customer contact must not keep receiving marketing.
+            GDPRConsentService._propagate_marketing_consent(user, consent=False)
+
             # Anonymize audit logs (IP addresses only)
             AuditEvent.objects.filter(user=user).update(
                 ip_address=cls.ANONYMIZATION_MAP["ip_address"](), user_agent="Anonymized"
@@ -1605,6 +1610,62 @@ class GDPRConsentService:
     - Audit trail for all consent changes
     """
 
+    @staticmethod
+    def _propagate_marketing_consent(user: User, *, consent: bool) -> None:
+        """Mirror a user's marketing-consent decision onto the customers they belong to.
+
+        The marketing send audience (notifications/tasks.py) selects on Customer.marketing_consent,
+        so a consent change on the User alone never reaches the send path (#226). Applied across the
+        user's CustomerMembership set — a user may belong to several customers.
+
+        Direction matters, because Customer.marketing_consent is a single flag shared by every
+        member of the customer:
+
+        - Withdrawal (consent=False) is unconditional and fail-closed: one member opting out
+          suppresses that customer's marketing. That is the GDPR-safe default.
+        - Granting (consent=True) is NOT unconditional. Blindly setting the shared flag True when
+          one member opts in would silently re-subscribe another member who had previously
+          withdrawn. So a grant only re-enables a customer where NO member is currently withdrawn.
+          The acting user is treated as consenting (they just granted), even if their own row has
+          not been persisted yet at call time.
+
+        Only ACTIVE memberships participate, in both directions: a user removed from a
+        customer neither suppresses it nor blocks its re-enable with a stale withdrawal.
+
+        Each customer is saved individually (not bulk-updated) with _consent_source set, so
+        the per-Customer marketing_consent signal (customers/signals.py) records the flip on
+        the customer's own consent trail with GDPR Art. 7 source attribution — complementing,
+        not duplicating, the user-attributed gdpr_consent event the callers log.
+        """
+        from apps.customers.models import Customer  # noqa: PLC0415  # Deferred: avoids circular import
+        from apps.users.models import CustomerMembership  # noqa: PLC0415  # Deferred: avoids circular import
+
+        customer_ids = list(
+            Customer.objects.filter(memberships__user=user, memberships__is_active=True)
+            .values_list("id", flat=True)
+            .distinct()
+        )
+        if not customer_ids:
+            return
+
+        if consent:
+            # Block any customer that still has a withdrawn ACTIVE member OTHER than the acting
+            # user (the acting user has just consented, so their own row does not block the grant).
+            blocked_ids = set(
+                CustomerMembership.objects.filter(
+                    customer_id__in=customer_ids, is_active=True, user__accepts_marketing=False
+                )
+                .exclude(user_id=user.id)
+                .values_list("customer_id", flat=True)
+            )
+            customer_ids = [cid for cid in customer_ids if cid not in blocked_ids]
+
+        for customer in Customer.objects.filter(id__in=customer_ids).exclude(marketing_consent=consent):
+            customer.marketing_consent = consent
+            customer._consent_source = "gdpr_consent_service"  # type: ignore[attr-defined]  # transient signal-instance attr; read via getattr in customers.signals
+            customer._consent_category = "marketing"  # type: ignore[attr-defined]  # transient signal-instance attr; read via getattr in customers.signals
+            customer.save(update_fields=["marketing_consent", "updated_at"])
+
     @classmethod
     @transaction.atomic
     def withdraw_consent(cls, user: User, consent_types: list[str], request_ip: str | None = None) -> Result[str, str]:
@@ -1621,6 +1682,10 @@ class GDPRConsentService:
             # Handle marketing consent withdrawal
             if "marketing" in consent_types and user.accepts_marketing:
                 user.accepts_marketing = False
+                # The marketing send audience filters on Customer.marketing_consent, NOT this
+                # User flag, so clearing the flag alone left the customer still receiving mail
+                # (#226). Propagate to every customer the user belongs to.
+                cls._propagate_marketing_consent(user, consent=False)
                 changes_made.append("marketing_communications")
 
             # Data processing consent withdrawal triggers anonymization
@@ -1631,6 +1696,9 @@ class GDPRConsentService:
                 )
                 if deletion_result.is_err():
                     error_msg = deletion_result.error if hasattr(deletion_result, "error") else str(deletion_result)
+                    # Err without raising would COMMIT the marketing propagation above
+                    # while the user flag never persists — roll the whole withdrawal back.
+                    transaction.set_rollback(True)
                     return Err(f"Failed to process consent withdrawal: {error_msg}")
 
                 # Immediately process the deletion request
@@ -1639,6 +1707,9 @@ class GDPRConsentService:
                 process_result = GDPRDeletionService.process_deletion_request(deletion_request)
                 if process_result.is_err():
                     error_msg = process_result.error if hasattr(process_result, "error") else str(process_result)
+                    # Err without raising would COMMIT the marketing propagation above
+                    # while the user flag never persists — roll the whole withdrawal back.
+                    transaction.set_rollback(True)
                     return Err(f"Failed to anonymize user data: {error_msg}")
 
                 changes_made.append("data_processing")
@@ -1667,6 +1738,8 @@ class GDPRConsentService:
 
         except Exception as e:
             logger.error(f"🔥 [GDPR Consent] Failed to withdraw consent for {user.email}: {e}")
+            # Err without raising would COMMIT any propagation already written — roll back.
+            transaction.set_rollback(True)
             return Err(f"Consent withdrawal failed: {e!s}")
 
     @classmethod
