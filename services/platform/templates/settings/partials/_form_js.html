@@ -1,0 +1,94 @@
+{% load i18n %}
+<script nonce="{{ csp_nonce }}">
+  // Dirty-only atomic change-set form (ADR-0040). Every control carries
+  // data-setting-field/data-key/data-baseline; values are canonicalized
+  // client-side so initial and current use identical encoding.
+  function settingsForm(saveUrl) {
+    return {
+      dirty: {},
+      errors: {},
+      conflicts: [],
+      saving: false,
+      reason: '',
+      get dirtyCount() { return Object.keys(this.dirty).length },
+      compute(el) {
+        const kind = el.dataset.kind
+        if (kind === 'toggle') return el.checked
+        if (kind === 'list') return el.value.split(',').map(s => s.trim()).filter(Boolean)
+        return el.value
+      },
+      initField(el) {
+        el.dataset.value = JSON.stringify(this.compute(el))
+        el.dataset.initial = el.dataset.value
+      },
+      syncField(el) {
+        el.dataset.value = JSON.stringify(this.compute(el))
+        const key = el.dataset.key
+        if (el.dataset.value === el.dataset.initial) delete this.dirty[key]
+        else this.dirty[key] = true
+        this.dirty = { ...this.dirty }
+      },
+      resetField(key) {
+        const el = this.$root.querySelector(`[data-setting-field][data-key="${key}"]`)
+        if (!el) return
+        const fallback = JSON.parse(el.dataset.default)
+        if (el.dataset.kind === 'toggle') el.checked = fallback
+        else if (el.dataset.kind === 'list') el.value = fallback.join(', ')
+        else el.value = fallback === null ? '' : String(fallback)
+        this.syncField(el)
+      },
+      discard() { window.location.reload() },
+      async save() {
+        if (!this.dirtyCount || this.saving) return
+        this.saving = true
+        this.errors = {}
+        this.conflicts = []
+        const changes = {}, baselines = {}
+        this.$root.querySelectorAll('[data-setting-field]').forEach(el => {
+          const key = el.dataset.key
+          if (this.dirty[key]) {
+            changes[key] = JSON.parse(el.dataset.value)
+            baselines[key] = el.dataset.baseline || null
+          }
+        })
+        try {
+          const response = await fetch(saveUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value,
+            },
+            body: JSON.stringify({ changes, baselines, reason: this.reason || null }),
+          })
+          const data = await response.json()
+          if (data.success) {
+            Object.entries(data.saved).forEach(([key, entry]) => {
+              const el = this.$root.querySelector(`[data-setting-field][data-key="${key}"]`)
+              if (el) {
+                el.dataset.baseline = entry.baseline
+                el.dataset.initial = el.dataset.value
+              }
+            })
+            this.dirty = {}
+            this.reason = ''
+            window.showToast && window.showToast('{% trans "Settings saved" %}', 'success')
+          } else if (response.status === 409) {
+            this.conflicts = data.conflicts || []
+          } else {
+            this.errors = data.errors || { __all__: data.error || '{% trans "Save failed" %}' }
+          }
+        } catch (error) {
+          this.errors = { __all__: error.message }
+        } finally {
+          this.saving = false
+        }
+      },
+    }
+  }
+  window.addEventListener('beforeunload', function (event) {
+    const form = document.querySelector('[data-settings-form]')
+    if (form && form.__x && Object.keys(form.__x.$data.dirty).length > 0) {
+      event.preventDefault()
+    }
+  })
+</script>

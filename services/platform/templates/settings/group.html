@@ -1,0 +1,83 @@
+{% extends 'base.html' %}
+{% load i18n %}
+{% load ui_components %}
+
+{% block title %}{{ group.label }} - {% trans "Settings" %} - PRAHO Platform{% endblock %}
+
+{% block content %}
+<div class="px-4 py-6">
+  <div class="grid grid-cols-12 gap-6">
+    {% include 'settings/partials/_sidebar.html' %}
+
+    <main class="col-span-12 lg:col-span-9">
+      <div x-data="settingsForm('{% url 'settings:save_change_set' %}')" data-settings-form>
+        {% csrf_token %}
+        <nav class="text-sm text-slate-400 mb-3">
+          <a href="{% url 'settings:home' %}" class="hover:text-white">{% trans "Settings" %}</a>
+          <span class="mx-1">›</span>
+          <span class="text-slate-200">{{ group.label }}</span>
+        </nav>
+        <h1 class="text-2xl font-bold text-white">{{ group.label }}</h1>
+        {% if group.description %}
+        <p class="mt-1 text-slate-400">{{ group.description }}</p>
+        {% endif %}
+
+        {% if is_advanced %}
+        {% trans "Defaults here are appropriate for most deployments. Changes affect performance and reliability — adjust only with a clear reason." as advanced_note %}
+        {% alert advanced_note variant="warning" %}
+        {% endif %}
+        {% if source_note %}
+        {% alert source_note variant="info" %}
+        {% endif %}
+
+        {% if is_integration %}
+        <div class="mt-4 mb-2" x-data="{ testing: false, result: null }">
+          <button type="button" :disabled="testing" @click="testing = true; result = null; fetch('{% url 'settings:integration_test' group.slug %}', { method: 'POST', headers: { 'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value } }).then(r => r.json()).then(data => { testing = false; result = data })" class="inline-flex items-center px-3 py-2 text-sm font-medium text-white bg-slate-600 border border-slate-600 rounded-lg hover:bg-slate-700 disabled:opacity-50">
+            <span x-show="!testing">🔌 {% trans "Test connection" %}</span>
+            <span x-show="testing" x-cloak>{% trans "Testing…" %}</span>
+          </button>
+          <span class="ml-3 text-sm" x-show="result" x-cloak :class="result && result.success ? 'text-green-400' : 'text-red-400'" x-text="result && result.message"></span>
+        </div>
+        {% endif %}
+
+        <div x-show="conflicts.length" x-cloak class="mt-4 bg-amber-500/10 border border-amber-500/40 rounded-lg p-4 text-sm text-amber-300">
+          <p class="font-medium">{% trans "Someone else changed these settings while you were editing:" %}</p>
+          <ul class="mt-1 list-disc list-inside font-mono text-xs">
+            <template x-for="conflict in conflicts" :key="conflict.key">
+              <li x-text="conflict.key"></li>
+            </template>
+          </ul>
+          <button type="button" @click="discard()" class="mt-2 text-amber-200 underline">{% trans "Reload with current values" %}</button>
+        </div>
+        <p class="mt-4 text-sm text-red-400" x-show="errors.__all__" x-cloak x-text="errors.__all__"></p>
+
+        <div class="mt-4 space-y-6">
+          {% for section in sections %}
+          {% section_card title=section.title %}
+            {% for row in section.rows %}
+              {% if row.definition.sensitive %}
+                {% include 'settings/partials/secret_row.html' with row=row %}
+              {% else %}
+                {% include 'settings/partials/setting_row.html' with row=row %}
+              {% endif %}
+            {% endfor %}
+          {% end_section_card %}
+          {% endfor %}
+        </div>
+
+        <div x-show="dirtyCount > 0" x-cloak class="sticky bottom-4 mt-6 bg-slate-800/95 backdrop-blur border border-slate-600 rounded-xl shadow-2xl px-4 py-3 flex flex-col sm:flex-row items-center gap-3">
+          <span class="text-sm text-white font-medium" x-text="dirtyCount + ' {% trans "unsaved change(s)" %}'"></span>
+          <input type="text" x-model="reason" placeholder="{% trans 'Reason (optional, recorded in audit log)' %}" class="flex-1 w-full px-3 py-2 bg-slate-900/60 border border-slate-600 rounded-lg text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500">
+          <div class="flex gap-2">
+            <button type="button" @click="discard()" class="px-3 py-2 text-sm text-slate-300 hover:text-white">{% trans "Discard" %}</button>
+            <button type="button" :disabled="saving" @click="save()" class="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50" x-text="saving ? '{% trans "Saving…" %}' : '{% trans "Save changes" %}'"></button>
+          </div>
+        </div>
+
+        <div id="history-drawer" class="mt-6"></div>
+      </div>
+    </main>
+  </div>
+</div>
+{% include 'settings/partials/_form_js.html' %}
+{% endblock %}

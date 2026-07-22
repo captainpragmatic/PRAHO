@@ -9,25 +9,39 @@ from __future__ import annotations
 
 import json
 import logging
+from decimal import Decimal
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from django.contrib.auth.decorators import login_required, user_passes_test
 from django.contrib.auth.models import AnonymousUser
+from django.contrib.contenttypes.models import ContentType
 from django.core.cache import cache
 from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, render
 from django.utils import timezone
 from django.utils.decorators import method_decorator
+from django.utils.translation import gettext_lazy as _
 from django.views import View
-from django.views.decorators.cache import cache_page
 from django.views.decorators.http import require_http_methods
-from django.views.generic import TemplateView
+from django_q.models import OrmQ, Schedule, Task
 
+from apps.audit.models import AuditEvent
 from apps.common.decorators import admin_required
 from apps.common.security_decorators import log_security_event
 from apps.common.types import Ok
 
-from .models import SettingCategory, SystemSetting
+from .catalog import (
+    CATALOG,
+    CATALOG_BY_KEY,
+    GROUPS_BY_SLUG,
+    ZONE_BUSINESS,
+    ZONE_INTEGRATIONS,
+    ZONE_PLATFORM,
+    SettingDef,
+    defs_for_group,
+    groups_in_zone,
+)
+from .models import SystemSetting
 from .services import SettingsService
 
 if TYPE_CHECKING:
@@ -41,41 +55,6 @@ logger = logging.getLogger(__name__)
 def is_staff_user(user: User | AnonymousUser) -> bool:
     """Check if user is staff member (delegates to User.is_staff_user property)"""
     return user.is_authenticated and getattr(user, "is_staff_user", False)
-
-
-# ===============================================================================
-# PUBLIC SETTINGS API (CACHED)
-# ===============================================================================
-
-
-@cache_page(60 * 15)  # Cache for 15 minutes
-@require_http_methods(["GET"])
-def public_settings_api(request: HttpRequest) -> JsonResponse:
-    """
-    🔓 Get public settings accessible to all users
-
-    Returns settings marked as is_public=True for frontend use.
-    Heavily cached to reduce database load.
-
-    Example response:
-    {
-        "success": true,
-        "settings": {
-            "domains.registration_enabled": true,
-            "users.session_timeout_minutes": 120
-        }
-    }
-    """
-    try:
-        public_settings = SystemSetting.get_public_settings()
-
-        settings_data = {setting.key: setting.value for setting in public_settings}
-
-        return JsonResponse({"success": True, "settings": settings_data, "count": len(settings_data)})
-
-    except Exception as e:
-        logger.error(f"💥 Error getting public settings: {e}")
-        return JsonResponse({"success": False, "error": "Failed to load public settings"}, status=500)
 
 
 # ===============================================================================
@@ -140,201 +119,6 @@ class SettingsAPIView(View):
         except Exception as e:
             logger.error(f"💥 Error getting settings: {e}")
             return JsonResponse({"success": False, "error": "Failed to retrieve settings"}, status=500)
-
-
-# ===============================================================================
-# CATEGORY SETTINGS API
-# ===============================================================================
-
-
-@user_passes_test(is_staff_user)
-@login_required
-@require_http_methods(["GET"])
-def category_settings_api(request: HttpRequest, category_key: str) -> JsonResponse:
-    """
-    📦 Get all settings for a specific category
-
-    GET /api/settings/category/billing/
-    """
-    try:
-        category = get_object_or_404(SettingCategory, key=category_key, is_active=True)
-        settings_data = SettingsService.get_settings_by_category(category_key)
-
-        return JsonResponse(
-            {
-                "success": True,
-                "category": {"key": category.key, "name": category.name, "description": category.description},
-                "settings": settings_data,
-                "count": len(settings_data),
-            }
-        )
-
-    except Http404:
-        return JsonResponse({"success": False, "error": f'Category "{category_key}" not found'}, status=404)
-    except Exception as e:
-        logger.error(f"💥 Error getting category settings: {e}")
-        return JsonResponse({"success": False, "error": "Failed to retrieve category settings"}, status=500)
-
-
-# ===============================================================================
-# SETTINGS DASHBOARD VIEW
-# ===============================================================================
-
-
-@method_decorator([login_required, user_passes_test(is_staff_user)], name="dispatch")
-class SettingsDashboardView(TemplateView):
-    """
-    📊 Staff dashboard for settings overview
-
-    Provides a comprehensive interface for managing system configuration
-    with visual indicators and quick access to common settings.
-    """
-
-    template_name = "settings/dashboard.html"
-
-    def get_context_data(self, **kwargs: Any) -> dict[str, Any]:
-        """🎯 Prepare dashboard context"""
-        context = super().get_context_data(**kwargs)
-
-        try:
-            # Get settings service
-            settings_service = SettingsService
-
-            # Get categories
-            categories = SettingCategory.objects.filter(is_active=True)
-
-            context.update(
-                {
-                    "categories": categories,
-                    "settings_service": settings_service,
-                    "total_settings": SystemSetting.objects.filter(is_active=True).count(),
-                    "public_settings_count": SystemSetting.objects.filter(is_active=True, is_public=True).count(),
-                    "restart_required_count": SystemSetting.objects.filter(
-                        is_active=True, requires_restart=True
-                    ).count(),
-                    # Quick access to common settings
-                    "quick_settings": {
-                        "proforma_validity": SettingsService.get_setting("billing.proforma_validity_days", 30),
-                        "session_timeout": SettingsService.get_setting("users.session_timeout_minutes", 120),
-                        "domain_registration": SettingsService.get_setting("domains.registration_enabled", True),
-                        "mfa_required": SettingsService.get_setting("users.mfa_required_for_staff", True),
-                    },
-                }
-            )
-
-        except Exception as e:
-            logger.error(f"💥 Error preparing dashboard context: {e}")
-            context["error"] = "Failed to load settings dashboard"
-
-        return context
-
-
-# ===============================================================================
-# SETTINGS MANAGEMENT VIEWS
-# ===============================================================================
-
-
-@method_decorator([login_required, user_passes_test(is_staff_user)], name="dispatch")
-class SettingsManagementView(TemplateView):
-    """
-    🎛️ Staff settings management interface with multi-tab dynamic view
-
-    Provides a comprehensive interface for managing system configuration
-    with tab-based navigation, HTMX dynamic loading, and form controls.
-    """
-
-    template_name = "settings/manage.html"
-
-    def get_context_data(self, **kwargs: Any) -> dict[str, Any]:
-        """🎯 Prepare management context"""
-        context = super().get_context_data(**kwargs)
-
-        try:
-            # Get all categories for tab navigation
-            categories = SettingCategory.objects.filter(is_active=True).order_by("name")
-
-            # Get default category (first one or from URL parameter)
-            active_category = self.request.GET.get("category")
-            if not active_category and categories:
-                first_category = categories.first()
-                active_category = first_category.key if first_category else None
-
-            context.update(
-                {
-                    "categories": categories,
-                    "active_category": active_category,
-                    "settings_service": SettingsService,
-                }
-            )
-
-        except Exception as e:
-            logger.error(f"💥 Error preparing management context: {e}")
-            context["error"] = "Failed to load settings management"
-
-        return context
-
-
-def _update_category_settings(request: HttpRequest, category_key: str) -> JsonResponse:
-    """💾 Handle POST request to update category settings"""
-    updated_count = 0
-    errors = []
-    user_id = request.user.id if hasattr(request.user, "id") and not isinstance(request.user, AnonymousUser) else None
-
-    for key, value in request.POST.items():
-        if not key.startswith("setting_"):
-            continue
-
-        setting_key = key[8:]  # Remove 'setting_' prefix
-        if not SystemSetting.objects.filter(key=setting_key, category=category_key).exists():
-            errors.append(f"Error updating {setting_key}")
-            continue
-        result = SettingsService.update_setting(setting_key, str(value), user_id, "Category settings update")
-        if isinstance(result, Ok):
-            updated_count += 1
-        else:
-            # SECURITY: Don't expose internal error details
-            errors.append(f"Error updating {setting_key}")
-
-    if errors:
-        return JsonResponse({"success": False, "errors": errors}, status=400)
-    return JsonResponse({"success": True, "updated": updated_count})
-
-
-@user_passes_test(is_staff_user)
-@login_required
-@require_http_methods(["GET", "POST"])
-def category_management_partial(request: HttpRequest, category_key: str) -> HttpResponse:
-    """
-    🔄 HTMX partial view for category-specific settings management
-
-    Returns the HTML fragment for managing settings in a specific category.
-    Supports both viewing and updating settings via HTMX.
-    """
-
-    try:
-        # Get category
-        try:
-            category = SettingCategory.objects.get(key=category_key, is_active=True)
-        except SettingCategory.DoesNotExist:
-            return JsonResponse({"error": "Category not found"}, status=404)
-
-        if request.method == "POST":
-            return _update_category_settings(request, category_key)
-
-        # GET request - return settings form
-        settings = SystemSetting.objects.filter(category=category_key, is_active=True).order_by("name")
-
-        context = {
-            "category": category,
-            "settings": settings,
-        }
-
-        return render(request, "settings/partials/category_form.html", context)
-
-    except Exception as e:
-        logger.error(f"💥 Error in category management partial: {e}")
-        # SECURITY: Don't expose internal error details
-        return JsonResponse({"error": "Internal error processing category settings"}, status=500)
 
 
 # ===============================================================================
@@ -453,18 +237,11 @@ def export_settings(request: HttpRequest) -> HttpResponse:
             category_key = setting.category if setting.category else "uncategorized"
 
             if category_key not in export_data["categories"]:
-                # Try to get the category object if it exists
-                try:
-                    category_obj = SettingCategory.objects.get(key=category_key)
-                    export_data["categories"][category_key] = {
-                        "name": category_obj.name,
-                        "description": category_obj.description,
-                    }
-                except SettingCategory.DoesNotExist:
-                    export_data["categories"][category_key] = {
-                        "name": category_key.title(),
-                        "description": f"Settings for {category_key}",
-                    }
+                group = GROUPS_BY_SLUG.get(category_key)
+                export_data["categories"][category_key] = {
+                    "name": str(group.label) if group else category_key.title(),
+                    "description": str(group.description) if group else f"Settings for {category_key}",
+                }
 
             export_data["settings"].append(
                 {
@@ -475,9 +252,7 @@ def export_settings(request: HttpRequest) -> HttpResponse:
                     "value": setting.value,
                     "default_value": setting.default_value,
                     "data_type": setting.data_type,
-                    "validation_rules": setting.validation_rules,
                     "is_required": setting.is_required,
-                    "is_public": setting.is_public,
                     "requires_restart": setting.requires_restart,
                 }
             )
@@ -533,18 +308,11 @@ def export_settings_full(request: HttpRequest) -> HttpResponse:
             category_key = setting.category if setting.category else "uncategorized"
 
             if category_key not in export_data["categories"]:
-                # Try to get the category object if it exists
-                try:
-                    category_obj = SettingCategory.objects.get(key=category_key)
-                    export_data["categories"][category_key] = {
-                        "name": category_obj.name,
-                        "description": category_obj.description,
-                    }
-                except SettingCategory.DoesNotExist:
-                    export_data["categories"][category_key] = {
-                        "name": category_key.title(),
-                        "description": f"Settings for {category_key}",
-                    }
+                group = GROUPS_BY_SLUG.get(category_key)
+                export_data["categories"][category_key] = {
+                    "name": str(group.label) if group else category_key.title(),
+                    "description": str(group.description) if group else f"Settings for {category_key}",
+                }
 
             export_data["settings"].append(
                 {
@@ -555,9 +323,7 @@ def export_settings_full(request: HttpRequest) -> HttpResponse:
                     "value": setting.value,  # Includes encrypted sensitive values
                     "default_value": setting.default_value,
                     "data_type": setting.data_type,
-                    "validation_rules": setting.validation_rules,
                     "is_required": setting.is_required,
-                    "is_public": setting.is_public,
                     "is_sensitive": setting.is_sensitive,
                     "requires_restart": setting.requires_restart,
                 }
@@ -708,3 +474,341 @@ def import_settings(request: HttpRequest) -> JsonResponse:
     except Exception as e:
         logger.error(f"💥 Error importing settings: {e}")
         return JsonResponse({"success": False, "error": "Failed to import settings"}, status=500)
+
+
+# ===============================================================================
+# SETTINGS UI (three-surface IA: Business / Integrations / Platform — ADR-0040)
+# ===============================================================================
+
+INTEGRATION_GROUPS = ("stripe", "virtualmin", "efactura", "node-deployment", "backup")
+
+SEARCH_MIN_QUERY_LENGTH = 2
+SEARCH_MAX_RESULTS = 30
+
+# Integration pages annotate where their configuration really lives
+INTEGRATION_SOURCE_NOTES: dict[str, Any] = {
+    "virtualmin": _(
+        "Server credentials are vault-managed per server (ADR-0033) and are not edited here — "
+        "these settings tune connection and provisioning behaviour."
+    ),
+    "efactura": _(
+        "Values here are database settings with a deployment fallback: when a key has no row, "
+        "the EFACTURA_* Django settings apply."
+    ),
+}
+
+
+def _is_admin(user: Any) -> bool:
+    return bool(getattr(user, "is_superuser", False) or getattr(user, "staff_role", "") == "admin")
+
+
+def _requires_admin(definition: SettingDef) -> bool:
+    """Business-zone settings are staff-editable; everything else needs admin"""
+    return GROUPS_BY_SLUG[definition.group].zone != ZONE_BUSINESS
+
+
+def _row_context(definition: SettingDef, row: SystemSetting | None) -> dict[str, Any]:
+    """Template context for one setting row"""
+    current = row.get_typed_value() if row is not None else definition.default
+    if definition.data_type == "decimal" and current is not None:
+        current = str(current)
+    configured = bool(row is not None and row.value not in (None, ""))
+    return {
+        "definition": definition,
+        "key": definition.key,
+        "current": current,
+        "current_json": json.dumps(current, ensure_ascii=False, default=str),
+        "baseline": row.updated_at.isoformat() if row is not None else "",
+        "modified": row is not None and row.get_typed_value() != definition.default,
+        "configured": configured,
+        "updated_at": row.updated_at if row is not None else None,
+        "choices": (definition.validation or {}).get("choices", []),
+    }
+
+
+def _group_sections(slug: str) -> list[dict[str, Any]]:
+    """Ordered sections with row contexts for one group"""
+    definitions = defs_for_group(slug)
+    rows = {row.key: row for row in SystemSetting.objects.filter(key__in=[d.key for d in definitions])}
+    sections: dict[str, list[dict[str, Any]]] = {}
+    for definition in definitions:
+        sections.setdefault(str(definition.section), []).append(_row_context(definition, rows.get(definition.key)))
+    return [{"title": title, "rows": rows_} for title, rows_ in sections.items()]
+
+
+def _sidebar_context(active_slug: str | None, user: Any) -> dict[str, Any]:
+    show_admin = _is_admin(user)
+    zones = []
+    for zone, label in (
+        (ZONE_BUSINESS, _("Business")),
+        (ZONE_INTEGRATIONS, _("Integrations")),
+        (ZONE_PLATFORM, _("Platform")),
+    ):
+        groups = [g for g in groups_in_zone(zone) if show_admin or zone == ZONE_BUSINESS]
+        if groups:
+            zones.append({"label": label, "groups": groups})
+    return {"nav_zones": zones, "active_group": active_slug}
+
+
+@login_required
+@user_passes_test(is_staff_user)
+def settings_home(request: HttpRequest) -> HttpResponse:
+    """🏠 Settings overview: attention items, recent changes, modified count"""
+    definitions = {d.key: d for d in CATALOG}
+    rows = {row.key: row for row in SystemSetting.objects.filter(key__in=list(definitions))}
+
+    modified_count = sum(
+        1 for key, row in rows.items() if key in definitions and row.get_typed_value() != definitions[key].default
+    )
+
+    integration_state = []
+    for slug in INTEGRATION_GROUPS:
+        secret_defs = [d for d in defs_for_group(slug) if d.sensitive]
+        configured = all(rows.get(d.key) is not None and rows[d.key].value not in (None, "") for d in secret_defs)
+        integration_state.append(
+            {
+                "group": GROUPS_BY_SLUG[slug],
+                "configured": configured if secret_defs else True,
+            }
+        )
+
+    setting_ct = ContentType.objects.get_for_model(SystemSetting)
+    recent_events = AuditEvent.objects.filter(content_type=setting_ct).select_related("user").order_by("-timestamp")[:8]
+
+    context = {
+        **_sidebar_context(None, request.user),
+        "modified_count": modified_count,
+        "integration_state": integration_state,
+        "recent_events": recent_events,
+        "maintenance_active": SettingsService.get_boolean_setting("system.maintenance_mode", False),
+        "is_admin": _is_admin(request.user),
+    }
+    return render(request, "settings/home.html", context)
+
+
+@login_required
+@user_passes_test(is_staff_user)
+def settings_group(request: HttpRequest, group_slug: str) -> HttpResponse:
+    """📂 One settings group page (business, integration, platform, or advanced)"""
+    group = GROUPS_BY_SLUG.get(group_slug)
+    if group is None:
+        raise Http404("Unknown settings group")
+    if group.zone != ZONE_BUSINESS and not _is_admin(request.user):
+        return HttpResponse(status=403)
+
+    context = {
+        **_sidebar_context(group_slug, request.user),
+        "group": group,
+        "sections": _group_sections(group_slug),
+        "is_integration": group_slug in INTEGRATION_GROUPS,
+        "source_note": INTEGRATION_SOURCE_NOTES.get(group_slug, ""),
+        "is_advanced": group_slug == "advanced",
+        "is_admin": _is_admin(request.user),
+    }
+    return render(request, "settings/group.html", context)
+
+
+@login_required
+@user_passes_test(is_staff_user)
+@require_http_methods(["POST"])
+def save_change_set(request: HttpRequest) -> JsonResponse:
+    """💾 Apply a dirty-only change set atomically (JSON contract with rebaselining)"""
+    try:
+        payload = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"success": False, "error": _("Invalid JSON body")}, status=400)
+
+    changes = payload.get("changes") or {}
+    baselines = payload.get("baselines") or {}
+    reason = (payload.get("reason") or "").strip() or None
+    if not isinstance(changes, dict) or not isinstance(baselines, dict):
+        return JsonResponse({"success": False, "error": _("changes and baselines must be objects")}, status=400)
+
+    # Zone gating: non-business keys need admin
+    if not _is_admin(request.user):
+        for key in changes:
+            definition = CATALOG_BY_KEY.get(key)
+            if definition is not None and _requires_admin(definition):
+                return JsonResponse(
+                    {"success": False, "errors": {key: str(_("Administrator role required for this setting"))}},
+                    status=403,
+                )
+
+    result = SettingsService.apply_change_set(changes, baselines, user_id=request.user.id, reason=reason)
+    if isinstance(result, Ok):
+        outcome = result.value
+        saved = {
+            key: {"baseline": setting.updated_at.isoformat(), "value": setting.get_typed_value()}
+            for key, setting in outcome.settings.items()
+        }
+        for entry in saved.values():
+            if isinstance(entry["value"], Decimal):
+                entry["value"] = str(entry["value"])
+        return JsonResponse({"success": True, "change_set_id": outcome.change_set_id, "saved": saved})
+
+    error = result.error
+    if error.code == "conflict":
+        return JsonResponse(
+            {
+                "success": False,
+                "conflicts": [
+                    {"key": conflict.key, "server_updated_at": conflict.server_updated_at}
+                    for conflict in error.conflicts
+                ],
+            },
+            status=409,
+        )
+    return JsonResponse(
+        {
+            "success": False,
+            "errors": {e.key: e.message for e in error.errors} or {"__all__": str(_("Nothing to save"))},
+        },
+        status=400,
+    )
+
+
+@admin_required
+@require_http_methods(["POST"])
+def secret_set(request: HttpRequest, key: str) -> JsonResponse:
+    """🔐 Set or replace a credential (write-only; empty submissions are rejected)"""
+    definition = CATALOG_BY_KEY.get(key)
+    if definition is None or not definition.sensitive:
+        raise Http404("Unknown credential")
+    try:
+        payload = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"success": False, "error": _("Invalid JSON body")}, status=400)
+
+    value = payload.get("value") or ""
+    if not value.strip():
+        return JsonResponse({"success": False, "error": _("Credential value is required")}, status=400)
+    reason = (payload.get("reason") or "").strip() or "Credential replaced"
+
+    result = SettingsService.update_setting(key, value, user_id=request.user.id, reason=reason)
+    if isinstance(result, Ok):
+        return JsonResponse({"success": True, "configured": True})
+    return JsonResponse({"success": False, "error": result.error.message}, status=400)
+
+
+@admin_required
+@require_http_methods(["POST"])
+def secret_clear(request: HttpRequest, key: str) -> JsonResponse:
+    """🗑️ Clear a credential (dangerous action; requires a reason)"""
+    definition = CATALOG_BY_KEY.get(key)
+    if definition is None or not definition.sensitive:
+        raise Http404("Unknown credential")
+    try:
+        payload = json.loads(request.body)
+    except json.JSONDecodeError:
+        payload = {}
+    reason = (payload.get("reason") or "").strip()
+    if not reason:
+        return JsonResponse({"success": False, "error": _("A reason is required to clear a credential")}, status=400)
+
+    result = SettingsService.update_setting(key, "", user_id=request.user.id, reason=reason)
+    if isinstance(result, Ok):
+        return JsonResponse({"success": True, "configured": False})
+    return JsonResponse({"success": False, "error": result.error.message}, status=400)
+
+
+@admin_required
+@require_http_methods(["POST"])
+def integration_test(request: HttpRequest, integration: str) -> JsonResponse:
+    """🔌 Test an integration's connectivity using its real gateway"""
+    try:
+        if integration == "stripe":
+            from apps.billing.gateways.stripe_gateway import StripeGateway  # noqa: PLC0415  # ADR-0007
+
+            ok = StripeGateway().validate_configuration()
+            message = _("Stripe credentials verified") if ok else _("Stripe validation failed — check the secret key")
+        elif integration == "virtualmin":
+            from apps.provisioning.virtualmin_auth_manager import (  # noqa: PLC0415  # ADR-0007
+                VirtualminAuthenticationManager,
+            )
+            from apps.provisioning.virtualmin_models import VirtualminServer  # noqa: PLC0415  # ADR-0007
+
+            server = VirtualminServer.objects.filter(status="active").first() or VirtualminServer.objects.first()
+            if server is None:
+                ok = False
+                message = _("No Virtualmin servers registered")
+            else:
+                health = VirtualminAuthenticationManager(server).health_check_all_methods()
+                ok = any(getattr(result, "success", False) for result in health.values())
+                message = (
+                    _("Virtualmin authentication healthy") if ok else _("No Virtualmin authentication method succeeded")
+                )
+        elif integration == "efactura":
+            from apps.billing.efactura.settings import efactura_settings  # noqa: PLC0415  # ADR-0007
+            from apps.billing.efactura.token_storage import OAuthToken  # noqa: PLC0415  # ADR-0007
+
+            cui = efactura_settings.company_cui
+            token = OAuthToken.objects.get_valid_token(cui) if cui else None
+            ok = token is not None
+            message = _("Active ANAF OAuth token present") if ok else _("No valid ANAF OAuth token — authorize first")
+        else:
+            raise Http404("Unknown integration")
+    except Http404:
+        raise
+    except Exception as e:
+        logger.error("🔥 [Settings] Integration test failed for %s: %s", integration, e)
+        return JsonResponse({"success": False, "message": str(_("Connection test failed — see logs"))})
+
+    log_security_event(
+        event_type="integration_connection_test",
+        details={"integration": integration, "ok": ok, "resource_type": "SystemSetting"},
+        request_ip=request.META.get("REMOTE_ADDR"),
+    )
+    return JsonResponse({"success": ok, "message": str(message)})
+
+
+@login_required
+@user_passes_test(is_staff_user)
+def settings_search(request: HttpRequest) -> HttpResponse:
+    """⌕ HTMX search across catalog keys, labels, and help text"""
+    query = (request.GET.get("q") or "").strip().lower()
+    results: list[dict[str, Any]] = []
+    if len(query) >= SEARCH_MIN_QUERY_LENGTH:
+        show_admin = _is_admin(request.user)
+        for definition in CATALOG:
+            group = GROUPS_BY_SLUG[definition.group]
+            if group.zone != ZONE_BUSINESS and not show_admin:
+                continue
+            haystack = f"{definition.key} {definition.label} {definition.help_text}".lower()
+            if query in haystack:
+                results.append({"definition": definition, "group": group})
+            if len(results) >= SEARCH_MAX_RESULTS:
+                break
+    return render(request, "settings/partials/search_results.html", {"results": results, "query": query})
+
+
+@login_required
+@user_passes_test(is_staff_user)
+def setting_history(request: HttpRequest, key: str) -> HttpResponse:
+    """🕘 HTMX drawer: audit history for one setting key"""
+    definition = CATALOG_BY_KEY.get(key)
+    if definition is None:
+        raise Http404("Unknown setting")
+    setting_ct = ContentType.objects.get_for_model(SystemSetting)
+    events = (
+        AuditEvent.objects.filter(content_type=setting_ct, metadata__setting_key=key)
+        .select_related("user")
+        .order_by("-timestamp")[:10]
+    )
+    return render(request, "settings/partials/history_drawer.html", {"definition": definition, "events": events})
+
+
+@login_required
+@user_passes_test(is_staff_user)
+def settings_automation(request: HttpRequest) -> HttpResponse:
+    """⏱️ Django-Q2 schedules with their latest run outcome"""
+    schedules = Schedule.objects.all().order_by("name")
+    latest_by_func: dict[str, Task] = {}
+    for task in Task.objects.order_by("-started")[:200]:
+        latest_by_func.setdefault(task.func, task)
+    entries = [{"schedule": schedule, "last_task": latest_by_func.get(schedule.func)} for schedule in schedules]
+    context = {
+        **_sidebar_context(None, request.user),
+        "entries": entries,
+        "queue_depth": OrmQ.objects.count(),
+    }
+    return render(request, "settings/automation.html", context)

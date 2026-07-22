@@ -1,8 +1,8 @@
 """
 URL Configuration for PRAHO System Settings
 
-Provides API endpoints and admin interfaces for dynamic platform configuration.
-Follows PRAHO's URL patterns and security requirements.
+Three-surface settings UI (ADR-0040) plus the read-only staff API and
+export/import utilities. Literal routes come before the group catch-all.
 """
 
 from __future__ import annotations
@@ -14,34 +14,23 @@ from . import views
 app_name = "settings"
 
 urlpatterns = [
-    # ===============================================================================
-    # PUBLIC API ENDPOINTS
-    # ===============================================================================
-    # Public settings (cached, no authentication required)
-    path("api/public/", views.public_settings_api, name="public_settings_api"),
-    # Health check
+    # ── Staff API (read-only) + utilities ───────────────────────────────────
     path("api/health/", views.settings_health_check, name="health_check"),
-    # ===============================================================================
-    # STAFF API ENDPOINTS (Authentication Required)
-    # ===============================================================================
-    # Export/Import endpoints (must come before generic patterns)
     path("api/export/", views.export_settings, name="export_settings"),
     path("api/export/full/", views.export_settings_full, name="export_settings_full"),
     path("api/import/", views.import_settings, name="import_settings"),
-    # Settings CRUD API
+    path("api/cache/refresh/", views.refresh_cache, name="refresh_cache"),
     path("api/", views.SettingsAPIView.as_view(), name="settings_api"),
     path("api/<str:key>/", views.SettingsAPIView.as_view(), name="setting_detail_api"),
-    # Category-specific settings
-    path("api/category/<str:category_key>/", views.category_settings_api, name="category_settings_api"),
-    # Cache management
-    path("api/cache/refresh/", views.refresh_cache, name="refresh_cache"),
-    # ===============================================================================
-    # DASHBOARD AND MANAGEMENT INTERFACES
-    # ===============================================================================
-    # Staff settings dashboard
-    path("dashboard/", views.SettingsDashboardView.as_view(), name="dashboard"),
-    # Settings management interface
-    path("manage/", views.SettingsManagementView.as_view(), name="manage"),
-    # HTMX partial for category content
-    path("manage/category/<str:category_key>/", views.category_management_partial, name="category_management_partial"),
+    # ── Settings UI ─────────────────────────────────────────────────────────
+    path("", views.settings_home, name="home"),
+    path("save/", views.save_change_set, name="save_change_set"),
+    path("search/", views.settings_search, name="search"),
+    path("automation/", views.settings_automation, name="automation"),
+    path("history/<str:key>/", views.setting_history, name="setting_history"),
+    path("secret/<str:key>/clear/", views.secret_clear, name="secret_clear"),
+    path("secret/<str:key>/", views.secret_set, name="secret_set"),
+    path("test/<slug:integration>/", views.integration_test, name="integration_test"),
+    # Group catch-all last: one page per catalog group
+    path("<slug:group_slug>/", views.settings_group, name="group"),
 ]

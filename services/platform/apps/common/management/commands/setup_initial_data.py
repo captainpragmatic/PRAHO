@@ -22,8 +22,7 @@ from django.core.management import call_command
 from django.core.management.base import BaseCommand, CommandError, CommandParser
 
 CORE_COMMANDS: list[tuple[str, str]] = [
-    ("setup_settings_categories", "Setting categories"),
-    ("setup_default_settings", "Default system settings"),
+    ("setup_default_settings", "Settings catalog sync"),
     ("setup_scheduled_tasks", "Scheduled background tasks"),
     ("setup_email_templates", "Email templates"),
     ("ensure_superuser", "Superuser account"),

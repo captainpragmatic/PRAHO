@@ -15,7 +15,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client, TestCase
 from django.urls import reverse
 
-from apps.settings.models import SettingCategory, SystemSetting
+from apps.settings.models import SystemSetting
 
 User = get_user_model()
 
@@ -39,7 +39,6 @@ class SettingsImportTests(TestCase):
         self.url = reverse("settings:import_settings")
 
         # Create a known setting in the DB so we can test importing against it
-        self.category = SettingCategory.objects.create(key="billing", name="Billing")
         SystemSetting.objects.create(
             key="billing.proforma_validity_days",
             name="Proforma Validity Days",

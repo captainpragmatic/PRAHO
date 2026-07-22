@@ -19,58 +19,6 @@ from django.utils.translation import gettext_lazy as _
 SettingDataType = Literal["string", "integer", "boolean", "decimal", "list", "json"]
 
 # Valid setting categories
-SettingCategoryType = Literal[
-    "billing", "users", "domains", "provisioning", "security", "notifications", "integrations", "system"
-]
-
-
-class SettingCategory(models.Model):
-    """🏷️ Setting category for organizing system configurations"""
-
-    key = models.CharField(
-        _("Key"), max_length=50, unique=True, help_text=_('Unique category identifier (e.g., "billing")')
-    )
-
-    name = models.CharField(_("Name"), max_length=100, help_text=_("Human-readable category name"))
-
-    description = models.TextField(_("Description"), blank=True, help_text=_("Category description for staff"))
-
-    display_order = models.PositiveIntegerField(
-        _("Display Order"), default=0, help_text=_("Order in which to display this category")
-    )
-
-    is_active = models.BooleanField(
-        _("Is Active"), default=True, help_text=_("Whether this category is currently active")
-    )
-
-    created_at = models.DateTimeField(
-        _("Created At"), default=timezone.now, help_text=_("When this category was created")
-    )
-
-    updated_at = models.DateTimeField(
-        _("Updated At"), auto_now=True, help_text=_("When this category was last updated")
-    )
-
-    class Meta:
-        db_table = "setting_categories"
-        verbose_name = _("Setting Category")
-        verbose_name_plural = _("Setting Categories")
-        ordering: ClassVar = ["display_order", "name"]
-        indexes: ClassVar = [
-            models.Index(fields=["key"]),
-            models.Index(fields=["display_order"]),
-        ]
-
-    def __str__(self) -> str:
-        return f"🏷️ {self.name}"
-
-    def clean(self) -> None:
-        """Validate category data"""
-        super().clean()
-
-        # Normalize key to lowercase
-        if self.key:
-            self.key = self.key.lower().replace(" ", "_")
 
 
 class SystemSetting(models.Model):
@@ -113,10 +61,11 @@ class SystemSetting(models.Model):
         help_text=_("Type of data this setting stores"),
     )
 
-    value = models.JSONField(_("Value"), help_text=_("Current setting value"))
+    # blank=True: an empty value is legitimate (cleared credentials, empty defaults)
+    value = models.JSONField(_("Value"), blank=True, help_text=_("Current setting value"))
 
     default_value = models.JSONField(
-        _("Default Value"), help_text=_("Default value to use if setting is not configured")
+        _("Default Value"), blank=True, help_text=_("Default value to use if setting is not configured")
     )
 
     is_required = models.BooleanField(
@@ -131,19 +80,8 @@ class SystemSetting(models.Model):
         _("Is Active"), default=True, help_text=_("Whether this setting is currently active")
     )
 
-    is_public = models.BooleanField(
-        _("Is Public"), default=False, help_text=_("Whether this setting can be accessed publicly")
-    )
-
     requires_restart = models.BooleanField(
         _("Requires Restart"), default=False, help_text=_("Whether changing this setting requires application restart")
-    )
-
-    validation_rules = models.JSONField(
-        _("Validation Rules"),
-        default=dict,
-        blank=True,
-        help_text=_("JSON object with validation rules (min, max, pattern, etc.)"),
     )
 
     help_text = models.TextField(_("Help Text"), blank=True, help_text=_("Additional help text for staff users"))
@@ -170,8 +108,9 @@ class SystemSetting(models.Model):
 
     def save(self, *args: Any, **kwargs: Any) -> None:
         """Save setting with automatic encryption for sensitive values"""
-        # Handle encryption for sensitive settings
-        if self.is_sensitive and self.value is not None:
+        # Encrypt sensitive values; an empty value means "cleared / not configured"
+        # and is stored plain — encrypting the empty string is rejected upstream.
+        if self.is_sensitive and self.value:
             from apps.common.encryption import encrypt_value, is_encrypted  # noqa: PLC0415
 
             if not is_encrypted(str(self.value)):
@@ -296,11 +235,6 @@ class SystemSetting(models.Model):
             return cls.objects.get(key=key)
         except cls.DoesNotExist:
             return None
-
-    @classmethod
-    def get_public_settings(cls) -> models.QuerySet[SystemSetting]:
-        """Get all public settings that can be accessed without authentication"""
-        return cls.objects.filter(is_active=True, is_public=True)
 
     @classmethod
     def get_value_by_key(cls, key: str, default: Any = None) -> Any:

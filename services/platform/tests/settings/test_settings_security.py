@@ -6,14 +6,15 @@ Verifies all OWASP Top 10 security fixes are working correctly.
 """
 
 import json
-from django.test import TestCase, Client
-from django.urls import reverse
+
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
+from django.test import Client, TestCase
+from django.urls import reverse
 
-from apps.settings.models import SystemSetting, SettingCategory
 from apps.common.encryption import encrypt_value, is_encrypted
-from apps.settings.services import SettingsService
+from apps.settings.models import SystemSetting
+from apps.settings.services import SettingsService, _safe_json_loads
 
 User = get_user_model()
 
@@ -25,8 +26,6 @@ class EncryptionSecurityTests(TestCase):
         self.admin_user = User.objects.create_user(
             email="admin@test.com", password="testpass123", is_staff=True, is_superuser=True
         )
-
-        self.category = SettingCategory.objects.create(key="security", name="Security Settings")
 
     def test_sensitive_setting_encryption_on_save(self):
         """🔒 Test that sensitive values are automatically encrypted when saved"""
@@ -116,10 +115,7 @@ class ExportSecurityTests(TestCase):
 
         self.regular_user = User.objects.create_user(email="user@test.com", password="testpass123")
 
-        self.category = SettingCategory.objects.create(key="security", name="Security Settings")
-
         # Create system category for the system setting
-        self.system_category = SettingCategory.objects.create(key="system", name="System Settings")
 
         # Create sensitive setting
         self.sensitive_setting = SystemSetting.objects.create(
@@ -308,8 +304,6 @@ class InputValidationSecurityTests(TestCase):
             email="admin@test.com", password="testpass123", is_staff=True, is_superuser=True
         )
 
-        self.category = SettingCategory.objects.create(key="security", name="Security Settings")
-
     def test_category_key_validation_prevents_path_traversal(self):
         """🔒 Test that category key validation prevents path traversal attacks"""
         self.client.force_login(self.admin_user)
@@ -325,15 +319,13 @@ class InputValidationSecurityTests(TestCase):
 
         for malicious_key in malicious_keys:
             # Use direct URL instead of reverse to avoid URL validation issues
-            response = self.client.get(f"/app/settings/manage/category/{malicious_key}/")
+            response = self.client.get(f"/settings/{malicious_key}/")
             # Should return 400 Bad Request or 404 for invalid category
             self.assertIn(response.status_code, [400, 404], f"Failed to reject malicious key: {malicious_key}")
 
     def test_json_size_limit_prevents_dos(self):
         """🔒 Test that JSON size limits prevent DoS attacks"""
         # This would test the _safe_json_loads function with oversized JSON
-        from apps.settings.services import _safe_json_loads
-
         # Test oversized JSON (exceed 1MB limit)
         large_json = '{"data": "' + "x" * 1200000 + '"}'  # 1.2MB+ JSON
 
@@ -344,8 +336,6 @@ class InputValidationSecurityTests(TestCase):
 
     def test_json_depth_limit_prevents_stack_overflow(self):
         """🔒 Test that JSON depth limits prevent stack overflow attacks"""
-        from apps.settings.services import _safe_json_loads
-
         # Create deeply nested JSON (>10 levels)
         nested_json = '{"a":' * 15 + '"value"' + "}" * 15
 
@@ -355,8 +345,8 @@ class InputValidationSecurityTests(TestCase):
         self.assertIn("JSON too deeply nested", str(cm.exception))
 
 
-class CategoryManagementStaffCheckTests(TestCase):
-    """H2: category_management_partial must require staff user."""
+class GroupPageStaffCheckTests(TestCase):
+    """H2: the settings group pages must require a staff user."""
 
     def setUp(self) -> None:
         self.client = Client()
@@ -371,14 +361,22 @@ class CategoryManagementStaffCheckTests(TestCase):
             is_staff=True,
             staff_role="admin",
         )
-        SettingCategory.objects.get_or_create(key="test_billing", defaults={"name": "Test Billing", "is_active": True})
 
     def test_non_staff_get_redirected(self) -> None:
         self.client.force_login(self.non_staff)
-        response = self.client.get("/settings/manage/category/test_billing/")
+        response = self.client.get("/settings/billing/")
         self.assertIn(response.status_code, [302, 403])
 
-    def test_non_staff_post_rejected(self) -> None:
+    def test_non_staff_save_rejected(self) -> None:
         self.client.force_login(self.non_staff)
-        response = self.client.post("/settings/manage/category/test_billing/", data={"setting_foo": "bar"})
+        response = self.client.post(
+            "/settings/save/",
+            data='{"changes": {"billing.proforma_validity_days": 45}, "baselines": {}}',
+            content_type="application/json",
+        )
         self.assertIn(response.status_code, [302, 403])
+
+    def test_staff_can_open_business_group(self) -> None:
+        self.client.force_login(self.staff_user)
+        response = self.client.get("/settings/billing/")
+        self.assertEqual(response.status_code, 200)
