@@ -39,6 +39,7 @@ def send_email_task(  # notification template parameters  # noqa: PLR0913  # Bus
     reply_to: str | None = None,
     cc: list[str] | None = None,
     bcc: list[str] | None = None,
+    attachments: list[tuple[str, bytes, str]] | None = None,
     tags: dict[str, str] | None = None,
     track_opens: bool = True,
     track_clicks: bool = True,
@@ -103,6 +104,12 @@ def send_email_task(  # notification template parameters  # noqa: PLR0913  # Bus
                 bcc=bcc,
                 reply_to=[reply_to] if reply_to else None,
             )
+
+        # Attach files. _send_async accepted attachments but never forwarded them to this task, so
+        # a proforma email queued for async delivery arrived with no PDF (#228).
+        if attachments:
+            for filename, content, mimetype in attachments:
+                msg.attach(filename, content, mimetype)
 
         # Add ESP-specific metadata for Anymail
         # These attributes are supported when using Anymail backends
@@ -172,6 +179,7 @@ def send_email_task(  # notification template parameters  # noqa: PLR0913  # Bus
                     reply_to=reply_to,
                     cc=cc,
                     bcc=bcc,
+                    attachments=attachments,
                     tags=tags,
                     track_opens=track_opens,
                     track_clicks=track_clicks,
@@ -222,8 +230,13 @@ def _schedule_email_retry(  # notification template parameters  # noqa: PLR0913 
     track_opens: bool,
     track_clicks: bool,
     retry_count: int,
+    attachments: list[tuple[str, bytes, str]] | None = None,
 ) -> None:
-    """Schedule an email retry with exponential backoff."""
+    """Schedule an email retry with exponential backoff.
+
+    Carries the attachments through the re-enqueue: a retried proforma email
+    must not arrive without its PDF (#228 sibling).
+    """
     try:
         from django_q.tasks import (  # noqa: PLC0415  # Deferred: avoids circular import
             async_task,  # Deferred: django-q task  # Deferred: avoids circular import
@@ -247,6 +260,7 @@ def _schedule_email_retry(  # notification template parameters  # noqa: PLR0913 
             reply_to=reply_to,
             cc=cc,
             bcc=bcc,
+            attachments=attachments,
             tags=tags,
             track_opens=track_opens,
             track_clicks=track_clicks,
