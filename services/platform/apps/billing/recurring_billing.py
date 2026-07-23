@@ -694,9 +694,12 @@ class RecurringBillingOrchestrator:
                     proforma = cycle.proforma
                     if proforma is None or proforma.payments.filter(status__in=["pending", "succeeded"]).exists():
                         continue
-                subscription._go_past_due()
-                subscription.grace_period_ends_at = run_at + timedelta(days=subscription.grace_period_days)
-                subscription.save(update_fields=["status", "grace_period_ends_at", "updated_at"])
+                if subscription.status == "active":
+                    subscription._go_past_due()
+                    subscription.grace_period_ends_at = run_at + timedelta(days=subscription.grace_period_days)
+                    subscription.save(update_fields=["status", "grace_period_ends_at", "updated_at"])
+                elif subscription.status != "past_due":
+                    continue
                 cycle.collection_status = "past_due"
                 cycle.save(update_fields=["collection_status", "updated_at"])
                 marked += 1

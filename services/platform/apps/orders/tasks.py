@@ -26,6 +26,9 @@ from apps.orders.services import OrderService, StatusChangeData
 # Constants
 _DEFAULT_MAX_PAYMENT_FAILURES_BEFORE_ORDER_FAIL = 3
 MAX_PAYMENT_FAILURES_BEFORE_ORDER_FAIL = _DEFAULT_MAX_PAYMENT_FAILURES_BEFORE_ORDER_FAIL
+_DEFAULT_MAX_PAID_ORDER_CONFIRMATION_FAILURES = 3
+_MAX_PAID_ORDER_CONFIRMATION_FAILURES = 10
+_PAID_ORDER_CONFIRMATION_META_KEY = "paid_order_confirmation"
 
 # Import at module level to avoid PLC0415
 try:
@@ -110,6 +113,22 @@ def get_max_payment_failures_before_order_fail() -> int:
 
     return SettingsService.get_integer_setting(
         "orders.max_payment_failures_before_fail", _DEFAULT_MAX_PAYMENT_FAILURES_BEFORE_ORDER_FAIL
+    )
+
+
+def get_max_paid_order_confirmation_failures() -> int:
+    """Get the automatic confirmation failure limit before staff retry is required."""
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return min(
+        _MAX_PAID_ORDER_CONFIRMATION_FAILURES,
+        max(
+            1,
+            SettingsService.get_integer_setting(
+                "orders.max_paid_order_confirmation_failures",
+                _DEFAULT_MAX_PAID_ORDER_CONFIRMATION_FAILURES,
+            ),
+        ),
     )
 
 
@@ -239,7 +258,7 @@ def process_pending_orders() -> dict[str, Any]:  # noqa: C901, PLR0912  # Comple
                 f"{results['provisioning_triggered']} provisioning triggered"
             )
 
-            return {"success": True, "results": results}
+            return {"success": not results["errors"], "results": results}
 
         finally:
             # Always release lock
@@ -430,10 +449,65 @@ def _process_paid_order(order: Order, invoice: Any, order_result: dict[str, Any]
 
     result = OrderPaymentConfirmationService.confirm_order(order, invoice=invoice)
     if result.is_err():
-        logger.warning("⚠️ [OrderProcessor] Cannot confirm order %s: %s", order.order_number, result.unwrap_err())
+        error = result.unwrap_err()
+        persisted_error = error[:1_000]
+        logger.warning("⚠️ [OrderProcessor] Cannot confirm order %s: %s", order.order_number, error)
+        results["failed_orders"] += 1
+        results["errors"].append(f"Order {order.order_number}: {error}")
+        order_result["action"] = "payment_confirmation_failed"
+
+        meta = dict(order.meta or {})
+        previous = meta.get(_PAID_ORDER_CONFIRMATION_META_KEY)
+        previous_attempts = previous.get("attempts", 0) if isinstance(previous, dict) else 0
+        attempts = previous_attempts + 1
+        failure_limit = get_max_paid_order_confirmation_failures()
+        meta[_PAID_ORDER_CONFIRMATION_META_KEY] = {
+            "attempts": attempts,
+            "last_error": persisted_error,
+            "last_attempt_at": timezone.now().isoformat(),
+            "requires_manual_retry": attempts >= failure_limit,
+        }
+        order.meta = meta
+        order.save(update_fields=["meta", "updated_at"])
+
+        if attempts >= failure_limit:
+            escalation = OrderService.update_order_status(
+                order,
+                StatusChangeData(
+                    new_status="failed",
+                    notes=(
+                        "Automatic confirmation stopped after "
+                        f"{attempts} failed recurring-enrollment attempts: {persisted_error}"
+                    ),
+                ),
+            )
+            if escalation.is_err():
+                escalation_error = escalation.unwrap_err()
+                results["errors"].append(
+                    f"Order {order.order_number}: failed to escalate confirmation error: {escalation_error}"
+                )
+                logger.critical(
+                    "🔥 [OrderProcessor] Could not escalate paid order %s after %d failures: %s",
+                    order.order_number,
+                    attempts,
+                    escalation_error,
+                )
+            else:
+                order = escalation.unwrap()
+                logger.critical(
+                    "🔥 [OrderProcessor] Paid order %s moved to failed after %d confirmation failures; "
+                    "staff must retry it after repairing enrollment",
+                    order.order_number,
+                    attempts,
+                )
+        order_result["status"] = order.status
         return
 
     order.refresh_from_db()
+    if _PAID_ORDER_CONFIRMATION_META_KEY in (order.meta or {}):
+        order.meta = dict(order.meta)
+        order.meta.pop(_PAID_ORDER_CONFIRMATION_META_KEY, None)
+        order.save(update_fields=["meta", "updated_at"])
     order_result["action"] = "payment_confirmed"
     order_result["status"] = order.status
     results["confirmed_orders"] += 1

@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 
 # Payment methods that support gateway refunds — add new gateways here
 GATEWAY_PAYMENT_METHODS: frozenset[str] = frozenset({"stripe"})
+MAX_REFUND_LIST_RECORDS = 5_000
 
 
 class PaymentIntentResult(TypedDict):
@@ -97,6 +98,7 @@ class RefundListResult(TypedDict):
 
     success: bool
     refunds: list[RefundStatusResult]
+    truncated: NotRequired[bool]
     error: str | None
 
 
@@ -214,8 +216,14 @@ class BasePaymentGateway(ABC):
         """Retrieve authoritative facts for one gateway refund."""
 
     @abstractmethod
-    def list_refunds(self, *, created_gte: int, limit: int = 100) -> RefundListResult:
-        """List all recent refunds, using limit as the provider page size."""
+    def list_refunds(
+        self,
+        *,
+        created_gte: int,
+        page_size: int = 100,
+        max_records: int = 500,
+    ) -> RefundListResult:
+        """List recent refunds within a hard record budget."""
 
     def validate_configuration(self) -> bool:
         """

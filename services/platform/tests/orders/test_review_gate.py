@@ -29,6 +29,19 @@ User = get_user_model()
 DEFAULT_THRESHOLD = 500000
 
 
+class PaidOrderConfirmationLimitTests(TestCase):
+    def test_runtime_setting_is_capped_to_keep_retry_loop_bounded(self):
+        from apps.orders.tasks import get_max_paid_order_confirmation_failures  # noqa: PLC0415
+
+        with patch(
+            "apps.settings.services.SettingsService.get_integer_setting",
+            return_value=999_999,
+        ):
+            result = get_max_paid_order_confirmation_failures()
+
+        self.assertEqual(result, 10)
+
+
 class ReviewGateTestBase(TestCase):
     def setUp(self):
         self.currency, _ = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei", "decimals": 2})
@@ -234,6 +247,42 @@ class TestReviewGateBackgroundTask(ReviewGateTestBase):
             f"High-value order should go to in_review, not {order.status}. "
             f"Background task must route through OrderPaymentConfirmationService.confirm_order().",
         )
+
+    def test_repeated_paid_order_enrollment_failure_escalates_to_recoverable_failed_state(self):
+        from apps.billing.models import Invoice  # noqa: PLC0415
+        from apps.common.types import Err  # noqa: PLC0415
+        from apps.orders.tasks import _process_paid_order  # noqa: PLC0415
+
+        order = self._create_order(total_cents=5_000)
+        force_status(order, "awaiting_payment")
+        invoice = Invoice.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            subtotal_cents=5_000,
+            tax_cents=0,
+            total_cents=5_000,
+            status="paid",
+        )
+        results = {
+            "confirmed_orders": 0,
+            "failed_orders": 0,
+            "provisioning_triggered": 0,
+            "errors": [],
+        }
+
+        with patch(
+            "apps.orders.services.OrderPaymentConfirmationService.confirm_order",
+            return_value=Err("recurring enrollment failed"),
+        ):
+            for _attempt in range(3):
+                _process_paid_order(order, invoice, {"action": None, "status": None}, results)
+                order.refresh_from_db()
+
+        self.assertEqual(order.status, "failed")
+        self.assertEqual(results["failed_orders"], 3)
+        self.assertEqual(len(results["errors"]), 3)
+        self.assertEqual(order.meta["paid_order_confirmation"]["attempts"], 3)
+        self.assertTrue(order.meta["paid_order_confirmation"]["requires_manual_retry"])
 
 
 class TestSyncTaskRespectsReviewGate(ReviewGateTestBase):
