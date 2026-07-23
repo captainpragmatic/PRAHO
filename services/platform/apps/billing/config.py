@@ -83,6 +83,27 @@ EU_COUNTRY_CODES = frozenset(
 # PAYMENT & INVOICE TERMS
 # ===============================================================================
 
+FIXED_RENEWAL_COLLECTION_LEAD_DAYS = 7
+_DEFAULT_INVOICE_GENERATION_LEAD_DAYS = 14
+_MIN_INVOICE_GENERATION_LEAD_DAYS = FIXED_RENEWAL_COLLECTION_LEAD_DAYS
+_MAX_INVOICE_GENERATION_LEAD_DAYS = 30
+
+
+def get_invoice_generation_lead_days() -> int:
+    """Return the guarded lead time for fixed recurring-invoice generation."""
+    try:
+        value = SettingsService.get_integer_setting(
+            "billing.invoice_generation_lead_days",
+            _DEFAULT_INVOICE_GENERATION_LEAD_DAYS,
+        )
+    except Exception:
+        logger.warning(
+            "Failed to read invoice_generation_lead_days from SettingsService, using fallback",
+            exc_info=True,
+        )
+        return _DEFAULT_INVOICE_GENERATION_LEAD_DAYS
+    return max(_MIN_INVOICE_GENERATION_LEAD_DAYS, min(_MAX_INVOICE_GENERATION_LEAD_DAYS, value))
+
 
 def get_invoice_payment_terms_days() -> int:
     """Get invoice payment terms from SettingsService (ADR-0015 cascade)."""

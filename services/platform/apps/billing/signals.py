@@ -90,6 +90,7 @@ def _serialize_values_for_audit(values: dict[str, Any]) -> dict[str, Any]:
 
 # Financial thresholds in cents (Romanian business context)
 LARGE_REFUND_THRESHOLD_CENTS = 50000  # 500 EUR - requires finance team notification
+_CREDIT_SCORE_ADJUSTMENTS_META_KEY = "credit_score_adjustments"
 
 # ===============================================================================
 # MODEL LIFECYCLE COVERAGE SIGNALS
@@ -672,7 +673,15 @@ def handle_payment_cleanup(sender: type[Payment], instance: Payment, **kwargs: A
 
         # Update customer payment statistics
         if instance.status == "succeeded":
-            _revert_customer_credit_score(instance.customer, "payment_deleted")
+            applied_adjustment = _get_payment_credit_adjustment(instance, "positive_payment")
+            if applied_adjustment is None:
+                _revert_customer_credit_score(instance.customer, "positive_payment")
+            else:
+                _revert_customer_credit_score(
+                    instance.customer,
+                    "positive_payment",
+                    applied_adjustment=applied_adjustment,
+                )
 
         logger.info(f"🗑️ [Payment] Cleaned up deleted payment {instance.id}")
 
@@ -964,33 +973,122 @@ def _activate_payment_services(payment: Payment) -> None:
         logger.exception(f"🔥 [Payment] Service activation failed: {e}")
 
 
+def _apply_customer_payment_credit(payment: Payment, event_type: str) -> None:
+    """Apply one event and atomically bind its exact reversible delta to the payment."""
+    from apps.customers.services import CustomerCreditService
+
+    with transaction.atomic():
+        result = CustomerCreditService.update_credit_score(
+            customer=payment.customer, event_type=event_type, event_date=timezone.now()
+        )
+        if event_type in {"positive_payment", "refund_issued"}:
+            applied_adjustment = result.get("adjustment")
+            if not isinstance(applied_adjustment, int) or isinstance(applied_adjustment, bool):
+                raise TypeError("CustomerCreditService returned a non-integer applied adjustment")
+            _record_payment_credit_adjustment(payment, event_type, applied_adjustment)
+
+
+def _revert_customer_payment_credit(payment: Payment, event_type: str) -> bool:
+    """Revert a payment-bound delta exactly, returning false for unrecorded legacy refunds."""
+    from apps.customers.services import CustomerCreditService
+
+    applied_adjustment = _get_payment_credit_adjustment(payment, event_type)
+    if applied_adjustment is None:
+        logger.warning(
+            "Skipping unrecorded credit-score reversion for payment %s event %s",
+            payment.id,
+            event_type,
+        )
+        return False
+    with transaction.atomic():
+        CustomerCreditService.revert_credit_change(
+            customer=payment.customer,
+            event_type=event_type,
+            event_date=timezone.now(),
+            applied_adjustment=applied_adjustment,
+        )
+        _remove_payment_credit_adjustment(payment, event_type)
+    return True
+
+
 def _update_customer_payment_credit(payment: Payment, old_status: str) -> None:
     """Update customer credit score based on payment events"""
     try:
         if (payment.meta or {}).get("reservation_abandoned") is True:
             return
 
-        from apps.customers.services import CustomerCreditService
-
         event_type = None
+        reverted_event_type = None
+        refund_statuses = {"partially_refunded", "refunded"}
         # `old_status == "pending"` only: a refund reversal restoring 'succeeded' (see
         # handle_payment_created_or_updated) is not a new positive payment.
         if payment.status == "succeeded" and old_status == "pending":
             event_type = "positive_payment"
+        elif payment.status == "succeeded" and old_status in refund_statuses:
+            reverted_event_type = "refund_issued"
         elif payment.status == "failed" and old_status != "failed":
             event_type = "failed_payment"
-        elif payment.status == "refunded" and old_status != "refunded":
-            event_type = "refund_processed"
+        elif payment.status in refund_statuses and old_status not in refund_statuses:
+            event_type = "refund_issued"
 
         if event_type:
-            CustomerCreditService.update_credit_score(
-                customer=payment.customer, event_type=event_type, event_date=timezone.now()
-            )
-
+            _apply_customer_payment_credit(payment, event_type)
             logger.info(f"📊 [Customer] Updated credit score for {payment.customer.id}: {event_type}")
+        elif reverted_event_type and _revert_customer_payment_credit(payment, reverted_event_type):
+            logger.info(
+                "📊 [Customer] Reverted credit score event for %s: %s",
+                payment.customer.id,
+                reverted_event_type,
+            )
 
     except Exception as e:
         logger.exception(f"🔥 [Customer] Credit score update failed: {e}")
+
+
+def _get_payment_credit_adjustment(payment: Payment, event_type: str) -> int | None:
+    """Return an exact payment-bound credit delta, rejecting malformed metadata."""
+    adjustments = (payment.meta or {}).get(_CREDIT_SCORE_ADJUSTMENTS_META_KEY)
+    if not isinstance(adjustments, dict):
+        return None
+    adjustment = adjustments.get(event_type)
+    if not isinstance(adjustment, int) or isinstance(adjustment, bool):
+        return None
+    return adjustment
+
+
+def _record_payment_credit_adjustment(payment: Payment, event_type: str, applied_adjustment: int) -> None:
+    """Persist the exact applied delta without recursively firing Payment signals."""
+    locked_payment = Payment.objects.select_for_update(of=("self",)).only("meta").get(pk=payment.pk)
+    payment_meta = dict(locked_payment.meta or {})
+    stored_adjustments = payment_meta.get(_CREDIT_SCORE_ADJUSTMENTS_META_KEY)
+    adjustments = dict(stored_adjustments) if isinstance(stored_adjustments, dict) else {}
+    adjustments[event_type] = applied_adjustment
+    payment_meta[_CREDIT_SCORE_ADJUSTMENTS_META_KEY] = adjustments
+    updated = Payment.objects.filter(pk=payment.pk).update(  # fsm-bypass: metadata-only signal bookkeeping
+        meta=payment_meta
+    )
+    if updated != 1:
+        raise Payment.DoesNotExist(f"Payment {payment.pk} disappeared while recording its credit adjustment")
+    payment.meta = payment_meta
+
+
+def _remove_payment_credit_adjustment(payment: Payment, event_type: str) -> None:
+    """Remove a consumed payment-bound delta without recursively firing signals."""
+    locked_payment = Payment.objects.select_for_update(of=("self",)).only("meta").get(pk=payment.pk)
+    payment_meta = dict(locked_payment.meta or {})
+    stored_adjustments = payment_meta.get(_CREDIT_SCORE_ADJUSTMENTS_META_KEY)
+    adjustments = dict(stored_adjustments) if isinstance(stored_adjustments, dict) else {}
+    adjustments.pop(event_type, None)
+    if adjustments:
+        payment_meta[_CREDIT_SCORE_ADJUSTMENTS_META_KEY] = adjustments
+    else:
+        payment_meta.pop(_CREDIT_SCORE_ADJUSTMENTS_META_KEY, None)
+    updated = Payment.objects.filter(pk=payment.pk).update(  # fsm-bypass: metadata-only signal bookkeeping
+        meta=payment_meta
+    )
+    if updated != 1:
+        raise Payment.DoesNotExist(f"Payment {payment.pk} disappeared while removing its credit adjustment")
+    payment.meta = payment_meta
 
 
 # ===============================================================================
@@ -1899,12 +1997,22 @@ def _cancel_invoice_webhooks(invoice: Invoice) -> None:
         logger.exception(f"🔥 [Webhook] Invoice webhook cancellation failed: {e}")
 
 
-def _revert_customer_credit_score(customer: Any, event_type: str) -> None:
+def _revert_customer_credit_score(
+    customer: Any,
+    event_type: str,
+    *,
+    applied_adjustment: int | None = None,
+) -> None:
     """Revert customer credit score changes"""
     try:
         from apps.customers.services import CustomerCreditService
 
-        CustomerCreditService.revert_credit_change(customer=customer, event_type=event_type, event_date=timezone.now())
+        CustomerCreditService.revert_credit_change(
+            customer=customer,
+            event_type=event_type,
+            event_date=timezone.now(),
+            applied_adjustment=applied_adjustment,
+        )
 
     except Exception as e:
         logger.exception(f"🔥 [Customer] Credit score reversion failed: {e}")

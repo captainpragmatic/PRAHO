@@ -17,6 +17,7 @@ from apps.billing.efactura.settings import ro_local_date
 from apps.common.types import Err, Ok, Result
 from apps.settings.services import SettingsService
 
+from .config import FIXED_RENEWAL_COLLECTION_LEAD_DAYS, get_invoice_generation_lead_days
 from .fiscal_identity import billing_country_code, get_customer_fiscal_identity
 
 logger = logging.getLogger(__name__)
@@ -27,6 +28,7 @@ if TYPE_CHECKING:
     from .invoice_models import Invoice
     from .metering_models import BillingCycle
     from .proforma_models import ProformaInvoice
+    from .subscription_models import Subscription
 
 _CYCLE_MONTHS: dict[str, int] = {
     "monthly": 1,
@@ -77,7 +79,11 @@ def next_billing_period_end(
 
 def fixed_renewal_schedule(period_end: datetime) -> tuple[datetime, datetime]:
     """Return the proforma-notice and automatic-charge times for a fixed renewal."""
-    return period_end - timedelta(days=14), period_end - timedelta(days=7)
+    invoice_lead_days = get_invoice_generation_lead_days()
+    return (
+        period_end - timedelta(days=invoice_lead_days),
+        period_end - timedelta(days=FIXED_RENEWAL_COLLECTION_LEAD_DAYS),
+    )
 
 
 def usage_collection_schedule(period_end: datetime) -> tuple[datetime, datetime]:
@@ -267,6 +273,62 @@ class RecurringCollectionResult(TypedDict):
     errors: list[str]
 
 
+def _resolve_due_unprepared_cycle(
+    subscription: Subscription,
+    *,
+    run_at: datetime,
+    invoice_lead_days: int,
+    errors: list[str],
+) -> tuple[BillingCycle, datetime] | None:
+    """Reconcile one fixed-renewal schedule and return its due unprepared cycle."""
+    from .metering_models import BillingCycle  # noqa: PLC0415
+
+    expected_proforma_at = subscription.current_period_end - timedelta(days=invoice_lead_days)
+    period_start = subscription.current_period_end
+    period_end = next_billing_period_end(
+        period_start,
+        subscription.billing_cycle,
+        anchor_day=subscription.billing_anchor_day,
+        custom_cycle_days=subscription.custom_cycle_days,
+    )
+    cycle = (
+        BillingCycle.objects.select_for_update(of=("self",))
+        .filter(subscription=subscription, period_start=period_start)
+        .first()
+    )
+    if cycle and cycle.period_end != period_end:
+        errors.append(f"Cycle {cycle.id} period does not match subscription {subscription.subscription_number}")
+        return None
+    if cycle and (cycle.proforma_id or cycle.invoice_id or cycle.collection_status != "unbilled"):
+        return None
+
+    if subscription.next_proforma_at != expected_proforma_at:
+        subscription.next_proforma_at = expected_proforma_at
+        subscription.next_billing_date = expected_proforma_at
+        subscription.save(update_fields=["next_proforma_at", "next_billing_date", "updated_at"])
+    if expected_proforma_at > run_at:
+        return None
+
+    if cycle is None:
+        cycle, _created = BillingCycle.objects.get_or_create(
+            subscription=subscription,
+            period_start=period_start,
+            defaults={
+                "period_end": period_end,
+                "status": "upcoming",
+                "collection_status": "unbilled",
+                "base_charge_cents": subscription.total_price_cents,
+                "charge_scheduled_at": subscription.next_charge_at,
+            },
+        )
+    if cycle.period_end != period_end:
+        errors.append(f"Cycle {cycle.id} period does not match subscription {subscription.subscription_number}")
+        return None
+    if cycle.proforma_id or cycle.invoice_id or cycle.collection_status != "unbilled":
+        return None
+    return cycle, period_end
+
+
 class RecurringBillingOrchestrator:
     """PRAHO-owned preparation and collection of recurring service charges."""
 
@@ -282,7 +344,6 @@ class RecurringBillingOrchestrator:
         """
         from apps.common.tax_service import TaxService  # noqa: PLC0415
 
-        from .metering_models import BillingCycle  # noqa: PLC0415
         from .proforma_models import ProformaInvoice, ProformaLine, ProformaSequence  # noqa: PLC0415
         from .proforma_service import _derive_tax_category  # noqa: PLC0415
         from .services import _build_customer_vat_info  # noqa: PLC0415
@@ -303,8 +364,10 @@ class RecurringBillingOrchestrator:
             )
 
         try:
+            invoice_lead_days = get_invoice_generation_lead_days()
+            preparation_cutoff = run_at + timedelta(days=invoice_lead_days)
             with transaction.atomic():
-                due_subscriptions = list(
+                candidate_subscriptions = list(
                     Subscription.objects.select_for_update(of=("self",))
                     .select_related(
                         "customer",
@@ -323,42 +386,26 @@ class RecurringBillingOrchestrator:
                         status__in=["active", "trialing"],
                         cancel_at_period_end=False,
                         next_proforma_at__isnull=False,
-                        next_proforma_at__lte=run_at,
                         service__isnull=False,
                         service__auto_renew=True,
                         service__status__in=["active", "suspended"],
                     )
+                    .filter(Q(next_proforma_at__lte=run_at) | Q(current_period_end__lte=preparation_cutoff))
                     .order_by("customer_id", "currency_id", "next_charge_at", "id")
                 )
-                result["subscriptions_checked"] = len(due_subscriptions)
+                result["subscriptions_checked"] = len(candidate_subscriptions)
 
                 groups: dict[tuple[object, ...], list[tuple[Subscription, BillingCycle, datetime]]] = {}
-                for subscription in due_subscriptions:
-                    period_start = subscription.current_period_end
-                    period_end = next_billing_period_end(
-                        period_start,
-                        subscription.billing_cycle,
-                        anchor_day=subscription.billing_anchor_day,
-                        custom_cycle_days=subscription.custom_cycle_days,
+                for subscription in candidate_subscriptions:
+                    due_cycle = _resolve_due_unprepared_cycle(
+                        subscription,
+                        run_at=run_at,
+                        invoice_lead_days=invoice_lead_days,
+                        errors=result["errors"],
                     )
-                    cycle, _created = BillingCycle.objects.get_or_create(
-                        subscription=subscription,
-                        period_start=period_start,
-                        defaults={
-                            "period_end": period_end,
-                            "status": "upcoming",
-                            "collection_status": "unbilled",
-                            "base_charge_cents": subscription.total_price_cents,
-                            "charge_scheduled_at": subscription.next_charge_at,
-                        },
-                    )
-                    if cycle.period_end != period_end:
-                        result["errors"].append(
-                            f"Cycle {cycle.id} period does not match subscription {subscription.subscription_number}"
-                        )
+                    if due_cycle is None:
                         continue
-                    if cycle.proforma_id or cycle.invoice_id or cycle.collection_status != "unbilled":
-                        continue
+                    cycle, period_end = due_cycle
 
                     collection_key = (
                         subscription.customer_id,

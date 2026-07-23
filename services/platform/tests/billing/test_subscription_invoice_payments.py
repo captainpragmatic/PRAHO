@@ -310,6 +310,88 @@ class SubscriptionInvoicePaymentTestCase(_SubscriptionInvoicePaymentFixture, Tes
         first_subscription.refresh_from_db()
         self.assertNotEqual(first_subscription.current_period_end, renewal_cycles[0].period_end)
 
+    def test_lead_time_change_does_not_reschedule_an_already_prepared_cycle(self) -> None:
+        now = timezone.now()
+        subscription = self._create_aligned_subscription("LEAD-PREPARED", now)
+
+        first_result = RecurringBillingOrchestrator.prepare_due_proformas(as_of=now)
+        subscription.refresh_from_db()
+        prepared_at = subscription.next_proforma_at
+        setting_result = SettingsService.update_setting(
+            key="billing.invoice_generation_lead_days",
+            value=7,
+            reason="prepared schedule stability test",
+        )
+        self.assertTrue(setting_result.is_ok(), setting_result)
+
+        second_result = RecurringBillingOrchestrator.prepare_due_proformas(as_of=now)
+
+        self.assertEqual(first_result["proformas_created"], 1)
+        self.assertEqual(second_result["proformas_created"], 0)
+        subscription.refresh_from_db()
+        self.assertEqual(subscription.next_proforma_at, prepared_at)
+        self.assertEqual(ProformaInvoice.objects.count(), 1)
+
+    def test_increased_invoice_lead_reschedules_an_existing_cycle_earlier(self) -> None:
+        now = timezone.now()
+        subscription = self._create_aligned_subscription("LEAD-EARLIER", now)
+        period_end = now + timedelta(days=20)
+        subscription.current_period_end = period_end
+        subscription.next_proforma_at = period_end - timedelta(days=14)
+        subscription.next_billing_date = subscription.next_proforma_at
+        subscription.next_charge_at = period_end - timedelta(days=7)
+        subscription.save(
+            update_fields=[
+                "current_period_end",
+                "next_proforma_at",
+                "next_billing_date",
+                "next_charge_at",
+                "updated_at",
+            ]
+        )
+        setting_result = SettingsService.update_setting(
+            key="billing.invoice_generation_lead_days",
+            value=21,
+            reason="reschedule test",
+        )
+        self.assertTrue(setting_result.is_ok(), setting_result)
+
+        result = RecurringBillingOrchestrator.prepare_due_proformas(as_of=now)
+
+        self.assertEqual(result["proformas_created"], 1)
+        subscription.refresh_from_db()
+        self.assertEqual(subscription.next_proforma_at, period_end - timedelta(days=21))
+
+    def test_reduced_invoice_lead_postpones_an_unprepared_existing_cycle(self) -> None:
+        now = timezone.now()
+        subscription = self._create_aligned_subscription("LEAD-LATER", now)
+        period_end = now + timedelta(days=10)
+        subscription.current_period_end = period_end
+        subscription.next_proforma_at = period_end - timedelta(days=14)
+        subscription.next_billing_date = subscription.next_proforma_at
+        subscription.next_charge_at = period_end - timedelta(days=7)
+        subscription.save(
+            update_fields=[
+                "current_period_end",
+                "next_proforma_at",
+                "next_billing_date",
+                "next_charge_at",
+                "updated_at",
+            ]
+        )
+        setting_result = SettingsService.update_setting(
+            key="billing.invoice_generation_lead_days",
+            value=7,
+            reason="reschedule test",
+        )
+        self.assertTrue(setting_result.is_ok(), setting_result)
+
+        result = RecurringBillingOrchestrator.prepare_due_proformas(as_of=now)
+
+        self.assertEqual(result["proformas_created"], 0)
+        subscription.refresh_from_db()
+        self.assertEqual(subscription.next_proforma_at, period_end - timedelta(days=7))
+
     def test_recurring_proforma_snapshots_individual_cnp(self) -> None:
         from apps.customers.models import CustomerTaxProfile  # noqa: PLC0415
 
@@ -1985,11 +2067,17 @@ class SubscriptionInvoicePaymentTestCase(_SubscriptionInvoicePaymentFixture, Tes
 
     @patch("apps.billing.payment_service.log_security_event")
     @patch("apps.billing.payment_service.PaymentGatewayFactory.create_gateway")
-    def test_paid_fixed_cycle_schedules_next_renewal_from_paid_through_boundary(
+    def test_paid_fixed_cycle_uses_configured_invoice_lead_from_paid_through_boundary(
         self,
         mock_create_gateway: MagicMock,
         _mock_log_security_event: MagicMock,
     ) -> None:
+        setting_result = SettingsService.update_setting(
+            key="billing.invoice_generation_lead_days",
+            value=21,
+            reason="renewal schedule test",
+        )
+        self.assertTrue(setting_result.is_ok(), setting_result)
         gateway = MagicMock()
         gateway.create_off_session_payment_intent.return_value = _intent_result(
             payment_intent_id="pi_next_renewal_schedule_305"
@@ -2010,7 +2098,7 @@ class SubscriptionInvoicePaymentTestCase(_SubscriptionInvoicePaymentFixture, Tes
         self.subscription.refresh_from_db()
         self.assertEqual(
             self.subscription.next_proforma_at,
-            self.billing_cycle.period_end - timedelta(days=14),
+            self.billing_cycle.period_end - timedelta(days=21),
         )
         self.assertEqual(
             self.subscription.next_charge_at,

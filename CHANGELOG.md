@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Enforced maintenance mode** — a staff-exempt 503 middleware driven by the `system.maintenance_mode` runtime setting with an environment override, replacing a decorative flag whose gate was never invoked
 
 - **Customer-controlled recurring payments** — customer owners and billing members can authorize a saved card through a verified Stripe SetupIntent after the current terms version is accepted server-side and bound to the exact accepting principal and terms hash, enroll or remove individual services, and withdraw authorization without cancelling sibling services; PRAHO preserves the exact accepted agreement text with its version, hash, actor, timestamp, IP address, and user agent, and groups compatible renewals into one proforma and charge
+- **Configurable renewal invoice lead time** — operators can schedule fixed-renewal proformas 7–30 days before the paid-through boundary, with the existing 14-day behavior preserved by default and unprepared subscription schedules reconciled when the setting changes (#382)
 
 ### Changed
 
@@ -34,6 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Billing credit-score accounting** — entering a partial or full refund state now applies the configured refund adjustment exactly once and leaving refunded states reverses its exact payment-bound score delta; deleting a succeeded payment reverses its actual clamped/bonus-inclusive adjustment, and successful payments without a due date count as on time consistently across aggregate and consecutive-payment scoring (#225)
 - **e-Factura submission and response evidence** — ANAF uploads now acquire a committed, leased database claim before network I/O, never replay ambiguous POST outcomes, quarantine crashed/lost-response attempts for operator reconciliation, and freeze the claimed XML bytes; accepted `/descarcare` responses are validated in memory and stored byte-for-byte as ZIP archives with SHA-256 integrity metadata instead of being mislabeled as signed PDFs (#351, #352)
 - **VAT evidence consistency** — customer-specific VAT rates are now explicit optional overrides (with legacy generated defaults migrated safely), legitimate 0% order and invoice lines are preserved, recurring proformas use one billing-country snapshot for tax and document fields, cart totals retain fractional rates, Stripe no longer invents 21% metadata, and dormant duplicate VAT reporting/configuration paths were removed (#389, #390)
 - **Discounted-order VAT convergence** — document allowances now reduce the taxable base before VAT across order calculation, preflight, proforma issuance, and direct-invoice recovery; mixed-rate discounts fail closed until per-rate allocation is supported, and issued proformas remain the authoritative amount throughout Stripe confirmation and fallback conversion (#203)

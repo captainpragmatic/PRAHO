@@ -788,7 +788,7 @@ class TestPaymentCleanup(TestCase):
         payment = _make_payment(self.customer, currency=self.currency, status="succeeded")
         payment.delete()
         mock_sec.assert_called_once()
-        mock_revert.assert_called_once_with(self.customer, "payment_deleted")
+        mock_revert.assert_called_once_with(self.customer, "positive_payment")
 
     @patch("apps.billing.signals._revert_customer_credit_score")
     @patch("apps.billing.signals._cleanup_payment_files")
@@ -1133,40 +1133,153 @@ class TestActivatePaymentServices(TestCase):
 
 
 class TestUpdateCustomerPaymentCredit(TestCase):
-    @patch("apps.customers.services.CustomerCreditService")
-    def test_succeeded(self, mock_ccs):
+    @patch("apps.billing.signals._apply_customer_payment_credit")
+    def test_succeeded(self, mock_apply):
         payment = MagicMock()
         payment.status = "succeeded"
         _update_customer_payment_credit(payment, "pending")
-        mock_ccs.update_credit_score.assert_called_once()
+        mock_apply.assert_called_once_with(payment, "positive_payment")
 
-    @patch("apps.customers.services.CustomerCreditService")
-    def test_failed(self, mock_ccs):
+    @patch("apps.billing.signals._apply_customer_payment_credit")
+    def test_failed(self, mock_apply):
         payment = MagicMock()
         payment.status = "failed"
         _update_customer_payment_credit(payment, "pending")
-        mock_ccs.update_credit_score.assert_called_once()
+        mock_apply.assert_called_once_with(payment, "failed_payment")
 
-    @patch("apps.customers.services.CustomerCreditService")
-    def test_refunded(self, mock_ccs):
+    @patch("apps.billing.signals._apply_customer_payment_credit")
+    def test_refunded(self, mock_apply):
         payment = MagicMock()
         payment.status = "refunded"
         _update_customer_payment_credit(payment, "succeeded")
-        mock_ccs.update_credit_score.assert_called_once()
+        mock_apply.assert_called_once_with(payment, "refund_issued")
 
-    @patch("apps.customers.services.CustomerCreditService")
-    def test_no_change(self, mock_ccs):
+    @patch("apps.billing.signals._revert_customer_payment_credit")
+    @patch("apps.billing.signals._apply_customer_payment_credit")
+    def test_partial_refund_applies_refund_adjustment_once(self, mock_apply, mock_revert):
+        payment = MagicMock()
+        payment.status = "partially_refunded"
+
+        _update_customer_payment_credit(payment, "succeeded")
+
+        mock_apply.assert_called_once_with(payment, "refund_issued")
+        mock_revert.assert_not_called()
+
+    @patch("apps.billing.signals._revert_customer_payment_credit")
+    @patch("apps.billing.signals._apply_customer_payment_credit")
+    def test_partial_to_full_refund_does_not_apply_a_second_adjustment(self, mock_apply, mock_revert):
+        payment = MagicMock()
+        payment.status = "refunded"
+
+        _update_customer_payment_credit(payment, "partially_refunded")
+
+        mock_apply.assert_not_called()
+        mock_revert.assert_not_called()
+
+    @patch("apps.billing.signals._apply_customer_payment_credit")
+    @patch("apps.billing.signals._revert_customer_payment_credit", return_value=True)
+    def test_refund_reversal_reverts_the_refund_adjustment(self, mock_revert, mock_apply):
+        payment = MagicMock()
+        payment.status = "succeeded"
+
+        _update_customer_payment_credit(payment, "refunded")
+
+        mock_apply.assert_not_called()
+        mock_revert.assert_called_once_with(payment, "refund_issued")
+
+    @patch("apps.billing.signals._apply_customer_payment_credit")
+    def test_no_change(self, mock_apply):
         payment = MagicMock()
         payment.status = "succeeded"
         _update_customer_payment_credit(payment, "succeeded")
-        mock_ccs.update_credit_score.assert_not_called()
+        mock_apply.assert_not_called()
 
-    def test_exception_handling(self):
+    @patch("apps.billing.signals._apply_customer_payment_credit", side_effect=Exception("boom"))
+    def test_exception_handling(self, _mock_apply):
         payment = MagicMock()
         payment.status = "succeeded"
-        with patch("apps.customers.services.CustomerCreditService") as mock_ccs:
-            mock_ccs.update_credit_score.side_effect = Exception("boom")
-            _update_customer_payment_credit(payment, "pending")
+        _update_customer_payment_credit(payment, "pending")
+
+
+class TestPaymentCreditAdjustmentPersistence(TestCase):
+    def setUp(self):
+        self.customer = CustomerFactory()
+        self.currency = _get_or_create_currency()
+
+    @patch("apps.customers.credit_service.CustomerCreditService._get_consecutive_on_time_payments", return_value=6)
+    def test_deletion_reverses_the_actual_bonus_inclusive_payment_adjustment(self, _mock_consecutive):
+        self.customer.meta = {"credit_score": 750}
+        self.customer.save(update_fields=["meta"])
+        payment = _make_payment(self.customer, currency=self.currency, status="succeeded")
+
+        _update_customer_payment_credit(payment, "pending")
+
+        payment.refresh_from_db()
+        self.assertEqual(payment.meta["credit_score_adjustments"]["positive_payment"], 25)
+        self.customer.refresh_from_db()
+        self.assertEqual(self.customer.meta["credit_score"], 775)
+
+        payment.delete()
+
+        self.customer.refresh_from_db()
+        self.assertEqual(self.customer.meta["credit_score"], 750)
+
+    def test_deletion_does_not_subtract_a_clamped_payment_adjustment(self):
+        self.customer.meta = {"credit_score": 1000}
+        self.customer.save(update_fields=["meta"])
+        payment = _make_payment(self.customer, currency=self.currency, status="succeeded")
+
+        _update_customer_payment_credit(payment, "pending")
+
+        payment.refresh_from_db()
+        self.assertEqual(payment.meta["credit_score_adjustments"]["positive_payment"], 0)
+        payment.delete()
+
+        self.customer.refresh_from_db()
+        self.assertEqual(self.customer.meta["credit_score"], 1000)
+
+    def test_recording_adjustment_preserves_newer_database_metadata(self):
+        payment = _make_payment(self.customer, currency=self.currency, status="succeeded")
+        stale_payment = Payment.objects.get(pk=payment.pk)
+        Payment.objects.filter(pk=payment.pk).update(meta={"webhook_reconciliation": "complete"})
+
+        _update_customer_payment_credit(stale_payment, "pending")
+
+        stale_payment.refresh_from_db()
+        self.assertEqual(stale_payment.meta["webhook_reconciliation"], "complete")
+        self.assertEqual(stale_payment.meta["credit_score_adjustments"]["positive_payment"], 15)
+
+    def test_refund_reversal_uses_and_removes_the_recorded_clamped_adjustment(self):
+        self.customer.meta = {"credit_score": 0}
+        self.customer.save(update_fields=["meta"])
+        payment = _make_payment(self.customer, currency=self.currency, status="partially_refunded")
+
+        _update_customer_payment_credit(payment, "succeeded")
+
+        payment.refresh_from_db()
+        self.assertEqual(payment.meta["credit_score_adjustments"]["refund_issued"], 0)
+        payment.restore_after_refund_reversal()
+        _update_customer_payment_credit(payment, "partially_refunded")
+
+        payment.refresh_from_db()
+        self.customer.refresh_from_db()
+        self.assertNotIn("refund_issued", payment.meta.get("credit_score_adjustments", {}))
+        self.assertEqual(self.customer.meta["credit_score"], 0)
+
+    def test_consuming_adjustment_preserves_newer_database_metadata(self):
+        payment = _make_payment(self.customer, currency=self.currency, status="partially_refunded")
+        _update_customer_payment_credit(payment, "succeeded")
+        stale_payment = Payment.objects.get(pk=payment.pk)
+        current_meta = dict(stale_payment.meta)
+        current_meta["webhook_reconciliation"] = "complete"
+        Payment.objects.filter(pk=payment.pk).update(meta=current_meta)
+        stale_payment.restore_after_refund_reversal()
+
+        _update_customer_payment_credit(stale_payment, "partially_refunded")
+
+        stale_payment.refresh_from_db()
+        self.assertEqual(stale_payment.meta["webhook_reconciliation"], "complete")
+        self.assertNotIn("refund_issued", stale_payment.meta.get("credit_score_adjustments", {}))
 
 
 # ===============================================================================
@@ -2078,7 +2191,7 @@ class TestRevertCustomerCreditScore(TestCase):
     @patch("apps.customers.services.CustomerCreditService")
     def test_flow(self, mock_ccs):
         customer = MagicMock()
-        _revert_customer_credit_score(customer, "payment_deleted")
+        _revert_customer_credit_score(customer, "positive_payment")
         mock_ccs.revert_credit_change.assert_called_once()
 
     def test_exception_handling(self):

@@ -52,6 +52,12 @@ class CatalogIntegrityTests(TestCase):
     def test_service_defaults_derive_from_catalog(self) -> None:
         self.assertEqual(SettingsService.DEFAULT_SETTINGS, {d.key: d.default for d in CATALOG})
 
+    def test_invoice_generation_lead_time_preserves_safe_existing_schedule(self) -> None:
+        definition = CATALOG_BY_KEY["billing.invoice_generation_lead_days"]
+
+        self.assertEqual(definition.default, 14)
+        self.assertEqual(definition.validation, {"min": 7, "max": 30})
+
     def test_retired_keys_are_not_in_catalog(self) -> None:
         overlap = set(_MIGRATION.RETIRED_KEYS) & set(CATALOG_BY_KEY)
         self.assertEqual(overlap, set())

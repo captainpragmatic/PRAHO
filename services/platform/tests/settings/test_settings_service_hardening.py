@@ -379,6 +379,33 @@ class CreationPathValidationTests(TestCase):
 
         self.assertTrue(result.is_ok())
 
+    def test_credit_adjustments_reject_fractional_scores(self) -> None:
+        SystemSetting.objects.filter(key="customers.credit_adjustments").delete()
+
+        result = SettingsService.update_setting(
+            "customers.credit_adjustments",
+            {"refund_issued": -7.5},
+        )
+
+        self.assertTrue(result.is_err(), "credit scores are integer-valued")
+        self.assertFalse(SystemSetting.objects.filter(key="customers.credit_adjustments").exists())
+
+    def test_existing_credit_adjustments_reject_fractional_scores(self) -> None:
+        setting = _make_setting(
+            "customers.credit_adjustments",
+            {"refund_issued": -10},
+            "json",
+        )
+
+        result = SettingsService.update_setting(
+            "customers.credit_adjustments",
+            {"refund_issued": -7.5},
+        )
+
+        self.assertTrue(result.is_err(), "existing rows must enforce the same catalog contract")
+        setting.refresh_from_db()
+        self.assertEqual(setting.value, {"refund_issued": -10})
+
 
 class AuditFailureIsolationTests(TestCase):
     """A failing audit write must neither poison nor roll back the setting change (fail-open)."""

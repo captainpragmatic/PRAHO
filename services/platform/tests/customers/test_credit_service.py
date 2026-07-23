@@ -7,15 +7,20 @@ Regression guard: these tests capture the chaos-monkey findings around:
 - Score calculation returning a non-integer
 """
 
+from datetime import datetime, timedelta
+from unittest.mock import patch
+
 from django.test import TestCase
 from django.utils import timezone
 
+from apps.billing.models import Payment
 from apps.customers.credit_service import (
     MAX_CREDIT_SCORE,
     MIN_CREDIT_SCORE,
     CustomerCreditService,
     get_credit_adjustments,
 )
+from tests.factories.billing_factories import CurrencyFactory, InvoiceFactory
 from tests.factories.core_factories import create_admin_user, create_full_customer
 
 
@@ -52,6 +57,15 @@ class TestCreditServiceConstants(TestCase):
     def test_credit_adjustments_has_failed_payment_key(self) -> None:
         adjustments = get_credit_adjustments()
         self.assertIn("failed_payment", adjustments)
+
+    @patch(
+        "apps.customers.credit_service.SettingsService.get_setting",
+        return_value={"refund_issued": -7.5},
+    )
+    def test_credit_adjustments_fail_safe_for_legacy_fractional_values(self, _mock_get: object) -> None:
+        adjustments = get_credit_adjustments()
+
+        self.assertEqual(adjustments["refund_issued"], -10)
 
 
 class TestCreditServiceUpdateScore(TestCase):
@@ -98,6 +112,28 @@ class TestCreditServiceUpdateScore(TestCase):
         self.customer.refresh_from_db()
         self.assertIsNotNone(self.customer.meta)
         self.assertIn("credit_score", self.customer.meta)
+
+    def test_clamped_update_reports_the_actual_applied_adjustment(self) -> None:
+        self.customer.meta = {"credit_score": MAX_CREDIT_SCORE}
+        self.customer.save(update_fields=["meta"])
+
+        result = CustomerCreditService.update_credit_score(self.customer, "positive_payment", timezone.now())
+
+        self.assertEqual(result["adjustment"], 0)
+        self.assertEqual(result["score_after"], MAX_CREDIT_SCORE)
+
+    def test_refund_adjustment_and_reversal_use_the_configured_event(self) -> None:
+        self.customer.meta = {"credit_score": 750}
+        self.customer.save(update_fields=["meta"])
+
+        applied = CustomerCreditService.update_credit_score(self.customer, "refund_issued", timezone.now())
+        self.assertEqual(applied["adjustment"], -10)
+        self.assertEqual(applied["score_after"], 740)
+
+        self.customer.refresh_from_db()
+        reverted = CustomerCreditService.revert_credit_change(self.customer, "refund_issued", timezone.now())
+        self.assertEqual(reverted["adjustment"], 10)
+        self.assertEqual(reverted["score_after"], 750)
 
 
 class TestCreditServiceScoreClamping(TestCase):
@@ -255,6 +291,56 @@ class TestCreditServiceReversion(TestCase):
             self.customer, "failed_payment", timezone.now()
         )
         self.assertEqual(result["adjustment"], -original_adj)
+
+    def test_revert_uses_the_recorded_applied_adjustment_instead_of_current_configuration(self) -> None:
+        self.customer.meta = {"credit_score": 0}
+        self.customer.save(update_fields=["meta"])
+
+        result = CustomerCreditService.revert_credit_change(
+            self.customer,
+            "refund_issued",
+            timezone.now(),
+            applied_adjustment=0,
+        )
+
+        self.assertEqual(result["adjustment"], 0)
+        self.assertEqual(result["score_after"], 0)
+
+
+class TestCreditServicePaymentStatistics(TestCase):
+    """Payment-history scoring must treat an explicit missing due date consistently."""
+
+    def setUp(self) -> None:
+        self.customer = _create_customer()
+        self.currency = CurrencyFactory()
+
+    def _create_succeeded_payment(self, *, invoice_number: str, due_at: datetime | None) -> None:
+        invoice = InvoiceFactory(
+            customer=self.customer,
+            currency=self.currency,
+            number=invoice_number,
+            due_at=due_at,
+        )
+        Payment.objects.create(
+            customer=self.customer,
+            invoice=invoice,
+            currency=self.currency,
+            amount_cents=invoice.total_cents,
+            payment_method="stripe",
+            status="succeeded",
+        )
+
+    def test_missing_due_date_is_counted_as_on_time_like_consecutive_history(self) -> None:
+        now = timezone.now()
+        self._create_succeeded_payment(invoice_number="INV-NO-DUE", due_at=None)
+        self._create_succeeded_payment(invoice_number="INV-FUTURE-DUE", due_at=now + timedelta(days=1))
+        self._create_succeeded_payment(invoice_number="INV-PAST-DUE", due_at=now - timedelta(days=1))
+
+        statistics = CustomerCreditService._get_payment_statistics(self.customer)
+
+        self.assertEqual(statistics["total_payments"], 3)
+        self.assertEqual(statistics["successful_payments"], 3)
+        self.assertEqual(statistics["on_time_payments"], 2)
 
 
 class TestCreditServiceCalculate(TestCase):
