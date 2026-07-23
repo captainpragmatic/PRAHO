@@ -52,19 +52,25 @@ def handle_order_created_or_updated(sender: type[Order], instance: Order, create
 
         # M1 review fix: Audit logging in its own try/except so failure doesn't
         # prevent on_commit callbacks from being registered (emails, status handling).
-        try:
-            event_data = BusinessEventData(
-                event_type=event_type,
-                business_object=instance,
-                user=None,  # System event
-                context=AuditContext(actor_type="system"),
-                old_values=old_values,
-                new_values=new_values,
-                description=f"Order {instance.order_number} {'created' if created else 'updated'}",
-            )
-            OrdersAuditService.log_order_event(event_data)
-        except Exception as e:
-            logger.warning("⚠️ [Order Signal] Audit logging failed for %s: %s", instance.order_number, e)
+        # Skip when the save was a totals-only recalculation triggered by an OrderItem
+        # signal — that item's own audit event already carries the meaningful change;
+        # an "order_updated" event here would just be a redundant echo of it (#dedup).
+        if getattr(instance, "_skip_audit_log", False):
+            pass
+        else:
+            try:
+                event_data = BusinessEventData(
+                    event_type=event_type,
+                    business_object=instance,
+                    user=None,  # System event
+                    context=AuditContext(actor_type="system"),
+                    old_values=old_values,
+                    new_values=new_values,
+                    description=f"Order {instance.order_number} {'created' if created else 'updated'}",
+                )
+                OrdersAuditService.log_order_event(event_data)
+            except Exception as e:
+                logger.warning("⚠️ [Order Signal] Audit logging failed for %s: %s", instance.order_number, e)
 
         if created:
             # Wrap in on_commit so email is not sent if the enclosing transaction
@@ -483,8 +489,16 @@ def handle_order_item_changes(sender: type[OrderItem], instance: OrderItem, crea
     """
     try:
         if created:
-            # New item added - recalculate order totals
-            instance.order.calculate_totals()
+            # New item added - recalculate order totals.
+            # The resulting Order save would otherwise emit its own "order_updated"
+            # audit event that just restates this item's own event below (#dedup) —
+            # suppress it for this specific cascading save only.
+            order = instance.order
+            order._skip_audit_log = True
+            try:
+                order.calculate_totals()
+            finally:
+                order._skip_audit_log = False
             logger.info(f"📦 [Order] Item added to {instance.order.order_number}: {instance.product_name}")
 
         else:
@@ -542,15 +556,30 @@ def store_original_item_values(sender: type[OrderItem], instance: OrderItem, **k
 def handle_order_item_deletion(sender: type[OrderItem], instance: OrderItem, **kwargs: Any) -> None:
     """Handle order item deletion"""
     try:
+        order = None
         # Recalculate order totals
         if instance.order_id:  # Order might be deleted too
             with contextlib.suppress(Order.DoesNotExist):
-                instance.order.calculate_totals()
+                order = instance.order
+                # Suppress the cascading "order_updated" event this save would
+                # otherwise fire — it would just restate the deletion event below
+                # for the same Order object (#dedup).
+                order._skip_audit_log = True
+                try:
+                    order.calculate_totals()
+                finally:
+                    order._skip_audit_log = False
 
         # Audit log the deletion
         event_data = AuditEventData(
             event_type="order_item_deleted",
-            content_object=instance.order if hasattr(instance, "order") else None,
+            content_object=order if order is not None else (instance.order if hasattr(instance, "order") else None),
+            old_values={
+                "product_name": instance.product_name,
+                "quantity": instance.quantity,
+                "unit_price_cents": instance.unit_price_cents,
+                "provisioning_status": instance.provisioning_status,
+            },
             description=f"Order item deleted: {instance.product_name}",
         )
         AuditService.log_event(event_data)

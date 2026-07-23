@@ -31,7 +31,7 @@ from django.db import models
 from django.http import HttpRequest
 from django.utils import timezone
 
-from apps.audit.services import audit_service  # For MFA audit logging
+from apps.audit.services import AuditContext, AuditService, TwoFactorAuditRequest  # For MFA audit logging
 from apps.common.constants import MAX_LOGIN_ATTEMPTS
 
 # Educational Example: This demonstrates different type annotation patterns
@@ -670,13 +670,17 @@ class MFAService:
                     }
                 )
 
-            audit_service.log_2fa_event(
-                event_type="2fa_enabled",
-                user=user,
-                ip_address=request.META.get("REMOTE_ADDR") if request else None,
-                user_agent=request.META.get("HTTP_USER_AGENT") if request else None,
-                metadata=metadata,
-                description=f"TOTP/2FA enabled for user {user.email}",
+            AuditService.log_2fa_event(
+                TwoFactorAuditRequest(
+                    event_type="2fa_enabled",
+                    user=user,
+                    context=AuditContext(
+                        ip_address=request.META.get("REMOTE_ADDR") if request else None,
+                        user_agent=request.META.get("HTTP_USER_AGENT") if request else None,
+                        metadata=metadata,
+                    ),
+                    description=f"TOTP/2FA enabled for user {user.email}",
+                )
             )
 
             logger.info(f"✅ [MFA] TOTP enabled for user {user.email}")
@@ -731,13 +735,17 @@ class MFAService:
                 event_type = "2fa_admin_reset"
                 description = f"TOTP/2FA disabled by admin {admin_user.email} for user {user.email}"
 
-            audit_service.log_2fa_event(
-                event_type=event_type,
-                user=user,
-                ip_address=request.META.get("REMOTE_ADDR") if request else None,
-                user_agent=request.META.get("HTTP_USER_AGENT") if request else None,
-                metadata=metadata,
-                description=description,
+            AuditService.log_2fa_event(
+                TwoFactorAuditRequest(
+                    event_type=event_type,
+                    user=user,
+                    context=AuditContext(
+                        ip_address=request.META.get("REMOTE_ADDR") if request else None,
+                        user_agent=request.META.get("HTTP_USER_AGENT") if request else None,
+                        metadata=metadata,
+                    ),
+                    description=description,
+                )
             )
 
             logger.warning(
@@ -762,16 +770,20 @@ class MFAService:
             user.save()
 
             # 📊 Audit log generation
-            audit_service.log_2fa_event(
-                event_type="2fa_backup_codes_generated",
-                user=user,
-                ip_address=request.META.get("REMOTE_ADDR") if request else None,
-                user_agent=request.META.get("HTTP_USER_AGENT") if request else None,
-                metadata={
-                    "count": len(codes),
-                    "timestamp": timezone.now().isoformat(),
-                    "previous_codes_invalidated": True,
-                },
+            AuditService.log_2fa_event(
+                TwoFactorAuditRequest(
+                    event_type="2fa_backup_codes_generated",
+                    user=user,
+                    context=AuditContext(
+                        ip_address=request.META.get("REMOTE_ADDR") if request else None,
+                        user_agent=request.META.get("HTTP_USER_AGENT") if request else None,
+                        metadata={
+                            "count": len(codes),
+                            "timestamp": timezone.now().isoformat(),
+                            "previous_codes_invalidated": True,
+                        },
+                    ),
+                )
             )
 
             logger.info(f"✅ [MFA] Generated {len(codes)} backup codes for {user.email}")
@@ -832,30 +844,38 @@ class MFAService:
                     )
 
                     # 📊 Audit backup code usage
-                    audit_service.log_2fa_event(
-                        event_type="2fa_backup_code_used",
-                        user=user,
-                        ip_address=request.META.get("REMOTE_ADDR") if request else None,
-                        user_agent=request.META.get("HTTP_USER_AGENT") if request else None,
-                        metadata={
-                            "remaining_codes": result["remaining_backup_codes"],
-                            "timestamp": timezone.now().isoformat(),
-                        },
+                    AuditService.log_2fa_event(
+                        TwoFactorAuditRequest(
+                            event_type="2fa_backup_code_used",
+                            user=user,
+                            context=AuditContext(
+                                ip_address=request.META.get("REMOTE_ADDR") if request else None,
+                                user_agent=request.META.get("HTTP_USER_AGENT") if request else None,
+                                metadata={
+                                    "remaining_codes": result["remaining_backup_codes"],
+                                    "timestamp": timezone.now().isoformat(),
+                                },
+                            ),
+                        )
                     )
 
             # 📊 Audit verification attempt
             event_type = "2fa_verification_success" if result["success"] else "2fa_verification_failed"
-            audit_service.log_2fa_event(
-                event_type=event_type,
-                user=user,
-                ip_address=request.META.get("REMOTE_ADDR") if request else None,
-                user_agent=request.META.get("HTTP_USER_AGENT") if request else None,
-                metadata={
-                    "method": result["method"],
-                    "timestamp": timezone.now().isoformat(),
-                    "rate_limited": result["rate_limited"],
-                    "replay_detected": result["replay_detected"],
-                },
+            AuditService.log_2fa_event(
+                TwoFactorAuditRequest(
+                    event_type=event_type,
+                    user=user,
+                    context=AuditContext(
+                        ip_address=request.META.get("REMOTE_ADDR") if request else None,
+                        user_agent=request.META.get("HTTP_USER_AGENT") if request else None,
+                        metadata={
+                            "method": result["method"],
+                            "timestamp": timezone.now().isoformat(),
+                            "rate_limited": result["rate_limited"],
+                            "replay_detected": result["replay_detected"],
+                        },
+                    ),
+                )
             )
 
             if result["success"]:
@@ -925,7 +945,7 @@ class MFAService:
         if not MFAService._check_rate_limit(user):
             result["error"] = "Rate limit exceeded"
             # Generic audit for compatibility with enhanced tests
-            audit_service.log_event(
+            AuditService.log_simple_event(
                 event_type="mfa_verification_failed", user=user, metadata={"reason": "rate_limited"}
             )
             return result
@@ -943,11 +963,13 @@ class MFAService:
                 result.update({"success": ok, "method": "backup_code"})
             else:
                 result["error"] = f"Unsupported MFA method: {method}"
-                audit_service.log_event(event_type="mfa_verification_failed", user=user, metadata={"method": method})
+                AuditService.log_simple_event(
+                    event_type="mfa_verification_failed", user=user, metadata={"method": method}
+                )
                 return result
 
             # Audit via generic interface for tests
-            audit_service.log_event(
+            AuditService.log_simple_event(
                 event_type="mfa_verification_success" if result["success"] else "mfa_verification_failed",
                 user=user,
                 metadata={"method": method, "ip": request.META.get("REMOTE_ADDR")},
@@ -969,7 +991,7 @@ class MFAService:
             user.backup_tokens = []
             user.save(update_fields=["two_factor_enabled", "_two_factor_secret", "backup_tokens"])
             WebAuthnCredential.objects.filter(user=user).delete()
-            audit_service.log_event(
+            AuditService.log_simple_event(
                 event_type="mfa_disabled", user=user, metadata={"by": getattr(request.user, "email", None)}
             )
             return {"success": True}

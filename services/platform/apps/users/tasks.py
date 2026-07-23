@@ -414,7 +414,10 @@ def cleanup_expired_password_reset_tokens() -> dict[str, Any]:
 
         audit_count = old_reset_events.count()
         if audit_count > 0:
-            old_reset_events.delete()
+            from apps.audit.models import audit_mutation_allowed  # noqa: PLC0415  # ADR-0007
+
+            with audit_mutation_allowed("password_reset_cleanup"):
+                old_reset_events.delete()
             results["cleaned_audit_events"] = audit_count
             logger.info(f"🔑 [UserSecurity] Cleaned {audit_count} old password reset audit events")
 

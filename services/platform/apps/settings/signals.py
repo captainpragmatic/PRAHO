@@ -115,7 +115,8 @@ def handle_setting_deleted(sender: Any, instance: SystemSetting, **kwargs: Any) 
     try:
         transaction.on_commit(lambda key=instance.key: SettingsService._clear_setting_cache(key))
 
-        # Log audit event
+        # Savepoint: same rationale as handle_setting_saved — audit failure must not
+        # poison the caller's transaction.
         with transaction.atomic():
             AuditService.log_simple_event(
                 event_type="delete",

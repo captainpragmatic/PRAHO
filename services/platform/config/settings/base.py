@@ -274,6 +274,20 @@ EMAIL_USE_TLS = True
 EMAIL_USE_SSL = False  # Use TLS instead of SSL
 
 # Default email addresses
+# ===============================================================================
+# AUDIT INTEGRITY (keyed v2 event MACs - ADR-0043)
+# ===============================================================================
+# MAC keys resolve via apps.common.key_derivation (domains "audit-integrity" /
+# "audit-integrity-previous"; env vars AUDIT_INTEGRITY_SECRET[_PREVIOUS] override HKDF).
+# Post-cutover default: any non-v2 integrity marker verifies as compromised (a stripped
+# marker is a downgrade attack). Set to false ONLY during the restamp migration window.
+AUDIT_INTEGRITY_REQUIRE_V2 = os.environ.get("AUDIT_INTEGRITY_REQUIRE_V2", "true").strip().lower() in (
+    "true",
+    "1",
+    "on",
+    "yes",
+)
+
 DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "PRAHO Platform <noreply@pragmatichost.com>")
 SERVER_EMAIL = os.environ.get("SERVER_EMAIL", "server@pragmatichost.com")
 

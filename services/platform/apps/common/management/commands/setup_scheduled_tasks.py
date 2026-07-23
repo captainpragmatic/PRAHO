@@ -8,6 +8,7 @@ from typing import Any
 
 from django.core.management.base import BaseCommand, CommandError, CommandParser
 
+from apps.audit.tasks import setup_audit_scheduled_tasks
 from apps.billing.tasks import setup_billing_scheduled_tasks
 from apps.common.tasks import setup_system_status_scheduled_tasks
 from apps.orders.tasks import setup_order_scheduled_tasks
@@ -49,6 +50,11 @@ class Command(BaseCommand):
             action="store_true",
             help="Set up only system status tasks",
         )
+        parser.add_argument(
+            "--audit-only",
+            action="store_true",
+            help="Set up only audit integrity/retention tasks",
+        )
 
     def _validate_options(self, options: dict[str, Any]) -> dict[str, bool]:
         """Validate mutually exclusive command options."""
@@ -57,13 +63,14 @@ class Command(BaseCommand):
         billing_only = options.get("billing_only", False)
         orders_only = options.get("orders_only", False)
         status_only = options.get("status_only", False)
+        audit_only = options.get("audit_only", False)
 
         # Check for mutually exclusive flags
-        exclusive_flags = [virtualmin_only, security_only, billing_only, orders_only, status_only]
+        exclusive_flags = [virtualmin_only, security_only, billing_only, orders_only, status_only, audit_only]
         if sum(exclusive_flags) > 1:
             raise CommandError(
                 "Cannot specify multiple exclusive flags "
-                "(--virtualmin-only, --security-only, --billing-only, --orders-only, --status-only)"
+                "(--virtualmin-only, --security-only, --billing-only, --orders-only, --status-only, --audit-only)"
             )
 
         return {
@@ -72,6 +79,7 @@ class Command(BaseCommand):
             "billing_only": billing_only,
             "orders_only": orders_only,
             "status_only": status_only,
+            "audit_only": audit_only,
         }
 
     def _setup_task_category(
@@ -138,6 +146,14 @@ class Command(BaseCommand):
             self.stdout.write("🔍 System Status:")
             self.stdout.write("  - System Status Check: Daily at 3 AM")
 
+        if run_all or flags["audit_only"]:
+            self.stdout.write("")
+            self.stdout.write("🔒 Audit:")
+            self.stdout.write("  - Integrity Check (all types): Daily")
+            self.stdout.write("  - Retention Enforcement: Weekly")
+            self.stdout.write("  - Integrity-Check Cleanup: Weekly")
+            self.stdout.write("  - File Integrity Check: Daily")
+
         self.stdout.write("")
         self.stdout.write("🔧 Start workers: python manage.py qcluster")
         self.stdout.write("📊 Monitor tasks: /admin/django_q/")
@@ -171,6 +187,10 @@ class Command(BaseCommand):
             # Set up System Status tasks
             if run_all or flags["status_only"]:
                 self._setup_task_category("system status", "🔍", setup_system_status_scheduled_tasks, all_results)
+
+            # Set up Audit tasks
+            if run_all or flags["audit_only"]:
+                self._setup_task_category("audit", "🔒", setup_audit_scheduled_tasks, all_results)
 
             # Summary header
             self.stdout.write("")

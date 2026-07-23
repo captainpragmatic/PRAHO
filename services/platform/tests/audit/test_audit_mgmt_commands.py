@@ -9,12 +9,15 @@ from __future__ import annotations
 
 import json
 from io import StringIO
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
 from django.contrib.auth import get_user_model
-from django.core.management import call_command
+from django.core.management import CommandError, call_command
 from django.test import TestCase
+
+from apps.common.types import Err, Ok
 
 User = get_user_model()
 
@@ -23,8 +26,10 @@ User = get_user_model()
 # Helpers / Fixtures
 # ============================================================================
 
-def _make_violation(framework="gdpr", control_id="GDPR-1", description="Test violation",
-                    severity="high", remediation="Fix it"):
+
+def _make_violation(
+    framework="gdpr", control_id="GDPR-1", description="Test violation", severity="high", remediation="Fix it"
+):
     """Create a mock ComplianceViolation-like object."""
     v = MagicMock()
     v.framework = framework
@@ -35,9 +40,15 @@ def _make_violation(framework="gdpr", control_id="GDPR-1", description="Test vio
     return v
 
 
-def _make_report(overall_status="compliant", compliance_score=95.0, total_events=100,  # noqa: PLR0913
-                 total_violations=0, critical_findings=0, violations=None,
-                 report_type_value="security_summary"):
+def _make_report(  # noqa: PLR0913
+    overall_status="compliant",
+    compliance_score=95.0,
+    total_events=100,
+    total_violations=0,
+    critical_findings=0,
+    violations=None,
+    report_type_value="security_summary",
+):
     """Create a mock ComplianceReport-like object."""
     report = MagicMock()
     report.report_id = "test-report-123"
@@ -54,6 +65,7 @@ def _make_report(overall_status="compliant", compliance_score=95.0, total_events
 # ============================================================================
 # audit_compliance tests
 # ============================================================================
+
 
 class TestAuditComplianceCommand(TestCase):
     """Tests for the audit_compliance management command."""
@@ -120,8 +132,7 @@ class TestAuditComplianceCommand(TestCase):
         mock_svc.generate_report.return_value = report
         mock_svc.export_report.return_value = "/tmp/r.csv"  # noqa: S108
 
-        _out, _ = self._call("report", "--type=access_review", "--framework=gdpr",
-                            "--format=csv", "--days=7")
+        _out, _ = self._call("report", "--type=access_review", "--framework=gdpr", "--format=csv", "--days=7")
         mock_svc.generate_report.assert_called_once()
         call_kwargs = mock_svc.generate_report.call_args
         # framework should be ComplianceFramework.GDPR
@@ -129,39 +140,63 @@ class TestAuditComplianceCommand(TestCase):
 
     # --- verify-integrity subcommand ---
 
-    @patch("apps.audit.management.commands.audit_compliance.get_siem_service")
-    def test_verify_integrity_valid(self, mock_get_siem):
-        mock_siem = mock_get_siem.return_value
-        mock_siem.verify_log_integrity.return_value = (True, [])
+    @staticmethod
+    def _integrity_check(**overrides):
+        defaults = {"status": "healthy", "records_checked": 10, "issues_found": 0, "findings": []}
+        defaults.update(overrides)
+        return SimpleNamespace(**defaults)
+
+    @patch("apps.audit.services.AuditIntegrityService.verify_audit_integrity")
+    def test_verify_integrity_valid(self, mock_verify):
+        mock_verify.return_value = Ok(self._integrity_check())
 
         out, _ = self._call("verify-integrity")
         assert "VERIFIED" in out
+        assert "Records checked: 10" in out
 
-    @patch("apps.audit.management.commands.audit_compliance.get_siem_service")
-    def test_verify_integrity_failed(self, mock_get_siem):
-        mock_siem = mock_get_siem.return_value
-        mock_siem.verify_log_integrity.return_value = (False, ["gap at seq 42", "hash mismatch"])
+    @patch("apps.audit.services.AuditIntegrityService.verify_audit_integrity")
+    def test_verify_integrity_failed(self, mock_verify):
+        mock_verify.return_value = Ok(
+            self._integrity_check(
+                status="compromised",
+                issues_found=2,
+                findings=[
+                    {"type": "hash_chain_gap", "description": "gap at seq 42"},
+                    {"type": "hash_mismatch", "description": "hash mismatch"},
+                ],
+            )
+        )
 
-        out, _ = self._call("verify-integrity", "--days=3")
-        assert "FAILED" in out
-        assert "gap at seq 42" in out
-        assert "2 integrity issues" in out
+        out = StringIO()
+        with pytest.raises(CommandError, match="compromised"):
+            call_command("audit_compliance", "verify-integrity", "--days=3", stdout=out)
+        assert "COMPROMISED (2 issues)" in out.getvalue()
+        assert "gap at seq 42" in out.getvalue()
+
+    @patch("apps.audit.services.AuditIntegrityService.verify_audit_integrity")
+    def test_verify_integrity_errored(self, mock_verify):
+        """A verifier that cannot run must exit non-zero, never report success."""
+        mock_verify.return_value = Err("db unavailable")
+
+        out = StringIO()
+        with pytest.raises(CommandError, match="errored"):
+            call_command("audit_compliance", "verify-integrity", stdout=out)
+        assert "FAILED TO RUN" in out.getvalue()
 
     # --- apply-retention subcommand ---
 
-    @patch("apps.audit.management.commands.audit_compliance.LogRetentionService")
-    def test_apply_retention_dry_run(self, mock_svc_cls):
-        mock_svc = mock_svc_cls.return_value
-        mock_svc.get_retention_status.return_value = {
+    @patch("apps.audit.services.AuditRetentionService.get_retention_status")
+    def test_apply_retention_dry_run(self, mock_status):
+        mock_status.return_value = {
             "authentication": {
                 "events_past_retention": 5,
                 "retention_days": 365,
-                "action": "archive",
+                "action": "anonymize",
             },
             "security_event": {
                 "events_past_retention": 0,
                 "retention_days": 730,
-                "action": "archive",
+                "action": "anonymize",
             },
         }
 
@@ -171,44 +206,58 @@ class TestAuditComplianceCommand(TestCase):
         # security_event has 0 past retention, should not be printed
         assert "security_event" not in out
 
-    @patch("apps.audit.management.commands.audit_compliance.LogRetentionService")
-    def test_apply_retention_real(self, mock_svc_cls):
-        mock_svc = mock_svc_cls.return_value
-        mock_svc.apply_retention_policies.return_value = {
-            "archived": 10,
-            "deleted": 3,
-            "anonymized": 2,
-            "errors": [],
-        }
+    @patch("apps.audit.services.AuditRetentionService.apply_retention_policies")
+    def test_apply_retention_real(self, mock_apply):
+        mock_apply.return_value = Ok(
+            {
+                "policies_applied": 4,
+                "events_processed": 5,
+                "events_deleted": 3,
+                "events_anonymized": 2,
+                "errors": [],
+            }
+        )
 
         out, _ = self._call("apply-retention")
-        assert "Archived: 10" in out
+        assert "Policies: 4" in out
         assert "Deleted: 3" in out
         assert "Anonymized: 2" in out
 
-    @patch("apps.audit.management.commands.audit_compliance.LogRetentionService")
-    def test_apply_retention_with_errors(self, mock_svc_cls):
-        mock_svc = mock_svc_cls.return_value
-        mock_svc.apply_retention_policies.return_value = {
-            "archived": 0,
-            "deleted": 0,
-            "anonymized": 0,
-            "errors": [{"category": "auth", "error": "DB locked"}],
-        }
+    @patch("apps.audit.services.AuditRetentionService.apply_retention_policies")
+    def test_apply_retention_with_errors_exits_nonzero(self, mock_apply):
+        mock_apply.return_value = Ok(
+            {
+                "policies_applied": 1,
+                "events_processed": 0,
+                "events_deleted": 0,
+                "events_anonymized": 0,
+                "errors": ["Policy auth failed: DB locked"],
+            }
+        )
 
-        out, _ = self._call("apply-retention")
-        assert "Errors: 1" in out
-        assert "DB locked" in out
+        out = StringIO()
+        with pytest.raises(CommandError, match="per-policy errors"):
+            call_command("audit_compliance", "apply-retention", stdout=out)
+        assert "Errors: 1" in out.getvalue()
+        assert "DB locked" in out.getvalue()
+
+    @patch("apps.audit.services.AuditRetentionService.apply_retention_policies")
+    def test_apply_retention_errored_exits_nonzero(self, mock_apply):
+        mock_apply.return_value = Err("policy table unavailable")
+
+        out = StringIO()
+        with pytest.raises(CommandError, match="errored"):
+            call_command("audit_compliance", "apply-retention", stdout=out)
+        assert "FAILED" in out.getvalue()
 
     # --- retention-status subcommand ---
 
-    @patch("apps.audit.management.commands.audit_compliance.LogRetentionService")
-    def test_retention_status_text(self, mock_svc_cls):
-        mock_svc = mock_svc_cls.return_value
-        mock_svc.get_retention_status.return_value = {
+    @patch("apps.audit.services.AuditRetentionService.get_retention_status")
+    def test_retention_status_text(self, mock_status):
+        mock_status.return_value = {
             "authentication": {
                 "retention_days": 365,
-                "action": "archive",
+                "action": "anonymize",
                 "legal_basis": "GDPR Art 6",
                 "total_events": 100,
                 "events_past_retention": 5,
@@ -221,22 +270,20 @@ class TestAuditComplianceCommand(TestCase):
         assert "AUTHENTICATION" in out
         assert "365" in out
 
-    @patch("apps.audit.management.commands.audit_compliance.LogRetentionService")
-    def test_retention_status_json(self, mock_svc_cls):
-        mock_svc = mock_svc_cls.return_value
+    @patch("apps.audit.services.AuditRetentionService.get_retention_status")
+    def test_retention_status_json(self, mock_status):
         status_data = {
             "auth": {"retention_days": 365, "compliance_status": "compliant"},
         }
-        mock_svc.get_retention_status.return_value = status_data
+        mock_status.return_value = status_data
 
         out, _ = self._call("retention-status", "--json")
         parsed = json.loads(out)
         assert parsed == status_data
 
-    @patch("apps.audit.management.commands.audit_compliance.LogRetentionService")
-    def test_retention_status_non_compliant(self, mock_svc_cls):
-        mock_svc = mock_svc_cls.return_value
-        mock_svc.get_retention_status.return_value = {
+    @patch("apps.audit.services.AuditRetentionService.get_retention_status")
+    def test_retention_status_non_compliant(self, mock_status):
+        mock_status.return_value = {
             "data_protection": {
                 "retention_days": 90,
                 "action": "delete",
@@ -282,8 +329,9 @@ class TestAuditComplianceCommand(TestCase):
             tmp_path = f.name
 
         try:
-            out, _ = self._call("export-siem", f"--output={tmp_path}", "--format=json",
-                                "--min-severity=low", "--days=1")
+            out, _ = self._call(
+                "export-siem", f"--output={tmp_path}", "--format=json", "--min-severity=low", "--days=1"
+            )
             assert "Exported" in out
             assert "events" in out
             assert tmp_path in out
@@ -301,10 +349,12 @@ class TestAuditComplianceCommand(TestCase):
 
         user = User.objects.create_user(email="siem2@test.com", password="testpass123")
         ct = ContentType.objects.get_for_model(User)
-        AuditEvent.objects.create(user=user, action="view", severity="low", description="Low",
-                                  content_type=ct, object_id=str(user.pk))
-        AuditEvent.objects.create(user=user, action="delete", severity="critical", description="Crit",
-                                  content_type=ct, object_id=str(user.pk))
+        AuditEvent.objects.create(
+            user=user, action="view", severity="low", description="Low", content_type=ct, object_id=str(user.pk)
+        )
+        AuditEvent.objects.create(
+            user=user, action="delete", severity="critical", description="Crit", content_type=ct, object_id=str(user.pk)
+        )
 
         import os  # noqa: PLC0415
         import tempfile  # noqa: PLC0415
@@ -357,6 +407,7 @@ class TestAuditComplianceCommand(TestCase):
 
     def test_colorize_status(self):
         from apps.audit.management.commands.audit_compliance import Command  # noqa: PLC0415
+
         cmd = Command(stdout=StringIO())
         assert "COMPLIANT" in cmd._colorize_status("compliant")
         assert "PARTIAL" in cmd._colorize_status("partial")
@@ -364,6 +415,7 @@ class TestAuditComplianceCommand(TestCase):
 
     def test_get_severity_style(self):
         from apps.audit.management.commands.audit_compliance import Command  # noqa: PLC0415
+
         cmd = Command(stdout=StringIO())
         assert "CRITICAL" in cmd._get_severity_style("critical")
         assert "HIGH" in cmd._get_severity_style("high")
@@ -374,6 +426,7 @@ class TestAuditComplianceCommand(TestCase):
 # ============================================================================
 # generate_audit_events tests
 # ============================================================================
+
 
 class TestGenerateAuditEventsCommand(TestCase):
     """Tests for the generate_audit_events management command."""
@@ -387,6 +440,7 @@ class TestGenerateAuditEventsCommand(TestCase):
     def test_default_count(self):
         """Default generates 30 events."""
         from apps.audit.models import AuditEvent  # noqa: PLC0415
+
         initial = AuditEvent.objects.count()
         out = self._call()
         assert AuditEvent.objects.count() >= initial + 25  # Allow some failures
@@ -394,6 +448,7 @@ class TestGenerateAuditEventsCommand(TestCase):
 
     def test_custom_count(self):
         from apps.audit.models import AuditEvent  # noqa: PLC0415
+
         out = self._call("--count=5")
         assert AuditEvent.objects.count() >= 5
         assert "5" in out
@@ -412,6 +467,7 @@ class TestGenerateAuditEventsCommand(TestCase):
 
     def test_pagination_info(self):
         from apps.audit.models import AuditEvent  # noqa: PLC0415
+
         out = self._call("--count=55")
         assert "Total audit events" in out
         total = AuditEvent.objects.count()
@@ -426,6 +482,7 @@ class TestGenerateAuditEventsCommand(TestCase):
 # ============================================================================
 # run_integrity_check tests
 # ============================================================================
+
 
 class TestRunIntegrityCheckCommand(TestCase):
     """Tests for the run_integrity_check management command."""
@@ -443,6 +500,7 @@ class TestRunIntegrityCheckCommand(TestCase):
     @patch("apps.audit.management.commands.run_integrity_check.AuditIntegrityService")
     def test_default_all_checks(self, mock_svc):
         from apps.common.types import Ok  # noqa: PLC0415
+
         check = MagicMock()
         check.status = "healthy"
         check.records_checked = 42
@@ -462,6 +520,7 @@ class TestRunIntegrityCheckCommand(TestCase):
     @patch("apps.audit.management.commands.run_integrity_check.AuditIntegrityService")
     def test_specific_check_type(self, mock_svc):
         from apps.common.types import Ok  # noqa: PLC0415
+
         check = MagicMock()
         check.status = "healthy"
         check.records_checked = 10
@@ -476,6 +535,7 @@ class TestRunIntegrityCheckCommand(TestCase):
     @patch("apps.audit.management.commands.run_integrity_check.AuditIntegrityService")
     def test_warning_status(self, mock_svc):
         from apps.common.types import Ok  # noqa: PLC0415
+
         check = MagicMock()
         check.status = "warning"
         check.records_checked = 50
@@ -491,6 +551,7 @@ class TestRunIntegrityCheckCommand(TestCase):
     @patch("apps.audit.management.commands.run_integrity_check.AuditIntegrityService")
     def test_compromised_status(self, mock_svc):
         from apps.common.types import Ok  # noqa: PLC0415
+
         check = MagicMock()
         check.status = "compromised"
         check.records_checked = 100
@@ -506,6 +567,7 @@ class TestRunIntegrityCheckCommand(TestCase):
     @patch("apps.audit.management.commands.run_integrity_check.AuditIntegrityService")
     def test_compromised_with_alerts(self, mock_svc):
         from apps.common.types import Ok  # noqa: PLC0415
+
         check = MagicMock()
         check.status = "compromised"
         check.records_checked = 100
@@ -520,6 +582,7 @@ class TestRunIntegrityCheckCommand(TestCase):
     @patch("apps.audit.management.commands.run_integrity_check.AuditIntegrityService")
     def test_error_result(self, mock_svc):
         from apps.common.types import Err  # noqa: PLC0415
+
         mock_svc.verify_audit_integrity.return_value = Err("DB connection failed")
 
         out, _ = self._call("--type=hash_verification")
@@ -530,6 +593,7 @@ class TestRunIntegrityCheckCommand(TestCase):
     @patch("apps.audit.management.commands.run_integrity_check.AuditIntegrityService")
     def test_verbose_shows_findings(self, mock_svc):
         from apps.common.types import Ok  # noqa: PLC0415
+
         check = MagicMock()
         check.status = "warning"
         check.records_checked = 20
@@ -545,6 +609,7 @@ class TestRunIntegrityCheckCommand(TestCase):
     @patch("apps.audit.management.commands.run_integrity_check.AuditIntegrityService")
     def test_verbose_limits_findings_to_10(self, mock_svc):
         from apps.common.types import Ok  # noqa: PLC0415
+
         check = MagicMock()
         check.status = "warning"
         check.records_checked = 20
@@ -563,6 +628,7 @@ class TestRunIntegrityCheckCommand(TestCase):
     @patch("apps.audit.management.commands.run_integrity_check.AuditIntegrityService")
     def test_period_map_values(self, mock_svc):
         from apps.common.types import Ok  # noqa: PLC0415
+
         check = MagicMock()
         check.status = "healthy"
         check.records_checked = 0
@@ -577,6 +643,7 @@ class TestRunIntegrityCheckCommand(TestCase):
     @patch("apps.audit.management.commands.run_integrity_check.AuditIntegrityService")
     def test_period_custom_hours(self, mock_svc):
         from apps.common.types import Ok  # noqa: PLC0415
+
         check = MagicMock()
         check.status = "healthy"
         check.records_checked = 0
@@ -591,6 +658,7 @@ class TestRunIntegrityCheckCommand(TestCase):
     @patch("apps.audit.management.commands.run_integrity_check.AuditIntegrityService")
     def test_period_custom_days(self, mock_svc):
         from apps.common.types import Ok  # noqa: PLC0415
+
         check = MagicMock()
         check.status = "healthy"
         check.records_checked = 0
@@ -609,6 +677,7 @@ class TestRunIntegrityCheckCommand(TestCase):
     @patch("apps.audit.management.commands.run_integrity_check.AuditIntegrityService")
     def test_start_end_override(self, mock_svc):
         from apps.common.types import Ok  # noqa: PLC0415
+
         check = MagicMock()
         check.status = "healthy"
         check.records_checked = 0
@@ -617,9 +686,9 @@ class TestRunIntegrityCheckCommand(TestCase):
         check.id = "c-9"
         mock_svc.verify_audit_integrity.return_value = Ok(check)
 
-        out, _ = self._call("--type=hash_verification",
-                            "--start=2026-01-01T00:00:00+00:00",
-                            "--end=2026-01-02T00:00:00+00:00")
+        out, _ = self._call(
+            "--type=hash_verification", "--start=2026-01-01T00:00:00+00:00", "--end=2026-01-02T00:00:00+00:00"
+        )
         assert "2026-01-01" in out
 
     def test_invalid_start_end(self):
@@ -628,36 +697,25 @@ class TestRunIntegrityCheckCommand(TestCase):
 
     # --- schedule ---
 
-    @patch("apps.audit.management.commands.run_integrity_check.AuditIntegrityService")
-    def test_schedule_without_django_q(self, mock_svc):
-        """When django_q not installed, prints error."""
-        with patch.dict("sys.modules", {"django_q": None, "django_q.models": None}):
-            # Force reimport to trigger ImportError
-            import apps.audit.management.commands.run_integrity_check as mod  # noqa: PLC0415
-            # The _setup_scheduled_tasks catches ImportError
-            out = StringIO()
-            err = StringIO()
-            cmd = mod.Command(stdout=out, stderr=err)
-            # Simulate the import error path
-            with patch("builtins.__import__", side_effect=ImportError("No django_q")):
-                cmd._setup_scheduled_tasks()
-            assert "not installed" in err.getvalue()
-
-    def test_schedule_with_exception(self):
-        """When schedule setup fails with generic exception."""
+    def test_schedule_redirects_to_single_vehicle(self):
+        """--schedule must register via setup_audit_scheduled_tasks (M6) - the command
+        no longer owns its own duplicate Schedule definitions."""
         import apps.audit.management.commands.run_integrity_check as mod  # noqa: PLC0415
-        out = StringIO()
-        err = StringIO()
-        cmd = mod.Command(stdout=out, stderr=err)
 
-        with patch("builtins.__import__", side_effect=RuntimeError("boom")):
+        out = StringIO()
+        cmd = mod.Command(stdout=out, stderr=StringIO())
+        with patch(
+            "apps.audit.tasks.setup_audit_scheduled_tasks", return_value={"audit-integrity-daily": "created"}
+        ) as mock_setup:
             cmd._setup_scheduled_tasks()
-        assert "Failed to setup" in err.getvalue()
+        mock_setup.assert_called_once()
+        assert "audit-integrity-daily: created" in out.getvalue()
 
     @patch("apps.audit.management.commands.run_integrity_check.AuditIntegrityService")
     def test_schedule_flag_calls_setup(self, mock_svc):
         """--schedule flag triggers _setup_scheduled_tasks."""
         import apps.audit.management.commands.run_integrity_check as mod  # noqa: PLC0415
+
         with patch.object(mod.Command, "_setup_scheduled_tasks") as mock_setup:
             out = StringIO()
             call_command("run_integrity_check", "--schedule", stdout=out)
@@ -668,6 +726,7 @@ class TestRunIntegrityCheckCommand(TestCase):
     @patch("apps.audit.management.commands.run_integrity_check.AuditIntegrityService")
     def test_mixed_results_summary(self, mock_svc):
         from apps.common.types import Err, Ok  # noqa: PLC0415
+
         healthy_check = MagicMock()
         healthy_check.status = "healthy"
         healthy_check.records_checked = 10

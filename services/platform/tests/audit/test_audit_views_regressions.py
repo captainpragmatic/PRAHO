@@ -176,6 +176,7 @@ class RequestDataExportTests(AuditViewsBaseTestCase):
         mock_service.process_data_export.return_value = Ok(export)
 
         from django.http import HttpResponse  # noqa: PLC0415
+
         mock_download.return_value = HttpResponse(b"data", content_type="application/json")
 
         self.client.login(email="user@example.com", password="testpass123")
@@ -258,9 +259,7 @@ class HandleImmediateDownloadTests(AuditViewsBaseTestCase):
         request.META["HTTP_USER_AGENT"] = "TestBrowser"
         request.META["REMOTE_ADDR"] = "127.0.0.1"
 
-        export = self._create_data_export(
-            status="completed", file_path="exports/test.json"
-        )
+        export = self._create_data_export(status="completed", file_path="exports/test.json")
 
         mock_file = MagicMock()
         mock_file.read.return_value = b'{"test": true}'
@@ -291,9 +290,7 @@ class HandleImmediateDownloadTests(AuditViewsBaseTestCase):
         factory = RequestFactory()
         request = factory.get("/", HTTP_HX_REQUEST="true")
 
-        export = self._create_data_export(
-            status="completed", file_path="exports/test.json"
-        )
+        export = self._create_data_export(status="completed", file_path="exports/test.json")
         mock_storage.open.side_effect = Exception("File not found")
 
         result = _handle_immediate_download(request, export, self.regular_user)
@@ -307,21 +304,17 @@ class HandleImmediateDownloadTests(AuditViewsBaseTestCase):
 
 class DownloadDataExportTests(AuditViewsBaseTestCase):
     def test_requires_login(self):
-        resp = self.client.get(
-            reverse("audit:download_data_export", args=[uuid.uuid4()])
-        )
+        resp = self.client.get(reverse("audit:download_data_export", args=[uuid.uuid4()]))
         self.assertEqual(resp.status_code, 302)
 
     def test_404_for_other_users_export(self):
         export = self._create_data_export(user=self.staff_user, status="completed")
         self.client.login(email="user@example.com", password="testpass123")
-        resp = self.client.get(
-            reverse("audit:download_data_export", args=[export.id])
-        )
+        resp = self.client.get(reverse("audit:download_data_export", args=[export.id]))
         self.assertEqual(resp.status_code, 404)
 
     @patch("apps.audit.views.default_storage")
-    @patch("apps.audit.views.audit_service")
+    @patch("apps.audit.views.AuditService")
     def test_download_expired_export(self, mock_audit, mock_storage):
         export = self._create_data_export(
             status="completed",
@@ -329,26 +322,22 @@ class DownloadDataExportTests(AuditViewsBaseTestCase):
             file_path="exports/test.json",
         )
         self.client.login(email="user@example.com", password="testpass123")
-        resp = self.client.get(
-            reverse("audit:download_data_export", args=[export.id])
-        )
+        resp = self.client.get(reverse("audit:download_data_export", args=[export.id]))
         self.assertRedirects(resp, reverse("audit:gdpr_dashboard"))
 
     @patch("apps.audit.views.default_storage")
-    @patch("apps.audit.views.audit_service")
+    @patch("apps.audit.views.AuditService")
     def test_download_missing_file(self, mock_audit, mock_storage):
         export = self._create_data_export(
             status="completed",
             file_path="",
         )
         self.client.login(email="user@example.com", password="testpass123")
-        resp = self.client.get(
-            reverse("audit:download_data_export", args=[export.id])
-        )
+        resp = self.client.get(reverse("audit:download_data_export", args=[export.id]))
         self.assertRedirects(resp, reverse("audit:gdpr_dashboard"))
 
     @patch("apps.audit.views.default_storage")
-    @patch("apps.audit.views.audit_service")
+    @patch("apps.audit.views.AuditService")
     def test_download_file_not_on_storage(self, mock_audit, mock_storage):
         export = self._create_data_export(
             status="completed",
@@ -356,13 +345,11 @@ class DownloadDataExportTests(AuditViewsBaseTestCase):
         )
         mock_storage.exists.return_value = False
         self.client.login(email="user@example.com", password="testpass123")
-        resp = self.client.get(
-            reverse("audit:download_data_export", args=[export.id])
-        )
+        resp = self.client.get(reverse("audit:download_data_export", args=[export.id]))
         self.assertRedirects(resp, reverse("audit:gdpr_dashboard"))
 
     @patch("apps.audit.views.default_storage")
-    @patch("apps.audit.views.audit_service")
+    @patch("apps.audit.views.AuditService")
     def test_download_success(self, mock_audit, mock_storage):
         export = self._create_data_export(
             status="completed",
@@ -374,16 +361,14 @@ class DownloadDataExportTests(AuditViewsBaseTestCase):
         mock_storage.open.return_value = mock_file
 
         self.client.login(email="user@example.com", password="testpass123")
-        resp = self.client.get(
-            reverse("audit:download_data_export", args=[export.id])
-        )
+        resp = self.client.get(reverse("audit:download_data_export", args=[export.id]))
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp["Content-Type"], "application/json")
         export.refresh_from_db()
         self.assertEqual(export.download_count, 1)
 
     @patch("apps.audit.views.default_storage")
-    @patch("apps.audit.views.audit_service")
+    @patch("apps.audit.views.AuditService")
     def test_download_exception(self, mock_audit, mock_storage):
         export = self._create_data_export(
             status="completed",
@@ -393,9 +378,7 @@ class DownloadDataExportTests(AuditViewsBaseTestCase):
         mock_storage.open.side_effect = Exception("Storage error")
 
         self.client.login(email="user@example.com", password="testpass123")
-        resp = self.client.get(
-            reverse("audit:download_data_export", args=[export.id])
-        )
+        resp = self.client.get(reverse("audit:download_data_export", args=[export.id]))
         self.assertRedirects(resp, reverse("audit:gdpr_dashboard"))
 
 
@@ -631,9 +614,7 @@ class UpdateConsentTests(AuditViewsBaseTestCase):
             mock_user.gdpr_consent_date = None
             mock_user.email = "user@example.com"
             # Simulate exception inside try block
-            type(mock_user).accepts_marketing = property(
-                lambda self: (_ for _ in ()).throw(Exception("DB error"))
-            )
+            type(mock_user).accepts_marketing = property(lambda self: (_ for _ in ()).throw(Exception("DB error")))
             # This is hard to trigger cleanly; let's just verify the basic exception path
         # Use a simpler approach: patch timezone to raise
         with patch("apps.audit.views.timezone") as mock_tz:
@@ -830,7 +811,7 @@ class LogsListTests(AuditViewsBaseTestCase):
 
 
 class ExportLogsTests(AuditViewsBaseTestCase):
-    @patch("apps.audit.views.audit_service")
+    @patch("apps.audit.views.AuditService")
     @patch("apps.audit.views.audit_search_service")
     def test_csv_export(self, mock_search, mock_audit):
         self._create_audit_event(
@@ -852,7 +833,7 @@ class ExportLogsTests(AuditViewsBaseTestCase):
         self.assertEqual(resp["Content-Type"], "text/csv")
         self.assertIn("audit_logs_", resp["Content-Disposition"])
 
-    @patch("apps.audit.views.audit_service")
+    @patch("apps.audit.views.AuditService")
     @patch("apps.audit.views.audit_search_service")
     def test_json_export(self, mock_search, mock_audit):
         self._create_audit_event()
@@ -865,7 +846,7 @@ class ExportLogsTests(AuditViewsBaseTestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp["Content-Type"], "application/json")
 
-    @patch("apps.audit.views.audit_service")
+    @patch("apps.audit.views.AuditService")
     @patch("apps.audit.views.audit_search_service")
     def test_export_default_csv(self, mock_search, mock_audit):
         mock_search.build_advanced_query.return_value = (
@@ -877,7 +858,7 @@ class ExportLogsTests(AuditViewsBaseTestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp["Content-Type"], "text/csv")
 
-    @patch("apps.audit.views.audit_service")
+    @patch("apps.audit.views.AuditService")
     @patch("apps.audit.views.audit_search_service")
     def test_export_with_filters(self, mock_search, mock_audit):
         mock_search.build_advanced_query.return_value = (
@@ -897,7 +878,7 @@ class ExportLogsTests(AuditViewsBaseTestCase):
         )
         self.assertEqual(resp.status_code, 200)
 
-    @patch("apps.audit.views.audit_service")
+    @patch("apps.audit.views.AuditService")
     @patch("apps.audit.views.audit_search_service")
     def test_csv_export_with_null_user(self, mock_search, mock_audit):
         """Export event with no user (system event)."""
@@ -910,7 +891,7 @@ class ExportLogsTests(AuditViewsBaseTestCase):
         resp = self.client.get(reverse("audit:export_logs"), {"format": "csv"})
         self.assertEqual(resp.status_code, 200)
 
-    @patch("apps.audit.views.audit_service")
+    @patch("apps.audit.views.AuditService")
     @patch("apps.audit.views.audit_search_service")
     def test_json_export_with_null_user(self, mock_search, mock_audit):
         """JSON export with null user and content_type."""
@@ -1015,12 +996,10 @@ class GDPRExportRequestsListTests(AuditViewsBaseTestCase):
 class ProcessExportRequestTests(AuditViewsBaseTestCase):
     def test_requires_staff(self):
         self.client.login(email="user@example.com", password="testpass123")
-        resp = self.client.post(
-            reverse("audit:process_export_request", args=[uuid.uuid4()])
-        )
+        resp = self.client.post(reverse("audit:process_export_request", args=[uuid.uuid4()]))
         self.assertEqual(resp.status_code, 403)
 
-    @patch("apps.audit.views.audit_service")
+    @patch("apps.audit.views.AuditService")
     @patch("apps.audit.views.gdpr_export_service")
     def test_process_now_success(self, mock_export, mock_audit):
         export = self._create_data_export()
@@ -1045,7 +1024,7 @@ class ProcessExportRequestTests(AuditViewsBaseTestCase):
         )
         self.assertRedirects(resp, reverse("audit:gdpr_management_dashboard"))
 
-    @patch("apps.audit.views.audit_service")
+    @patch("apps.audit.views.AuditService")
     def test_mark_failed(self, mock_audit):
         export = self._create_data_export()
         self.client.login(email="staff@example.com", password="testpass123")
@@ -1067,7 +1046,7 @@ class ProcessExportRequestTests(AuditViewsBaseTestCase):
         self.assertRedirects(resp, reverse("audit:gdpr_management_dashboard"))
 
     @patch("apps.audit.views.default_storage")
-    @patch("apps.audit.views.audit_service")
+    @patch("apps.audit.views.AuditService")
     def test_delete_expired(self, mock_audit, mock_storage):
         export = self._create_data_export(
             status="completed",
@@ -1134,22 +1113,16 @@ class ProcessExportRequestTests(AuditViewsBaseTestCase):
 class GDPRExportDetailTests(AuditViewsBaseTestCase):
     def test_requires_staff(self):
         self.client.login(email="user@example.com", password="testpass123")
-        resp = self.client.get(
-            reverse("audit:gdpr_export_detail", args=[uuid.uuid4()])
-        )
+        resp = self.client.get(reverse("audit:gdpr_export_detail", args=[uuid.uuid4()]))
         self.assertEqual(resp.status_code, 403)
 
     @patch("apps.audit.views.default_storage")
     def test_renders(self, mock_storage):
-        export = self._create_data_export(
-            status="completed", file_path="exports/test.json"
-        )
+        export = self._create_data_export(status="completed", file_path="exports/test.json")
         mock_storage.exists.return_value = True
 
         self.client.login(email="staff@example.com", password="testpass123")
-        resp = self.client.get(
-            reverse("audit:gdpr_export_detail", args=[export.id])
-        )
+        resp = self.client.get(reverse("audit:gdpr_export_detail", args=[export.id]))
         self.assertEqual(resp.status_code, 200)
 
     @patch("apps.audit.views.default_storage")
@@ -1162,17 +1135,13 @@ class GDPRExportDetailTests(AuditViewsBaseTestCase):
         mock_storage.exists.return_value = True
 
         self.client.login(email="staff@example.com", password="testpass123")
-        resp = self.client.get(
-            reverse("audit:gdpr_export_detail", args=[export.id])
-        )
+        resp = self.client.get(reverse("audit:gdpr_export_detail", args=[export.id]))
         self.assertEqual(resp.status_code, 200)
 
     def test_no_file_path(self):
         export = self._create_data_export(status="pending")
         self.client.login(email="staff@example.com", password="testpass123")
-        resp = self.client.get(
-            reverse("audit:gdpr_export_detail", args=[export.id])
-        )
+        resp = self.client.get(reverse("audit:gdpr_export_detail", args=[export.id]))
         self.assertEqual(resp.status_code, 200)
 
 
@@ -1184,26 +1153,20 @@ class GDPRExportDetailTests(AuditViewsBaseTestCase):
 class DownloadUserExportTests(AuditViewsBaseTestCase):
     def test_requires_staff(self):
         self.client.login(email="user@example.com", password="testpass123")
-        resp = self.client.get(
-            reverse("audit:download_user_export", args=[uuid.uuid4()])
-        )
+        resp = self.client.get(reverse("audit:download_user_export", args=[uuid.uuid4()]))
         self.assertEqual(resp.status_code, 403)
 
     @patch("apps.audit.views.default_storage")
-    @patch("apps.audit.views.audit_service")
+    @patch("apps.audit.views.AuditService")
     def test_download_success(self, mock_audit, mock_storage):
-        export = self._create_data_export(
-            status="completed", file_path="exports/test.json"
-        )
+        export = self._create_data_export(status="completed", file_path="exports/test.json")
         mock_storage.exists.return_value = True
         mock_file = MagicMock()
         mock_file.read.return_value = b'{"data": "test"}'
         mock_storage.open.return_value = mock_file
 
         self.client.login(email="staff@example.com", password="testpass123")
-        resp = self.client.get(
-            reverse("audit:download_user_export", args=[export.id])
-        )
+        resp = self.client.get(reverse("audit:download_user_export", args=[export.id]))
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp["Content-Type"], "application/json")
 
@@ -1211,36 +1174,26 @@ class DownloadUserExportTests(AuditViewsBaseTestCase):
     def test_download_missing_file(self, mock_storage):
         export = self._create_data_export(status="completed", file_path="")
         self.client.login(email="staff@example.com", password="testpass123")
-        resp = self.client.get(
-            reverse("audit:download_user_export", args=[export.id])
-        )
+        resp = self.client.get(reverse("audit:download_user_export", args=[export.id]))
         self.assertRedirects(resp, reverse("audit:gdpr_management_dashboard"))
 
     @patch("apps.audit.views.default_storage")
     def test_download_file_not_on_storage(self, mock_storage):
-        export = self._create_data_export(
-            status="completed", file_path="exports/test.json"
-        )
+        export = self._create_data_export(status="completed", file_path="exports/test.json")
         mock_storage.exists.return_value = False
         self.client.login(email="staff@example.com", password="testpass123")
-        resp = self.client.get(
-            reverse("audit:download_user_export", args=[export.id])
-        )
+        resp = self.client.get(reverse("audit:download_user_export", args=[export.id]))
         self.assertRedirects(resp, reverse("audit:gdpr_management_dashboard"))
 
     @patch("apps.audit.views.default_storage")
-    @patch("apps.audit.views.audit_service")
+    @patch("apps.audit.views.AuditService")
     def test_download_exception(self, mock_audit, mock_storage):
-        export = self._create_data_export(
-            status="completed", file_path="exports/test.json"
-        )
+        export = self._create_data_export(status="completed", file_path="exports/test.json")
         mock_storage.exists.return_value = True
         mock_storage.open.side_effect = Exception("Error")
 
         self.client.login(email="staff@example.com", password="testpass123")
-        resp = self.client.get(
-            reverse("audit:download_user_export", args=[export.id])
-        )
+        resp = self.client.get(reverse("audit:download_user_export", args=[export.id]))
         self.assertRedirects(resp, reverse("audit:gdpr_management_dashboard"))
 
 
@@ -1332,9 +1285,7 @@ class LoadSavedSearchTests(AuditViewsBaseTestCase):
             created_by=self.staff_user,
         )
         self.client.login(email="staff@example.com", password="testpass123")
-        resp = self.client.get(
-            reverse("audit:load_saved_search", args=[query.id])
-        )
+        resp = self.client.get(reverse("audit:load_saved_search", args=[query.id]))
         self.assertEqual(resp.status_code, 302)
         query.refresh_from_db()
         self.assertEqual(query.usage_count, 1)
@@ -1350,9 +1301,7 @@ class LoadSavedSearchTests(AuditViewsBaseTestCase):
             is_shared=True,
         )
         self.client.login(email="staff@example.com", password="testpass123")
-        resp = self.client.get(
-            reverse("audit:load_saved_search", args=[query.id])
-        )
+        resp = self.client.get(reverse("audit:load_saved_search", args=[query.id]))
         self.assertEqual(resp.status_code, 302)
 
     def test_load_private_other_user_denied(self):
@@ -1366,16 +1315,12 @@ class LoadSavedSearchTests(AuditViewsBaseTestCase):
             is_shared=False,
         )
         self.client.login(email="staff@example.com", password="testpass123")
-        resp = self.client.get(
-            reverse("audit:load_saved_search", args=[query.id])
-        )
+        resp = self.client.get(reverse("audit:load_saved_search", args=[query.id]))
         self.assertRedirects(resp, reverse("audit:logs"))
 
     def test_load_nonexistent(self):
         self.client.login(email="staff@example.com", password="testpass123")
-        resp = self.client.get(
-            reverse("audit:load_saved_search", args=[uuid.uuid4()])
-        )
+        resp = self.client.get(reverse("audit:load_saved_search", args=[uuid.uuid4()]))
         # Http404 caught by exception handler -> redirect
         self.assertRedirects(resp, reverse("audit:logs"))
 
@@ -1386,9 +1331,7 @@ class LoadSavedSearchTests(AuditViewsBaseTestCase):
             created_by=self.staff_user,
         )
         self.client.login(email="staff@example.com", password="testpass123")
-        resp = self.client.get(
-            reverse("audit:load_saved_search", args=[query.id])
-        )
+        resp = self.client.get(reverse("audit:load_saved_search", args=[query.id]))
         self.assertEqual(resp.status_code, 302)
 
 
@@ -1665,7 +1608,7 @@ class UpdateAlertStatusTests(AuditViewsBaseTestCase):
             status="active",
         )
 
-    @patch("apps.audit.views.audit_service")
+    @patch("apps.audit.views.AuditService")
     def test_acknowledge(self, mock_audit):
         self.client.login(email="staff@example.com", password="testpass123")
         resp = self.client.post(
@@ -1676,7 +1619,7 @@ class UpdateAlertStatusTests(AuditViewsBaseTestCase):
         self.alert.refresh_from_db()
         self.assertEqual(self.alert.status, "acknowledged")
 
-    @patch("apps.audit.views.audit_service")
+    @patch("apps.audit.views.AuditService")
     def test_assign_to_me(self, mock_audit):
         self.client.login(email="staff@example.com", password="testpass123")
         resp = self.client.post(
@@ -1688,7 +1631,7 @@ class UpdateAlertStatusTests(AuditViewsBaseTestCase):
         self.assertEqual(self.alert.status, "investigating")
         self.assertEqual(self.alert.assigned_to, self.staff_user)
 
-    @patch("apps.audit.views.audit_service")
+    @patch("apps.audit.views.AuditService")
     def test_assign_to_me_non_active(self, mock_audit):
         """Assigning when status is not 'active' should not change status."""
         self.alert.status = "acknowledged"
@@ -1701,7 +1644,7 @@ class UpdateAlertStatusTests(AuditViewsBaseTestCase):
         self.alert.refresh_from_db()
         self.assertEqual(self.alert.status, "acknowledged")
 
-    @patch("apps.audit.views.audit_service")
+    @patch("apps.audit.views.AuditService")
     def test_resolve(self, mock_audit):
         self.client.login(email="staff@example.com", password="testpass123")
         resp = self.client.post(
@@ -1713,7 +1656,7 @@ class UpdateAlertStatusTests(AuditViewsBaseTestCase):
         self.assertEqual(self.alert.status, "resolved")
         self.assertIsNotNone(self.alert.resolved_at)
 
-    @patch("apps.audit.views.audit_service")
+    @patch("apps.audit.views.AuditService")
     def test_false_positive(self, mock_audit):
         self.client.login(email="staff@example.com", password="testpass123")
         resp = self.client.post(
@@ -1732,9 +1675,9 @@ class UpdateAlertStatusTests(AuditViewsBaseTestCase):
         )
         self.assertRedirects(resp, reverse("audit:alerts_dashboard"))
 
-    @patch("apps.audit.views.audit_service")
+    @patch("apps.audit.views.AuditService")
     def test_exception_handling(self, mock_audit):
-        mock_audit.log_event.side_effect = Exception("Error")
+        mock_audit.log_simple_event.side_effect = Exception("Error")
         self.client.login(email="staff@example.com", password="testpass123")
         resp = self.client.post(
             reverse("audit:update_alert_status", args=[self.alert.id]),
@@ -1752,44 +1695,34 @@ class UpdateAlertStatusTests(AuditViewsBaseTestCase):
 class EventDetailTests(AuditViewsBaseTestCase):
     def test_requires_staff(self):
         self.client.login(email="user@example.com", password="testpass123")
-        resp = self.client.get(
-            reverse("audit:event_detail", args=[uuid.uuid4()])
-        )
+        resp = self.client.get(reverse("audit:event_detail", args=[uuid.uuid4()]))
         self.assertEqual(resp.status_code, 403)
 
     def test_renders_basic(self):
         event = self._create_audit_event()
         self.client.login(email="staff@example.com", password="testpass123")
-        resp = self.client.get(
-            reverse("audit:event_detail", args=[event.id])
-        )
+        resp = self.client.get(reverse("audit:event_detail", args=[event.id]))
         self.assertEqual(resp.status_code, 200)
 
     def test_with_related_by_user(self):
         event = self._create_audit_event()
         self._create_audit_event(description="Related event")
         self.client.login(email="staff@example.com", password="testpass123")
-        resp = self.client.get(
-            reverse("audit:event_detail", args=[event.id])
-        )
+        resp = self.client.get(reverse("audit:event_detail", args=[event.id]))
         self.assertEqual(resp.status_code, 200)
 
     def test_with_session_key(self):
         event = self._create_audit_event(session_key="testsession123")
         self._create_audit_event(session_key="testsession123", description="Same session")
         self.client.login(email="staff@example.com", password="testpass123")
-        resp = self.client.get(
-            reverse("audit:event_detail", args=[event.id])
-        )
+        resp = self.client.get(reverse("audit:event_detail", args=[event.id]))
         self.assertEqual(resp.status_code, 200)
 
     def test_with_request_id(self):
         event = self._create_audit_event(request_id="req-123-456")
         self._create_audit_event(request_id="req-123-456", description="Same request")
         self.client.login(email="staff@example.com", password="testpass123")
-        resp = self.client.get(
-            reverse("audit:event_detail", args=[event.id])
-        )
+        resp = self.client.get(reverse("audit:event_detail", args=[event.id]))
         self.assertEqual(resp.status_code, 200)
 
     def test_with_metadata_and_values(self):
@@ -1799,17 +1732,13 @@ class EventDetailTests(AuditViewsBaseTestCase):
             new_values={"field": "new"},
         )
         self.client.login(email="staff@example.com", password="testpass123")
-        resp = self.client.get(
-            reverse("audit:event_detail", args=[event.id])
-        )
+        resp = self.client.get(reverse("audit:event_detail", args=[event.id]))
         self.assertEqual(resp.status_code, 200)
 
     def test_with_no_user(self):
         event = self._create_audit_event(user=None)
         self.client.login(email="staff@example.com", password="testpass123")
-        resp = self.client.get(
-            reverse("audit:event_detail", args=[event.id])
-        )
+        resp = self.client.get(reverse("audit:event_detail", args=[event.id]))
         self.assertEqual(resp.status_code, 200)
 
     def test_with_related_alerts(self):
@@ -1823,16 +1752,12 @@ class EventDetailTests(AuditViewsBaseTestCase):
         alert.related_events.add(event)
 
         self.client.login(email="staff@example.com", password="testpass123")
-        resp = self.client.get(
-            reverse("audit:event_detail", args=[event.id])
-        )
+        resp = self.client.get(reverse("audit:event_detail", args=[event.id]))
         self.assertEqual(resp.status_code, 200)
 
     def test_nonexistent_event(self):
         self.client.login(email="staff@example.com", password="testpass123")
-        resp = self.client.get(
-            reverse("audit:event_detail", args=[uuid.uuid4()])
-        )
+        resp = self.client.get(reverse("audit:event_detail", args=[uuid.uuid4()]))
         self.assertEqual(resp.status_code, 404)
 
     def test_deduplicate_related_events(self):
@@ -1848,9 +1773,7 @@ class EventDetailTests(AuditViewsBaseTestCase):
             description="Multi-match",
         )
         self.client.login(email="staff@example.com", password="testpass123")
-        resp = self.client.get(
-            reverse("audit:event_detail", args=[event.id])
-        )
+        resp = self.client.get(reverse("audit:event_detail", args=[event.id]))
         self.assertEqual(resp.status_code, 200)
 
 
@@ -1913,3 +1836,30 @@ class ParseDateFiltersTests(TestCase):
         filters = {"start_date": dt}
         result = _parse_date_filters(filters)
         self.assertEqual(result["start_date"], dt)
+
+
+class AuditUiReachabilityTests(AuditViewsBaseTestCase):
+    """C5: the management hub is reachable from staff nav and saved searches render."""
+
+    def test_staff_nav_links_the_management_hub(self):
+        self.client.force_login(self.staff_user)
+        resp = self.client.get(reverse("audit:logs"))
+        self.assertContains(resp, "/audit/management/")
+
+    def test_logs_page_renders_saved_searches(self):
+        AuditSearchQuery.objects.create(
+            name="My failed logins",
+            query_params={"action": "login_failed"},
+            created_by=self.staff_user,
+            is_shared=False,
+        )
+        self.client.force_login(self.staff_user)
+        resp = self.client.get(reverse("audit:logs"))
+        self.assertContains(resp, "Saved Searches")
+        self.assertContains(resp, "My failed logins")
+        self.assertContains(resp, reverse("audit:save_search_query"))
+
+    def test_integrity_dashboard_breadcrumbs_reach_the_hub(self):
+        self.client.force_login(self.staff_user)
+        resp = self.client.get(reverse("audit:integrity_dashboard"))
+        self.assertContains(resp, "/audit/management/")

@@ -12,7 +12,7 @@ import json
 from django.contrib.contenttypes.models import ContentType
 from django.test import TestCase, override_settings
 
-from apps.audit.models import AuditEvent
+from apps.audit.models import AuditEvent, audit_mutation_allowed
 from apps.settings.models import SystemSetting
 from tests.factories.core_factories import create_staff_user
 
@@ -35,7 +35,8 @@ class TestSettingsAPIAuditTrail(TestCase):
             default_value="default",
         )
         # Clear events from setup
-        AuditEvent.objects.all().delete()
+        with audit_mutation_allowed("test fixture"):
+            AuditEvent.objects.all().delete()
 
     def test_update_setting_creates_attributed_audit_event(self) -> None:
         """Hardened write path → SystemSetting.save() → attributed AuditEvent.
@@ -76,7 +77,8 @@ class TestModelSaveAuditTrail(TestCase):
 
     def test_system_setting_create_produces_audit_event(self) -> None:
         """Direct model save → signal → AuditEvent (regression guard)."""
-        AuditEvent.objects.all().delete()
+        with audit_mutation_allowed("test fixture"):
+            AuditEvent.objects.all().delete()
 
         SystemSetting.objects.create(
             key="test.e2e_direct",
@@ -98,7 +100,8 @@ class TestModelSaveAuditTrail(TestCase):
         """Customer creation → signal → AuditEvent."""
         from apps.customers.models import Customer
 
-        AuditEvent.objects.all().delete()
+        with audit_mutation_allowed("test fixture"):
+            AuditEvent.objects.all().delete()
 
         customer = Customer.objects.create(
             company_name="E2E Audit Test SRL",
@@ -123,11 +126,10 @@ class TestInvoiceCreationAuditTrail(TestCase):
         from apps.billing.models import Currency, Invoice
         from apps.customers.models import Customer
 
-        AuditEvent.objects.all().delete()
+        with audit_mutation_allowed("test fixture"):
+            AuditEvent.objects.all().delete()
 
-        currency, _ = Currency.objects.get_or_create(
-            code="RON", defaults={"symbol": "L", "decimals": 2}
-        )
+        currency, _ = Currency.objects.get_or_create(code="RON", defaults={"symbol": "L", "decimals": 2})
         customer = Customer.objects.create(
             company_name="E2E Invoice Test SRL",
             customer_type="business",

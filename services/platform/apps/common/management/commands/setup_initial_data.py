@@ -31,6 +31,7 @@ CORE_COMMANDS: list[tuple[str, str]] = [
 BUSINESS_COMMANDS: list[tuple[str, str]] = [
     ("setup_tax_rules", "Romanian & EU tax rules"),
     ("setup_dunning_policies", "Payment retry policies"),
+    ("setup_audit_retention_policies", "Audit retention policies"),
 ]
 
 

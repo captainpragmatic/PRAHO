@@ -48,7 +48,6 @@ from .services import (
     audit_integrity_service,
     audit_retention_service,
     audit_search_service,
-    audit_service,
     gdpr_consent_service,
     gdpr_deletion_service,
     gdpr_export_service,
@@ -293,18 +292,20 @@ def download_data_export(request: HttpRequest, export_id: uuid.UUID) -> HttpResp
         export_request.save(update_fields=["download_count"])
 
         # Log download
-        audit_service.log_compliance_event(
-            compliance_type="gdpr_consent",
-            reference_id=f"export_download_{export_request.id}",
-            description=f"GDPR export downloaded by {user.email}",
-            user=user,
-            status="success",
-            evidence={
-                "export_id": str(export_request.id),
-                "download_count": export_request.download_count,
-                "file_size": export_request.file_size,
-            },
-            metadata={"ip_address": get_safe_client_ip(request)},
+        AuditService.log_compliance_event(
+            ComplianceEventRequest(
+                compliance_type="gdpr_consent",
+                reference_id=f"export_download_{export_request.id}",
+                description=f"GDPR export downloaded by {user.email}",
+                user=user,
+                status="success",
+                evidence={
+                    "export_id": str(export_request.id),
+                    "download_count": export_request.download_count,
+                    "file_size": export_request.file_size,
+                },
+                metadata={"ip_address": get_safe_client_ip(request)},
+            )
         )
 
         # Serve file
@@ -711,7 +712,7 @@ def export_logs(request: HttpRequest) -> HttpResponse:
         queryset = queryset[:max_export_size]
 
     # Log the export
-    audit_service.log_event(
+    AuditService.log_simple_event(
         event_type="export",
         user=request.user,
         description=f"Audit logs exported in {export_format} format ({queryset.count()} records)",
@@ -936,11 +937,11 @@ def process_export_request(request: HttpRequest, export_id: uuid.UUID) -> HttpRe
             match result:
                 case Ok(_):
                     # Log the staff action
-                    audit_service.log_event(
+                    AuditService.log_simple_event(
                         event_type="export",
                         user=request.user,
                         content_object=export_request,
-                        description=f"Staff processed GDPR export request for {export_request.requested_by.email}",
+                        description=f"Staff processed GDPR export request for {export_request.requested_by_display}",
                         ip_address=get_safe_client_ip(request),
                     )
                     messages.success(request, _("Export request processed successfully."))
@@ -957,11 +958,11 @@ def process_export_request(request: HttpRequest, export_id: uuid.UUID) -> HttpRe
                 export_request.save(update_fields=["status", "error_message"])
 
                 # Log the staff action
-                audit_service.log_event(
+                AuditService.log_simple_event(
                     event_type="update",
                     user=request.user,
                     content_object=export_request,
-                    description=f"Staff marked GDPR export as failed for {export_request.requested_by.email}: {error_message}",
+                    description=f"Staff marked GDPR export as failed for {export_request.requested_by_display}: {error_message}",
                     ip_address=get_safe_client_ip(request),
                 )
                 messages.warning(request, _("Export request marked as failed."))
@@ -973,11 +974,11 @@ def process_export_request(request: HttpRequest, export_id: uuid.UUID) -> HttpRe
                     default_storage.delete(export_request.file_path)
 
                 # Log the staff action before deletion
-                audit_service.log_event(
+                AuditService.log_simple_event(
                     event_type="delete",
                     user=request.user,
                     content_object=export_request,
-                    description=f"Staff deleted expired GDPR export for {export_request.requested_by.email}",
+                    description=f"Staff deleted expired GDPR export for {export_request.requested_by_display}",
                     ip_address=get_safe_client_ip(request),
                 )
 
@@ -1030,20 +1031,18 @@ def download_user_export(request: HttpRequest, export_id: uuid.UUID) -> HttpResp
             return redirect("audit:gdpr_management_dashboard")
 
         # Log the staff download
-        audit_service.log_event(
+        AuditService.log_simple_event(
             event_type="access",
             user=request.user,
             content_object=export_request,
-            description=f"Staff downloaded GDPR export for compliance review (user: {export_request.requested_by.email})",
+            description=f"Staff downloaded GDPR export for compliance review (user: {export_request.requested_by_display})",
             ip_address=get_safe_client_ip(request),
         )
 
         # Serve file
         file_content = default_storage.open(export_request.file_path).read()
         response = HttpResponse(file_content, content_type="application/json")
-        response["Content-Disposition"] = (
-            f'attachment; filename="gdpr_export_{export_request.requested_by.id}_{export_request.id}.json"'
-        )
+        response["Content-Disposition"] = f'attachment; filename="gdpr_export_{export_request.id}.json"'
         response["Content-Length"] = len(file_content)
 
         return response
@@ -1165,19 +1164,25 @@ def integrity_dashboard(request: HttpRequest) -> HttpResponse:
     healthy_checks = AuditIntegrityCheck.objects.filter(status="healthy").count()
     warning_checks = AuditIntegrityCheck.objects.filter(status="warning").count()
     compromised_checks = AuditIntegrityCheck.objects.filter(status="compromised").count()
+    error_checks = AuditIntegrityCheck.objects.filter(status="error").count()
 
     # Recent issues
     recent_issues = AuditIntegrityCheck.objects.filter(
-        status__in=["warning", "compromised"], checked_at__gte=timezone.now() - timedelta(days=7)
+        status__in=["warning", "compromised", "error"], checked_at__gte=timezone.now() - timedelta(days=7)
     ).order_by("-checked_at")[:10]
 
     context = {
+        "breadcrumb_items": [
+            {"text": _("Audit Management"), "url": "/audit/management/"},
+            {"text": _("Integrity")},
+        ],
         "recent_checks": recent_checks,
         "stats": {
             "total_checks": total_checks,
             "healthy_checks": healthy_checks,
             "warning_checks": warning_checks,
             "compromised_checks": compromised_checks,
+            "error_checks": error_checks,
             "health_percentage": (healthy_checks / total_checks * 100) if total_checks > 0 else 0,
         },
         "recent_issues": recent_issues,
@@ -1402,7 +1407,7 @@ def update_alert_status(request: HttpRequest, alert_id: uuid.UUID) -> HttpRespon
         alert.save()
 
         # Log the action
-        audit_service.log_event(
+        AuditService.log_simple_event(
             event_type="update",
             user=request.user,
             content_object=alert,

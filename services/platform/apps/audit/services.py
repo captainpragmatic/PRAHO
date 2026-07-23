@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import hmac
 import json
 import logging
+import os
 import re
 import uuid
 from dataclasses import dataclass, field
@@ -11,6 +13,7 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, ClassVar, TypedDict
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.contenttypes.models import ContentType
 from django.core.files.base import ContentFile
@@ -33,6 +36,7 @@ from .models import (
     ComplianceLog,
     CookieConsent,
     DataExport,
+    audit_mutation_allowed,
 )
 
 # Constants for audit operations
@@ -676,8 +680,10 @@ class AuditService:
                 requires_review=requires_review,
                 content_type=content_type,
                 object_id=object_id,
-                old_values=event_data.old_values or {},
-                new_values=event_data.new_values or {},
+                # #385: raw Decimal/datetime/lazy-proxy values must be coerced before the
+                # JSONField INSERT - an unserializable evidence dict would kill the event.
+                old_values=serialize_metadata(event_data.old_values or {}),
+                new_values=serialize_metadata(event_data.new_values or {}),
                 description=event_data.description,
                 ip_address=context.ip_address,
                 user_agent=context.user_agent or "",
@@ -1043,110 +1049,6 @@ class AuditService:
             logger.error(f"🔥 [Compliance] Failed to log {request.compliance_type}: {e}")
             raise
 
-    # ===============================================================================
-    # BACKWARD COMPATIBILITY WRAPPER METHODS
-    # ===============================================================================
-
-    @staticmethod
-    def log_event_legacy(  # audit trail fields  # noqa: PLR0913  # Business logic parameters
-        event_type: str,
-        user: User | None = None,
-        content_object: Any | None = None,
-        old_values: dict[str, Any] | None = None,
-        new_values: dict[str, Any] | None = None,
-        description: str = "",
-        ip_address: str | None = None,
-        user_agent: str | None = None,
-        request_id: str | None = None,
-        session_key: str | None = None,
-        metadata: dict[str, Any] | None = None,
-        actor_type: str = "user",
-    ) -> AuditEvent:
-        """Legacy wrapper for backward compatibility"""
-        event_data = AuditEventData(
-            event_type=event_type,
-            content_object=content_object,
-            old_values=old_values,
-            new_values=new_values,
-            description=description,
-        )
-
-        context = AuditContext(
-            user=user,
-            ip_address=ip_address,
-            user_agent=user_agent,
-            request_id=request_id,
-            session_key=session_key,
-            metadata=metadata or {},
-            actor_type=actor_type,
-        )
-
-        return AuditService.log_event(event_data, context)
-
-    @staticmethod
-    def log_2fa_event_legacy(  # audit trail fields  # noqa: PLR0913  # Business logic parameters
-        event_type: str,
-        user: User,
-        ip_address: str | None = None,
-        user_agent: str | None = None,
-        metadata: dict[str, Any] | None = None,
-        description: str = "",
-        request_id: str | None = None,
-        session_key: str | None = None,
-    ) -> AuditEvent:
-        """Legacy wrapper for backward compatibility"""
-        context = AuditContext(
-            ip_address=ip_address,
-            user_agent=user_agent,
-            request_id=request_id,
-            session_key=session_key,
-            metadata=metadata or {},
-        )
-
-        request = TwoFactorAuditRequest(event_type=event_type, user=user, context=context, description=description)
-
-        return AuditService.log_2fa_event(request)
-
-    @staticmethod
-    def log_compliance_event_legacy(  # audit trail fields  # noqa: PLR0913  # Business logic parameters
-        compliance_type: str,
-        reference_id: str,
-        description: str,
-        user: User | None = None,
-        status: str = "success",
-        evidence: dict[str, Any] | None = None,
-        metadata: dict[str, Any] | None = None,
-    ) -> ComplianceLog:
-        """Legacy wrapper for backward compatibility"""
-        request = ComplianceEventRequest(
-            compliance_type=compliance_type,
-            reference_id=reference_id,
-            description=description,
-            user=user,
-            status=status,
-            evidence=evidence or {},
-            metadata=metadata or {},
-        )
-
-        return AuditService.log_compliance_event(request)
-
-
-class AuditServiceProxy:
-    """Proxy class to maintain backward compatibility with existing code"""
-
-    def log_event(self, *args: Any, **kwargs: Any) -> AuditEvent:
-        return AuditService.log_event_legacy(*args, **kwargs)
-
-    def log_2fa_event(self, *args: Any, **kwargs: Any) -> AuditEvent:
-        return AuditService.log_2fa_event_legacy(*args, **kwargs)
-
-    def log_compliance_event(self, *args: Any, **kwargs: Any) -> ComplianceLog:
-        return AuditService.log_compliance_event_legacy(*args, **kwargs)
-
-
-# Global audit service instance (backward compatible)
-audit_service = AuditServiceProxy()
-
 
 # ===============================================================================
 # GDPR COMPLIANCE SERVICES
@@ -1218,6 +1120,12 @@ class GDPRExportService:
         """Process and generate the actual data export file"""
         try:
             user = export_request.requested_by
+            if user is None:
+                # Orphaned request: the requester was deleted before processing (W7)
+                export_request.status = "failed"
+                export_request.error_message = "Requesting user was deleted before the export was processed"
+                export_request.save(update_fields=["status", "error_message"])
+                return Err("Requesting user no longer exists")
             export_request.status = "processing"
             export_request.started_at = timezone.now()
             export_request.save(update_fields=["status", "started_at"])
@@ -1270,7 +1178,7 @@ class GDPRExportService:
             export_request.error_message = str(e)
             export_request.save(update_fields=["status", "error_message"])
 
-            logger.error(f"🔥 [GDPR Export] Processing failed for {user.email}: {e}")
+            logger.error(f"🔥 [GDPR Export] Processing failed for export {export_request.id}: {e}")
             return Err(f"Export processing failed: {e!s}")
 
     @classmethod
@@ -1567,9 +1475,10 @@ class GDPRDeletionService:
             GDPRConsentService._propagate_marketing_consent(user, consent=False)
 
             # Anonymize audit logs (IP addresses only)
-            AuditEvent.objects.filter(user=user).update(
-                ip_address=cls.ANONYMIZATION_MAP["ip_address"](), user_agent="Anonymized"
-            )
+            with audit_mutation_allowed("gdpr_anonymization"):
+                AuditEvent.objects.filter(user=user).update(
+                    ip_address=cls.ANONYMIZATION_MAP["ip_address"](), user_agent="Anonymized"
+                )
 
             logger.info(f"✅ [GDPR Anonymization] User {original_email} anonymized successfully")
             return Ok("User data anonymized successfully")
@@ -1586,7 +1495,8 @@ class GDPRDeletionService:
             original_email = user.email
 
             # Delete related data that can be safely removed
-            AuditEvent.objects.filter(user=user).delete()
+            with audit_mutation_allowed("gdpr_erasure"):
+                AuditEvent.objects.filter(user=user).delete()
 
             # Delete user account
             user.delete()
@@ -3271,55 +3181,74 @@ class AuditIntegrityService:
     - GDPR compliance validation (required fields, retention periods)
     """
 
+    HASH_VERSION = 2
+    RESERVED_METADATA_KEYS: ClassVar[frozenset[str]] = frozenset(
+        {"integrity_hash", "integrity_hash_version", "integrity_key_id"}
+    )
+
     @classmethod
-    @transaction.atomic
     def verify_audit_integrity(
         cls, period_start: datetime, period_end: datetime, check_type: str = "hash_verification"
     ) -> Result[AuditIntegrityCheck, str]:
-        """Verify audit data integrity for a given period."""
+        """Verify audit data integrity for a given period.
 
+        Never lies about its own health: a crash during verification persists an
+        AuditIntegrityCheck(status="error") row OUTSIDE the failed transaction, so
+        dashboards and schedulers count failures instead of seeing zero-by-construction.
+        Err is returned only when even that error row cannot be written.
+        """
         try:
-            # Get audit events in the period
-            events = AuditEvent.objects.filter(timestamp__gte=period_start, timestamp__lt=period_end).order_by(
-                "timestamp"
-            )
+            with transaction.atomic():
+                events = AuditEvent.objects.filter(timestamp__gte=period_start, timestamp__lt=period_end).order_by(
+                    "timestamp"
+                )
 
-            records_checked = events.count()
-            issues_found = []
+                records_checked = events.count()
+                issues_found = []
 
-            # Convert QuerySet to list for methods that expect list[AuditEvent]
-            events_list = list(events)
+                # Convert QuerySet to list for methods that expect list[AuditEvent]
+                events_list = list(events)
 
-            if check_type == "hash_verification":
-                issues_found = cls._verify_hash_chain(events_list)
-            elif check_type == "sequence_check":
-                issues_found = cls._check_sequence_gaps(events_list)
-            elif check_type == "gdpr_compliance":
-                issues_found = cls._check_gdpr_compliance(events_list)
+                if check_type == "hash_verification":
+                    issues_found = cls._verify_hash_chain(events_list)
+                elif check_type == "sequence_check":
+                    issues_found = cls._check_sequence_gaps(events_list)
+                elif check_type == "gdpr_compliance":
+                    issues_found = cls._check_gdpr_compliance(events_list)
 
-            # Generate hash chain for this check
-            hash_chain = cls._generate_hash_chain(events_list)
+                # Generate hash chain for this check
+                hash_chain = cls._generate_hash_chain(events_list)
 
-            # Determine status
-            status = "healthy"
-            if len(issues_found) > 0:
-                critical_issues = [i for i in issues_found if i.get("severity") == "critical"]
-                status = "compromised" if critical_issues else "warning"
+                # Determine status
+                status = "healthy"
+                if issues_found:
+                    critical_issues = [i for i in issues_found if i.get("severity") == "critical"]
+                    status = "compromised" if critical_issues else "warning"
+                elif records_checked == 0:
+                    # An empty window in a live system means the audit stream stalled or the
+                    # window is wrong — either way "healthy" would be a claim with no evidence.
+                    status = "warning"
+                    issues_found = [
+                        {
+                            "type": "empty_verification_window",
+                            "severity": "warning",
+                            "description": "No audit events found in the verification window; nothing was verified",
+                        }
+                    ]
 
-            # Create integrity check record
-            integrity_check = AuditIntegrityCheck.objects.create(
-                check_type=check_type,
-                period_start=period_start,
-                period_end=period_end,
-                status=status,
-                records_checked=records_checked,
-                issues_found=len(issues_found),
-                findings=issues_found,
-                hash_chain=hash_chain,
-                metadata={"check_timestamp": timezone.now().isoformat(), "checker": "AuditIntegrityService"},
-            )
+                integrity_check = AuditIntegrityCheck.objects.create(
+                    check_type=check_type,
+                    period_start=period_start,
+                    period_end=period_end,
+                    status=status,
+                    records_checked=records_checked,
+                    issues_found=len(issues_found),
+                    findings=issues_found,
+                    hash_chain=hash_chain,
+                    metadata={"check_timestamp": timezone.now().isoformat(), "checker": "AuditIntegrityService"},
+                )
 
-            # Create alerts for critical issues
+            # Alerts fire after the check row commits, for confirmed tampering only
             if status == "compromised":
                 cls._create_integrity_alert(integrity_check, issues_found)
 
@@ -3328,89 +3257,249 @@ class AuditIntegrityService:
 
         except Exception as e:
             logger.error(f"🔥 [Audit Integrity] Verification failed: {e}")
+            error_check = cls._persist_error_check(check_type, period_start, period_end, e)
+            if error_check is not None:
+                cls._create_integrity_alert(error_check, list(error_check.findings))
+                return Ok(error_check)
             return Err(f"Integrity verification failed: {e!s}")
 
     @classmethod
-    def _verify_hash_chain(cls, events: list[AuditEvent]) -> list[dict[str, Any]]:
-        """Verify per-event integrity hashes of audit events.
+    def _persist_error_check(
+        cls, check_type: str, period_start: datetime, period_end: datetime, exc: Exception
+    ) -> AuditIntegrityCheck | None:
+        """Persist an error-status check row after a verification crash (W3).
 
-        Honest threat model (#217, upgrade tracked in #313): despite this function's
-        historical name there is no chaining here — each event carries an independent,
-        UNKEYED SHA-256 over a subset of its fields. That detects naive tampering (a row
-        edited without recomputing its hash) and deletion of the hash key, and nothing
-        more: an attacker with UPDATE access and source knowledge can recompute a matching
-        hash, strip both metadata keys to demote a row to "legacy", or delete rows
-        outright. A keyed MAC with real chaining exists in siem.py's HashChainManager;
-        #313 covers converging on it and widening the covered fields.
+        Runs in its own transaction so it survives the rollback of the failed
+        verification; returns None only when the DB itself is unreachable.
+        """
+        try:
+            with transaction.atomic():
+                return AuditIntegrityCheck.objects.create(
+                    check_type=check_type,
+                    period_start=period_start,
+                    period_end=period_end,
+                    status="error",
+                    records_checked=0,
+                    issues_found=1,
+                    findings=[
+                        {
+                            "type": "verification_error",
+                            "severity": "critical",
+                            "description": f"Integrity verification crashed before completion: {exc}",
+                        }
+                    ],
+                    metadata={"check_timestamp": timezone.now().isoformat(), "checker": "AuditIntegrityService"},
+                )
+        except Exception:
+            logger.error("🔥 [Audit Integrity] Could not persist error-status check row; DB unreachable")
+            return None
+
+    @staticmethod
+    def _canonical_json(data: Any) -> str:
+        """Canonical JSON for MAC payloads — stamp and verifier MUST share this exact encoding."""
+        return json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=True, default=str)
+
+    @classmethod
+    def _integrity_keys(cls) -> list[tuple[str, bytes]]:
+        """Ordered MAC keys as (key_id, key): current first, then previous (rotation window).
+
+        The current key resolves via the "audit-integrity" derivation domain
+        (AUDIT_INTEGRITY_SECRET env when provisioned, else HKDF over SECRET_KEY) -
+        stamping never silently degrades to unkeyed hashing. The previous key exists
+        only while AUDIT_INTEGRITY_SECRET_PREVIOUS is set, derived from that material
+        under the SAME domain so rotation does not change what the old secret derives to.
+        """
+        from apps.common.key_derivation import (  # noqa: PLC0415  # Deferred: avoids app-load cycle
+            derive_key,
+            derive_key_with_material,
+        )
+
+        current = derive_key("audit-integrity")
+        keys: list[tuple[str, bytes]] = [(hashlib.sha256(current).hexdigest()[:8], current)]
+        previous_material = os.environ.get("AUDIT_INTEGRITY_SECRET_PREVIOUS", "")
+        if previous_material:
+            previous = derive_key_with_material("audit-integrity", previous_material)
+            previous_id = hashlib.sha256(previous).hexdigest()[:8]
+            if previous_id != keys[0][0]:
+                keys.append((previous_id, previous))
+        return keys
+
+    @classmethod
+    def _integrity_payload_v2(cls, event: AuditEvent) -> str:
+        """v2 authenticated payload: the evidence fields plus canonicalized metadata.
+
+        Covers old/new values and metadata (minus the reserved marker keys) so evidence
+        tampering changes the MAC. Deliberately excludes user_id and ip_address: GDPR
+        anonymization clears those, and under v1 that made every anonymized row a false
+        CRITICAL.
+        """
+        metadata = event.metadata if isinstance(event.metadata, dict) else {}
+        covered_metadata = {k: v for k, v in metadata.items() if k not in cls.RESERVED_METADATA_KEYS}
+        return cls._canonical_json(
+            {
+                "version": cls.HASH_VERSION,
+                "id": str(event.id),
+                "timestamp": event.timestamp.isoformat(),
+                "action": event.action,
+                "actor_type": event.actor_type,
+                "is_sensitive": event.is_sensitive,
+                "content_type_id": event.content_type_id,
+                "object_id": event.object_id,
+                "description": event.description,
+                "old_values": event.old_values,
+                "new_values": event.new_values,
+                "category": event.category,
+                "severity": event.severity,
+                "metadata": covered_metadata,
+            }
+        )
+
+    @classmethod
+    def _compute_event_mac(cls, event: AuditEvent, key: bytes) -> str:
+        return hmac.new(key, cls._integrity_payload_v2(event).encode(), hashlib.sha256).hexdigest()
+
+    @classmethod
+    def integrity_stamp_marker(cls, event: AuditEvent) -> dict[str, Any]:
+        """Compute the v2 stamp for an event: keyed MAC + version + key id."""
+        key_id, key = cls._integrity_keys()[0]
+        return {
+            "integrity_hash": cls._compute_event_mac(event, key),
+            "integrity_hash_version": cls.HASH_VERSION,
+            "integrity_key_id": key_id,
+        }
+
+    @classmethod
+    def _verify_hash_chain(cls, events: list[AuditEvent]) -> list[dict[str, Any]]:
+        """Verify per-event integrity MACs (v2, keyed).
+
+        v2 rows carry an HMAC-SHA256 over the evidence payload; the stamped key id
+        selects the key, and both the current and previous keys are accepted so key
+        rotation does not invalidate history (#313 keyed tier).
+
+        Non-v2 rows (missing marker, v1, unknown version): with
+        AUDIT_INTEGRITY_REQUIRE_V2 enabled (the post-cutover default) any such row is
+        COMPROMISED — after the restamp cutover a stripped or downgraded marker is
+        indistinguishable from an attacker laundering a tampered row. During the
+        migration window (setting disabled) v1 rows verify under the legacy unkeyed
+        algorithm and unmarked rows report as unverifiable legacy (info).
         """
         issues = []
+        keys = cls._integrity_keys()
+        keys_by_id = dict(keys)
+        require_v2 = bool(getattr(settings, "AUDIT_INTEGRITY_REQUIRE_V2", True))
 
         for event in events:
             # One malformed row must not abort the whole sweep: the exception would
             # propagate to verify_audit_integrity's outer except and every other event in
             # the window would silently go unverified for this run.
             try:
-                expected_hash = cls._calculate_event_hash(event)
+                issue = cls._verify_single_event(event, keys, keys_by_id, require_v2=require_v2)
             except Exception as e:
-                issues.append(
-                    {
-                        "type": "verification_error",
-                        "severity": "critical",
-                        "event_id": str(event.id),
-                        "timestamp": event.timestamp.isoformat(),
-                        "description": f"Could not compute integrity hash for verification: {e}",
-                        "expected_hash": None,
-                        "stored_hash": None,
-                    }
-                )
-                continue
-            metadata = event.metadata if isinstance(event.metadata, dict) else {}
-            stored_hash = metadata.get("integrity_hash")
-
-            if stored_hash is None:
-                # A missing hash used to short-circuit to "healthy", which is what made the whole
-                # check a no-op (#217). It is only a real finding for events written since hashing
-                # began — anything older simply cannot be verified, and reporting thousands of
-                # legacy rows as tampered would bury an actual mismatch.
-                if metadata.get("integrity_hash_version") is not None:
-                    issues.append(
-                        {
-                            "type": "missing_integrity_hash",
-                            "severity": "critical",
-                            "event_id": str(event.id),
-                            "timestamp": event.timestamp.isoformat(),
-                            "description": "Event has no integrity hash despite being written after "
-                            "hashing was enabled - possible tampering",
-                            "expected_hash": expected_hash,
-                            "stored_hash": None,
-                        }
-                    )
-                else:
-                    issues.append(
-                        {
-                            "type": "unverifiable_legacy_event",
-                            "severity": "info",
-                            "event_id": str(event.id),
-                            "timestamp": event.timestamp.isoformat(),
-                            "description": "Event predates integrity hashing and cannot be verified",
-                            "expected_hash": expected_hash,
-                            "stored_hash": None,
-                        }
-                    )
-            elif stored_hash != expected_hash:
-                issues.append(
-                    {
-                        "type": "hash_mismatch",
-                        "severity": "critical",
-                        "event_id": str(event.id),
-                        "timestamp": event.timestamp.isoformat(),
-                        "description": "Event hash mismatch - possible tampering detected",
-                        "expected_hash": expected_hash,
-                        "stored_hash": stored_hash,
-                    }
-                )
+                issue = {
+                    "type": "verification_error",
+                    "severity": "critical",
+                    "event_id": str(event.id),
+                    "timestamp": event.timestamp.isoformat(),
+                    "description": f"Could not verify integrity hash: {e}",
+                    "expected_hash": None,
+                    "stored_hash": None,
+                }
+            if issue is not None:
+                issues.append(issue)
 
         return issues
+
+    @classmethod
+    def _verify_single_event(  # noqa: PLR0911  # finding-type dispatch reads clearest as early returns
+        cls,
+        event: AuditEvent,
+        keys: list[tuple[str, bytes]],
+        keys_by_id: dict[str, bytes],
+        *,
+        require_v2: bool,
+    ) -> dict[str, Any] | None:
+        """Verify one event's integrity marker; return a finding dict or None if valid."""
+        metadata = event.metadata if isinstance(event.metadata, dict) else {}
+        stored_hash = metadata.get("integrity_hash")
+        version = metadata.get("integrity_hash_version")
+
+        if version == cls.HASH_VERSION:
+            if stored_hash is None:
+                # The stamp handler's failure fallback lands the version marker alone so
+                # a write-time stamping failure surfaces here as critical, not as legacy.
+                return {
+                    "type": "missing_integrity_hash",
+                    "severity": "critical",
+                    "event_id": str(event.id),
+                    "timestamp": event.timestamp.isoformat(),
+                    "description": "Event has a version marker but no integrity hash - "
+                    "stamping failed at write time or the hash was stripped",
+                    "expected_hash": None,
+                    "stored_hash": None,
+                }
+            key_id = metadata.get("integrity_key_id")
+            candidates = [keys_by_id[key_id]] if key_id in keys_by_id else [key for _, key in keys]
+            for key in candidates:
+                if hmac.compare_digest(cls._compute_event_mac(event, key), stored_hash):
+                    return None
+            return {
+                "type": "hash_mismatch",
+                "severity": "critical",
+                "event_id": str(event.id),
+                "timestamp": event.timestamp.isoformat(),
+                "description": "Event MAC mismatch - possible tampering detected"
+                + ("" if key_id in keys_by_id else f" (unrecognized key id {key_id!r})"),
+                "expected_hash": None,
+                "stored_hash": stored_hash,
+            }
+
+        # Non-v2 marker (missing, v1, or unknown version)
+        if require_v2:
+            return {
+                "type": "integrity_marker_downgrade",
+                "severity": "critical",
+                "event_id": str(event.id),
+                "timestamp": event.timestamp.isoformat(),
+                "description": f"Event carries a non-v2 integrity marker (version={version!r}) "
+                "after the v2 cutover - possible downgrade attack or unrestamped row",
+                "expected_hash": None,
+                "stored_hash": stored_hash,
+            }
+
+        # Migration window: legacy handling
+        expected_v1 = cls._calculate_event_hash(event)
+        if stored_hash is None:
+            if version is not None:
+                return {
+                    "type": "missing_integrity_hash",
+                    "severity": "critical",
+                    "event_id": str(event.id),
+                    "timestamp": event.timestamp.isoformat(),
+                    "description": "Event has no integrity hash despite being written after "
+                    "hashing was enabled - possible tampering",
+                    "expected_hash": expected_v1,
+                    "stored_hash": None,
+                }
+            return {
+                "type": "unverifiable_legacy_event",
+                "severity": "info",
+                "event_id": str(event.id),
+                "timestamp": event.timestamp.isoformat(),
+                "description": "Event predates integrity hashing and cannot be verified",
+                "expected_hash": expected_v1,
+                "stored_hash": None,
+            }
+        if stored_hash != expected_v1:
+            return {
+                "type": "hash_mismatch",
+                "severity": "critical",
+                "event_id": str(event.id),
+                "timestamp": event.timestamp.isoformat(),
+                "description": "Event hash mismatch - possible tampering detected",
+                "expected_hash": expected_v1,
+                "stored_hash": stored_hash,
+            }
+        return None
 
     @classmethod
     def _check_sequence_gaps(cls, events: list[AuditEvent]) -> list[dict[str, Any]]:
@@ -3473,7 +3562,13 @@ class AuditIntegrityService:
 
     @classmethod
     def _calculate_event_hash(cls, event: AuditEvent) -> str:
-        """Calculate cryptographic hash for an audit event."""
+        """Legacy v1 hash: UNKEYED SHA-256 over a field subset (#217).
+
+        Kept only to verify pre-cutover rows during the migration window
+        (AUDIT_INTEGRITY_REQUIRE_V2 disabled). New stamps are v2 keyed MACs via
+        integrity_stamp_marker(); the restamp_audit_integrity command upgrades
+        old rows, after which this path is dead.
+        """
         # Create a canonical representation of the event
         data = {
             "id": str(event.id),
@@ -3545,16 +3640,38 @@ class AuditIntegrityService:
 
 class AuditRetentionService:
     """
-    📅 Audit log retention management service
+    📅 Audit log retention management service (ADR-0043)
 
-    Features:
-    - Configurable retention periods by event category/severity
-    - Automatic archiving of old audit logs
-    - Romanian legal compliance (gdpr.data_retention_years, default 7 years)
-    - GDPR right-to-erasure implementation
-    - Bulk deletion with approval workflows
-    - Archive storage and retrieval system
+    Policy-driven (AuditRetentionPolicy rows), with two enforced invariants:
+    - financial evidence survives at least the Romanian legal minimum regardless of
+      what a policy says (effective cutoff = max(policy retention, legal minimum));
+    - anonymization is a full identity scrub with an explicit post-state, re-stamped
+      with a fresh v2 MAC, idempotent across runs.
     """
+
+    # Legea contabilității: financial/tax records keep 10 years. A policy may demand
+    # MORE retention, never less - the guard applies max(policy, this) per event.
+    FINANCIAL_RETENTION_MINIMUM_DAYS = 3653
+
+    # Content types whose object_id identifies a person; anonymization replaces the
+    # reference with a sentinel so the row stops pointing at the data subject.
+    PERSON_BEARING_MODELS: ClassVar[frozenset[tuple[str, str]]] = frozenset(
+        {
+            ("users", "user"),
+            ("users", "userprofile"),
+            ("customers", "customer"),
+            ("customers", "customertaxprofile"),
+            ("customers", "customerbillingprofile"),
+            ("customers", "customeraddress"),
+        }
+    )
+    ANONYMIZED_OBJECT_SENTINEL = "anonymized"
+
+    # Metadata keys that survive anonymization. An ALLOWLIST by design: a blocklist
+    # scrub silently retains any identifying key nobody thought to enumerate.
+    ANONYMIZE_METADATA_ALLOWLIST: ClassVar[frozenset[str]] = frozenset(
+        {"category", "severity", "source_app", "is_sensitive", "requires_review"}
+    )
 
     @classmethod
     def apply_retention_policies(cls) -> Result[dict[str, Any], str]:
@@ -3565,7 +3682,6 @@ class AuditRetentionService:
             results: dict[str, Any] = {
                 "policies_applied": 0,
                 "events_processed": 0,
-                "events_archived": 0,
                 "events_deleted": 0,
                 "events_anonymized": 0,
                 "errors": [],
@@ -3576,7 +3692,6 @@ class AuditRetentionService:
                     result = cls._apply_single_policy(policy)
                     results["policies_applied"] += 1
                     results["events_processed"] += result.get("processed", 0)
-                    results["events_archived"] += result.get("archived", 0)
                     results["events_deleted"] += result.get("deleted", 0)
                     results["events_anonymized"] += result.get("anonymized", 0)
 
@@ -3607,119 +3722,195 @@ class AuditRetentionService:
     @classmethod
     @transaction.atomic
     def _apply_single_policy(cls, policy: AuditRetentionPolicy) -> dict[str, int]:
-        """Apply a single retention policy."""
+        """Apply a single retention policy. The action EXECUTES after retention_days;
+        mandatory policies protect against weaker replacement, not against running."""
 
-        # Calculate cutoff date
         cutoff_date = timezone.now() - timedelta(days=policy.retention_days)
 
-        # Build query for events to process
         queryset = AuditEvent.objects.filter(timestamp__lt=cutoff_date, category=policy.category)
-
-        # Add severity filter if specified
         if policy.severity:
             queryset = queryset.filter(severity=policy.severity)
+        if policy.action == "anonymize":
+            # Idempotency (W4): already-anonymized rows never re-enter the pipeline,
+            # so a second weekly run performs zero mutations and emits no event.
+            # has_key, not __anonymized=True: SQL three-valued logic makes exclude()
+            # on a missing JSON key drop exactly the un-anonymized rows we want.
+            queryset = queryset.exclude(metadata__has_key="anonymized")
 
         events_to_process = list(queryset)
-        result = {"processed": len(events_to_process), "archived": 0, "deleted": 0, "anonymized": 0}
+        result = {"processed": len(events_to_process), "deleted": 0, "anonymized": 0}
 
         if not events_to_process:
             return result
 
-        # Apply retention action
-        if policy.action == "archive":
-            result["archived"] = cls._archive_events(events_to_process)
-        elif policy.action == "delete":
+        if policy.action == "delete":
             result["deleted"] = cls._delete_events(events_to_process, policy)
         elif policy.action == "anonymize":
             result["anonymized"] = cls._anonymize_events(events_to_process)
+        else:
+            # A stale row with a removed action (e.g. "archive") must surface as a
+            # per-policy error, never quietly process zero events.
+            raise ValueError(f"Unknown retention action {policy.action!r} on policy {policy.name}")
 
         return result
 
     @classmethod
-    def _archive_events(cls, events: list[AuditEvent]) -> int:
-        """Archive events to cold storage (placeholder - implement with actual storage)."""
-
-        # For now, mark events as archived in metadata
-        # In production, this would move data to cold storage (S3, etc.)
-        archived_count = 0
-
-        for event in events:
-            event.metadata["archived"] = True
-            event.metadata["archived_at"] = timezone.now().isoformat()
-            event.save(update_fields=["metadata"])
-            archived_count += 1
-
-        return archived_count
-
-    @classmethod
     def _delete_events(cls, events: list[AuditEvent], policy: AuditRetentionPolicy) -> int:
-        """Delete events (only if not mandatory retention)."""
+        """Delete events, holding financial evidence to the legal minimum (W5).
 
-        # Additional safety check for mandatory retention
-        if policy.is_mandatory:
-            logger.warning(f"⚠️ [Retention] Attempted deletion with mandatory policy: {policy.name}")
-            return 0
+        Effective cutoff per financial event = max(policy retention, legal minimum):
+        financial records OLDER than the minimum are deletable; younger are protected
+        even when the policy window has passed.
+        """
+        financial_cutoff = timezone.now() - timedelta(
+            days=max(policy.retention_days, cls.FINANCIAL_RETENTION_MINIMUM_DAYS)
+        )
 
-        # Check Romanian compliance (gdpr.data_retention_years, default 7 years)
-        financial_events = [e for e in events if cls._is_financial_record(e)]
-        if financial_events:
+        deletable_ids = []
+        blocked = 0
+        for event in events:
+            if cls._is_financial_record(event) and event.timestamp >= financial_cutoff:
+                blocked += 1
+                continue
+            deletable_ids.append(event.id)
+
+        if blocked:
             logger.warning(
-                f"⚠️ [Retention] Blocked deletion of {len(financial_events)} financial records (Romanian compliance)"
+                f"⚠️ [Retention] Held {blocked} financial records under the "
+                f"{cls.FINANCIAL_RETENTION_MINIMUM_DAYS}-day legal minimum (policy {policy.name})"
             )
-            # Remove financial events from deletion list
-            events = [e for e in events if not cls._is_financial_record(e)]
 
         deleted_count = 0
-        event_ids = [e.id for e in events]
-
-        if event_ids:
-            deleted_count = AuditEvent.objects.filter(id__in=event_ids).delete()[0]
+        if deletable_ids:
+            with audit_mutation_allowed("retention_delete"):
+                deleted_count = AuditEvent.objects.filter(id__in=deletable_ids).delete()[0]
 
         return deleted_count
 
     @classmethod
     def _anonymize_events(cls, events: list[AuditEvent]) -> int:
-        """Anonymize sensitive data in events."""
+        """Anonymize events to an explicit post-state, then re-stamp (Codex C3).
 
+        Post-anonymization invariant: user cleared, request/session identifiers
+        cleared, network identity cleared, person-bearing object references replaced
+        with a sentinel, free-text evidence stubbed, metadata reduced to the
+        allowlist. The row is then re-stamped with a fresh v2 MAC (metadata is
+        MAC-covered, so the re-stamp is what keeps the row verifiable).
+        """
         anonymized_count = 0
+        anonymized_at = timezone.now().isoformat()
 
-        for event in events:
-            # Anonymize IP addresses
-            if event.ip_address:
-                event.ip_address = "0.0.0.0"
+        with audit_mutation_allowed("retention_anonymize"):
+            for event in events:
+                metadata = event.metadata if isinstance(event.metadata, dict) else {}
+                if metadata.get("anonymized"):
+                    continue
 
-            # Anonymize user agent
-            if event.user_agent:
-                event.user_agent = "Anonymized"
+                event.user = None
+                event.ip_address = None
+                event.user_agent = ""
+                event.request_id = ""
+                event.session_key = ""
+                if (event.content_type.app_label, event.content_type.model) in cls.PERSON_BEARING_MODELS:
+                    event.object_id = cls.ANONYMIZED_OBJECT_SENTINEL
+                event.description = "Anonymized under retention policy"
+                event.old_values = {"anonymized": True}
+                event.new_values = {"anonymized": True}
+                event.metadata = {
+                    **{k: v for k, v in metadata.items() if k in cls.ANONYMIZE_METADATA_ALLOWLIST},
+                    "anonymized": True,
+                    "anonymized_at": anonymized_at,
+                }
+                # Fresh v2 stamp over the anonymized content - without it the scrub
+                # itself would read as tampering on the next verification sweep.
+                event.metadata.update(AuditIntegrityService.integrity_stamp_marker(event))
+                event.save()
+                anonymized_count += 1
 
-            # Remove sensitive metadata
-            if event.metadata:
-                sensitive_keys = ["user_email", "phone", "real_name", "address"]
-                for key in sensitive_keys:
-                    if key in event.metadata:
-                        event.metadata[key] = "Anonymized"
-
-            event.metadata["anonymized"] = True
-            event.metadata["anonymized_at"] = timezone.now().isoformat()
-            event.save(update_fields=["ip_address", "user_agent", "metadata"])
-            anonymized_count += 1
+        if anonymized_count:
+            AuditService.log_simple_event(
+                event_type="data_anonymization_completed",
+                user=None,
+                content_object=None,
+                description=f"Retention anonymization completed: {anonymized_count} events scrubbed",
+                actor_type="system",
+                metadata={"anonymized_count": anonymized_count, "category": "privacy"},
+            )
 
         return anonymized_count
 
     @classmethod
     def _is_financial_record(cls, event: AuditEvent) -> bool:
-        """Check if event is a financial record requiring extended retention (see gdpr.data_retention_years)."""
+        """Financial evidence requiring the legal retention minimum.
 
-        financial_actions = [
+        Explicit actions and document prefixes only - the old category catch-all
+        made EVERY business_operation event "financial" and blocked all deletion.
+        """
+        financial_actions = {
             "invoice_created",
             "invoice_paid",
+            "invoice_issued",
+            "invoice_voided",
             "payment_succeeded",
-            "proforma_created",
-            "credit_added",
+            "payment_failed",
+            "payment_refunded",
             "vat_calculation_applied",
-        ]
+        }
+        financial_prefixes = ("invoice_", "payment_", "proforma_", "credit_", "efactura_")
 
-        return event.action in financial_actions or event.category == "business_operation"
+        return event.action in financial_actions or event.action.startswith(financial_prefixes)
+
+    @classmethod
+    def get_retention_status(cls) -> dict[str, Any]:
+        """Retention status per active policy plus partition health (M4).
+
+        Preserves the historical caller contract: entries keyed by scope with
+        retention_days / action / events_past_retention / compliance_status, and
+        table:* entries for partition status.
+        """
+        from apps.common.partitioning import EventPartitionService  # noqa: PLC0415  # ADR-0007
+
+        status: dict[str, Any] = {}
+
+        for policy in AuditRetentionPolicy.objects.filter(is_active=True):
+            cutoff_date = timezone.now() - timedelta(days=policy.retention_days)
+            scope = AuditEvent.objects.filter(category=policy.category)
+            past = scope.filter(timestamp__lt=cutoff_date)
+            if policy.severity:
+                scope = scope.filter(severity=policy.severity)
+                past = past.filter(severity=policy.severity)
+            if policy.action == "anonymize":
+                past = past.exclude(metadata__has_key="anonymized")
+
+            key = f"{policy.category}/{policy.severity}" if policy.severity else policy.category
+            past_count = past.count()
+            status[key] = {
+                "policy": policy.name,
+                "retention_days": policy.retention_days,
+                "action": policy.action,
+                "legal_basis": policy.legal_basis,
+                "is_mandatory": policy.is_mandatory,
+                "total_events": scope.count(),
+                "events_past_retention": past_count,
+                "compliance_status": "compliant" if past_count == 0 else "action_required",
+            }
+
+        partition_status = EventPartitionService().get_status()
+        # "partitioned" / "unsupported_backend" → compliant (working as designed)
+        _compliant_statuses = {"partitioned", "unsupported_backend"}
+        for table_name, table_details in partition_status.items():
+            raw_status = table_details.get("status", "unknown")
+            status[f"table:{table_name}"] = {
+                "retention_days": table_details.get("archive_retention_days"),
+                "action": "partition_rotation",
+                "legal_basis": "Operational partition retention",
+                "total_partitions": len(table_details.get("attached_partitions", [])),
+                "partitions_past_retention": 0,
+                "compliance_status": "compliant" if raw_status in _compliant_statuses else "action_required",
+                "partition_status": table_details,
+            }
+
+        return status
 
 
 # ===============================================================================
@@ -3744,7 +3935,7 @@ class AuditSearchService:
         cls, filters: dict[str, Any], user: User
     ) -> tuple[models.QuerySet[Any, Any], dict[str, Any]]:
         """Build advanced audit query with multiple filters and performance optimization."""
-        queryset = AuditEvent.objects.select_related("user", "content_type")
+        queryset: models.QuerySet[Any, Any] = AuditEvent.objects.select_related("user", "content_type")
         query_info = {"filters_applied": [], "performance_hints": [], "estimated_cost": "low"}
 
         # Apply all filter groups

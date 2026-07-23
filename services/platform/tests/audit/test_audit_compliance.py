@@ -4,8 +4,7 @@ Comprehensive tests for apps.audit.compliance module.
 Covers:
 - All compliance rule classes (PasswordPolicyRule, MFAEnforcementRule, etc.)
 - ComplianceReportService (generate_report, export, all report types)
-- LogRetentionService (apply_retention_policies, archive/delete/anonymize)
-- Convenience functions (generate_compliance_report, apply_retention_policies)
+- Convenience functions (generate_compliance_report)
 """
 
 from __future__ import annotations
@@ -18,7 +17,7 @@ import uuid
 from datetime import timedelta
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.contrib.contenttypes.models import ContentType
@@ -34,20 +33,20 @@ from apps.audit.compliance import (
     ComplianceViolation,
     DataProtectionRule,
     GDPRConsentRule,
-    LogRetentionService,
     MFAEnforcementRule,
     PasswordPolicyRule,
     ReportFormat,
     ReportType,
     SecurityEventRule,
-    apply_retention_policies,
     generate_compliance_report,
 )
-from apps.audit.models import AuditEvent
+from apps.audit.models import AuditEvent, audit_mutation_allowed
+from apps.common.types import Err, Ok
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def make_event(**kwargs: Any) -> SimpleNamespace:
     """Create a lightweight mock event for rule-level tests."""
@@ -352,8 +351,7 @@ class TestSecurityEventRule(TestCase):
 
     def test_event_ids_capped_at_10(self) -> None:
         events = [
-            make_event(action="brute_force_attempt", severity="critical", requires_review=True)
-            for _ in range(15)
+            make_event(action="brute_force_attempt", severity="critical", requires_review=True) for _ in range(15)
         ]
         _, violations = self.rule.check(events, self.start, self.end)
         self.assertLessEqual(len(violations[0].evidence["event_ids"]), 10)
@@ -397,7 +395,9 @@ class TestComplianceReportServiceGenerateReport(TestCase):
     def test_generate_security_summary_with_auth_events(self) -> None:
         self._create_event(action="login_failed", category="authentication", severity="medium")
         self._create_event(action="login_success", category="authentication", severity="info")
-        self._create_event(action="brute_force_attempt", category="security_event", severity="critical", requires_review=False)
+        self._create_event(
+            action="brute_force_attempt", category="security_event", severity="critical", requires_review=False
+        )
 
         with tempfile.TemporaryDirectory() as tmpdir:
             svc = self._service(tmpdir)
@@ -493,37 +493,68 @@ class TestComplianceReportServiceGenerateReport(TestCase):
             self.assertEqual(gdpr_section.metrics["data_export_requests"], 1)
             self.assertEqual(gdpr_section.metrics["data_deletion_requests"], 1)
 
+    @staticmethod
+    def _integrity_check(**overrides: Any) -> SimpleNamespace:
+        defaults: dict[str, Any] = {"status": "healthy", "records_checked": 10, "issues_found": 0, "findings": []}
+        defaults.update(overrides)
+        return SimpleNamespace(**defaults)
+
     def test_generate_log_integrity_valid(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             svc = self._service(tmpdir)
             start, end = make_period()
-            mock_siem = MagicMock()
-            mock_siem.verify_log_integrity.return_value = (True, [])
-            with patch("apps.audit.siem.get_siem_service", return_value=mock_siem):
+            with patch(
+                "apps.audit.services.AuditIntegrityService.verify_audit_integrity",
+                return_value=Ok(self._integrity_check()),
+            ):
                 report = svc.generate_report(ReportType.LOG_INTEGRITY, start, end)
             section = next(s for s in report.sections if s.title == "Log Integrity Verification")
             self.assertEqual(section.status, "compliant")
-            self.assertEqual(section.metrics["integrity_errors"], 0)
+            self.assertEqual(section.metrics["integrity_issues"], 0)
+            self.assertEqual(section.metrics["logs_verified"], 10)
             self.assertEqual(len(report.violations), 0)
 
     def test_generate_log_integrity_invalid(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             svc = self._service(tmpdir)
             start, end = make_period()
-            mock_siem = MagicMock()
-            mock_siem.verify_log_integrity.return_value = (False, ["hash mismatch at event 42"])
-            with patch("apps.audit.siem.get_siem_service", return_value=mock_siem):
+            check = self._integrity_check(
+                status="compromised",
+                issues_found=1,
+                findings=[{"type": "hash_mismatch", "description": "hash mismatch at event 42"}],
+            )
+            with patch(
+                "apps.audit.services.AuditIntegrityService.verify_audit_integrity",
+                return_value=Ok(check),
+            ):
                 report = svc.generate_report(ReportType.LOG_INTEGRITY, start, end)
             section = next(s for s in report.sections if s.title == "Log Integrity Verification")
             self.assertEqual(section.status, "non_compliant")
-            self.assertEqual(section.metrics["integrity_errors"], 1)
-            # A violation should be added
+            self.assertEqual(section.metrics["integrity_issues"], 1)
             integrity_violations = [v for v in report.violations if v.control_id == "A.12.4.2"]
             self.assertGreaterEqual(len(integrity_violations), 1)
 
-    @override_settings(AUDIT_LOG_RETENTION={
-        "authentication": {"retention_days": 365, "action": "archive"},
-    })
+    def test_generate_log_integrity_error_is_non_compliant(self) -> None:
+        """A verifier that fails to run must surface as non-compliance, never silent success."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            svc = self._service(tmpdir)
+            start, end = make_period()
+            with patch(
+                "apps.audit.services.AuditIntegrityService.verify_audit_integrity",
+                return_value=Err("db unavailable"),
+            ):
+                report = svc.generate_report(ReportType.LOG_INTEGRITY, start, end)
+            section = next(s for s in report.sections if s.title == "Log Integrity Verification")
+            self.assertEqual(section.status, "non_compliant")
+            self.assertIn("failed to run", str(section.findings))
+            integrity_violations = [v for v in report.violations if v.control_id == "A.12.4.2"]
+            self.assertGreaterEqual(len(integrity_violations), 1)
+
+    @override_settings(
+        AUDIT_LOG_RETENTION={
+            "authentication": {"retention_days": 365, "action": "archive"},
+        }
+    )
     def test_generate_retention_compliance_no_old_events(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             svc = self._service(tmpdir)
@@ -534,9 +565,11 @@ class TestComplianceReportServiceGenerateReport(TestCase):
             self.assertEqual(section.metrics["categories_checked"], 1)
             self.assertEqual(section.metrics["categories_with_issues"], 0)
 
-    @override_settings(AUDIT_LOG_RETENTION={
-        "authentication": {"retention_days": 1, "action": "archive"},
-    })
+    @override_settings(
+        AUDIT_LOG_RETENTION={
+            "authentication": {"retention_days": 1, "action": "archive"},
+        }
+    )
     def test_generate_retention_compliance_with_old_events(self) -> None:
         ct = get_user_content_type()
         event = AuditEvent.objects.create(
@@ -548,7 +581,8 @@ class TestComplianceReportServiceGenerateReport(TestCase):
             object_id=_DUMMY_OBJECT_ID,
         )
         # Force old timestamp since auto_now_add ignores the value at create time
-        AuditEvent.objects.filter(pk=event.pk).update(timestamp=timezone.now() - timedelta(days=5))
+        with audit_mutation_allowed("test fixture"):
+            AuditEvent.objects.filter(pk=event.pk).update(timestamp=timezone.now() - timedelta(days=5))
 
         with tempfile.TemporaryDirectory() as tmpdir:
             svc = self._service(tmpdir)
@@ -639,13 +673,15 @@ class TestComplianceChecksAndScore(TestCase):
     def test_calculate_compliance_score_with_critical_violation(self) -> None:
         svc = self._service()
         report = make_report(total_events=5)
-        report.violations.append(ComplianceViolation(
-            framework="iso27001",
-            control_id="X.1",
-            description="Critical",
-            severity="critical",
-            detected_at=timezone.now(),
-        ))
+        report.violations.append(
+            ComplianceViolation(
+                framework="iso27001",
+                control_id="X.1",
+                description="Critical",
+                severity="critical",
+                detected_at=timezone.now(),
+            )
+        )
         report.total_violations = 1
         svc._calculate_compliance_score(report)
         # 100 - 25 = 75 → partial
@@ -657,13 +693,15 @@ class TestComplianceChecksAndScore(TestCase):
         report = make_report(total_events=5)
         # Add enough violations to drop below 70
         for _ in range(5):
-            report.violations.append(ComplianceViolation(
-                framework="iso27001",
-                control_id="X.1",
-                description="Critical",
-                severity="critical",
-                detected_at=timezone.now(),
-            ))
+            report.violations.append(
+                ComplianceViolation(
+                    framework="iso27001",
+                    control_id="X.1",
+                    description="Critical",
+                    severity="critical",
+                    detected_at=timezone.now(),
+                )
+            )
         report.total_violations = 5
         svc._calculate_compliance_score(report)
         # 100 - 5*25 = -25 → clamped to 0 → non_compliant
@@ -673,13 +711,15 @@ class TestComplianceChecksAndScore(TestCase):
     def test_calculate_compliance_score_high_severity(self) -> None:
         svc = self._service()
         report = make_report(total_events=5)
-        report.violations.append(ComplianceViolation(
-            framework="iso27001",
-            control_id="X.1",
-            description="High",
-            severity="high",
-            detected_at=timezone.now(),
-        ))
+        report.violations.append(
+            ComplianceViolation(
+                framework="iso27001",
+                control_id="X.1",
+                description="High",
+                severity="high",
+                detected_at=timezone.now(),
+            )
+        )
         svc._calculate_compliance_score(report)
         self.assertEqual(report.compliance_score, 90.0)
         self.assertEqual(report.overall_status, "compliant")
@@ -687,26 +727,30 @@ class TestComplianceChecksAndScore(TestCase):
     def test_calculate_compliance_score_medium_severity(self) -> None:
         svc = self._service()
         report = make_report(total_events=5)
-        report.violations.append(ComplianceViolation(
-            framework="iso27001",
-            control_id="X.1",
-            description="Medium",
-            severity="medium",
-            detected_at=timezone.now(),
-        ))
+        report.violations.append(
+            ComplianceViolation(
+                framework="iso27001",
+                control_id="X.1",
+                description="Medium",
+                severity="medium",
+                detected_at=timezone.now(),
+            )
+        )
         svc._calculate_compliance_score(report)
         self.assertEqual(report.compliance_score, 95.0)
 
     def test_calculate_compliance_score_unknown_severity(self) -> None:
         svc = self._service()
         report = make_report(total_events=5)
-        report.violations.append(ComplianceViolation(
-            framework="iso27001",
-            control_id="X.1",
-            description="Unknown",
-            severity="unknown_sev",
-            detected_at=timezone.now(),
-        ))
+        report.violations.append(
+            ComplianceViolation(
+                framework="iso27001",
+                control_id="X.1",
+                description="Unknown",
+                severity="unknown_sev",
+                detected_at=timezone.now(),
+            )
+        )
         svc._calculate_compliance_score(report)
         # Default weight 5
         self.assertEqual(report.compliance_score, 95.0)
@@ -725,21 +769,25 @@ class TestExportReport(TestCase):
 
     def _make_report_with_violation(self) -> ComplianceReport:
         report = make_report(total_events=10, total_violations=1)
-        report.violations.append(ComplianceViolation(
-            framework="iso27001",
-            control_id="A.9.4.3",
-            description="Weak password",
-            severity="high",
-            detected_at=timezone.now(),
-            remediation="Enforce stronger passwords",
-        ))
-        report.sections.append(ComplianceReportSection(
-            title="Test Section",
-            description="A test section",
-            status="partial",
-            metrics={"total": 1},
-            recommendations=["Fix something"],
-        ))
+        report.violations.append(
+            ComplianceViolation(
+                framework="iso27001",
+                control_id="A.9.4.3",
+                description="Weak password",
+                severity="high",
+                detected_at=timezone.now(),
+                remediation="Enforce stronger passwords",
+            )
+        )
+        report.sections.append(
+            ComplianceReportSection(
+                title="Test Section",
+                description="A test section",
+                status="partial",
+                metrics={"total": 1},
+                recommendations=["Fix something"],
+            )
+        )
         return report
 
     def test_export_json_creates_file(self) -> None:
@@ -928,239 +976,6 @@ class TestAccessReviewEdgeCases(TestCase):
 
 
 # ---------------------------------------------------------------------------
-# LogRetentionService
-# ---------------------------------------------------------------------------
-
-
-RETENTION_SETTINGS = {
-    "authentication": {
-        "retention_days": 1,
-        "action": "archive",
-        "legal_basis": "GDPR Art. 30",
-    },
-}
-
-
-class TestLogRetentionServiceApplyPolicies(TestCase):
-    def _create_old_event(self, category: str = "authentication", days_old: int = 5) -> AuditEvent:
-        ct = get_user_content_type()
-        event = AuditEvent.objects.create(
-            action="login_success",
-            category=category,
-            severity="info",
-            description="Old event",
-            content_type=ct,
-            object_id=_DUMMY_OBJECT_ID,
-        )
-        old_ts = timezone.now() - timedelta(days=days_old)
-        AuditEvent.objects.filter(pk=event.pk).update(timestamp=old_ts)
-        event.refresh_from_db()
-        return event
-
-    @override_settings(AUDIT_LOG_RETENTION={})
-    def test_no_config_returns_empty_summary(self) -> None:
-        svc = LogRetentionService()
-        summary = svc.apply_retention_policies()
-        self.assertEqual(summary["processed_categories"], [])
-        self.assertEqual(summary["archived"], 0)
-        self.assertEqual(summary["deleted"], 0)
-        self.assertEqual(summary["anonymized"], 0)
-        self.assertEqual(summary["errors"], [])
-
-    @override_settings(AUDIT_LOG_RETENTION=RETENTION_SETTINGS)
-    def test_archive_old_events(self) -> None:
-        event = self._create_old_event()
-        svc = LogRetentionService()
-        summary = svc.apply_retention_policies()
-        self.assertIn("authentication", summary["processed_categories"])
-        self.assertGreaterEqual(summary["archived"], 1)
-        event.refresh_from_db()
-        self.assertTrue(event.metadata.get("archived"))
-
-    @override_settings(AUDIT_LOG_RETENTION={
-        "authentication": {"retention_days": 1, "action": "archive"},
-    })
-    def test_no_old_events_returns_zeros(self) -> None:
-        # Create a recent event that should NOT be archived
-        ct = get_user_content_type()
-        AuditEvent.objects.create(
-            action="login_success",
-            category="authentication",
-            severity="info",
-            description="Recent",
-            content_type=ct,
-            object_id=_DUMMY_OBJECT_ID,
-        )
-        svc = LogRetentionService()
-        summary = svc.apply_retention_policies()
-        self.assertEqual(summary["archived"], 0)
-
-    @override_settings(AUDIT_LOG_RETENTION={
-        "authentication": {"retention_days": 1, "action": "delete"},
-    })
-    def test_delete_old_events(self) -> None:
-        self._create_old_event(category="authentication")
-        count_before = AuditEvent.objects.filter(category="authentication").count()
-        svc = LogRetentionService()
-        summary = svc.apply_retention_policies()
-        count_after = AuditEvent.objects.filter(category="authentication").count()
-        self.assertGreaterEqual(summary["deleted"], 1)
-        self.assertLess(count_after, count_before)
-
-    @override_settings(AUDIT_LOG_RETENTION={
-        "security_event": {"retention_days": 1, "action": "delete"},
-    })
-    def test_delete_excludes_critical_events(self) -> None:
-        ct = get_user_content_type()
-        event = AuditEvent.objects.create(
-            action="security_incident_detected",
-            category="security_event",
-            severity="critical",
-            description="Critical security event",
-            content_type=ct,
-            object_id=_DUMMY_OBJECT_ID,
-        )
-        AuditEvent.objects.filter(pk=event.pk).update(timestamp=timezone.now() - timedelta(days=5))
-        svc = LogRetentionService()
-        svc.apply_retention_policies()
-        # Critical security_event should NOT be deleted
-        self.assertTrue(AuditEvent.objects.filter(category="security_event", severity="critical").exists())
-
-    @override_settings(AUDIT_LOG_RETENTION={
-        "compliance": {"retention_days": 1, "action": "delete"},
-    })
-    def test_delete_excludes_compliance_category(self) -> None:
-        ct = get_user_content_type()
-        event = AuditEvent.objects.create(
-            action="login_success",
-            category="compliance",
-            severity="info",
-            description="Compliance audit",
-            content_type=ct,
-            object_id=_DUMMY_OBJECT_ID,
-        )
-        AuditEvent.objects.filter(pk=event.pk).update(timestamp=timezone.now() - timedelta(days=5))
-        svc = LogRetentionService()
-        svc.apply_retention_policies()
-        self.assertTrue(AuditEvent.objects.filter(category="compliance").exists())
-
-    @override_settings(AUDIT_LOG_RETENTION={
-        "authentication": {"retention_days": 1, "action": "anonymize"},
-    })
-    def test_anonymize_old_events(self) -> None:
-        user_model = get_user_model()
-        user = user_model.objects.create_user(email="anon@test.com", password="testpass123")
-        ct = get_user_content_type()
-        event = AuditEvent.objects.create(
-            action="login_success",
-            category="authentication",
-            severity="info",
-            description="Anonymize me",
-            user=user,
-            ip_address="192.168.1.1",
-            content_type=ct,
-            object_id=_DUMMY_OBJECT_ID,
-        )
-        AuditEvent.objects.filter(pk=event.pk).update(timestamp=timezone.now() - timedelta(days=5))
-        event.refresh_from_db()
-        svc = LogRetentionService()
-        summary = svc.apply_retention_policies()
-        self.assertGreaterEqual(summary["anonymized"], 1)
-        event.refresh_from_db()
-        self.assertIsNone(event.user_id)
-        self.assertIsNone(event.ip_address)
-        self.assertIn("original_user_id", event.metadata)
-        self.assertTrue(event.metadata.get("had_ip"))
-
-    @override_settings(AUDIT_LOG_RETENTION={
-        "authentication": {"retention_days": 1, "action": "anonymize"},
-    })
-    def test_anonymize_event_with_email_in_metadata(self) -> None:
-        ct = get_user_content_type()
-        event = AuditEvent.objects.create(
-            action="login_success",
-            category="authentication",
-            severity="info",
-            description="Anonymize",
-            metadata={"email": "user@example.com"},
-            content_type=ct,
-            object_id=_DUMMY_OBJECT_ID,
-        )
-        AuditEvent.objects.filter(pk=event.pk).update(timestamp=timezone.now() - timedelta(days=5))
-        event.refresh_from_db()
-        svc = LogRetentionService()
-        svc.apply_retention_policies()
-        event.refresh_from_db()
-        self.assertTrue(event.metadata.get("email_anonymized"))
-
-    @override_settings(AUDIT_LOG_RETENTION={
-        "authentication": {"retention_days": 1, "action": "archive"},
-    })
-    def test_apply_retention_error_handling(self) -> None:
-        svc = LogRetentionService()
-        with patch.object(svc, "_process_category", side_effect=RuntimeError("DB error")):
-            summary = svc.apply_retention_policies()
-        self.assertEqual(len(summary["errors"]), 1)
-        self.assertIn("authentication", summary["errors"][0]["category"])
-        self.assertIn("DB error", summary["errors"][0]["error"])
-
-
-class TestLogRetentionServiceGetStatus(TestCase):
-    @override_settings(AUDIT_LOG_RETENTION={
-        "authentication": {
-            "retention_days": 365,
-            "action": "archive",
-            "legal_basis": "GDPR Art. 30",
-        },
-    })
-    def test_get_retention_status_empty(self) -> None:
-        svc = LogRetentionService()
-        status = svc.get_retention_status()
-        self.assertIn("authentication", status)
-        auth_status = status["authentication"]
-        self.assertEqual(auth_status["retention_days"], 365)
-        self.assertEqual(auth_status["action"], "archive")
-        self.assertEqual(auth_status["legal_basis"], "GDPR Art. 30")
-        self.assertEqual(auth_status["total_events"], 0)
-        self.assertEqual(auth_status["events_past_retention"], 0)
-        self.assertEqual(auth_status["compliance_status"], "compliant")
-
-    @override_settings(AUDIT_LOG_RETENTION={
-        "authentication": {"retention_days": 1, "action": "archive"},
-    })
-    def test_get_retention_status_with_old_event(self) -> None:
-        ct = get_user_content_type()
-        event = AuditEvent.objects.create(
-            action="login_success",
-            category="authentication",
-            severity="info",
-            description="Old",
-            content_type=ct,
-            object_id=_DUMMY_OBJECT_ID,
-        )
-        AuditEvent.objects.filter(pk=event.pk).update(timestamp=timezone.now() - timedelta(days=5))
-        svc = LogRetentionService()
-        status = svc.get_retention_status()
-        self.assertEqual(status["authentication"]["compliance_status"], "action_required")
-        self.assertGreater(status["authentication"]["events_past_retention"], 0)
-
-    @override_settings(AUDIT_LOG_RETENTION={})
-    def test_get_retention_status_no_config(self) -> None:
-        """With empty retention config, only partition table entries are returned."""
-        svc = LogRetentionService()
-        status = svc.get_retention_status()
-        # No event-category entries (those come from AUDIT_LOG_RETENTION config)
-        category_entries = {k: v for k, v in status.items() if not k.startswith("table:")}
-        self.assertEqual(category_entries, {})
-        # Partition table entries are always present (from EventPartitionService)
-        partition_entries = {k: v for k, v in status.items() if k.startswith("table:")}
-        self.assertGreater(len(partition_entries), 0)
-        # Partition entries must use proper compliance semantics (not raw backend status)
-        for entry in partition_entries.values():
-            self.assertIn(entry["compliance_status"], ("compliant", "action_required"))
-
-
-# ---------------------------------------------------------------------------
 # Convenience functions
 # ---------------------------------------------------------------------------
 
@@ -1182,13 +997,3 @@ class TestConvenienceFunctions(TestCase):
     def test_generate_compliance_report_no_framework(self) -> None:
         report = generate_compliance_report(report_type="access_review", days=14)
         self.assertIsNone(report.framework)
-
-    @override_settings(AUDIT_LOG_RETENTION={})
-    def test_apply_retention_policies_convenience(self) -> None:
-        result = apply_retention_policies()
-        self.assertIsInstance(result, dict)
-        self.assertIn("processed_categories", result)
-        self.assertIn("archived", result)
-        self.assertIn("deleted", result)
-        self.assertIn("anonymized", result)
-        self.assertIn("errors", result)

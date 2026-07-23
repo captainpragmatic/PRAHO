@@ -21,7 +21,6 @@ from django.utils import timezone
 from apps.audit.compliance import (
     ComplianceFramework,
     ComplianceReportService,
-    LogRetentionService,
     ReportFormat,
     ReportType,
 )
@@ -36,6 +35,7 @@ from apps.audit.siem import (
     SyslogFormatter,
     get_siem_service,
 )
+from apps.common.types import Err
 from apps.settings.services import SettingsService
 
 _DEFAULT_MAX_VIOLATIONS_DISPLAYED = 10
@@ -231,26 +231,37 @@ class Command(BaseCommand):
                 self.stdout.write(f"  ... and {len(report.violations) - MAX_VIOLATIONS_DISPLAYED} more")
 
     def handle_verify_integrity(self, options: dict[str, Any]) -> None:
-        """Verify audit log integrity"""
-        self.stdout.write(self.style.NOTICE("Verifying audit log integrity..."))
+        """Verify audit event integrity via the real verifier; non-zero exit on failure."""
+        from apps.audit.services import AuditIntegrityService  # noqa: PLC0415  # Deferred: avoids circular import
 
-        siem = get_siem_service()
+        self.stdout.write(self.style.NOTICE("Verifying audit log integrity..."))
 
         period_end = timezone.now()
         period_start = period_end - timedelta(days=options["days"])
-
-        is_valid, errors = siem.verify_log_integrity(period_start, period_end)
+        result = AuditIntegrityService.verify_audit_integrity(period_start, period_end)
 
         self.stdout.write("")
-        if is_valid:
+        if isinstance(result, Err):
+            self.stdout.write(self.style.ERROR(f"Integrity verification FAILED TO RUN: {result.error}"))
+            raise CommandError("integrity verification errored")
+
+        check = result.value
+        self.stdout.write(f"Period: {period_start.date()} to {period_end.date()}")
+        self.stdout.write(f"Records checked: {check.records_checked}")
+        if check.status == "healthy":
             self.stdout.write(self.style.SUCCESS("Audit log integrity VERIFIED"))
-            self.stdout.write(f"Period: {period_start.date()} to {period_end.date()}")
-            self.stdout.write("No integrity issues detected.")
-        else:
-            self.stdout.write(self.style.ERROR("Audit log integrity FAILED"))
-            self.stdout.write(f"Found {len(errors)} integrity issues:")
-            for error in errors:
-                self.stdout.write(f"  - {error}")
+            return
+        if check.status == "warning":
+            self.stdout.write(self.style.WARNING(f"Audit log integrity: WARNING ({check.issues_found} issues)"))
+            for finding in check.findings[:20]:
+                self.stdout.write(f"  - {finding.get('type')}: {finding.get('description')}")
+            return
+        self.stdout.write(
+            self.style.ERROR(f"Audit log integrity: {check.status.upper()} ({check.issues_found} issues)")
+        )
+        for finding in check.findings[:20]:
+            self.stdout.write(f"  - {finding.get('type')}: {finding.get('description')}")
+        raise CommandError(f"integrity status: {check.status}")
 
     def handle_apply_retention(self, options: dict[str, Any]) -> None:
         """Apply log retention policies"""
@@ -259,38 +270,44 @@ class Command(BaseCommand):
 
         self.stdout.write(self.style.NOTICE("Applying log retention policies..."))
 
-        service = LogRetentionService()
+        from apps.audit.services import AuditRetentionService  # noqa: PLC0415  # Deferred: avoids circular import
 
         if options["dry_run"]:
-            status = service.get_retention_status()
+            status = AuditRetentionService.get_retention_status()
             self.stdout.write("")
             self.stdout.write("Retention status (dry run):")
-            for category, info in status.items():
+            for scope, info in status.items():
                 past = info.get("events_past_retention", info.get("partitions_past_retention", 0))
                 if past > 0:
                     self.stdout.write(
-                        f"  {category}: {past} events "
-                        f"past {info['retention_days']}-day retention "
+                        f"  {scope}: {past} events past {info['retention_days']}-day retention "
                         f"(action: {info['action']})"
                     )
-        else:
-            summary = service.apply_retention_policies()
+            return
 
-            self.stdout.write("")
-            self.stdout.write(self.style.SUCCESS("Retention policies applied:"))
-            self.stdout.write(f"  Archived: {summary['archived']}")
-            self.stdout.write(f"  Deleted: {summary['deleted']}")
-            self.stdout.write(f"  Anonymized: {summary['anonymized']}")
+        result = AuditRetentionService.apply_retention_policies()
+        if isinstance(result, Err):
+            self.stdout.write(self.style.ERROR(f"Retention run FAILED: {result.error}"))
+            raise CommandError("retention policy application errored")
+        summary = result.value
 
-            if summary["errors"]:
-                self.stdout.write(self.style.ERROR(f"  Errors: {len(summary['errors'])}"))
-                for error in summary["errors"]:
-                    self.stdout.write(f"    - {error['category']}: {error['error']}")
+        self.stdout.write("")
+        self.stdout.write(self.style.SUCCESS("Retention policies applied:"))
+        self.stdout.write(f"  Policies: {summary['policies_applied']}")
+        self.stdout.write(f"  Deleted: {summary['events_deleted']}")
+        self.stdout.write(f"  Anonymized: {summary['events_anonymized']}")
+
+        if summary["errors"]:
+            self.stdout.write(self.style.ERROR(f"  Errors: {len(summary['errors'])}"))
+            for error in summary["errors"]:
+                self.stdout.write(f"    - {error}")
+            raise CommandError("retention run completed with per-policy errors")
 
     def handle_retention_status(self, options: dict[str, Any]) -> None:
         """Check log retention status"""
-        service = LogRetentionService()
-        status = service.get_retention_status()
+        from apps.audit.services import AuditRetentionService  # noqa: PLC0415  # Deferred: avoids circular import
+
+        status = AuditRetentionService.get_retention_status()
 
         if options["json"]:
             self.stdout.write(json.dumps(status, indent=2, default=str))
@@ -302,9 +319,9 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS("=" * 60))
         self.stdout.write("")
 
-        for category, info in status.items():
+        for scope, info in status.items():
             status_color = self.style.SUCCESS if info["compliance_status"] == "compliant" else self.style.WARNING
-            self.stdout.write(f"{category.upper()}")
+            self.stdout.write(f"{scope.upper()}")
             self.stdout.write(f"  Retention: {info['retention_days']} days")
             self.stdout.write(f"  Action: {info['action']}")
             self.stdout.write(f"  Legal Basis: {info['legal_basis']}")

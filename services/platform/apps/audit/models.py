@@ -5,7 +5,10 @@ Implements Romanian compliance requirements and security audit trails.
 
 from __future__ import annotations
 
+import threading
 import uuid
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
 from typing import Any, ClassVar, TypedDict
 
 from django.contrib.auth import get_user_model
@@ -15,6 +18,63 @@ from django.db import models
 from django.utils.translation import gettext_lazy as _
 
 User = get_user_model()
+
+# ===============================================================================
+# AUDIT EVENT IMMUTABILITY GUARD (ADR-0016 / ADR-0043)
+# ===============================================================================
+
+_audit_mutation_context = threading.local()
+
+
+class AuditImmutabilityError(Exception):
+    """Raised when AuditEvent rows are mutated outside audit_mutation_allowed()."""
+
+
+@contextmanager
+def audit_mutation_allowed(reason: str) -> Iterator[None]:
+    """Escape hatch for the audit immutability guard.
+
+    AuditEvent rows are append-only evidence. Every legitimate mutator enters this
+    context at its call site with an auditable reason (GDPR anonymization/erasure,
+    retention enforcement, integrity stamping/restamping, password-reset cleanup);
+    any other ORM mutation raises AuditImmutabilityError. The guard is an ORM-layer
+    defense - raw SQL and _base_manager (framework FK cascades) bypass it, which is
+    what the integrity MAC exists to catch.
+    """
+    previous = getattr(_audit_mutation_context, "reason", None)
+    _audit_mutation_context.reason = reason
+    try:
+        yield
+    finally:
+        _audit_mutation_context.reason = previous
+
+
+def _mutation_allowed() -> bool:
+    return getattr(_audit_mutation_context, "reason", None) is not None
+
+
+class AuditEventQuerySet(models.QuerySet["AuditEvent"]):
+    """QuerySet that blocks bulk mutation of audit evidence outside the escape hatch."""
+
+    def update(self, **kwargs: Any) -> int:
+        self._guard("update()")
+        return super().update(**kwargs)
+
+    def bulk_update(self, objs: Iterable[AuditEvent], fields: Iterable[str], batch_size: int | None = None) -> int:
+        self._guard("bulk_update()")
+        return super().bulk_update(objs, fields, batch_size=batch_size)
+
+    def delete(self) -> tuple[int, dict[str, int]]:
+        self._guard("delete()")
+        return super().delete()
+
+    @staticmethod
+    def _guard(operation: str) -> None:
+        if not _mutation_allowed():
+            raise AuditImmutabilityError(
+                f"AuditEvent is append-only; {operation} requires the audit_mutation_allowed() escape hatch"
+            )
+
 
 # ===============================================================================
 # TypedDict Definitions for JSON Fields
@@ -287,6 +347,7 @@ class AuditEvent(models.Model):
         ("dunning_email_sent", "Dunning Email Sent"),
         ("collection_run_started", "Collection Run Started"),
         ("collection_run_completed", "Collection Run Completed"),
+        ("collection_run_failed", "Collection Run Failed"),
         # ======================================================================
         # CREDIT & BALANCE MANAGEMENT
         # ======================================================================
@@ -305,6 +366,7 @@ class AuditEvent(models.Model):
         ("order_created", "Order Created"),
         ("order_updated", "Order Updated"),
         ("order_status_changed", "Order Status Changed"),
+        ("status_changed", "Status Changed"),
         ("order_item_added", "Order Item Added"),
         ("order_item_removed", "Order Item Removed"),
         ("order_item_updated", "Order Item Updated"),
@@ -468,7 +530,9 @@ class AuditEvent(models.Model):
 
     # What object (generic foreign key)
     # Support both integer and UUID primary keys (CharField for mixed PK types)
-    content_type = models.ForeignKey(ContentType, on_delete=models.CASCADE)
+    # PROTECT: cascading a ContentType delete must never silently erase audit evidence.
+    # remove_stale_contenttypes requires an explicit retention decision first (ADR-0043).
+    content_type = models.ForeignKey(ContentType, on_delete=models.PROTECT)
     object_id = models.CharField(max_length=36, db_index=True)  # 36 chars for UUIDs, integers fit fine
     content_object = GenericForeignKey("content_type", "object_id")
 
@@ -484,7 +548,13 @@ class AuditEvent(models.Model):
     # Additional metadata
     metadata = models.JSONField(default=dict, blank=True)
 
+    objects: ClassVar[models.Manager[AuditEvent]] = AuditEventQuerySet.as_manager()
+
     class Meta:
+        # base_manager_name deliberately NOT set to "objects": Django's deletion
+        # collector runs FK cascades (User SET_NULL) through _base_manager, which must
+        # stay a plain Manager or every user deletion would trip the guard. user_id is
+        # outside the v2 MAC payload precisely so that cascade cannot break stamps.
         db_table = "audit_events"
         ordering: ClassVar[tuple[str, ...]] = ("-timestamp",)
         indexes: ClassVar[tuple[models.Index, ...]] = (
@@ -515,6 +585,20 @@ class AuditEvent(models.Model):
     def __str__(self) -> str:
         return f"{self.action} on {self.content_type} by {self.user or 'System'}"
 
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        if not self._state.adding and not _mutation_allowed():
+            raise AuditImmutabilityError(
+                "AuditEvent is append-only; save() on an existing row requires audit_mutation_allowed()"
+            )
+        super().save(*args, **kwargs)
+
+    def delete(self, *args: Any, **kwargs: Any) -> tuple[int, dict[str, int]]:
+        if not _mutation_allowed():
+            raise AuditImmutabilityError(
+                "AuditEvent is append-only; delete() requires the audit_mutation_allowed() escape hatch"
+            )
+        return super().delete(*args, **kwargs)
+
 
 class DataExport(models.Model):
     """Track GDPR data exports and similar compliance operations."""
@@ -529,7 +613,9 @@ class DataExport(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
     # Request details
-    requested_by = models.ForeignKey(User, on_delete=models.CASCADE)
+    # SET_NULL, not CASCADE: deleting a user must not erase the GDPR compliance
+    # record that an export of their data was made (W7).
+    requested_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
     requested_at = models.DateTimeField(auto_now_add=True)
 
     # Export scope
@@ -558,7 +644,11 @@ class DataExport(models.Model):
         ordering: ClassVar[tuple[str, ...]] = ("-requested_at",)
 
     def __str__(self) -> str:
-        return f"{self.export_type} export by {self.requested_by}"
+        return f"{self.export_type} export by {self.requested_by_display}"
+
+    @property
+    def requested_by_display(self) -> str:
+        return self.requested_by.email if self.requested_by else "deleted user"
 
 
 class AuditIntegrityCheck(models.Model):
@@ -568,6 +658,9 @@ class AuditIntegrityCheck(models.Model):
         ("healthy", "Healthy"),
         ("warning", "Warning"),
         ("compromised", "Compromised"),
+        # The check itself failed to run - distinct from a clean or tampered result;
+        # dashboards must count these instead of defaulting to healthy (W3).
+        ("error", "Error"),
     )
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -606,8 +699,9 @@ class AuditIntegrityCheck(models.Model):
 class AuditRetentionPolicy(models.Model):
     """Define retention policies for different types of audit events."""
 
+    # "archive" was removed deliberately: it only flipped a metadata flag while claiming
+    # cold storage, a silent no-op. Real cold-storage archive is future work (ADR-0043).
     RETENTION_ACTION_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
-        ("archive", "Archive to Cold Storage"),
         ("delete", "Permanent Deletion"),
         ("anonymize", "Anonymize Sensitive Data"),
     )
@@ -622,7 +716,7 @@ class AuditRetentionPolicy(models.Model):
 
     # Retention rules
     retention_days = models.PositiveIntegerField()  # Days to keep in active storage
-    action = models.CharField(max_length=20, choices=RETENTION_ACTION_CHOICES, default="archive")
+    action = models.CharField(max_length=20, choices=RETENTION_ACTION_CHOICES, default="anonymize")
 
     # Compliance requirements
     legal_basis = models.CharField(max_length=200, blank=True)  # Romanian law reference
@@ -641,9 +735,63 @@ class AuditRetentionPolicy(models.Model):
             models.Index(fields=["category", "severity"]),
             models.Index(fields=["is_active", "retention_days"]),
         )
+        constraints: ClassVar[tuple[models.BaseConstraint, ...]] = (
+            # A mandatory policy that is inactive would be a legal requirement quietly
+            # switched off - the DB refuses the state outright (W6).
+            models.CheckConstraint(
+                condition=models.Q(is_mandatory=False) | models.Q(is_active=True),
+                name="audit_retention_mandatory_implies_active",
+            ),
+            # Exactly one active policy may claim a (category, severity) slot; the seeder
+            # resolves conflicts deterministically instead of racing at apply time.
+            models.UniqueConstraint(
+                fields=("category", "severity"),
+                condition=models.Q(is_active=True),
+                name="audit_retention_one_active_per_scope",
+            ),
+        )
 
     def __str__(self) -> str:
         return f"{self.name} ({self.retention_days} days)"
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        if not self._state.adding and not _mutation_allowed():
+            original = type(self)._default_manager.filter(pk=self.pk).first()
+            if original is not None and original.is_mandatory and (not self.is_active or not self.is_mandatory):
+                raise AuditImmutabilityError(
+                    "Mandatory retention policies cannot be deactivated or demoted outside "
+                    "the audit_mutation_allowed() escape hatch"
+                )
+        super().save(*args, **kwargs)
+
+    def delete(self, *args: Any, **kwargs: Any) -> tuple[int, dict[str, int]]:
+        if self.is_mandatory and not _mutation_allowed():
+            raise AuditImmutabilityError(
+                "Mandatory retention policies cannot be deleted outside the audit_mutation_allowed() escape hatch"
+            )
+        return super().delete(*args, **kwargs)
+
+
+class FileIntegrityBaseline(models.Model):
+    """Durable baseline hash for one monitored file (W10).
+
+    Replaces the evictable-cache baselines: a cache flush used to silently re-baseline
+    every monitored file, which is exactly when an attacker would want it to. Rows are
+    written ONLY by an explicit rebaseline (deploy runbook step), never during checks.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    path = models.CharField(max_length=500, unique=True)  # relative to BASE_DIR
+    sha256 = models.CharField(max_length=64)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "audit_file_integrity_baselines"
+        ordering: ClassVar[tuple[str, ...]] = ("path",)
+
+    def __str__(self) -> str:
+        return f"{self.path} ({self.sha256[:12]}...)"
 
 
 class AuditSearchQuery(models.Model):
@@ -800,37 +948,6 @@ class ComplianceLog(models.Model):
         return f"{self.compliance_type}: {self.reference_id}"
 
 
-class SIEMHashChainState(models.Model):
-    """
-    Track SIEM hash chain state for tamper-proof logging.
-
-    This model maintains the cryptographic hash chain state
-    to ensure log integrity and detect tampering.
-    """
-
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-
-    # Chain state
-    sequence_number = models.BigIntegerField(default=0, db_index=True)
-    last_hash = models.CharField(max_length=128, blank=True)
-    last_event_id = models.UUIDField(null=True, blank=True)
-
-    # Timestamps
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    # Configuration
-    hash_algorithm = models.CharField(max_length=20, default="sha256")
-    is_active = models.BooleanField(default=True)
-
-    class Meta:
-        db_table = "audit_siem_hash_chain_states"
-        ordering: ClassVar[tuple[str, ...]] = ("-updated_at",)
-
-    def __str__(self) -> str:
-        return f"HashChain #{self.sequence_number} ({self.hash_algorithm})"
-
-
 class ComplianceReportRecord(models.Model):
     """Track generated compliance reports for audit trail."""
 
@@ -903,63 +1020,6 @@ class ComplianceReportRecord(models.Model):
 
     def __str__(self) -> str:
         return f"{self.report_type} report ({self.overall_status}) - {self.generated_at.date()}"
-
-
-class SIEMExportLog(models.Model):
-    """Track SIEM export operations for monitoring."""
-
-    STATUS_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
-        ("pending", "Pending"),
-        ("in_progress", "In Progress"),
-        ("completed", "Completed"),
-        ("failed", "Failed"),
-    )
-
-    FORMAT_CHOICES: ClassVar[tuple[tuple[str, str], ...]] = (
-        ("cef", "CEF (ArcSight/Splunk)"),
-        ("leef", "LEEF (IBM QRadar)"),
-        ("json", "JSON (ELK/Graylog)"),
-        ("syslog", "Syslog (RFC 5424)"),
-        ("ocsf", "OCSF"),
-    )
-
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-
-    # Export details
-    export_format = models.CharField(max_length=10, choices=FORMAT_CHOICES)
-    destination = models.CharField(max_length=255)  # Host:port or file path
-
-    # Period
-    period_start = models.DateTimeField()
-    period_end = models.DateTimeField()
-
-    # Status
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
-    started_at = models.DateTimeField(null=True, blank=True)
-    completed_at = models.DateTimeField(null=True, blank=True)
-
-    # Results
-    events_exported = models.PositiveIntegerField(default=0)
-    events_failed = models.PositiveIntegerField(default=0)
-    bytes_transferred = models.BigIntegerField(default=0)
-
-    # Error handling
-    error_message = models.TextField(blank=True)
-    retry_count = models.PositiveIntegerField(default=0)
-
-    # Metadata
-    metadata = models.JSONField(default=dict, blank=True)
-
-    class Meta:
-        db_table = "audit_siem_export_logs"
-        ordering: ClassVar[tuple[str, ...]] = ("-started_at",)
-        indexes: ClassVar[tuple[models.Index, ...]] = (
-            models.Index(fields=["status", "-started_at"]),
-            models.Index(fields=["export_format", "-started_at"]),
-        )
-
-    def __str__(self) -> str:
-        return f"SIEM Export ({self.export_format}) - {self.status}"
 
 
 class CookieConsent(models.Model):

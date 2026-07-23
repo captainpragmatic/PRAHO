@@ -100,6 +100,7 @@ _IMPORTED_TASK_CASES = (
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_invoice(status: str = "issued", due_days: int = -5) -> Invoice:
     """Create an invoice with a given status and due_at set relative to now."""
     customer = create_customer()
@@ -131,9 +132,7 @@ class GetTaskRetryDelayTests(TestCase):
         ) as mock_get:
             result = _get_task_retry_delay()
 
-        mock_get.assert_called_once_with(
-            "billing.task_retry_delay_seconds", _DEFAULT_TASK_RETRY_DELAY
-        )
+        mock_get.assert_called_once_with("billing.task_retry_delay_seconds", _DEFAULT_TASK_RETRY_DELAY)
         self.assertEqual(result, _DEFAULT_TASK_RETRY_DELAY)
 
     def test_returns_custom_value_from_settings(self) -> None:
@@ -156,9 +155,7 @@ class GetTaskMaxRetriesTests(TestCase):
         ) as mock_get:
             result = _get_task_max_retries()
 
-        mock_get.assert_called_once_with(
-            "billing.task_max_retries", _DEFAULT_TASK_MAX_RETRIES
-        )
+        mock_get.assert_called_once_with("billing.task_max_retries", _DEFAULT_TASK_MAX_RETRIES)
         self.assertEqual(result, _DEFAULT_TASK_MAX_RETRIES)
 
     def test_returns_custom_value_from_settings(self) -> None:
@@ -255,9 +252,7 @@ class SchedulePaymentRemindersTests(TestCase):
         self.assertFalse(result["success"])
 
     @patch("apps.audit.services.AuditService.log_simple_event")
-    def test_non_pending_invoice_does_not_emit_reminders_scheduled_event(
-        self, mock_audit: MagicMock
-    ) -> None:
+    def test_non_pending_invoice_does_not_emit_reminders_scheduled_event(self, mock_audit: MagicMock) -> None:
         invoice = _make_invoice(status="void")
         schedule_payment_reminders(str(invoice.id))
 
@@ -359,9 +354,7 @@ class StartDunningProcessTests(TestCase):
         self.assertFalse(result["success"])
 
     @patch("apps.audit.services.AuditService.log_simple_event")
-    def test_non_overdue_status_does_not_emit_dunning_event(
-        self, mock_audit: MagicMock
-    ) -> None:
+    def test_non_overdue_status_does_not_emit_dunning_event(self, mock_audit: MagicMock) -> None:
         # 'draft' is not in ["issued", "overdue"] so the early return fires
         invoice = _make_invoice(status="draft")
         start_dunning_process(str(invoice.id))
@@ -393,8 +386,11 @@ class ValidateVatNumberTests(TestCase):
         from apps.billing.gateways.vies_gateway import VIESResponse  # noqa: PLC0415
 
         mock_vies.return_value = VIESResponse(
-            is_valid=True, country_code="RO", vat_number="1234567",
-            company_name="Test SRL", api_available=True,
+            is_valid=True,
+            country_code="RO",
+            vat_number="1234567",
+            company_name="Test SRL",
+            api_available=True,
         )
         profile = self._make_tax_profile(vat_number="RO1234567")
         result = validate_vat_number(str(profile.id))
@@ -428,7 +424,9 @@ class ValidateVatNumberTests(TestCase):
         from apps.billing.gateways.vies_gateway import VIESResponse  # noqa: PLC0415
 
         mock_vies.return_value = VIESResponse(
-            is_valid=True, country_code="RO", vat_number="1234567",
+            is_valid=True,
+            country_code="RO",
+            vat_number="1234567",
             api_available=True,
         )
 
@@ -499,9 +497,7 @@ class AsyncWrapperTests(TestCase):
         result = submit_efactura_async("inv-123")
 
         self.assertEqual(result, "task-id-1")
-        mock_async.assert_called_once_with(
-            "apps.billing.tasks.submit_efactura", "inv-123", timeout=TASK_TIME_LIMIT
-        )
+        mock_async.assert_called_once_with("apps.billing.tasks.submit_efactura", "inv-123", timeout=TASK_TIME_LIMIT)
 
     @patch("apps.billing.tasks.async_task", return_value="task-id-2")
     def test_schedule_payment_reminders_async(self, mock_async: MagicMock) -> None:
@@ -539,9 +535,7 @@ class AsyncWrapperTests(TestCase):
         result = validate_vat_number_async("tp-111")
 
         self.assertEqual(result, "task-id-5")
-        mock_async.assert_called_once_with(
-            "apps.billing.tasks.validate_vat_number", "tp-111", timeout=TASK_TIME_LIMIT
-        )
+        mock_async.assert_called_once_with("apps.billing.tasks.validate_vat_number", "tp-111", timeout=TASK_TIME_LIMIT)
 
     @patch("apps.billing.tasks.async_task", return_value="task-id-6")
     def test_process_auto_payment_async(self, mock_async: MagicMock) -> None:
@@ -557,18 +551,14 @@ class AsyncWrapperTests(TestCase):
         result = run_daily_billing_async()
 
         self.assertEqual(result, "task-id-7")
-        mock_async.assert_called_once_with(
-            "apps.billing.tasks.run_daily_billing", timeout=TASK_TIME_LIMIT * 2
-        )
+        mock_async.assert_called_once_with("apps.billing.tasks.run_daily_billing", timeout=TASK_TIME_LIMIT * 2)
 
     @patch("apps.billing.tasks.async_task", return_value="task-id-8")
     def test_process_expired_trials_async(self, mock_async: MagicMock) -> None:
         result = process_expired_trials_async()
 
         self.assertEqual(result, "task-id-8")
-        mock_async.assert_called_once_with(
-            "apps.billing.tasks.process_expired_trials", timeout=TASK_TIME_LIMIT
-        )
+        mock_async.assert_called_once_with("apps.billing.tasks.process_expired_trials", timeout=TASK_TIME_LIMIT)
 
     @patch("apps.billing.tasks.async_task", return_value="task-id-9")
     def test_process_grace_period_expirations_async(self, mock_async: MagicMock) -> None:
@@ -580,9 +570,7 @@ class AsyncWrapperTests(TestCase):
         )
 
     @patch("apps.billing.tasks.async_task", return_value="task-id-10")
-    def test_notify_expiring_grandfathering_async_default_days(
-        self, mock_async: MagicMock
-    ) -> None:
+    def test_notify_expiring_grandfathering_async_default_days(self, mock_async: MagicMock) -> None:
         result = notify_expiring_grandfathering_async()
 
         self.assertEqual(result, "task-id-10")
@@ -593,9 +581,7 @@ class AsyncWrapperTests(TestCase):
         )
 
     @patch("apps.billing.tasks.async_task", return_value="task-id-11")
-    def test_notify_expiring_grandfathering_async_custom_days(
-        self, mock_async: MagicMock
-    ) -> None:
+    def test_notify_expiring_grandfathering_async_custom_days(self, mock_async: MagicMock) -> None:
         result = notify_expiring_grandfathering_async(days_ahead=60)
 
         self.assertEqual(result, "task-id-11")
@@ -610,9 +596,7 @@ class AsyncWrapperTests(TestCase):
         result = run_payment_collection_async()
 
         self.assertEqual(result, "task-id-12")
-        mock_async.assert_called_once_with(
-            "apps.billing.tasks.run_payment_collection", timeout=TASK_TIME_LIMIT * 2
-        )
+        mock_async.assert_called_once_with("apps.billing.tasks.run_payment_collection", timeout=TASK_TIME_LIMIT * 2)
 
 
 # ---------------------------------------------------------------------------
@@ -821,9 +805,7 @@ class NotifyExpiringGrandfatheringTests(TestCase):
         "apps.billing.subscription_service.GrandfatheringService.check_expiring_grandfathering",
         return_value=[],
     )
-    def test_no_expiring_returns_zero(
-        self, mock_check: MagicMock, mock_email: MagicMock
-    ) -> None:
+    def test_no_expiring_returns_zero(self, mock_check: MagicMock, mock_email: MagicMock) -> None:
         result = notify_expiring_grandfathering()
 
         self.assertTrue(result["success"])
@@ -832,12 +814,8 @@ class NotifyExpiringGrandfatheringTests(TestCase):
         mock_email.assert_not_called()
 
     @patch("apps.notifications.services.EmailService.send_template_email")
-    @patch(
-        "apps.billing.subscription_service.GrandfatheringService.check_expiring_grandfathering"
-    )
-    def test_notifies_expiring_customers(
-        self, mock_check: MagicMock, mock_email: MagicMock
-    ) -> None:
+    @patch("apps.billing.subscription_service.GrandfatheringService.check_expiring_grandfathering")
+    def test_notifies_expiring_customers(self, mock_check: MagicMock, mock_email: MagicMock) -> None:
         gf1 = _make_mock_grandfathering("cust1@example.com")
         gf2 = _make_mock_grandfathering("cust2@example.com")
         mock_check.return_value = [gf1, gf2]
@@ -850,17 +828,11 @@ class NotifyExpiringGrandfatheringTests(TestCase):
         self.assertEqual(mock_email.call_count, 2)
         self.assertTrue(gf1.expiry_notified)
         self.assertTrue(gf2.expiry_notified)
-        gf1.save.assert_called_once_with(
-            update_fields=["expiry_notified", "expiry_notified_at"]
-        )
+        gf1.save.assert_called_once_with(update_fields=["expiry_notified", "expiry_notified_at"])
 
     @patch("apps.notifications.services.EmailService.send_template_email")
-    @patch(
-        "apps.billing.subscription_service.GrandfatheringService.check_expiring_grandfathering"
-    )
-    def test_email_failure_skips_one_but_continues(
-        self, mock_check: MagicMock, mock_email: MagicMock
-    ) -> None:
+    @patch("apps.billing.subscription_service.GrandfatheringService.check_expiring_grandfathering")
+    def test_email_failure_skips_one_but_continues(self, mock_check: MagicMock, mock_email: MagicMock) -> None:
         gf_fail = _make_mock_grandfathering("fail@example.com")
         gf_ok = _make_mock_grandfathering("ok@example.com")
         mock_check.return_value = [gf_fail, gf_ok]
@@ -883,12 +855,8 @@ class NotifyExpiringGrandfatheringTests(TestCase):
         self.assertIn("service crash", result["error"])
 
     @patch("apps.notifications.services.EmailService.send_template_email")
-    @patch(
-        "apps.billing.subscription_service.GrandfatheringService.check_expiring_grandfathering"
-    )
-    def test_email_context_contains_required_fields(
-        self, mock_check: MagicMock, mock_email: MagicMock
-    ) -> None:
+    @patch("apps.billing.subscription_service.GrandfatheringService.check_expiring_grandfathering")
+    def test_email_context_contains_required_fields(self, mock_check: MagicMock, mock_email: MagicMock) -> None:
         gf = _make_mock_grandfathering()
         mock_check.return_value = [gf]
 
@@ -902,12 +870,8 @@ class NotifyExpiringGrandfatheringTests(TestCase):
         self.assertIn("expires_at", context)
 
     @patch("apps.notifications.services.EmailService.send_template_email")
-    @patch(
-        "apps.billing.subscription_service.GrandfatheringService.check_expiring_grandfathering"
-    )
-    def test_default_days_ahead_is_30(
-        self, mock_check: MagicMock, mock_email: MagicMock
-    ) -> None:
+    @patch("apps.billing.subscription_service.GrandfatheringService.check_expiring_grandfathering")
+    def test_default_days_ahead_is_30(self, mock_check: MagicMock, mock_email: MagicMock) -> None:
         mock_check.return_value = []
         notify_expiring_grandfathering()
 
@@ -942,6 +906,45 @@ class RunPaymentCollectionTests(TestCase):
         run = PaymentCollectionRun.objects.get(id=result["run_id"])
         self.assertEqual(run.status, "completed")
         self.assertIsNotNone(run.completed_at)
+
+    def test_lifecycle_audit_events_emitted(self) -> None:
+        """W9: a run emits collection_run_started and collection_run_completed."""
+        from apps.audit.models import AuditEvent  # noqa: PLC0415
+
+        result = run_payment_collection()
+
+        run_id = result["run_id"]
+        actions = list(
+            AuditEvent.objects.filter(object_id=run_id).order_by("timestamp").values_list("action", flat=True)
+        )
+        self.assertEqual(actions, ["collection_run_started", "collection_run_completed"])
+
+    def test_crashed_run_is_marked_failed_not_stuck_running(self) -> None:
+        """W9: pre-fix, a crash left the run in status='running' forever."""
+        from unittest.mock import patch  # noqa: PLC0415
+
+        from apps.audit.models import AuditEvent  # noqa: PLC0415
+
+        with patch("apps.billing.tasks._reclaim_stale_payment_retries", side_effect=RuntimeError("db exploded")):
+            result = run_payment_collection()
+
+        self.assertFalse(result["success"])
+        run = PaymentCollectionRun.objects.get()
+        self.assertEqual(run.status, "failed")
+        self.assertIsNotNone(run.completed_at)
+        self.assertIn("db exploded", run.error_message)
+        self.assertTrue(AuditEvent.objects.filter(object_id=str(run.id), action="collection_run_failed").exists())
+
+    def test_audit_failure_does_not_mask_collection_result(self) -> None:
+        """An audit outage must not turn a successful collection run into a failure."""
+        from unittest.mock import patch  # noqa: PLC0415
+
+        with patch("apps.billing.tasks.AuditService.log_simple_event", side_effect=RuntimeError("audit down")):
+            result = run_payment_collection()
+
+        self.assertTrue(result["success"])
+        run = PaymentCollectionRun.objects.get(id=result["run_id"])
+        self.assertEqual(run.status, "completed")
 
     def test_pending_retry_is_processed_as_failed(self) -> None:
         """
@@ -1025,9 +1028,7 @@ class RunPaymentCollectionTests(TestCase):
 
         run_payment_collection()
 
-        next_attempt = PaymentRetryAttempt.objects.filter(
-            payment=payment, attempt_number=2
-        ).first()
+        next_attempt = PaymentRetryAttempt.objects.filter(payment=payment, attempt_number=2).first()
         self.assertIsNotNone(next_attempt)
         assert next_attempt is not None
         self.assertEqual(next_attempt.status, "pending")
@@ -1056,9 +1057,7 @@ class RunPaymentCollectionTests(TestCase):
 
         run_payment_collection()
 
-        count = PaymentRetryAttempt.objects.filter(
-            payment=payment, attempt_number=4
-        ).count()
+        count = PaymentRetryAttempt.objects.filter(payment=payment, attempt_number=4).count()
         self.assertEqual(count, 0)
 
     def test_run_record_tracks_total_scheduled(self) -> None:
@@ -1159,9 +1158,7 @@ class RunPaymentCollectionTests(TestCase):
         self.assertEqual(payment.status, "failed")
 
     @patch("apps.billing.payment_service.PaymentService.confirm_payment")
-    def test_collection_does_not_reconfirm_original_pending_payment(
-        self, mock_confirm_payment: MagicMock
-    ) -> None:
+    def test_collection_does_not_reconfirm_original_pending_payment(self, mock_confirm_payment: MagicMock) -> None:
         """A retry without an authorized subscription method must fail closed."""
         mock_confirm_payment.return_value = {"success": True, "status": "succeeded"}
 

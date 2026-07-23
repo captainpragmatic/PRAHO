@@ -20,7 +20,7 @@ import logging
 from datetime import timedelta
 from typing import Any, ClassVar
 
-from django.core.management.base import BaseCommand, CommandParser
+from django.core.management.base import BaseCommand, CommandError, CommandParser
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
@@ -95,11 +95,19 @@ class Command(BaseCommand):
             action="store_true",
             help="Show detailed output",
         )
+        parser.add_argument(
+            "--rebaseline",
+            action="store_true",
+            help="Atomically replace the file-integrity baseline set (deploy runbook step)",
+        )
 
     def handle(self, *args: Any, **options: Any) -> None:
         """Execute the command."""
         if options["schedule"]:
             self._setup_scheduled_tasks()
+            return
+        if options["rebaseline"]:
+            self._rebaseline()
             return
 
         # Parse time period
@@ -180,6 +188,7 @@ class Command(BaseCommand):
                 "healthy": self.style.SUCCESS,
                 "warning": self.style.WARNING,
                 "compromised": self.style.ERROR,
+                "error": self.style.ERROR,
             }.get(check.status, self.style.NOTICE)
 
             self.stdout.write(
@@ -264,68 +273,22 @@ class Command(BaseCommand):
             self.stdout.write(self.style.SUCCESS("\nAll integrity checks passed successfully."))
 
     def _setup_scheduled_tasks(self) -> None:
-        """Configure scheduled integrity check tasks using Django-Q2."""
-        try:
-            from django_q.models import (  # noqa: PLC0415  # Deferred: avoids circular import
-                Schedule,  # Deferred: optional dependency  # Deferred: avoids circular import
-            )
+        """Redirect to the single scheduling vehicle (M6) - no duplicate schedules."""
+        from apps.audit.tasks import setup_audit_scheduled_tasks  # noqa: PLC0415  # Deferred: avoids circular import
 
-            # Hourly hash verification for critical events
-            Schedule.objects.update_or_create(
-                name="audit_integrity_hourly",
-                defaults={
-                    "func": "apps.audit.tasks.run_integrity_check",
-                    "args": "('hash_verification', '1h')",
-                    "schedule_type": Schedule.HOURLY,
-                    "repeats": -1,  # Run forever
-                },
-            )
-            self.stdout.write(self.style.SUCCESS("Created hourly hash verification schedule"))
+        results = setup_audit_scheduled_tasks()
+        for name, outcome in results.items():
+            style = self.style.SUCCESS if outcome == "created" else self.style.WARNING
+            self.stdout.write(style(f"  {name}: {outcome}"))
+        self.stdout.write(self.style.SUCCESS("Audit schedules configured (see setup_scheduled_tasks --audit-only)"))
 
-            # Daily comprehensive check
-            Schedule.objects.update_or_create(
-                name="audit_integrity_daily",
-                defaults={
-                    "func": "apps.audit.tasks.run_integrity_check",
-                    "args": "('all', '24h')",
-                    "schedule_type": Schedule.DAILY,
-                    "repeats": -1,
-                },
-            )
-            self.stdout.write(self.style.SUCCESS("Created daily comprehensive check schedule"))
+    def _rebaseline(self) -> None:
+        """Rewrite the durable file-integrity baseline set from current disk state."""
+        from apps.audit.tasks import rebaseline_file_integrity  # noqa: PLC0415  # Deferred: avoids circular import
 
-            # Weekly deep analysis
-            Schedule.objects.update_or_create(
-                name="audit_integrity_weekly",
-                defaults={
-                    "func": "apps.audit.tasks.run_integrity_check",
-                    "args": "('all', '7d')",
-                    "schedule_type": Schedule.WEEKLY,
-                    "repeats": -1,
-                },
-            )
-            self.stdout.write(self.style.SUCCESS("Created weekly deep analysis schedule"))
-
-            # File integrity monitoring (every 6 hours)
-            Schedule.objects.update_or_create(
-                name="file_integrity_monitoring",
-                defaults={
-                    "func": "apps.audit.tasks.run_file_integrity_check",
-                    "schedule_type": Schedule.HOURLY,
-                    "minutes": 360,  # Every 6 hours
-                    "repeats": -1,
-                },
-            )
-            self.stdout.write(self.style.SUCCESS("Created file integrity monitoring schedule (6h)"))
-
-            self.stdout.write(
-                self.style.SUCCESS(
-                    "\nAll scheduled tasks configured successfully!\n"
-                    "Run 'python manage.py qcluster' to start the task worker."
-                )
-            )
-
-        except ImportError:
-            self.stderr.write(self.style.ERROR("Django-Q2 not installed. Install with: pip install django-q2"))
-        except Exception as e:
-            self.stderr.write(self.style.ERROR(f"Failed to setup schedules: {e}"))
+        result = rebaseline_file_integrity()
+        self.stdout.write(self.style.SUCCESS(f"Rebaselined {result['baselined']} files"))
+        for err in result["errors"]:
+            self.stdout.write(self.style.ERROR(f"  {err['path']}: {err['error']}"))
+        if result["errors"]:
+            raise CommandError("rebaseline completed with hashing errors")

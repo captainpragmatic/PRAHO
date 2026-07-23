@@ -34,14 +34,14 @@
 | audit/test_audit_notification_integration.py | audit.tasks (_send_integrity_escalation_alert, _create_file_integrity_alert) — notification wiring for integrity alerts |
 | audit/test_audit_services.py | audit.services (BillingAuditService, OrdersAuditService) — billing/order/proforma/payment audit event metadata, categorization |
 | audit/test_audit_services_regressions.py | audit.services comprehensive — GDPR services, integrity, retention, search, security, all domain audit services (92KB) |
-| audit/test_audit_siem_regressions.py | audit.siem + audit.siem_integration — formatters (CEF, LEEF, OCSF, JSON, Syslog), transports, hash chain, SIEMService, providers (60KB) |
+| audit/test_siem_formats.py (transport/integration tests retired with the dead code; format/config/hash-chain tests ported) | audit.siem + audit.siem_integration — formatters (CEF, LEEF, OCSF, JSON, Syslog), transports, hash chain, SIEMService, providers (60KB) |
 | audit/test_audit_signal_registration.py | Signal wiring guardrail — verifies billing/orders/customers/domains/products/tickets/notifications/settings models have signal receivers |
 | audit/test_audit_signals.py | audit.signals — user profile changes, membership changes, custom signals (privacy, API key, context switch), categorization mapping |
 | audit/test_audit_views_regressions.py | audit.views comprehensive — all audit view endpoints, HTMX partials, permissions, filtering, export (89KB) |
 | audit/test_cookie_consent_model.py | audit.models.CookieConsent — model creation, status choices, consent properties, indexes, string repr |
-| audit/test_file_integrity_monitoring.py | audit.file_integrity_service (FileIntegrityMonitoringService) — baseline, change detection, critical file verification, tasks |
+| audit/(retired — dead duplicate module removed) | audit.file_integrity_service (FileIntegrityMonitoringService) — baseline, change detection, critical file verification, tasks |
 | audit/test_partition_retention_status.py | audit.compliance.LogRetentionService — partition table retention status |
-| audit/test_siem_outbound.py | audit.siem_integration.SIEMIntegrationService — outbound HTTP uses safe_request(), private IP rejection, TLS verification |
+| audit/(retired — outbound SIEM transport removed) | audit.siem_integration.SIEMIntegrationService — outbound HTTP uses safe_request(), private IP rejection, TLS verification |
 | audit/test_uuid_serialization.py | audit.services (AuditJSONEncoder, serialize_metadata) — UUID/datetime/Decimal serialization in audit metadata |
 | billing/test_billing_audit_and_workflow_regressions.py | billing.efactura.audit.EFacturaAuditService + billing.management.commands.setup_tax_rules + billing.metering_tasks — e-Factura audit, tax rules, metering task scheduling |
 | billing/test_billing_models_regressions.py | billing.models (Currency, FXRate, InvoiceSequence, ProformaSequence, TaxRule, VATValidation, PaymentRetryPolicy) — model validation, constraints, cascade |
@@ -360,7 +360,7 @@
 - **Speed**: ⚠️ 92KB file — consider splitting by service domain (GDPR, integrity, retention, search, etc.)
 - **Severity**: 🟢 clean (large but comprehensive)
 
-#### test_audit_siem_regressions.py — 🟢 clean
+#### test_siem_formats.py (transport/integration tests retired with the dead code; format/config/hash-chain tests ported) — 🟢 clean
 - **Placement**: ✅ correct
 - **Naming**: ⚠️ "regressions" but actually comprehensive SIEM tests (60KB)
 - **Duplicates**: ✅ none — only file testing `audit.siem` formatters/transports in depth
@@ -405,7 +405,7 @@
 - **Speed**: ✅ `@override_settings(DISABLE_AUDIT_SIGNALS=True)` — good optimization
 - **Severity**: 🟢 clean
 
-#### test_file_integrity_monitoring.py — 🟢 clean
+#### (retired — dead duplicate module removed) — 🟢 clean
 - **Placement**: ✅ correct
 - **Naming**: ✅ accurate
 - **Duplicates**: ✅ none
@@ -423,7 +423,7 @@
 - **Speed**: ✅ `SimpleTestCase` — optimal
 - **Severity**: 🟢 clean
 
-#### test_siem_outbound.py — 🟢 clean
+#### (retired — outbound SIEM transport removed) — 🟢 clean
 - **Placement**: ✅ correct
 - **Naming**: ✅ accurate — focuses on outbound HTTP security migration
 - **Duplicates**: ✅ none
@@ -448,8 +448,8 @@
 4. **OVERLAP — MANAGEMENT VIEWS**: `test_audit_management.py` (773L) overlaps with `test_audit_views_regressions.py` (89KB). The views file is far more comprehensive. **Recommend: merge unique tests from management.py into views file, delete management.py.**
 5. **OVERLAP — SERIALIZATION**: UUID/datetime serialization tested in 3 files: `test_uuid_serialization.py`, `test_audit_authentication.py`, `test_audit_services.py`. **Recommend: consolidate into test_uuid_serialization.py.**
 6. **DEAD INDEX TESTS**: Both `test_audit_authentication.py:test_audit_indexes_exist` and `test_audit_categorization.py:test_audit_event_indexes_exist` always skip on SQLite. The categorization one cheats by hardcoding expected indexes as the answer. **Recommend: remove both or gate behind PostgreSQL-only CI.**
-7. **NAMING**: 5 files use "regressions" suffix but aren't regression tests: `test_audit_gdpr_regressions.py` (basic tests), `test_audit_services_regressions.py` (comprehensive coverage), `test_audit_siem_regressions.py` (comprehensive SIEM), `test_audit_views_regressions.py` (comprehensive views), `test_audit_model_regressions.py` (structural guardrail).
-8. **SPEED — LARGE FILES**: `test_audit_services_regressions.py` (92KB), `test_audit_views_regressions.py` (89KB), `test_audit_siem_regressions.py` (60KB), `test_audit_compliance.py` (56KB) are very large. Consider splitting by domain.
+7. **NAMING**: 5 files use "regressions" suffix but aren't regression tests: `test_audit_gdpr_regressions.py` (basic tests), `test_audit_services_regressions.py` (comprehensive coverage), `test_siem_formats.py (transport/integration tests retired with the dead code; format/config/hash-chain tests ported)` (comprehensive SIEM), `test_audit_views_regressions.py` (comprehensive views), `test_audit_model_regressions.py` (structural guardrail).
+8. **SPEED — LARGE FILES**: `test_audit_services_regressions.py` (92KB), `test_audit_views_regressions.py` (89KB), `test_siem_formats.py (transport/integration tests retired with the dead code; format/config/hash-chain tests ported)` (60KB), `test_audit_compliance.py` (56KB) are very large. Consider splitting by domain.
 9. **SPEED — setUp**: `test_audit_management.py:EnterpriseAuditManagementTestCase.setUp` creates 3 users + 15 audit events per test class. Use `setUpTestData` for shared fixtures.
 
 ### audit/ Summary

@@ -21,13 +21,12 @@ from django.http import HttpRequest
 from apps.common.request_ip import get_safe_client_ip
 from apps.users.models import CustomerMembership, User, UserProfile
 
-from .models import AuditEvent
+from .models import AuditEvent, audit_mutation_allowed
 from .services import AuditContext, AuditEventData, AuditService
 
 # Bumped when _calculate_event_hash changes shape, so old hashes are not compared against a new
 # algorithm and misreported as tampering. Its presence also marks an event as belonging to the
 # hashed era: a row without it predates #217 and is unverifiable rather than tampered.
-AUDIT_INTEGRITY_HASH_VERSION = 1
 
 
 @dataclass
@@ -772,6 +771,73 @@ def audit_customer_context_switch(
 
 
 # ===============================================================================
+# GENERIC FSM TRANSITION AUDIT (ADR-0034 / ADR-0016)
+# ===============================================================================
+
+# Senders whose transitions are ALREADY audited by their own status-diffing
+# post_save handlers - a generic event here would double-write. Each entry is
+# pinned by a one-event-per-transition test in tests/audit/test_audit_fsm_receiver.py.
+FSM_AUDIT_SENDER_SKIPLIST: frozenset[str] = frozenset(
+    {
+        "orders.order",  # orders/signals.py order_status_changed
+        "tickets.ticket",  # tickets/signals.py _handle_status_change
+        "billing.payment",  # billing/signals.py _handle_payment_status_change
+        "domains.domain",  # domains/signals.py domain_status_changed
+    }
+)
+
+
+def audit_fsm_transition(sender: Any, instance: Any, name: str, source: str, target: str, **kwargs: Any) -> None:
+    """Audit every django-fsm transition not covered by a model-specific handler.
+
+    Caveat (django-fsm contract): the transition method mutates the in-memory field
+    but does NOT save the instance - this event records that the transition was
+    EXECUTED, not that it was persisted. `make lint-fsm` guards that call sites
+    save after transitioning.
+
+    Flag contract (mirrors billing/signals.py): DISABLE_AUDIT_SIGNALS is honored
+    only under TESTING; in production the flag is a misconfiguration - log critical
+    and audit anyway (W8).
+    """
+    from django.conf import settings as django_settings  # noqa: PLC0415
+
+    if getattr(django_settings, "DISABLE_AUDIT_SIGNALS", False):
+        if getattr(django_settings, "TESTING", False):
+            return
+        logger.critical(
+            "DISABLE_AUDIT_SIGNALS is set outside of TESTING context — ignoring flag and continuing audit for safety"
+        )
+
+    label = f"{sender._meta.app_label}.{sender._meta.model_name}"
+    if label in FSM_AUDIT_SENDER_SKIPLIST:
+        return
+
+    try:
+        # Savepoint: a failed audit INSERT must not poison the caller's transaction.
+        with atomic():
+            AuditService.log_simple_event(
+                event_type="status_changed",
+                user=None,
+                content_object=instance if instance.pk else None,
+                description=f"{sender.__name__} {instance.pk or '(unsaved)'} transition {name}: {source} -> {target}",
+                actor_type="system",
+                old_values={"status": source},
+                new_values={"status": target},
+                metadata={"source_app": sender._meta.app_label, "fsm_transition": name},
+            )
+    except Exception as e:
+        logger.error(f"🔥 [Audit FSM] Failed to audit transition {name} on {label}: {e}")
+
+
+try:  # pragma: no cover - django-fsm is a hard dependency, guard mirrors app-load robustness
+    from django_fsm.signals import post_transition
+
+    post_transition.connect(audit_fsm_transition, dispatch_uid="audit_fsm_transition")
+except ImportError:  # pragma: no cover
+    logger.error("🔥 [Audit FSM] django-fsm not installed; FSM transitions are NOT audited")
+
+
+# ===============================================================================
 # AUDIT EVENT INTEGRITY HASH
 # ===============================================================================
 
@@ -797,15 +863,14 @@ def stamp_audit_event_integrity_hash(sender: Any, instance: AuditEvent, created:
     base_metadata = instance.metadata if isinstance(instance.metadata, dict) else {}
     try:
         metadata = dict(base_metadata)
-        metadata["integrity_hash"] = AuditIntegrityService._calculate_event_hash(instance)
-        metadata["integrity_hash_version"] = AUDIT_INTEGRITY_HASH_VERSION
+        metadata.update(AuditIntegrityService.integrity_stamp_marker(instance))
         # QuerySet.update() cannot re-enter this handler (updates emit no post_save), and a
         # nested atomic() is essential, not decorative: a DB error in this statement marks the
         # CALLER's connection needs_rollback, and this handler fires inside money-moving atomic
         # blocks (order confirmation). Without the savepoint, swallowing the exception below
         # would let the caller "commit" a transaction Django then silently rolls back — the
         # exact SFH-3 failure mode (audit failure must never undo a financial transaction).
-        with atomic():
+        with atomic(), audit_mutation_allowed("integrity_stamp"):
             AuditEvent.objects.filter(pk=instance.pk).update(metadata=metadata)
         instance.metadata = metadata
     except Exception as e:
@@ -816,9 +881,9 @@ def stamp_audit_event_integrity_hash(sender: Any, instance: AuditEvent, created:
         # pre-hashing legacy row and demotes to an info-level "unverifiable" finding, which
         # is precisely the low-visibility outcome #217 exists to eliminate.
         try:
-            with atomic():
+            with atomic(), audit_mutation_allowed("integrity_stamp"):
                 AuditEvent.objects.filter(pk=instance.pk).update(
-                    metadata={**base_metadata, "integrity_hash_version": AUDIT_INTEGRITY_HASH_VERSION}
+                    metadata={**base_metadata, "integrity_hash_version": AuditIntegrityService.HASH_VERSION}
                 )
         except Exception:
             logger.error(f"🔥 [Audit Integrity] Could not mark event {instance.pk} for critical follow-up")

@@ -12,7 +12,7 @@ import hashlib
 from django.contrib.contenttypes.models import ContentType
 from django.test import TestCase, override_settings
 
-from apps.audit.models import AuditEvent
+from apps.audit.models import AuditEvent, audit_mutation_allowed
 from apps.billing.models import Currency, Invoice, Payment
 from apps.common.validators import log_security_event
 from apps.notifications.models import EmailPreference, EmailSuppression, EmailTemplate
@@ -61,7 +61,8 @@ class TestSystemSettingAuditEvent(TestCase):
 
         # Clear events from creation
         ct = ContentType.objects.get_for_model(SystemSetting)
-        AuditEvent.objects.filter(content_type=ct, object_id=str(setting.pk)).delete()
+        with audit_mutation_allowed("test fixture"):
+            AuditEvent.objects.filter(content_type=ct, object_id=str(setting.pk)).delete()
 
         # Update
         setting.value = "new_value"

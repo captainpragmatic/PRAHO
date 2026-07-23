@@ -501,21 +501,16 @@ def archive_old_events():
 ## Integration with External Systems
 
 ### SIEM Integration
-```python
-# Export events to SIEM systems
-def export_to_siem(events):
-    for event in events:
-        siem_event = {
-            'timestamp': event.timestamp.isoformat(),
-            'severity': event.severity,
-            'category': event.category,
-            'user': event.user.email if event.user else 'System',
-            'action': event.action,
-            'source_ip': event.ip_address,
-            'metadata': event.metadata
-        }
-        send_to_siem(siem_event)
-```
+
+The audit module stands alone — no SIEM is required. Integration surface (ADR-0043):
+
+- **Structured log stream**: `SIEMJSONFormatter` (`apps/audit/logging_formatters.py`) is wired
+  into prod/staging `LOGGING`; point any log shipper (Vector, Filebeat, …) at it to feed
+  Splunk/QRadar/Elastic.
+- **On-demand export**: `manage.py audit_compliance export-events --format cef|leef|json|syslog|ocsf`
+  renders `AuditEvent`s to a file via `apps/audit/siem.py`'s format renderers.
+- **Deliberately not implemented**: real-time network push. There is no in-app transport;
+  delivery guarantees belong to the log-shipping layer.
 
 ### Compliance Dashboards
 ```python

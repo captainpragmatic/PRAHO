@@ -119,6 +119,33 @@ Dark theme interface for staff/admin audit log monitoring
             </form>
         </div>
 
+        <!-- Saved Searches -->
+        <div class="bg-slate-800 border border-slate-700 rounded-lg p-4 mb-6">
+          <h2 class="text-lg font-medium text-white mb-3">{% icon "search" %} {% trans "Saved Searches" %}</h2>
+          {% if saved_searches %}
+            <div class="flex flex-wrap gap-2 mb-4">
+              {% for search in saved_searches %}
+                <a href="{% url 'audit:load_saved_search' search.id %}"
+                   class="inline-flex items-center px-3 py-1 rounded-full bg-slate-700 text-slate-200 text-sm hover:bg-blue-600 transition-colors"
+                   title="{{ search.description }}">
+                  {{ search.name }}
+                  {% if search.is_shared %}<span class="ml-1 text-xs text-slate-400">({% trans "shared" %})</span>{% endif %}
+                </a>
+              {% endfor %}
+            </div>
+          {% else %}
+            <p class="text-sm text-slate-400 mb-4">{% trans "No saved searches yet. Save the current filters below." %}</p>
+          {% endif %}
+          <form method="post" action="{% url 'audit:save_search_query' %}" id="save-search-form" class="flex flex-wrap items-end gap-3">
+            {% csrf_token %}
+            {% include 'components/input.html' with label='Name' name='name' html_id='save-search-name' container_class='flex-1 min-w-48' %}
+            <label class="flex items-center gap-2 text-sm text-slate-300 pb-2">
+              <input type="checkbox" name="is_shared" class="rounded border-slate-600 bg-slate-700"> {% trans "Share with staff" %}
+            </label>
+            {% trans "Save Current Filters" as save_label %}{% button save_label variant="secondary" type="submit" %}
+          </form>
+        </div>
+
         <!-- Results Section -->
         <div class="bg-slate-800 border border-slate-700 rounded-lg overflow-hidden">
             <div class="px-6 py-4 border-b border-slate-700">

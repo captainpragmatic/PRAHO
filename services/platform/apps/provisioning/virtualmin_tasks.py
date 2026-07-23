@@ -585,43 +585,21 @@ def _execute_virtualmin_provisioning(
 def _handle_successful_provisioning_secure(
     account: Any, service: Service, correlation_id: str, safe_log_ctx: dict[str, Any]
 ) -> dict[str, Any]:
-    """Handle successful provisioning with enhanced security and audit logging."""
+    """Handle successful provisioning with enhanced security logging.
+
+    Note: the AuditEvent for this transition is already emitted by
+    VirtualminAccount's own post_save signal (account.status -> "active" is
+    saved with update_fields=["status", ...] before this function runs,
+    firing "virtualmin_account_status_changed"). An additional explicit
+    "virtualmin_account_provisioned" event here was a redundant duplicate
+    for the same account (#dedup) — removed in favor of the signal, which
+    also covers the manual provisioning path the signal-less call did not.
+    """
     # Converge once more after creation: a termination that landed while the
     # gateway was working must not leave a live account for a dead Service.
     service_id = str(service.id)
     transaction.on_commit(lambda: reconcile_virtualmin_service_state_async(service_id))
     try:
-        # Enhanced audit logging with security metadata
-        AuditService.log_event(
-            AuditEventData(
-                event_type="virtualmin_account_provisioned",
-                content_object=account,
-                new_values={
-                    "account_id": str(account.id),
-                    "domain": account.domain,
-                    "server": account.server.hostname,
-                    "service_id": str(service.id),
-                    "customer_id": str(service.customer.id),
-                    "provisioning_type": "automatic_secure",
-                    "status": account.status,
-                },
-                description=f"VirtualMin account provisioned securely for domain '{account.domain}'",
-            ),
-            context=AuditContext(
-                actor_type="system",
-                metadata={
-                    "source_app": "provisioning",
-                    "provisioning_event": True,
-                    "automatic_provisioning": True,
-                    "security_enhanced": True,
-                    "correlation_id": correlation_id,
-                    "domain": account.domain,
-                    "server_hostname": account.server.hostname,
-                    "customer_id": str(service.customer.id),
-                },
-            ),
-        )
-
         # Log security event for successful provisioning
         log_security_event_safe(
             "virtualmin_account_provisioned_successfully",

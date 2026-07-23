@@ -24,6 +24,7 @@ from apps.audit.models import (
     ComplianceLog,
     CookieConsent,
     DataExport,
+    audit_mutation_allowed,
 )
 from apps.audit.services import (
     AccountEventData,
@@ -51,7 +52,6 @@ from apps.audit.services import (
     SessionRotationEventData,
     TicketsAuditService,
     TwoFactorAuditRequest,
-    audit_service,
     serialize_metadata,
 )
 
@@ -113,6 +113,7 @@ class TestAuditJSONEncoder(TestCase):
     def test_encode_generic_object_with_dict(self):
         class Obj:
             x = 1
+
         enc = AuditJSONEncoder()
         result = enc.default(Obj())
         self.assertIsInstance(result, str)
@@ -124,7 +125,6 @@ class TestAuditJSONEncoder(TestCase):
 
 
 class TestSerializeMetadata(TestCase):
-
     def test_empty_metadata(self):
         self.assertEqual(serialize_metadata({}), {})
 
@@ -139,7 +139,6 @@ class TestSerializeMetadata(TestCase):
 
 
 class TestAuditServiceLogEvent(TestCase):
-
     def test_log_event_no_context(self):
         user = _make_user()
         event_data = AuditEventData(event_type="test_event", content_object=user, description="test")
@@ -170,7 +169,6 @@ class TestAuditServiceLogEvent(TestCase):
 
 
 class TestAuditServiceSimpleEvent(TestCase):
-
     def test_log_simple_event(self):
         user = _make_user()
         event = AuditService.log_simple_event(
@@ -185,7 +183,6 @@ class TestAuditServiceSimpleEvent(TestCase):
 
 
 class TestAuditServiceCategorization(TestCase):
-
     def test_account_management_category(self):
         self.assertEqual(AuditService._get_action_category("profile_updated"), "account_management")
         self.assertEqual(AuditService._get_action_category("email_changed"), "account_management")
@@ -248,54 +245,7 @@ class TestAuditServiceCategorization(TestCase):
         self.assertFalse(AuditService._requires_review("invoice_created"))
 
 
-class TestAuditServiceLegacy(TestCase):
-
-    def test_log_event_legacy(self):
-        user = _make_user()
-        event = AuditService.log_event_legacy(
-            "test_legacy", user=user, content_object=user, description="legacy test"
-        )
-        self.assertEqual(event.action, "test_legacy")
-
-    def test_log_2fa_event_legacy(self):
-        user = _make_user()
-        user.two_factor_enabled = False
-        user.backup_tokens = []
-        user.save()
-        event = AuditService.log_2fa_event_legacy(
-            "2fa_enabled", user=user, ip_address="1.2.3.4", description="2FA enabled"
-        )
-        self.assertEqual(event.action, "2fa_enabled")
-
-    def test_log_compliance_event_legacy(self):
-        log = AuditService.log_compliance_event_legacy(
-            "gdpr_consent", "ref_001", "Test compliance", status="success"
-        )
-        self.assertEqual(log.compliance_type, "gdpr_consent")
-
-
-class TestAuditServiceProxy(TestCase):
-
-    def test_proxy_log_event(self):
-        user = _make_user()
-        event = audit_service.log_event("test_proxy", user=user, content_object=user)
-        self.assertEqual(event.action, "test_proxy")
-
-    def test_proxy_log_2fa_event(self):
-        user = _make_user()
-        user.two_factor_enabled = False
-        user.backup_tokens = []
-        user.save()
-        event = audit_service.log_2fa_event("2fa_enabled", user=user)
-        self.assertEqual(event.action, "2fa_enabled")
-
-    def test_proxy_log_compliance_event(self):
-        log = audit_service.log_compliance_event("gdpr_consent", "ref_002", "Proxy test")
-        self.assertIsInstance(log, ComplianceLog)
-
-
 class TestLog2FAEvent(TestCase):
-
     def test_2fa_disabled_high_severity(self):
         user = _make_user()
         user.two_factor_enabled = False
@@ -317,7 +267,6 @@ class TestLog2FAEvent(TestCase):
 
 
 class TestLogComplianceEvent(TestCase):
-
     def test_success(self):
         user = _make_user()
         req = ComplianceEventRequest(
@@ -334,7 +283,6 @@ class TestLogComplianceEvent(TestCase):
 
 
 class TestGDPRExportService(TestCase):
-
     def test_create_data_export_request_default_scope(self):
         user = _make_user()
         result = GDPRExportService.create_data_export_request(user, request_ip="1.2.3.4")
@@ -356,8 +304,12 @@ class TestGDPRExportService(TestCase):
         export = DataExport.objects.create(
             requested_by=user,
             export_type="gdpr",
-            scope={"include_profile": True, "include_customers": True, "include_tickets": True,
-                   "include_audit_logs": True},
+            scope={
+                "include_profile": True,
+                "include_customers": True,
+                "include_tickets": True,
+                "include_audit_logs": True,
+            },
             status="pending",
             expires_at=timezone.now() + timedelta(days=7),
         )
@@ -385,8 +337,12 @@ class TestGDPRExportService(TestCase):
     def test_get_user_exports(self):
         user = _make_user()
         DataExport.objects.create(
-            requested_by=user, export_type="gdpr", scope={}, status="completed",
-            expires_at=timezone.now() + timedelta(days=7), completed_at=timezone.now(),
+            requested_by=user,
+            export_type="gdpr",
+            scope={},
+            status="completed",
+            expires_at=timezone.now() + timedelta(days=7),
+            completed_at=timezone.now(),
         )
         exports = GDPRExportService.get_user_exports(user)
         self.assertEqual(len(exports), 1)
@@ -410,16 +366,19 @@ class TestGDPRExportService(TestCase):
         # Create customer membership
         from apps.customers.models import Customer  # noqa: PLC0415
         from apps.users.models import CustomerMembership  # noqa: PLC0415
-        customer = Customer.objects.create(
-            company_name="Test SRL", customer_type="business", status="active"
-        )
+
+        customer = Customer.objects.create(company_name="Test SRL", customer_type="business", status="active")
         CustomerMembership.objects.create(customer=customer, user=user, role="owner", is_primary=True)
 
         export = DataExport.objects.create(
             requested_by=user,
             export_type="gdpr",
-            scope={"include_profile": True, "include_customers": True, "include_tickets": True,
-                   "include_audit_logs": True},
+            scope={
+                "include_profile": True,
+                "include_customers": True,
+                "include_tickets": True,
+                "include_audit_logs": True,
+            },
             status="pending",
             expires_at=timezone.now() + timedelta(days=7),
         )
@@ -434,8 +393,12 @@ class TestGDPRExportService(TestCase):
         export = DataExport.objects.create(
             requested_by=user,
             export_type="gdpr",
-            scope={"include_profile": False, "include_customers": False,
-                   "include_tickets": False, "include_audit_logs": False},
+            scope={
+                "include_profile": False,
+                "include_customers": False,
+                "include_tickets": False,
+                "include_audit_logs": False,
+            },
             status="pending",
             expires_at=timezone.now() + timedelta(days=7),
         )
@@ -444,7 +407,6 @@ class TestGDPRExportService(TestCase):
 
 
 class TestGDPRDeletionService(TestCase):
-
     def test_create_deletion_request_anonymize(self):
         user = _make_user()
         result = GDPRDeletionService.create_deletion_request(user, "anonymize", "1.2.3.4", "User request")
@@ -459,6 +421,7 @@ class TestGDPRDeletionService(TestCase):
         user = _make_user()
         from apps.customers.models import Customer  # noqa: PLC0415
         from apps.users.models import CustomerMembership  # noqa: PLC0415
+
         customer = Customer.objects.create(company_name="SRL", customer_type="business", status="active")
         CustomerMembership.objects.create(customer=customer, user=user, role="owner", is_primary=True)
         result = GDPRDeletionService.create_deletion_request(user, "delete", "1.2.3.4")
@@ -546,13 +509,16 @@ class TestGDPRDeletionService(TestCase):
         self.assertTrue(can_delete)
         self.assertIsNone(reason)
 
-    @patch("apps.audit.services.GDPRDeletionService.ANONYMIZATION_MAP", {
-        "email": lambda: "anonymized@example.com",
-        "first_name": lambda: "Anonymized",
-        "last_name": lambda: "User",
-        "phone": lambda: "+40700000000",
-        "ip_address": lambda: "0.0.0.0",
-    })
+    @patch(
+        "apps.audit.services.GDPRDeletionService.ANONYMIZATION_MAP",
+        {
+            "email": lambda: "anonymized@example.com",
+            "first_name": lambda: "Anonymized",
+            "last_name": lambda: "User",
+            "phone": lambda: "+40700000000",
+            "ip_address": lambda: "0.0.0.0",
+        },
+    )
     def test_anonymize_user_data_with_2fa(self):
         user = _make_user()
         user.two_factor_enabled = True
@@ -565,7 +531,6 @@ class TestGDPRDeletionService(TestCase):
 
 
 class TestGDPRConsentService(TestCase):
-
     def test_withdraw_marketing_consent(self):
         user = _make_user()
         user.accepts_marketing = True
@@ -681,7 +646,6 @@ class TestGDPRConsentService(TestCase):
 
 
 class TestAuditIntegrityService(TestCase):
-
     def setUp(self):
         self.user = _make_user()
         self.ct = ContentType.objects.get_for_model(User)
@@ -718,7 +682,8 @@ class TestAuditIntegrityService(TestCase):
         which is what an attacker with database access would actually do.
         """
         event = self._create_event()
-        AuditEvent.objects.filter(pk=event.pk).update(description="TAMPERED — this never happened")
+        with audit_mutation_allowed("test fixture"):
+            AuditEvent.objects.filter(pk=event.pk).update(description="TAMPERED — this never happened")
 
         result = AuditIntegrityService.verify_audit_integrity(
             self.now - timedelta(hours=1), self.now + timedelta(hours=1), "hash_verification"
@@ -748,13 +713,13 @@ class TestAuditIntegrityService(TestCase):
         """Create events with a gap to trigger sequence_gap detection."""
         e1 = self._create_event(session_key="sess1")
         # Update timestamp to 2 hours ago
-        AuditEvent.objects.filter(pk=e1.pk).update(timestamp=self.now - timedelta(hours=3))
+        with audit_mutation_allowed("test fixture"):
+            AuditEvent.objects.filter(pk=e1.pk).update(timestamp=self.now - timedelta(hours=3))
         e2 = self._create_event(session_key="sess1")
-        AuditEvent.objects.filter(pk=e2.pk).update(timestamp=self.now - timedelta(hours=1))
+        with audit_mutation_allowed("test fixture"):
+            AuditEvent.objects.filter(pk=e2.pk).update(timestamp=self.now - timedelta(hours=1))
 
-        result = AuditIntegrityService.verify_audit_integrity(
-            self.now - timedelta(hours=4), self.now, "sequence_check"
-        )
+        result = AuditIntegrityService.verify_audit_integrity(self.now - timedelta(hours=4), self.now, "sequence_check")
         self.assertTrue(result.is_ok())
 
     def test_generate_hash_chain_empty(self):
@@ -800,7 +765,6 @@ class TestAuditIntegrityService(TestCase):
 
 
 class TestAuditRetentionService(TestCase):
-
     def setUp(self):
         self.user = _make_user()
         self.ct = ContentType.objects.get_for_model(User)
@@ -817,26 +781,34 @@ class TestAuditRetentionService(TestCase):
         }
         defaults.update(kwargs)
         event = AuditEvent.objects.create(**defaults)
-        AuditEvent.objects.filter(pk=event.pk).update(
-            timestamp=timezone.now() - timedelta(days=days_ago)
-        )
+        with audit_mutation_allowed("test fixture"):
+            AuditEvent.objects.filter(pk=event.pk).update(timestamp=timezone.now() - timedelta(days=days_ago))
         return event
 
-    def test_apply_retention_policies_archive(self):
-        _policy = AuditRetentionPolicy.objects.create(
-            name="archive_auth", category="authentication", retention_days=30, action="archive", is_active=True
+    def test_apply_retention_policies_unknown_action_is_per_policy_error(self):
+        """A stale action value (e.g. the removed "archive") must be a loud per-policy
+        error, never a silent zero-action pass."""
+        policy = AuditRetentionPolicy.objects.create(
+            name="stale_archive", category="authentication", retention_days=30, action="anonymize", is_active=True
         )
+        # Bypass model validation the way a legacy row would: straight column write.
+        AuditRetentionPolicy.objects.filter(pk=policy.pk).update(action="archive")
         self._create_old_event(days_ago=60)
+
         result = AuditRetentionService.apply_retention_policies()
         self.assertTrue(result.is_ok())
         data = result.unwrap()
-        self.assertEqual(data["policies_applied"], 1)
-        self.assertGreaterEqual(data["events_archived"], 1)
+        self.assertEqual(len(data["errors"]), 1)
+        self.assertIn("archive", data["errors"][0])
 
     def test_apply_retention_policies_delete_non_mandatory(self):
         _policy = AuditRetentionPolicy.objects.create(
-            name="delete_auth", category="authentication", retention_days=30, action="delete",
-            is_active=True, is_mandatory=False,
+            name="delete_auth",
+            category="authentication",
+            retention_days=30,
+            action="delete",
+            is_active=True,
+            is_mandatory=False,
         )
         self._create_old_event(days_ago=60)
         result = AuditRetentionService.apply_retention_policies()
@@ -844,55 +816,109 @@ class TestAuditRetentionService(TestCase):
         data = result.unwrap()
         self.assertGreaterEqual(data["events_deleted"], 1)
 
-    def test_apply_retention_policies_delete_mandatory_blocked(self):
+    def test_mandatory_policy_executes_after_retention(self):
+        """W6 semantics flip: is_mandatory protects the POLICY from weaker replacement;
+        it does not stop the action from running. The old code returned 0 for mandatory
+        delete policies, which meant the legally mandated cleanup never happened."""
         _policy = AuditRetentionPolicy.objects.create(
-            name="delete_mandatory", category="authentication", retention_days=30, action="delete",
-            is_active=True, is_mandatory=True,
+            name="delete_mandatory",
+            category="authentication",
+            retention_days=30,
+            action="delete",
+            is_active=True,
+            is_mandatory=True,
         )
         self._create_old_event(days_ago=60)
         result = AuditRetentionService.apply_retention_policies()
         self.assertTrue(result.is_ok())
         data = result.unwrap()
-        self.assertEqual(data["events_deleted"], 0)
+        self.assertEqual(data["events_deleted"], 1)
 
     def test_apply_retention_policies_anonymize(self):
         _policy = AuditRetentionPolicy.objects.create(
             name="anonymize_auth", category="authentication", retention_days=30, action="anonymize", is_active=True
         )
-        event = self._create_old_event(days_ago=60, ip_address="1.2.3.4", user_agent="TestBrowser")
+        event = self._create_old_event(
+            days_ago=60, ip_address="1.2.3.4", user_agent="TestBrowser", request_id="req-1", session_key="sess-1"
+        )
         result = AuditRetentionService.apply_retention_policies()
         self.assertTrue(result.is_ok())
         data = result.unwrap()
         self.assertGreaterEqual(data["events_anonymized"], 1)
         event.refresh_from_db()
-        self.assertEqual(event.ip_address, "0.0.0.0")
+        # Explicit post-anonymization invariant (Codex C3)
+        self.assertIsNone(event.user_id)
+        self.assertIsNone(event.ip_address)
+        self.assertEqual(event.user_agent, "")
+        self.assertEqual(event.request_id, "")
+        self.assertEqual(event.session_key, "")
+        self.assertEqual(event.object_id, "anonymized")  # User content type is person-bearing
+        self.assertEqual(event.description, "Anonymized under retention policy")
+        self.assertTrue(event.metadata["anonymized"])
+
+    def test_anonymized_row_restamped_and_verifies(self):
+        """The scrub itself must not read as tampering on the next sweep."""
+        _policy = AuditRetentionPolicy.objects.create(
+            name="anonymize_auth", category="authentication", retention_days=30, action="anonymize", is_active=True
+        )
+        event = self._create_old_event(days_ago=60, ip_address="1.2.3.4")
+        AuditRetentionService.apply_retention_policies()
+        event.refresh_from_db()
+        self.assertEqual(AuditIntegrityService._verify_hash_chain([event]), [])
+
+    def test_anonymize_is_idempotent(self):
+        """W4: a second run performs zero mutations and emits no completion event."""
+        _policy = AuditRetentionPolicy.objects.create(
+            name="anonymize_auth", category="authentication", retention_days=30, action="anonymize", is_active=True
+        )
+        self._create_old_event(days_ago=60)
+        first = AuditRetentionService.apply_retention_policies().unwrap()
+        self.assertEqual(first["events_anonymized"], 1)
+
+        completion_count = AuditEvent.objects.filter(action="data_anonymization_completed").count()
+        second = AuditRetentionService.apply_retention_policies().unwrap()
+        self.assertEqual(second["events_anonymized"], 0)
+        self.assertEqual(second["events_processed"], 0)
+        self.assertEqual(AuditEvent.objects.filter(action="data_anonymization_completed").count(), completion_count)
 
     def test_apply_retention_policies_with_severity_filter(self):
         _policy = AuditRetentionPolicy.objects.create(
-            name="archive_low", category="authentication", severity="low",
-            retention_days=30, action="archive", is_active=True,
+            name="delete_low",
+            category="authentication",
+            severity="low",
+            retention_days=30,
+            action="delete",
+            is_active=True,
         )
         self._create_old_event(days_ago=60, severity="low")
         self._create_old_event(days_ago=60, severity="high")
         result = AuditRetentionService.apply_retention_policies()
         self.assertTrue(result.is_ok())
         data = result.unwrap()
-        self.assertEqual(data["events_archived"], 1)
+        self.assertEqual(data["events_deleted"], 1)
 
     def test_apply_retention_policies_no_events_to_process(self):
         AuditRetentionPolicy.objects.create(
-            name="empty_policy", category="authentication", retention_days=30, action="archive", is_active=True,
+            name="empty_policy",
+            category="authentication",
+            retention_days=30,
+            action="anonymize",
+            is_active=True,
         )
         result = AuditRetentionService.apply_retention_policies()
         self.assertTrue(result.is_ok())
         data = result.unwrap()
         self.assertEqual(data["events_processed"], 0)
 
-    def test_delete_events_financial_records_blocked(self):
-        """Financial records should be excluded from deletion."""
+    def test_delete_events_financial_records_blocked_inside_legal_minimum(self):
+        """Financial evidence younger than the legal minimum survives the policy window."""
         _policy = AuditRetentionPolicy.objects.create(
-            name="delete_biz", category="business_operation", retention_days=30, action="delete",
-            is_active=True, is_mandatory=False,
+            name="delete_biz",
+            category="business_operation",
+            retention_days=30,
+            action="delete",
+            is_active=True,
+            is_mandatory=False,
         )
         self._create_old_event(days_ago=60, action="invoice_created", category="business_operation")
         result = AuditRetentionService.apply_retention_policies()
@@ -900,20 +926,47 @@ class TestAuditRetentionService(TestCase):
         data = result.unwrap()
         self.assertEqual(data["events_deleted"], 0)
 
-    def test_anonymize_events_with_sensitive_metadata(self):
+    def test_delete_events_financial_records_deletable_past_legal_minimum(self):
+        """W5 boundary: financial evidence OLDER than the legal minimum is deletable -
+        the guard is an effective cutoff, not an immortality clause."""
         _policy = AuditRetentionPolicy.objects.create(
-            name="anon_test", category="authentication", retention_days=30, action="anonymize", is_active=True,
+            name="delete_biz",
+            category="business_operation",
+            retention_days=30,
+            action="delete",
+            is_active=True,
+        )
+        self._create_old_event(
+            days_ago=AuditRetentionService.FINANCIAL_RETENTION_MINIMUM_DAYS + 30,
+            action="invoice_created",
+            category="business_operation",
+        )
+        result = AuditRetentionService.apply_retention_policies()
+        data = result.unwrap()
+        self.assertEqual(data["events_deleted"], 1)
+
+    def test_anonymize_events_with_sensitive_metadata(self):
+        """Metadata survives by ALLOWLIST only - unenumerated keys are dropped, not
+        scrubbed in place (a blocklist retains anything nobody thought of)."""
+        _policy = AuditRetentionPolicy.objects.create(
+            name="anon_test",
+            category="authentication",
+            retention_days=30,
+            action="anonymize",
+            is_active=True,
         )
         event = self._create_old_event(
             days_ago=60,
-            metadata={"user_email": "test@example.com", "phone": "123", "normal_key": "keep"},
+            metadata={"user_email": "test@example.com", "phone": "123", "source_app": "users"},
         )
         result = AuditRetentionService.apply_retention_policies()
         self.assertTrue(result.is_ok())
         event.refresh_from_db()
-        self.assertEqual(event.metadata["user_email"], "Anonymized")
-        self.assertEqual(event.metadata["phone"], "Anonymized")
+        self.assertNotIn("user_email", event.metadata)
+        self.assertNotIn("phone", event.metadata)
+        self.assertEqual(event.metadata["source_app"], "users")  # allowlisted operational key
         self.assertTrue(event.metadata["anonymized"])
+        self.assertNotIn("test@example.com", str(event.metadata))
 
     def test_is_financial_record(self):
         ct = ContentType.objects.get_for_model(User)
@@ -921,12 +974,15 @@ class TestAuditRetentionService(TestCase):
         self.assertTrue(AuditRetentionService._is_financial_record(event))
         event2 = AuditEvent(action="login_success", category="authentication", content_type=ct, object_id="1")
         self.assertFalse(AuditRetentionService._is_financial_record(event2))
+        # The category catch-all is gone: business_operation alone is not financial
         event3 = AuditEvent(action="random_action", category="business_operation", content_type=ct, object_id="1")
-        self.assertTrue(AuditRetentionService._is_financial_record(event3))
+        self.assertFalse(AuditRetentionService._is_financial_record(event3))
+        # Document prefixes are
+        event4 = AuditEvent(action="efactura_submitted", category="integration", content_type=ct, object_id="1")
+        self.assertTrue(AuditRetentionService._is_financial_record(event4))
 
 
 class TestAuditSearchService(TestCase):
-
     def setUp(self):
         self.user = _make_user(is_staff=True)
         self.ct = ContentType.objects.get_for_model(User)
@@ -949,8 +1005,12 @@ class TestAuditSearchService(TestCase):
     def test_build_advanced_query_basic_filters(self):
         self._create_event()
         qs, info = AuditSearchService.build_advanced_query(
-            {"user_ids": [self.user.id], "actions": ["login_success"], "categories": ["authentication"],
-             "severities": ["medium"]},
+            {
+                "user_ids": [self.user.id],
+                "actions": ["login_success"],
+                "categories": ["authentication"],
+                "severities": ["medium"],
+            },
             self.user,
         )
         self.assertGreaterEqual(qs.count(), 1)
@@ -1094,7 +1154,6 @@ class TestAuditSearchService(TestCase):
 
 
 class TestSecurityAuditService(TestCase):
-
     def test_log_rate_limit_event_authenticated(self):
         user = _make_user()
         event_data = {
@@ -1123,7 +1182,6 @@ class TestSecurityAuditService(TestCase):
 
 
 class TestIntegrationsAuditService(TestCase):
-
     def setUp(self):
         self.user = _make_user()
 
@@ -1185,9 +1243,7 @@ class TestIntegrationsAuditService(TestCase):
 
     def test_log_webhook_failure_basic(self):
         wh = self._make_webhook_event(error_message="Connection timeout")
-        event = IntegrationsAuditService.log_webhook_failure(
-            wh, {"error_type": "timeout", "category": "network_error"}
-        )
+        event = IntegrationsAuditService.log_webhook_failure(wh, {"error_type": "timeout", "category": "network_error"})
         self.assertEqual(event.action, "webhook_delivery_failure")
 
     def test_log_webhook_failure_max_retries(self):
@@ -1205,7 +1261,10 @@ class TestIntegrationsAuditService(TestCase):
     def test_log_webhook_retry_exhausted(self):
         wh = self._make_webhook_event(retry_count=5)
         event = IntegrationsAuditService.log_webhook_retry_exhausted(
-            wh, 5, "Max retries reached", reliability_impact={"sla_breach": True, "customer_impact_level": "high", "customer_visible": True}
+            wh,
+            5,
+            "Max retries reached",
+            reliability_impact={"sla_breach": True, "customer_impact_level": "high", "customer_visible": True},
         )
         self.assertEqual(event.action, "webhook_retry_exhausted")
 
@@ -1221,7 +1280,6 @@ class TestIntegrationsAuditService(TestCase):
 
 
 class TestTicketsAuditService(TestCase):
-
     def setUp(self):
         self.user = _make_user()
 
@@ -1307,7 +1365,6 @@ class TestTicketsAuditService(TestCase):
 
 
 class TestProductsAuditService(TestCase):
-
     def setUp(self):
         self._user = _make_user()
 
@@ -1338,9 +1395,7 @@ class TestProductsAuditService(TestCase):
 
     def test_log_product_created_with_romanian_context(self):
         product = self._make_product()
-        event = ProductsAuditService.log_product_created(
-            product, romanian_business_context={"vat_rate": 19}
-        )
+        event = ProductsAuditService.log_product_created(product, romanian_business_context={"vat_rate": 19})
         self.assertIn("romanian_context", event.metadata)
 
     def test_log_product_availability_changed(self):
@@ -1371,9 +1426,7 @@ class TestProductsAuditService(TestCase):
         price.semiannual_discount_percent = Decimal("0.00")
         price.annual_discount_percent = Decimal("0.00")
 
-        event = ProductsAuditService.log_product_pricing_changed(
-            price, "price_created", {}
-        )
+        event = ProductsAuditService.log_product_pricing_changed(price, "price_created", {})
         self.assertEqual(event.action, "product_pricing_changed")
         self.assertIn("New pricing created", event.description)
 
@@ -1398,8 +1451,11 @@ class TestProductsAuditService(TestCase):
 
         changes = {
             "price_changed": {
-                "from_amount": 50, "to_amount": 60, "percent_change": 20.0,
-                "price_increased": True, "significant": True,
+                "from_amount": 50,
+                "to_amount": 60,
+                "percent_change": 20.0,
+                "price_increased": True,
+                "significant": True,
             }
         }
         event = ProductsAuditService.log_product_pricing_changed(price, "price_updated", changes)
@@ -1430,7 +1486,6 @@ class TestProductsAuditService(TestCase):
 
 
 class TestDomainsAuditService(TestCase):
-
     def setUp(self):
         self._user = _make_user()
 
@@ -1495,9 +1550,7 @@ class TestDomainsAuditService(TestCase):
         registrar.is_active = True
         registrar.supported_tlds = Mock()
         registrar.supported_tlds.all.return_value = []
-        event = DomainsAuditService.log_registrar_event(
-            "api_credentials_updated", registrar, security_sensitive=True
-        )
+        event = DomainsAuditService.log_registrar_event("api_credentials_updated", registrar, security_sensitive=True)
         self.assertIn("[SECURITY]", event.description)
         self.assertEqual(event.metadata["api_url"], "[REDACTED]")
 
@@ -1516,14 +1569,11 @@ class TestDomainsAuditService(TestCase):
 
     def test_log_domain_security_event(self):
         domain = self._make_domain()
-        event = DomainsAuditService.log_domain_security_event(
-            "epp_code_generated", domain, "epp_code_generation"
-        )
+        event = DomainsAuditService.log_domain_security_event("epp_code_generated", domain, "epp_code_generation")
         self.assertEqual(event.action, "epp_code_generated")
 
 
 class TestCustomersAuditService(TestCase):
-
     def setUp(self):
         self._user = _make_user()
 
@@ -1564,8 +1614,11 @@ class TestCustomersAuditService(TestCase):
         customer = self._make_customer_mock()
         user = _make_user()
         event = CustomersAuditService.log_customer_event(
-            "customer_updated", customer, user=user,
-            old_values={"status": "pending"}, new_values={"status": "active"},
+            "customer_updated",
+            customer,
+            user=user,
+            old_values={"status": "pending"},
+            new_values={"status": "active"},
             description="Customer activated",
         )
         self.assertEqual(event.old_values, {"status": "pending"})
@@ -1652,7 +1705,6 @@ class TestCustomersAuditService(TestCase):
 
 
 class TestProvisioningAuditService(TestCase):
-
     def setUp(self):
         self._user = _make_user()
 
@@ -1854,24 +1906,28 @@ class TestSettingsServiceHelpers(TestCase):
     @patch("apps.settings.services.SettingsService.get_integer_setting", return_value=10)
     def test_get_high_complexity_filter_threshold(self, mock_get):
         from apps.audit.services import get_high_complexity_filter_threshold  # noqa: PLC0415
+
         result = get_high_complexity_filter_threshold()
         self.assertEqual(result, 10)
 
     @patch("apps.settings.services.SettingsService.get_integer_setting", return_value=300)
     def test_get_webhook_healthy_response_threshold(self, mock_get):
         from apps.audit.services import get_webhook_healthy_response_threshold  # noqa: PLC0415
+
         result = get_webhook_healthy_response_threshold()
         self.assertEqual(result, 300)
 
     @patch("apps.settings.services.SettingsService.get_integer_setting", return_value=5)
     def test_get_webhook_max_retry_threshold(self, mock_get):
         from apps.audit.services import get_webhook_max_retry_threshold  # noqa: PLC0415
+
         result = get_webhook_max_retry_threshold()
         self.assertEqual(result, 5)
 
     @patch("apps.settings.services.SettingsService.get_integer_setting", return_value=3)
     def test_get_webhook_suspicious_retry_threshold(self, mock_get):
         from apps.audit.services import get_webhook_suspicious_retry_threshold  # noqa: PLC0415
+
         result = get_webhook_suspicious_retry_threshold()
         self.assertEqual(result, 3)
 
@@ -1885,9 +1941,7 @@ class TestAuthenticationAuditServiceAdditional(TestCase):
         request.META = {"HTTP_USER_AGENT": "TestBrowser/1.0"}
         request.session = Mock(session_key="sess_123")
         with patch("apps.audit.services.get_safe_client_ip", return_value="10.0.0.1"):
-            event = AuthenticationAuditService.log_login_success(
-                AuthenticationEventData(user=user, request=request)
-            )
+            event = AuthenticationAuditService.log_login_success(AuthenticationEventData(user=user, request=request))
         self.assertEqual(event.action, "login_success")
         self.assertIn("user_agent_info", event.metadata)
 
@@ -1913,9 +1967,7 @@ class TestAuthenticationAuditServiceAdditional(TestCase):
         self.assertFalse(event.metadata["attempted_email_format_valid"])
 
     def test_log_login_failed_no_email(self):
-        event = AuthenticationAuditService.log_login_failed(
-            LoginFailureEventData(email=None, failure_reason="unknown")
-        )
+        event = AuthenticationAuditService.log_login_failed(LoginFailureEventData(email=None, failure_reason="unknown"))
         self.assertEqual(event.action, "login_failed")
 
     def test_log_logout_with_request(self):
@@ -1931,25 +1983,19 @@ class TestAuthenticationAuditServiceAdditional(TestCase):
 
     def test_log_logout_session_expired(self):
         user = _make_user()
-        event = AuthenticationAuditService.log_logout(
-            LogoutEventData(user=user, logout_reason="session_expired")
-        )
+        event = AuthenticationAuditService.log_logout(LogoutEventData(user=user, logout_reason="session_expired"))
         self.assertEqual(event.action, "logout_session_expired")
 
     def test_log_logout_concurrent_session(self):
         user = _make_user()
-        event = AuthenticationAuditService.log_logout(
-            LogoutEventData(user=user, logout_reason="concurrent_session")
-        )
+        event = AuthenticationAuditService.log_logout(LogoutEventData(user=user, logout_reason="concurrent_session"))
         self.assertEqual(event.action, "logout_concurrent_session")
 
     def test_log_logout_with_last_login(self):
         user = _make_user()
         user.last_login = timezone.now() - timedelta(hours=2)
         user.save()
-        event = AuthenticationAuditService.log_logout(
-            LogoutEventData(user=user, logout_reason="manual")
-        )
+        event = AuthenticationAuditService.log_logout(LogoutEventData(user=user, logout_reason="manual"))
         self.assertIn("duration_seconds", event.metadata["session_info"])
 
     def test_log_account_locked_with_request(self):
@@ -1967,8 +2013,11 @@ class TestAuthenticationAuditServiceAdditional(TestCase):
         with patch("apps.audit.services.get_safe_client_ip", return_value="10.0.0.5"):
             event = AuthenticationAuditService.log_session_rotation(
                 SessionRotationEventData(
-                    user=user, reason="security_upgrade", request=request,
-                    old_session_key="old_sess", new_session_key="new_sess",
+                    user=user,
+                    reason="security_upgrade",
+                    request=request,
+                    old_session_key="old_sess",
+                    new_session_key="new_sess",
                 )
             )
         self.assertEqual(event.action, "session_rotation")
