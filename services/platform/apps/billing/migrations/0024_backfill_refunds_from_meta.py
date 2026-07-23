@@ -49,6 +49,35 @@ def _get_legacy_refund_entries(entity, entity_field: str) -> tuple[dict, list]:
     return meta, legacy_refunds
 
 
+def _gateway_refund_state(refund_model, entity_filter: dict, gateway_refund_id: str) -> str:
+    """Classify an existing gateway ID as completed, conflicting, or absent."""
+    gateway_matches = refund_model.objects.filter(gateway_refund_id=gateway_refund_id)
+    if gateway_matches.filter(**entity_filter, status="completed").exists():
+        return "completed"
+    if gateway_matches.exists():
+        return "conflicting"
+    return "absent"
+
+
+def _legacy_refund_reconciliation_state(
+    refund_model,
+    entity_filter: dict,
+    entry: dict,
+    existing_amount_counts: Counter,
+    legacy_amount_occurrences: Counter,
+) -> str:
+    """Return completed, conflicting, or absent for one legacy entry."""
+    gateway_refund_id = entry.get("refund_id", "")
+    if gateway_refund_id:
+        return _gateway_refund_state(refund_model, entity_filter, gateway_refund_id)
+
+    amount_cents = entry["amount_cents"]
+    legacy_amount_occurrences[amount_cents] += 1
+    if legacy_amount_occurrences[amount_cents] <= existing_amount_counts[amount_cents]:
+        return "completed"
+    return "absent"
+
+
 def _backfill_entity_refunds(refund_model, entity, entity_field: str, ron_currency) -> int:
     """
     Process one Order or Invoice entity.
@@ -69,7 +98,7 @@ def _backfill_entity_refunds(refund_model, entity, entity_field: str, ron_curren
     created_count = 0
     entity_filter = {entity_field: entity}
     existing_amount_counts = Counter(
-        refund_model.objects.filter(**entity_filter).values_list("amount_cents", flat=True)
+        refund_model.objects.filter(**entity_filter, status="completed").values_list("amount_cents", flat=True)
     )
     legacy_amount_occurrences: Counter[int] = Counter()
     unresolved_entries = []
@@ -96,23 +125,22 @@ def _backfill_entity_refunds(refund_model, entity, entity_field: str, ron_curren
             unresolved_entries.append(entry)
             continue
 
-        # Dedupe exact gateway IDs. Without an ID, preserve multiplicity: each
-        # pre-existing same-amount row consumes at most one legacy entry.
         gateway_refund_id = entry.get("refund_id", "")
-        if gateway_refund_id:
-            already_reconciled = refund_model.objects.filter(
-                **entity_filter,
-                gateway_refund_id=gateway_refund_id,
-            ).exists()
-        else:
-            legacy_amount_occurrences[amount_cents] += 1
-            already_reconciled = (
-                legacy_amount_occurrences[amount_cents] <= existing_amount_counts[amount_cents]
-            )
-
-        if already_reconciled:
-            logger.info(
-                "Skipping duplicate meta.refunds entry on %s id=%s (refund_id=%s, amount_cents=%s)",
+        # Dedupe exact gateway IDs. Without an ID, preserve multiplicity: each
+        # pre-existing completed same-amount row consumes at most one legacy entry.
+        reconciliation_state = _legacy_refund_reconciliation_state(
+            refund_model,
+            entity_filter,
+            entry,
+            existing_amount_counts,
+            legacy_amount_occurrences,
+        )
+        if reconciliation_state != "absent":
+            unresolved_entries.extend({"completed": [], "conflicting": [entry]}[reconciliation_state])
+            logger.log(
+                {"completed": logging.INFO, "conflicting": logging.WARNING}[reconciliation_state],
+                "Skipping %s meta.refunds entry on %s id=%s (refund_id=%s, amount_cents=%s)",
+                reconciliation_state,
                 entity_field,
                 entity.pk,
                 gateway_refund_id or "N/A",

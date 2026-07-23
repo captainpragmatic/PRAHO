@@ -1953,6 +1953,7 @@ class TestBackfillRefundsFromMeta(TestCase):
             original_amount_cents=10000,
             reference_number=f"REF-{uuid.uuid4().hex[:8]}",
             reason="customer_request",
+            status="completed",
         )
 
         self._forward()
@@ -1994,11 +1995,76 @@ class TestBackfillRefundsFromMeta(TestCase):
             original_amount_cents=10000,
             reference_number=f"REF-{uuid.uuid4().hex[:8]}",
             reason="customer_request",
+            status="completed",
         )
 
         self._forward()
 
         assert Refund.objects.filter(order=order, amount_cents=2500).count() == 2
+
+    def test_backfill_does_not_reconcile_against_unsettled_same_amount_row(self):
+        """A failed attempt is not evidence that the historical refund settled."""
+        order = _make_order(self.customer, self.currency, status="completed", total_cents=10000)
+        Order.objects.filter(pk=order.pk).update(
+            meta={"refunds": [{"amount_cents": 2500, "reason": "customer_request"}]}
+        )
+        Refund.objects.create(
+            customer=self.customer,
+            order=order,
+            amount_cents=2500,
+            currency=self.currency,
+            original_amount_cents=10000,
+            reference_number=f"REF-{uuid.uuid4().hex[:8]}",
+            reason="customer_request",
+            status="failed",
+        )
+
+        self._forward()
+
+        assert Refund.objects.filter(order=order, amount_cents=2500).count() == 2
+        assert Refund.objects.filter(order=order, amount_cents=2500, status="completed").count() == 1
+        order.refresh_from_db()
+        assert "refunds" not in order.meta
+
+    def test_backfill_does_not_reconcile_gateway_id_against_unsettled_row(self):
+        """A gateway ID on a failed attempt must not erase completed legacy evidence."""
+        order = _make_order(self.customer, self.currency, status="completed", total_cents=10000)
+        conflicted_entry = {
+            "amount_cents": 2500,
+            "reason": "customer_request",
+            "refund_id": "re_legacy_settled",
+        }
+        Order.objects.filter(pk=order.pk).update(
+            meta={
+                "refunds": [
+                    conflicted_entry,
+                    {
+                        "amount_cents": 1000,
+                        "reason": "customer_request",
+                        "refund_id": "re_independent",
+                    },
+                ]
+            }
+        )
+        Refund.objects.create(
+            customer=self.customer,
+            order=order,
+            amount_cents=2500,
+            currency=self.currency,
+            original_amount_cents=10000,
+            reference_number=f"REF-{uuid.uuid4().hex[:8]}",
+            gateway_refund_id="re_legacy_settled",
+            reason="customer_request",
+            status="failed",
+        )
+
+        self._forward()
+
+        assert Refund.objects.filter(order=order, gateway_refund_id="re_legacy_settled").count() == 1
+        assert not Refund.objects.filter(order=order, gateway_refund_id="re_legacy_settled", status="completed").exists()
+        assert Refund.objects.filter(order=order, gateway_refund_id="re_independent", status="completed").exists()
+        order.refresh_from_db()
+        assert order.meta["refunds"] == [conflicted_entry]
 
     def test_corrective_migration_reconciles_meta_left_by_applied_migration(self):
         """The forward repair reprocesses evidence that 0024 left behind."""
@@ -2014,6 +2080,7 @@ class TestBackfillRefundsFromMeta(TestCase):
             original_amount_cents=10000,
             reference_number=f"REF-{uuid.uuid4().hex[:8]}",
             reason="customer_request",
+            status="completed",
         )
 
         self._corrective_forward()
