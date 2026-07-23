@@ -103,8 +103,11 @@ class OrderTotalsLockTestCase(_OrderTotalsFixture, TestCase):
     def test_item_delete_recompute_uses_the_committed_discount(self) -> None:
         """Deleting an item on a stale Order reflects the committed discount."""
         extra = self._add_item(self.order, unit_price_cents=5000)
+        stale_extra = OrderItem.objects.get(pk=extra.pk)
+        # Populate the FK cache BEFORE the promotion commits, so the deletion signal's
+        # `instance.order` is genuinely stale — a post-commit lazy load would defeat the test.
+        self.assertEqual(stale_extra.order.discount_cents, 0)
         Order.objects.filter(pk=self.order.pk).update(discount_cents=2000)
-        stale_extra = OrderItem.objects.get(pk=extra.pk)  # its .order is a fresh-but-soon-stale load
 
         stale_extra.delete()  # fires handle_order_item_deletion -> calculate_totals()
 
