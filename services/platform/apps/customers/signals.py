@@ -299,16 +299,19 @@ def handle_tax_profile_changes(
 
     except Exception as e:
         logger.exception(f"🔥 [Customer Signal] Failed to handle tax profile change: {e}")
+    finally:
+        # The snapshot belongs to one save only. Reusing a model instance must
+        # never attribute an earlier tax change to a later unrelated save.
+        instance.__dict__.pop("_original_tax_values", None)
 
 
 @receiver(pre_save, sender=CustomerTaxProfile)
 def store_original_tax_values(sender: type[CustomerTaxProfile], instance: CustomerTaxProfile, **kwargs: Any) -> None:
     """Store original tax profile values for comparison"""
     try:
-        update_fields = kwargs.get("update_fields")
-        if update_fields and set(update_fields).issubset({"updated_at"}):
-            return
-
+        # No update_fields shortcut here: skipping the refresh would leave the
+        # PREVIOUS save's snapshot on the instance, and the post_save comparison
+        # would re-run VIES/compliance side effects on a timestamp-only save.
         if instance.pk:
             try:
                 original = CustomerTaxProfile.objects.get(pk=instance.pk)
@@ -383,6 +386,10 @@ def handle_billing_profile_changes(
 
     except Exception as e:
         logger.exception(f"🔥 [Customer Signal] Failed to handle billing profile change: {e}")
+    finally:
+        # One-save snapshot: never let a later unrelated save on the same
+        # instance replay this save's change detection.
+        instance.__dict__.pop("_original_billing_values", None)
 
 
 @receiver(pre_save, sender=CustomerBillingProfile)
@@ -391,10 +398,8 @@ def store_original_billing_values(
 ) -> None:
     """Store original billing profile values for comparison"""
     try:
-        update_fields = kwargs.get("update_fields")
-        if update_fields and set(update_fields).issubset({"updated_at"}):
-            return
-
+        # No update_fields shortcut here — a stale snapshot would let a later
+        # timestamp-only save re-fire credit-limit/payment-terms alerts.
         if instance.pk:
             try:
                 original = CustomerBillingProfile.objects.get(pk=instance.pk)

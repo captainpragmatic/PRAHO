@@ -61,7 +61,9 @@ class CustomerTaxProfileSignalRegressionTests(TestCase):
             profile.vat_number = "DE123456789"
             profile.save(update_fields=["vat_number"])
 
-        audit_tax_profile.assert_called_once()
+        # Romanian registrations write the ComplianceLog only — the AuditEvent
+        # would restate it (#241 dedup, landed with the audit module).
+        audit_tax_profile.assert_not_called()
         validate_cui.assert_not_called()
         validate_vat.assert_called_once_with(profile)
         compliance_audit.assert_called_once()
@@ -84,7 +86,7 @@ class CustomerTaxProfileSignalRegressionTests(TestCase):
                 ]
             )
 
-        audit_tax_profile.assert_called_once()
+        audit_tax_profile.assert_not_called()  # RO registration: ComplianceLog only (#241 dedup)
         validate_cui.assert_not_called()
         validate_vat.assert_not_called()
         compliance_audit.assert_called_once()
@@ -102,6 +104,38 @@ class CustomerTaxProfileSignalRegressionTests(TestCase):
             profile.save(update_fields=["vat_number"])
             profile.save(update_fields=["updated_at"])
 
-        self.assertEqual(audit_tax_profile.call_count, 1)
+        # The timestamp-only save must not re-fire any side effect: the pre-save
+        # snapshot is refreshed per save, so counts stay at the first save's values.
+        self.assertEqual(audit_tax_profile.call_count, 0)  # RO registration: ComplianceLog only
         self.assertEqual(validate_vat.call_count, 1)
         self.assertEqual(compliance_audit.call_count, 1)
+
+    def test_non_romanian_profile_change_writes_one_audit_event(self) -> None:
+        """Non-RO registrations have no ComplianceLog path — they keep the AuditEvent."""
+        with (
+            patch("apps.audit.services.CustomersAuditService.log_tax_profile_event"),
+            patch("apps.customers.signals._validate_romanian_cui"),
+            patch("apps.customers.signals._trigger_vat_validation"),
+            patch("apps.customers.signals.AuditService.log_compliance_event"),
+        ):
+            profile = CustomerTaxProfile.objects.create(
+                customer=self.customer,
+                cui="",
+                vat_number="DE999999999",
+                is_vat_payer=True,
+                vat_rate=Decimal("19.00"),
+            )
+
+        with (
+            patch("apps.audit.services.CustomersAuditService.log_tax_profile_event") as audit_tax_profile,
+            patch("apps.customers.signals._validate_romanian_cui") as validate_cui,
+            patch("apps.customers.signals._trigger_vat_validation") as validate_vat,
+            patch("apps.customers.signals.AuditService.log_compliance_event") as compliance_audit,
+        ):
+            profile.vat_number = "DE123456789"
+            profile.save(update_fields=["vat_number"])
+
+        audit_tax_profile.assert_called_once()
+        validate_cui.assert_not_called()
+        validate_vat.assert_called_once_with(profile)
+        compliance_audit.assert_not_called()
