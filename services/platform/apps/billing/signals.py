@@ -22,7 +22,6 @@ from django.conf import settings
 from django.core.cache import cache
 from django.core.files.storage import default_storage
 from django.db import transaction
-from django.db.models import Sum
 from django.db.models.signals import post_delete, post_save, pre_delete, pre_save
 from django.dispatch import receiver
 from django.utils import timezone
@@ -1276,24 +1275,8 @@ def _handle_payment_failure(payment: Payment) -> None:
 
 
 def _handle_payment_refund(payment: Payment) -> None:
-    """Handle payment refund completion"""
+    """Send Payment-level side effects; RefundService owns Invoice projection."""
     try:
-        if payment.invoice:
-            refunded_amount = payment.invoice.payments.filter(status="refunded").aggregate(
-                total=Sum("amount_cents", default=0)
-            )["total"]
-            if refunded_amount >= payment.invoice.total_cents:
-                try:
-                    payment.invoice.refund_invoice()
-                except TransitionNotAllowed:
-                    logger.warning(
-                        "⚠️ [Invoice Signal] Cannot mark invoice %s as refunded from status '%s'",
-                        payment.invoice.number,
-                        payment.invoice.status,
-                    )
-                else:
-                    payment.invoice.save(update_fields=["status"])
-
         # Email deferred to post-commit
         transaction.on_commit(lambda p=payment: _send_payment_refund_email(p))
 

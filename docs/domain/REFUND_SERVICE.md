@@ -10,9 +10,11 @@ funds have settled.
 
 ## 🚨 Critical Safety Features
 
-- **Atomic Transactions**: All refund operations use `@transaction.atomic` to prevent partial refunds
+- **Durable Commands**: PRAHO commits a Refund intent before calling Stripe, then settles local state in a separate atomic phase
 - **Canonical Lock Order**: Refund paths lock Payment → Invoice → Order → Refund to avoid cross-flow deadlocks
 - **Double Refund Prevention**: Pending and settled refund reservations both reduce the available refundable amount
+- **Stable Gateway Idempotency**: Stripe keys use `refund:{refund_uuid}`, never mutable payment-ledger totals
+- **Fail-Closed Gateway Boundary**: Gateway refunds without a durable Refund intent are rejected
 - **Amount Validation**: Ensures refund amounts don't exceed available amounts
 - **Gateway Convergence**: Stripe webhooks and the scheduled sweep share one idempotent convergence service
 - **Gateway Identity Integrity**: A non-empty gateway refund ID is unique in the PRAHO ledger
@@ -74,6 +76,10 @@ The only service allowed to project Stripe refund facts into PRAHO:
 - ignores stale gateway events using an event-time watermark
 - treats duplicate webhook delivery and scheduled discovery as idempotent
 - projects only completed refund totals onto Payment and Invoice
+
+`RefundService._project_settled_refunds()` is the sole owner of coarse Payment
+and Invoice refund-state projection. The Payment `post_save` signal sends
+notifications only; it never derives Invoice status from Payment rows.
 
 Stripe `refund.created`, `refund.updated`, `refund.failed`,
 `charge.refund.updated`, and legacy `charge.refunded` events route through
@@ -187,10 +193,10 @@ Refund status is tracked on Invoice (not Order). The table below reflects Invoic
 When refunding an **order**:
 1. Resolve the authoritative Payment and its invoice/proforma linkage
 2. Lock Payment, then Invoice, then Order
-3. Reserve the amount against pending and settled refunds
-4. Submit the exact cent amount and currency to the gateway with an idempotency key
-5. Create a Refund ledger row with the gateway refund ID
-6. Project Payment and Invoice status only when the gateway status is `succeeded`
+3. Create and commit a pending Refund row that reserves the exact amount
+4. Submit that command to the gateway with `refund:{refund_uuid}` as its idempotency key
+5. Atomically attach the gateway refund ID and advance the Refund FSM
+6. Project Payment and Invoice status from completed Refund rows only
 
 When refunding an **invoice**:
 1. Resolve and lock its authoritative Payment before the Invoice
@@ -200,7 +206,12 @@ Gateway `pending` and `requires_action` results remain non-terminal and do
 not reduce the settled Payment or Invoice balance. Gateway `failed`,
 `canceled`, and locally rejected refunds release the reservation. A later
 webhook or reconciliation sweep can advance the same Refund without creating a
-second ledger entry.
+second ledger entry. If PRAHO loses the gateway response or rolls back local
+settlement, the committed blank-ID intent remains reserved. A retry reuses its
+UUID and Stripe key; gateway discovery attaches matching facts to that same row.
+Ambiguous matches fail closed for manual reconciliation. PRAHO also refuses to
+resubmit an unknown outcome after 23 hours, before Stripe may prune the
+idempotency record; reconciliation must establish its gateway state first.
 
 ## Error Handling
 

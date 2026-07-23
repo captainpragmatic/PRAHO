@@ -29,6 +29,7 @@ from apps.billing.models import (
     VATValidation,
 )
 from apps.billing.recurring_authorization_service import RecurringPaymentAuthorizationService
+from apps.billing.refund_service import RefundService
 from apps.billing.signals import (
     LARGE_REFUND_THRESHOLD_CENTS,
     _activate_payment_services,
@@ -1455,14 +1456,15 @@ class TestHandlePaymentFailure(TestCase):
 
 class TestHandlePaymentRefund(TestCase):
     @patch("apps.billing.signals._send_payment_refund_email")
-    def test_fully_refunded_invoice(self, mock_email):
+    def test_coarse_payment_status_does_not_mutate_invoice(self, mock_email):
         payment = MagicMock()
         payment.invoice.total_cents = 1000
         payment.invoice.payments.filter.return_value.aggregate.return_value = {"total": 1000}
         with self.captureOnCommitCallbacks(execute=True):
             _handle_payment_refund(payment)
-        payment.invoice.save.assert_called_once()
-        payment.invoice.refund_invoice.assert_called_once()
+        payment.invoice.save.assert_not_called()
+        payment.invoice.refund_invoice.assert_not_called()
+        mock_email.assert_called_once_with(payment)
 
     @patch("apps.billing.signals._send_payment_refund_email")
     def test_partial_refund(self, mock_email):
@@ -1480,6 +1482,43 @@ class TestHandlePaymentRefund(TestCase):
         with self.captureOnCommitCallbacks(execute=True):
             _handle_payment_refund(payment)
         mock_email.assert_called_once()
+
+    @patch("apps.billing.signals._send_payment_refund_email")
+    def test_invoice_status_is_owned_by_completed_refund_projection(self, mock_email):
+        customer = CustomerFactory(company_name="Refund Projection SRL")
+        currency = _get_or_create_currency()
+        invoice = InvoiceFactory(
+            customer=customer,
+            currency=currency,
+            status="paid",
+            subtotal_cents=1_000,
+            tax_cents=0,
+            total_cents=1_000,
+        )
+        payment = _make_payment(customer, invoice=invoice, currency=currency, amount_cents=1_000)
+        Refund.objects.create(
+            customer=customer,
+            invoice=invoice,
+            payment=payment,
+            amount_cents=400,
+            currency=currency,
+            original_amount_cents=1_000,
+            status="completed",
+            gateway_refund_id="re_partial_ledger_truth",
+            reference_number="REF-PARTIAL-LEDGER-TRUTH",
+        )
+        Payment.objects.filter(pk=payment.pk).update(status="refunded")
+        payment.refresh_from_db()
+
+        with self.captureOnCommitCallbacks(execute=True):
+            _handle_payment_refund(payment)
+
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.status, "paid")
+        projection = RefundService._project_settled_refunds(payment, invoice)
+        self.assertTrue(projection.is_ok(), projection.unwrap_err() if projection.is_err() else "")
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.status, "partially_refunded")
 
 
 class TestHandleRetryCompletion(TestCase):

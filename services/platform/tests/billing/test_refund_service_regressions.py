@@ -1121,70 +1121,6 @@ class TestCreateRefundRecord(TestCase):
 
 
 # ===========================================================================
-# _process_entity_updates
-# ===========================================================================
-class TestProcessEntityUpdates(TestCase):
-    @patch.object(RefundService, "_update_order_refund_status", return_value=Ok(None))
-    def test_with_order(self, mock_update: MagicMock) -> None:
-        order = MagicMock(id=1)
-        r = RefundService._process_entity_updates(order, None, "ref-1", None)
-        assert r.is_ok()
-        data = r.unwrap()
-        assert data["order_status_updated"] is False  # Phase A: order status not changed on refund
-        assert data["order_id"] == 1
-        assert data["invoice_id"] is None
-        mock_update.assert_called_once_with(order, refund_data=None)
-
-    @patch.object(RefundService, "_update_invoice_refund_status", return_value=Ok(None))
-    def test_with_invoice(self, mock_update: MagicMock) -> None:
-        inv = MagicMock(id=2)
-        r = RefundService._process_entity_updates(None, inv, "ref-2", None)
-        assert r.is_ok()
-        data = r.unwrap()
-        assert data["invoice_status_updated"] is True
-        assert data["invoice_id"] == 2
-        mock_update.assert_called_once_with(inv, refund_data=None)
-
-    @patch.object(RefundService, "_update_invoice_refund_status", return_value=Ok(None))
-    @patch.object(RefundService, "_update_order_refund_status", return_value=Ok(None))
-    def test_with_both(self, mock_order: MagicMock, mock_inv: MagicMock) -> None:
-        order = MagicMock(id=1)
-        inv = MagicMock(id=2)
-        r = RefundService._process_entity_updates(order, inv, "ref-3", None)
-        assert r.is_ok()
-        data = r.unwrap()
-        assert data["order_status_updated"] is False  # Phase A: order status not changed on refund
-        assert data["invoice_status_updated"] is True
-
-    def test_with_neither(self) -> None:
-        r = RefundService._process_entity_updates(None, None, "ref-4", None)
-        assert r.is_ok()
-        data = r.unwrap()
-        assert data["order_status_updated"] is False
-        assert data["invoice_status_updated"] is False
-
-    @patch.object(RefundService, "_update_order_refund_status", return_value=Err("FSM blocked"))
-    def test_order_update_failure_returns_ok_with_false(self, mock_update: MagicMock) -> None:
-        """C3 regression: when order update fails, result still Ok but order_status_updated=False."""
-        order = MagicMock(id=1)
-        r = RefundService._process_entity_updates(order, None, "ref-5", None)
-        assert r.is_ok()
-        data = r.unwrap()
-        assert data["order_status_updated"] is False
-        assert data["order_id"] == 1
-
-    @patch.object(RefundService, "_update_invoice_refund_status", return_value=Err("FSM blocked"))
-    def test_invoice_update_failure_returns_ok_with_false(self, mock_update: MagicMock) -> None:
-        """C3 regression: when invoice update fails, result still Ok but invoice_status_updated=False."""
-        inv = MagicMock(id=2)
-        r = RefundService._process_entity_updates(None, inv, "ref-6", None)
-        assert r.is_ok()
-        data = r.unwrap()
-        assert data["invoice_status_updated"] is False
-        assert data["invoice_id"] == 2
-
-
-# ===========================================================================
 # _process_payment_refund_if_exists
 # ===========================================================================
 class TestProcessPaymentRefundIfExists(TestCase):
@@ -1282,51 +1218,6 @@ class TestUpdateOrderRefundStatus(TestCase):
         o.refresh_from_db()
         # Phase A: order stays completed — refund is on Invoice/Payment
         assert o.status == "completed"
-
-
-# ===========================================================================
-# _update_invoice_refund_status
-# ===========================================================================
-class TestUpdateInvoiceRefundStatus(TestCase):
-    def test_full_refund(self):
-        c = _make_customer()
-        cur = _make_currency()
-        inv = _make_invoice(c, cur, status="paid", total_cents=10000)
-        r = RefundService._update_invoice_refund_status(inv, refund_data={"refund_type": "full"})
-        assert r.is_ok()
-        inv.refresh_from_db()
-        assert inv.status == "refunded"
-
-    def test_partial_refund(self):
-        c = _make_customer()
-        cur = _make_currency()
-        inv = _make_invoice(c, cur, status="paid", total_cents=10000)
-        r = RefundService._update_invoice_refund_status(
-            inv, refund_data={"refund_type": "partial", "amount_cents": 3000}
-        )
-        assert r.is_ok()
-        inv.refresh_from_db()
-        assert inv.status == "partially_refunded"
-
-    def test_no_status_attr(self):
-        inv = MagicMock(spec=["total_cents"])
-        inv.total_cents = 10000
-        del inv.status
-        r = RefundService._update_invoice_refund_status(inv, refund_data={"refund_type": "full"})
-        assert r.is_err()
-
-    def test_exception_path(self):
-        inv = MagicMock(status="paid", total_cents=10000)
-        inv.save.side_effect = Exception("db error")
-        r = RefundService._update_invoice_refund_status(inv, refund_data={"refund_type": "full"})
-        assert r.is_err()
-
-    def test_no_refund_data(self):
-        c = _make_customer()
-        cur = _make_currency()
-        inv = _make_invoice(c, cur, status="paid", total_cents=10000)
-        r = RefundService._update_invoice_refund_status(inv)
-        assert r.is_ok()
 
 
 # ===========================================================================
@@ -1585,13 +1476,15 @@ class TestProcessPaymentRefund(TestCase):
         }
         return patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway", return_value=mock_gw)
 
-    def _make_succeeded_payment(self, gateway_txn_id: str = "tx_123") -> object:
+    def _make_succeeded_payment(self, gateway_txn_id: str = "tx_123") -> Payment:
         """Create a real Payment instance in 'succeeded' state for FSM-aware tests."""
 
         c = _make_customer()
         cur = _make_currency()
+        invoice = _make_invoice(c, cur, status="paid", total_cents=10_000)
         payment = Payment.objects.create(
             customer=c,
+            invoice=invoice,
             currency=cur,
             payment_method="stripe",
             amount_cents=10000,
@@ -1600,20 +1493,42 @@ class TestProcessPaymentRefund(TestCase):
         )
         return payment
 
+    @staticmethod
+    def _create_refund_intent(payment: Payment, amount_cents: int) -> uuid.UUID:
+        assert payment.invoice is not None
+        return Refund.objects.create(
+            customer=payment.customer,
+            invoice=payment.invoice,
+            payment=payment,
+            amount_cents=amount_cents,
+            currency=payment.currency,
+            original_amount_cents=payment.amount_cents,
+            refund_type="full" if amount_cents == payment.amount_cents else "partial",
+            status="pending",
+            gateway_refund_id="",
+        ).id
+
     def test_payment_full_refund(self):
         payment = self._make_succeeded_payment(gateway_txn_id="tx_full_refund")
+        refund_intent_id = self._create_refund_intent(payment, 10_000)
         with self._mock_gateway_success():
-            r = RefundService._process_payment_refund(payment, {"refund_type": "full"})
+            r = RefundService._process_payment_refund(
+                payment,
+                {"refund_type": "full", "amount_cents": 10_000},
+                refund_intent_id=refund_intent_id,
+            )
         assert r.is_ok()
         payment.refresh_from_db()
         assert payment.status == "refunded"
 
     def test_payment_partial_refund(self):
         payment = self._make_succeeded_payment(gateway_txn_id="tx_partial_refund")
+        refund_intent_id = self._create_refund_intent(payment, 5_000)
         with self._mock_gateway_success(amount=5000):
             r = RefundService._process_payment_refund(
                 payment,
                 {"refund_type": "partial", "amount_cents": 5000},
+                refund_intent_id=refund_intent_id,
             )
         assert r.is_ok()
         payment.refresh_from_db()
@@ -1637,16 +1552,22 @@ class TestProcessPaymentRefund(TestCase):
 
     def test_refund_amount_cents_kwarg_full(self):
         payment = self._make_succeeded_payment(gateway_txn_id="tx_kwarg_full")
+        refund_intent_id = self._create_refund_intent(payment, 10_000)
         with self._mock_gateway_success():
-            r = RefundService._process_payment_refund(payment, None, refund_amount_cents=10000)
+            r = RefundService._process_payment_refund(
+                payment, None, refund_amount_cents=10000, refund_intent_id=refund_intent_id
+            )
         assert r.is_ok()
         payment.refresh_from_db()
         assert payment.status == "refunded"
 
     def test_refund_amount_cents_kwarg_partial(self):
         payment = self._make_succeeded_payment(gateway_txn_id="tx_kwarg_partial")
+        refund_intent_id = self._create_refund_intent(payment, 5_000)
         with self._mock_gateway_success(amount=5000):
-            r = RefundService._process_payment_refund(payment, None, refund_amount_cents=5000)
+            r = RefundService._process_payment_refund(
+                payment, None, refund_amount_cents=5000, refund_intent_id=refund_intent_id
+            )
         assert r.is_ok()
         payment.refresh_from_db()
         assert payment.status == "partially_refunded"
@@ -1686,6 +1607,7 @@ class TestProcessPaymentRefund(TestCase):
         from apps.billing.payment_models import Payment  # noqa: PLC0415
 
         payment = self._make_succeeded_payment(gateway_txn_id="tx_concurrent_refund")
+        refund_intent_id = self._create_refund_intent(payment, 10_000)
 
         # Mock select_for_update to return the same payment instance (so our
         # patch.object on refund_payment survives the re-fetch).
@@ -1698,7 +1620,11 @@ class TestProcessPaymentRefund(TestCase):
             patch.object(payment, "refund_payment", side_effect=ConcurrentTransition("concurrent write")),
         ):
             # Must not raise — the exception is caught, logged at ERROR, and gateway_result is returned.
-            r = RefundService._process_payment_refund(payment, {"refund_type": "full"})
+            r = RefundService._process_payment_refund(
+                payment,
+                {"refund_type": "full", "amount_cents": 10_000},
+                refund_intent_id=refund_intent_id,
+            )
 
         # Gateway result is propagated even when the FSM transition fails.
         assert r.is_ok()
@@ -2073,3 +1999,35 @@ class TestBackfillRefundsFromMeta(TestCase):
         refunds = list(Refund.objects.filter(order=order))
         assert len(refunds) == 1
         assert refunds[0].reason == "customer_request"
+
+
+class TestOrderRefundInvoiceLinkage(TestCase):
+    """Settlement of an order refund must project the ORDER-linked invoice
+    (review of #388): a payment matched via meta['order_id'] can legally carry
+    an invoice_id different from order.invoice_id, and preferring the payment's
+    invoice would refund-project the wrong document."""
+
+    def test_mismatched_payment_invoice_linkage_fails_closed(self) -> None:
+        """A refund must not guess which document to mark refunded: when the
+        payment's invoice disagrees with the order's, settlement rejects the
+        command for manual reconciliation and touches NEITHER invoice."""
+        customer = _make_customer()
+        currency = _make_currency()
+        order_invoice = _make_invoice(customer, currency)
+        other_invoice = _make_invoice(customer, currency)
+        order = _make_order(customer, currency, invoice=order_invoice)
+        payment = _make_bank_payment(customer, currency, invoice=other_invoice, order=order)
+
+        result = RefundService.refund_order(
+            order.id,
+            {"refund_type": RefundType.FULL, "reason": "customer_request", "notes": "linkage test"},
+        )
+
+        self.assertTrue(result.is_err(), "mismatched invoice linkage must fail closed")
+        self.assertIn("linkage", result.unwrap_err().lower())
+        order_invoice.refresh_from_db()
+        other_invoice.refresh_from_db()
+        payment.refresh_from_db()
+        self.assertEqual(order_invoice.status, "paid")
+        self.assertEqual(other_invoice.status, "paid")
+        self.assertEqual(payment.status, "succeeded")
