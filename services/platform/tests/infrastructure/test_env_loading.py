@@ -158,7 +158,10 @@ class TestEnvTemplateHygiene(TestCase):
 
     def test_no_empty_value_inline_comments_in_templates(self) -> None:
         offenders: list[str] = []
-        for template in sorted(_REPO_ROOT.glob(".env.example*")):
+        templates = sorted(_REPO_ROOT.glob(".env.example*"))
+        # A broken glob or repo-layout change must fail loudly, not scan zero files and pass.
+        self.assertGreaterEqual(len(templates), 3, f"expected the .env.example templates at {_REPO_ROOT}")
+        for template in templates:
             for lineno, line in enumerate(template.read_text().splitlines(), start=1):
                 if _EMPTY_VALUE_INLINE_COMMENT.match(line):
                     offenders.append(f"{template.name}:{lineno}: {line}")
