@@ -75,6 +75,8 @@
                 {% trans "Cancelled" as bt11 %}{% badge bt11 variant="danger" icon="x" css_class="w-28 justify-center" %}
               {% elif invoice.status == 'refunded' %}
                 {% trans "Refunded" as bt12 %}{% badge bt12 variant="warning" icon="refresh" css_class="w-28 justify-center" %}
+              {% elif invoice.status == 'partially_refunded' %}
+                {% trans "Partially Refunded" as bt12p %}{% badge bt12p variant="warning" icon="refresh" css_class="w-28 justify-center" %}
               {% else %}
                 {% trans "Draft" as bt13 %}{% badge bt13 variant="secondary" icon="document" css_class="w-28 justify-center" %}
               {% endif %}
@@ -131,6 +133,8 @@
             {% trans "Cancelled" as bt24 %}{% badge bt24 variant="danger" icon="x" css_class="w-28 justify-center" %}
           {% elif invoice.status == 'refunded' %}
             {% trans "Refunded" as bt25 %}{% badge bt25 variant="warning" icon="refresh" css_class="w-28 justify-center" %}
+          {% elif invoice.status == 'partially_refunded' %}
+            {% trans "Partially Refunded" as bt25p %}{% badge bt25p variant="warning" icon="refresh" css_class="w-28 justify-center" %}
           {% else %}
             {% trans "Draft" as bt26 %}{% badge bt26 variant="secondary" icon="document" css_class="w-28 justify-center" %}
           {% endif %}

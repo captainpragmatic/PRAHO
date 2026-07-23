@@ -11,6 +11,7 @@ import time
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from django.template.loader import render_to_string
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
@@ -18,6 +19,7 @@ from django.utils.functional import Promise
 
 from apps.billing.schemas import BillingDocumentPage
 from apps.billing.views import INVOICE_DOC_TYPE_TABS, INVOICE_STATUS_CHOICES
+from apps.common.pagination import PaginatorData
 
 
 class InvoiceTabConfigTests(TestCase):
@@ -98,3 +100,26 @@ class InvoicesListDocTypeClampTests(TestCase):
         self.assertEqual(response.context["paginator_data"].number, 3)
         self.assertEqual(response.context["paginator_data"].paginator.count, 45)
         self.assertEqual(response.context["header_stats"][2]["value"], "5")
+
+    def test_partially_refunded_invoice_badge_does_not_fall_back_to_draft(self) -> None:
+        document = SimpleNamespace(
+            document_type="invoice",
+            number="INV-PARTIAL-001",
+            status="partially_refunded",
+            status_display="Partially Refunded",
+            total_cents=1000,
+            currency=SimpleNamespace(code="RON"),
+            created_at=timezone.now(),
+        )
+
+        html = render_to_string(
+            "billing/partials/invoices_table.html",
+            {
+                "invoices": [document],
+                "paginator_data": PaginatorData(total_count=1, current_page=1, page_size=20),
+                "pagination_params": "",
+            },
+        )
+
+        self.assertEqual(html.count("Partially Refunded"), 2)
+        self.assertNotIn("Draft", html)

@@ -135,7 +135,7 @@ def _filter_document_queryset[DocumentT: (Invoice, ProformaInvoice)](
             | Q(bill_to_email__icontains=search)
             | Q(lines__description__icontains=search)
         )
-        if search.casefold() in document_label:
+        if search.casefold() in {document_label, f"{document_label}s"}:
             predicate |= Q(pk__isnull=False)
         if queryset.model is ProformaInvoice:
             predicate |= Q(notes__icontains=search)

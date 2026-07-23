@@ -112,3 +112,25 @@ class BillingDocumentsAPITestCase(HMACTestMixin, TestCase):
         self.assertEqual(body["pagination"]["total_items"], 1)
         self.assertEqual([document["number"] for document in body["documents"]], ["INV-OLD-003"])
         self.assertEqual(body["documents"][0]["document_type"], "invoice")
+
+    def test_partial_type_word_does_not_disable_search_filtering(self) -> None:
+        response = self.portal_post(
+            "/api/billing/documents/",
+            self._payload(page=1, limit=20, search="voice"),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["pagination"]["total_items"], 0)
+        self.assertEqual(body["documents"], [])
+
+    def test_exact_type_word_explicitly_matches_that_document_type(self) -> None:
+        response = self.portal_post(
+            "/api/billing/documents/",
+            self._payload(page=1, limit=20, search="invoice"),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["pagination"]["total_items"], 45)
+        self.assertTrue(all(document["document_type"] == "invoice" for document in body["documents"]))
