@@ -765,6 +765,8 @@ class SubscriptionInvoicePaymentTestCase(_SubscriptionInvoicePaymentFixture, Tes
             is_default=True,
         )
         payment = self._create_pending_invoice_payment("pi_duplicate_definitive_decline_301")
+        original_created_at = timezone.now() - timedelta(days=10)
+        Payment.objects.filter(pk=payment.pk).update(created_at=original_created_at)
 
         _mark_invoice_payment_attempt_failed(payment.id, "card declined")
         _mark_invoice_payment_attempt_failed(payment.id, "card declined")
@@ -779,6 +781,10 @@ class SubscriptionInvoicePaymentTestCase(_SubscriptionInvoicePaymentFixture, Tes
         self.assertEqual(retry.policy, policy)
         self.assertEqual(retry.attempt_number, 1)
         self.assertEqual(retry.status, "pending")
+        self.assertIsNotNone(payment.failed_at)
+        assert payment.failed_at is not None
+        self.assertEqual(retry.scheduled_at, payment.failed_at + timedelta(days=1))
+        self.assertNotEqual(retry.scheduled_at, original_created_at + timedelta(days=1))
 
     def test_definitive_proforma_decline_schedules_exactly_one_retry(self) -> None:
         """A failed fixed renewal must enter collection without relying on invoice dunning."""

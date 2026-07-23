@@ -253,7 +253,7 @@ class PaymentRetryService:
     """Schedule payment retries using dunning policies."""
 
     @staticmethod
-    def retry_payment(payment_id: str) -> Result[bool, str]:
+    def retry_payment(payment_id: str) -> Result[bool, str]:  # noqa: PLR0911  # Fail-closed retry eligibility gates
         """Find customer's retry policy and schedule a PaymentRetryAttempt."""
         from apps.billing.models import Payment  # noqa: PLC0415  # Deferred: test mockability
         from apps.billing.payment_models import (  # noqa: PLC0415  # Deferred: test mockability
@@ -269,6 +269,13 @@ class PaymentRetryService:
         if payment.status == "succeeded":
             return Ok(True)  # Already succeeded
 
+        if payment.failed_at is None:
+            _services_logger.critical(
+                "Payment %s has no definitive failure timestamp; refusing to schedule a retry",
+                payment_id,
+            )
+            return Err("Payment has no definitive failure timestamp")
+
         # Find applicable retry policy (customer-specific or default)
         policy = PaymentRetryPolicy.objects.filter(is_active=True, is_default=True).first()
         if not policy:
@@ -281,7 +288,7 @@ class PaymentRetryService:
             return Err(f"Max retry attempts ({policy.max_attempts}) reached")
 
         # Schedule next retry
-        next_retry_date = policy.get_next_retry_date(payment.created_at, existing_attempts)
+        next_retry_date = policy.get_next_retry_date(payment.failed_at, existing_attempts)
         if not next_retry_date:
             return Err("No more retry dates available")
 

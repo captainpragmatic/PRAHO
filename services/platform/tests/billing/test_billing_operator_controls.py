@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from django.core.exceptions import ValidationError
 from django.test import TestCase
@@ -149,6 +149,44 @@ class PaymentRetryPolicyEditorTests(TestCase):
         )
 
         self.assertRedirects(response, reverse("billing:operator_controls"))
+        self.policy.refresh_from_db()
+        other.refresh_from_db()
+        self.assertFalse(self.policy.is_default)
+        self.assertTrue(other.is_default)
+
+    @patch("apps.billing.operator_controls.PaymentRetryPolicy.objects.select_for_update")
+    def test_policy_update_locks_every_policy_in_deterministic_order(self, select_for_update: MagicMock) -> None:
+        """Concurrent default promotions must not lock their target rows in opposite order."""
+        other = PaymentRetryPolicy.objects.create(
+            name="VIP",
+            retry_intervals_days=[1, 4],
+            max_attempts=2,
+            suspend_service_after_days=10,
+            terminate_service_after_days=30,
+            is_active=True,
+        )
+        locked_queryset = MagicMock()
+        locked_queryset.order_by.return_value = sorted([self.policy, other], key=lambda policy: policy.pk)
+        select_for_update.return_value = locked_queryset
+
+        response = self.client.post(
+            reverse("billing:retry_policy_edit", args=[other.pk]),
+            {
+                "name": "VIP",
+                "description": "",
+                "retry_intervals_days": "1, 4",
+                "max_attempts": 2,
+                "send_dunning_emails": "on",
+                "is_default": "on",
+                "is_active": "on",
+                "reason": "Promote VIP without lock inversion",
+                "baseline": other.updated_at.isoformat(),
+            },
+        )
+
+        self.assertRedirects(response, reverse("billing:operator_controls"))
+        locked_queryset.order_by.assert_called_once_with("id")
+        locked_queryset.get.assert_not_called()
         self.policy.refresh_from_db()
         other.refresh_from_db()
         self.assertFalse(self.policy.is_default)

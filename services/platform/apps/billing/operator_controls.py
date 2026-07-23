@@ -76,31 +76,30 @@ def update_retry_policy(
 ) -> PaymentRetryPolicy:
     """Apply one retry-policy edit without lost updates or default-policy gaps."""
     _require_audit_reason(actor)
-    policy = PaymentRetryPolicy.objects.select_for_update().get(pk=policy_id)
+    locked_policies = list(PaymentRetryPolicy.objects.select_for_update().order_by("id"))
+    policy = next((candidate for candidate in locked_policies if candidate.pk == policy_id), None)
+    if policy is None:
+        raise PaymentRetryPolicy.DoesNotExist
     if policy.updated_at.isoformat() != baseline:
         raise ValidationError({"baseline": _("This policy changed while you were editing it. Reload and try again.")})
-    if PaymentRetryPolicy.objects.exclude(pk=policy.pk).filter(name=values["name"]).exists():
+    if any(candidate.pk != policy.pk and candidate.name == values["name"] for candidate in locked_policies):
         raise ValidationError({"name": _("A retry policy with this name already exists.")})
 
     old_values = _policy_values(policy)
     making_default = bool(values["is_active"] and values["is_default"])
     if not making_default and policy.is_active and policy.is_default:
-        replacement_exists = (
-            PaymentRetryPolicy.objects.select_for_update()
-            .exclude(pk=policy.pk)
-            .filter(is_active=True, is_default=True)
-            .exists()
+        replacement_exists = any(
+            candidate.pk != policy.pk and candidate.is_active and candidate.is_default for candidate in locked_policies
         )
         if not replacement_exists:
             raise ValidationError({"is_default": _("Configure another active default policy first.")})
 
     if making_default:
-        previous_defaults = list(
-            PaymentRetryPolicy.objects.select_for_update()
-            .exclude(pk=policy.pk)
-            .filter(is_active=True, is_default=True)
-            .order_by("id")
-        )
+        previous_defaults = [
+            candidate
+            for candidate in locked_policies
+            if candidate.pk != policy.pk and candidate.is_active and candidate.is_default
+        ]
         for previous in previous_defaults:
             previous_old_values = _policy_values(previous)
             previous.is_default = False

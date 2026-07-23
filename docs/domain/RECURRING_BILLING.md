@@ -15,9 +15,9 @@ PRAHO owns subscriptions, periods, proformas, invoices, taxes, usage rating, ret
 3. Run `python manage.py setup_dunning_policies` and verify exactly one active default payment-retry policy exists.
    Billing administrators can review and edit the live retry cadence and dunning-email switch from
    **Settings → Billing → Payment retry policies**. Retry days are absolute offsets from the original
-   failed Payment, not delays chained from the previous attempt. Subscription suspension and cancellation
-   remain governed by the subscription grace-period lifecycle; the retry-policy editor does not expose
-   the legacy dormant escalation columns.
+   Payment's persisted definitive failure timestamp, not its creation time and not delays chained from the
+   previous attempt. Subscription suspension and cancellation remain governed by the subscription
+   grace-period lifecycle; the retry-policy editor does not expose the legacy dormant escalation columns.
 4. Run `python manage.py setup_scheduled_tasks --billing-only` and verify the Django-Q schedules.
 5. Ensure a Django-Q worker is running with `python manage.py qcluster`.
 6. Verify Stripe webhook delivery for `payment_intent.succeeded` and `payment_intent.payment_failed`.
@@ -46,6 +46,8 @@ From 1 January 2026, the submission deadline is five Romanian working days. A CN
 | `Collect Virtualmin Usage` / `Collect Service Usage` | Record local cumulative hosting snapshots |
 
 The fixed renewal schedule is proforma at period end minus 14 days and automatic charge at period end minus 7 days. A definitive recurring decline schedules exactly one policy-controlled retry chain; duplicate webhook or synchronous handling cannot consume another retry slot. Retry ownership is persisted before the Stripe call, and stale worker leases resume idempotently after two task timeouts without recharging an already-succeeded result. Usage is rated and invoiced after the measured period ends; its automatic charge is scheduled for period end plus 7 days and is not attempted when the invoice is issued.
+
+Retry attempts are created only by recurring-payment convergence or invoice dunning. The generic Payment status signal sends failure notifications and updates customer history, but must not create a second retry chain.
 
 Invoice numbering is controlled from **Settings → Billing → Invoice numbering series**. Starting a new
 legal series snapshots the active prefix and counter, then resets the stable active control row under one database lock.

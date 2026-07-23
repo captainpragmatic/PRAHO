@@ -47,7 +47,11 @@ def _schedule_recurring_payment_retry(payment: Payment) -> bool:
         logger.critical("Recurring payment %s failed but no active default retry policy exists", payment.id)
         return False
 
-    scheduled_at = policy.get_next_retry_date(payment.created_at, 0)
+    if payment.failed_at is None:
+        logger.critical("Recurring payment %s has no definitive failure timestamp; refusing to schedule", payment.id)
+        return False
+
+    scheduled_at = policy.get_next_retry_date(payment.failed_at, 0)
     if scheduled_at is None:
         logger.critical("Recurring retry policy %s has no first retry interval", policy.id)
         return False

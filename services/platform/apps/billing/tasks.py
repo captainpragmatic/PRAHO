@@ -309,11 +309,18 @@ def start_dunning_process(invoice_id: str) -> dict[str, Any]:
             logger.info("⚠️ [Dunning] Email disabled by retry policy for invoice %s", invoice.number)
 
         # Schedule payment retry if there's a payment method on file
-        payments = invoice.payments.filter(status="failed").order_by("-created_at")
+        payments = invoice.payments.filter(status="failed").order_by("-failed_at", "-created_at")
         if payments.exists():
             payment = payments.first()
             if policy and payment is not None:
-                next_date = policy.get_next_retry_date(payment.created_at, 0)
+                if payment.failed_at is None:
+                    logger.critical(
+                        "⚠️ [Dunning] Failed payment %s has no definitive failure timestamp; refusing to schedule",
+                        payment.id,
+                    )
+                    next_date = None
+                else:
+                    next_date = policy.get_next_retry_date(payment.failed_at, 0)
                 if next_date:
                     PaymentRetryAttempt.objects.get_or_create(
                         payment=payment,
@@ -925,7 +932,14 @@ def notify_expiring_grandfathering(days_ahead: int = 30) -> dict[str, Any]:
 def _schedule_next_retry(retry: Any, retry_model: Any) -> None:
     """Schedule the next retry attempt if the policy allows more attempts."""
     if retry.policy and retry.attempt_number < retry.policy.max_attempts:
-        next_retry_date = retry.policy.get_next_retry_date(retry.payment.created_at, retry.attempt_number)
+        if retry.payment.failed_at is None:
+            logger.critical(
+                "Failed payment %s has no definitive failure timestamp; refusing to schedule retry %s",
+                retry.payment_id,
+                retry.attempt_number + 1,
+            )
+            return
+        next_retry_date = retry.policy.get_next_retry_date(retry.payment.failed_at, retry.attempt_number)
         if next_retry_date:
             retry_model.objects.get_or_create(
                 payment=retry.payment,

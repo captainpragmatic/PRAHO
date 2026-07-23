@@ -131,6 +131,12 @@ class Payment(ConcurrentTransitionMixin, models.Model):
     received_at = models.DateTimeField(default=timezone.now)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    failed_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        editable=False,
+        help_text=_("Definitive failure time used as the stable retry-schedule anchor"),
+    )
 
     # Metadata
     meta = models.JSONField(default=dict, blank=True)
@@ -177,6 +183,16 @@ class Payment(ConcurrentTransitionMixin, models.Model):
     def __str__(self) -> str:
         return f"Payment {self.amount} {self.currency.code} for {self.customer}"
 
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        """Keep every persisted failed payment anchored to one stable failure time."""
+        if self.status == "failed":
+            if self.failed_at is None:
+                self.failed_at = timezone.now()
+            update_fields = kwargs.get("update_fields")
+            if update_fields is not None:
+                kwargs["update_fields"] = {*update_fields, "failed_at"}
+        super().save(*args, **kwargs)
+
     @property
     def amount(self) -> Decimal:
         return Decimal(self.amount_cents) / 100
@@ -210,6 +226,8 @@ class Payment(ConcurrentTransitionMixin, models.Model):
     @transition(field=status, source="pending", target="failed")
     def fail_payment(self) -> None:
         """Mark payment as failed."""
+        if self.failed_at is None:
+            self.failed_at = timezone.now()
 
     @transition(field=status, source="succeeded", target="refunded")
     def refund_payment(self) -> None:
@@ -322,7 +340,10 @@ class Payment(ConcurrentTransitionMixin, models.Model):
 
         if meta_update:
             self.meta = {**(self.meta or {}), **meta_update}
-        self.save(update_fields=["status", "meta", "updated_at"])
+        update_fields = ["status", "meta", "updated_at"]
+        if new_status == "failed":
+            update_fields.append("failed_at")
+        self.save(update_fields=update_fields)
         return True
 
     # =========================================================================
