@@ -180,7 +180,14 @@ class SubmitEfacturaTests(TestCase):
     @patch("apps.audit.services.AuditService.log_simple_event")
     def test_success(self, mock_audit: MagicMock, mock_service: MagicMock) -> None:
         invoice = _make_invoice(status="issued")
-        mock_service.return_value.submit_invoice.return_value = MagicMock(success=True, error_message="")
+        document = MagicMock(status="submitted")
+        mock_service.return_value.submit_invoice.return_value = MagicMock(
+            success=True,
+            error_message="",
+            document=document,
+            document_status="submitted",
+            registered_with_anaf=True,
+        )
         result = submit_efactura(str(invoice.id))
 
         self.assertTrue(result["success"])
@@ -190,6 +197,33 @@ class SubmitEfacturaTests(TestCase):
         # The last audit call must be the task event (signals may fire earlier).
         last_call = _last_audit_call_kwargs(mock_audit)
         self.assertEqual(last_call["event_type"], "efactura_submission_attempted")
+
+        invoice.refresh_from_db()
+        self.assertTrue(invoice.meta["efactura_submitted"])
+
+    @patch("apps.billing.efactura.service.EFacturaService")
+    @patch("apps.audit.services.AuditService.log_simple_event")
+    def test_active_upload_claim_does_not_mark_invoice_as_submitted(
+        self,
+        mock_audit: MagicMock,
+        mock_service: MagicMock,
+    ) -> None:
+        invoice = _make_invoice(status="issued")
+        document = MagicMock(status="uploading")
+        mock_service.return_value.submit_invoice.return_value = MagicMock(
+            success=True,
+            error_message="",
+            document=document,
+            document_status="uploading",
+            registered_with_anaf=False,
+        )
+
+        result = submit_efactura(str(invoice.id))
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["status"], "uploading")
+        invoice.refresh_from_db()
+        self.assertNotIn("efactura_submitted", invoice.meta)
 
     def test_invoice_not_found_returns_error(self) -> None:
         fake_id = str(uuid.uuid4())

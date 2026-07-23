@@ -11,6 +11,7 @@ from apps.billing.efactura.models import EFacturaDocument, EFacturaStatus
 from apps.billing.efactura.service import StatusCheckResult, SubmissionResult
 from apps.billing.efactura.tasks import (
     TASK_TIMEOUT,
+    archive_missing_efactura_responses_task,
     check_efactura_deadlines_task,
     download_efactura_response_task,
     poll_all_pending_status_task,
@@ -41,6 +42,7 @@ class SubmitEfacturaTaskTestCase(TestCase):
 
         mock_doc = Mock()
         mock_doc.anaf_upload_index = "12345"
+        mock_doc.status = EFacturaStatus.SUBMITTED.value
         mock_service.submit_invoice.return_value = SubmissionResult(
             success=True,
             document=mock_doc,
@@ -51,6 +53,7 @@ class SubmitEfacturaTaskTestCase(TestCase):
         self.assertTrue(result["success"])
         self.assertEqual(result["invoice_id"], invoice_id)
         self.assertEqual(result["upload_index"], "12345")
+        self.assertEqual(result["status"], EFacturaStatus.SUBMITTED.value)
 
     @patch("apps.billing.efactura.tasks.Invoice")
     def test_submit_invoice_not_found(self, mock_invoice_model):
@@ -260,22 +263,25 @@ class DownloadEfacturaResponseTaskTestCase(TestCase):
     @patch("apps.billing.efactura.tasks.EFacturaService")
     @patch("apps.billing.efactura.tasks.EFacturaDocument")
     def test_download_success(self, mock_doc_model, mock_service_class):
-        """Test successful download."""
+        """Successful downloads return the portable storage key, not a local-only path."""
         doc_id = str(uuid4())
         mock_doc = Mock()
         mock_doc.status = EFacturaStatus.ACCEPTED.value
-        mock_doc.signed_pdf = Mock()
-        mock_doc.signed_pdf.path = "/path/to/pdf"
+        mock_doc.response_archive = Mock()
+        mock_doc.response_archive.name = "efactura/responses/2026/07/anaf-response.zip"
+        type(mock_doc.response_archive).path = property(
+            lambda _archive: (_ for _ in ()).throw(NotImplementedError("remote storage has no local path"))
+        )
         mock_doc_model.objects.get.return_value = mock_doc
 
         mock_service = Mock()
         mock_service_class.return_value = mock_service
-        mock_service.download_response.return_value = b"%PDF content"
+        mock_service.download_response.return_value = b"PK response archive"
 
         result = download_efactura_response_task(doc_id)
 
         self.assertTrue(result["success"])
-        self.assertEqual(result["file_path"], "/path/to/pdf")
+        self.assertEqual(result["file_path"], "efactura/responses/2026/07/anaf-response.zip")
 
     @patch("apps.billing.efactura.tasks.EFacturaService")
     @patch("apps.billing.efactura.tasks.EFacturaDocument")
@@ -296,6 +302,21 @@ class DownloadEfacturaResponseTaskTestCase(TestCase):
         self.assertIn("failed", result["error"].lower())
 
 
+class ArchiveMissingEfacturaResponsesTaskTestCase(TestCase):
+    @patch("apps.billing.efactura.tasks.EFacturaService")
+    def test_runs_daily_recovery_batch(self, mock_service_class):
+        mock_service_class.return_value.process_missing_response_archives.return_value = {
+            "archived": 2,
+            "failed": 1,
+        }
+
+        result = archive_missing_efactura_responses_task()
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["archived"], 2)
+        self.assertEqual(result["failed"], 1)
+
+
 class ScheduleEfacturaTasksTestCase(TestCase):
     """Test schedule_efactura_tasks."""
 
@@ -309,8 +330,8 @@ class ScheduleEfacturaTasksTestCase(TestCase):
 
         schedule_efactura_tasks()
 
-        # Should create 4 schedules
-        self.assertEqual(mock_schedule.objects.update_or_create.call_count, 4)
+        # Submission, polling, retries, deadlines, and response-archive recovery.
+        self.assertEqual(mock_schedule.objects.update_or_create.call_count, 5)
 
     def test_schedule_tasks_no_django_q(self):
         """Test scheduling when Django-Q not installed."""

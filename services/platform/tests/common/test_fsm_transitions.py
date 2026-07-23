@@ -12,7 +12,9 @@ Part of the defense-in-depth strategy from ADR-0034.
 from __future__ import annotations
 
 import inspect
+from datetime import timedelta
 from unittest.mock import patch
+from uuid import uuid4
 
 from django.test import TestCase
 from django.utils import timezone
@@ -1068,8 +1070,15 @@ class EFacturaDocumentFSMTests(FSMTestMixin, TestCase):
         doc.save()
         self.assertEqual(doc.status, "queued")
 
-    def test_mark_submitted_from_queued(self) -> None:
+    def test_mark_submitted_from_uploading(self) -> None:
         doc = self._make_efactura("queued")
+        claimed_at = timezone.now()
+        doc.mark_uploading(
+            claim_token=uuid4(),
+            claimed_at=claimed_at,
+            claim_expires_at=claimed_at + timedelta(minutes=10),
+        )
+        doc.save()
         doc.mark_submitted("IDX-123")
         doc.save()
         self.assertEqual(doc.status, "submitted")

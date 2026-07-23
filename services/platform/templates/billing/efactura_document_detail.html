@@ -31,6 +31,16 @@
     </div>
   </div>
 
+  {% if document.status == "outcome_unknown" %}
+  <div class="bg-red-950 border border-red-700 rounded-lg p-4 mb-6" role="alert">
+    <h2 class="text-sm font-semibold text-red-200">{% trans "Reconciliation Required" %}</h2>
+    <p class="mt-1 text-sm text-red-300">
+      {% trans "ANAF may have accepted this upload. Do not retry it until the ANAF message history has been reconciled." as reconciliation_message %}
+      {{ reconciliation_message|force_escape }}
+    </p>
+  </div>
+  {% endif %}
+
   <!-- Deadline Warning -->
   {% if is_deadline_approaching and not is_terminal %}
   <div class="bg-amber-900 border border-amber-700 rounded-lg p-4 mb-6">
@@ -62,6 +72,10 @@
                 {% trans "Rejected" as lbl %}{% badge lbl variant="danger" icon="x" %}
               {% elif document.status == "error" %}
                 {% trans "Error" as lbl %}{% badge lbl variant="warning" icon="warning" %}
+              {% elif document.status == "outcome_unknown" %}
+                {% trans "Reconciliation Required" as lbl %}{% badge lbl variant="danger" icon="warning" %}
+              {% elif document.status == "uploading" %}
+                {% trans "Uploading" as lbl %}{% badge lbl variant="info" icon="external" %}
               {% elif document.status == "processing" %}
                 {% trans "Processing" as lbl %}{% badge lbl variant="warning" icon="clock" %}
               {% elif document.status == "submitted" %}
@@ -151,6 +165,18 @@
             <span class="text-sm text-slate-300">{% trans "XML Generated" %}</span>
           </li>
           {% endif %}
+          {% if document.submission_claimed_at %}
+          <li class="flex items-start">
+            <span class="text-slate-500 text-xs w-24 flex-shrink-0">{{ document.submission_claimed_at|date:"d/m H:i" }}</span>
+            <span class="text-sm text-slate-300">{% trans "Upload Claim Acquired" %}</span>
+          </li>
+          {% endif %}
+          {% if document.status == "outcome_unknown" and document.submission_claim_expires_at %}
+          <li class="flex items-start">
+            <span class="text-slate-500 text-xs w-24 flex-shrink-0">{{ document.submission_claim_expires_at|date:"d/m H:i" }}</span>
+            <span class="text-sm text-red-300">{% trans "Claim Lease Expired" %}</span>
+          </li>
+          {% endif %}
           {% if document.submitted_at %}
           <li class="flex items-start">
             <span class="text-slate-500 text-xs w-24 flex-shrink-0">{{ document.submitted_at|date:"d/m H:i" }}</span>
@@ -187,12 +213,31 @@
       {% endif %}
 
       <!-- XML Hash -->
-      {% if document.xml_hash %}
+      {% if document.xml_hash or document.response_archive %}
       <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
         <h2 class="text-lg font-semibold text-white mb-4">{% icon "lock" %} {% trans "Integrity" %}</h2>
-        <dl>
+        <dl class="space-y-3">
+          {% if document.xml_hash %}
           <dt class="text-xs text-slate-400">{% trans "XML SHA-256" %}</dt>
           <dd class="mt-1 text-xs text-slate-300 font-mono break-all">{{ document.xml_hash }}</dd>
+          {% endif %}
+          {% if document.response_archive %}
+          <dt class="text-xs text-slate-400">{% trans "ANAF Response Archive" %}</dt>
+          <dd class="mt-1 text-xs text-slate-300 font-mono break-all">{{ document.response_archive.name }}</dd>
+          <dt class="text-xs text-slate-400">{% trans "Response Archive SHA-256" %}</dt>
+          {% trans "Unverified legacy archive" as unverified_archive %}
+          <dd class="mt-1 text-xs text-slate-300 font-mono break-all">
+            {% if document.response_archive_sha256 %}
+              {{ document.response_archive_sha256 }}
+            {% else %}
+              {{ unverified_archive|force_escape }}
+            {% endif %}
+          </dd>
+          <dt class="text-xs text-slate-400">{% trans "Archived At" %}</dt>
+          <dd class="mt-1 text-xs text-slate-300">
+            {{ document.response_archive_downloaded_at|date:"d M Y H:i"|default:"-" }}
+          </dd>
+          {% endif %}
         </dl>
       </div>
       {% endif %}

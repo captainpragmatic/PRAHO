@@ -2026,6 +2026,13 @@ def efactura_dashboard(request: HttpRequest) -> HttpResponse:
         {"key": "draft", "label": _("Draft"), "count": status_counts.get("draft", 0), "color": "slate", "icon": "📝"},
         {"key": "queued", "label": _("Queued"), "count": status_counts.get("queued", 0), "color": "blue", "icon": "📋"},
         {
+            "key": "uploading",
+            "label": _("Uploading"),
+            "count": status_counts.get("uploading", 0),
+            "color": "cyan",
+            "icon": "⬆️",
+        },
+        {
             "key": "submitted",
             "label": _("Submitted"),
             "count": status_counts.get("submitted", 0),
@@ -2054,6 +2061,13 @@ def efactura_dashboard(request: HttpRequest) -> HttpResponse:
             "icon": "❌",
         },
         {"key": "error", "label": _("Error"), "count": status_counts.get("error", 0), "color": "orange", "icon": "⚠️"},
+        {
+            "key": "outcome_unknown",
+            "label": _("Reconciliation Required"),
+            "count": status_counts.get("outcome_unknown", 0),
+            "color": "red",
+            "icon": "🚨",
+        },
     ]
 
     # 2-4. Queue data
@@ -2152,7 +2166,10 @@ def efactura_submit(request: HttpRequest, pk: int) -> HttpResponse:
     result = service.submit_invoice(invoice)
 
     if result.success:
-        messages.success(request, _("Invoice queued for e-Factura submission."))
+        if result.registered_with_anaf:
+            messages.success(request, _("Invoice submitted to e-Factura."))
+        else:
+            messages.info(request, _("This e-Factura submission is already in progress."))
     else:
         messages.error(request, _(f"e-Factura submission failed: {result.error_message}"))
 
@@ -2178,7 +2195,10 @@ def efactura_retry(request: HttpRequest, pk: str) -> HttpResponse:
     result = service.retry_failed_submission(document)
 
     if result.success:
-        messages.success(request, _("Retry queued successfully."))
+        if result.registered_with_anaf:
+            messages.success(request, _("e-Factura retry completed successfully."))
+        else:
+            messages.info(request, _("This e-Factura submission is already in progress."))
     else:
         messages.error(request, _(f"Retry failed: {result.error_message}"))
 

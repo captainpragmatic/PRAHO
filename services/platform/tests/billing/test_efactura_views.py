@@ -2,6 +2,7 @@
 Tests for e-Factura compliance dashboard views.
 """
 
+from datetime import timedelta
 from unittest.mock import Mock, patch
 from uuid import uuid4
 
@@ -57,7 +58,10 @@ class EfacturaDashboardViewTestCase(TestCase):
 
         response = self.client.get(reverse("billing:efactura_dashboard"))
         self.assertIn("status_cards", response.context)
-        self.assertEqual(len(response.context["status_cards"]), 7)
+        self.assertEqual(len(response.context["status_cards"]), 9)
+        card_keys = {card["key"] for card in response.context["status_cards"]}
+        self.assertIn("uploading", card_keys)
+        self.assertIn("outcome_unknown", card_keys)
 
     @patch("apps.billing.efactura.service.EFacturaService")
     def test_dashboard_status_filter(self, mock_service_class):
@@ -93,6 +97,53 @@ class EfacturaDocumentDetailViewTestCase(TestCase):
             reverse("billing:efactura_document_detail", kwargs={"pk": fake_uuid})
         )
         self.assertEqual(response.status_code, 404)
+
+    def test_unknown_outcome_requires_reconciliation_and_has_no_retry_action(self):
+        from tests.factories import CurrencyFactory, CustomerFactory, InvoiceFactory  # noqa: PLC0415
+
+        invoice = InvoiceFactory(
+            customer=CustomerFactory(),
+            currency=CurrencyFactory(code="RON"),
+            number="INV-UNKNOWN-UI",
+            bill_to_country="RO",
+            status="issued",
+        )
+        claimed_at = timezone.now() - timedelta(minutes=11)
+        document = EFacturaDocument.objects.create(
+            invoice=invoice,
+            status=EFacturaStatus.OUTCOME_UNKNOWN.value,
+            submission_claimed_at=claimed_at,
+            submission_claim_expires_at=claimed_at + timedelta(minutes=10),
+            xml_content="<Invoice/>",
+            last_error="ANAF upload response was lost",
+        )
+
+        response = self.client.get(reverse("billing:efactura_document_detail", kwargs={"pk": document.pk}))
+
+        self.assertContains(response, "Reconciliation Required")
+        self.assertContains(response, "Upload Claim Acquired")
+        self.assertContains(response, "Claim Lease Expired")
+        self.assertNotContains(response, "Retry Submission")
+
+    def test_legacy_response_archive_is_visible_without_an_xml_hash(self):
+        from tests.factories import CurrencyFactory, CustomerFactory, InvoiceFactory  # noqa: PLC0415
+
+        invoice = InvoiceFactory(
+            customer=CustomerFactory(),
+            currency=CurrencyFactory(code="RON"),
+            number="INV-LEGACY-ARCHIVE-UI",
+            bill_to_country="RO",
+            status="issued",
+        )
+        document = EFacturaDocument.objects.create(
+            invoice=invoice,
+            response_archive="efactura/pdf/2026/07/legacy-response.pdf",
+        )
+
+        response = self.client.get(reverse("billing:efactura_document_detail", kwargs={"pk": document.pk}))
+
+        self.assertContains(response, "efactura/pdf/2026/07/legacy-response.pdf")
+        self.assertContains(response, "Unverified legacy archive")
 
 
 class EfacturaSubmitViewTestCase(TestCase):

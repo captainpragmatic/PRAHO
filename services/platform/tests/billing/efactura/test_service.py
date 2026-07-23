@@ -19,6 +19,7 @@ from apps.billing.efactura.models import EFacturaDocument, EFacturaDocumentType,
 from apps.billing.efactura.service import (
     EFacturaService,
     StatusCheckResult,
+    SubmissionClaim,
     SubmissionResult,
     submit_invoice_to_efactura,
 )
@@ -135,120 +136,126 @@ class EFacturaServiceTestCase(TestCase):
         self.assertFalse(result.success)
         self.assertIn("does not require", result.error_message.lower())
 
-    @patch("apps.billing.efactura.service.EFacturaDocument.objects")
-    @patch.object(EFacturaService, "_generate_xml")
-    def test_submit_success(self, mock_generate, mock_objects):
-        """Test successful submission."""
+    @staticmethod
+    def _claim() -> SubmissionClaim:
+        return SubmissionClaim(
+            document_id=uuid4(),
+            token=uuid4(),
+            xml_content="<Invoice/>",
+            xml_hash="a" * 64,
+            is_b2c=False,
+            is_credit_note=False,
+        )
+
+    def test_submit_success(self):
+        """A claimed upload is routed and finalized with ANAF's index."""
         mock_doc = Mock(spec=EFacturaDocument)
-        mock_doc.status = EFacturaStatus.DRAFT.value
-        mock_objects.get_or_create.return_value = (mock_doc, True)
-
-        mock_generate.return_value = "<Invoice/>"
-
+        claim = self._claim()
         self.mock_client.upload_invoice.return_value = UploadResponse(
             success=True,
             upload_index="12345",
         )
 
-        with patch.object(self.service, "_log_audit_event"):
+        with (
+            patch.object(self.service, "_prepare_and_claim_submission", return_value=claim),
+            patch.object(self.service, "_finalize_success", return_value=SubmissionResult.ok(mock_doc)) as finalize,
+        ):
             result = self.service.submit_invoice(self.invoice)
 
         self.assertTrue(result.success)
         self.assertEqual(result.document, mock_doc)
-        mock_doc.mark_submitted.assert_called_once_with("12345")
+        self.mock_client.upload_invoice.assert_called_once_with("<Invoice/>")
+        finalize.assert_called_once_with(claim, "12345")
 
-    @patch("apps.billing.efactura.service.EFacturaDocument.objects")
-    @patch.object(EFacturaService, "_generate_xml")
-    @patch.object(EFacturaService, "_validate_xml")
-    def test_submit_validation_failure(self, mock_validate, mock_generate, mock_objects):
-        """Test submission with validation failure."""
-        mock_doc = Mock(spec=EFacturaDocument)
-        mock_doc.status = EFacturaStatus.DRAFT.value
-        mock_objects.get_or_create.return_value = (mock_doc, True)
-
-        mock_generate.return_value = "<Invoice/>"
-
-        validation_result = ValidationResult(is_valid=False)
-        validation_result.add_error("BR-01", "Missing ID")
-        mock_validate.return_value = validation_result
-
-        with patch.object(self.service, "_log_audit_event"):
+    def test_submit_validation_failure(self):
+        """A deterministic preparation failure never reaches ANAF."""
+        validation_failure = SubmissionResult.error("XML validation failed: 1 errors")
+        with patch.object(self.service, "_prepare_and_claim_submission", return_value=validation_failure):
             result = self.service.submit_invoice(self.invoice)
 
         self.assertFalse(result.success)
         self.assertIn("validation failed", result.error_message.lower())
-        mock_doc.mark_local_error.assert_called_once()
         self.mock_client.upload_invoice.assert_not_called()
 
-    @patch("apps.billing.efactura.service.EFacturaDocument.objects")
-    @patch.object(EFacturaService, "_generate_xml")
-    def test_submit_upload_failure(self, mock_generate, mock_objects):
-        """Test submission with upload failure."""
-        mock_doc = Mock(spec=EFacturaDocument)
-        mock_doc.status = EFacturaStatus.DRAFT.value
-        mock_objects.get_or_create.return_value = (mock_doc, True)
-
-        mock_generate.return_value = "<Invoice/>"
-
+    def test_submit_upload_failure(self):
+        """An explicit ANAF refusal is finalized as a safe retryable failure."""
+        claim = self._claim()
         self.mock_client.upload_invoice.return_value = UploadResponse(
             success=False,
             message="Invalid XML",
             errors=["Schema validation error"],
         )
 
-        with patch.object(self.service, "_log_audit_event"):
+        with (
+            patch.object(self.service, "_prepare_and_claim_submission", return_value=claim),
+            patch.object(
+                self.service,
+                "_finalize_safe_failure",
+                return_value=SubmissionResult.error("Invalid XML"),
+            ) as finalize,
+        ):
             result = self.service.submit_invoice(self.invoice)
 
         self.assertFalse(result.success)
-        mock_doc.mark_error.assert_called_once()
+        finalize.assert_called_once_with(
+            claim,
+            "Invalid XML",
+            errors=[{"message": "Schema validation error"}],
+        )
 
-    @patch.object(EFacturaService, "_get_existing_document")
-    def test_submit_already_accepted(self, mock_get_existing):
+    def test_submit_already_accepted(self):
         """Test submission when already accepted."""
         mock_doc = Mock(spec=EFacturaDocument)
         mock_doc.status = EFacturaStatus.ACCEPTED.value
-        mock_get_existing.return_value = mock_doc
 
-        result = self.service.submit_invoice(self.invoice)
+        with patch.object(
+            self.service,
+            "_prepare_and_claim_submission",
+            return_value=SubmissionResult.ok(mock_doc),
+        ):
+            result = self.service.submit_invoice(self.invoice)
 
         self.assertTrue(result.success)
         self.assertEqual(result.document, mock_doc)
-        # Should not attempt re-submission
         self.mock_client.upload_invoice.assert_not_called()
 
-    @patch("apps.billing.efactura.service.EFacturaDocument.objects")
-    @patch.object(EFacturaService, "_generate_xml")
-    def test_submit_authentication_error(self, mock_generate, mock_objects):
+    def test_submit_authentication_error(self):
         """Test submission with authentication error."""
-        mock_doc = Mock(spec=EFacturaDocument)
-        mock_doc.status = EFacturaStatus.DRAFT.value
-        mock_objects.get_or_create.return_value = (mock_doc, True)
-
-        mock_generate.return_value = "<Invoice/>"
+        claim = self._claim()
         self.mock_client.upload_invoice.side_effect = AuthenticationError("Token expired")
 
-        with patch.object(self.service, "_get_existing_document", return_value=mock_doc):
+        with (
+            patch.object(self.service, "_prepare_and_claim_submission", return_value=claim),
+            patch.object(
+                self.service,
+                "_finalize_safe_failure",
+                return_value=SubmissionResult.error("Authentication failed: Token expired"),
+            ) as finalize,
+        ):
             result = self.service.submit_invoice(self.invoice)
 
         self.assertFalse(result.success)
         self.assertIn("Authentication", result.error_message)
+        finalize.assert_called_once_with(claim, "Authentication failed: Token expired")
 
-    @patch("apps.billing.efactura.service.EFacturaDocument.objects")
-    @patch.object(EFacturaService, "_generate_xml")
-    def test_submit_network_error(self, mock_generate, mock_objects):
+    def test_submit_network_error(self):
         """Test submission with network error."""
-        mock_doc = Mock(spec=EFacturaDocument)
-        mock_doc.status = EFacturaStatus.DRAFT.value
-        mock_objects.get_or_create.return_value = (mock_doc, True)
-
-        mock_generate.return_value = "<Invoice/>"
+        claim = self._claim()
         self.mock_client.upload_invoice.side_effect = NetworkError("Connection refused")
 
-        with patch.object(self.service, "_get_existing_document", return_value=mock_doc):
+        with (
+            patch.object(self.service, "_prepare_and_claim_submission", return_value=claim),
+            patch.object(
+                self.service,
+                "_finalize_unknown_outcome",
+                return_value=SubmissionResult.error("ANAF upload outcome unknown: Connection refused"),
+            ) as finalize,
+        ):
             result = self.service.submit_invoice(self.invoice)
 
         self.assertFalse(result.success)
-        self.assertIn("Network", result.error_message)
+        self.assertIn("outcome unknown", result.error_message)
+        finalize.assert_called_once_with(claim, "ANAF upload outcome unknown: Connection refused")
 
 
 @override_settings(EFACTURA_ENABLED=True)
@@ -283,13 +290,16 @@ class EFacturaStatusCheckTestCase(TestCase):
         mock_response.raw_response = {}
         self.mock_client.get_upload_status.return_value = mock_response
 
-        with patch.object(self.service, "_log_audit_event"):
+        with patch.object(self.service, "_log_audit_event"), patch.object(
+            self.service, "download_response", return_value=b"response archive"
+        ) as download_response:
             result = self.service.check_status(mock_doc)
 
         self.assertEqual(result.status, "accepted")
         self.assertTrue(result.is_terminal)
         self.assertEqual(result.download_id, "67890")
         mock_doc.mark_accepted.assert_called_once()
+        download_response.assert_called_once_with(mock_doc)
 
     def test_check_status_rejected(self):
         """Test status check returns rejected."""
@@ -388,25 +398,33 @@ class EFacturaDownloadTestCase(TestCase):
         self.assertIsNone(result)
 
     def test_download_success(self):
-        """Test successful download."""
+        """Test successful validated ZIP download."""
         mock_doc = Mock(spec=EFacturaDocument)
         mock_doc.anaf_download_id = "67890"
-        mock_doc.invoice = Mock(number="INV-001")
-        mock_doc.signed_pdf = Mock()
+        mock_doc.id = uuid4()
+        mock_doc.status = EFacturaStatus.ACCEPTED.value
+        mock_doc.verify_response_archive_integrity.return_value = False
+        mock_doc.response_archive = Mock()
 
-        pdf_content = b"%PDF-1.4 test content"
-        self.mock_client.download_response.return_value = pdf_content
+        zip_content = b"validated zip content"
+        self.mock_client.download_response.return_value = zip_content
 
-        result = self.service.download_response(mock_doc)
+        with patch("apps.billing.efactura.service.validate_response_archive") as validate:
+            result = self.service.download_response(mock_doc)
 
-        self.assertEqual(result, pdf_content)
-        mock_doc.signed_pdf.save.assert_called_once()
+        self.assertEqual(result, zip_content)
+        validate.assert_called_once_with(zip_content)
+        mock_doc.response_archive.save.assert_called_once()
+        self.assertEqual(len(mock_doc.response_archive_sha256), 64)
+        mock_doc.save.assert_called_once()
 
     def test_download_failure(self):
         """Test download failure."""
         mock_doc = Mock(spec=EFacturaDocument)
         mock_doc.anaf_download_id = "67890"
         mock_doc.id = uuid4()
+        mock_doc.status = EFacturaStatus.ACCEPTED.value
+        mock_doc.verify_response_archive_integrity.return_value = False
 
         self.mock_client.download_response.side_effect = NetworkError("Download failed")
 
@@ -445,8 +463,9 @@ class EFacturaRetryTestCase(TestCase):
         result = self.service.retry_failed_submission(mock_doc)
 
         self.assertTrue(result.success)
-        mock_doc.mark_queued.assert_called_once()
-        mock_doc.save.assert_called_once()
+        mock_submit.assert_called_once_with(mock_doc.invoice)
+        mock_doc.mark_queued.assert_not_called()
+        mock_doc.save.assert_not_called()
 
     @patch.object(EFacturaService, "submit_invoice")
     def test_retry_success(self, mock_submit):
@@ -460,21 +479,23 @@ class EFacturaRetryTestCase(TestCase):
         result = self.service.retry_failed_submission(mock_doc)
 
         self.assertTrue(result.success)
-        mock_doc.mark_queued.assert_called_once()
-        mock_doc.save.assert_called_once()
+        mock_submit.assert_called_once_with(mock_doc.invoice)
+        mock_doc.mark_queued.assert_not_called()
+        mock_doc.save.assert_not_called()
 
-    @patch("apps.billing.efactura.service.transaction.atomic")
     @patch.object(EFacturaService, "submit_invoice")
-    def test_retry_failed_submission_uses_transaction_atomic(self, mock_submit, mock_atomic):
-        """Retry queueing and resubmission call should run in one atomic block."""
+    def test_retry_does_not_open_an_outer_transaction_around_upload(self, mock_submit):
+        """The claim helper owns the short transaction; retry must not wrap the remote POST."""
         mock_doc = Mock(spec=EFacturaDocument)
         mock_doc.can_retry = True
+        mock_doc.can_requeue_after_fix = False
         mock_doc.invoice = Mock()
         mock_submit.return_value = SubmissionResult.ok(mock_doc)
 
-        self.service.retry_failed_submission(mock_doc)
+        result = self.service.retry_failed_submission(mock_doc)
 
-        mock_atomic.assert_called_once()
+        self.assertTrue(result.success)
+        mock_submit.assert_called_once_with(mock_doc.invoice)
 
 
 @override_settings(EFACTURA_ENABLED=True)
@@ -491,6 +512,7 @@ class EFacturaBatchOperationsTestCase(TestCase):
         """Test processing pending submissions."""
         mock_doc1 = Mock(spec=EFacturaDocument)
         mock_doc1.invoice = Mock()
+        mock_doc1.status = EFacturaStatus.SUBMITTED.value
         mock_doc2 = Mock(spec=EFacturaDocument)
         mock_doc2.invoice = Mock()
         mock_get_pending.return_value = [mock_doc1, mock_doc2]
@@ -522,6 +544,19 @@ class EFacturaBatchOperationsTestCase(TestCase):
 
         self.assertEqual(results["accepted"], 1)
         self.assertEqual(results["processing"], 1)
+
+    @patch("apps.billing.efactura.service.EFacturaDocument.get_missing_response_archives")
+    @patch.object(EFacturaService, "download_response")
+    def test_process_missing_response_archives(self, mock_download, mock_get_missing):
+        first = Mock(spec=EFacturaDocument)
+        second = Mock(spec=EFacturaDocument)
+        mock_get_missing.return_value = [first, second]
+        mock_download.side_effect = [b"archive", None]
+
+        results = self.service.process_missing_response_archives()
+
+        self.assertEqual(results, {"archived": 1, "failed": 1})
+        mock_get_missing.assert_called_once_with(100)
 
     @patch("apps.billing.efactura.service.EFacturaDocument.get_ready_for_retry")
     @patch.object(EFacturaService, "retry_failed_submission")
@@ -689,6 +724,13 @@ class SubmissionLifecycleTests(TestCase):
         doc = EFacturaDocument.objects.create(invoice=invoice, document_type=EFacturaDocumentType.INVOICE.value)
         doc.mark_queued()
         doc.save()
+        claimed_at = timezone.now()
+        doc.mark_uploading(
+            claim_token=uuid4(),
+            claimed_at=claimed_at,
+            claim_expires_at=claimed_at + EFacturaService.SUBMISSION_CLAIM_LEASE,
+        )
+        doc.save()
         doc.mark_submitted(upload_index)
         doc.save()
         return doc
@@ -852,10 +894,8 @@ class SubmissionLifecycleTests(TestCase):
         client.upload_invoice.assert_not_called()
         client.upload_credit_note.assert_not_called()
 
-    def test_fresh_failure_marks_new_document_as_error_not_queued(self):
-        """#202 review (codex P2): a fresh submission that fails AFTER queue-before-upload must mark
-        the NEW document `error` (with backoff), not leave it `queued` where
-        process_pending_submissions hot-retries it forever without incrementing retry_count."""
+    def test_fresh_network_failure_is_quarantined_as_outcome_unknown(self):
+        """A lost POST response cannot be safely classified as a retryable local error."""
         invoice = self._ro_invoice("INV-FAIL-1")
         client = Mock(spec=EFacturaClient)
         client.upload_invoice.side_effect = NetworkError("boom")
@@ -870,8 +910,9 @@ class SubmissionLifecycleTests(TestCase):
 
         self.assertFalse(result.success)
         doc = EFacturaDocument.objects.get(invoice=invoice)
-        self.assertEqual(doc.status, EFacturaStatus.ERROR.value)
-        self.assertGreaterEqual(doc.retry_count, 1)
+        self.assertEqual(doc.status, EFacturaStatus.OUTCOME_UNKNOWN.value)
+        self.assertIsNone(doc.next_retry_at)
+        self.assertFalse(doc.can_retry)
 
     def test_rejected_document_is_not_resubmitted(self):
         """#202 review (copilot): submit_invoice on an ANAF-rejected doc must NOT re-POST (duplicate
@@ -879,6 +920,13 @@ class SubmissionLifecycleTests(TestCase):
         invoice = self._ro_invoice("INV-REJ-1")
         doc = EFacturaDocument.objects.create(invoice=invoice, document_type=EFacturaDocumentType.INVOICE.value)
         doc.mark_queued()
+        doc.save()
+        claimed_at = timezone.now()
+        doc.mark_uploading(
+            claim_token=uuid4(),
+            claimed_at=claimed_at,
+            claim_expires_at=claimed_at + EFacturaService.SUBMISSION_CLAIM_LEASE,
+        )
         doc.save()
         doc.mark_submitted("IDX-R")
         doc.save()
