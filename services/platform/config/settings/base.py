@@ -392,6 +392,7 @@ REST_FRAMEWORK = {
 # Set API_TOKEN_DEFAULT_TTL_DAYS=0 to disable default expiry (not recommended).
 API_TOKEN_DEFAULT_TTL_DAYS = int(os.environ.get("API_TOKEN_DEFAULT_TTL_DAYS", "90"))
 API_TOKEN_MAX_TTL_DAYS = int(os.environ.get("API_TOKEN_MAX_TTL_DAYS", "365"))
+API_TOKEN_MAX_ACTIVE_PER_USER = int(os.environ.get("API_TOKEN_MAX_ACTIVE_PER_USER", "20"))
 
 # Registrar gateway safety gate (ADR/#93). The Gandi/ROTLD response schemas were
 # implemented against documentation and have NOT been validated against a live

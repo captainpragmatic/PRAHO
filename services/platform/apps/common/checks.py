@@ -577,18 +577,20 @@ def check_csp_nonce_middleware_order(app_configs: Any, **kwargs: Any) -> list[Er
 
 
 @register(Tags.security)
-def check_api_token_ttl_configuration(app_configs: Any, **kwargs: Any) -> list[Error | DjangoWarning]:
+def check_api_token_configuration(app_configs: Any, **kwargs: Any) -> list[Error | DjangoWarning]:
     """
-    Check that the API token TTL settings form a coherent expiry policy (ADR-0031).
+    Check that the API token settings form a coherent issuance policy (ADR-0031).
 
     obtain_token clamps caller-supplied TTLs to API_TOKEN_MAX_TTL_DAYS and falls
     back to API_TOKEN_DEFAULT_TTL_DAYS, so an incoherent pair silently changes
-    token lifetimes instead of failing. Catch it at startup instead.
+    token lifetimes instead of failing. It also enforces a deployment-level
+    active-token cap. Catch invalid policy at startup instead.
     """
     findings: list[Error | DjangoWarning] = []
 
     default_ttl = getattr(settings, "API_TOKEN_DEFAULT_TTL_DAYS", 90)
     max_ttl = getattr(settings, "API_TOKEN_MAX_TTL_DAYS", 365)
+    max_active_tokens = getattr(settings, "API_TOKEN_MAX_ACTIVE_PER_USER", 20)
 
     if max_ttl < 1:
         findings.append(
@@ -618,6 +620,16 @@ def check_api_token_ttl_configuration(app_configs: Any, **kwargs: Any) -> list[E
                 hint="ADR-0031 recommends a rolling default expiry (90 days). "
                 "Leave this at 0 only if non-expiring tokens are an accepted risk.",
                 id="security.W063",
+            )
+        )
+
+    if max_active_tokens < 1:
+        findings.append(
+            Error(
+                f"API_TOKEN_MAX_ACTIVE_PER_USER is {max_active_tokens} — it must be >= 1",
+                hint="Set API_TOKEN_MAX_ACTIVE_PER_USER to the maximum number of live automation tokens "
+                "each user may hold.",
+                id="security.E064",
             )
         )
 
