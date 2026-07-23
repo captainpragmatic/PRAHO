@@ -196,6 +196,7 @@ def _get_vat_rate_for_order(order: Order) -> Decimal:
     """Resolve VAT from the order snapshot plus any explicit customer override."""
     from apps.orders.vat_rules import CustomerVATInfo, OrderVATCalculator  # noqa: PLC0415
 
+    country = "RO"
     try:
         customer = order.customer
         billing_address = order.billing_address or {}
@@ -783,6 +784,7 @@ def order_create_with_item(request: HttpRequest) -> HttpResponse:
                     quantity=quantity,
                     unit_price_cents=int(price.get_price_cents_for_period(billing_period)),
                     setup_cents=int(price.setup_cents),
+                    tax_rate=_get_vat_rate_for_order(order),
                     config={"product_price_id": str(price.id)},
                     domain_name=domain_name,
                 )

@@ -56,6 +56,11 @@ class OrderItemVATRateResolutionTestCase(TestCase):
 
         self.assertEqual(_get_vat_rate_for_order(self.order), Decimal("0.0000"))
 
+    def test_invalid_snapshot_country_falls_back_to_romanian_rate(self):
+        self.order.billing_address["country"] = "Unknownland"
+
+        self.assertEqual(_get_vat_rate_for_order(self.order), Decimal("0.2100"))
+
 
 class OrderViewsAuthenticationTestCase(TestCase):
     """Test authentication requirements for order views"""

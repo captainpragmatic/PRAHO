@@ -24,7 +24,7 @@ class VATRateOverrideMigrationTest(TransactionTestCase):
         self.profile_ids: dict[str, object] = {}
         for index, (label, is_vat_payer, vat_rate) in enumerate(
             (
-                ("generated_standard", True, Decimal("21.00")),
+                ("ambiguous_standard", True, Decimal("21.00")),
                 ("generated_nonpayer", False, Decimal("0.00")),
                 ("explicit_zero", True, Decimal("0.00")),
                 ("explicit_reduced", True, Decimal("19.00")),
@@ -47,7 +47,7 @@ class VATRateOverrideMigrationTest(TransactionTestCase):
         MigrationExecutor(connection).migrate([MIGRATE_TO])
         super().tearDown()
 
-    def test_generated_defaults_are_cleared_and_explicit_rates_are_preserved(self) -> None:
+    def test_only_proven_generated_defaults_are_cleared(self) -> None:
         executor = MigrationExecutor(connection)
         executor.migrate([MIGRATE_TO])
         migrated_apps = executor.loader.project_state([MIGRATE_TO]).apps
@@ -58,7 +58,7 @@ class VATRateOverrideMigrationTest(TransactionTestCase):
             for label, profile_id in self.profile_ids.items()
         }
 
-        self.assertIsNone(rates["generated_standard"])
+        self.assertEqual(rates["ambiguous_standard"], Decimal("21.00"))
         self.assertIsNone(rates["generated_nonpayer"])
         self.assertEqual(rates["explicit_zero"], Decimal("0.00"))
         self.assertEqual(rates["explicit_reduced"], Decimal("19.00"))
@@ -76,7 +76,7 @@ class VATRateOverrideMigrationTest(TransactionTestCase):
             for label, profile_id in self.profile_ids.items()
         }
 
-        self.assertEqual(rates["generated_standard"], Decimal("21.00"))
+        self.assertEqual(rates["ambiguous_standard"], Decimal("21.00"))
         self.assertEqual(rates["generated_nonpayer"], Decimal("0.00"))
         self.assertEqual(rates["explicit_zero"], Decimal("0.00"))
         self.assertEqual(rates["explicit_reduced"], Decimal("19.00"))
