@@ -59,7 +59,7 @@ jobs:
         uv python install
         uv sync --all-groups
 
-    - name: Lint all services (make lint — 7 phases)
+    - name: Lint all services (make lint — 8 phases)
       run: make lint
 
     - name: Component parity check (portal ↔ platform)

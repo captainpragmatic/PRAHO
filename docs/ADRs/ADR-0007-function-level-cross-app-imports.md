@@ -230,6 +230,12 @@ from reportlab.pdfgen import canvas
 - **Safe imports optimized** by moving Django core/stdlib/third-party to module-level
 - **Maximum code quality maintained** while respecting Django architectural patterns
 
+### Enforcement:
+- `make lint-imports` rejects new module-level cross-app model dependencies.
+- `scripts/cross_app_model_imports_baseline.txt` records exact legacy dependencies and must shrink when debt is removed.
+- API composition roots and management commands are excluded because they assemble domain models after Django app setup.
+- Pre-commit and `make lint` both run the guard.
+
 ### Review Process:
 1. **New PLC0415 warnings** require explicit noqa comment with justification
 2. **Cross-app imports** must explain circular dependency prevention in noqa comment
