@@ -263,7 +263,7 @@ class OrderServiceTestCase(TestCase):
                 "city": "Bucuresti",
                 "county": "Bucuresti",
                 "postal_code": "010563",
-                "country": "Romania",
+                "country": "RO",
                 "fiscal_code": "RO12345678",
             },
         )
@@ -374,7 +374,7 @@ class OrderServiceTestCase(TestCase):
                         "city": "Bucuresti",
                         "county": "Bucuresti",
                         "postal_code": "010001",
-                        "country": "Romania",
+                        "country": "RO",
                     },
                 )
 

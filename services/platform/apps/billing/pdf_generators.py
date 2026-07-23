@@ -1,6 +1,6 @@
 # ===============================================================================
 # ROMANIAN PDF GENERATORS FOR BILLING DOCUMENTS
-# EN16931-compliant with Romanian Cod Fiscal art. 319 / art. 331 support
+# EN16931-compliant with Romanian Cod Fiscal art. 319 and EU reverse-charge support
 # ===============================================================================
 
 from __future__ import annotations
@@ -23,6 +23,7 @@ from reportlab.pdfgen import canvas
 
 from apps.billing.document_adjustments import validate_no_unsupported_adjustments
 from apps.billing.models import Invoice, ProformaInvoice
+from apps.billing.tax_evidence import REVERSE_CHARGE_LEGAL_BASIS
 from apps.common.utils import format_romanian_date
 
 logger = logging.getLogger(__name__)
@@ -548,7 +549,9 @@ class RomanianDocumentPDFGenerator:
             self.canvas.drawString(
                 2 * cm,
                 totals_y,
-                str(_t("Taxare inversă / Reverse charge — Art. 331 Cod Fiscal")),
+                str(_t("Taxare inversă / Reverse charge — {legal_basis}")).format(
+                    legal_basis=REVERSE_CHARGE_LEGAL_BASIS
+                ),
             )
             totals_y -= 0.5 * cm
 

@@ -17,7 +17,7 @@ from unittest.mock import patch
 from django.test import RequestFactory, TestCase
 
 from apps.billing.models import Currency
-from apps.customers.models import Customer
+from apps.customers.models import Customer, CustomerAddress, CustomerTaxProfile
 from apps.orders.models import Order, OrderItem
 from apps.products.models import Product, ProductPrice
 from apps.provisioning.models import ServicePlan
@@ -109,6 +109,30 @@ class PreflightCurrencyValidationTests(TestCase):
         status_code, data = _call_preflight(self.customer, self.cart_items, currency="EUR")
         self.assertEqual(status_code, 400)
         self.assertTrue(any("not configured" in e.lower() for e in data["errors"]))
+
+    def test_non_vat_payer_eu_business_uses_profile_for_preview(self) -> None:
+        """Preflight must not quote reverse charge when the tax profile disables it."""
+        CustomerAddress.objects.create(
+            customer=self.customer,
+            is_billing=True,
+            address_line1="Teststrasse 1",
+            city="Berlin",
+            county="Berlin",
+            postal_code="10115",
+            country="DE",
+        )
+        CustomerTaxProfile.objects.create(
+            customer=self.customer,
+            vat_number="DE123456789",
+            is_vat_payer=False,
+        )
+
+        status_code, data = _call_preflight(self.customer, self.cart_items)
+
+        self.assertEqual(status_code, 200)
+        self.assertEqual(data["preview"]["subtotal_cents"], 2500)
+        self.assertEqual(data["preview"]["vat_cents"], 475)
+        self.assertEqual(data["preview"]["total_cents"], 2975)
 
 
 # ---------------------------------------------------------------------------

@@ -126,6 +126,7 @@ class TaxServiceScenarioTests(TestCase):
             "country": "DE",
             "is_business": True,
             "vat_number": "DE123456789",
+            "is_vat_payer": True,
         }
         result = TaxService.calculate_vat_for_document(10000, info)
 
@@ -140,6 +141,7 @@ class TaxServiceScenarioTests(TestCase):
             "country": "FR",
             "is_business": True,
             "vat_number": "FR12345678901",
+            "is_vat_payer": True,
         }
         result = TaxService.calculate_vat_for_document(5000, info)
 
@@ -169,6 +171,9 @@ class TaxServiceScenarioTests(TestCase):
                     "country": "FR",
                     "is_business": True,
                     "vat_number": "FR12345678901",
+                    # Explicit under the fail-closed contract: missing VAT-payer
+                    # evidence now routes to EU_B2C, so the verified case states it.
+                    "is_vat_payer": True,
                     "reverse_charge_eligible": True,
                 },
                 VATScenario.EU_B2B_REVERSE_CHARGE,
@@ -184,6 +189,21 @@ class TaxServiceScenarioTests(TestCase):
                 self.assertEqual(result.vat_rate, Decimal(rate))
                 self.assertEqual(result.vat_cents, vat_cents)
                 self.assertEqual(result.total_cents, 10000 + vat_cents)
+
+    def test_eu_business_missing_vat_payer_evidence_fails_closed(self) -> None:
+        """A partial context must not treat missing VAT-payer evidence as permission."""
+        info: CustomerVATInfo = {
+            "country": "DE",
+            "is_business": True,
+            "vat_number": "DE123456789",
+            "reverse_charge_eligible": True,
+        }
+
+        result = TaxService.calculate_vat_for_document(10000, info)
+
+        self.assertEqual(result.scenario, VATScenario.EU_B2C)
+        self.assertEqual(result.vat_rate, Decimal("19.0"))
+        self.assertEqual(result.vat_cents, 1900)
 
     # ── Scenario 5: Non-EU Zero VAT ──────────────────────────────────────────
 
@@ -325,6 +345,7 @@ class TaxServiceScenarioTests(TestCase):
             "country": "DE",
             "is_business": True,
             "vat_number": "DE123456789",
+            "is_vat_payer": True,
             "reverse_charge_eligible": True,
         }
         result = TaxService.calculate_vat_for_document(10000, info)
@@ -338,6 +359,7 @@ class TaxServiceScenarioTests(TestCase):
             "country": "RO",
             "is_business": True,
             "vat_number": "RO12345678",
+            "is_vat_payer": True,
             "reverse_charge_eligible": True,
         }
         result = TaxService.calculate_vat_for_document(10000, info)
