@@ -8,12 +8,13 @@ from typing import Any
 from unittest import mock
 from unittest.mock import MagicMock, patch
 
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, OperationalError, transaction
 from django.test import TestCase
 from django.utils import timezone
 
 from apps.billing.models import Currency, Invoice, Payment, ProformaInvoice, Refund, RefundStatusHistory
 from apps.billing.refund_service import Err, RefundData, RefundService
+from apps.common.types import Retriability
 from apps.customers.models import Customer
 from apps.orders.models import Order
 
@@ -535,7 +536,7 @@ class RefundGatewayIntegrityTests(TestCase):
         self.assertEqual(refund.metadata["gateway_event_id"], "evt_refund_newer")
         self.assertEqual(refund.metadata["gateway_event_created"], 200)
 
-    def test_refund_webhook_rejects_amount_mismatch_without_mutation(self) -> None:
+    def test_refund_webhook_acknowledges_amount_mismatch_without_mutation(self) -> None:
         invoice = self._make_invoice()
         payment = self._make_payment(invoice, transaction_id="pi_refund_mismatch")
         refund = Refund.objects.create(
@@ -562,10 +563,12 @@ class RefundGatewayIntegrityTests(TestCase):
         }
         from apps.integrations.webhooks.stripe import StripeWebhookProcessor  # noqa: PLC0415
 
-        accepted, message = StripeWebhookProcessor().handle_refund_event("refund.updated", payload)
+        with self.assertLogs("apps.integrations.webhooks.stripe", level="CRITICAL") as logs:
+            accepted, message = StripeWebhookProcessor().handle_refund_event("refund.updated", payload)
 
-        self.assertFalse(accepted)
+        self.assertTrue(accepted)
         self.assertIn("amount mismatch", message.lower())
+        self.assertIn("manual reconciliation required", logs.output[0])
         refund.refresh_from_db()
         payment.refresh_from_db()
         invoice.refresh_from_db()
@@ -1519,5 +1522,231 @@ class RefundConvergenceHardeningTests(TestCase):
 
         # Both valid siblings are processed even though the middle entry is malformed.
         self.assertEqual(seen, ["re_ok_1", "re_ok_2"])
+        self.assertTrue(accepted)
+        self.assertIn("handled", message)
+
+    def test_convergence_marks_validation_failure_not_retriable(self) -> None:
+        from apps.billing.refund_service import RefundConvergenceService  # noqa: PLC0415
+
+        result = RefundConvergenceService.converge_gateway_refund({})
+
+        self.assertIsInstance(result, Err)
+        self.assertEqual(result.retriability, Retriability.NOT_RETRIABLE)
+
+    def test_convergence_marks_transactional_failure_retriable(self) -> None:
+        from apps.billing.refund_service import RefundConvergenceService  # noqa: PLC0415
+
+        with patch(
+            "apps.billing.refund_service.Payment.objects.select_for_update",
+            side_effect=OperationalError("deadlock detected"),
+        ):
+            result = RefundConvergenceService.converge_gateway_refund(
+                {
+                    "refund_id": "re_retryable_failure",
+                    "payment_intent_id": "pi_retryable_failure",
+                    "amount_cents": 1_000,
+                    "currency": "ron",
+                    "status": "succeeded",
+                }
+            )
+
+        self.assertIsInstance(result, Err)
+        self.assertEqual(result.retriability, Retriability.RETRIABLE)
+
+    def test_convergence_leaves_unexpected_failure_unclassified_for_safe_replay(self) -> None:
+        from apps.billing.refund_service import RefundConvergenceService  # noqa: PLC0415
+
+        with patch(
+            "apps.billing.refund_service.Payment.objects.select_for_update",
+            side_effect=RuntimeError("unexpected convergence failure"),
+        ):
+            result = RefundConvergenceService.converge_gateway_refund(
+                {
+                    "refund_id": "re_unknown_failure",
+                    "payment_intent_id": "pi_unknown_failure",
+                    "amount_cents": 1_000,
+                    "currency": "ron",
+                    "status": "succeeded",
+                }
+            )
+
+        self.assertIsInstance(result, Err)
+        self.assertEqual(result.retriability, Retriability.UNKNOWN)
+
+    def test_refund_webhook_rejects_retryable_convergence_failure(self) -> None:
+        from apps.integrations.webhooks.stripe import StripeWebhookProcessor  # noqa: PLC0415
+
+        payload = {
+            "id": "evt_retryable_failure",
+            "created": 1_700_000_000,
+            "data": {
+                "object": {
+                    "id": "re_retryable_failure",
+                    "payment_intent": "pi_retryable_failure",
+                    "amount": 1_000,
+                    "currency": "ron",
+                    "status": "succeeded",
+                }
+            },
+        }
+        with patch(
+            "apps.billing.refund_service.RefundConvergenceService.converge_gateway_refund",
+            return_value=Err("deadlock detected", retriability=Retriability.RETRIABLE),
+        ):
+            accepted, message = StripeWebhookProcessor().handle_refund_event("refund.updated", payload)
+
         self.assertFalse(accepted)
-        self.assertIn("failed", message)
+        self.assertIn("deadlock", message)
+
+    def test_refund_webhook_acknowledges_malformed_object(self) -> None:
+        from apps.integrations.webhooks.stripe import StripeWebhookProcessor  # noqa: PLC0415
+
+        malformed_payloads: tuple[dict[str, Any], ...] = (
+            {"data": {"object": "not-a-refund"}},
+            {"data": "not-an-event-data-object"},
+        )
+        for payload in malformed_payloads:
+            with self.subTest(payload=payload), self.assertLogs(
+                "apps.integrations.webhooks.stripe", level="CRITICAL"
+            ) as logs:
+                accepted, message = StripeWebhookProcessor().handle_refund_event("refund.updated", payload)
+
+            self.assertTrue(accepted)
+            self.assertIn("permanent", message.lower())
+            self.assertIn("manual reconciliation required", logs.output[0])
+
+    def test_refund_webhook_rejects_unclassified_convergence_failure(self) -> None:
+        from apps.integrations.webhooks.stripe import StripeWebhookProcessor  # noqa: PLC0415
+
+        payload = {
+            "data": {
+                "object": {
+                    "id": "re_unknown_failure",
+                    "payment_intent": "pi_unknown_failure",
+                    "amount": 1_000,
+                    "currency": "ron",
+                    "status": "succeeded",
+                }
+            }
+        }
+        with patch(
+            "apps.billing.refund_service.RefundConvergenceService.converge_gateway_refund",
+            return_value=Err("unclassified failure"),
+        ):
+            accepted, message = StripeWebhookProcessor().handle_refund_event("refund.updated", payload)
+
+        self.assertFalse(accepted)
+        self.assertIn("unclassified", message)
+
+    def test_concurrent_refund_transition_is_retriable(self) -> None:
+        from django_fsm import ConcurrentTransition  # noqa: PLC0415
+
+        invoice = self._make_invoice()
+        payment = self._make_payment(invoice, transaction_id="pi_concurrent_transition")
+        refund = Refund.objects.create(
+            customer=self.customer,
+            invoice=invoice,
+            payment=payment,
+            amount_cents=1_000,
+            currency=self.currency,
+            original_amount_cents=10_000,
+            status="pending",
+            reference_number="REF-CONCURRENT-TRANSITION",
+        )
+        with patch.object(refund, "start_processing", side_effect=ConcurrentTransition("stale refund")):
+            result = RefundService._advance_refund_status(refund, "pending")
+
+        self.assertIsInstance(result, Err)
+        self.assertEqual(result.retriability, Retriability.RETRIABLE)
+
+    def test_charge_refunded_acknowledges_malformed_charge_object(self) -> None:
+        from apps.integrations.webhooks.stripe import StripeWebhookProcessor  # noqa: PLC0415
+
+        with self.assertLogs("apps.integrations.webhooks.stripe", level="CRITICAL") as logs:
+            accepted, message = StripeWebhookProcessor().handle_charge_event("charge.refunded", {"data": "bad"})
+
+        self.assertTrue(accepted)
+        self.assertIn("permanent", message.lower())
+        self.assertIn("manual reconciliation required", logs.output[0])
+
+
+class RefundErrorMessageHygieneTests(TestCase):
+    """Err messages from refund convergence flow into webhook HTTP responses
+    (integrations/views.py), so raw exception text — DB internals included —
+    must stay in the logs, never in the returned message (review of #374)."""
+
+    def setUp(self) -> None:
+        self.currency, _ = Currency.objects.get_or_create(
+            code="RON",
+            defaults={"name": "Romanian Leu", "symbol": "lei", "decimals": 2},
+        )
+        self.customer = Customer.objects.create(
+            name="Message Hygiene SRL",
+            customer_type="company",
+            company_name="Message Hygiene SRL",
+            status="active",
+        )
+        invoice = Invoice.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            number=f"INV-{uuid.uuid4().hex[:10]}",
+            status="paid",
+            subtotal_cents=1_000,
+            tax_cents=0,
+            total_cents=1_000,
+            due_at=timezone.now() + timedelta(days=14),
+            bill_to_name=self.customer.company_name,
+        )
+        Payment.objects.create(
+            customer=self.customer,
+            invoice=invoice,
+            currency=self.currency,
+            status="succeeded",
+            payment_method="stripe",
+            amount_cents=1_000,
+            gateway_txn_id="pi_leak_check",
+        )
+
+    def test_transient_db_failure_message_carries_no_exception_detail(self) -> None:
+        from apps.billing.refund_service import RefundConvergenceService  # noqa: PLC0415
+
+        with patch.object(
+            RefundConvergenceService,
+            "_lock_related_order",
+            side_effect=OperationalError("connection reset by peer at 10.0.0.5:5432"),
+        ):
+            result = RefundConvergenceService.converge_gateway_refund(
+                {
+                    "refund_id": "re_leak_check",
+                    "payment_intent_id": "pi_leak_check",
+                    "amount_cents": 1_000,
+                    "currency": "ron",
+                    "status": "succeeded",
+                }
+            )
+
+        self.assertTrue(result.is_err())
+        message = result.unwrap_err()
+        self.assertNotIn("10.0.0.5", message, "DB exception detail must not reach the webhook response")
+        self.assertNotIn("connection reset", message)
+
+    def test_unexpected_failure_message_carries_no_exception_detail(self) -> None:
+        from apps.billing.refund_service import RefundConvergenceService  # noqa: PLC0415
+
+        with patch.object(
+            RefundConvergenceService,
+            "_lock_related_order",
+            side_effect=RuntimeError("secret internal state: /etc/praho/key"),
+        ):
+            result = RefundConvergenceService.converge_gateway_refund(
+                {
+                    "refund_id": "re_leak_check_2",
+                    "payment_intent_id": "pi_leak_check",
+                    "amount_cents": 1_000,
+                    "currency": "ron",
+                    "status": "succeeded",
+                }
+            )
+
+        self.assertTrue(result.is_err())
+        self.assertNotIn("/etc/praho/key", result.unwrap_err())
