@@ -1999,3 +1999,35 @@ class TestBackfillRefundsFromMeta(TestCase):
         refunds = list(Refund.objects.filter(order=order))
         assert len(refunds) == 1
         assert refunds[0].reason == "customer_request"
+
+
+class TestOrderRefundInvoiceLinkage(TestCase):
+    """Settlement of an order refund must project the ORDER-linked invoice
+    (review of #388): a payment matched via meta['order_id'] can legally carry
+    an invoice_id different from order.invoice_id, and preferring the payment's
+    invoice would refund-project the wrong document."""
+
+    def test_mismatched_payment_invoice_linkage_fails_closed(self) -> None:
+        """A refund must not guess which document to mark refunded: when the
+        payment's invoice disagrees with the order's, settlement rejects the
+        command for manual reconciliation and touches NEITHER invoice."""
+        customer = _make_customer()
+        currency = _make_currency()
+        order_invoice = _make_invoice(customer, currency)
+        other_invoice = _make_invoice(customer, currency)
+        order = _make_order(customer, currency, invoice=order_invoice)
+        payment = _make_bank_payment(customer, currency, invoice=other_invoice, order=order)
+
+        result = RefundService.refund_order(
+            order.id,
+            {"refund_type": RefundType.FULL, "reason": "customer_request", "notes": "linkage test"},
+        )
+
+        self.assertTrue(result.is_err(), "mismatched invoice linkage must fail closed")
+        self.assertIn("linkage", result.unwrap_err().lower())
+        order_invoice.refresh_from_db()
+        other_invoice.refresh_from_db()
+        payment.refresh_from_db()
+        self.assertEqual(order_invoice.status, "paid")
+        self.assertEqual(other_invoice.status, "paid")
+        self.assertEqual(payment.status, "succeeded")

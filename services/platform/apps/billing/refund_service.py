@@ -283,7 +283,23 @@ class RefundService:
 
             with transaction.atomic(durable=True):
                 payment = Payment.objects.select_for_update(of=("self",)).get(pk=snapshot.payment_id)
-                invoice_id = payment.invoice_id or snapshot.invoice_id
+                # An order refund settles the ORDER-linked invoice (mirroring
+                # _lock_related_invoice_for_refund). A payment matched via
+                # meta["order_id"] can legally carry a DIFFERENT invoice_id —
+                # refunding then has no unambiguous document to project, so the
+                # command fails closed to manual reconciliation instead of
+                # marking an arbitrary invoice refunded (review of #388). The
+                # unlocked read keeps the canonical Payment → Invoice → Order
+                # lock order; the order is re-locked and re-read below.
+                if snapshot.order_id is not None:
+                    invoice_id = Order.objects.filter(pk=snapshot.order_id).values_list("invoice_id", flat=True).first()
+                    if payment.invoice_id is not None and payment.invoice_id != invoice_id:
+                        return Err(
+                            "Failed to process refund: payment and order invoice linkage mismatch; "
+                            "manual reconciliation required"
+                        )
+                else:
+                    invoice_id = snapshot.invoice_id or payment.invoice_id
                 invoice = (
                     Invoice.objects.select_for_update(of=("self",)).get(pk=invoice_id)
                     if invoice_id is not None

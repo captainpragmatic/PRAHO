@@ -399,9 +399,16 @@ class GatewayFirstRefundTests(TestCase):
             patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway", return_value=mock_gateway),
             patch("apps.common.validators.log_security_event"),
         ):
-            result = RefundService._process_payment_refund(payment, refund_intent_id=refund_intent.id)
+            result = RefundService._process_payment_refund(
+                payment,
+                {"refund_type": "full", "amount_cents": 5000, "reason": "requested_by_customer"},
+                refund_intent_id=refund_intent.id,
+            )
 
         self.assertTrue(result.is_err())
+        # The failure must be a GATEWAY failure, not an earlier validation exit —
+        # otherwise this test stops verifying its named scenario (review of #388).
+        mock_gateway.refund_payment.assert_called_once()
         payment.refresh_from_db()
         self.assertEqual(payment.status, "succeeded")  # NOT "refunded"
 
