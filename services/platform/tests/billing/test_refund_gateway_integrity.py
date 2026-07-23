@@ -1668,3 +1668,85 @@ class RefundConvergenceHardeningTests(TestCase):
         self.assertTrue(accepted)
         self.assertIn("permanent", message.lower())
         self.assertIn("manual reconciliation required", logs.output[0])
+
+
+class RefundErrorMessageHygieneTests(TestCase):
+    """Err messages from refund convergence flow into webhook HTTP responses
+    (integrations/views.py), so raw exception text — DB internals included —
+    must stay in the logs, never in the returned message (review of #374)."""
+
+    def setUp(self) -> None:
+        self.currency, _ = Currency.objects.get_or_create(
+            code="RON",
+            defaults={"name": "Romanian Leu", "symbol": "lei", "decimals": 2},
+        )
+        self.customer = Customer.objects.create(
+            name="Message Hygiene SRL",
+            customer_type="company",
+            company_name="Message Hygiene SRL",
+            status="active",
+        )
+        invoice = Invoice.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            number=f"INV-{uuid.uuid4().hex[:10]}",
+            status="paid",
+            subtotal_cents=1_000,
+            tax_cents=0,
+            total_cents=1_000,
+            due_at=timezone.now() + timedelta(days=14),
+            bill_to_name=self.customer.company_name,
+        )
+        Payment.objects.create(
+            customer=self.customer,
+            invoice=invoice,
+            currency=self.currency,
+            status="succeeded",
+            payment_method="stripe",
+            amount_cents=1_000,
+            gateway_txn_id="pi_leak_check",
+        )
+
+    def test_transient_db_failure_message_carries_no_exception_detail(self) -> None:
+        from apps.billing.refund_service import RefundConvergenceService  # noqa: PLC0415
+
+        with patch.object(
+            RefundConvergenceService,
+            "_lock_related_order",
+            side_effect=OperationalError("connection reset by peer at 10.0.0.5:5432"),
+        ):
+            result = RefundConvergenceService.converge_gateway_refund(
+                {
+                    "refund_id": "re_leak_check",
+                    "payment_intent_id": "pi_leak_check",
+                    "amount_cents": 1_000,
+                    "currency": "ron",
+                    "status": "succeeded",
+                }
+            )
+
+        self.assertTrue(result.is_err())
+        message = result.unwrap_err()
+        self.assertNotIn("10.0.0.5", message, "DB exception detail must not reach the webhook response")
+        self.assertNotIn("connection reset", message)
+
+    def test_unexpected_failure_message_carries_no_exception_detail(self) -> None:
+        from apps.billing.refund_service import RefundConvergenceService  # noqa: PLC0415
+
+        with patch.object(
+            RefundConvergenceService,
+            "_lock_related_order",
+            side_effect=RuntimeError("secret internal state: /etc/praho/key"),
+        ):
+            result = RefundConvergenceService.converge_gateway_refund(
+                {
+                    "refund_id": "re_leak_check_2",
+                    "payment_intent_id": "pi_leak_check",
+                    "amount_cents": 1_000,
+                    "currency": "ron",
+                    "status": "succeeded",
+                }
+            )
+
+        self.assertTrue(result.is_err())
+        self.assertNotIn("/etc/praho/key", result.unwrap_err())

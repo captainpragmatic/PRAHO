@@ -439,23 +439,25 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
         return value if isinstance(value, int) and not isinstance(value, bool) else 0
 
     @staticmethod
-    def _acknowledge_permanent_refund_rejection(
+    def _acknowledge_permanent_rejection(
         message: str,
         retriability: Retriability = Retriability.NOT_RETRIABLE,
     ) -> tuple[bool, str]:
+        # Event-agnostic wording: this path also acknowledges malformed charge
+        # and generic payloads, not only refund objects (review of #374).
         logger.critical(
-            "Stripe refund permanently rejected (%s); manual reconciliation required: %s",
+            "Stripe webhook permanently rejected (%s); manual reconciliation required: %s",
             retriability.value,
             message,
         )
-        return True, f"Permanent Stripe refund rejection acknowledged: {message}"
+        return True, f"Permanent Stripe webhook rejection acknowledged: {message}"
 
     def handle_refund_event(self, event_type: str, payload: dict[str, Any]) -> tuple[bool, str]:
         """Converge modern Stripe Refund events into PRAHO's ledger."""
         event_data = payload.get("data", {})
         refund_object = event_data.get("object", {}) if isinstance(event_data, dict) else None
         if not isinstance(refund_object, dict):
-            return self._acknowledge_permanent_refund_rejection("Malformed Stripe refund object")
+            return self._acknowledge_permanent_rejection("Malformed Stripe refund object")
         from apps.billing.refund_service import (  # noqa: PLC0415
             RefundConvergenceService,
             RefundGatewayFacts,
@@ -477,7 +479,7 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
             error = result.unwrap_err()
             retriability = retriability_of(result)
             if retriability is Retriability.NOT_RETRIABLE:
-                return self._acknowledge_permanent_refund_rejection(error, retriability)
+                return self._acknowledge_permanent_rejection(error, retriability)
             if retriability is Retriability.UNKNOWN:
                 logger.critical(
                     "Stripe refund convergence violated its typed error contract; rejecting for safe replay: %s",
@@ -500,16 +502,16 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
         """Converge the embedded refunds from the legacy charge event."""
         refund_collection = charge.get("refunds", {})
         if not isinstance(refund_collection, dict):
-            return self._acknowledge_permanent_refund_rejection("Malformed Stripe charge refunds")
+            return self._acknowledge_permanent_rejection("Malformed Stripe charge refunds")
         refund_list = refund_collection.get("data", [])
         if not isinstance(refund_list, list):
-            return self._acknowledge_permanent_refund_rejection("Malformed Stripe charge refunds")
+            return self._acknowledge_permanent_rejection("Malformed Stripe charge refunds")
         failures: list[str] = []
         for refund_object in refund_list:
             if not isinstance(refund_object, dict):
                 # Do NOT short-circuit: a bad sibling here would starve every later valid
                 # embedded refund. Alert and acknowledge it, then continue with valid siblings.
-                self._acknowledge_permanent_refund_rejection("Malformed embedded Stripe refund")
+                self._acknowledge_permanent_rejection("Malformed embedded Stripe refund")
                 continue
             normalized_refund = {
                 **refund_object,
@@ -600,7 +602,7 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
         event_data = payload.get("data", {})
         charge = event_data.get("object", {}) if isinstance(event_data, dict) else None
         if not isinstance(charge, dict):
-            return self._acknowledge_permanent_refund_rejection("Malformed Stripe charge object")
+            return self._acknowledge_permanent_rejection("Malformed Stripe charge object")
         charge_id = charge.get("id")
         if event_type == "charge.refunded":
             result = self._handle_charge_refunded(event_type, payload, charge)

@@ -1119,7 +1119,10 @@ class RefundService:
             retriability = (
                 Retriability.RETRIABLE if isinstance(exc, ConcurrentTransition) else Retriability.NOT_RETRIABLE
             )
-            return Err(f"Refund state transition failed: {exc}", retriability=retriability)
+            # Exception detail stays in the log: refund Err messages flow into
+            # webhook HTTP responses (integrations/views.py) — never leak internals.
+            logger.exception("Refund state transition failed for refund_id=%s", refund.pk)
+            return Err("Refund state transition failed", retriability=retriability)
 
         refund.metadata = {**(refund.metadata or {}), "gateway_status": normalized}
         update_fields = ["metadata", "updated_at"]
@@ -1244,17 +1247,19 @@ class RefundService:
                 )
             invoice_changed = invoice_projection.unwrap()
             return Ok({"payment": payment_changed, "invoice": invoice_changed})
-        except (OperationalError, InterfaceError) as exc:
+        except (OperationalError, InterfaceError):
             logger.exception(
                 "Refund settlement projection hit a transient database error for payment_id=%s", payment.pk
             )
+            # Exception detail stays in the log: these Err messages flow into
+            # webhook HTTP responses (integrations/views.py) — never leak internals.
             return Err(
-                f"Refund settlement projection failed: {exc}",
+                "Refund settlement projection failed",
                 retriability=Retriability.RETRIABLE,
             )
-        except Exception as exc:
+        except Exception:
             logger.exception("Refund settlement projection failed for payment_id=%s", payment.pk)
-            return Err(f"Refund settlement projection failed: {exc}")
+            return Err("Refund settlement projection failed")
 
     @staticmethod
     def _process_entity_updates(
@@ -2176,12 +2181,14 @@ class RefundConvergenceService:
                         retriability=retriability_of(projection),
                     )
                 return Ok(refund)
-        except (OperationalError, InterfaceError) as exc:
+        except (OperationalError, InterfaceError):
             logger.exception("Refund convergence hit a transient database error for gateway_refund_id=%s", refund_id)
-            return RefundConvergenceService._retryable_error(f"Refund convergence failed: {exc}")
-        except Exception as exc:
+            # Exception detail stays in the log: these Err messages flow into
+            # webhook HTTP responses (integrations/views.py) — never leak internals.
+            return RefundConvergenceService._retryable_error("Refund convergence failed")
+        except Exception:
             logger.exception("Refund convergence failed for gateway_refund_id=%s", refund_id)
-            return Err(f"Refund convergence failed: {exc}")
+            return Err("Refund convergence failed")
 
 
 class RefundQueryService:

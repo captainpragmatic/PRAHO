@@ -149,3 +149,20 @@ class StripeCustomerIdentityTests(TestCase):
         second.refresh_from_db()
         self.assertNotIn("stripe_customer_id", first.meta)
         self.assertNotIn("stripe_customer_id", second.meta)
+
+
+class PermanentRejectionWordingTests(TestCase):
+    """The permanent-rejection acknowledgement is used for charge and generic
+    payload malformations too — its alert/response wording must be
+    event-agnostic, not claim a 'refund rejection' (review of #374)."""
+
+    def test_malformed_charge_acknowledgement_is_event_agnostic(self) -> None:
+        processor = StripeWebhookProcessor()
+
+        success, message = processor.handle_refund_event(
+            "refund.updated", {"data": {"object": "not-a-dict"}}
+        )
+
+        self.assertTrue(success, "a permanently malformed payload is acknowledged, not retried")
+        self.assertNotIn("refund rejection", message.lower())
+        self.assertIn("Malformed", message)
