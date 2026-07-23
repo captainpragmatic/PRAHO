@@ -7,6 +7,7 @@ generation, payment processing, and dunning workflows.
 from __future__ import annotations
 
 import logging
+import uuid
 from datetime import datetime, timedelta
 from itertools import batched
 from typing import TYPE_CHECKING, Any, Literal
@@ -25,6 +26,7 @@ from django_q.tasks import async_task
 
 from apps.audit.services import AuditService
 from apps.billing.models import Invoice
+from apps.common.performance.async_tasks import DistributedLock
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +38,10 @@ TASK_TIME_LIMIT = 600  # 10 minutes
 PAYMENT_RETRY_LEASE_TIMEOUT = timedelta(seconds=TASK_TIME_LIMIT * 2)
 _REFUND_RECONCILIATION_LOCK_NAME = "billing-stripe-refund-reconciliation"
 _DEFAULT_REFUND_RECONCILIATION_LIMIT = 500
+RECURRING_RECONCILIATION_BATCH_SIZE = 100
+RECURRING_RECONCILIATION_MAX_BATCH_SIZE = 500
+RECURRING_RECONCILIATION_STALE_AFTER = timedelta(minutes=15)
+RECURRING_RECONCILIATION_LEASE = timedelta(seconds=TASK_TIME_LIMIT * 2)
 
 
 def _get_refund_reconciliation_limit() -> int:
@@ -1492,6 +1498,447 @@ def reconcile_stripe_refunds(
         lock.release()
 
 
+def _recurring_reconciliation_queryset(*, stale_before: datetime) -> Any:
+    """Return stale recurring attempts whose gateway outcome is unresolved."""
+    from apps.billing.payment_models import RecurringPaymentSubmission  # noqa: PLC0415
+
+    now = timezone.now()
+    return (
+        RecurringPaymentSubmission.objects.filter(
+            payment__payment_method="stripe",
+            payment__meta__source="recurring_billing",
+            updated_at__lte=stale_before,
+        )
+        .filter(
+            Q(payment__status="pending")
+            | (
+                Q(payment__status="succeeded", payment__proforma__isnull=False)
+                & ~Q(payment__proforma__status="converted")
+            )
+        )
+        .filter(
+            Q(state="in_flight", claimed_at__lte=stale_before) | Q(state="submitted", submitted_at__lte=stale_before)
+        )
+        .filter(Q(reconcile_claim_expires_at__isnull=True) | Q(reconcile_claim_expires_at__lt=now))
+    )
+
+
+def _manual_review_recurring_submission_count() -> int:
+    from apps.billing.payment_models import RecurringPaymentSubmission  # noqa: PLC0415
+
+    return (
+        RecurringPaymentSubmission.objects.filter(
+            state="manual_review",
+            payment__payment_method="stripe",
+            payment__meta__source="recurring_billing",
+        )
+        .filter(
+            Q(payment__status="pending")
+            | (
+                Q(payment__status="succeeded", payment__proforma__isnull=False)
+                & ~Q(payment__proforma__status="converted")
+            )
+        )
+        .count()
+    )
+
+
+def _claim_recurring_reconciliation_batch(
+    *,
+    batch_size: int,
+    stale_before: datetime,
+) -> tuple[list[int], int, uuid.UUID]:
+    """Lease a bounded batch so a crashed worker can be safely reclaimed."""
+    from apps.billing.payment_models import RecurringPaymentSubmission  # noqa: PLC0415
+
+    claim_token = uuid.uuid4()
+    now = timezone.now()
+    queryset = _recurring_reconciliation_queryset(stale_before=stale_before)
+    backlog = queryset.count()
+    with transaction.atomic():
+        submissions = list(queryset.select_for_update(skip_locked=True).order_by("created_at", "id")[:batch_size])
+        for submission in submissions:
+            submission.reconcile_claim_token = claim_token
+            submission.reconcile_claim_expires_at = now + RECURRING_RECONCILIATION_LEASE
+            submission.updated_at = now
+        RecurringPaymentSubmission.objects.bulk_update(
+            submissions,
+            ["reconcile_claim_token", "reconcile_claim_expires_at", "updated_at"],
+        )
+    return [submission.id for submission in submissions], backlog, claim_token
+
+
+def _release_recurring_reconciliation_claim(
+    submission_id: int,
+    claim_token: uuid.UUID,
+    *,
+    error: str = "",
+) -> None:
+    from apps.billing.payment_models import RecurringPaymentSubmission  # noqa: PLC0415
+
+    RecurringPaymentSubmission.objects.filter(
+        id=submission_id,
+        reconcile_claim_token=claim_token,
+    ).update(
+        reconcile_claim_token=None,
+        reconcile_claim_expires_at=None,
+        last_error=error[:2000],
+        updated_at=timezone.now(),
+    )
+
+
+def _validate_recurring_failure_facts(payment: Any, facts: Any) -> str | None:
+    """Validate the immutable attempt identity before accepting a decline."""
+    validation_error: str | None
+    amount = facts.get("amount")
+    if isinstance(amount, bool) or not isinstance(amount, int) or amount != payment.amount_cents:
+        validation_error = f"Gateway amount mismatch: expected {payment.amount_cents}, received {amount!r}"
+    else:
+        currency = facts.get("currency")
+        if not isinstance(currency, str) or currency.upper() != payment.currency.code.upper():
+            validation_error = (
+                f"Gateway currency mismatch: expected {payment.currency.code.upper()}, received {currency!r}"
+            )
+        elif facts.get("customer_id") != payment.meta.get("stripe_customer_id"):
+            validation_error = "Gateway customer mismatch for recurring payment failure"
+        elif facts.get("payment_method_id") != payment.meta.get("stripe_payment_method_id"):
+            validation_error = "Gateway payment method mismatch for recurring payment failure"
+        else:
+            metadata = facts.get("metadata")
+            if not isinstance(metadata, dict):
+                validation_error = "Gateway document metadata mismatch: metadata is missing"
+            else:
+                document_key = "invoice_id" if payment.invoice_id is not None else "proforma_id"
+                document_id = payment.invoice_id or payment.proforma_id
+                expected_metadata = {
+                    document_key: str(document_id),
+                    "customer_id": str(payment.customer_id),
+                    "source": "recurring_billing",
+                }
+                validation_error = next(
+                    (
+                        f"Gateway document metadata mismatch for {key}"
+                        for key, expected in expected_metadata.items()
+                        if str(metadata.get(key)) != expected
+                    ),
+                    None,
+                )
+                attempt_marker = metadata.get("payment_attempt")
+                if validation_error is None and attempt_marker is not None and str(attempt_marker) != str(payment.id):
+                    validation_error = "Gateway document metadata mismatch for payment_attempt"
+    return validation_error
+
+
+def _converge_retrieved_recurring_payment(payment: Any, facts: Any) -> str:
+    """Apply one authoritative Stripe retrieval to the existing convergence paths."""
+    from apps.billing.payment_convergence import (  # noqa: PLC0415
+        PaymentSuccessService,
+        converge_recurring_payment_failure,
+    )
+    from apps.billing.payment_models import Payment  # noqa: PLC0415
+    from apps.common.validators import log_security_event  # noqa: PLC0415
+
+    if not facts.get("success", False):
+        raise RuntimeError(facts.get("error") or "Gateway retrieval failed")
+    status = str(facts.get("status") or "")
+    if status == "succeeded":
+        convergence = PaymentSuccessService.converge_gateway_success(payment.gateway_txn_id, facts)
+        if convergence.is_err():
+            raise RuntimeError(convergence.unwrap_err())
+        converged_payment = convergence.unwrap()
+        if converged_payment.proforma_id is not None:
+            from apps.billing.proforma_service import ProformaPaymentService  # noqa: PLC0415
+
+            conversion = ProformaPaymentService.record_payment_and_convert(
+                proforma_id=str(converged_payment.proforma_id),
+                amount_cents=converged_payment.amount_cents,
+                payment_method="stripe",
+                existing_payment=converged_payment,
+            )
+            if conversion.is_err():
+                raise RuntimeError(f"Proforma conversion failed: {conversion.unwrap_err()}")
+        return "converged"
+    if status not in {"requires_payment_method", "canceled"}:
+        return "pending"
+
+    validation_error = _validate_recurring_failure_facts(payment, facts)
+    if validation_error is not None:
+        log_security_event(
+            "payment_gateway_fact_mismatch",
+            {
+                "payment_id": str(payment.id),
+                "gateway_intent_id": payment.gateway_txn_id,
+                "reason": validation_error,
+                "critical_financial_operation": True,
+            },
+        )
+        raise RuntimeError(validation_error)
+    with transaction.atomic():
+        locked = Payment.objects.select_for_update(of=("self",)).get(id=payment.id)
+        if locked.status == "pending" and locked.apply_gateway_event(
+            "failed",
+            {
+                "gateway_error": f"Stripe PaymentIntent is {status}",
+                "stripe_status": status,
+            },
+        ):
+            converge_recurring_payment_failure(locked)
+    return "failed"
+
+
+def _bind_replayed_recurring_intent(payment_id: int, intent_id: str, client_secret: str | None) -> Any:
+    from apps.billing.payment_models import Payment  # noqa: PLC0415
+
+    with transaction.atomic():
+        payment = (
+            Payment.objects.select_for_update(of=("self",))
+            .select_related("currency", "invoice", "proforma")
+            .get(id=payment_id)
+        )
+        if payment.gateway_txn_id and payment.gateway_txn_id != intent_id:
+            raise RuntimeError("Gateway returned a different intent for the same recurring payment attempt")
+        if Payment.objects.filter(gateway_txn_id=intent_id).exclude(id=payment.id).exists():
+            raise RuntimeError("Gateway transaction conflicts with another recurring payment")
+        payment.gateway_txn_id = intent_id
+        payment.meta = {**payment.meta, "client_secret": client_secret}
+        payment.save(update_fields=["gateway_txn_id", "meta", "updated_at"])
+        return payment
+
+
+def _replay_unbound_recurring_submission(
+    submission: Any,
+    gateway: Any,
+    claim_token: uuid.UUID,
+) -> Any:
+    """Replay one already-authorized unknown submission with its original key."""
+    from apps.billing.payment_service import _mark_invoice_payment_attempt_failed  # noqa: PLC0415
+    from apps.billing.recurring_submission_service import (  # noqa: PLC0415
+        record_recurring_submission_replay_started,
+        record_recurring_submission_result,
+    )
+
+    submission = record_recurring_submission_replay_started(submission.id, claim_token)
+    payment = submission.payment
+    document_type = "invoice" if payment.invoice_id is not None else "proforma"
+    document_id = payment.invoice_id or payment.proforma_id
+    if document_id is None or not payment.idempotency_key:
+        raise RuntimeError("Recurring submission has no document or idempotency key")
+    stripe_customer_id = payment.meta.get("stripe_customer_id")
+    stripe_payment_method_id = payment.meta.get("stripe_payment_method_id")
+    if not stripe_customer_id or not stripe_payment_method_id:
+        raise RuntimeError("Recurring submission has no immutable Stripe customer or payment method")
+    number_key = f"{document_type}_number"
+    metadata = {
+        f"{document_type}_id": str(document_id),
+        number_key: payment.meta.get(number_key),
+        "customer_id": str(payment.customer_id),
+        "platform": "PRAHO",
+        "source": "recurring_billing",
+        "payment_attempt": str(payment.id),
+    }
+    result = gateway.create_off_session_payment_intent(
+        document_id=str(document_id),
+        document_type=document_type,
+        amount_cents=payment.amount_cents,
+        currency=payment.currency.code,
+        customer_id=stripe_customer_id,
+        payment_method_id=stripe_payment_method_id,
+        metadata=metadata,
+        idempotency_key=payment.idempotency_key,
+    )
+    record_recurring_submission_result(payment.id, result)
+    intent_id = result.get("payment_intent_id") or ""
+    if not result.get("success", False):
+        if not result.get("retryable", False):
+            _mark_invoice_payment_attempt_failed(payment.id, result.get("error"), gateway_txn_id=intent_id)
+            return "failed"
+        raise RuntimeError(result.get("error") or "Unknown recurring gateway outcome")
+    if not intent_id:
+        _mark_invoice_payment_attempt_failed(payment.id, "Gateway returned success without a PaymentIntent ID")
+        return "failed"
+    return _bind_replayed_recurring_intent(payment.id, intent_id, result.get("client_secret"))
+
+
+def _recurring_reconciliation_argument_error(batch_size: object, stale_after_seconds: object) -> str | None:
+    if (
+        isinstance(batch_size, bool)
+        or not isinstance(batch_size, int)
+        or not 1 <= batch_size <= RECURRING_RECONCILIATION_MAX_BATCH_SIZE
+    ):
+        return f"batch_size must be between 1 and {RECURRING_RECONCILIATION_MAX_BATCH_SIZE}"
+    if isinstance(stale_after_seconds, bool) or not isinstance(stale_after_seconds, int) or stale_after_seconds < 0:
+        return "stale_after_seconds must be a non-negative integer"
+    return None
+
+
+def _reconcile_claimed_recurring_submission(
+    submission_id: int,
+    claim_token: uuid.UUID,
+    gateway: Any,
+) -> Literal["converged", "failed", "pending"]:
+    """Reconcile one row whose lease is owned by this worker."""
+    from apps.billing.payment_models import RecurringPaymentSubmission  # noqa: PLC0415
+
+    submission = RecurringPaymentSubmission.objects.select_related(
+        "payment__currency",
+        "payment__invoice",
+        "payment__proforma",
+    ).get(id=submission_id, reconcile_claim_token=claim_token)
+    payment = submission.payment
+    if not payment.gateway_txn_id:
+        replay_result = _replay_unbound_recurring_submission(submission, gateway, claim_token)
+        if replay_result == "failed":
+            return "failed"
+        payment = replay_result
+    gateway_txn_id = payment.gateway_txn_id
+    if not gateway_txn_id:
+        raise RuntimeError("Recurring payment replay did not bind a gateway transaction")
+    facts = gateway.confirm_payment(gateway_txn_id)
+    return _converge_retrieved_recurring_payment(payment, facts)
+
+
+def _process_recurring_reconciliation_batch(
+    submission_ids: list[int],
+    claim_token: uuid.UUID,
+    gateway: Any,
+) -> tuple[int, int, int, list[str]]:
+    """Process a leased batch and release each token-guarded row claim."""
+    converged = 0
+    failed = 0
+    pending = 0
+    errors: list[str] = []
+    for submission_id in submission_ids:
+        reconciliation_error = ""
+        try:
+            outcome = _reconcile_claimed_recurring_submission(submission_id, claim_token, gateway)
+            if outcome == "converged":
+                converged += 1
+            elif outcome == "failed":
+                failed += 1
+            else:
+                pending += 1
+        except Exception as exc:
+            logger.exception("Recurring payment reconciliation failed for submission %s", submission_id)
+            reconciliation_error = str(exc)
+            errors.append(f"{submission_id}: {reconciliation_error}")
+        finally:
+            _release_recurring_reconciliation_claim(
+                submission_id,
+                claim_token,
+                error=reconciliation_error,
+            )
+    return converged, failed, pending, errors
+
+
+def reconcile_recurring_payment_submissions(
+    *,
+    batch_size: int = RECURRING_RECONCILIATION_BATCH_SIZE,
+    stale_after_seconds: int = int(RECURRING_RECONCILIATION_STALE_AFTER.total_seconds()),
+) -> dict[str, Any]:
+    """Reconcile stale ambiguous or gateway-bound recurring PaymentIntents."""
+    from apps.billing.gateways import PaymentGatewayFactory  # noqa: PLC0415
+
+    argument_error = _recurring_reconciliation_argument_error(batch_size, stale_after_seconds)
+    if argument_error is not None:
+        return {"success": False, "error": argument_error}
+
+    lock = DistributedLock(
+        "billing-recurring-payment-reconciliation",
+        timeout=int(RECURRING_RECONCILIATION_LEASE.total_seconds()),
+        blocking=False,
+    )
+    if not lock.acquire():
+        return {
+            "success": True,
+            "skipped": True,
+            "payments_checked": 0,
+            "payments_converged": 0,
+            "payments_failed": 0,
+            "manual_review_required": 0,
+            "backlog_remaining": 0,
+            "errors": [],
+        }
+
+    errors: list[str] = []
+    stale_before = timezone.now() - timedelta(seconds=stale_after_seconds)
+    try:
+        manual_review_required = _manual_review_recurring_submission_count()
+        if manual_review_required:
+            errors.append(
+                f"{manual_review_required} legacy recurring payment submission(s) require manual Stripe reconciliation"
+            )
+        submission_ids, backlog_before, claim_token = _claim_recurring_reconciliation_batch(
+            batch_size=batch_size,
+            stale_before=stale_before,
+        )
+        if not submission_ids:
+            if errors:
+                logger.error("Recurring payment reconciliation requires manual review: %s", errors[0])
+            return {
+                "success": not errors,
+                "skipped": False,
+                "payments_checked": 0,
+                "payments_converged": 0,
+                "payments_failed": 0,
+                "payments_pending": 0,
+                "manual_review_required": manual_review_required,
+                "backlog_remaining": 0,
+                "errors": errors,
+            }
+        try:
+            gateway = PaymentGatewayFactory.create_gateway("stripe")
+        except Exception as exc:
+            gateway_error = f"Stripe gateway initialization failed: {exc}"
+            logger.exception(gateway_error)
+            for submission_id in submission_ids:
+                _release_recurring_reconciliation_claim(
+                    submission_id,
+                    claim_token,
+                    error=gateway_error,
+                )
+            errors.append(gateway_error)
+            return {
+                "success": False,
+                "skipped": False,
+                "payments_checked": 0,
+                "payments_converged": 0,
+                "payments_failed": 0,
+                "payments_pending": 0,
+                "manual_review_required": manual_review_required,
+                "backlog_remaining": backlog_before,
+                "errors": errors,
+            }
+        converged, failed, pending, batch_errors = _process_recurring_reconciliation_batch(
+            submission_ids,
+            claim_token,
+            gateway,
+        )
+        errors.extend(batch_errors)
+
+        backlog_remaining = _recurring_reconciliation_queryset(stale_before=stale_before).count()
+        if backlog_before > len(submission_ids):
+            logger.warning(
+                "Recurring payment reconciliation processed %d of %d eligible attempts",
+                len(submission_ids),
+                backlog_before,
+            )
+        if errors:
+            logger.error("Recurring payment reconciliation completed with %d error(s)", len(errors))
+        return {
+            "success": not errors,
+            "skipped": False,
+            "payments_checked": len(submission_ids),
+            "payments_converged": converged,
+            "payments_failed": failed,
+            "payments_pending": pending,
+            "manual_review_required": manual_review_required,
+            "backlog_remaining": backlog_remaining,
+            "errors": errors,
+        }
+    finally:
+        lock.release()
+
+
 def setup_billing_scheduled_tasks() -> dict[str, str]:
     """Register the single PRAHO renewal path plus local usage processing."""
     from django_q.models import Schedule  # noqa: PLC0415
@@ -1540,6 +1987,11 @@ def setup_billing_scheduled_tasks() -> dict[str, str]:
             "billing-vies-reverification",
             "apps.billing.tasks.reverify_expired_vat_validations",
             "15 2 * * *",
+        ),
+        (
+            "billing-recurring-payment-reconciliation",
+            "apps.billing.tasks.reconcile_recurring_payment_submissions",
+            "*/10 * * * *",
         ),
     )
     results: dict[str, str] = {}

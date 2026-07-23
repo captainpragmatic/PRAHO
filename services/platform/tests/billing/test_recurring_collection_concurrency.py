@@ -1,4 +1,4 @@
-"""PostgreSQL concurrency regressions for recurring charge revocation (#316)."""
+"""PostgreSQL concurrency regressions for recurring charge revocation (#316, #335)."""
 
 from __future__ import annotations
 
@@ -6,7 +6,6 @@ import threading
 import uuid
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from concurrent.futures import TimeoutError as FutureTimeoutError
 from datetime import datetime
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -22,6 +21,7 @@ from apps.billing.payment_service import PaymentService
 from apps.billing.recurring_authorization_service import RecurringPaymentAuthorizationService
 from apps.billing.recurring_locking import lock_recurring_collection_customer
 from apps.billing.recurring_models import RecurringPaymentAuthorization
+from apps.billing.recurring_submission_service import claim_recurring_submission as durable_claim_recurring_submission
 from apps.billing.subscription_models import Subscription
 from apps.billing.subscription_service import SubscriptionService
 from apps.provisioning.models import Service
@@ -331,50 +331,47 @@ class RecurringCollectionPostgresConcurrencyTests(_SubscriptionInvoicePaymentFix
         self.assertIn("renewal disabled", (charge_result.get("error") or "").lower())
         self.assertFalse(gateway_called.is_set())
 
-    def test_gateway_submission_started_first_defers_withdrawal(self) -> None:
-        revalidation_complete = threading.Event()
-        release_charge = threading.Event()
-        withdrawal_started = threading.Event()
+    def test_durable_claim_started_first_does_not_block_withdrawal_during_gateway_io(self) -> None:
         gateway_called = threading.Event()
-
-        from apps.billing import payment_service as payment_service_module  # noqa: PLC0415
-
-        original_revalidate = payment_service_module._revalidate_invoice_payment_reservation
-
-        def pause_after_revalidation(**kwargs: object) -> str | None:
-            result = original_revalidate(**kwargs)
-            revalidation_complete.set()
-            if not release_charge.wait(timeout=10):
-                raise AssertionError("Timed out releasing in-flight gateway submission")
-            return result
+        release_charge = threading.Event()
 
         def charge() -> PaymentIntentResult:
-            return self._charge_invoice(gateway_called)
+            gateway = MagicMock()
+
+            def submit_charge(**_kwargs: object) -> PaymentIntentResult:
+                gateway_called.set()
+                if not release_charge.wait(timeout=10):
+                    raise AssertionError("Timed out releasing in-flight gateway submission")
+                return _intent_result(payment_intent_id=f"pi_claim_first_{uuid.uuid4().hex[:8]}")
+
+            gateway.create_off_session_payment_intent.side_effect = submit_charge
+            with patch(
+                "apps.billing.payment_service.PaymentGatewayFactory.create_gateway",
+                return_value=gateway,
+            ):
+                return PaymentService.create_payment_intent_for_invoice(
+                    invoice_id=self.invoice.id,
+                    payment_method_id=self.payment_method.stripe_payment_method_id,
+                )
 
         def withdraw() -> Any:
-            withdrawal_started.set()
             return RecurringPaymentAuthorizationService.withdraw(
                 authorization=RecurringPaymentAuthorization.objects.get(pk=self.authorization.pk),
                 actor=User.objects.get(pk=self.owner.pk),
                 reason="Customer withdrew during in-flight collection",
             )
 
-        with patch.object(
-            payment_service_module,
-            "_revalidate_invoice_payment_reservation",
-            new=pause_after_revalidation,
-        ), ThreadPoolExecutor(max_workers=2) as executor:
+        with ThreadPoolExecutor(max_workers=2) as executor:
             charge_future = executor.submit(self._in_separate_connection, charge)
-            self.assertTrue(revalidation_complete.wait(timeout=5), "Charge never reached final revalidation")
+            self.assertTrue(gateway_called.wait(timeout=5), "Charge never reached gateway I/O")
+            submission = Payment.objects.get(invoice=self.invoice).recurring_submission
+            self.assertEqual(submission.state, submission.State.IN_FLIGHT)
             withdrawal_future = executor.submit(self._in_separate_connection, withdraw)
-            self.assertTrue(withdrawal_started.wait(timeout=5), "Withdrawal worker did not start")
             try:
-                with self.assertRaises(FutureTimeoutError):
-                    withdrawal_future.result(timeout=2)
+                withdrawal_result = withdrawal_future.result(timeout=2)
             finally:
                 release_charge.set()
             charge_result = charge_future.result(timeout=10)
-            withdrawal_result = withdrawal_future.result(timeout=10)
 
         self.assertTrue(charge_result["success"], charge_result)
         self.assertTrue(gateway_called.is_set())
@@ -382,12 +379,98 @@ class RecurringCollectionPostgresConcurrencyTests(_SubscriptionInvoicePaymentFix
         self.authorization.refresh_from_db()
         self.assertEqual(self.authorization.status, "withdrawn")
 
+    def test_kill_switch_cannot_commit_between_authorization_read_and_durable_claim(self) -> None:
+        claim_reached = threading.Event()
+        release_claim = threading.Event()
+        disable_finished = threading.Event()
+        gateway_called = threading.Event()
+
+        def pause_before_claim(payment_id: int) -> str | None:
+            claim_reached.set()
+            if not release_claim.wait(timeout=10):
+                raise AssertionError("Timed out releasing durable recurring-payment claim")
+            return durable_claim_recurring_submission(payment_id)
+
+        def charge() -> PaymentIntentResult:
+            return self._charge_invoice(gateway_called)
+
+        def disable_collection() -> None:
+            try:
+                result = SettingsService.update_setting("billing.recurring_auto_collection_enabled", False)
+                assert result.is_ok(), f"Failed to disable recurring collection: {result}"
+            finally:
+                disable_finished.set()
+
+        with (
+            patch("apps.billing.payment_service.claim_recurring_submission", side_effect=pause_before_claim),
+            ThreadPoolExecutor(max_workers=2) as executor,
+        ):
+            charge_future = executor.submit(self._in_separate_connection, charge)
+            self.assertTrue(claim_reached.wait(timeout=5), "Charge never reached its durable claim")
+            disable_future = executor.submit(self._in_separate_connection, disable_collection)
+            try:
+                self.assertFalse(
+                    disable_finished.wait(timeout=2),
+                    "Kill switch committed after authorization was read but before the durable claim",
+                )
+            finally:
+                release_claim.set()
+            charge_result = charge_future.result(timeout=10)
+            disable_future.result(timeout=10)
+
+        self.assertTrue(charge_result["success"], charge_result)
+        self.assertTrue(gateway_called.is_set())
+        self.assertIs(
+            SystemSetting.objects.get(key="billing.recurring_auto_collection_enabled").get_typed_value(),
+            False,
+        )
+
+    def test_concurrent_workers_submit_one_gateway_request_for_the_same_attempt(self) -> None:
+        gateway_called = threading.Event()
+        release_charge = threading.Event()
+        gateway = MagicMock()
+
+        def submit_charge(**_kwargs: object) -> PaymentIntentResult:
+            gateway_called.set()
+            if not release_charge.wait(timeout=10):
+                raise AssertionError("Timed out releasing concurrent recurring charge")
+            return _intent_result(payment_intent_id=f"pi_single_submit_{uuid.uuid4().hex[:8]}")
+
+        gateway.create_off_session_payment_intent.side_effect = submit_charge
+
+        def charge() -> PaymentIntentResult:
+            return PaymentService.create_payment_intent_for_invoice(
+                invoice_id=self.invoice.id,
+                payment_method_id=self.payment_method.stripe_payment_method_id,
+            )
+
+        with (
+            patch(
+                "apps.billing.payment_service.PaymentGatewayFactory.create_gateway",
+                return_value=gateway,
+            ),
+            ThreadPoolExecutor(max_workers=2) as executor,
+        ):
+            first_future = executor.submit(self._in_separate_connection, charge)
+            self.assertTrue(gateway_called.wait(timeout=5), "First worker never reached gateway I/O")
+            second_future = executor.submit(self._in_separate_connection, charge)
+            try:
+                second_result = second_future.result(timeout=5)
+            finally:
+                release_charge.set()
+            first_result = first_future.result(timeout=10)
+
+        self.assertTrue(first_result["success"], first_result)
+        self.assertFalse(second_result["success"], second_result)
+        self.assertIn("in flight", (second_result.get("error") or "").lower())
+        self.assertEqual(gateway.create_off_session_payment_intent.call_count, 1)
+
     def test_kill_switch_row_is_not_locked_across_the_gateway_call(self) -> None:
         """W1: the global kill-switch row must be released before the gateway
-        round-trip. While a charge is mid-Stripe-call (its boundary held), a
-        second connection must still be able to lock the setting row — otherwise
-        one hung gateway call serializes every customer's charge and blocks the
-        kill switch itself."""
+        round-trip. While a durably claimed charge is mid-Stripe-call, a second
+        connection must still be able to lock the setting row — otherwise one
+        hung gateway call serializes every customer's charge and blocks the kill
+        switch itself."""
         gateway_called = threading.Event()
         release_charge = threading.Event()
 

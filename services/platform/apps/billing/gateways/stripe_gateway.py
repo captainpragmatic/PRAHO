@@ -202,6 +202,9 @@ class StripeGateway(BasePaymentGateway):
             self.logger.info(f"💳 Payment {payment_intent_id} status: {payment_intent.status}")
 
             result = PaymentConfirmResult(success=True, status=payment_intent.status, error=None)
+            amount_due = getattr(payment_intent, "amount", None)
+            if isinstance(amount_due, int) and not isinstance(amount_due, bool):
+                result["amount"] = amount_due
             # TDA-1: Only include amount_received when Stripe provides it (NotRequired[int]).
             amount = getattr(payment_intent, "amount_received", None)
             if amount is not None:

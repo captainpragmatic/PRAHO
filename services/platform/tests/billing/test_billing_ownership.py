@@ -164,5 +164,11 @@ class BillingScheduleContractTestCase(TestCase):
         vies_schedule = Schedule.objects.get(name="billing-vies-reverification")
         self.assertEqual(vies_schedule.func, "apps.billing.tasks.reverify_expired_vat_validations")
         self.assertEqual(vies_schedule.cron, "15 2 * * *")
-        self.assertEqual(len(result), 7)
+        recurring_reconciliation = Schedule.objects.get(name="billing-recurring-payment-reconciliation")
+        self.assertEqual(
+            recurring_reconciliation.func,
+            "apps.billing.tasks.reconcile_recurring_payment_submissions",
+        )
+        self.assertEqual(recurring_reconciliation.cron, "*/10 * * * *")
+        self.assertEqual(len(result), 8)
         register_usage.assert_called_once_with()

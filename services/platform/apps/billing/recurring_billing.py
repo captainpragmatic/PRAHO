@@ -577,7 +577,10 @@ class RecurringBillingOrchestrator:
                         .order_by("-created_at")
                         .first()
                     )
-                    if existing is not None and (existing.gateway_txn_id or existing.status == "succeeded"):
+                    # The first recurring attempt owns this proforma. A pending
+                    # gateway-less attempt may already exist at Stripe, so only the
+                    # reconciliation task may replay its durable idempotency key.
+                    if existing is not None:
                         continue
                     if not cycles:
                         result["errors"].append(f"Proforma {proforma.number} has no recurring cycles")

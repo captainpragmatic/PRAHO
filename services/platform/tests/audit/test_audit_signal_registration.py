@@ -59,6 +59,14 @@ class TestBillingSignalRegistration(SimpleTestCase):
             "Payment has no billing signal receivers",
         )
 
+    def test_recurring_payment_submission_has_signal_receivers(self) -> None:
+        from apps.billing.models import RecurringPaymentSubmission
+
+        self.assertTrue(
+            _has_receiver_from_module(RecurringPaymentSubmission, "apps.billing.signals"),
+            "RecurringPaymentSubmission has no billing signal receivers",
+        )
+
     def test_proforma_invoice_has_signal_receivers(self) -> None:
         from apps.billing.models import ProformaInvoice
 

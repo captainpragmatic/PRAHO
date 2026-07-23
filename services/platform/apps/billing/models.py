@@ -39,7 +39,14 @@ from .metering_models import (
     UsageMeter,
     UsageThreshold,
 )
-from .payment_models import CreditLedger, Payment, PaymentCollectionRun, PaymentRetryAttempt, PaymentRetryPolicy
+from .payment_models import (
+    CreditLedger,
+    Payment,
+    PaymentCollectionRun,
+    PaymentRetryAttempt,
+    PaymentRetryPolicy,
+    RecurringPaymentSubmission,
+)
 from .proforma_models import ProformaInvoice, ProformaLine, ProformaSequence
 from .recurring_models import RecurringPaymentAuthorization
 from .refund_models import Refund, RefundNote, RefundStatusHistory
@@ -114,6 +121,7 @@ __all__ = [  # noqa: RUF022  # Grouped by billing domain for discoverability
     "PaymentCollectionRun",
     "PaymentRetryAttempt",
     "PaymentRetryPolicy",
+    "RecurringPaymentSubmission",
     # Subscription Models
     "PriceGrandfathering",
     "PricingTier",
