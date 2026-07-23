@@ -229,6 +229,12 @@ class SettingsService:
         pattern = rules.get("pattern")
         if pattern is not None and isinstance(value, str) and re.fullmatch(pattern, value) is None:
             raise ValidationError(_("%(key)s: value does not match the required pattern") % {"key": key})
+        mapping_value_type = rules.get("mapping_value_type")
+        if mapping_value_type == "integer" and (
+            not isinstance(value, dict)
+            or any(not isinstance(item, int) or isinstance(item, bool) for item in value.values())
+        ):
+            raise ValidationError(_("%(key)s: all JSON object values must be integers") % {"key": key})
 
     @classmethod
     def _validation_error(cls, key: str, exc: ValidationError) -> SettingValidationError:

@@ -768,7 +768,9 @@ CATALOG: tuple[SettingDef, ...] = (
         group="customers",
         section=_("Credit scoring"),
         label=_("Credit adjustments"),
+        help_text=_("Integer score points applied for each credit event."),
         input_kind="json",
+        validation={"mapping_value_type": "integer"},
     ),
     SettingDef(
         key="customers.engagement_activity_weight",

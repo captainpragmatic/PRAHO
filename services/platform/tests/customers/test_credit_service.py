@@ -8,6 +8,7 @@ Regression guard: these tests capture the chaos-monkey findings around:
 """
 
 from datetime import datetime, timedelta
+from unittest.mock import patch
 
 from django.test import TestCase
 from django.utils import timezone
@@ -56,6 +57,15 @@ class TestCreditServiceConstants(TestCase):
     def test_credit_adjustments_has_failed_payment_key(self) -> None:
         adjustments = get_credit_adjustments()
         self.assertIn("failed_payment", adjustments)
+
+    @patch(
+        "apps.customers.credit_service.SettingsService.get_setting",
+        return_value={"refund_issued": -7.5},
+    )
+    def test_credit_adjustments_fail_safe_for_legacy_fractional_values(self, _mock_get: object) -> None:
+        adjustments = get_credit_adjustments()
+
+        self.assertEqual(adjustments["refund_issued"], -10)
 
 
 class TestCreditServiceUpdateScore(TestCase):

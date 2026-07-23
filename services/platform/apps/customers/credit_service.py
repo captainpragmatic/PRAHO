@@ -50,7 +50,9 @@ def get_base_credit_score() -> int:
 def get_credit_adjustments() -> dict[str, int]:
     """Get credit score adjustments from SettingsService (runtime)."""
     val = SettingsService.get_setting("customers.credit_adjustments", _DEFAULT_CREDIT_ADJUSTMENTS)
-    if isinstance(val, dict) and all(isinstance(v, (int, float)) for v in val.values()):
+    if isinstance(val, dict) and all(
+        isinstance(key, str) and isinstance(value, int) and not isinstance(value, bool) for key, value in val.items()
+    ):
         return val
     return _DEFAULT_CREDIT_ADJUSTMENTS
 
