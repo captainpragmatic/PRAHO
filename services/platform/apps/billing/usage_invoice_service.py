@@ -30,9 +30,10 @@ from apps.customers.models import CustomerAddress, CustomerTaxProfile
 
 from . import config as billing_config
 from .fiscal_identity import billing_country_code, get_customer_fiscal_identity
-from .invoice_models import Invoice, InvoiceLine, InvoiceSequence
+from .invoice_models import Invoice, InvoiceLine
 from .metering_models import BillingCycle, UsageAggregation, UsageMeter
 from .metering_service import AggregationService, RatingEngine
+from .numbering_service import InvoiceNumberingService
 from .payment_models import CreditLedger, Payment
 from .recurring_billing import usage_collection_schedule
 
@@ -118,9 +119,6 @@ class UsageInvoiceService:
         )
 
         with transaction.atomic():
-            # Get invoice sequence (reuse existing billing pattern)
-            sequence, _ = InvoiceSequence.objects.get_or_create(scope="default")
-
             # The fixed period price was collected on the renewal proforma/invoice.
             # This second document contains post-paid usage only.
             gross_amount_cents = billing_cycle.usage_charge_cents
@@ -157,7 +155,7 @@ class UsageInvoiceService:
             # Create invoice - subtotal is the NET taxable amount (matching Invoice.clean() validation)
             invoice = Invoice.objects.create(
                 customer=customer,
-                number=sequence.get_next_number("INV"),
+                number=InvoiceNumberingService.get_next_number(),
                 status="draft",
                 currency=currency,
                 subtotal_cents=net_amount_cents,  # NET amount before tax (not gross)

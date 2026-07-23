@@ -302,17 +302,18 @@ def start_dunning_process(invoice_id: str) -> dict[str, Any]:
                 "message": "No dunning needed before the invoice due date",
             }
 
-        # Find customer's retry policy and create first retry attempt
-        # Send dunning email
-        EmailService.send_payment_reminder(invoice)
+        policy = PaymentRetryPolicy.objects.filter(is_active=True, is_default=True).first()
+        if policy is None or policy.send_dunning_emails:
+            EmailService.send_payment_reminder(invoice)
+        else:
+            logger.info("⚠️ [Dunning] Email disabled by retry policy for invoice %s", invoice.number)
 
         # Schedule payment retry if there's a payment method on file
         payments = invoice.payments.filter(status="failed").order_by("-created_at")
         if payments.exists():
             payment = payments.first()
-            policy = PaymentRetryPolicy.objects.filter(is_active=True, is_default=True).first()
-            if policy:
-                next_date = policy.get_next_retry_date(timezone.now(), 0)
+            if policy and payment is not None:
+                next_date = policy.get_next_retry_date(payment.created_at, 0)
                 if next_date:
                     PaymentRetryAttempt.objects.get_or_create(
                         payment=payment,
@@ -924,7 +925,7 @@ def notify_expiring_grandfathering(days_ahead: int = 30) -> dict[str, Any]:
 def _schedule_next_retry(retry: Any, retry_model: Any) -> None:
     """Schedule the next retry attempt if the policy allows more attempts."""
     if retry.policy and retry.attempt_number < retry.policy.max_attempts:
-        next_retry_date = retry.policy.get_next_retry_date(timezone.now(), retry.attempt_number)
+        next_retry_date = retry.policy.get_next_retry_date(retry.payment.created_at, retry.attempt_number)
         if next_retry_date:
             retry_model.objects.get_or_create(
                 payment=retry.payment,

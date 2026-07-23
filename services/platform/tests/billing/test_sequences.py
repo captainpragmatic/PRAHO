@@ -2,11 +2,14 @@
 # BILLING SEQUENCES TESTS (Django TestCase Format)
 # ===============================================================================
 
+from unittest.mock import MagicMock, patch
+
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError, transaction
 from django.test import TestCase
 
 from apps.billing.models import InvoiceSequence, ProformaSequence
+from apps.billing.services import InvoiceNumberingService
 
 User = get_user_model()
 
@@ -81,17 +84,43 @@ class InvoiceSequenceTestCase(TestCase):
         self.assertEqual(number2, 'INV-000002')
         self.assertEqual(sequence.last_value, 2)
 
-    def test_invoice_sequence_get_next_number_custom_prefix(self):
-        """Test getting next invoice number with custom prefix"""
+    def test_invoice_sequence_uses_its_persisted_series_prefix(self) -> None:
+        """The active legal series owns its prefix; callers must not hardcode it."""
+        sequence = InvoiceSequence.objects.create(
+            scope="default",
+            prefix="INV-2027",
+            last_value=0,
+        )
+
+        number = sequence.get_next_number()
+
+        self.assertEqual(number, "INV-2027-000001")
+
+    def test_next_number_preview_does_not_consume_the_sequence(self) -> None:
+        sequence = InvoiceSequence.objects.create(
+            scope="default",
+            prefix="INV-2027",
+            last_value=42,
+        )
+
+        self.assertEqual(sequence.next_number_preview, "INV-2027-000043")
+        sequence.refresh_from_db()
+        self.assertEqual(sequence.last_value, 42)
+
+    def test_invoice_sequence_rejects_per_call_prefix_override(self) -> None:
+        """A caller cannot silently change the legal prefix for one invoice."""
         sequence = InvoiceSequence.objects.create(
             scope='romania',
             last_value=0
         )
 
-        # Get number with custom prefix
-        number = sequence.get_next_number('INVOICE')
-        self.assertEqual(number, 'INVOICE-000001')
-        self.assertEqual(sequence.last_value, 1)
+        with self.assertRaises(TypeError):
+            sequence.get_next_number(prefix='INVOICE')
+        with self.assertRaises(TypeError):
+            sequence.get_next_number('INVOICE')
+
+        sequence.refresh_from_db()
+        self.assertEqual(sequence.last_value, 0)
 
     def test_invoice_sequence_increment_behavior(self):
         """Test sequence increment behavior"""
@@ -216,19 +245,21 @@ class SequenceIntegrationTestCase(TestCase):
         # Romania specific scope
         romania_inv = InvoiceSequence.objects.create(
             scope='romania',
+            prefix='RO-INV',
             last_value=0
         )
 
         # Test scope
         test_inv = InvoiceSequence.objects.create(
             scope='test',
+            prefix='TEST',
             last_value=1000
         )
 
         # Each should operate independently
         default_num = default_inv.get_next_number()
-        romania_num = romania_inv.get_next_number('RO-INV')
-        test_num = test_inv.get_next_number('TEST')
+        romania_num = romania_inv.get_next_number()
+        test_num = test_inv.get_next_number()
 
         self.assertEqual(default_num, 'INV-000001')
         self.assertEqual(romania_num, 'RO-INV-000001')
@@ -238,13 +269,14 @@ class SequenceIntegrationTestCase(TestCase):
         """Test sequence behavior under simulated concurrent usage"""
         sequence = InvoiceSequence.objects.create(
             scope='concurrent',
+            prefix='CONC',
             last_value=0
         )
 
         # Simulate multiple requests getting numbers
         numbers = []
         for _i in range(5):
-            number = sequence.get_next_number('CONC')
+            number = sequence.get_next_number()
             numbers.append(number)
 
         # All numbers should be sequential and unique
@@ -263,6 +295,7 @@ class SequenceIntegrationTestCase(TestCase):
         """Test that sequence number format is consistent"""
         sequence = InvoiceSequence.objects.create(
             scope='format',
+            prefix='TEST',
             last_value=0
         )
 
@@ -281,40 +314,29 @@ class SequenceIntegrationTestCase(TestCase):
             sequence.last_value = expected_value - 1
             sequence.save()
 
-            number = sequence.get_next_number('TEST')
+            number = sequence.get_next_number()
             self.assertEqual(number, expected_format)
 
     def test_sequence_prefix_variations(self):
         """Test various prefix formats"""
-        sequence = InvoiceSequence.objects.create(
-            scope='prefix_test',
-            last_value=0
-        )
-
         prefixes = ['INV', 'INVOICE', 'F-2024', 'REC', '001-BILL']
 
-        for prefix in prefixes:
-            number = sequence.get_next_number(prefix)
-            self.assertTrue(number.startswith(prefix + '-'))
-            self.assertTrue(number.endswith(f'{sequence.last_value:06d}'))
+        for index, prefix in enumerate(prefixes):
+            sequence = InvoiceSequence.objects.create(scope=f'prefix_{index}', prefix=prefix, last_value=0)
+            number = sequence.get_next_number()
+            self.assertEqual(number, f'{prefix}-000001')
 
     def test_sequence_reset_simulation(self):
         """Test sequence reset scenario (for new year, etc.)"""
-        sequence = InvoiceSequence.objects.create(
-            scope='yearly',
-            last_value=999
-        )
+        sequence = InvoiceSequence.objects.create(scope='yearly-2024', prefix='2024', last_value=999)
 
         # Generate a number at end of year
-        end_year_number = sequence.get_next_number('2024')
+        end_year_number = sequence.get_next_number()
         self.assertEqual(end_year_number, '2024-001000')
 
-        # Simulate year reset
-        sequence.last_value = 0
-        sequence.save()
-
-        # First number of new year
-        new_year_number = sequence.get_next_number('2025')
+        # A new year is a new immutable series, not a counter edit.
+        next_year = InvoiceSequence.objects.create(scope='yearly-2025', prefix='2025', last_value=0)
+        new_year_number = next_year.get_next_number()
         self.assertEqual(new_year_number, '2025-000001')
 
     def test_sequence_persistence(self):
@@ -338,19 +360,10 @@ class SequenceIntegrationTestCase(TestCase):
 
     def test_sequence_edge_cases(self):
         """Test sequence edge cases"""
-        # Empty prefix
-        sequence = InvoiceSequence.objects.create(
-            scope='edge',
-            last_value=0
-        )
+        sequence = InvoiceSequence.objects.create(scope='edge', prefix='I', last_value=0)
 
-        number = sequence.get_next_number('')
-        self.assertEqual(number, '-000001')  # Empty prefix but still formatted
-
-        # Very long prefix
-        long_prefix = 'VERY_LONG_PREFIX_FOR_TESTING'
-        number = sequence.get_next_number(long_prefix)
-        self.assertEqual(number, f'{long_prefix}-000002')  # Should work with long prefix
+        number = sequence.get_next_number()
+        self.assertEqual(number, 'I-000001')
 
 
 # ===============================================================================
@@ -362,9 +375,9 @@ class InvoiceSequenceConcurrencyMigratedTests(TestCase):
     """Tests migrated from test_sequences_concurrency.py"""
 
     def test_sequential_numbers_unique_and_incrementing(self) -> None:
-        seq = InvoiceSequence.objects.create(scope='test_conc', last_value=0)
+        seq = InvoiceSequence.objects.create(scope='test_conc', prefix='TST', last_value=0)
 
-        numbers: list[str] = [seq.get_next_number('TST') for _ in range(10)]
+        numbers: list[str] = [seq.get_next_number() for _ in range(10)]
 
         # Ensure uniqueness and ascending sequence
         self.assertEqual(len(numbers), len(set(numbers)))
@@ -372,8 +385,18 @@ class InvoiceSequenceConcurrencyMigratedTests(TestCase):
         self.assertEqual(seq.last_value, expected_last)
 
     def test_prefix_and_padding(self) -> None:
-        seq = InvoiceSequence.objects.create(scope='pad_test', last_value=999)
-        number = seq.get_next_number('PAD')
+        seq = InvoiceSequence.objects.create(scope='pad_test', prefix='PAD', last_value=999)
+        number = seq.get_next_number()
         # Should increment to 1000 and padded accordingly
         self.assertTrue(number.startswith('PAD-'))
         self.assertTrue(number.endswith('001000'))
+
+    def test_numbering_service_recovers_when_another_worker_creates_the_scope(self) -> None:
+        sequence = InvoiceSequence.objects.create(scope="default", prefix="INV", last_value=0)
+        locked_queryset = MagicMock()
+        locked_queryset.get.side_effect = [InvoiceSequence.DoesNotExist, sequence]
+
+        with patch.object(InvoiceSequence.objects, "select_for_update", return_value=locked_queryset):
+            number = InvoiceNumberingService.get_next_number()
+
+        self.assertEqual(number, "INV-000001")

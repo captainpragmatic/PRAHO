@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% load ui_components %}
+
+{% block title %}{% trans "Start invoice series" %} - PRAHO Platform{% endblock %}
+
+{% block content %}
+<div class="px-4 py-6 max-w-3xl mx-auto space-y-6">
+  {% trans "Start invoice series" as page_title %}
+  {% page_header title=page_title subtitle=_("Guarded legal numbering rotation") icon="receipt" %}{% end_page_header %}
+
+  {% trans "This action preserves an immutable snapshot of the current series and starts the new prefix at 000001. Existing invoice numbers remain unchanged." as warning_text %}
+  {% alert warning_text variant="warning" %}
+
+  {% if current_sequence %}
+  <p class="text-sm text-slate-300">
+    {% trans "Current series" %}: <code class="text-blue-300">{{ current_sequence.prefix }}</code>
+    · {% trans "last value" %}: {{ current_sequence.last_value }}
+  </p>
+  {% endif %}
+
+  <form method="post" class="space-y-6">
+    {% csrf_token %}
+    {{ form.baseline }}
+    {% if form.non_field_errors %}
+    <div class="rounded-lg border border-red-500/40 bg-red-500/10 p-3 text-sm text-red-300">{{ form.non_field_errors }}</div>
+    {% endif %}
+    {% trans "New legal series" as series_title %}
+    {% section_card title=series_title %}
+      <div class="space-y-4">
+        {% for field in form.visible_fields %}
+        <div>
+          <label for="{{ field.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-1">{{ field.label }}</label>
+          {{ field }}
+          {% if field.help_text %}<p class="mt-1 text-xs text-slate-500">{{ field.help_text }}</p>{% endif %}
+          {% for error in field.errors %}<p class="mt-1 text-sm text-red-400">{{ error }}</p>{% endfor %}
+        </div>
+        {% endfor %}
+      </div>
+    {% end_section_card %}
+
+    <div class="flex justify-end gap-3">
+      {% url "billing:operator_controls" as controls_url %}
+      {% button "Cancel" href=controls_url variant="secondary" %}
+      {% trans "Start new series" as start_series_label %}
+      {% button start_series_label type="submit" variant="danger" %}
+    </div>
+  </form>
+</div>
+{% endblock %}

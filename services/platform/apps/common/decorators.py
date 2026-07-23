@@ -116,6 +116,20 @@ def billing_staff_required(view_func: Callable[..., HttpResponse]) -> Callable[.
     return wrapper
 
 
+def billing_configuration_required(view_func: Callable[..., HttpResponse]) -> Callable[..., HttpResponse]:
+    """Require the narrow admin/billing role set for billing policy mutations."""
+
+    @wraps(view_func)
+    @login_required
+    def wrapper(request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
+        user = request.user
+        if not (user.is_superuser or getattr(user, "staff_role", "") in {"admin", "billing"}):
+            return HttpResponseForbidden("Billing configuration privileges required")
+        return view_func(request, *args, **kwargs)
+
+    return wrapper
+
+
 def support_staff_required(view_func: Callable[..., HttpResponse]) -> Callable[..., HttpResponse]:
     """
     Decorator that requires user to be support staff or admin

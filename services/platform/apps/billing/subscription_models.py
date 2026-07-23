@@ -32,7 +32,6 @@ if TYPE_CHECKING:
 from apps.settings.services import SettingsService
 
 from .currency_models import Currency
-from .invoice_models import InvoiceSequence
 from .validators import log_security_event, validate_financial_amount
 
 logger = logging.getLogger(__name__)
@@ -456,8 +455,9 @@ class Subscription(models.Model):
 
     def _generate_subscription_number(self) -> str:
         """Generate unique subscription number."""
-        sequence, _ = InvoiceSequence.objects.get_or_create(scope="subscription")
-        return sequence.get_next_number("SUB")
+        from .numbering_service import InvoiceNumberingService  # noqa: PLC0415
+
+        return InvoiceNumberingService.get_next_number(scope="subscription")
 
     # =========================================================================
     # PRICE PROPERTIES

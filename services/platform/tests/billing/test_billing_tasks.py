@@ -31,6 +31,7 @@ from apps.billing.tasks import (
     TASK_TIME_LIMIT,
     _get_task_max_retries,
     _get_task_retry_delay,
+    _schedule_next_retry,
     cancel_payment_reminders,
     cancel_payment_reminders_async,
     notify_expiring_grandfathering,
@@ -366,6 +367,28 @@ class StartDunningProcessTests(TestCase):
         result = start_dunning_process(str(invoice.id))
 
         self.assertTrue(result["success"], result)
+
+    @patch("apps.notifications.services.EmailService.send_payment_reminder")
+    @patch("apps.audit.services.AuditService.log_simple_event")
+    def test_active_policy_can_disable_dunning_email(
+        self,
+        _mock_audit: MagicMock,
+        mock_email: MagicMock,
+    ) -> None:
+        PaymentRetryPolicy.objects.create(
+            name="No dunning email",
+            retry_intervals_days=[1],
+            max_attempts=1,
+            send_dunning_emails=False,
+            is_default=True,
+            is_active=True,
+        )
+        invoice = _make_invoice(status="overdue", due_days=-1)
+
+        result = start_dunning_process(str(invoice.id))
+
+        self.assertTrue(result["success"], result)
+        mock_email.assert_not_called()
 
     @patch("apps.audit.services.AuditService.log_simple_event")
     def test_skips_paid_invoice(self, mock_audit: MagicMock) -> None:
@@ -1059,6 +1082,25 @@ def _make_retry_policy() -> PaymentRetryPolicy:
 
 class RunPaymentCollectionTests(TestCase):
     """Tests for run_payment_collection()."""
+
+    def test_next_retry_stays_anchored_to_the_original_failure(self) -> None:
+        """Absolute schedule [1,3,7] means day 3, not three days after attempt one."""
+        original_failure = timezone.now() - timedelta(days=1)
+        scheduled_at = original_failure + timedelta(days=3)
+        policy = MagicMock(max_attempts=3)
+        policy.get_next_retry_date.return_value = scheduled_at
+        retry = MagicMock(
+            policy=policy,
+            attempt_number=1,
+            payment=MagicMock(created_at=original_failure),
+        )
+        retry_model = MagicMock()
+
+        _schedule_next_retry(retry, retry_model)
+
+        policy.get_next_retry_date.assert_called_once_with(original_failure, 1)
+        retry_model.objects.get_or_create.assert_called_once()
+        self.assertEqual(retry_model.objects.get_or_create.call_args.kwargs["defaults"]["scheduled_at"], scheduled_at)
 
     def test_no_pending_retries_creates_completed_run(self) -> None:
         result = run_payment_collection()

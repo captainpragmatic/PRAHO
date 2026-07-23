@@ -747,7 +747,7 @@ class TestOrderPaymentConfirmationService(ProformaLifecycleTestBase):
         invoice = Invoice.objects.create(
             customer=self.customer,
             currency=self.currency,
-            number=seq.get_next_number("INV"),
+            number=seq.get_next_number(),
             subtotal_cents=10000,
             tax_cents=2100,
             total_cents=12100,

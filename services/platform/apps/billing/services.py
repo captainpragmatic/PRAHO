@@ -27,7 +27,7 @@ from decimal import Decimal
 # ===============================================================================
 from typing import Any
 
-from django.db import IntegrityError, transaction
+from django.db import transaction
 from django.utils import timezone as tz
 
 from apps.billing.currency_models import Currency as CurrencyModel
@@ -37,7 +37,7 @@ from apps.billing.fiscal_identity import (
     normalize_business_tax_id,
     validated_cnp_or_empty,
 )
-from apps.billing.models import Invoice, InvoiceLine, InvoiceSequence
+from apps.billing.models import Invoice, InvoiceLine
 from apps.common.financial_arithmetic import calculate_document_totals
 from apps.common.tax_service import CustomerVATInfo, TaxService
 from apps.common.types import Err, Ok, Result
@@ -62,6 +62,7 @@ from .metering_service import (
 
 # Re-export security logging function
 from .models import log_security_event
+from .numbering_service import InvoiceNumberingService
 from .proforma_service import (
     ProformaService,
     generate_proforma_pdf,
@@ -122,18 +123,6 @@ class InvoiceService:
                 taxable_subtotal_cents = source_totals.total_cents - source_totals.tax_cents
                 order_discount_cents = source_totals.subtotal_cents - taxable_subtotal_cents
 
-                # Get invoice sequence with lock to prevent race conditions
-                # Using select_for_update ensures only one process generates a number at a time
-                try:
-                    sequence = InvoiceSequence.objects.select_for_update().get(scope="default")
-                except InvoiceSequence.DoesNotExist:
-                    # Create with retry in case of concurrent creation
-                    try:
-                        sequence = InvoiceSequence.objects.create(scope="default")
-                    except IntegrityError:
-                        # Another process created it - get it with lock
-                        sequence = InvoiceSequence.objects.select_for_update().get(scope="default")
-
                 # VAT is computed on the NET taxable base (gross line subtotal minus the
                 # document discount), mirroring the proforma conversion path. order.total_cents
                 # is the GROSS tax-INCLUSIVE total — feeding it here re-applied VAT on top of an
@@ -158,7 +147,7 @@ class InvoiceService:
                 # Create invoice - all within the same atomic block to ensure consistency
                 invoice = Invoice.objects.create(
                     customer=order.customer,
-                    number=sequence.get_next_number("INV"),
+                    number=InvoiceNumberingService.get_next_number(),
                     currency=order.currency,
                     subtotal_cents=vat_result.subtotal_cents,
                     tax_cents=vat_result.vat_cents,
@@ -292,7 +281,7 @@ class PaymentRetryService:
             return Err(f"Max retry attempts ({policy.max_attempts}) reached")
 
         # Schedule next retry
-        next_retry_date = policy.get_next_retry_date(tz.now(), existing_attempts)
+        next_retry_date = policy.get_next_retry_date(payment.created_at, existing_attempts)
         if not next_retry_date:
             return Err("No more retry dates available")
 
@@ -335,16 +324,6 @@ class EFacturaService:
         return Err(result.error_message or "e-Factura submission failed")
 
 
-class InvoiceNumberingService:
-    """Generate sequential invoice numbers using InvoiceSequence."""
-
-    @staticmethod
-    def get_next_number(prefix: str = "INV", scope: str = "default") -> str:
-        """Get next invoice number from atomic sequence."""
-        sequence, _ = InvoiceSequence.objects.get_or_create(scope=scope)
-        return sequence.get_next_number(prefix)
-
-
 class ProformaConversionService:
     """Convert proforma invoices to real invoices."""
 
@@ -370,7 +349,6 @@ class ProformaConversionService:
         try:
             with transaction.atomic():
                 # Get invoice sequence
-                sequence, _ = InvoiceSequence.objects.get_or_create(scope="default")
                 currency = proforma.currency
 
                 if not currency:
@@ -391,7 +369,7 @@ class ProformaConversionService:
 
                 invoice = Invoice.objects.create(
                     customer=proforma.customer,
-                    number=sequence.get_next_number("INV"),
+                    number=InvoiceNumberingService.get_next_number(),
                     currency=currency,
                     subtotal_cents=subtotal_cents,
                     tax_cents=tax_cents,

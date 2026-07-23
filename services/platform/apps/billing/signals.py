@@ -499,9 +499,9 @@ def handle_invoice_number_generation(sender: type[Invoice], instance: Invoice, c
     try:
         if not created and instance.status == "issued" and instance.number.startswith("TMP-"):
             # Generate proper invoice number
-            from .services import InvoiceNumberingService
+            from .numbering_service import InvoiceNumberingService
 
-            new_number = InvoiceNumberingService.get_next_number(prefix="INV", scope="default")
+            new_number = InvoiceNumberingService.get_next_number()
 
             # Update without triggering signals again
             Invoice.objects.filter(pk=instance.pk).update(number=new_number, issued_at=timezone.now())

@@ -119,10 +119,13 @@ class InvoiceNumberingServiceTests(TestCase):
         result = InvoiceNumberingService.get_next_number()
         self.assertTrue(result.startswith("INV-"))
 
-    def test_custom_prefix(self):
+    def test_custom_prefix_is_not_a_public_escape_hatch(self) -> None:
         InvoiceSequence.objects.all().delete()
-        result = InvoiceNumberingService.get_next_number(prefix="PRO")
-        self.assertTrue(result.startswith("PRO-"))
+        with self.assertRaises(TypeError):
+            InvoiceNumberingService.get_next_number(prefix="PRO")
+        with self.assertRaises(TypeError):
+            InvoiceNumberingService.get_next_number("PRO")
+        self.assertFalse(InvoiceSequence.objects.exists())
 
 
 class ProformaConversionServiceTests(TestCase):
