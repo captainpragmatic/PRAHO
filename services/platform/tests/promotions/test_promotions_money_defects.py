@@ -354,3 +354,35 @@ class GiftCardCurrencyTestCase(PromotionsMoneyTestCase):
         # The order is equally untouched: no discount, no total change.
         self.order.refresh_from_db()
         self.assertEqual(self.order.total_cents, 10000)
+
+
+class GiftCardCouponHeadroomTestCase(PromotionsMoneyTestCase):
+    """Gift-card redemptions are order-wide value: they must consume headroom
+    from EVERY coupon subset (review of #387). The subset-scoped cap read only
+    CouponRedemption rows, so a coupon applied AFTER a gift card regained the
+    full base and recorded an inflated redemption."""
+
+    def _gift_card(self, balance_cents: int) -> GiftCard:
+        return GiftCard.objects.create(
+            code=f"GC{balance_cents}",
+            initial_value_cents=balance_cents,
+            current_balance_cents=balance_cents,
+            currency=self.currency,
+            status="active",
+        )
+
+    def test_coupon_after_gift_card_only_gets_the_remaining_headroom(self) -> None:
+        card = self._gift_card(5000)
+        redeemed = GiftCardService.redeem_gift_card(code=card.code, order=self.order, customer=self.customer)
+        self.assertTrue(redeemed.success, f"gift card redemption failed: {redeemed.error_message}")
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.discount_cents, 5000)
+
+        coupon = self._coupon("FULLAFTERGC", "100.00")
+        result = CouponService.calculate_discount(coupon, self.order, items=[self.item])
+
+        self.assertEqual(
+            result.discount_cents,
+            5000,
+            "a coupon after a gift card must only get the headroom the gift card left",
+        )

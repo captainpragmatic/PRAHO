@@ -397,6 +397,18 @@ class CouponService:
             if item_ids.intersection(str(x) for x in applied):
                 # Clamp per redemption: a corrupt negative discount must not inflate the headroom.
                 total += max(0, int(redemption.discount_cents or 0))
+
+        # Gift-card redemptions are order-wide value, not item-targeted: they consume
+        # headroom from EVERY coupon subset. Redemption rows are negative, refunds
+        # positive, so the net redeemed amount is the negated sum (review of #387 —
+        # without this, a coupon applied after a gift card regained its full base).
+        gift_card_net = (
+            GiftCardTransaction.objects.filter(order=order, transaction_type__in=("redemption", "refund")).aggregate(
+                total=models.Sum("amount_cents")
+            )["total"]
+            or 0
+        )
+        total += max(0, -int(gift_card_net))
         return total
 
     @classmethod
