@@ -2,8 +2,7 @@
 Comprehensive tests for apps/billing/invoice_service.py.
 
 Coverage targets: BillingAnalyticsService (4 static methods),
-generate_invoice_pdf, generate_e_factura_xml, send_invoice_email,
-generate_vat_summary.
+generate_invoice_pdf, generate_e_factura_xml, send_invoice_email.
 """
 
 from __future__ import annotations
@@ -21,7 +20,6 @@ from apps.billing.invoice_service import (
     BillingAnalyticsService,
     generate_e_factura_xml,
     generate_invoice_pdf,
-    generate_vat_summary,
     send_invoice_email,
 )
 from apps.customers.models import Customer
@@ -674,110 +672,6 @@ class SendInvoiceEmailTest(TestCase):
         result = send_invoice_email(self.invoice)
 
         self.assertFalse(result)
-
-
-# ===============================================================================
-# generate_vat_summary
-# ===============================================================================
-
-
-class GenerateVatSummaryTest(TestCase):
-    """generate_vat_summary — aggregates invoices by period and VAT rate."""
-
-    def setUp(self) -> None:
-        self.customer = create_customer("VAT SRL")
-        self.currency = create_currency("RON")
-
-    def _create_invoice_for_vat(
-        self,
-        number: str,
-        status: str = "paid",
-        subtotal_cents: int = 10000,
-        tax_cents: int = 2100,
-    ) -> Invoice:
-        total = subtotal_cents + tax_cents
-        invoice = create_invoice(self.customer, self.currency, number=number, total_cents=total)
-        invoice.subtotal_cents = subtotal_cents
-        invoice.tax_cents = tax_cents
-        force_status(invoice, status, save=False)
-        invoice.save(update_fields=["subtotal_cents", "tax_cents", "status"])
-        return invoice
-
-    def test_no_invoices_returns_zeros(self) -> None:
-        result = generate_vat_summary("2026-01-01", "2026-01-31")
-
-        self.assertEqual(result["period_start"], "2026-01-01")
-        self.assertEqual(result["period_end"], "2026-01-31")
-        self.assertEqual(result["invoice_count"], 0)
-        self.assertEqual(result["total_vat"], Decimal("0"))
-        self.assertEqual(result["total_sales"], Decimal("0"))
-        self.assertEqual(result["total_amount"], Decimal("0"))
-
-    def test_paid_invoice_included_in_summary(self) -> None:
-        self._create_invoice_for_vat("INV-VAT-001", status="paid")
-
-        result = generate_vat_summary("2025-01-01", "2027-01-01")
-
-        self.assertGreater(result["invoice_count"], 0)
-        self.assertGreater(result["total_sales"], Decimal("0"))
-        self.assertGreater(result["total_vat"], Decimal("0"))
-
-    def test_issued_invoice_included_in_summary(self) -> None:
-        self._create_invoice_for_vat("INV-VAT-002", status="issued")
-
-        result = generate_vat_summary("2025-01-01", "2027-01-01")
-
-        self.assertGreater(result["invoice_count"], 0)
-
-    def test_draft_invoice_excluded_from_summary(self) -> None:
-        self._create_invoice_for_vat("INV-VAT-003", status="draft")
-
-        result = generate_vat_summary("2025-01-01", "2027-01-01")
-
-        self.assertEqual(result["invoice_count"], 0)
-
-    def test_vat_breakdown_uses_default_rate_21(self) -> None:
-        self._create_invoice_for_vat("INV-VAT-004")
-
-        result = generate_vat_summary("2025-01-01", "2027-01-01")
-
-        # Default vat_rate getattr fallback is 21
-        self.assertIn(21, result["vat_breakdown"])
-        breakdown = result["vat_breakdown"][21]
-        self.assertGreater(breakdown["count"], 0)
-        self.assertIsInstance(breakdown["sales"], Decimal)
-        self.assertIsInstance(breakdown["vat"], Decimal)
-
-    def test_invalid_date_format_returns_error_dict(self) -> None:
-        result = generate_vat_summary("not-a-date", "2026-01-31")
-
-        self.assertIn("error", result)
-        self.assertEqual(result["period_start"], "not-a-date")
-
-    def test_multiple_invoices_totals_are_summed(self) -> None:
-        self._create_invoice_for_vat("INV-VAT-005", subtotal_cents=10000, tax_cents=2100)
-        self._create_invoice_for_vat("INV-VAT-006", subtotal_cents=5000, tax_cents=1050)
-
-        result = generate_vat_summary("2025-01-01", "2027-01-01")
-
-        self.assertGreaterEqual(result["invoice_count"], 2)
-        self.assertGreaterEqual(result["total_sales"], Decimal("150.00"))
-        self.assertGreaterEqual(result["total_vat"], Decimal("31.50"))
-
-    def test_generated_at_present_in_result(self) -> None:
-        result = generate_vat_summary("2026-01-01", "2026-12-31")
-
-        self.assertIn("generated_at", result)
-
-    def test_totals_correctly_converted_from_cents_to_decimal(self) -> None:
-        self._create_invoice_for_vat("INV-VAT-007", subtotal_cents=10000, tax_cents=2100)
-
-        result = generate_vat_summary("2025-01-01", "2027-01-01")
-
-        # 10000 cents = 100.00 decimal
-        self.assertEqual(result["total_sales"], Decimal("100.00"))
-        # 2100 cents = 21.00 decimal
-        self.assertEqual(result["total_vat"], Decimal("21.00"))
 
 
 class SendInvoiceEmailGuardPropagationTest(TestCase):

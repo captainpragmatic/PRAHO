@@ -1619,6 +1619,22 @@ class TestStripeGateway(TestCase):
         assert create_kwargs["metadata"]["praho_order_id"] == "order-authoritative"
         assert create_kwargs["metadata"]["platform"] == "PRAHO"
 
+    def test_create_payment_intent_does_not_invent_vat_metadata(self):
+        mock_stripe = MagicMock()
+        mock_stripe.PaymentIntent.create.return_value = MagicMock(id="pi_no_vat", client_secret="secret_no_vat")
+        gw = self._make_gateway(mock_stripe)
+
+        result = gw.create_payment_intent(
+            "order-no-vat",
+            2999,
+            metadata={"vat_rate": "21%", "invoice_number": "INV-001"},
+        )
+
+        assert result["success"] is True
+        metadata = mock_stripe.PaymentIntent.create.call_args.kwargs["metadata"]
+        assert "vat_rate" not in metadata
+        assert metadata["invoice_number"] == "INV-001"
+
     def test_create_payment_intent_no_customer(self):
         mock_stripe = MagicMock()
         mock_stripe.PaymentIntent.create.return_value = MagicMock(id="pi_x", client_secret="sec")

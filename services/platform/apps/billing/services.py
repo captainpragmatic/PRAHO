@@ -48,7 +48,6 @@ from .invoice_service import (
     BillingAnalyticsService,
     generate_e_factura_xml,
     generate_invoice_pdf,
-    generate_vat_summary,
     send_invoice_email,
 )
 
@@ -503,7 +502,6 @@ __all__ = [
     "generate_e_factura_xml",
     "generate_invoice_pdf",
     "generate_proforma_pdf",
-    "generate_vat_summary",
     "log_security_event",
     "send_invoice_email",
     "send_proforma_email",

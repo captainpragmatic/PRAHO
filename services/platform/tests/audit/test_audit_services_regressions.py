@@ -1638,6 +1638,22 @@ class TestCustomersAuditService(TestCase):
         event = CustomersAuditService.log_tax_profile_event("tax_profile_updated", tax_profile)
         self.assertEqual(event.action, "tax_profile_updated")
 
+    def test_log_tax_profile_event_without_rate_override(self):
+        tax_profile = _make_mock_with_pk(self._user.pk)
+        tax_profile.customer = self._make_customer_mock()
+        tax_profile.cui = ""
+        tax_profile.registration_number = ""
+        tax_profile.is_vat_payer = True
+        tax_profile.vat_number = ""
+        tax_profile.vat_rate = None
+        tax_profile.reverse_charge_eligible = False
+        tax_profile.created_at = timezone.now()
+        tax_profile.updated_at = timezone.now()
+
+        event = CustomersAuditService.log_tax_profile_event("tax_profile_updated", tax_profile)
+
+        self.assertIsNone(event.metadata["vat_rate"])
+
     def test_log_billing_profile_event(self):
         billing_profile = _make_mock_with_pk(self._user.pk)
         billing_profile.customer = self._make_customer_mock()

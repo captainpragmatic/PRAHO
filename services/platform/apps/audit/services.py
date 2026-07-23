@@ -2380,7 +2380,7 @@ class CustomersAuditService:
             "registration_number": tax_profile.registration_number,
             "is_vat_payer": tax_profile.is_vat_payer,
             "vat_number": tax_profile.vat_number,
-            "vat_rate": float(tax_profile.vat_rate),
+            "vat_rate": float(tax_profile.vat_rate) if tax_profile.vat_rate is not None else None,
             "reverse_charge_eligible": tax_profile.reverse_charge_eligible,
             "cui_valid": tax_profile.validate_cui() if tax_profile.cui else None,
             "is_romanian_entity": tax_profile.cui.startswith("RO") if tax_profile.cui else False,

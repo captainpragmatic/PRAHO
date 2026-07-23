@@ -291,7 +291,7 @@ def calculate_cart_totals(  # noqa: PLR0912, PLR0915  # Complexity: multi-step b
             "subtotal_cents": totals["subtotal_cents"],
             "tax_cents": totals["tax_cents"],
             "total_cents": totals["total_cents"],
-            "vat_rate_percent": round(vat_result.vat_rate),
+            "vat_rate_percent": vat_result.vat_rate,
             "currency": currency_code,
             "warnings": warnings,
             "items": [
@@ -314,7 +314,7 @@ def calculate_cart_totals(  # noqa: PLR0912, PLR0915  # Complexity: multi-step b
         output_serializer = CartCalculationOutputSerializer(data=response_data)
         if output_serializer.is_valid():
             logger.info(f"💰 [API] Cart calculated: {totals['total_cents']} cents for customer {customer_id}")
-            return Response(output_serializer.validated_data)
+            return Response(output_serializer.data)
         else:
             logger.error(f"🔥 [API] Output serializer error: {output_serializer.errors}")
             return Response({"error": "Calculation error"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

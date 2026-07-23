@@ -51,28 +51,10 @@ class ConfigValidationRedTeamTestCase(TestCase):
         result = billing_config._get_positive_int("FAKE_SETTING", 0)
         self.assertEqual(result, 1)
 
-    def test_float_string_vat_rate(self):
-        """Test VAT rate parsing with float string."""
-        # Test that the helper correctly parses a valid decimal string
-        result = billing_config._get_decimal_rate("FAKE_SETTING", "0.19")
-        self.assertEqual(result, Decimal("0.19"))
-
-    def test_percent_vat_rate_clamped(self):
-        """Test VAT rate > 1 is clamped (someone sets 19 instead of 0.19)."""
-        result = billing_config._get_decimal_rate("FAKE_SETTING", "19")
-        self.assertEqual(result, Decimal("1"))
-
-    def test_negative_vat_rate_clamped(self):
-        """Test negative VAT rate is clamped to 0."""
-        result = billing_config._get_decimal_rate("FAKE_SETTING", "-0.19")
-        self.assertEqual(result, Decimal("0"))
-
-    def test_invalid_decimal_string(self):
-        """Test invalid decimal string falls back to valid default."""
-        # When setting value is invalid, function falls back to default
-        result = billing_config._get_decimal_rate("FAKE_SETTING", "0.19")
-        # Default is "0.19", so we get that
-        self.assertEqual(result, Decimal("0.19"))
+    def test_dead_vat_default_configuration_is_not_exposed(self):
+        """TaxService is the only supported VAT-rate resolver."""
+        self.assertFalse(hasattr(billing_config, "DEFAULT_VAT_RATE"))
+        self.assertFalse(hasattr(billing_config, "_get_decimal_rate"))
 
     def test_none_country_code_in_is_eu_country(self):
         """Test is_eu_country handles None safely."""
@@ -96,7 +78,7 @@ class ConfigValidationRedTeamTestCase(TestCase):
         """
         # No TaxRules in test DB — TaxService falls back to defaults
         rate = billing_config.get_vat_rate("RO", fallback=True)
-        self.assertEqual(rate, billing_config.DEFAULT_VAT_RATE)
+        self.assertEqual(rate, Decimal("0.21"))
 
 
 class IdempotencyRedTeamTestCase(TransactionTestCase):

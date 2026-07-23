@@ -1,13 +1,15 @@
 """H13+H14: Order creation and editing security tests."""
 
+from decimal import Decimal
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import Client, TestCase
 
 from apps.billing.currency_models import Currency
-from apps.customers.models import Customer
-from apps.orders.models import Order
+from apps.customers.models import Customer, CustomerAddress, CustomerTaxProfile
+from apps.orders.models import Order, OrderItem
+from apps.products.models import Product, ProductPrice
 from apps.users.models import CustomerMembership
 
 User = get_user_model()
@@ -98,6 +100,55 @@ class OrderCreateCustomerScopingTests(TestCase):
         # raises Http404. The preview returns error content or 404 — not a
         # successful 200 with customer_b's financial data.
         self.assertNotEqual(response.status_code, 500, "Preview must not crash with unscoped customer lookup")
+
+    def test_staff_create_with_item_applies_resolved_vat_rate(self) -> None:
+        """The first item must not keep its zero-rate model default."""
+        CustomerAddress.objects.create(
+            customer=self.customer_a,
+            is_billing=True,
+            address_line1="Strada Test 1",
+            city="București",
+            county="București",
+            postal_code="010101",
+            country="RO",
+        )
+        CustomerTaxProfile.objects.create(customer=self.customer_a, is_vat_payer=True, vat_rate=None)
+        product = Product.objects.create(
+            slug="staff-created-hosting",
+            name="Staff-created hosting",
+            product_type="shared_hosting",
+            is_active=True,
+        )
+        ProductPrice.objects.create(
+            product=product,
+            currency=self.currency,
+            monthly_price_cents=10_000,
+        )
+        self.client.force_login(self.staff)
+
+        with patch(
+            "apps.orders.views._get_accessible_customer_ids",
+            return_value=[self.customer_a.id],
+        ):
+            response = self.client.post(
+                "/orders/create/with-item/",
+                {
+                    "customer": str(self.customer_a.id),
+                    "currency": str(self.currency.id),
+                    "payment_method": "bank_transfer",
+                    "first_product": str(product.id),
+                    "first_billing_period": "monthly",
+                    "first_quantity": "1",
+                },
+            )
+
+        self.assertEqual(response.status_code, 302)
+        order = Order.objects.get(customer=self.customer_a)
+        item = OrderItem.objects.get(order=order)
+        self.assertEqual(item.tax_rate, Decimal("0.2100"))
+        self.assertEqual(order.subtotal_cents, 10_000)
+        self.assertEqual(order.tax_cents, 2_100)
+        self.assertEqual(order.total_cents, 12_100)
 
 
 class DraftOrderMassAssignmentTests(TestCase):

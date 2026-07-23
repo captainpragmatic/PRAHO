@@ -51,10 +51,6 @@ class UsageInvoiceService:
     - Integrating with existing invoice workflow
     """
 
-    def __init__(self) -> None:
-        # Use centralized config for defaults
-        self.default_vat_rate = billing_config.DEFAULT_VAT_RATE
-
     @transaction.atomic
     def generate_invoice_from_cycle(  # noqa: C901, PLR0911, PLR0915  # Atomic usage rating, document, tax, and credit flow
         self, billing_cycle_id: str

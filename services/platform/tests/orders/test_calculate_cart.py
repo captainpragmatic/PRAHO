@@ -15,6 +15,7 @@ Platform tests — full database access via Django TestCase.
 """
 
 import uuid
+from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
 from django.test import RequestFactory, TestCase
@@ -199,6 +200,61 @@ class CartCalculateProductByUUIDTestCase(TestCase):
 
         self.assertEqual(data["subtotal_cents"], 32_400)
         self.assertEqual(data["items"][0]["unit_price_cents"], 32_400)
+
+    def test_fractional_vat_rate_is_preserved_exactly(self) -> None:
+        vat_result = MagicMock(
+            subtotal_cents=3_000,
+            vat_cents=585,
+            total_cents=3_585,
+            vat_rate=Decimal("19.50"),
+        )
+        items = [_cart_item(product_id=self.product.id)]
+
+        with patch("apps.api.orders.views.OrderVATCalculator.calculate_vat", return_value=vat_result):
+            data = _call_calculate(self.customer, self.currency, items)
+
+        self.assertEqual(data["vat_rate_percent"], "19.50")
+
+
+class CartCalculationOutputSerializerTestCase(TestCase):
+    def _payload(self) -> dict:
+        return {
+            "subtotal_cents": 10_000,
+            "tax_cents": 1_950,
+            "total_cents": 11_950,
+            "currency": "RON",
+            "warnings": [],
+            "items": [],
+        }
+
+    def test_vat_rate_is_required(self) -> None:
+        from apps.api.orders.serializers import CartCalculationOutputSerializer  # noqa: PLC0415
+
+        serializer = CartCalculationOutputSerializer(data=self._payload())
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("vat_rate_percent", serializer.errors)
+
+    def test_fractional_vat_rate_is_an_exact_decimal(self) -> None:
+        from apps.api.orders.serializers import CartCalculationOutputSerializer  # noqa: PLC0415
+
+        payload = self._payload()
+        payload["vat_rate_percent"] = "19.50"
+        serializer = CartCalculationOutputSerializer(data=payload)
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        self.assertIsInstance(serializer.validated_data["vat_rate_percent"], Decimal)
+        self.assertEqual(serializer.validated_data["vat_rate_percent"], Decimal("19.50"))
+
+    def test_explicit_zero_vat_rate_remains_valid(self) -> None:
+        from apps.api.orders.serializers import CartCalculationOutputSerializer  # noqa: PLC0415
+
+        payload = self._payload()
+        payload["vat_rate_percent"] = "0.00"
+        serializer = CartCalculationOutputSerializer(data=payload)
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        self.assertEqual(serializer.validated_data["vat_rate_percent"], Decimal("0.00"))
 
 
 class CartCalculateProductBySlugTestCase(TestCase):

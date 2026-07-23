@@ -53,7 +53,7 @@
 | billing/test_creditledger.py | billing.models.CreditLedger — customer credit accounting, overpayment conversion, chargeback handling |
 | billing/test_currencies.py | billing.models (Currency, FXRate) — DUPLICATE of test_billing_models_regressions.py |
 | billing/test_efactura_views.py | billing.views (efactura_dashboard, document_detail, submit, retry) — minimal view tests (status codes only) |
-| billing/test_invoice_service.py | billing.invoice_service (BillingAnalyticsService, generate_invoice_pdf, send_invoice_email, generate_vat_summary) |
+| billing/test_invoice_service.py | billing.invoice_service (BillingAnalyticsService, generate_invoice_pdf, send_invoice_email) |
 | billing/test_invoices_models.py | billing.models (Invoice, InvoiceLine) — model CRUD, FSM transitions (issue, mark_as_paid, mark_partially_refunded) |
 | billing/test_invoices_views.py | billing.views (invoice_detail, proforma_to_invoice) — access control, view rendering |
 | billing/test_metering_enforcement.py | billing.metering_service.UsageAlertService._take_threshold_action() — throttle, suspend, block_new, warn actions |

@@ -28,6 +28,7 @@ from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from django.views.decorators.http import require_POST
 
+from apps.billing.fiscal_identity import billing_country_code
 from apps.billing.models import Currency
 from apps.billing.refund_service import RefundData, RefundService
 from apps.common.decorators import staff_required_strict
@@ -191,21 +192,17 @@ def _validate_manual_price_override(
 # ===============================================================================
 
 
-def _get_vat_rate_for_customer(customer: Customer) -> Decimal:
-    """Calculate VAT rate for customer using OrderVATCalculator (#130/L4)."""
+def _get_vat_rate_for_order(order: Order) -> Decimal:
+    """Resolve VAT from the order snapshot plus any explicit customer override."""
     from apps.orders.vat_rules import CustomerVATInfo, OrderVATCalculator  # noqa: PLC0415
 
+    country = "RO"
     try:
-        country = getattr(customer, "country", "RO") or "RO"
-        vat_number = ""
-        is_business = bool(getattr(customer, "company_name", ""))
-        if hasattr(customer, "tax_profile"):
-            try:
-                tp = customer.tax_profile
-                vat_number = getattr(tp, "vat_number", "") or ""
-                is_business = is_business or getattr(tp, "is_vat_payer", False)
-            except Exception:  # noqa: S110
-                pass  # No tax profile — use defaults
+        customer = order.customer
+        billing_address = order.billing_address or {}
+        country = billing_country_code(billing_address.get("country"))
+        vat_number = str(billing_address.get("vat_number") or billing_address.get("vat_id") or "")
+        is_business = bool(billing_address.get("company_name")) or bool(vat_number)
 
         info: CustomerVATInfo = {
             "country": country,
@@ -215,23 +212,22 @@ def _get_vat_rate_for_customer(customer: Customer) -> Decimal:
             "order_id": None,
         }
         # Include per-customer overrides from tax profile if available
-        if hasattr(customer, "tax_profile"):
-            try:
-                tp = customer.tax_profile
-                if hasattr(tp, "is_vat_payer") and tp.is_vat_payer is not None:
-                    info["is_vat_payer"] = tp.is_vat_payer
-                if hasattr(tp, "custom_vat_rate") and tp.custom_vat_rate is not None:
-                    info["custom_vat_rate"] = tp.custom_vat_rate
-            except Exception:  # noqa: S110
-                pass
+        try:
+            tax_profile = customer.tax_profile
+            info["is_vat_payer"] = tax_profile.is_vat_payer
+            info["reverse_charge_eligible"] = tax_profile.reverse_charge_eligible
+            if tax_profile.vat_rate is not None:
+                info["custom_vat_rate"] = tax_profile.vat_rate
+        except Exception:  # noqa: S110
+            pass  # No tax profile — use the immutable order snapshot
         # Use 10000 (100.00) as dummy subtotal — we only need the rate
         result = OrderVATCalculator.calculate_vat(subtotal_cents=10000, customer_info=info)
         return (result.vat_rate / Decimal("100")).quantize(Decimal("0.0001"))
     except Exception as e:
         from apps.billing.config import get_vat_rate  # noqa: PLC0415
 
-        logger.warning("⚠️ [Orders] VAT rate lookup failed for customer %s: %s — using default VAT", customer.id, e)
-        return get_vat_rate("RO")
+        logger.warning("⚠️ [Orders] VAT rate lookup failed for order %s: %s — using country VAT", order.id, e)
+        return get_vat_rate(country)
 
 
 def _get_accessible_customer_ids(user: User) -> list[int]:
@@ -788,6 +784,7 @@ def order_create_with_item(request: HttpRequest) -> HttpResponse:
                     quantity=quantity,
                     unit_price_cents=int(price.get_price_cents_for_period(billing_period)),
                     setup_cents=int(price.setup_cents),
+                    tax_rate=_get_vat_rate_for_order(order),
                     config={"product_price_id": str(price.id)},
                     domain_name=domain_name,
                 )
@@ -1257,7 +1254,7 @@ def _process_order_item_creation(
                 item.setup_cents = 0
 
             # Calculate VAT for Romanian customers
-            tax_rate = _get_vat_rate_for_customer(order.customer)
+            tax_rate = _get_vat_rate_for_order(order)
             item.tax_rate = tax_rate
 
             # Save the item (totals will be calculated in save method)
@@ -1477,7 +1474,7 @@ def _process_order_item_update(form: ModelForm[Any], order: Order, pk: uuid.UUID
 
             # Recalculate VAT if customer-related or product changed
             if product_changed or billing_period_changed:
-                tax_rate = _get_vat_rate_for_customer(order.customer)
+                tax_rate = _get_vat_rate_for_order(order)
                 updated_item.tax_rate = tax_rate
 
             # Save the updated item (totals will be calculated in save method)

@@ -678,39 +678,9 @@ class OrderItem(models.Model):
             super().save(*args, **kwargs)
             return
 
-        # Apply default VAT when tax_rate was not explicitly set.
-        # This keeps direct model creation aligned with the authoritative VAT rules.
-        if self.tax_rate == Decimal("0.0000") and self.order_id:
-            try:
-                from .vat_rules import CustomerVATInfo, OrderVATCalculator
-
-                customer = self.order.customer
-                if not hasattr(customer, "tax_profile"):
-                    raise LookupError("No tax profile available for automatic VAT inference")
-
-                tax_profile = customer.tax_profile
-                vat_number = getattr(tax_profile, "vat_number", "")
-                customer_vat_info: CustomerVATInfo = {
-                    "country": getattr(customer, "country", "RO") or "RO",
-                    "is_business": bool(getattr(customer, "company_name", "")),
-                    "vat_number": vat_number,
-                    "customer_id": str(customer.id),
-                    "order_id": str(self.order.id),
-                }
-
-                customer_vat_info["is_vat_payer"] = tax_profile.is_vat_payer
-                customer_vat_info["reverse_charge_eligible"] = tax_profile.reverse_charge_eligible
-                if tax_profile.vat_rate is not None:
-                    customer_vat_info["custom_vat_rate"] = tax_profile.vat_rate
-
-                vat_result = OrderVATCalculator.calculate_vat(
-                    subtotal_cents=self.subtotal_cents,
-                    customer_info=customer_vat_info,
-                )
-                self.tax_rate = (vat_result.vat_rate / Decimal("100")).quantize(Decimal("0.0001"))
-            except Exception as exc:
-                # Fallback to explicit tax_rate provided by caller (or 0.0000 default).
-                logger.debug("Skipping automatic VAT inference for order item %s: %s", self.id, exc)
+        # tax_rate is fiscal evidence supplied by OrderService. Zero is a valid
+        # cross-border/reverse-charge rate, so model persistence must never treat
+        # it as "unset" and recompute it from mutable customer data.
 
         # Calculate totals
         self.calculate_totals()

@@ -275,6 +275,7 @@ class OrderServiceTestCase(TestCase):
             product_type="hosting",
             quantity=1,
             unit_price_cents=5000,
+            tax_rate=Decimal("0.2100"),
         )
         # Preflight validation requires a current price for the order currency
         ProductPrice.objects.create(
@@ -392,6 +393,7 @@ class OrderServiceTestCase(TestCase):
                         product_type=item_product.product_type,
                         quantity=1,
                         unit_price_cents=1000,
+                        tax_rate=Decimal("0.2100"),
                     )
                     ProductPrice.objects.create(
                         product=item_product,

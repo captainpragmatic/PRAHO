@@ -53,8 +53,11 @@ class CustomerTaxProfile(SoftDeleteModel):
     vat_rate = models.DecimalField(
         max_digits=5,
         decimal_places=2,
-        default=Decimal("21.00"),  # Romanian VAT rate (updated Aug 2025)
+        null=True,
+        blank=True,
+        default=None,
         verbose_name=_("Cota TVA (%)"),
+        help_text=_("Optional customer-specific override; leave blank to use TaxService country rules"),
     )
 
     # Tax Reverse Charge (for B2B EU)
