@@ -1894,7 +1894,7 @@ class TestBackfillRefundsFromMeta(TestCase):
         mod.backfill_refunds_from_meta(django_apps, None)
 
     def _corrective_forward(self):
-        mod = importlib.import_module("apps.billing.migrations.0040_recover_remaining_legacy_refunds")
+        mod = importlib.import_module("apps.billing.migrations.0041_recover_remaining_legacy_refunds")
         mod.recover_remaining_legacy_refunds(django_apps, None)
 
     def test_backfill_creates_refund_rows_for_order(self):

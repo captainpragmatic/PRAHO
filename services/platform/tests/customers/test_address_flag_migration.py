@@ -120,7 +120,7 @@ class AddressBooleanFlagMigrationTest(SimpleTestCase):
             ],
         )
         migration = importlib.import_module(
-            "apps.customers.migrations.0020_repair_address_billing_flags"
+            "apps.customers.migrations.0021_repair_address_billing_flags"
         )
 
         migration.repair_address_billing_flags(None, self._schema_editor())
@@ -141,7 +141,7 @@ class AddressBooleanFlagMigrationTest(SimpleTestCase):
             ],
         )
         migration = importlib.import_module(
-            "apps.customers.migrations.0020_repair_address_billing_flags"
+            "apps.customers.migrations.0021_repair_address_billing_flags"
         )
 
         migration.repair_address_billing_flags(None, self._schema_editor())

@@ -20,7 +20,7 @@ def recover_remaining_legacy_refunds(apps, schema_editor):
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("billing", "0039_invoice_tax_point_and_fx_snapshot"),
+        ("billing", "0040_efactura_submission_integrity"),
     ]
 
     operations = [

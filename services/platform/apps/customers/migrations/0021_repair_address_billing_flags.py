@@ -26,7 +26,7 @@ def repair_address_billing_flags(apps, schema_editor):
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("customers", "0019_bind_payment_method_encryption_context"),
+        ("customers", "0020_make_vat_rate_override_optional"),
     ]
 
     operations = [
