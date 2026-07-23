@@ -2,7 +2,7 @@
 Replace address_type CharField with boolean flags is_primary, is_billing, and label.
 
 Data migration logic:
-- address_type="primary" → is_primary=True, is_billing=True  (single address = both roles)
+- address_type="primary" → is_primary=True; is_billing=True only when no distinct billing address exists
 - address_type="billing" → is_billing=True
 - For customers with only ONE non-deleted address (regardless of type) → set both flags
 
@@ -15,12 +15,27 @@ from django.db import migrations, models
 def migrate_address_type_to_flags(apps, schema_editor):
     """Convert address_type string values to is_primary / is_billing boolean flags."""
     with schema_editor.connection.cursor() as cursor:
-        # Step 1: primary → is_primary=True, is_billing=True
+        # Step 1: primary → is_primary=True. It is also the billing address only
+        # when the customer does not already have a distinct current billing row.
         cursor.execute("""
             UPDATE customer_addresses
-            SET is_primary = TRUE, is_billing = TRUE
+            SET is_primary = TRUE
             WHERE address_type = 'primary'
               AND deleted_at IS NULL
+        """)
+        cursor.execute("""
+            UPDATE customer_addresses
+            SET is_billing = TRUE
+            WHERE address_type = 'primary'
+              AND deleted_at IS NULL
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM customer_addresses AS distinct_billing
+                  WHERE distinct_billing.customer_id = customer_addresses.customer_id
+                    AND distinct_billing.address_type = 'billing'
+                    AND distinct_billing.is_current = TRUE
+                    AND distinct_billing.deleted_at IS NULL
+              )
         """)
 
         # Step 2: billing → is_billing=True (is_primary stays FALSE)
