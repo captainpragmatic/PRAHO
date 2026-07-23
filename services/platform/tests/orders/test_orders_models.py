@@ -7,9 +7,11 @@ import uuid
 from decimal import Decimal
 from unittest.mock import patch
 
+from django.contrib.contenttypes.models import ContentType
 from django.db import transaction
 from django.test import TestCase
 
+from apps.audit.models import AuditEvent
 from apps.billing.models import Currency
 from apps.customers.models import Customer
 from apps.orders.models import Order, OrderItem, OrderStatusHistory
@@ -23,23 +25,13 @@ class OrderModelTestCase(TestCase):
 
     def setUp(self):
         """Set up test data"""
-        self.currency, _ = Currency.objects.get_or_create(
-            code="RON",
-            defaults={"symbol": "lei", "decimals": 2}
-        )
+        self.currency, _ = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei", "decimals": 2})
 
         self.customer = Customer.objects.create(
-            name="Test Company SRL",
-            customer_type="company",
-            status="active",
-            primary_email="contact@testcompany.ro"
+            name="Test Company SRL", customer_type="company", status="active", primary_email="contact@testcompany.ro"
         )
 
-        self.user = User.objects.create_user(
-            email="admin@pragmatichost.com",
-            password="testpass123",
-            is_staff=True
-        )
+        self.user = User.objects.create_user(email="admin@pragmatichost.com", password="testpass123", is_staff=True)
 
     def test_order_creation_with_sequential_number(self):
         """Test that orders get sequential numbers per customer"""
@@ -50,8 +42,8 @@ class OrderModelTestCase(TestCase):
             customer_email=self.customer.primary_email,
             customer_name=self.customer.name,
             subtotal_cents=10000,  # 100.00 RON
-            tax_cents=1900,       # 19.00 RON (19% VAT)
-            total_cents=11900     # 119.00 RON
+            tax_cents=1900,  # 19.00 RON (19% VAT)
+            total_cents=11900,  # 119.00 RON
         )
 
         order2 = Order.objects.create(
@@ -62,7 +54,7 @@ class OrderModelTestCase(TestCase):
             customer_name=self.customer.name,
             subtotal_cents=20000,
             tax_cents=3800,
-            total_cents=23800
+            total_cents=23800,
         )
 
         self.assertEqual(order1.customer, self.customer)
@@ -78,7 +70,7 @@ class OrderModelTestCase(TestCase):
             order_number="ORD-2024-TEST-0001",
             currency=self.currency,
             customer_email=self.customer.primary_email,
-            customer_name=self.customer.name
+            customer_name=self.customer.name,
         )
 
         self.assertIsInstance(order.id, uuid.UUID)
@@ -93,14 +85,23 @@ class OrderModelTestCase(TestCase):
             customer_email=self.customer.primary_email,
             customer_name=self.customer.name,
             billing_address={},  # Empty dict for default billing address
-            status="draft"
+            status="draft",
         )
 
         # Test default status
         self.assertEqual(order.status, "draft")
 
         # Test valid status values survive DB roundtrip (verifies CHECK constraint compatibility)
-        valid_statuses = ["draft", "awaiting_payment", "paid", "in_review", "provisioning", "completed", "cancelled", "failed"]
+        valid_statuses = [
+            "draft",
+            "awaiting_payment",
+            "paid",
+            "in_review",
+            "provisioning",
+            "completed",
+            "cancelled",
+            "failed",
+        ]
         for status in valid_statuses:
             force_status(order, status)
             order.refresh_from_db()
@@ -109,7 +110,7 @@ class OrderModelTestCase(TestCase):
     def test_romanian_vat_compliance(self):
         """Test Romanian VAT calculation compliance"""
         subtotal_cents = 10000  # 100.00 RON
-        expected_vat = int(subtotal_cents * Decimal('0.19'))  # 19% VAT
+        expected_vat = int(subtotal_cents * Decimal("0.19"))  # 19% VAT
         total_cents = subtotal_cents + expected_vat
 
         order = Order.objects.create(
@@ -120,7 +121,7 @@ class OrderModelTestCase(TestCase):
             customer_name=self.customer.name,
             subtotal_cents=subtotal_cents,
             tax_cents=expected_vat,
-            total_cents=total_cents
+            total_cents=total_cents,
         )
 
         # Verify VAT calculation
@@ -150,8 +151,8 @@ class OrderModelTestCase(TestCase):
                 "county": "Bucuresti",
                 "postal_code": "010563",
                 "country": "Romania",
-                "fiscal_code": "RO12345678"
-            }
+                "fiscal_code": "RO12345678",
+            },
         )
 
         # Verify billing address is saved as JSON
@@ -166,7 +167,7 @@ class OrderModelTestCase(TestCase):
             order_number="ORD-2024-STR-0001",
             currency=self.currency,
             customer_email=self.customer.primary_email,
-            customer_name=self.customer.name
+            customer_name=self.customer.name,
         )
 
         expected_str = f"Order ORD-2024-STR-0001 - {self.customer.primary_email}"
@@ -178,10 +179,7 @@ class OrderModelTestCase(TestCase):
             "source": "website",
             "campaign": "spring_2024",
             "notes": "Urgent order",
-            "custom_fields": {
-                "project_name": "Website Redesign",
-                "deadline": "2024-06-01"
-            }
+            "custom_fields": {"project_name": "Website Redesign", "deadline": "2024-06-01"},
         }
 
         order = Order.objects.create(
@@ -190,7 +188,7 @@ class OrderModelTestCase(TestCase):
             currency=self.currency,
             customer_email=self.customer.primary_email,
             customer_name=self.customer.name,
-            meta=meta_data
+            meta=meta_data,
         )
 
         # Retrieve and verify JSON data
@@ -205,29 +203,19 @@ class OrderItemModelTestCase(TestCase):
     def setUp(self):
         """Set up test data"""
         self.customer = Customer.objects.create(
-            name="Test Company SRL",
-            customer_type="company",
-            status="active",
-            primary_email="contact@testcompany.ro"
+            name="Test Company SRL", customer_type="company", status="active", primary_email="contact@testcompany.ro"
         )
 
-        self.currency, _ = Currency.objects.get_or_create(
-            code="RON",
-            defaults={"symbol": "lei", "decimals": 2}
-        )
+        self.currency, _ = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei", "decimals": 2})
 
-        self.product = Product.objects.create(
-            slug="test-product",
-            name="Test Product",
-            product_type="shared_hosting"
-        )
+        self.product = Product.objects.create(slug="test-product", name="Test Product", product_type="shared_hosting")
 
         self.order = Order.objects.create(
             customer=self.customer,
             order_number="ORD-2024-ITEMS-0001",
             currency=self.currency,
             customer_email=self.customer.primary_email,
-            customer_name=self.customer.name
+            customer_name=self.customer.name,
         )
 
     def test_order_item_creation(self):
@@ -240,7 +228,7 @@ class OrderItemModelTestCase(TestCase):
             quantity=2,
             unit_price_cents=5000,  # 50.00 RON
             line_total_cents=10000,  # 100.00 RON
-            config={}  # Empty dict for default config
+            config={},  # Empty dict for default config
         )
 
         self.assertEqual(item.order, self.order)
@@ -249,7 +237,7 @@ class OrderItemModelTestCase(TestCase):
         self.assertEqual(item.line_total_cents, 10000)
 
     def test_order_item_line_total_calculation(self):
-        """Test that line total equals quantity × unit price"""
+        """Test that line total equals quantity x unit price"""
         quantity = 3
         unit_price_cents = 2500  # 25.00 RON
         expected_line_total = quantity * unit_price_cents
@@ -262,7 +250,7 @@ class OrderItemModelTestCase(TestCase):
             quantity=quantity,
             unit_price_cents=unit_price_cents,
             line_total_cents=expected_line_total,
-            config={}  # Empty dict for default config
+            config={},  # Empty dict for default config
         )
 
         self.assertEqual(item.line_total_cents, expected_line_total)
@@ -278,7 +266,7 @@ class OrderItemModelTestCase(TestCase):
             unit_price_cents=10000,
             line_total_cents=10000,
             config={},  # Empty dict for default config
-            provisioning_status="pending"
+            provisioning_status="pending",
         )
 
         # Test valid provisioning statuses survive DB roundtrip (verifies CHECK constraint)
@@ -298,7 +286,7 @@ class OrderItemModelTestCase(TestCase):
             quantity=1,
             unit_price_cents=1000,
             line_total_cents=1000,
-            config={}  # Empty dict for default config
+            config={},  # Empty dict for default config
         )
 
         self.assertIsInstance(item.id, uuid.UUID)
@@ -306,13 +294,9 @@ class OrderItemModelTestCase(TestCase):
     def test_order_item_config_field(self):
         """Test order item config JSON field"""
         config_data = {
-            "configuration": {
-                "cpu": "2 cores",
-                "ram": "4GB",
-                "disk": "50GB SSD"
-            },
+            "configuration": {"cpu": "2 cores", "ram": "4GB", "disk": "50GB SSD"},
             "duration": "12 months",
-            "renewal": True
+            "renewal": True,
         }
 
         item = OrderItem.objects.create(
@@ -323,7 +307,7 @@ class OrderItemModelTestCase(TestCase):
             quantity=1,
             unit_price_cents=15000,
             line_total_cents=15000,
-            config=config_data
+            config=config_data,
         )
 
         saved_item = OrderItem.objects.get(id=item.id)
@@ -332,22 +316,102 @@ class OrderItemModelTestCase(TestCase):
         self.assertTrue(saved_item.config["renewal"])
 
 
+class OrderItemAuditDedupTestCase(TestCase):
+    """OrderItem creation/deletion must not double-write audit events.
+
+    OrderItem.save() (via calculate_totals) cascades into an Order.save(),
+    which previously fired its own "order_updated"/"order_created" audit
+    event on top of the item's own "order_item_added"/"order_item_deleted"
+    event — two rows for one logical action. The cascade is now suppressed
+    for that specific save; the item's own event remains the sole record.
+    """
+
+    def setUp(self):
+        self.customer = Customer.objects.create(
+            name="Dedup Test SRL",
+            customer_type="company",
+            status="active",
+            primary_email="dedup@testcompany.ro",
+        )
+        self.currency, _ = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei", "decimals": 2})
+        self.product = Product.objects.create(
+            slug="dedup-product",
+            name="Dedup Product",
+            product_type="shared_hosting",
+        )
+        self.order = Order.objects.create(
+            customer=self.customer,
+            order_number="ORD-2024-DEDUP-0001",
+            currency=self.currency,
+            customer_email=self.customer.primary_email,
+            customer_name=self.customer.name,
+        )
+        self.order_content_type = ContentType.objects.get_for_model(Order)
+        self.order_item_content_type = ContentType.objects.get_for_model(OrderItem)
+
+    def _order_events(self):
+        return AuditEvent.objects.filter(content_type=self.order_content_type, object_id=str(self.order.id))
+
+    def test_order_item_creation_emits_exactly_one_item_event_and_no_order_event(self):
+        """Creating an OrderItem must not also emit an Order "order_updated" event."""
+        # Baseline: the Order's own creation already emitted its own event.
+        baseline_order_events = self._order_events().count()
+
+        item = OrderItem.objects.create(
+            order=self.order,
+            product=self.product,
+            product_name="Dedup Hosting Plan",
+            product_type="shared_hosting",
+            quantity=1,
+            unit_price_cents=5000,
+            line_total_cents=5000,
+            config={},
+        )
+
+        item_events = AuditEvent.objects.filter(content_type=self.order_item_content_type, object_id=str(item.id))
+        self.assertEqual(item_events.count(), 1)
+        self.assertEqual(item_events.first().action, "order_item_added")
+
+        # The cascading Order.save() from calculate_totals() must not add a
+        # new "order_updated" event on top of the item's own event.
+        self.assertEqual(self._order_events().count(), baseline_order_events)
+
+    def test_order_item_deletion_emits_exactly_one_order_event(self):
+        """Deleting an OrderItem must emit exactly one order_item_deleted event, not two."""
+        item = OrderItem.objects.create(
+            order=self.order,
+            product=self.product,
+            product_name="Dedup Hosting Plan",
+            product_type="shared_hosting",
+            quantity=1,
+            unit_price_cents=5000,
+            line_total_cents=5000,
+            config={},
+        )
+
+        baseline_order_events = self._order_events().count()
+
+        item.delete()
+
+        deletion_events = self._order_events().filter(action="order_item_deleted")
+        self.assertEqual(deletion_events.count(), 1)
+        # Exactly one new event was added by the deletion (the deletion event
+        # itself) — the cascading calculate_totals() save must not add a
+        # second "order_updated" event for the same Order object.
+        self.assertEqual(self._order_events().count(), baseline_order_events + 1)
+        self.assertEqual(deletion_events.first().old_values.get("product_name"), "Dedup Hosting Plan")
+
+
 class OrderStatusHistoryModelTestCase(TestCase):
     """Test cases for OrderStatusHistory model functionality"""
 
     def setUp(self):
         """Set up test data"""
         self.customer = Customer.objects.create(
-            name="Test Company SRL",
-            customer_type="company",
-            status="active",
-            primary_email="contact@testcompany.ro"
+            name="Test Company SRL", customer_type="company", status="active", primary_email="contact@testcompany.ro"
         )
 
-        self.currency, _ = Currency.objects.get_or_create(
-            code="RON",
-            defaults={"symbol": "lei", "decimals": 2}
-        )
+        self.currency, _ = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei", "decimals": 2})
 
         self.order = Order.objects.create(
             customer=self.customer,
@@ -355,14 +419,10 @@ class OrderStatusHistoryModelTestCase(TestCase):
             currency=self.currency,
             customer_email=self.customer.primary_email,
             customer_name=self.customer.name,
-            status="draft"
+            status="draft",
         )
 
-        self.user = User.objects.create_user(
-            email="staff@pragmatichost.com",
-            password="testpass123",
-            is_staff=True
-        )
+        self.user = User.objects.create_user(email="staff@pragmatichost.com", password="testpass123", is_staff=True)
 
     def test_status_history_creation(self):
         """Test order status history tracking"""
@@ -371,7 +431,7 @@ class OrderStatusHistoryModelTestCase(TestCase):
             old_status="",  # Initial creation (empty string instead of None)
             new_status="draft",
             notes="Order created",
-            changed_by=self.user
+            changed_by=self.user,
         )
 
         self.assertEqual(history.order, self.order)
@@ -386,7 +446,7 @@ class OrderStatusHistoryModelTestCase(TestCase):
             order=self.order,
             old_status="",  # Empty string for initial creation
             new_status="draft",
-            notes="Order created"
+            notes="Order created",
         )
         # Verify initial history was created
         self.assertIsNotNone(initial_history)
@@ -398,7 +458,7 @@ class OrderStatusHistoryModelTestCase(TestCase):
             old_status="draft",
             new_status="awaiting_payment",
             notes="Order submitted for processing",
-            changed_by=self.user
+            changed_by=self.user,
         )
 
         # Verify transition tracking
@@ -413,21 +473,15 @@ class OrderStatusHistoryModelTestCase(TestCase):
             order=self.order,
             old_status="",  # Empty string for initial creation
             new_status="draft",
-            notes="Created"
+            notes="Created",
         )
 
         history2 = OrderStatusHistory.objects.create(
-            order=self.order,
-            old_status="draft",
-            new_status="awaiting_payment",
-            notes="Submitted"
+            order=self.order, old_status="draft", new_status="awaiting_payment", notes="Submitted"
         )
 
         history3 = OrderStatusHistory.objects.create(
-            order=self.order,
-            old_status="awaiting_payment",
-            new_status="paid",
-            notes="Paid"
+            order=self.order, old_status="awaiting_payment", new_status="paid", notes="Paid"
         )
 
         # Get history in default order (most recent first)
@@ -444,16 +498,12 @@ class OrderStatusHistoryModelTestCase(TestCase):
             ("draft", "awaiting_payment", "Submitted for approval"),
             ("awaiting_payment", "paid", "Payment confirmed"),
             ("paid", "provisioning", "Provisioning started"),
-            ("provisioning", "completed", "Order fulfilled")
+            ("provisioning", "completed", "Order fulfilled"),
         ]
 
         for old_status, new_status, notes in statuses:
             OrderStatusHistory.objects.create(
-                order=self.order,
-                old_status=old_status,
-                new_status=new_status,
-                notes=notes,
-                changed_by=self.user
+                order=self.order, old_status=old_status, new_status=new_status, notes=notes, changed_by=self.user
             )
 
         # Verify complete audit trail
@@ -471,7 +521,7 @@ class OrderStatusHistoryModelTestCase(TestCase):
             old_status="draft",
             new_status="awaiting_payment",
             notes="Status changed",
-            changed_by=self.user
+            changed_by=self.user,
         )
 
         expected_str = "ORD-2024-HISTORY-0001: draft → awaiting_payment"
@@ -680,7 +730,10 @@ class OrderSaveRetryOnCreationOnlyTestCase(TestCase):
         force_status(order, "awaiting_payment", save=False)
 
         # Patch Model.save (the super()) to raise IntegrityError
-        with patch("django.db.models.Model.save", side_effect=IntegrityError("simulated")), self.assertRaises(IntegrityError):
+        with (
+            patch("django.db.models.Model.save", side_effect=IntegrityError("simulated")),
+            self.assertRaises(IntegrityError),
+        ):
             order.save()
 
     def test_creation_retries_on_order_number_collision(self) -> None:

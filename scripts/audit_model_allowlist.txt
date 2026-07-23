@@ -53,26 +53,21 @@ tickets.SupportCategory         # support category taxonomy
 billing.BillingCycle            # child of Subscription
 billing.InvoiceLine             # child of Invoice
 billing.InvoiceSequence         # internal counter (no business significance)
-billing.PaymentCollectionRun    # batch processing record
+billing.PaymentCollectionRun    # lifecycle audited via collection_run_started/_completed/_failed events (billing/tasks.py)
 billing.PaymentRetryAttempt     # child of PaymentCollectionRun
 billing.ProformaLine            # child of ProformaInvoice
 billing.ProformaSequence        # internal counter (no business significance)
 billing.SubscriptionChange      # child of Subscription
 billing.SubscriptionItem        # child of Subscription
 domains.DomainOperation         # operational task tracking (audited via gateway _audit_api_call)
-domains.DomainOrderItem         # child of Order (audited via Order signal)
-orders.OrderItem                # child of Order
-provisioning.ServiceDomain      # child of Service
 provisioning.ServiceGroupMember # child of ServiceGroup
 provisioning.ServiceRelationship # child of Service
 tickets.TicketAttachment        # child of Ticket
 tickets.TicketComment           # child of Ticket
 tickets.TicketWorklog           # child of Ticket
 
-# ── 5. Virtualmin integration internals (audited via Service parent) ──────────
-provisioning.VirtualminAccount          # internal Virtualmin state
+# ── 5. Virtualmin integration internals ────────────────────────────────────────
 provisioning.VirtualminDriftRecord      # internal drift detection
-provisioning.VirtualminProvisioningJob  # internal provisioning job
 provisioning.VirtualminServer           # mirrors Server model
 
 # ── 6. Usage metering (high-volume operational data) ──────────────────────────

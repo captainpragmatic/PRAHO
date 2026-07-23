@@ -1058,7 +1058,7 @@ def _execute_payment_retry(retry: Any, retry_model: Any) -> int | None:
     return None
 
 
-def run_payment_collection() -> dict[str, Any]:
+def run_payment_collection() -> dict[str, Any]:  # noqa: PLR0915  # linear batch pipeline + W9 lifecycle bookkeeping
     """
     Run payment collection for failed payments.
 
@@ -1075,11 +1075,13 @@ def run_payment_collection() -> dict[str, Any]:
 
     logger.info("💳 [Collection] Starting payment collection run")
 
+    run = None
     try:
         # Create collection run record
         run = PaymentCollectionRun.objects.create(
             run_type="automatic",
         )
+        _log_collection_run_event("collection_run_started", run, f"Payment collection run {run.id} started")
 
         now = timezone.now()
         _reclaim_stale_payment_retries(PaymentRetryAttempt, now=now)
@@ -1125,6 +1127,11 @@ def run_payment_collection() -> dict[str, Any]:
         run.completed_at = timezone.now()
         run.status = "completed"
         run.save()
+        _log_collection_run_event(
+            "collection_run_completed",
+            run,
+            f"Payment collection run {run.id} completed: {successful} recovered, {failed} failed",
+        )
 
         logger.info(
             f"💳 [Collection] Run completed: "
@@ -1143,7 +1150,46 @@ def run_payment_collection() -> dict[str, Any]:
 
     except Exception as e:
         logger.exception(f"💥 [Collection] Error running payment collection: {e}")
+        # W9: a crashed run must not sit in "running" forever - close it out honestly
+        # so dashboards and the next scheduled run see a failed batch, not a live one.
+        if run is not None:
+            try:
+                run.status = "failed"
+                run.error_message = str(e)
+                run.completed_at = timezone.now()
+                run.save(update_fields=["status", "error_message", "completed_at"])
+                _log_collection_run_event("collection_run_failed", run, f"Payment collection run {run.id} failed: {e}")
+            except Exception:
+                logger.exception("💥 [Collection] Could not mark collection run as failed")
         return {"success": False, "error": str(e)}
+
+
+def _log_collection_run_event(event_type: str, run: Any, description: str) -> None:
+    """Audit a collection-run lifecycle transition.
+
+    Savepoint + swallow: an audit failure must neither poison the surrounding
+    transaction nor mask the collection result itself.
+    """
+    try:
+        with transaction.atomic():
+            AuditService.log_simple_event(
+                event_type=event_type,
+                user=run.triggered_by,
+                content_object=run,
+                description=description,
+                actor_type="system",
+                metadata={
+                    "source_app": "billing",
+                    "run_type": run.run_type,
+                    "total_processed": run.total_processed,
+                    "total_successful": run.total_successful,
+                    "total_failed": run.total_failed,
+                    "amount_recovered_cents": run.amount_recovered_cents,
+                    "status": run.status,
+                },
+            )
+    except Exception:
+        logger.exception(f"🔥 [Collection] Failed to audit {event_type} for run {run.id}")
 
 
 # ===============================================================================

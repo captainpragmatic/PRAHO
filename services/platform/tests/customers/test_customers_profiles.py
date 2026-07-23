@@ -12,7 +12,6 @@ Tests for Customer tax and billing profile models focusing on Romanian complianc
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
-from django.core.exceptions import ValidationError
 from django.test import TestCase
 
 from apps.customers.models import (
@@ -26,7 +25,7 @@ User = get_user_model()
 
 def create_test_user(email, **kwargs):
     """Helper to create test user"""
-    return User.objects.create_user(email=email, password='testpass', **kwargs)
+    return User.objects.create_user(email=email, password="testpass", **kwargs)
 
 
 class CustomerTaxProfileTestCase(TestCase):
@@ -34,49 +33,44 @@ class CustomerTaxProfileTestCase(TestCase):
 
     def setUp(self):
         """Set up test data"""
-        self.admin_user = create_test_user('admin@test.ro', staff_role='admin')
+        self.admin_user = create_test_user("admin@test.ro", staff_role="admin")
 
         self.customer = Customer.objects.create(
-            name='Test Company SRL',
-            customer_type='company',
-            company_name='Test Company SRL',
-            primary_email='test@company.ro',
-            status='active'
+            name="Test Company SRL",
+            customer_type="company",
+            company_name="Test Company SRL",
+            primary_email="test@company.ro",
+            status="active",
         )
 
     def test_tax_profile_creation(self):
         """Test tax profile creation with valid data"""
         tax_profile = CustomerTaxProfile.objects.create(
             customer=self.customer,
-            cui='RO12345678',
-            vat_number='RO12345678',
+            cui="RO12345678",
+            vat_number="RO12345678",
             is_vat_payer=True,
-            vat_rate=Decimal('19.00')
+            vat_rate=Decimal("19.00"),
         )
 
-        self.assertEqual(tax_profile.cui, 'RO12345678')
-        self.assertEqual(tax_profile.vat_number, 'RO12345678')
+        self.assertEqual(tax_profile.cui, "RO12345678")
+        self.assertEqual(tax_profile.vat_number, "RO12345678")
         self.assertTrue(tax_profile.is_vat_payer)
-        self.assertEqual(tax_profile.vat_rate, Decimal('19.00'))
+        self.assertEqual(tax_profile.vat_rate, Decimal("19.00"))
 
     def test_tax_number_validation_romanian(self):
         """Test Romanian tax number (CUI) validation"""
         # Valid Romanian CUI
         tax_profile = CustomerTaxProfile.objects.create(
-            customer=self.customer,
-            cui='RO12345678',
-            vat_number='RO12345678',
-            is_vat_payer=True
+            customer=self.customer, cui="RO12345678", vat_number="RO12345678", is_vat_payer=True
         )
 
-        self.assertEqual(tax_profile.cui, 'RO12345678')
+        self.assertEqual(tax_profile.cui, "RO12345678")
 
     def test_tax_profile_str_representation(self):
         """Test string representation of tax profile"""
         tax_profile = CustomerTaxProfile.objects.create(
-            customer=self.customer,
-            cui='RO12345678',
-            vat_number='RO12345678'
+            customer=self.customer, cui="RO12345678", vat_number="RO12345678"
         )
 
         # The model doesn't have a custom __str__ method, so test basic functionality
@@ -88,30 +82,27 @@ class CustomerTaxProfileTestCase(TestCase):
         """Test VAT calculation helper methods"""
         tax_profile = CustomerTaxProfile.objects.create(
             customer=self.customer,
-            cui='RO12345678',
-            vat_number='RO12345678',
+            cui="RO12345678",
+            vat_number="RO12345678",
             is_vat_payer=True,
-            vat_rate=Decimal('19.00')
+            vat_rate=Decimal("19.00"),
         )
 
         # Test tax profile stores VAT rate correctly
-        self.assertEqual(tax_profile.vat_rate, Decimal('19.00'))
+        self.assertEqual(tax_profile.vat_rate, Decimal("19.00"))
         self.assertTrue(tax_profile.is_vat_payer)
         self.assertTrue(tax_profile.validate_cui())
 
     def test_romanian_vat_requirements(self):
         """Test Romanian VAT registration requirements"""
         tax_profile = CustomerTaxProfile.objects.create(
-            customer=self.customer,
-            cui='RO12345678',
-            vat_number='RO12345678',
-            is_vat_payer=True
+            customer=self.customer, cui="RO12345678", vat_number="RO12345678", is_vat_payer=True
         )
 
         # Test Romanian VAT registration requirements
         self.assertTrue(tax_profile.is_vat_payer)
-        self.assertEqual(tax_profile.cui, 'RO12345678')
-        self.assertEqual(tax_profile.vat_number, 'RO12345678')
+        self.assertEqual(tax_profile.cui, "RO12345678")
+        self.assertEqual(tax_profile.vat_number, "RO12345678")
         self.assertTrue(tax_profile.validate_cui())
 
 
@@ -120,14 +111,14 @@ class CustomerBillingProfileTestCase(TestCase):
 
     def setUp(self):
         """Set up test data"""
-        self.admin_user = create_test_user('billing@test.ro', staff_role='billing')
+        self.admin_user = create_test_user("billing@test.ro", staff_role="billing")
 
         self.customer = Customer.objects.create(
-            name='Billing Test SRL',
-            customer_type='company',
-            company_name='Billing Test SRL',
-            primary_email='billing@test.ro',
-            status='active'
+            name="Billing Test SRL",
+            customer_type="company",
+            company_name="Billing Test SRL",
+            primary_email="billing@test.ro",
+            status="active",
         )
 
     def test_billing_profile_creation(self):
@@ -135,24 +126,22 @@ class CustomerBillingProfileTestCase(TestCase):
         billing_profile = CustomerBillingProfile.objects.create(
             customer=self.customer,
             payment_terms=30,
-            credit_limit=Decimal('5000.00'),
-            preferred_currency='RON',
+            credit_limit=Decimal("5000.00"),
+            preferred_currency="RON",
         )
 
         self.assertEqual(billing_profile.payment_terms, 30)
-        self.assertEqual(billing_profile.credit_limit, Decimal('5000.00'))
-        self.assertEqual(billing_profile.preferred_currency, 'RON')
+        self.assertEqual(billing_profile.credit_limit, Decimal("5000.00"))
+        self.assertEqual(billing_profile.preferred_currency, "RON")
 
     def test_credit_limit_properties(self):
         """Test credit limit calculation methods"""
         billing_profile = CustomerBillingProfile.objects.create(
-            customer=self.customer,
-            credit_limit=Decimal('5000.00'),
-            preferred_currency='RON'
+            customer=self.customer, credit_limit=Decimal("5000.00"), preferred_currency="RON"
         )
 
         # Test credit limit
-        self.assertEqual(billing_profile.credit_limit, Decimal('5000.00'))
+        self.assertEqual(billing_profile.credit_limit, Decimal("5000.00"))
 
         # Test credit limit is stored correctly
         self.assertIsInstance(billing_profile.credit_limit, Decimal)
@@ -161,21 +150,18 @@ class CustomerBillingProfileTestCase(TestCase):
         """Test billing contact information validation"""
         billing_profile = CustomerBillingProfile.objects.create(
             customer=self.customer,
-            preferred_currency='RON',
+            preferred_currency="RON",
         )
 
         # Test that billing profile is created successfully
-        self.assertEqual(billing_profile.preferred_currency, 'RON')
+        self.assertEqual(billing_profile.preferred_currency, "RON")
 
         # The billing contact info is stored in the customer model
-        self.assertEqual(self.customer.primary_email, 'billing@test.ro')
+        self.assertEqual(self.customer.primary_email, "billing@test.ro")
 
     def test_payment_terms_validation(self):
         """Test payment terms validation"""
-        billing_profile = CustomerBillingProfile.objects.create(
-            customer=self.customer,
-            payment_terms=30
-        )
+        billing_profile = CustomerBillingProfile.objects.create(customer=self.customer, payment_terms=30)
 
         self.assertEqual(billing_profile.payment_terms, 30)
 
@@ -184,10 +170,7 @@ class CustomerBillingProfileTestCase(TestCase):
 
     def test_billing_profile_str_representation(self):
         """Test string representation of billing profile"""
-        billing_profile = CustomerBillingProfile.objects.create(
-            customer=self.customer,
-            preferred_currency='RON'
-        )
+        billing_profile = CustomerBillingProfile.objects.create(customer=self.customer, preferred_currency="RON")
 
         # The model doesn't have a custom __str__ method, so test basic functionality
         str_repr = str(billing_profile)
@@ -197,16 +180,92 @@ class CustomerBillingProfileTestCase(TestCase):
     def test_romanian_billing_requirements(self):
         """Test Romanian-specific billing requirements"""
         billing_profile = CustomerBillingProfile.objects.create(
-            customer=self.customer,
-            preferred_currency='RON',
-            payment_terms=30
+            customer=self.customer, preferred_currency="RON", payment_terms=30
         )
 
         # Romanian businesses typically use RON currency
-        self.assertEqual(billing_profile.preferred_currency, 'RON')
+        self.assertEqual(billing_profile.preferred_currency, "RON")
 
         # Test Romanian invoice numbering requirements if method exists
-        if hasattr(billing_profile, 'get_next_invoice_number'):
+        if hasattr(billing_profile, "get_next_invoice_number"):
             invoice_number = billing_profile.get_next_invoice_number()
             self.assertIsInstance(invoice_number, str)
             self.assertTrue(len(invoice_number) > 0)
+
+
+class TaxProfileAuditGatingTestCase(TestCase):
+    """#241: tax-profile side effects fire once per REAL tax-field change, and each
+    change produces exactly one record (ComplianceLog for RO, AuditEvent otherwise)."""
+
+    def setUp(self):
+        self.customer = Customer.objects.create(
+            name="Gating Test SRL",
+            customer_type="company",
+            company_name="Gating Test SRL",
+            primary_email="gating@company.ro",
+            status="active",
+        )
+
+    def _audit_events_for(self, profile):
+        from django.contrib.contenttypes.models import ContentType  # noqa: PLC0415  # Deferred: test-local
+
+        from apps.audit.models import AuditEvent  # noqa: PLC0415  # Deferred: test-local
+
+        ct = ContentType.objects.get_for_model(CustomerTaxProfile)
+        return AuditEvent.objects.filter(content_type=ct, object_id=str(profile.pk))
+
+    def test_romanian_profile_writes_compliance_log_not_audit_event(self):
+        from apps.audit.models import ComplianceLog  # noqa: PLC0415  # Deferred: test-local
+
+        profile = CustomerTaxProfile.objects.create(
+            customer=self.customer, cui="RO12345678", is_vat_payer=True, vat_rate=Decimal("19.00")
+        )
+
+        self.assertEqual(
+            ComplianceLog.objects.filter(
+                compliance_type="romanian_tax_registration", reference_id="RO12345678"
+            ).count(),
+            1,
+        )
+        self.assertEqual(self._audit_events_for(profile).count(), 0)
+
+    def test_non_romanian_profile_keeps_audit_event_coverage(self):
+        profile = CustomerTaxProfile.objects.create(
+            customer=self.customer, cui="DE999999999", vat_number="DE999999999", vat_rate=Decimal("19.00")
+        )
+
+        self.assertEqual(self._audit_events_for(profile).count(), 1)
+
+    def test_unrelated_save_emits_nothing_and_skips_vies(self):
+        """The #241 defect: every save re-ran VIES and re-wrote compliance rows."""
+        from unittest.mock import patch  # noqa: PLC0415  # Deferred: test-local
+
+        from apps.audit.models import ComplianceLog  # noqa: PLC0415  # Deferred: test-local
+
+        profile = CustomerTaxProfile.objects.create(
+            customer=self.customer, cui="RO12345678", vat_number="RO12345678", vat_rate=Decimal("19.00")
+        )
+        compliance_before = ComplianceLog.objects.count()
+        events_before = self._audit_events_for(profile).count()
+
+        with patch("apps.customers.signals._trigger_vat_validation") as mock_vies:
+            profile.refresh_from_db()
+            profile.save()  # no tax field changed
+
+        mock_vies.assert_not_called()
+        self.assertEqual(ComplianceLog.objects.count(), compliance_before)
+        self.assertEqual(self._audit_events_for(profile).count(), events_before)
+
+    def test_vat_number_change_retriggers_vies(self):
+        from unittest.mock import patch  # noqa: PLC0415  # Deferred: test-local
+
+        profile = CustomerTaxProfile.objects.create(
+            customer=self.customer, cui="RO12345678", vat_number="RO12345678", vat_rate=Decimal("19.00")
+        )
+
+        with patch("apps.customers.signals._trigger_vat_validation") as mock_vies:
+            profile.refresh_from_db()
+            profile.vat_number = "RO87654321"
+            profile.save()
+
+        mock_vies.assert_called_once()

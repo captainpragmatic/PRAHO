@@ -159,7 +159,13 @@ class SecurityHeadersMiddleware:
 
 
 class AuditMiddleware:
-    """Log all requests for Romanian legal compliance"""
+    """Request/response LOG-STREAM tracing - not the audit trail.
+
+    Emits structured request/response records to the logging framework only; it
+    writes NO AuditEvent rows and provides no tamper evidence. The database audit
+    trail is owned by apps.audit signals/services (ADR-0016). Naming kept for
+    settings-module compatibility; treat this as observability, not compliance.
+    """
 
     def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]):
         self.get_response = get_response

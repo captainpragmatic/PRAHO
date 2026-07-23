@@ -52,7 +52,6 @@ from apps.audit.services import (
     SessionRotationEventData,
     TicketsAuditService,
     TwoFactorAuditRequest,
-    audit_service,
     serialize_metadata,
 )
 
@@ -244,46 +243,6 @@ class TestAuditServiceCategorization(TestCase):
         self.assertTrue(AuditService._requires_review("malicious_request_detected"))
         self.assertTrue(AuditService._requires_review("data_breach_confirmed"))
         self.assertFalse(AuditService._requires_review("invoice_created"))
-
-
-class TestAuditServiceLegacy(TestCase):
-    def test_log_event_legacy(self):
-        user = _make_user()
-        event = AuditService.log_event_legacy("test_legacy", user=user, content_object=user, description="legacy test")
-        self.assertEqual(event.action, "test_legacy")
-
-    def test_log_2fa_event_legacy(self):
-        user = _make_user()
-        user.two_factor_enabled = False
-        user.backup_tokens = []
-        user.save()
-        event = AuditService.log_2fa_event_legacy(
-            "2fa_enabled", user=user, ip_address="1.2.3.4", description="2FA enabled"
-        )
-        self.assertEqual(event.action, "2fa_enabled")
-
-    def test_log_compliance_event_legacy(self):
-        log = AuditService.log_compliance_event_legacy("gdpr_consent", "ref_001", "Test compliance", status="success")
-        self.assertEqual(log.compliance_type, "gdpr_consent")
-
-
-class TestAuditServiceProxy(TestCase):
-    def test_proxy_log_event(self):
-        user = _make_user()
-        event = audit_service.log_event("test_proxy", user=user, content_object=user)
-        self.assertEqual(event.action, "test_proxy")
-
-    def test_proxy_log_2fa_event(self):
-        user = _make_user()
-        user.two_factor_enabled = False
-        user.backup_tokens = []
-        user.save()
-        event = audit_service.log_2fa_event("2fa_enabled", user=user)
-        self.assertEqual(event.action, "2fa_enabled")
-
-    def test_proxy_log_compliance_event(self):
-        log = audit_service.log_compliance_event("gdpr_consent", "ref_002", "Proxy test")
-        self.assertIsInstance(log, ComplianceLog)
 
 
 class TestLog2FAEvent(TestCase):

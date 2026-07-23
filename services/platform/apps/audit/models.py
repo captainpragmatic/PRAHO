@@ -347,6 +347,7 @@ class AuditEvent(models.Model):
         ("dunning_email_sent", "Dunning Email Sent"),
         ("collection_run_started", "Collection Run Started"),
         ("collection_run_completed", "Collection Run Completed"),
+        ("collection_run_failed", "Collection Run Failed"),
         # ======================================================================
         # CREDIT & BALANCE MANAGEMENT
         # ======================================================================
@@ -365,6 +366,7 @@ class AuditEvent(models.Model):
         ("order_created", "Order Created"),
         ("order_updated", "Order Updated"),
         ("order_status_changed", "Order Status Changed"),
+        ("status_changed", "Status Changed"),
         ("order_item_added", "Order Item Added"),
         ("order_item_removed", "Order Item Removed"),
         ("order_item_updated", "Order Item Updated"),
@@ -611,7 +613,9 @@ class DataExport(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
     # Request details
-    requested_by = models.ForeignKey(User, on_delete=models.CASCADE)
+    # SET_NULL, not CASCADE: deleting a user must not erase the GDPR compliance
+    # record that an export of their data was made (W7).
+    requested_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
     requested_at = models.DateTimeField(auto_now_add=True)
 
     # Export scope
@@ -640,7 +644,11 @@ class DataExport(models.Model):
         ordering: ClassVar[tuple[str, ...]] = ("-requested_at",)
 
     def __str__(self) -> str:
-        return f"{self.export_type} export by {self.requested_by}"
+        return f"{self.export_type} export by {self.requested_by_display}"
+
+    @property
+    def requested_by_display(self) -> str:
+        return self.requested_by.email if self.requested_by else "deleted user"
 
 
 class AuditIntegrityCheck(models.Model):

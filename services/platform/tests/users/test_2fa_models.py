@@ -34,86 +34,77 @@ class EnhancedWebAuthnCredentialTest(TestCase):
     def setUp(self) -> None:
         """Set up test data"""
         self.user = UserModel.objects.create_user(
-            email='test@example.com',
-            password='testpass123',
-            first_name='Test',
-            last_name='User'
+            email="test@example.com", password="testpass123", first_name="Test", last_name="User"
         )
 
     def test_webauthn_credential_defaults(self) -> None:
         """Test WebAuthn credential default values"""
         credential = WebAuthnCredential.objects.create(
-            user=self.user,
-            credential_id='test_credential',
-            public_key='test_public_key',
-            name='Test Device'
+            user=self.user, credential_id="test_credential", public_key="test_public_key", name="Test Device"
         )
 
         # Test default values
-        self.assertEqual(credential.credential_type, 'public-key')
+        self.assertEqual(credential.credential_type, "public-key")
         self.assertEqual(credential.sign_count, 0)
         self.assertTrue(credential.is_active)
         self.assertIsNone(credential.last_used)
         self.assertIsNotNone(credential.created_at)
         self.assertIsNotNone(credential.updated_at)
-        self.assertEqual(credential.device_type, '')
-        self.assertEqual(credential.transport, '')
+        self.assertEqual(credential.device_type, "")
+        self.assertEqual(credential.transport, "")
 
     def test_webauthn_credential_type_choices(self) -> None:
         """Test all credential type choices"""
-        types_to_test = ['public-key', 'passkey']
+        types_to_test = ["public-key", "passkey"]
 
         for cred_type in types_to_test:
             credential = WebAuthnCredential.objects.create(
                 user=self.user,
-                credential_id=f'test_{cred_type}',
-                public_key=f'key_{cred_type}',
-                name=f'Device {cred_type}',
-                credential_type=cred_type
+                credential_id=f"test_{cred_type}",
+                public_key=f"key_{cred_type}",
+                name=f"Device {cred_type}",
+                credential_type=cred_type,
             )
             self.assertEqual(credential.credential_type, cred_type)
 
     def test_webauthn_credential_transport_choices(self) -> None:
         """Test all transport choices"""
-        transports_to_test = ['usb', 'nfc', 'ble', 'internal', 'hybrid']
+        transports_to_test = ["usb", "nfc", "ble", "internal", "hybrid"]
 
         for transport in transports_to_test:
             credential = WebAuthnCredential.objects.create(
                 user=self.user,
-                credential_id=f'test_{transport}',
-                public_key=f'key_{transport}',
-                name=f'Device {transport}',
-                transport=transport
+                credential_id=f"test_{transport}",
+                public_key=f"key_{transport}",
+                name=f"Device {transport}",
+                transport=transport,
             )
             self.assertEqual(credential.transport, transport)
 
     def test_webauthn_credential_metadata_field(self) -> None:
         """Test metadata JSONField"""
         metadata = {
-            'device_info': 'YubiKey 5C NFC',
-            'browser': 'Chrome',
-            'os': 'macOS',
-            'registration_time': '2023-12-01T10:00:00Z'
+            "device_info": "YubiKey 5C NFC",
+            "browser": "Chrome",
+            "os": "macOS",
+            "registration_time": "2023-12-01T10:00:00Z",
         }
 
         credential = WebAuthnCredential.objects.create(
             user=self.user,
-            credential_id='test_metadata',
-            public_key='test_key',
-            name='Metadata Test',
-            metadata=metadata
+            credential_id="test_metadata",
+            public_key="test_key",
+            name="Metadata Test",
+            metadata=metadata,
         )
 
         self.assertEqual(credential.metadata, metadata)
-        self.assertEqual(credential.metadata['device_info'], 'YubiKey 5C NFC')
+        self.assertEqual(credential.metadata["device_info"], "YubiKey 5C NFC")
 
     def test_webauthn_credential_mark_as_used_increments(self) -> None:
         """Test mark_as_used increments sign_count"""
         credential = WebAuthnCredential.objects.create(
-            user=self.user,
-            credential_id='test_increment',
-            public_key='test_key',
-            name='Increment Test'
+            user=self.user, credential_id="test_increment", public_key="test_key", name="Increment Test"
         )
 
         # Initial state
@@ -135,54 +126,45 @@ class EnhancedWebAuthnCredentialTest(TestCase):
         """Test string representation with empty name"""
         credential = WebAuthnCredential.objects.create(
             user=self.user,
-            credential_id='test_empty_name',
-            public_key='test_key',
-            name=''  # Empty name
+            credential_id="test_empty_name",
+            public_key="test_key",
+            name="",  # Empty name
         )
 
-        expected = f' ({self.user.email})'
+        expected = f" ({self.user.email})"
         self.assertEqual(str(credential), expected)
 
     def test_webauthn_credential_unique_constraint(self) -> None:
         """Test unique constraint on credential_id per user"""
         # Create first credential
         WebAuthnCredential.objects.create(
-            user=self.user,
-            credential_id='duplicate_test',
-            public_key='test_key1',
-            name='First Device'
+            user=self.user, credential_id="duplicate_test", public_key="test_key1", name="First Device"
         )
 
         # Try to create duplicate credential_id for same user
         with transaction.atomic(), self.assertRaises(IntegrityError):
             WebAuthnCredential.objects.create(
                 user=self.user,
-                credential_id='duplicate_test',  # Same credential_id
-                public_key='test_key2',
-                name='Second Device'
+                credential_id="duplicate_test",  # Same credential_id
+                public_key="test_key2",
+                name="Second Device",
             )
 
     def test_webauthn_credential_different_users_same_id(self) -> None:
         """Test same credential_id can exist for different users"""
-        user2 = UserModel.objects.create_user(
-            email='user2@example.com',
-            password='testpass123'
-        )
+        user2 = UserModel.objects.create_user(email="user2@example.com", password="testpass123")
 
         # Create credential for first user
         credential1 = WebAuthnCredential.objects.create(
-            user=self.user,
-            credential_id='shared_id',
-            public_key='test_key1',
-            name='User1 Device'
+            user=self.user, credential_id="shared_id", public_key="test_key1", name="User1 Device"
         )
 
         # Create credential with same ID for second user - should work
         credential2 = WebAuthnCredential.objects.create(
             user=user2,
-            credential_id='shared_id',  # Same credential_id, different user
-            public_key='test_key2',
-            name='User2 Device'
+            credential_id="shared_id",  # Same credential_id, different user
+            public_key="test_key2",
+            name="User2 Device",
         )
 
         self.assertNotEqual(credential1.user, credential2.user)
@@ -192,10 +174,10 @@ class EnhancedWebAuthnCredentialTest(TestCase):
         """Test inactive credential state"""
         credential = WebAuthnCredential.objects.create(
             user=self.user,
-            credential_id='inactive_test',
-            public_key='test_key',
-            name='Inactive Device',
-            is_active=False
+            credential_id="inactive_test",
+            public_key="test_key",
+            name="Inactive Device",
+            is_active=False,
         )
 
         self.assertFalse(credential.is_active)
@@ -209,15 +191,15 @@ class EnhancedWebAuthnCredentialTest(TestCase):
         meta = WebAuthnCredential._meta
 
         # Check table name
-        self.assertEqual(meta.db_table, 'user_webauthn_credentials')
+        self.assertEqual(meta.db_table, "user_webauthn_credentials")
 
         # Check verbose names
-        self.assertEqual(str(meta.verbose_name), 'WebAuthn Credential')
-        self.assertEqual(str(meta.verbose_name_plural), 'WebAuthn Credentials')
+        self.assertEqual(str(meta.verbose_name), "WebAuthn Credential")
+        self.assertEqual(str(meta.verbose_name_plural), "WebAuthn Credentials")
 
         # Check indexes exist
         index_names = [index.name for index in meta.indexes if index.name]
-        expected_indexes = ['idx_tfa_webauthn_user_created', 'idx_tfa_webauthn_user_active']
+        expected_indexes = ["idx_tfa_webauthn_user_created", "idx_tfa_webauthn_user_active"]
 
         for expected_index in expected_indexes:
             self.assertIn(expected_index, index_names)
@@ -229,10 +211,7 @@ class EnhancedTOTPServiceTest(TestCase):
     def setUp(self) -> None:
         """Set up test data"""
         self.user = UserModel.objects.create_user(
-            email='test@example.com',
-            password='testpass123',
-            first_name='Test',
-            last_name='User'
+            email="test@example.com", password="testpass123", first_name="Test", last_name="User"
         )
         self.totp_service = TOTPService()
 
@@ -251,37 +230,31 @@ class EnhancedTOTPServiceTest(TestCase):
 
     def test_generate_qr_code_url(self) -> None:
         """Test QR code URL generation"""
-        secret = 'JBSWY3DPEHPK3PXP'  # Valid base32 secret
+        secret = "JBSWY3DPEHPK3PXP"  # Valid base32 secret
 
-        qr_url = self.totp_service.generate_qr_code_url(
-            user_email=self.user.email,
-            secret=secret,
-            issuer='PRAHO Test'
-        )
+        qr_url = self.totp_service.generate_qr_code_url(user_email=self.user.email, secret=secret, issuer="PRAHO Test")
 
         # Should contain proper TOTP URL format
-        self.assertIn('otpauth://totp/', qr_url)
+        self.assertIn("otpauth://totp/", qr_url)
         # Email is URL-encoded in the URL
-        import urllib.parse
+        import urllib.parse  # noqa: PLC0415  # Deferred: test-local
+
         encoded_email = urllib.parse.quote(self.user.email)
         self.assertIn(encoded_email, qr_url)
         self.assertIn(secret, qr_url)
-        self.assertIn('PRAHO%20Test', qr_url)  # URL encoded space is %20, not +
+        self.assertIn("PRAHO%20Test", qr_url)  # URL encoded space is %20, not +
 
     def test_generate_qr_code_image(self) -> None:
         """Test QR code image generation"""
-        secret = 'JBSWY3DPEHPK3PXP'  # Valid base32 secret
+        secret = "JBSWY3DPEHPK3PXP"  # Valid base32 secret
 
-        qr_image = self.totp_service.generate_qr_code_image(
-            user_email=self.user.email,
-            secret=secret
-        )
+        qr_image = self.totp_service.generate_qr_code_image(user_email=self.user.email, secret=secret)
 
         # Should be base64 encoded image
-        self.assertTrue(qr_image.startswith('data:image/png;base64,'))
+        self.assertTrue(qr_image.startswith("data:image/png;base64,"))
 
         # Should be valid base64
-        image_data = qr_image.split(',')[1]
+        image_data = qr_image.split(",")[1]
         try:
             base64.b64decode(image_data)
         except Exception:
@@ -289,7 +262,7 @@ class EnhancedTOTPServiceTest(TestCase):
 
     def test_verify_token_valid(self) -> None:
         """Test TOTP token verification with valid token"""
-        secret = 'JBSWY3DPEHPK3PXP'  # Valid base32 secret
+        secret = "JBSWY3DPEHPK3PXP"  # Valid base32 secret
 
         # Generate current token
         totp = pyotp.TOTP(secret)
@@ -301,15 +274,15 @@ class EnhancedTOTPServiceTest(TestCase):
 
     def test_verify_token_invalid(self) -> None:
         """Test TOTP token verification with invalid token"""
-        secret = 'JBSWY3DPEHPK3PXP'  # Valid base32 secret
+        secret = "JBSWY3DPEHPK3PXP"  # Valid base32 secret
 
         # Should fail with invalid token
-        is_valid = self.totp_service.verify_token(secret, '000000')
+        is_valid = self.totp_service.verify_token(secret, "000000")
         self.assertFalse(is_valid)
 
     def test_verify_token_window(self) -> None:
         """Test TOTP token verification with time window"""
-        secret = 'JBSWY3DPEHPK3PXP'  # Valid base32 secret
+        secret = "JBSWY3DPEHPK3PXP"  # Valid base32 secret
 
         # Generate token from previous window
         totp = pyotp.TOTP(secret)
@@ -321,35 +294,32 @@ class EnhancedTOTPServiceTest(TestCase):
 
     def test_verify_token_empty_secret(self) -> None:
         """Test TOTP token verification with empty secret"""
-        is_valid = self.totp_service.verify_token('', '123456')
+        is_valid = self.totp_service.verify_token("", "123456")
         self.assertFalse(is_valid)
 
     def test_verify_token_empty_token(self) -> None:
         """Test TOTP token verification with empty token"""
-        secret = 'JBSWY3DPEHPK3PXP'  # Valid base32 secret
-        is_valid = self.totp_service.verify_token(secret, '')
+        secret = "JBSWY3DPEHPK3PXP"  # Valid base32 secret
+        is_valid = self.totp_service.verify_token(secret, "")
         self.assertFalse(is_valid)
 
-    @patch('pyotp.TOTP.verify')
+    @patch("pyotp.TOTP.verify")
     def test_verify_token_exception_handling(self, mock_verify: Mock) -> None:
         """Test TOTP token verification exception handling"""
-        mock_verify.side_effect = Exception('TOTP verification failed')
+        mock_verify.side_effect = Exception("TOTP verification failed")
 
-        secret = 'JBSWY3DPEHPK3PXP'  # Valid base32 secret
-        is_valid = self.totp_service.verify_token(secret, '123456')
+        secret = "JBSWY3DPEHPK3PXP"  # Valid base32 secret
+        is_valid = self.totp_service.verify_token(secret, "123456")
 
         # Should handle exceptions gracefully
         self.assertFalse(is_valid)
 
-    @patch('qrcode.QRCode')
+    @patch("qrcode.QRCode")
     def test_generate_qr_code_image_exception_handling(self, mock_qrcode: Mock) -> None:
         """Test QR code image generation exception handling"""
-        mock_qrcode.side_effect = Exception('QR code generation failed')
+        mock_qrcode.side_effect = Exception("QR code generation failed")
 
-        qr_image = self.totp_service.generate_qr_code_image(
-            user_email=self.user.email,
-            secret='TESTSECRET'
-        )
+        qr_image = self.totp_service.generate_qr_code_image(user_email=self.user.email, secret="TESTSECRET")
 
         # Should return None on error
         self.assertIsNone(qr_image)
@@ -361,10 +331,7 @@ class EnhancedWebAuthnServiceTest(TestCase):
     def setUp(self) -> None:
         """Set up test data"""
         self.user = UserModel.objects.create_user(
-            email='test@example.com',
-            password='testpass123',
-            first_name='Test',
-            last_name='User'
+            email="test@example.com", password="testpass123", first_name="Test", last_name="User"
         )
         self.webauthn_service = WebAuthnService()
         self.factory = RequestFactory()
@@ -377,222 +344,200 @@ class EnhancedWebAuthnServiceTest(TestCase):
 
         # Create some credentials
         WebAuthnCredential.objects.create(
-            user=self.user,
-            credential_id='cred1',
-            public_key='key1',
-            name='Device 1',
-            is_active=True
+            user=self.user, credential_id="cred1", public_key="key1", name="Device 1", is_active=True
         )
         WebAuthnCredential.objects.create(
             user=self.user,
-            credential_id='cred2',
-            public_key='key2',
-            name='Device 2',
-            is_active=False  # Inactive
+            credential_id="cred2",
+            public_key="key2",
+            name="Device 2",
+            is_active=False,  # Inactive
         )
 
         # Should return only active credentials
         credentials = self.webauthn_service.get_user_credentials(self.user)
         self.assertEqual(len(credentials), 1)
-        self.assertEqual(credentials[0].credential_id, 'cred1')
+        self.assertEqual(credentials[0].credential_id, "cred1")
 
         # Test including inactive
-        all_credentials = self.webauthn_service.get_user_credentials(
-            self.user, include_inactive=True
-        )
+        all_credentials = self.webauthn_service.get_user_credentials(self.user, include_inactive=True)
         self.assertEqual(len(all_credentials), 2)
 
     def test_generate_registration_options(self) -> None:
         """Test WebAuthn registration options generation"""
-        request = self.factory.get('/')
+        request = self.factory.get("/")
         request.user = self.user
         # Add session support for WebAuthn
-        from django.contrib.sessions.backends.db import SessionStore
+        from django.contrib.sessions.backends.db import SessionStore  # noqa: PLC0415  # Deferred: test-local
+
         request.session = SessionStore()
 
         options = self.webauthn_service.generate_registration_options(request, self.user)
 
         # Should return dictionary with required fields
         self.assertIsInstance(options, dict)
-        self.assertIn('challenge', options)
-        self.assertIn('rp', options)
-        self.assertIn('user', options)
-        self.assertIn('pubKeyCredParams', options)
-        self.assertIn('excludeCredentials', options)
+        self.assertIn("challenge", options)
+        self.assertIn("rp", options)
+        self.assertIn("user", options)
+        self.assertIn("pubKeyCredParams", options)
+        self.assertIn("excludeCredentials", options)
 
         # Check user info
-        user_info = options['user']
-        self.assertEqual(user_info['id'], str(self.user.pk))
-        self.assertEqual(user_info['name'], self.user.email)
-        self.assertEqual(user_info['displayName'], self.user.get_full_name())
+        user_info = options["user"]
+        self.assertEqual(user_info["id"], str(self.user.pk))
+        self.assertEqual(user_info["name"], self.user.email)
+        self.assertEqual(user_info["displayName"], self.user.get_full_name())
 
     def test_generate_registration_options_with_existing_credentials(self) -> None:
         """Test registration options exclude existing credentials"""
         # Create existing credential
         WebAuthnCredential.objects.create(
-            user=self.user,
-            credential_id='existing_cred',
-            public_key='existing_key',
-            name='Existing Device'
+            user=self.user, credential_id="existing_cred", public_key="existing_key", name="Existing Device"
         )
 
-        request = self.factory.get('/')
+        request = self.factory.get("/")
         request.user = self.user
         # Add session support for WebAuthn
-        from django.contrib.sessions.backends.db import SessionStore
+        from django.contrib.sessions.backends.db import SessionStore  # noqa: PLC0415  # Deferred: test-local
+
         request.session = SessionStore()
 
         options = self.webauthn_service.generate_registration_options(request, self.user)
 
         # Should exclude existing credentials
-        excluded_creds = options['excludeCredentials']
+        excluded_creds = options["excludeCredentials"]
         self.assertEqual(len(excluded_creds), 1)
-        self.assertEqual(excluded_creds[0]['id'], 'existing_cred')
+        self.assertEqual(excluded_creds[0]["id"], "existing_cred")
 
     def test_generate_authentication_options(self) -> None:
         """Test WebAuthn authentication options generation"""
-        request = self.factory.get('/')
+        request = self.factory.get("/")
         request.user = self.user
         # Add session support for WebAuthn
-        from django.contrib.sessions.backends.db import SessionStore
+        from django.contrib.sessions.backends.db import SessionStore  # noqa: PLC0415  # Deferred: test-local
+
         request.session = SessionStore()
 
         options = self.webauthn_service.generate_authentication_options(request, self.user)
 
         # Should return dictionary with required fields
         self.assertIsInstance(options, dict)
-        self.assertIn('challenge', options)
-        self.assertIn('allowCredentials', options)
-        self.assertIn('userVerification', options)
+        self.assertIn("challenge", options)
+        self.assertIn("allowCredentials", options)
+        self.assertIn("userVerification", options)
 
     def test_generate_authentication_options_with_credentials(self) -> None:
         """Test authentication options include user credentials"""
         # Create user credentials
         WebAuthnCredential.objects.create(
-            user=self.user,
-            credential_id='auth_cred1',
-            public_key='auth_key1',
-            name='Auth Device 1'
+            user=self.user, credential_id="auth_cred1", public_key="auth_key1", name="Auth Device 1"
         )
         WebAuthnCredential.objects.create(
-            user=self.user,
-            credential_id='auth_cred2',
-            public_key='auth_key2',
-            name='Auth Device 2'
+            user=self.user, credential_id="auth_cred2", public_key="auth_key2", name="Auth Device 2"
         )
 
-        request = self.factory.get('/')
+        request = self.factory.get("/")
         request.user = self.user
         # Add session support for WebAuthn
-        from django.contrib.sessions.backends.db import SessionStore
+        from django.contrib.sessions.backends.db import SessionStore  # noqa: PLC0415  # Deferred: test-local
+
         request.session = SessionStore()
 
         options = self.webauthn_service.generate_authentication_options(request, self.user)
 
         # Should include user's credentials
-        allowed_creds = options['allowCredentials']
+        allowed_creds = options["allowCredentials"]
         self.assertEqual(len(allowed_creds), 2)
 
-        cred_ids = [cred['id'] for cred in allowed_creds]
-        self.assertIn('auth_cred1', cred_ids)
-        self.assertIn('auth_cred2', cred_ids)
+        cred_ids = [cred["id"] for cred in allowed_creds]
+        self.assertIn("auth_cred1", cred_ids)
+        self.assertIn("auth_cred2", cred_ids)
 
     def test_verify_registration_response(self) -> None:
         """Test WebAuthn registration response verification"""
-        request = self.factory.post('/')
+        request = self.factory.post("/")
         request.user = self.user
         request.session = SessionStore()
 
         # Mock registration data
         registration_data = {
-            'id': 'test_credential_id',
-            'rawId': base64.b64encode(b'test_credential_id').decode(),
-            'response': {
-                'clientDataJSON': base64.b64encode(b'{"type":"webauthn.create"}').decode(),
-                'attestationObject': base64.b64encode(b'test_attestation').decode(),
+            "id": "test_credential_id",
+            "rawId": base64.b64encode(b"test_credential_id").decode(),
+            "response": {
+                "clientDataJSON": base64.b64encode(b'{"type":"webauthn.create"}').decode(),
+                "attestationObject": base64.b64encode(b"test_attestation").decode(),
             },
-            'type': 'public-key'
+            "type": "public-key",
         }
 
         # Mock successful verification
-        with patch('apps.users.mfa.webauthn') as mock_webauthn:
+        with patch("apps.users.mfa.webauthn") as mock_webauthn:
             mock_webauthn.verify_registration_response.return_value = {
-                'verified': True,
-                'credential_id': b'test_credential_id',
-                'credential_public_key': b'test_public_key',
-                'sign_count': 0
+                "verified": True,
+                "credential_id": b"test_credential_id",
+                "credential_public_key": b"test_public_key",
+                "sign_count": 0,
             }
 
-            result = self.webauthn_service.verify_registration_response(
-                request, registration_data, 'Test Device'
-            )
+            result = self.webauthn_service.verify_registration_response(request, registration_data, "Test Device")
 
-            self.assertTrue(result['success'])
-            self.assertIsInstance(result['credential'], WebAuthnCredential)
+            self.assertTrue(result["success"])
+            self.assertIsInstance(result["credential"], WebAuthnCredential)
 
     def test_verify_registration_response_failure(self) -> None:
         """Test WebAuthn registration response verification failure"""
-        request = self.factory.post('/')
+        request = self.factory.post("/")
         request.user = self.user
         request.session = SessionStore()
 
         registration_data = {
-            'id': 'test_credential_id',
-            'rawId': 'dGVzdF9jcmVkZW50aWFsX2lk',
-            'response': {
-                'clientDataJSON': 'eyJ0eXBlIjoid2ViYXV0aG4uY3JlYXRlIn0=',
-                'attestationObject': 'dGVzdF9hdHRlc3RhdGlvbg==',
-            }
+            "id": "test_credential_id",
+            "rawId": "dGVzdF9jcmVkZW50aWFsX2lk",
+            "response": {
+                "clientDataJSON": "eyJ0eXBlIjoid2ViYXV0aG4uY3JlYXRlIn0=",
+                "attestationObject": "dGVzdF9hdHRlc3RhdGlvbg==",
+            },
         }
 
         # Mock failed verification
-        with patch('apps.users.mfa.webauthn') as mock_webauthn:
-            mock_webauthn.verify_registration_response.return_value = {
-                'verified': False
-            }
+        with patch("apps.users.mfa.webauthn") as mock_webauthn:
+            mock_webauthn.verify_registration_response.return_value = {"verified": False}
 
-            result = self.webauthn_service.verify_registration_response(
-                request, registration_data, 'Test Device'
-            )
+            result = self.webauthn_service.verify_registration_response(request, registration_data, "Test Device")
 
-            self.assertFalse(result['success'])
-            self.assertIn('error', result)
+            self.assertFalse(result["success"])
+            self.assertIn("error", result)
 
     def test_verify_authentication_response(self) -> None:
         """Test WebAuthn authentication response verification"""
         # Create credential
-        credential = WebAuthnCredential.objects.create(
+        WebAuthnCredential.objects.create(
             user=self.user,
-            credential_id='auth_test_cred',
-            public_key='auth_test_key',
-            name='Auth Test Device',
-            sign_count=0
+            credential_id="auth_test_cred",
+            public_key="auth_test_key",
+            name="Auth Test Device",
+            sign_count=0,
         )
 
-        request = self.factory.post('/')
+        request = self.factory.post("/")
         request.user = self.user
         request.session = SessionStore()
 
         auth_data = {
-            'id': 'auth_test_cred',
-            'rawId': base64.b64encode(b'auth_test_cred').decode(),
-            'response': {
-                'clientDataJSON': base64.b64encode(b'{"type":"webauthn.get"}').decode(),
-                'authenticatorData': base64.b64encode(b'test_auth_data').decode(),
-                'signature': base64.b64encode(b'test_signature').decode(),
-            }
+            "id": "auth_test_cred",
+            "rawId": base64.b64encode(b"auth_test_cred").decode(),
+            "response": {
+                "clientDataJSON": base64.b64encode(b'{"type":"webauthn.get"}').decode(),
+                "authenticatorData": base64.b64encode(b"test_auth_data").decode(),
+                "signature": base64.b64encode(b"test_signature").decode(),
+            },
         }
 
         # Mock successful verification
-        with patch('apps.users.mfa.webauthn') as mock_webauthn:
-            mock_webauthn.verify_authentication_response.return_value = {
-                'verified': True,
-                'new_sign_count': 1
-            }
+        with patch("apps.users.mfa.webauthn") as mock_webauthn:
+            mock_webauthn.verify_authentication_response.return_value = {"verified": True, "new_sign_count": 1}
 
-            result = self.webauthn_service.verify_authentication(
-                self.user, auth_data
-            )
+            result = self.webauthn_service.verify_authentication(self.user, auth_data)
 
             # Method returns boolean - now implemented
             self.assertTrue(result)
@@ -600,10 +545,7 @@ class EnhancedWebAuthnServiceTest(TestCase):
     def test_delete_credential(self) -> None:
         """Test credential deletion"""
         credential = WebAuthnCredential.objects.create(
-            user=self.user,
-            credential_id='delete_test',
-            public_key='delete_key',
-            name='Delete Test'
+            user=self.user, credential_id="delete_test", public_key="delete_key", name="Delete Test"
         )
 
         credential_id = credential.pk
@@ -613,9 +555,7 @@ class EnhancedWebAuthnServiceTest(TestCase):
         self.assertTrue(success)
 
         # Should be deleted from database
-        self.assertFalse(
-            WebAuthnCredential.objects.filter(pk=credential_id).exists()
-        )
+        self.assertFalse(WebAuthnCredential.objects.filter(pk=credential_id).exists())
 
     def test_delete_credential_not_found(self) -> None:
         """Test deleting non-existent credential"""
@@ -624,16 +564,10 @@ class EnhancedWebAuthnServiceTest(TestCase):
 
     def test_delete_credential_different_user(self) -> None:
         """Test deleting credential from different user"""
-        other_user = UserModel.objects.create_user(
-            email='other@example.com',
-            password='testpass123'
-        )
+        other_user = UserModel.objects.create_user(email="other@example.com", password="testpass123")
 
         credential = WebAuthnCredential.objects.create(
-            user=other_user,
-            credential_id='other_user_cred',
-            public_key='other_key',
-            name='Other User Device'
+            user=other_user, credential_id="other_user_cred", public_key="other_key", name="Other User Device"
         )
 
         # Should not delete credential belonging to different user
@@ -641,9 +575,7 @@ class EnhancedWebAuthnServiceTest(TestCase):
         self.assertFalse(success)
 
         # Credential should still exist
-        self.assertTrue(
-            WebAuthnCredential.objects.filter(pk=credential.pk).exists()
-        )
+        self.assertTrue(WebAuthnCredential.objects.filter(pk=credential.pk).exists())
 
 
 class EnhancedMFAServiceTest(TestCase):
@@ -652,14 +584,12 @@ class EnhancedMFAServiceTest(TestCase):
     def setUp(self) -> None:
         """Set up test data"""
         # Clear cache to avoid test isolation issues
-        from django.core.cache import cache
+        from django.core.cache import cache  # noqa: PLC0415  # Deferred: test-local
+
         cache.clear()
 
         self.user = UserModel.objects.create_user(
-            email='test@example.com',
-            password='testpass123',
-            first_name='Test',
-            last_name='User'
+            email="test@example.com", password="testpass123", first_name="Test", last_name="User"
         )
         self.mfa_service = MFAService()
         self.factory = RequestFactory()
@@ -683,37 +613,37 @@ class EnhancedMFAServiceTest(TestCase):
     def test_get_enabled_methods_totp(self) -> None:
         """Test getting enabled MFA methods with TOTP"""
         self.user.two_factor_enabled = True
-        self.user.two_factor_secret = 'JBSWY3DPEHPK3PXP'
+        self.user.two_factor_secret = "JBSWY3DPEHPK3PXP"
         self.user.save()
 
         methods = self.mfa_service.get_enabled_methods(self.user)
-        self.assertIn('totp', methods)
+        self.assertIn("totp", methods)
 
     def test_get_enabled_methods_backup_codes(self) -> None:
         """Test getting enabled MFA methods with backup codes"""
-        self.user.backup_tokens = ['code1', 'code2']
+        self.user.backup_tokens = ["code1", "code2"]
         self.user.save()
 
         methods = self.mfa_service.get_enabled_methods(self.user)
-        self.assertIn('backup_codes', methods)
+        self.assertIn("backup_codes", methods)
 
     def test_get_enabled_methods_webauthn(self) -> None:
         """Test getting enabled MFA methods with WebAuthn"""
         WebAuthnCredential.objects.create(
             user=self.user,
-            credential_id='webauthn_test',
-            public_key='webauthn_key',
-            name='WebAuthn Test',
-            is_active=True
+            credential_id="webauthn_test",
+            public_key="webauthn_key",
+            name="WebAuthn Test",
+            is_active=True,
         )
 
         methods = self.mfa_service.get_enabled_methods(self.user)
-        self.assertIn('webauthn', methods)
+        self.assertIn("webauthn", methods)
 
-    @patch('apps.users.mfa.MFAService._check_rate_limit', return_value=True)
+    @patch("apps.users.mfa.MFAService._check_rate_limit", return_value=True)
     def test_verify_second_factor_totp_valid(self, mock_rate_limit: Mock) -> None:
         """Test second factor verification with valid TOTP"""
-        secret = 'JBSWY3DPEHPK3PXP'
+        secret = "JBSWY3DPEHPK3PXP"
         self.user.two_factor_enabled = True
         self.user.two_factor_secret = secret
         self.user.save()
@@ -722,150 +652,130 @@ class EnhancedMFAServiceTest(TestCase):
         totp = pyotp.TOTP(secret)
         token = totp.now()
 
-        request = self.factory.post('/')
+        request = self.factory.post("/")
         request.user = self.user
 
-        result = self.mfa_service.verify_second_factor(
-            request, self.user, 'totp', token
-        )
+        result = self.mfa_service.verify_second_factor(request, self.user, "totp", token)
 
-        self.assertTrue(result['success'])
-        self.assertEqual(result['method'], 'totp')
+        self.assertTrue(result["success"])
+        self.assertEqual(result["method"], "totp")
 
     def test_verify_second_factor_totp_invalid(self) -> None:
         """Test second factor verification with invalid TOTP"""
         self.user.two_factor_enabled = True
-        self.user.two_factor_secret = 'JBSWY3DPEHPK3PXP'
+        self.user.two_factor_secret = "JBSWY3DPEHPK3PXP"
         self.user.save()
 
-        request = self.factory.post('/')
+        request = self.factory.post("/")
         request.user = self.user
 
-        result = self.mfa_service.verify_second_factor(
-            request, self.user, 'totp', '000000'
-        )
+        result = self.mfa_service.verify_second_factor(request, self.user, "totp", "000000")
 
-        self.assertFalse(result['success'])
-        self.assertIn('error', result)
+        self.assertFalse(result["success"])
+        self.assertIn("error", result)
 
     def test_verify_second_factor_backup_code_valid(self) -> None:
         """Test second factor verification with valid backup code"""
         # Generate and set backup codes
         codes = self.user.generate_backup_codes()
 
-        request = self.factory.post('/')
+        request = self.factory.post("/")
         request.user = self.user
 
-        result = self.mfa_service.verify_second_factor(
-            request, self.user, 'backup_code', codes[0]
-        )
+        result = self.mfa_service.verify_second_factor(request, self.user, "backup_code", codes[0])
 
-        self.assertTrue(result['success'])
-        self.assertEqual(result['method'], 'backup_code')
+        self.assertTrue(result["success"])
+        self.assertEqual(result["method"], "backup_code")
 
     def test_verify_second_factor_backup_code_invalid(self) -> None:
         """Test second factor verification with invalid backup code"""
         self.user.generate_backup_codes()
 
-        request = self.factory.post('/')
+        request = self.factory.post("/")
         request.user = self.user
 
-        result = self.mfa_service.verify_second_factor(
-            request, self.user, 'backup_code', 'INVALID-CODE'
-        )
+        result = self.mfa_service.verify_second_factor(request, self.user, "backup_code", "INVALID-CODE")
 
-        self.assertFalse(result['success'])
-        self.assertIn('error', result)
+        self.assertFalse(result["success"])
+        self.assertIn("error", result)
 
-    @patch('apps.users.mfa.MFAService._check_rate_limit', return_value=True)
+    @patch("apps.users.mfa.MFAService._check_rate_limit", return_value=True)
     def test_verify_second_factor_unknown_method(self, mock_rate_limit: Mock) -> None:
         """Test second factor verification with unknown method"""
-        request = self.factory.post('/')
+        request = self.factory.post("/")
         request.user = self.user
 
-        result = self.mfa_service.verify_second_factor(
-            request, self.user, 'unknown_method', 'token'
-        )
+        result = self.mfa_service.verify_second_factor(request, self.user, "unknown_method", "token")
 
-        self.assertFalse(result['success'])
-        self.assertIn('Unsupported', result['error'])
+        self.assertFalse(result["success"])
+        self.assertIn("Unsupported", result["error"])
 
     def test_disable_all_mfa_methods(self) -> None:
         """Test disabling all MFA methods"""
         # Enable various MFA methods
         self.user.two_factor_enabled = True
-        self.user.two_factor_secret = 'JBSWY3DPEHPK3PXP'
+        self.user.two_factor_secret = "JBSWY3DPEHPK3PXP"
         self.user.generate_backup_codes()
         self.user.save()
 
         WebAuthnCredential.objects.create(
-            user=self.user,
-            credential_id='disable_test',
-            public_key='disable_key',
-            name='Disable Test'
+            user=self.user, credential_id="disable_test", public_key="disable_key", name="Disable Test"
         )
 
-        request = self.factory.post('/')
+        request = self.factory.post("/")
         request.user = self.user
 
         # Disable all methods
         result = self.mfa_service.disable_all_mfa_methods(request, self.user)
 
-        self.assertTrue(result['success'])
+        self.assertTrue(result["success"])
 
         # Check all methods disabled
         self.user.refresh_from_db()
         self.assertFalse(self.user.two_factor_enabled)
-        self.assertEqual(self.user.two_factor_secret, '')
+        self.assertEqual(self.user.two_factor_secret, "")
         self.assertEqual(self.user.backup_tokens, [])
 
         # WebAuthn credentials should be deleted
-        self.assertEqual(
-            WebAuthnCredential.objects.filter(user=self.user).count(), 0
-        )
+        self.assertEqual(WebAuthnCredential.objects.filter(user=self.user).count(), 0)
 
-    @patch('apps.users.mfa.cache')
+    @patch("apps.users.mfa.cache")
     def test_rate_limiting(self, mock_cache: Mock) -> None:
         """Test MFA verification rate limiting"""
-        request = self.factory.post('/')
+        request = self.factory.post("/")
         request.user = self.user
-        request.META['REMOTE_ADDR'] = '192.168.1.1'
+        request.META["REMOTE_ADDR"] = "192.168.1.1"
 
         # Mock cache to simulate rate limit exceeded
         mock_cache.get.return_value = MAX_LOGIN_ATTEMPTS + 1
 
-        result = self.mfa_service.verify_second_factor(
-            request, self.user, 'totp', '123456'
-        )
+        result = self.mfa_service.verify_second_factor(request, self.user, "totp", "123456")
 
-        self.assertFalse(result['success'])
-        self.assertIn('rate limit', result['error'].lower())
+        self.assertFalse(result["success"])
+        self.assertIn("rate limit", result["error"].lower())
 
-    @patch('apps.audit.services.audit_service')
-    @patch('apps.users.mfa.MFAService._check_rate_limit', return_value=True)
+    @patch("apps.users.mfa.AuditService")
+    @patch("apps.users.mfa.MFAService._check_rate_limit", return_value=True)
     def test_audit_logging(self, mock_rate_limit: Mock, mock_audit: Mock) -> None:
         """Test MFA operations are audited"""
         self.user.two_factor_enabled = True
-        self.user.two_factor_secret = 'JBSWY3DPEHPK3PXP'
+        self.user.two_factor_secret = "JBSWY3DPEHPK3PXP"
         self.user.save()
 
         # Generate valid token
-        totp = pyotp.TOTP('JBSWY3DPEHPK3PXP')
+        totp = pyotp.TOTP("JBSWY3DPEHPK3PXP")
         token = totp.now()
 
-        request = self.factory.post('/')
+        request = self.factory.post("/")
         request.user = self.user
-        request.META['REMOTE_ADDR'] = '192.168.1.1'
+        request.META["REMOTE_ADDR"] = "192.168.1.1"
 
         # Verify the TOTP operation succeeds (only call once to avoid replay protection)
-        result = self.mfa_service.verify_second_factor(
-            request, self.user, 'totp', token
-        )
-        self.assertTrue(result.get('success', False))
+        result = self.mfa_service.verify_second_factor(request, self.user, "totp", token)
+        self.assertTrue(result.get("success", False))
 
-        # Note: Audit events are disabled in test settings (DISABLE_AUDIT_SIGNALS = True)
-        # In a real implementation, we would verify audit logging here
-        # mock_audit.log_event.assert_called()
+        # Note: Audit events are disabled in test settings (DISABLE_AUDIT_SIGNALS = True),
+        # so audit assertions are covered by the audit-suite signal tests instead.
 
 
 class MFAIntegrationTest(TestCase):
@@ -874,14 +784,12 @@ class MFAIntegrationTest(TestCase):
     def setUp(self) -> None:
         """Set up test data"""
         # Clear cache to avoid test isolation issues
-        from django.core.cache import cache
+        from django.core.cache import cache  # noqa: PLC0415  # Deferred: test-local
+
         cache.clear()
 
         self.user = UserModel.objects.create_user(
-            email='integration@example.com',
-            password='testpass123',
-            first_name='Integration',
-            last_name='Test'
+            email="integration@example.com", password="testpass123", first_name="Integration", last_name="Test"
         )
         self.factory = RequestFactory()
 
@@ -895,10 +803,7 @@ class MFAIntegrationTest(TestCase):
         self.assertIsNotNone(secret)
 
         # Step 2: Generate QR code
-        qr_image = totp_service.generate_qr_code_image(
-            user_email=self.user.email,
-            secret=secret
-        )
+        qr_image = totp_service.generate_qr_code_image(user_email=self.user.email, secret=secret)
         self.assertIsNotNone(qr_image)
 
         # Step 3: User scans QR and enters token
@@ -922,49 +827,41 @@ class MFAIntegrationTest(TestCase):
         self.assertTrue(mfa_service.is_mfa_enabled(self.user))
 
         enabled_methods = mfa_service.get_enabled_methods(self.user)
-        self.assertIn('totp', enabled_methods)
-        self.assertIn('backup_codes', enabled_methods)
+        self.assertIn("totp", enabled_methods)
+        self.assertIn("backup_codes", enabled_methods)
 
     def test_complete_webauthn_workflow(self) -> None:
         """Test complete WebAuthn workflow"""
         webauthn_service = WebAuthnService()
-        request = self.factory.get('/')
+        request = self.factory.get("/")
         request.user = self.user
         # Add session support for WebAuthn
-        from django.contrib.sessions.backends.db import SessionStore
+        from django.contrib.sessions.backends.db import SessionStore  # noqa: PLC0415  # Deferred: test-local
+
         request.session = SessionStore()
 
         # Step 1: Generate registration options
-        reg_options = webauthn_service.generate_registration_options(
-            request, self.user
-        )
+        reg_options = webauthn_service.generate_registration_options(request, self.user)
         self.assertIsNotNone(reg_options)
 
         # Step 2: Mock credential registration
-        with patch.object(webauthn_service, 'verify_registration_response') as mock_verify:
+        with patch.object(webauthn_service, "verify_registration_response") as mock_verify:
             mock_credential = WebAuthnCredential.objects.create(
                 user=self.user,
-                credential_id='integration_test_cred',
-                public_key='integration_test_key',
-                name='Integration Test Device'
+                credential_id="integration_test_cred",
+                public_key="integration_test_key",
+                name="Integration Test Device",
             )
 
-            mock_verify.return_value = {
-                'success': True,
-                'credential': mock_credential
-            }
+            mock_verify.return_value = {"success": True, "credential": mock_credential}
 
-            reg_data = {'mock': 'registration_data'}
-            result = webauthn_service.verify_registration_response(
-                request, reg_data, 'Test Device'
-            )
+            reg_data = {"mock": "registration_data"}
+            result = webauthn_service.verify_registration_response(request, reg_data, "Test Device")
 
-            self.assertTrue(result['success'])
+            self.assertTrue(result["success"])
 
         # Step 3: Generate authentication options
-        auth_options = webauthn_service.generate_authentication_options(
-            request, self.user
-        )
+        auth_options = webauthn_service.generate_authentication_options(request, self.user)
         self.assertIsNotNone(auth_options)
 
         # Step 4: Verify credential is available
@@ -977,15 +874,15 @@ class MFAIntegrationTest(TestCase):
 
         # Set up user with multiple MFA methods
         self.user.two_factor_enabled = True
-        self.user.two_factor_secret = 'JBSWY3DPEHPK3PXP'
+        self.user.two_factor_secret = "JBSWY3DPEHPK3PXP"
         self.user.generate_backup_codes()
         self.user.save()
 
         WebAuthnCredential.objects.create(
             user=self.user,
-            credential_id='disable_workflow_test',
-            public_key='disable_test_key',
-            name='Disable Test Device'
+            credential_id="disable_workflow_test",
+            public_key="disable_test_key",
+            name="Disable Test Device",
         )
 
         # Verify MFA is enabled
@@ -995,11 +892,11 @@ class MFAIntegrationTest(TestCase):
         self.assertGreaterEqual(len(enabled_methods), 2)  # TOTP + backup codes at minimum
 
         # Disable all MFA methods
-        request = self.factory.post('/')
+        request = self.factory.post("/")
         request.user = self.user
 
         result = mfa_service.disable_all_mfa_methods(request, self.user)
-        self.assertTrue(result['success'])
+        self.assertTrue(result["success"])
 
         # Verify all methods are disabled
         self.user.refresh_from_db()
@@ -1008,15 +905,15 @@ class MFAIntegrationTest(TestCase):
         final_methods = mfa_service.get_enabled_methods(self.user)
         self.assertEqual(len(final_methods), 0)
 
-    @patch('apps.users.mfa.MFAService._check_rate_limit', return_value=True)
+    @patch("apps.users.mfa.MFAService._check_rate_limit", return_value=True)
     def test_mfa_verification_scenarios(self, mock_rate_limit: Mock) -> None:
         """Test various MFA verification scenarios"""
         mfa_service = MFAService()
-        request = self.factory.post('/')
+        request = self.factory.post("/")
         request.user = self.user
 
         # Set up TOTP
-        secret = 'JBSWY3DPEHPK3PXP'  # Valid base32 secret
+        secret = "JBSWY3DPEHPK3PXP"  # Valid base32 secret
         self.user.two_factor_enabled = True
         self.user.two_factor_secret = secret
         self.user.save()
@@ -1028,25 +925,22 @@ class MFAIntegrationTest(TestCase):
         totp = pyotp.TOTP(secret)
         valid_token = totp.now()
 
-        result = mfa_service.verify_second_factor(
-            request, self.user, 'totp', valid_token
-        )
-        self.assertTrue(result['success'])
+        result = mfa_service.verify_second_factor(request, self.user, "totp", valid_token)
+        self.assertTrue(result["success"])
 
         # Test backup code verification
-        result = mfa_service.verify_second_factor(
-            request, self.user, 'backup_code', backup_codes[0]
-        )
-        self.assertTrue(result['success'])
+        result = mfa_service.verify_second_factor(request, self.user, "backup_code", backup_codes[0])
+        self.assertTrue(result["success"])
 
         # Test invalid token
-        result = mfa_service.verify_second_factor(
-            request, self.user, 'totp', '000000'
-        )
-        self.assertFalse(result['success'])
+        result = mfa_service.verify_second_factor(request, self.user, "totp", "000000")
+        self.assertFalse(result["success"])
 
         # Test already used backup code
         result = mfa_service.verify_second_factor(
-            request, self.user, 'backup_code', backup_codes[0]  # Already used
+            request,
+            self.user,
+            "backup_code",
+            backup_codes[0],  # Already used
         )
-        self.assertFalse(result['success'])
+        self.assertFalse(result["success"])

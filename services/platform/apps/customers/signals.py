@@ -236,8 +236,19 @@ def handle_tax_profile_changes(
             "reverse_charge_eligible": instance.reverse_charge_eligible,
         }
 
-        # Enhanced tax profile audit logging
-        if not getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
+        # #241: every side effect below is gated on an ACTUAL tax-field change.
+        # Ungated, any unrelated-field save re-ran VIES (able to flip a valid VAT
+        # to invalid during VIES downtime) and wrote a duplicate compliance row.
+        tax_fields_changed = created or (old_values != new_values)
+        if not tax_fields_changed:
+            return
+
+        is_romanian_registration = bool(instance.cui and instance.cui.startswith("RO"))
+
+        # One audit record per change (#241 dedup): Romanian registrations get the
+        # ComplianceLog below - the AuditEvent restated it. Non-RO profiles have no
+        # ComplianceLog path, so they keep the AuditEvent for coverage.
+        if not is_romanian_registration and not getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
             from apps.audit.services import CustomersAuditService
 
             CustomersAuditService.log_tax_profile_event(
@@ -250,16 +261,20 @@ def handle_tax_profile_changes(
                 description=f"Tax profile {'created' if created else 'updated'} for {instance.customer.get_display_name()}",
             )
 
-        # Romanian compliance validation
-        if instance.cui:
+        # Romanian compliance validation (only when the CUI itself is new or changed)
+        if instance.cui and (created or old_values.get("cui") != instance.cui):
             _validate_romanian_cui(instance)
 
-        # VAT number validation for EU customers
-        if instance.vat_number and instance.vat_number.startswith(("RO", "DE", "FR", "IT")):
+        # VAT number validation for EU customers (only when the VAT number changed)
+        if (
+            instance.vat_number
+            and instance.vat_number.startswith(("RO", "DE", "FR", "IT"))
+            and (created or old_values.get("vat_number") != instance.vat_number)
+        ):
             _trigger_vat_validation(instance)
 
         # Compliance logging for Romanian tax authorities
-        if instance.cui and instance.cui.startswith("RO"):
+        if is_romanian_registration:
             compliance_request = ComplianceEventRequest(
                 compliance_type="romanian_tax_registration",
                 reference_id=instance.cui,

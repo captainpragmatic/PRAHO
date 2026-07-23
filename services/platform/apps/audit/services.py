@@ -1049,110 +1049,6 @@ class AuditService:
             logger.error(f"🔥 [Compliance] Failed to log {request.compliance_type}: {e}")
             raise
 
-    # ===============================================================================
-    # BACKWARD COMPATIBILITY WRAPPER METHODS
-    # ===============================================================================
-
-    @staticmethod
-    def log_event_legacy(  # audit trail fields  # noqa: PLR0913  # Business logic parameters
-        event_type: str,
-        user: User | None = None,
-        content_object: Any | None = None,
-        old_values: dict[str, Any] | None = None,
-        new_values: dict[str, Any] | None = None,
-        description: str = "",
-        ip_address: str | None = None,
-        user_agent: str | None = None,
-        request_id: str | None = None,
-        session_key: str | None = None,
-        metadata: dict[str, Any] | None = None,
-        actor_type: str = "user",
-    ) -> AuditEvent:
-        """Legacy wrapper for backward compatibility"""
-        event_data = AuditEventData(
-            event_type=event_type,
-            content_object=content_object,
-            old_values=old_values,
-            new_values=new_values,
-            description=description,
-        )
-
-        context = AuditContext(
-            user=user,
-            ip_address=ip_address,
-            user_agent=user_agent,
-            request_id=request_id,
-            session_key=session_key,
-            metadata=metadata or {},
-            actor_type=actor_type,
-        )
-
-        return AuditService.log_event(event_data, context)
-
-    @staticmethod
-    def log_2fa_event_legacy(  # audit trail fields  # noqa: PLR0913  # Business logic parameters
-        event_type: str,
-        user: User,
-        ip_address: str | None = None,
-        user_agent: str | None = None,
-        metadata: dict[str, Any] | None = None,
-        description: str = "",
-        request_id: str | None = None,
-        session_key: str | None = None,
-    ) -> AuditEvent:
-        """Legacy wrapper for backward compatibility"""
-        context = AuditContext(
-            ip_address=ip_address,
-            user_agent=user_agent,
-            request_id=request_id,
-            session_key=session_key,
-            metadata=metadata or {},
-        )
-
-        request = TwoFactorAuditRequest(event_type=event_type, user=user, context=context, description=description)
-
-        return AuditService.log_2fa_event(request)
-
-    @staticmethod
-    def log_compliance_event_legacy(  # audit trail fields  # noqa: PLR0913  # Business logic parameters
-        compliance_type: str,
-        reference_id: str,
-        description: str,
-        user: User | None = None,
-        status: str = "success",
-        evidence: dict[str, Any] | None = None,
-        metadata: dict[str, Any] | None = None,
-    ) -> ComplianceLog:
-        """Legacy wrapper for backward compatibility"""
-        request = ComplianceEventRequest(
-            compliance_type=compliance_type,
-            reference_id=reference_id,
-            description=description,
-            user=user,
-            status=status,
-            evidence=evidence or {},
-            metadata=metadata or {},
-        )
-
-        return AuditService.log_compliance_event(request)
-
-
-class AuditServiceProxy:
-    """Proxy class to maintain backward compatibility with existing code"""
-
-    def log_event(self, *args: Any, **kwargs: Any) -> AuditEvent:
-        return AuditService.log_event_legacy(*args, **kwargs)
-
-    def log_2fa_event(self, *args: Any, **kwargs: Any) -> AuditEvent:
-        return AuditService.log_2fa_event_legacy(*args, **kwargs)
-
-    def log_compliance_event(self, *args: Any, **kwargs: Any) -> ComplianceLog:
-        return AuditService.log_compliance_event_legacy(*args, **kwargs)
-
-
-# Global audit service instance (backward compatible)
-audit_service = AuditServiceProxy()
-
 
 # ===============================================================================
 # GDPR COMPLIANCE SERVICES
@@ -1224,6 +1120,12 @@ class GDPRExportService:
         """Process and generate the actual data export file"""
         try:
             user = export_request.requested_by
+            if user is None:
+                # Orphaned request: the requester was deleted before processing (W7)
+                export_request.status = "failed"
+                export_request.error_message = "Requesting user was deleted before the export was processed"
+                export_request.save(update_fields=["status", "error_message"])
+                return Err("Requesting user no longer exists")
             export_request.status = "processing"
             export_request.started_at = timezone.now()
             export_request.save(update_fields=["status", "started_at"])
@@ -1276,7 +1178,7 @@ class GDPRExportService:
             export_request.error_message = str(e)
             export_request.save(update_fields=["status", "error_message"])
 
-            logger.error(f"🔥 [GDPR Export] Processing failed for {user.email}: {e}")
+            logger.error(f"🔥 [GDPR Export] Processing failed for export {export_request.id}: {e}")
             return Err(f"Export processing failed: {e!s}")
 
     @classmethod

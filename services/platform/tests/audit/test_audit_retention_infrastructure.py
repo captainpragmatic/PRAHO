@@ -221,3 +221,29 @@ class FileIntegrityBaselineTestCase(TestCase):
         results = run_file_integrity_check()
         self.assertEqual(results["status"], "error")
         self.assertGreater(len(results["hash_errors"]), 0)
+
+
+class DedupLedgerRetentionLockInTestCase(TestCase):
+    """m7: customers/tasks.py uses customer_feedback_processed events with
+    metadata__note_id as an idempotency ledger. Retention must never anonymize
+    them (the allowlist scrub would strip note_id and break dedup) - the category
+    they resolve to must map to the long-horizon delete policy."""
+
+    def test_ledger_events_map_to_a_delete_policy_with_long_horizon(self) -> None:
+        from apps.audit.services import AuditService  # noqa: PLC0415  # Deferred: test-local
+
+        event = AuditService.log_simple_event(
+            event_type="customer_feedback_processed",
+            user=None,
+            content_object=None,
+            description="ledger lock-in",
+            actor_type="system",
+            metadata={"note_id": "abc"},
+        )
+        call_command("setup_audit_retention_policies", stdout=StringIO())
+        policy = AuditRetentionPolicy.objects.get(category=event.category, severity="", is_active=True)
+        # The kill condition is ANONYMIZE: the metadata allowlist scrub strips note_id
+        # and every processed note becomes reprocessable overnight. Deletion after the
+        # policy horizon is acceptable - a years-old note re-analysis is a no-op.
+        self.assertEqual(policy.action, "delete")
+        self.assertGreaterEqual(policy.retention_days, 1096)
