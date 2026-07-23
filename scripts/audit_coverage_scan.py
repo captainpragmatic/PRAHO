@@ -175,6 +175,18 @@ class AuditCoverageVisitor(ast.NodeVisitor):
             return
         if not isinstance(node.func, ast.Attribute):
             return
+        # The AuditServiceProxy singleton was retired (ADR-0043): any surviving
+        # `audit_service.<method>()` call would silently NameError at runtime.
+        base = node.func.value
+        if isinstance(base, ast.Name) and base.id == "audit_service":
+            self._add_issue(
+                line=node.lineno,
+                col=node.col_offset,
+                severity="high",
+                code="retired-audit-proxy",
+                message="`audit_service.*` proxy was removed — call `AuditService` from `apps.audit.services` directly.",
+            )
+            return
         if node.func.attr == "log_event_legacy":
             self._add_issue(
                 line=node.lineno,

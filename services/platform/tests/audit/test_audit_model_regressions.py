@@ -8,7 +8,10 @@ models are added. The allowlist must include a justification comment.
 
 from __future__ import annotations
 
+import inspect
+import io
 import re
+import tokenize
 from pathlib import Path
 
 from django.apps import apps
@@ -58,15 +61,61 @@ def _model_label(model: type) -> str:
     return f"{model._meta.app_label}.{model.__name__}"
 
 
+# NAME tokens that prove a receiver actually writes to the audit trail. Checked
+# via tokenize (comments cannot fake membership) on the receiver's source.
+_AUDIT_API_NAMES = frozenset(
+    {
+        "AuditService",
+        "CustomersAuditService",
+        "OrdersAuditService",
+        "DomainsAuditService",
+        "ProductsAuditService",
+        "InfrastructureAuditService",
+        "BusinessEventData",
+        "AuditEventCreationData",
+        "log_security_event",
+        "log_simple_event",
+        "log_compliance_event",
+    }
+)
+
+
+def _receiver_audits(receiver: object) -> bool:
+    """True when the receiver's defining MODULE references the audit API by NAME token.
+
+    A live receiver that merely invalidates a cache must not count as audit
+    coverage - the pre-upgrade check accepted ANY receiver, which made the
+    coverage guarantee vacuous for models whose only signals never audit.
+    Module scope (not function scope) because receivers routinely delegate to
+    module-level helpers (_log_billing_model_event, _handle_status_change);
+    tokenize still means comments cannot fake membership.
+    """
+    try:
+        module = inspect.getmodule(inspect.unwrap(receiver))
+        if module is None:
+            return False
+        source = inspect.getsource(module)
+    except (OSError, TypeError):
+        return False
+    try:
+        names = {
+            tok.string
+            for tok in tokenize.generate_tokens(io.StringIO(source).readline)
+            if tok.type == tokenize.NAME
+        }
+    except tokenize.TokenizeError:
+        return False
+    return bool(names & _AUDIT_API_NAMES)
+
+
 def _has_audit_signal(model: type) -> bool:
-    """Check if *any* audit signal type has a live receiver for this model."""
+    """Check if any signal receiver for this model actually writes audit events."""
     for sig in AUDIT_SIGNALS:
         raw_receivers = sig._live_receivers(model)
-        if isinstance(raw_receivers, tuple):
-            sync_receivers, async_receivers = raw_receivers
-            if sync_receivers or async_receivers:
-                return True
-        elif raw_receivers:
+        receivers = (
+            [*raw_receivers[0], *raw_receivers[1]] if isinstance(raw_receivers, tuple) else list(raw_receivers)
+        )
+        if any(_receiver_audits(r) for r in receivers):
             return True
     return False
 
@@ -144,4 +193,38 @@ class TestAuditModelCoverage(SimpleTestCase):
             f"\n{len(uncommented_sorted)} allowlist entry/entries lack a justification "
             f"comment (format: 'app_label.ModelName  # reason'):\n  "
             + "\n  ".join(uncommented_sorted),
+        )
+
+
+class TestAllowlistJustificationsAreTrue(SimpleTestCase):
+    """Every "audited via X" claim in the allowlist must name a mechanism that exists.
+
+    The pre-overhaul allowlist carried five entries claiming "audited via parent
+    signal" for models whose parents never audited them - a justification nobody
+    could falsify because nothing checked it. Any snake_case identifier a comment
+    cites (event name, function, module path) must appear somewhere under apps/.
+    """
+
+    _IDENTIFIER_RE = re.compile(r"[a-z][a-z0-9]*(?:_[a-z0-9]+)+")
+
+    def test_cited_mechanisms_exist_in_the_codebase(self):
+        apps_root = ALLOWLIST_PATH.parents[1] / "services" / "platform" / "apps"
+        corpus = "\n".join(
+            f.read_text(encoding="utf-8", errors="ignore") for f in apps_root.rglob("*.py")
+        )
+
+        unbacked: list[str] = []
+        for line in ALLOWLIST_PATH.read_text().splitlines():
+            m = _ALLOWLIST_RE.match(line.strip())
+            if not m or "audited via" not in m.group("comment"):
+                continue
+            claim = m.group("comment").split("audited via", 1)[1]
+            identifiers = self._IDENTIFIER_RE.findall(claim)
+            if identifiers and not any(name in corpus for name in identifiers):
+                unbacked.append(f"{m.group('entry')}: none of {identifiers} found under apps/")
+
+        self.assertEqual(
+            unbacked,
+            [],
+            "Allowlist justification cites a mechanism that does not exist:\n" + "\n".join(unbacked),
         )
