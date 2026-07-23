@@ -61,7 +61,7 @@ class ListViewsRateLimitTests(SimpleTestCase):
         messages = [str(message) for message in get_messages(response.wsgi_request)]
         self.assertFalse(any("many requests right now" in message.lower() for message in messages))
 
-    @patch("apps.billing.views._fetch_filtered_documents")
+    @patch("apps.billing.views.InvoiceViewService.get_customer_documents")
     def test_billing_list_shows_rate_limited_state(self, mock_fetch_documents) -> None:
         self._set_customer_session(include_membership=True)
         mock_fetch_documents.side_effect = PlatformAPIError(

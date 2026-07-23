@@ -17,7 +17,7 @@ from typing import Any
 
 from apps.api_client.services import PlatformAPIClient, PlatformAPIError
 
-from .schemas import Currency, Invoice, Proforma
+from .schemas import BillingDocumentPage, Currency, Invoice, Proforma
 from .serializers import (
     create_currency_from_api,
     create_invoice_from_api,
@@ -39,6 +39,62 @@ class InvoiceViewService:
 
     def __init__(self) -> None:
         self.api_client = PlatformAPIClient()
+
+    def get_customer_documents(  # noqa: PLR0913
+        self,
+        customer_id: int,
+        user_id: int,
+        page: int = 1,
+        limit: int = 20,
+        document_type: str = "all",
+        status: str = "",
+        search: str = "",
+        force_sync: bool = False,
+    ) -> BillingDocumentPage:
+        """Get an authoritative filtered page across invoices and proformas."""
+        try:
+            request_data: dict[str, Any] = {
+                "customer_id": customer_id,
+                "user_id": user_id,
+                "action": "get_billing_documents",
+                "page": page,
+                "limit": limit,
+                "document_type": document_type,
+                "status": status,
+                "search": search,
+            }
+            if force_sync:
+                request_data["force_sync"] = True
+            response = self.api_client.post("/billing/documents/", data=request_data)
+            if not response.get("success"):
+                logger.error("Failed to fetch billing documents: %s", response)
+                return BillingDocumentPage()
+
+            documents: list[Invoice | Proforma] = []
+            for document_data in response.get("documents", []):
+                try:
+                    if document_data.get("document_type") == "proforma":
+                        documents.append(create_proforma_from_api(document_data))
+                    else:
+                        documents.append(create_invoice_from_api(document_data))
+                except Exception as error:
+                    logger.error("Failed to parse billing document %s: %s", document_data.get("id"), error)
+
+            pagination = response.get("pagination", {})
+            summary = response.get("summary", {})
+            return BillingDocumentPage(
+                documents=documents,
+                current_page=int(pagination.get("current_page", 1)),
+                page_size=int(pagination.get("limit", limit)),
+                total_items=int(pagination.get("total_items", 0)),
+                invoice_count=int(summary.get("invoice_count", 0)),
+                proforma_count=int(summary.get("proforma_count", 0)),
+                unpaid_invoice_count=int(summary.get("unpaid_invoice_count", 0)),
+            )
+        except Exception as error:
+            logger.error("Error retrieving billing documents for customer %s: %s", customer_id, error)
+            _raise_if_rate_limited(error)
+            return BillingDocumentPage()
 
     def get_customer_invoices(self, customer_id: int, user_id: int, force_sync: bool = False) -> list[Invoice]:
         """Get invoices for a customer directly from Platform API"""

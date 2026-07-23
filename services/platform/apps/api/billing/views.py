@@ -4,9 +4,10 @@
 
 import logging
 import uuid
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from django.db.models import QuerySet
+from django.db.models import CharField, Q, QuerySet, Value
 from django.http import HttpRequest
 from rest_framework import status
 from rest_framework.authentication import BaseAuthentication
@@ -36,6 +37,11 @@ from .serializers import (
 )
 
 logger = logging.getLogger(__name__)
+
+_INVOICE_STATUSES = {value for value, _label in Invoice.STATUS_CHOICES}
+_PROFORMA_STATUSES = {value for value, _label in ProformaInvoice.STATUS_CHOICES}
+_UNPAID_INVOICE_STATUSES = {"draft", "issued", "overdue"}
+_MAX_AMOUNT_SEARCH_LENGTH = 32
 
 
 def _request_actor(request: HttpRequest) -> User | None:
@@ -89,6 +95,81 @@ def _active_card_methods(customer: Customer) -> QuerySet[CustomerPaymentMethod]:
         .defer("bank_details")
         .order_by("-is_default", "created_at")
     )
+
+
+def _amount_search_cents(search: str) -> set[int]:
+    """Interpret numeric searches as both displayed currency units and raw cents."""
+    normalized = search.strip().replace(" ", "").replace(",", ".")
+    if len(normalized) > _MAX_AMOUNT_SEARCH_LENGTH:
+        return set()
+    try:
+        amount = Decimal(normalized)
+    except InvalidOperation:
+        return set()
+    if not amount.is_finite() or amount < 0 or amount > Decimal("90000000000000000"):
+        return set()
+
+    cents = amount * 100
+    matches = {int(cents)} if cents == cents.to_integral_value() else set()
+    if normalized.isdigit():
+        matches.add(int(normalized))
+    return matches
+
+
+def _filter_document_queryset[DocumentT: (Invoice, ProformaInvoice)](
+    queryset: QuerySet[DocumentT],
+    *,
+    document_label: str,
+    status_filter: str,
+    valid_statuses: set[str],
+    search: str,
+) -> QuerySet[DocumentT]:
+    if status_filter:
+        queryset = queryset.filter(status=status_filter) if status_filter in valid_statuses else queryset.none()
+
+    if search:
+        predicate = (
+            Q(number__icontains=search)
+            | Q(status__icontains=search)
+            | Q(bill_to_name__icontains=search)
+            | Q(bill_to_email__icontains=search)
+            | Q(lines__description__icontains=search)
+        )
+        if search.casefold() in document_label:
+            predicate |= Q(pk__isnull=False)
+        if queryset.model is ProformaInvoice:
+            predicate |= Q(notes__icontains=search)
+        amount_matches = _amount_search_cents(search)
+        if amount_matches:
+            predicate |= Q(total_cents__in=amount_matches)
+        queryset = queryset.filter(predicate).distinct()
+
+    return queryset
+
+
+def _serialize_document_page(
+    rows: list[dict[str, Any]],
+    invoice_queryset: QuerySet[Invoice],
+    proforma_queryset: QuerySet[ProformaInvoice],
+) -> list[dict[str, Any]]:
+    invoice_ids = [row["id"] for row in rows if row["document_type"] == "invoice"]
+    proforma_ids = [row["id"] for row in rows if row["document_type"] == "proforma"]
+    invoices = {
+        invoice.id: dict(InvoiceListSerializer(invoice).data)
+        for invoice in invoice_queryset.filter(id__in=invoice_ids).select_related("currency")
+    }
+    proformas = {
+        proforma.id: dict(ProformaListSerializer(proforma).data)
+        for proforma in proforma_queryset.filter(id__in=proforma_ids).select_related("currency")
+    }
+
+    documents = []
+    for row in rows:
+        document_type = row["document_type"]
+        document = (invoices if document_type == "invoice" else proformas)[row["id"]]
+        document["document_type"] = document_type
+        documents.append(document)
+    return documents
 
 
 def _serialize_recurring_overview(customer: Customer) -> dict[str, Any]:
@@ -408,6 +489,92 @@ def customer_invoices_api(request: HttpRequest, customer: Customer) -> Response:
         logger.error(f"🔥 [Billing API] Invoice list error: {e}")
         return Response(
             {"success": False, "error": "Invoice service temporarily unavailable"},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
+
+# ===============================================================================
+# CUSTOMER BILLING DOCUMENT LIST API 📄
+# ===============================================================================
+
+
+@api_view(["POST"])
+@authentication_classes([])
+@permission_classes([AllowAny])
+@require_customer_authentication
+def customer_billing_documents_api(request: HttpRequest, customer: Customer) -> Response:
+    """Return one authoritative, filtered page across invoices and proformas."""
+    try:
+        request_data = request.data if hasattr(request, "data") else {}
+        page = _positive_int(request_data.get("page")) or 1
+        limit = min(100, _positive_int(request_data.get("limit")) or 20)
+        document_type = str(request_data.get("document_type", "all")).strip()
+        document_type = document_type if document_type in {"all", "invoice", "proforma"} else "all"
+        status_filter = str(request_data.get("status") or "").strip()
+        search = str(request_data.get("search") or "").strip()[:200]
+
+        invoice_base = Invoice.objects.filter(customer=customer)
+        proforma_base = ProformaInvoice.objects.filter(customer=customer)
+        invoice_count = invoice_base.count()
+        proforma_count = proforma_base.count()
+        unpaid_invoice_count = invoice_base.filter(status__in=_UNPAID_INVOICE_STATUSES).count()
+
+        invoice_queryset = _filter_document_queryset(
+            invoice_base,
+            document_label="invoice",
+            status_filter=status_filter,
+            valid_statuses=_INVOICE_STATUSES,
+            search=search,
+        )
+        proforma_queryset = _filter_document_queryset(
+            proforma_base,
+            document_label="proforma",
+            status_filter=status_filter,
+            valid_statuses=_PROFORMA_STATUSES,
+            search=search,
+        )
+        if document_type == "invoice":
+            proforma_queryset = proforma_queryset.none()
+        elif document_type == "proforma":
+            invoice_queryset = invoice_queryset.none()
+
+        invoice_rows = invoice_queryset.values("id", "created_at").annotate(
+            document_type=Value("invoice", output_field=CharField())
+        )
+        proforma_rows = proforma_queryset.values("id", "created_at").annotate(
+            document_type=Value("proforma", output_field=CharField())
+        )
+        ordered_rows = invoice_rows.union(proforma_rows).order_by("-created_at", "-document_type", "-id")
+        total_items = ordered_rows.count()
+        total_pages = max(1, (total_items + limit - 1) // limit)
+        page = min(page, total_pages)
+        offset = (page - 1) * limit
+        rows = list(ordered_rows[offset : offset + limit])
+
+        return Response(
+            {
+                "success": True,
+                "documents": _serialize_document_page(rows, invoice_queryset, proforma_queryset),
+                "pagination": {
+                    "current_page": page,
+                    "total_pages": total_pages,
+                    "total_items": total_items,
+                    "has_next": page < total_pages,
+                    "has_previous": page > 1,
+                    "limit": limit,
+                },
+                "summary": {
+                    "invoice_count": invoice_count,
+                    "proforma_count": proforma_count,
+                    "unpaid_invoice_count": unpaid_invoice_count,
+                    "total_count": invoice_count + proforma_count,
+                },
+            }
+        )
+    except Exception as error:
+        logger.exception("Billing document list failed for customer %s: %s", customer.id, error)
+        return Response(
+            {"success": False, "error": "Billing document service temporarily unavailable"},
             status=status.HTTP_503_SERVICE_UNAVAILABLE,
         )
 

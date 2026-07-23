@@ -12,6 +12,7 @@ urlpatterns = [
     # Currency endpoints
     path("currencies/", views.currencies_api, name="currencies"),
     # Invoice endpoints
+    path("documents/", views.customer_billing_documents_api, name="customer_billing_documents"),
     path("invoices/", views.customer_invoices_api, name="customer_invoices"),
     path("invoices/<str:invoice_number>/", views.customer_invoice_detail_api, name="customer_invoice_detail"),
     path("invoices/<str:invoice_number>/pdf/", views.invoice_pdf_export, name="invoice_pdf_export"),
