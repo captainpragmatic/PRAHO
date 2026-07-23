@@ -2,17 +2,46 @@
 Development settings for PRAHO Portal Service
 """
 
+import logging
 import os
 import sys
 from pathlib import Path
 
-from dotenv import load_dotenv
+from dotenv import dotenv_values, load_dotenv
+
+
+def _strip_comment_polluted_env(env_path: Path) -> list[str]:
+    """Unset any dotenv-loaded var whose value is actually a leaked inline comment (#364).
+
+    python-dotenv strips an inline ``# comment`` for a non-empty value but keeps it as the VALUE
+    for an EMPTY-value var (``KEY=   # note`` -> ``"# note"``). Left in place, a comment-polluted
+    placeholder masquerades as a real (garbage) secret and slips past ``if not key:`` guards. Only
+    keys that dotenv set from ``env_path`` are touched — a var already present in the real
+    environment (load_dotenv's default override=False) keeps its real value and is never stripped.
+
+    Known limitation: a genuinely intended value that begins with ``#`` (e.g. ``KEY=#ffffff``) is
+    indistinguishable from a leaked comment at the value level — dotenv yields ``"#..."`` for both —
+    so it is also treated as pollution and unset. This is dev-only and fails safe (the var becomes
+    unset, never a wrong value); no config key here legitimately starts with ``#``.
+    """
+    stripped = []
+    for key, value in dotenv_values(env_path).items():
+        if value is not None and value.lstrip().startswith("#") and os.environ.get(key) == value:
+            del os.environ[key]
+            stripped.append(key)
+    return stripped
+
 
 # Dev-only: load project-root .env. Prod/staging must set env vars
 # via deployment platform (Docker, systemd, secrets manager).
 _env_path = Path(__file__).resolve().parents[4] / ".env"
 if _env_path.exists():
     load_dotenv(_env_path)
+    _polluted = _strip_comment_polluted_env(_env_path)
+    if _polluted:
+        logging.getLogger(__name__).warning(
+            "Ignored %d comment-polluted .env var(s) (#364): %s", len(_polluted), ", ".join(_polluted)
+        )
 
 from .base import *  # noqa: E402, F403
 
