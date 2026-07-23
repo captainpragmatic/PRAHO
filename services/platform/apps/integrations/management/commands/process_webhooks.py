@@ -1,8 +1,9 @@
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 from django.core.management.base import BaseCommand
+from django.db.models import Q, QuerySet
 from django.utils import timezone
 
 from apps.common.constants import SECONDS_PER_HOUR, SECONDS_PER_MINUTE
@@ -13,6 +14,13 @@ from apps.integrations.webhooks.base import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _old_terminal_webhooks(cutoff: datetime) -> QuerySet[WebhookEvent]:
+    """Return terminal webhook rows whose authoritative age exceeds the cutoff."""
+    return WebhookEvent.objects.filter(status__in=["processed", "skipped"]).filter(
+        Q(processed_at__lt=cutoff) | Q(processed_at__isnull=True, received_at__lt=cutoff)
+    )
 
 
 class Command(BaseCommand):
@@ -96,7 +104,7 @@ class Command(BaseCommand):
         cutoff_date = timezone.now() - timedelta(days=30)
 
         # Only delete processed/skipped webhooks, keep failed ones for analysis
-        old_webhooks = WebhookEvent.objects.filter(status__in=["processed", "skipped"], processed_at__lt=cutoff_date)
+        old_webhooks = _old_terminal_webhooks(cutoff_date)
 
         count = old_webhooks.count()
         if count > 0:
@@ -168,9 +176,7 @@ class Command(BaseCommand):
 
         # Old webhooks that can be cleaned up
         cutoff_date = timezone.now() - timedelta(days=30)
-        old_webhooks = WebhookEvent.objects.filter(
-            status__in=["processed", "skipped"], processed_at__lt=cutoff_date
-        ).count()
+        old_webhooks = _old_terminal_webhooks(cutoff_date).count()
 
         if old_webhooks > 0:
             self.stdout.write(f"\n🗑️ {old_webhooks} old webhook records can be cleaned up (>30 days)")

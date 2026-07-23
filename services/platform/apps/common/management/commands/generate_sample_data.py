@@ -75,6 +75,25 @@ _ROMANIAN_CITIES: list[tuple[str, str]] = [
 ]
 
 
+# Single source of truth for advertised dev credentials: (label, email, password).
+# Both _print_credentials() and _ensure_credential_passwords() read from this list, so the
+# printed credentials table can never advertise a password that isn't actually set on the row.
+# NOTE: inactive-staff@pragmatichost.com and the bulk user{i}@example.com accounts are
+# intentionally NOT advertised here, so they are left untouched by the credential reset.
+DEV_USER_CREDENTIALS: list[tuple[str, str, str]] = [
+    ("Admin", "admin@pragmatichost.com", "admin123"),
+    ("Support", "john@pragmatichost.com", "support123"),
+    ("Support", "jane@pragmatichost.com", "support123"),
+    ("Support", "mike@pragmatichost.com", "support123"),
+    ("Manager", "manager@pragmatichost.com", "manager123"),
+    ("Customer", "customer@pragmatichost.com", "testpass123"),
+    ("Multi-company", "multi-company@example.com", "testpass123"),
+    ("Suspended", "suspended@example.com", "testpass123"),
+    ("E2E Admin", "e2e-admin@test.local", "test123"),
+    ("E2E Customer", "e2e-customer@test.local", "test123"),
+]
+
+
 def _cycle(items: list[Any], index: int) -> Any:
     """Round-robin select from a list by index. DRY helper for the ubiquitous items[i % len(items)] pattern."""
     if not items:
@@ -249,7 +268,24 @@ class Command(BaseCommand):
             )
         )
 
+        self._ensure_credential_passwords()
         self._print_credentials()
+
+    def _ensure_credential_passwords(self) -> None:
+        """Force every advertised dev account's password to match DEV_USER_CREDENTIALS.
+
+        Runs after all users are created, so the printed credentials table is always true.
+        This is what fixes the create-only blocks (admin, support trio, customer) that never
+        refreshed an existing row's password on re-runs. The command is already DEBUG-gated in
+        handle(), so this only ever runs against dev/test data.
+        """
+        for _label, email, password in DEV_USER_CREDENTIALS:
+            user = User.objects.filter(email=email).first()
+            if user is None:
+                continue  # advertised account was not created this run — nothing to reset
+            user.set_password(password)  # nosemgrep: unvalidated-password — dev fixture, DEBUG-gated
+            user.save(update_fields=["password"])
+        self.stdout.write(self.style.SUCCESS("  ✓ Dev credential passwords synchronized"))
 
     def _print_credentials(self) -> None:
         """Print available login credentials table."""
@@ -259,16 +295,8 @@ class Command(BaseCommand):
         self.stdout.write("━" * 60)
         self.stdout.write(f"  {'Role':<16} {'Email':<38} {'Password'}")
         self.stdout.write(f"  {'─' * 16} {'─' * 38} {'─' * 12}")
-        self.stdout.write(f"  {'Admin':<16} {'admin@pragmatichost.com':<38} admin123")
-        self.stdout.write(f"  {'Support':<16} {'john@pragmatichost.com':<38} support123")
-        self.stdout.write(f"  {'Support':<16} {'jane@pragmatichost.com':<38} support123")
-        self.stdout.write(f"  {'Support':<16} {'mike@pragmatichost.com':<38} support123")
-        self.stdout.write(f"  {'Manager':<16} {'manager@pragmatichost.com':<38} manager123")
-        self.stdout.write(f"  {'Customer':<16} {'customer@pragmatichost.com':<38} testpass123")
-        self.stdout.write(f"  {'Multi-company':<16} {'multi-company@example.com':<38} testpass123")
-        self.stdout.write(f"  {'Suspended':<16} {'suspended@example.com':<38} testpass123")
-        self.stdout.write(f"  {'E2E Admin':<16} {'e2e-admin@test.local':<38} test123")
-        self.stdout.write(f"  {'E2E Customer':<16} {'e2e-customer@test.local':<38} test123")
+        for label, email, password in DEV_USER_CREDENTIALS:
+            self.stdout.write(f"  {label:<16} {email:<38} {password}")
         self.stdout.write("━" * 60)
         self.stdout.write("  Platform: http://localhost:8700")
         self.stdout.write("  Portal:   http://localhost:8701")

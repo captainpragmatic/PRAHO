@@ -13,6 +13,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from apps.billing.models import Payment
+from apps.common.types import Retriability, retriability_of
 from apps.customers.models import Customer
 from apps.integrations.models import WebhookEvent
 
@@ -384,32 +385,44 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
             customer_email = stripe_customer.get("email")
 
             if customer_email:
-                try:
-                    with transaction.atomic():
-                        customer = Customer.objects.select_for_update(of=("self",)).get(primary_email=customer_email)
-                        customer_meta = dict(customer.meta or {})
-                        existing_customer_id = customer_meta.get("stripe_customer_id")
+                with transaction.atomic():
+                    customers = list(
+                        Customer.objects.select_for_update(of=("self",))
+                        .filter(primary_email=customer_email)
+                        .order_by("id")[:2]
+                    )
+                    if not customers:
+                        logger.warning(f"⚠️ Customer not found for Stripe customer: {customer_email}")
+                        return True, f"Customer not found: {customer_email}"
+                    if len(customers) > 1:
+                        logger.critical(
+                            "🔥 [Stripe] Ambiguous customer.created email %s for Stripe customer %s; "
+                            "refusing to link an arbitrary PRAHO customer",
+                            customer_email,
+                            stripe_customer_id,
+                        )
+                        return True, f"Ambiguous customer email; not linked: {customer_email}"
 
-                        if existing_customer_id and stripe_customer_id and existing_customer_id != stripe_customer_id:
-                            logger.warning(
-                                "⚠️ [Stripe] Ignoring customer.created ID %s for %s; already linked to %s",
-                                stripe_customer_id,
-                                customer.id,
-                                existing_customer_id,
-                            )
-                        elif stripe_customer_id:
-                            customer_meta["stripe_customer_id"] = stripe_customer_id
+                    customer = customers[0]
+                    customer_meta = dict(customer.meta or {})
+                    existing_customer_id = customer_meta.get("stripe_customer_id")
 
-                        customer_meta["stripe_linked_at"] = timezone.now().isoformat()
-                        customer.meta = customer_meta
-                        customer.save(update_fields=["meta", "updated_at"])
+                    if existing_customer_id and stripe_customer_id and existing_customer_id != stripe_customer_id:
+                        logger.warning(
+                            "⚠️ [Stripe] Ignoring customer.created ID %s for %s; already linked to %s",
+                            stripe_customer_id,
+                            customer.id,
+                            existing_customer_id,
+                        )
+                    elif stripe_customer_id:
+                        customer_meta["stripe_customer_id"] = stripe_customer_id
 
-                    logger.info(f"🔗 Linked Stripe customer {stripe_customer_id} to {customer}")
-                    return True, f"Customer linked: {customer}"
+                    customer_meta["stripe_linked_at"] = timezone.now().isoformat()
+                    customer.meta = customer_meta
+                    customer.save(update_fields=["meta", "updated_at"])
 
-                except Customer.DoesNotExist:
-                    logger.warning(f"⚠️ Customer not found for Stripe customer: {customer_email}")
-                    return True, f"Customer not found: {customer_email}"
+                logger.info(f"🔗 Linked Stripe customer {stripe_customer_id} to {customer}")
+                return True, f"Customer linked: {customer}"
 
         return True, f"Skipped Customer event: {event_type}"
 
@@ -425,11 +438,26 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
         """Normalize a Stripe integer while rejecting bool's int subtype."""
         return value if isinstance(value, int) and not isinstance(value, bool) else 0
 
+    @staticmethod
+    def _acknowledge_permanent_rejection(
+        message: str,
+        retriability: Retriability = Retriability.NOT_RETRIABLE,
+    ) -> tuple[bool, str]:
+        # Event-agnostic wording: this path also acknowledges malformed charge
+        # and generic payloads, not only refund objects (review of #374).
+        logger.critical(
+            "Stripe webhook permanently rejected (%s); manual reconciliation required: %s",
+            retriability.value,
+            message,
+        )
+        return True, f"Permanent Stripe webhook rejection acknowledged: {message}"
+
     def handle_refund_event(self, event_type: str, payload: dict[str, Any]) -> tuple[bool, str]:
         """Converge modern Stripe Refund events into PRAHO's ledger."""
-        refund_object = payload.get("data", {}).get("object", {})
+        event_data = payload.get("data", {})
+        refund_object = event_data.get("object", {}) if isinstance(event_data, dict) else None
         if not isinstance(refund_object, dict):
-            return False, "Malformed Stripe refund object"
+            return self._acknowledge_permanent_rejection("Malformed Stripe refund object")
         from apps.billing.refund_service import (  # noqa: PLC0415
             RefundConvergenceService,
             RefundGatewayFacts,
@@ -449,7 +477,16 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
         result = RefundConvergenceService.converge_gateway_refund(facts)
         if result.is_err():
             error = result.unwrap_err()
-            logger.critical("Stripe refund convergence rejected: %s", error)
+            retriability = retriability_of(result)
+            if retriability is Retriability.NOT_RETRIABLE:
+                return self._acknowledge_permanent_rejection(error, retriability)
+            if retriability is Retriability.UNKNOWN:
+                logger.critical(
+                    "Stripe refund convergence violated its typed error contract; rejecting for safe replay: %s",
+                    error,
+                )
+            else:
+                logger.error("Stripe refund convergence failed retryably: %s", error)
             return False, error
         refund = result.unwrap()
         if refund is None:
@@ -463,17 +500,18 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
         charge: dict[str, Any],
     ) -> tuple[bool, str]:
         """Converge the embedded refunds from the legacy charge event."""
-        refund_list = charge.get("refunds", {}).get("data", [])
+        refund_collection = charge.get("refunds", {})
+        if not isinstance(refund_collection, dict):
+            return self._acknowledge_permanent_rejection("Malformed Stripe charge refunds")
+        refund_list = refund_collection.get("data", [])
         if not isinstance(refund_list, list):
-            return False, "Malformed Stripe charge refunds"
+            return self._acknowledge_permanent_rejection("Malformed Stripe charge refunds")
         failures: list[str] = []
         for refund_object in refund_list:
             if not isinstance(refund_object, dict):
                 # Do NOT short-circuit: a bad sibling here would starve every later valid
-                # embedded refund, and each Stripe retry would stop at the same bad item.
-                # Record it and keep going — convergence is idempotent, so re-processing the
-                # already-converged siblings on the whole-event retry is safe.
-                failures.append("Malformed embedded Stripe refund")
+                # embedded refund. Alert and acknowledge it, then continue with valid siblings.
+                self._acknowledge_permanent_rejection("Malformed embedded Stripe refund")
                 continue
             normalized_refund = {
                 **refund_object,
@@ -487,7 +525,7 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
         if failures:
             converged_count = len(refund_list) - len(failures)
             return False, f"Charge refunds: {converged_count} converged, {len(failures)} failed: {'; '.join(failures)}"
-        return True, f"Charge refunds converged: {len(refund_list)}"
+        return True, f"Charge refunds handled: {len(refund_list)}"
 
     @staticmethod
     def _handle_charge_dispute(charge: dict[str, Any], charge_id: Any) -> tuple[bool, str]:
@@ -561,20 +599,25 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
         if event_type == "charge.refund.updated":
             return self.handle_refund_event(event_type, payload)
 
-        charge = payload.get("data", {}).get("object", {})
+        event_data = payload.get("data", {})
+        charge = event_data.get("object", {}) if isinstance(event_data, dict) else None
+        if not isinstance(charge, dict):
+            return self._acknowledge_permanent_rejection("Malformed Stripe charge object")
         charge_id = charge.get("id")
         if event_type == "charge.refunded":
-            return self._handle_charge_refunded(event_type, payload, charge)
-        if event_type == "charge.dispute.created":
-            return self._handle_charge_dispute(charge, charge_id)
-        if event_type == "charge.succeeded":
+            result = self._handle_charge_refunded(event_type, payload, charge)
+        elif event_type == "charge.dispute.created":
+            result = self._handle_charge_dispute(charge, charge_id)
+        elif event_type == "charge.succeeded":
             logger.info(f"✅ Stripe charge succeeded: {charge_id}")
-            return True, f"Charge succeeded: {charge_id}"
-        if event_type == "charge.failed":
+            result = (True, f"Charge succeeded: {charge_id}")
+        elif event_type == "charge.failed":
             failure_reason = charge.get("failure_message", "Unknown error")
             logger.warning(f"❌ Stripe charge failed: {charge_id} - {failure_reason}")
-            return True, f"Charge failed: {charge_id}"
-        return True, f"Skipped Charge event: {event_type}"
+            result = (True, f"Charge failed: {charge_id}")
+        else:
+            result = (True, f"Skipped Charge event: {event_type}")
+        return result
 
     def handle_setup_intent_event(self, event_type: str, payload: dict[str, Any]) -> tuple[bool, str]:
         """🔧 Handle SetupIntent events (for saved payment methods)"""

@@ -409,7 +409,7 @@ def verify_stripe_signature(
         # Parse Stripe signature header
         elements = stripe_signature.split(",")
         timestamp = None
-        signature = None
+        signatures: list[str] = []
 
         for element in elements:
             if "=" not in element:
@@ -418,27 +418,29 @@ def verify_stripe_signature(
             if len(parts) != EXPECTED_KEY_VALUE_PARTS:
                 continue  # Skip malformed elements
             key, value = parts
+            key, value = key.strip(), value.strip()
             if key == "t":
                 timestamp = int(value)
             elif key == "v1":
-                signature = value
+                signatures.append(value)
 
-        if not timestamp or not signature:
+        if timestamp is None or not signatures:
             return False
 
         # Check timestamp (prevent replay attacks)
         current_time = int(timezone.now().timestamp())
-        if current_time - timestamp > tolerance:
-            logger.warning(f"⏰ Stripe webhook timestamp too old: {current_time - timestamp}s")
+        if timestamp < current_time - tolerance:
+            timestamp_age = current_time - timestamp
+            logger.warning(f"⏰ Stripe webhook timestamp too old: {timestamp_age}s")
             return False
 
-        # Verify signature
+        # Stripe emits one v1 signature per active endpoint secret during rotation.
         payload_for_signature = f"{timestamp}.{payload_body.decode('utf-8')}"
         expected_signature = hmac.new(
             webhook_secret.encode("utf-8"), payload_for_signature.encode("utf-8"), hashlib.sha256
         ).hexdigest()
 
-        return hmac.compare_digest(signature, expected_signature)
+        return any(hmac.compare_digest(signature, expected_signature) for signature in signatures)
 
     except Exception as e:
         logger.error(f"❌ Stripe signature verification error: {e}")
