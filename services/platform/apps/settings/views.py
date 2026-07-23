@@ -25,7 +25,6 @@ from django.views import View
 from django.views.decorators.http import require_http_methods
 from django_q.models import OrmQ, Schedule, Task
 
-from apps.audit.models import AuditEvent
 from apps.common.decorators import admin_required
 from apps.common.security_decorators import log_security_event
 from apps.common.types import Ok
@@ -579,6 +578,8 @@ def settings_home(request: HttpRequest) -> HttpResponse:
             }
         )
 
+    from apps.audit.models import AuditEvent  # noqa: PLC0415  # Deferred: ADR-0007 cross-app model import
+
     setting_ct = ContentType.objects.get_for_model(SystemSetting)
     recent_events = AuditEvent.objects.filter(content_type=setting_ct).select_related("user").order_by("-timestamp")[:8]
 
@@ -810,6 +811,8 @@ def settings_search(request: HttpRequest) -> HttpResponse:
 @user_passes_test(is_staff_user)
 def setting_history(request: HttpRequest, key: str) -> HttpResponse:
     """🕘 HTMX drawer: audit history for one setting key"""
+    from apps.audit.models import AuditEvent  # noqa: PLC0415  # Deferred: ADR-0007 cross-app model import
+
     definition = CATALOG_BY_KEY.get(key)
     if definition is None:
         raise Http404("Unknown setting")
