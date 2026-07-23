@@ -92,7 +92,7 @@ class CustomerCreditService:
             fallback_score = CustomerCreditService.calculate_credit_score(customer)
 
             # Calculate score adjustment based on event type — use runtime config, not stale alias
-            adjustment = get_credit_adjustments().get(event_type, 0)
+            requested_adjustment = get_credit_adjustments().get(event_type, 0)
 
             # Apply additional modifiers based on customer history
             if event_type == "positive_payment":
@@ -101,13 +101,14 @@ class CustomerCreditService:
                 consecutive_bonus_6 = SettingsService.get_integer_setting("billing.credit_consecutive_bonus_6", 10)
                 consecutive_bonus_12 = SettingsService.get_integer_setting("billing.credit_consecutive_bonus_12", 20)
                 if consecutive_on_time >= CONSECUTIVE_PAYMENTS_TIER_2:
-                    adjustment += consecutive_bonus_12  # Larger bonus for 12+ consecutive
+                    requested_adjustment += consecutive_bonus_12  # Larger bonus for 12+ consecutive
                 elif consecutive_on_time >= CONSECUTIVE_PAYMENTS_TIER_1:
-                    adjustment += consecutive_bonus_6  # Bonus for 6+ consecutive on-time payments
+                    requested_adjustment += consecutive_bonus_6  # Bonus for 6+ consecutive on-time payments
 
             # Initialise to fallback values; will be overwritten inside the lock if meta is available
             current_score = fallback_score
-            new_score = max(MIN_CREDIT_SCORE, min(MAX_CREDIT_SCORE, current_score + adjustment))
+            new_score = max(MIN_CREDIT_SCORE, min(MAX_CREDIT_SCORE, current_score + requested_adjustment))
+            applied_adjustment = new_score - current_score
 
             if hasattr(customer, "meta"):
                 # Narrow lock: prevent lost updates from concurrent meta writers.
@@ -119,7 +120,8 @@ class CustomerCreditService:
                     locked_meta = locked.meta or {}
                     # Use stored score from locked row (authoritative), fall back to computed score
                     current_score = locked_meta.get("credit_score", fallback_score)
-                    new_score = max(MIN_CREDIT_SCORE, min(MAX_CREDIT_SCORE, current_score + adjustment))
+                    new_score = max(MIN_CREDIT_SCORE, min(MAX_CREDIT_SCORE, current_score + requested_adjustment))
+                    applied_adjustment = new_score - current_score
 
                     # Read credit_history from the locked row, not from the stale customer object
                     credit_history = locked_meta.get("credit_history", [])
@@ -128,7 +130,8 @@ class CustomerCreditService:
                         "event_date": event_date.isoformat(),
                         "score_before": current_score,
                         "score_after": new_score,
-                        "adjustment": adjustment,
+                        "adjustment": applied_adjustment,
+                        "requested_adjustment": requested_adjustment,
                         "recorded_at": timezone.now().isoformat(),
                     }
                     credit_history.append(credit_event)
@@ -148,21 +151,22 @@ class CustomerCreditService:
                 event_type="credit_score_updated",
                 user=None,
                 content_object=customer,
-                description=f"Credit score updated for {customer}: {event_type} ({adjustment:+d})",
+                description=f"Credit score updated for {customer}: {event_type} ({applied_adjustment:+d})",
                 actor_type="system",
                 metadata={
                     "customer_id": str(customer.id),
                     "event_type": event_type,
                     "score_before": current_score,
                     "score_after": new_score,
-                    "adjustment": adjustment,
+                    "adjustment": applied_adjustment,
+                    "requested_adjustment": requested_adjustment,
                     "source_app": "customers",
                 },
             )
 
             logger.info(
                 f"📊 [Credit] Updated score for {customer}: {event_type} "
-                f"({current_score} -> {new_score}, {adjustment:+d})"
+                f"({current_score} -> {new_score}, {applied_adjustment:+d})"
             )
 
             return {
@@ -171,7 +175,7 @@ class CustomerCreditService:
                 "event_type": event_type,
                 "score_before": current_score,
                 "score_after": new_score,
-                "adjustment": adjustment,
+                "adjustment": applied_adjustment,
             }
 
         except Exception as e:
@@ -179,7 +183,13 @@ class CustomerCreditService:
             raise
 
     @staticmethod
-    def revert_credit_change(customer: Customer, event_type: str, event_date: datetime) -> dict[str, Any]:
+    def revert_credit_change(
+        customer: Customer,
+        event_type: str,
+        event_date: datetime,
+        *,
+        applied_adjustment: int | None = None,
+    ) -> dict[str, Any]:
         """
         Revert a previously applied credit score change.
 
@@ -187,6 +197,8 @@ class CustomerCreditService:
             customer: Customer instance
             event_type: Type of event to revert
             event_date: When the original event occurred
+            applied_adjustment: Exact score delta applied by the original event.
+                Falls back to the current configured event adjustment for legacy callers.
 
         Returns:
             Dictionary with reversion details
@@ -199,13 +211,17 @@ class CustomerCreditService:
             # Compute fallback score OUTSIDE the lock (may use stale cached data, but safe as fallback)
             fallback_score = CustomerCreditService.calculate_credit_score(customer)
 
-            # Get the original adjustment and reverse it — use runtime config, not stale alias
-            original_adjustment = get_credit_adjustments().get(event_type, 0)
-            reversion_adjustment = -original_adjustment
+            # New payment events persist their exact applied delta so clamps, bonuses,
+            # and later settings changes remain reversible. Legacy callers fall back.
+            original_adjustment = (
+                get_credit_adjustments().get(event_type, 0) if applied_adjustment is None else applied_adjustment
+            )
+            requested_reversion = -original_adjustment
 
             # Initialise to fallback values; will be overwritten inside the lock if meta is available
             current_score = fallback_score
-            new_score = max(MIN_CREDIT_SCORE, min(MAX_CREDIT_SCORE, current_score + reversion_adjustment))
+            new_score = max(MIN_CREDIT_SCORE, min(MAX_CREDIT_SCORE, current_score + requested_reversion))
+            reversion_adjustment = new_score - current_score
 
             # Record reversion in credit history (locked to prevent lost updates)
             if hasattr(customer, "meta"):
@@ -217,7 +233,8 @@ class CustomerCreditService:
                     locked_meta = locked.meta or {}
                     # Use stored score from locked row (authoritative), fall back to computed score
                     current_score = locked_meta.get("credit_score", fallback_score)
-                    new_score = max(MIN_CREDIT_SCORE, min(MAX_CREDIT_SCORE, current_score + reversion_adjustment))
+                    new_score = max(MIN_CREDIT_SCORE, min(MAX_CREDIT_SCORE, current_score + requested_reversion))
+                    reversion_adjustment = new_score - current_score
 
                     reversion_event = {
                         "event_type": f"revert_{event_type}",
@@ -225,6 +242,7 @@ class CustomerCreditService:
                         "score_before": current_score,
                         "score_after": new_score,
                         "adjustment": reversion_adjustment,
+                        "requested_adjustment": requested_reversion,
                         "recorded_at": timezone.now().isoformat(),
                     }
                     credit_history = locked_meta.get("credit_history", [])
@@ -248,6 +266,7 @@ class CustomerCreditService:
                     "score_before": current_score,
                     "score_after": new_score,
                     "adjustment": reversion_adjustment,
+                    "requested_adjustment": requested_reversion,
                     "source_app": "customers",
                 },
             )

@@ -103,6 +103,15 @@ class TestCreditServiceUpdateScore(TestCase):
         self.assertIsNotNone(self.customer.meta)
         self.assertIn("credit_score", self.customer.meta)
 
+    def test_clamped_update_reports_the_actual_applied_adjustment(self) -> None:
+        self.customer.meta = {"credit_score": MAX_CREDIT_SCORE}
+        self.customer.save(update_fields=["meta"])
+
+        result = CustomerCreditService.update_credit_score(self.customer, "positive_payment", timezone.now())
+
+        self.assertEqual(result["adjustment"], 0)
+        self.assertEqual(result["score_after"], MAX_CREDIT_SCORE)
+
     def test_refund_adjustment_and_reversal_use_the_configured_event(self) -> None:
         self.customer.meta = {"credit_score": 750}
         self.customer.save(update_fields=["meta"])
@@ -272,6 +281,20 @@ class TestCreditServiceReversion(TestCase):
             self.customer, "failed_payment", timezone.now()
         )
         self.assertEqual(result["adjustment"], -original_adj)
+
+    def test_revert_uses_the_recorded_applied_adjustment_instead_of_current_configuration(self) -> None:
+        self.customer.meta = {"credit_score": 0}
+        self.customer.save(update_fields=["meta"])
+
+        result = CustomerCreditService.revert_credit_change(
+            self.customer,
+            "refund_issued",
+            timezone.now(),
+            applied_adjustment=0,
+        )
+
+        self.assertEqual(result["adjustment"], 0)
+        self.assertEqual(result["score_after"], 0)
 
 
 class TestCreditServicePaymentStatistics(TestCase):
