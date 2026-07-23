@@ -368,7 +368,11 @@ class CustomerCreditService:
                 total=Count("id"),
                 successful=Count("id", filter=Q(status="succeeded")),
                 failed=Count("id", filter=Q(status="failed")),
-                on_time=Count("id", filter=Q(status="succeeded", created_at__lte=F("invoice__due_at"))),
+                on_time=Count(
+                    "id",
+                    filter=Q(status="succeeded")
+                    & (Q(invoice__due_at__isnull=True) | Q(created_at__lte=F("invoice__due_at"))),
+                ),
             )
 
             return {

@@ -8,7 +8,7 @@ import uuid
 from datetime import datetime, timedelta
 from decimal import Decimal
 from enum import Enum
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 from django.db import transaction
 from django.test import TestCase, override_settings
@@ -788,7 +788,7 @@ class TestPaymentCleanup(TestCase):
         payment = _make_payment(self.customer, currency=self.currency, status="succeeded")
         payment.delete()
         mock_sec.assert_called_once()
-        mock_revert.assert_called_once_with(self.customer, "payment_deleted")
+        mock_revert.assert_called_once_with(self.customer, "positive_payment")
 
     @patch("apps.billing.signals._revert_customer_credit_score")
     @patch("apps.billing.signals._cleanup_payment_files")
@@ -1152,7 +1152,49 @@ class TestUpdateCustomerPaymentCredit(TestCase):
         payment = MagicMock()
         payment.status = "refunded"
         _update_customer_payment_credit(payment, "succeeded")
-        mock_ccs.update_credit_score.assert_called_once()
+        mock_ccs.update_credit_score.assert_called_once_with(
+            customer=payment.customer,
+            event_type="refund_issued",
+            event_date=ANY,
+        )
+
+    @patch("apps.customers.services.CustomerCreditService")
+    def test_partial_refund_applies_refund_adjustment_once(self, mock_ccs):
+        payment = MagicMock()
+        payment.status = "partially_refunded"
+
+        _update_customer_payment_credit(payment, "succeeded")
+
+        mock_ccs.update_credit_score.assert_called_once_with(
+            customer=payment.customer,
+            event_type="refund_issued",
+            event_date=ANY,
+        )
+        mock_ccs.revert_credit_change.assert_not_called()
+
+    @patch("apps.customers.services.CustomerCreditService")
+    def test_partial_to_full_refund_does_not_apply_a_second_adjustment(self, mock_ccs):
+        payment = MagicMock()
+        payment.status = "refunded"
+
+        _update_customer_payment_credit(payment, "partially_refunded")
+
+        mock_ccs.update_credit_score.assert_not_called()
+        mock_ccs.revert_credit_change.assert_not_called()
+
+    @patch("apps.customers.services.CustomerCreditService")
+    def test_refund_reversal_reverts_the_refund_adjustment(self, mock_ccs):
+        payment = MagicMock()
+        payment.status = "succeeded"
+
+        _update_customer_payment_credit(payment, "refunded")
+
+        mock_ccs.update_credit_score.assert_not_called()
+        mock_ccs.revert_credit_change.assert_called_once_with(
+            customer=payment.customer,
+            event_type="refund_issued",
+            event_date=ANY,
+        )
 
     @patch("apps.customers.services.CustomerCreditService")
     def test_no_change(self, mock_ccs):
@@ -2078,7 +2120,7 @@ class TestRevertCustomerCreditScore(TestCase):
     @patch("apps.customers.services.CustomerCreditService")
     def test_flow(self, mock_ccs):
         customer = MagicMock()
-        _revert_customer_credit_score(customer, "payment_deleted")
+        _revert_customer_credit_score(customer, "positive_payment")
         mock_ccs.revert_credit_change.assert_called_once()
 
     def test_exception_handling(self):

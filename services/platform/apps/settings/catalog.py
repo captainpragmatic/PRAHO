@@ -391,6 +391,22 @@ CATALOG: tuple[SettingDef, ...] = (
         validation={"min": 0},
     ),
     SettingDef(
+        key="billing.invoice_generation_lead_days",
+        data_type="integer",
+        default=14,
+        group="billing",
+        section=_("Invoicing"),
+        label=_("Renewal billing notice lead time"),
+        help_text=_(
+            "Generate renewal proformas this many days before the paid-through date. "
+            "The global range is 7-30 days so automatic collection never precedes the billing notice "
+            "and advance billing stays bounded for monthly services."
+        ),
+        unit="days",
+        input_kind="number",
+        validation={"min": 7, "max": 30},
+    ),
+    SettingDef(
         key="billing.invoice_payment_terms_days",
         data_type="integer",
         default=14,

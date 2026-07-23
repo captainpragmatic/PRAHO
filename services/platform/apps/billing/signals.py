@@ -672,7 +672,7 @@ def handle_payment_cleanup(sender: type[Payment], instance: Payment, **kwargs: A
 
         # Update customer payment statistics
         if instance.status == "succeeded":
-            _revert_customer_credit_score(instance.customer, "payment_deleted")
+            _revert_customer_credit_score(instance.customer, "positive_payment")
 
         logger.info(f"🗑️ [Payment] Cleaned up deleted payment {instance.id}")
 
@@ -973,14 +973,18 @@ def _update_customer_payment_credit(payment: Payment, old_status: str) -> None:
         from apps.customers.services import CustomerCreditService
 
         event_type = None
+        reverted_event_type = None
+        refund_statuses = {"partially_refunded", "refunded"}
         # `old_status == "pending"` only: a refund reversal restoring 'succeeded' (see
         # handle_payment_created_or_updated) is not a new positive payment.
         if payment.status == "succeeded" and old_status == "pending":
             event_type = "positive_payment"
+        elif payment.status == "succeeded" and old_status in refund_statuses:
+            reverted_event_type = "refund_issued"
         elif payment.status == "failed" and old_status != "failed":
             event_type = "failed_payment"
-        elif payment.status == "refunded" and old_status != "refunded":
-            event_type = "refund_processed"
+        elif payment.status in refund_statuses and old_status not in refund_statuses:
+            event_type = "refund_issued"
 
         if event_type:
             CustomerCreditService.update_credit_score(
@@ -988,6 +992,17 @@ def _update_customer_payment_credit(payment: Payment, old_status: str) -> None:
             )
 
             logger.info(f"📊 [Customer] Updated credit score for {payment.customer.id}: {event_type}")
+        elif reverted_event_type:
+            CustomerCreditService.revert_credit_change(
+                customer=payment.customer,
+                event_type=reverted_event_type,
+                event_date=timezone.now(),
+            )
+            logger.info(
+                "📊 [Customer] Reverted credit score event for %s: %s",
+                payment.customer.id,
+                reverted_event_type,
+            )
 
     except Exception as e:
         logger.exception(f"🔥 [Customer] Credit score update failed: {e}")
