@@ -222,6 +222,50 @@ class FileIntegrityBaselineTestCase(TestCase):
         self.assertEqual(results["status"], "error")
         self.assertGreater(len(results["hash_errors"]), 0)
 
+    def test_rebaseline_aborts_on_hashing_failure_and_preserves_baselines(self) -> None:
+        """A partial rebaseline would permanently lose the trusted hash for the
+        failed file - on any hashing error the existing set must stay untouched."""
+        rebaseline_file_integrity()
+        before = dict(FileIntegrityBaseline.objects.values_list("path", "sha256"))
+        self.assertGreater(len(before), 0)
+
+        with patch("apps.audit.tasks._calculate_file_hash", side_effect=OSError("disk error")):
+            result = rebaseline_file_integrity()
+
+        self.assertEqual(result["baselined"], 0)
+        self.assertGreater(len(result["errors"]), 0)
+        self.assertIsNone(result["rebaselined_at"])
+        after = dict(FileIntegrityBaseline.objects.values_list("path", "sha256"))
+        self.assertEqual(after, before)
+
+
+class IntegrityTaskStatusRollupTestCase(TestCase):
+    """The scheduled task must never report healthy when verification could not run."""
+
+    def test_err_from_verifier_degrades_aggregate_status(self) -> None:
+        from apps.audit.tasks import run_integrity_check  # noqa: PLC0415  # Deferred: test-local
+        from apps.common.types import Err  # noqa: PLC0415  # Deferred: test-local
+
+        with patch(
+            "apps.audit.tasks.AuditIntegrityService.verify_audit_integrity",
+            return_value=Err("db unavailable"),
+        ):
+            results = run_integrity_check(check_type="hash_verification")
+
+        self.assertEqual(results["status"], "error")
+        self.assertEqual(results["checks"][0]["status"], "error")
+
+    def test_exception_from_verifier_degrades_aggregate_status(self) -> None:
+        from apps.audit.tasks import run_integrity_check  # noqa: PLC0415  # Deferred: test-local
+
+        with patch(
+            "apps.audit.tasks.AuditIntegrityService.verify_audit_integrity",
+            side_effect=RuntimeError("verifier exploded"),
+        ):
+            results = run_integrity_check(check_type="hash_verification")
+
+        self.assertEqual(results["status"], "error")
+
 
 class DedupLedgerRetentionLockInTestCase(TestCase):
     """m7: customers/tasks.py uses customer_feedback_processed events with

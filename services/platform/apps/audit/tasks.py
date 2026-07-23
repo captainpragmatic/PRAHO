@@ -118,6 +118,8 @@ def run_integrity_check(
                         "error": result.error,
                     }
                 )
+                if results["status"] != "compromised":
+                    results["status"] = "error"
 
         except Exception as e:
             logger.exception(f"[Integrity Task] {ct} exception: {e}")
@@ -128,6 +130,8 @@ def run_integrity_check(
                     "error": str(e),
                 }
             )
+            if results["status"] != "compromised":
+                results["status"] = "error"
 
     results["completed_at"] = timezone.now().isoformat()
 
@@ -277,11 +281,18 @@ def rebaseline_file_integrity() -> dict[str, Any]:
         except Exception as e:
             errors.append({"path": relative_path, "error": str(e)})
 
+    if errors:
+        # All-or-nothing: replacing the trusted set with a partial one would
+        # permanently lose the reference hash for every file that failed to hash -
+        # the next check could no longer detect a modification to it.
+        logger.error(f"🔥 [File Integrity] Rebaseline aborted; {len(errors)} hashing failures, baselines untouched")
+        return {"baselined": 0, "errors": errors, "rebaselined_at": None}
+
     with transaction.atomic():
         FileIntegrityBaseline.objects.all().delete()
         FileIntegrityBaseline.objects.bulk_create(entries)
 
-    logger.info(f"✅ [File Integrity] Rebaselined {len(entries)} files ({len(errors)} errors)")
+    logger.info(f"✅ [File Integrity] Rebaselined {len(entries)} files")
     return {"baselined": len(entries), "errors": errors, "rebaselined_at": timezone.now().isoformat()}
 
 

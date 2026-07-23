@@ -302,9 +302,9 @@ Both systems use **AES-256-GCM** (NIST SP 800-38D). For full standards mapping, 
 |---------|--------|
 | Cryptographic Hash Tracking | Implemented — SHA-256 |
 | Critical File Monitoring | Implemented — `config/settings/*.py`, `apps/common/encryption.py`, `apps/users/mfa.py`, `apps/common/middleware.py`, `apps/users/views.py`, `apps/common/security_decorators.py` |
-| Change Detection | Implemented — CREATED, MODIFIED, DELETED, PERMISSIONS_CHANGED, OWNER_CHANGED |
-| Baseline Establishment | Implemented — cache-based with 30-day timeout |
-| Scheduled Monitoring | Implemented — Django-Q2 tasks with 6h interval (`apps/audit/tasks.py`) |
+| Change Detection | Implemented — two-way baseline-vs-disk diff: changed (compromised), new/missing files (warning), hashing failures (error) |
+| Baseline Establishment | Implemented — durable `FileIntegrityBaseline` rows, replaced only by an explicit `run_integrity_check --rebaseline` (deploy runbook step); checks never mutate baselines |
+| Scheduled Monitoring | Implemented — daily via `setup_audit_scheduled_tasks` (`apps/audit/tasks.py`) |
 | Alert Generation | Implemented — `AuditAlert` integration |
 | Management Command | Implemented — `run_integrity_check` |
 | Data Retention | Implemented — 90-day cleanup for healthy checks, retain all warnings/compromised |
