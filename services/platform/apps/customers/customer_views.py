@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import logging
 from contextlib import suppress
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import urlencode
 
 from django.contrib import messages
@@ -22,20 +22,19 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils.translation import gettext_lazy as _
 
-from apps.billing.models import Invoice
 from apps.common.constants import SEARCH_QUERY_MIN_LENGTH
 from apps.common.decorators import staff_required
 from apps.common.rate_limiting import rate_limit
 from apps.common.types import Err
 from apps.customers.contact_models import CustomerAddress
-from apps.provisioning.models import Service
-from apps.tickets.models import Ticket
-from apps.users.models import User
 from apps.users.services import CustomerUserService, UserCreationRequest, UserLinkingRequest
 
 from .customer_models import Customer
 from .customer_service import CustomerService
 from .forms import CustomerCreationForm, CustomerEditForm, CustomerUserAssignmentForm
+
+if TYPE_CHECKING:
+    from apps.users.models import User
 
 logger = logging.getLogger(__name__)
 security_logger = logging.getLogger("security")
@@ -126,7 +125,7 @@ def _build_customer_queryset(
 @login_required
 def customer_list(request: HttpRequest) -> HttpResponse:
     """👥 Display list of customers with search, filtering, and HTMX support."""
-    user = cast(User, request.user)
+    user = cast("User", request.user)
 
     search_query = request.GET.get("q", "").strip()
     status_filter = request.GET.get("status", "").strip()
@@ -213,7 +212,7 @@ def customer_list(request: HttpRequest) -> HttpResponse:
 @rate_limit(key="user", rate="45/m", method="GET")
 def customer_search_htmx(request: HttpRequest) -> HttpResponse:
     """🔄 HTMX endpoint for live customer filtering."""
-    user = cast(User, request.user)
+    user = cast("User", request.user)
 
     search_query = request.GET.get("q", "").strip()
     status_filter = request.GET.get("status", "").strip()
@@ -242,8 +241,12 @@ def customer_detail(request: HttpRequest, customer_id: int) -> HttpResponse:
     🔍 Customer detail view with all related information
     Shows normalized data from separate profile models
     """
+    from apps.billing.models import Invoice  # noqa: PLC0415 - ADR-0007 cross-app model import
+    from apps.provisioning.models import Service  # noqa: PLC0415 - ADR-0007 cross-app model import
+    from apps.tickets.models import Ticket  # noqa: PLC0415 - ADR-0007 cross-app model import
+
     # 🔒 Security: Check access permissions BEFORE object retrieval to prevent enumeration
-    user = cast(User, request.user)  # Safe due to @login_required
+    user = cast("User", request.user)  # Safe due to @login_required
     accessible_qs = CustomerService.get_accessible_customers(user)
 
     # Expected queries: 4 (customer + tax + billing + addresses)
@@ -349,7 +352,7 @@ def _handle_user_creation_for_customer(
     request: HttpRequest, customer: Customer, form_data: dict[str, str], result: dict[str, str]
 ) -> None:
     """Handle user creation for a new customer."""
-    created_by_user = cast(User, request.user)  # Safe in authenticated contexts
+    created_by_user = cast("User", request.user)  # Safe in authenticated contexts
     user_creation_request = UserCreationRequest(
         customer=customer,
         first_name=form_data.get("first_name", ""),
@@ -375,7 +378,7 @@ def _handle_user_linking_for_customer(request: HttpRequest, customer: Customer, 
     if not existing_user:
         return
 
-    created_by_user = cast(User, request.user)  # Safe in authenticated contexts
+    created_by_user = cast("User", request.user)  # Safe in authenticated contexts
     user_linking_request = UserLinkingRequest(
         user=existing_user, customer=customer, role="owner", is_primary=True, created_by=created_by_user
     )
@@ -413,7 +416,7 @@ def _handle_customer_create_post(request: HttpRequest) -> HttpResponse:
 
     try:
         # Save customer and get result data
-        user = cast(User, request.user)  # Safe in authenticated contexts
+        user = cast("User", request.user)  # Safe in authenticated contexts
         result = form.save(user=user)
         customer = result["customer"]
         user_action = result["user_action"]
@@ -465,7 +468,7 @@ def customer_edit(request: HttpRequest, customer_id: int) -> HttpResponse:
     Edits core customer, tax profile, billing profile, and primary address
     """
     # 🔒 Security: Check access permissions BEFORE object retrieval to prevent enumeration
-    user = cast(User, request.user)  # Safe due to @staff_required
+    user = cast("User", request.user)  # Safe due to @staff_required
     accessible_qs = CustomerService.get_accessible_customers(user)
     # Prefetch related profiles for efficiency
     customer = get_object_or_404(
@@ -517,7 +520,7 @@ def customer_delete(request: HttpRequest, customer_id: int) -> HttpResponse:
     🗑️ Soft delete customer (preserves audit trail)
     """
     # 🔒 Security: Check access permissions BEFORE object retrieval to prevent enumeration
-    user = cast(User, request.user)  # Safe due to @staff_required
+    user = cast("User", request.user)  # Safe due to @staff_required
     accessible_qs = CustomerService.get_accessible_customers(user)
     customer = get_object_or_404(accessible_qs, id=customer_id)
 
@@ -531,7 +534,7 @@ def customer_delete(request: HttpRequest, customer_id: int) -> HttpResponse:
             return render(request, "customers/delete_confirm.html", {"customer": customer})
 
         # Soft delete preserves all related data
-        user = cast(User, request.user)  # Safe due to @staff_required
+        user = cast("User", request.user)  # Safe due to @staff_required
         customer.soft_delete(user=user)
         messages.success(
             request,
@@ -561,7 +564,7 @@ def customer_search_api(request: HttpRequest) -> JsonResponse:
     if len(query) < SEARCH_QUERY_MIN_LENGTH:
         return JsonResponse({"results": []})
 
-    user = cast(User, request.user)  # Safe due to @login_required
+    user = cast("User", request.user)  # Safe due to @login_required
     customers = CustomerService.search_customers(query, user)[:10]
 
     results = [
@@ -591,7 +594,7 @@ def _validate_customer_assign_access(request: HttpRequest, user: User, customer:
 def _handle_user_creation_action(request: HttpRequest, customer: Customer, assignment_data: dict[str, str]) -> None:
     """Handle the 'create' action for user assignment."""
     send_welcome = bool(assignment_data.get("send_welcome_email", True))
-    created_by_user = cast(User, request.user)  # Safe in authenticated contexts
+    created_by_user = cast("User", request.user)  # Safe in authenticated contexts
     user_creation_request = UserCreationRequest(
         customer=customer,
         first_name=assignment_data["first_name"],
@@ -633,6 +636,8 @@ def _handle_user_linking_action(request: HttpRequest, customer: Customer, assign
     existing_user = assignment_data["existing_user"]
     role = assignment_data["role"]
 
+    from apps.users.models import User  # noqa: PLC0415 - ADR-0007 cross-app model import
+
     if not existing_user:
         messages.error(request, _("❌ No user selected for linking"))
         return
@@ -641,7 +646,7 @@ def _handle_user_linking_action(request: HttpRequest, customer: Customer, assign
         messages.error(request, _("❌ Invalid user selected"))
         return
 
-    created_by_user = cast(User, request.user)  # Safe in authenticated contexts
+    created_by_user = cast("User", request.user)  # Safe in authenticated contexts
     user_linking_request = UserLinkingRequest(
         user=existing_user,
         customer=customer,
@@ -678,7 +683,7 @@ def _handle_user_assignment_post(request: HttpRequest, customer: Customer) -> Ht
         return _render_assignment_form(request, form, customer)
 
     try:
-        created_by_user = cast(User, request.user)  # Safe in authenticated contexts
+        created_by_user = cast("User", request.user)  # Safe in authenticated contexts
         assignment_data = form.save(customer=customer, created_by=created_by_user)
         action = assignment_data["action"]
 
@@ -728,7 +733,7 @@ def customer_assign_user(request: HttpRequest, customer_id: int) -> HttpResponse
     Provides same three-option workflow as customer creation
     """
     # 🔒 Security: Check access permissions BEFORE object retrieval to prevent enumeration
-    user = cast(User, request.user)  # Safe due to @staff_required
+    user = cast("User", request.user)  # Safe due to @staff_required
     accessible_qs = CustomerService.get_accessible_customers(user)
     customer = get_object_or_404(accessible_qs, id=customer_id)
 
@@ -745,13 +750,15 @@ def customer_services_api(request: HttpRequest, customer_id: int) -> JsonRespons
     🔗 API endpoint for customer services (for ticket form) with rate limiting
     Returns real Service objects filtered by customer access.
     """
+    from apps.provisioning.models import Service  # noqa: PLC0415 - ADR-0007 cross-app model import
+
     # Check if rate limited
     if getattr(request, "limited", False):
         logger.warning(f"🚨 [Security] Rate limit exceeded for services API by user {request.user.id}")
         return JsonResponse({"error": "Too many requests. Please slow down."}, status=429)
 
     # Verify user has access to this customer
-    user = cast(User, request.user)
+    user = cast("User", request.user)
     customers_qs = CustomerService.get_accessible_customers(user)
 
     if not customers_qs.filter(id=customer_id).exists():

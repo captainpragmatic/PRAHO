@@ -70,9 +70,9 @@ def handle_setting_saved(sender: Any, instance: SystemSetting, created: bool, **
             old_values = {"value": context.get("old_value")}
             new_values = {"value": context.get("new_value")}
 
-        # Savepoint: a failed audit INSERT inside this swallowing handler would otherwise
-        # mark the caller's transaction needs-rollback and silently undo the setting write
-        # (the lazy-proxy incident: UPDATE -> ROLLBACK TO SAVEPOINT with no error surfaced).
+        # Savepoint isolation (customers/signals.py pattern): a DB-level audit failure
+        # must not poison the caller's transaction — catching the Python exception alone
+        # does not recover the connection.
         with transaction.atomic():
             AuditService.log_simple_event(
                 event_type=action,
@@ -84,11 +84,14 @@ def handle_setting_saved(sender: Any, instance: SystemSetting, created: bool, **
                 metadata=metadata,
             )
 
-        logger.info(
-            "✅ [Settings Signal] Setting %s %s: %s",
-            instance.key,
-            action,
-            instance.get_display_value() if not instance.is_sensitive else "(hidden)",
+        # Capture primitives NOW: the instance may be saved again before commit
+        # (multi-key change sets), and a closure over it would log the FINAL
+        # value for every deferred line instead of this save's value.
+        logged_display = instance.get_display_value() if not instance.is_sensitive else "(hidden)"
+        transaction.on_commit(
+            lambda key=instance.key, act=action, val=logged_display: logger.info(
+                "✅ [Settings Signal] Setting %s %s: %s", key, act, val
+            )
         )
 
         # Notify only after the surrounding transaction commits — a later failure
@@ -112,7 +115,7 @@ def handle_setting_deleted(sender: Any, instance: SystemSetting, **kwargs: Any) 
     try:
         transaction.on_commit(lambda key=instance.key: SettingsService._clear_setting_cache(key))
 
-        # Savepoint: same rationale as handle_setting_saved - audit failure must not
+        # Savepoint: same rationale as handle_setting_saved — audit failure must not
         # poison the caller's transaction.
         with transaction.atomic():
             AuditService.log_simple_event(

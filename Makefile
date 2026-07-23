@@ -3,7 +3,7 @@
 # ===============================================================================
 # Enhanced for Platform/Portal separation with scoped PYTHONPATH security
 
-.PHONY: help install check-env dev dev-e2e dev-e2e-bg dev-platform dev-portal dev-all test test-fast test-file test-platform test-platform-fast test-ci test-ci-focused test-portal test-integration test-e2e test-with-e2e test-e2e-platform test-e2e-portal test-e2e-orm test-security test-cache show-test-deps install-frontend build-css watch-css check-css-tooling migrate fixtures fixtures-light clean-cache clean-dist clean-db-and-logs clean-nuke lint lint-fix lint-platform lint-portal lint-security lint-health lint-credentials lint-audit lint-fsm lint-test-layout check-types check-types-platform check-types-portal pre-commit infra-init infra-plan infra-dev infra-staging infra-prod infra-destroy-dev deploy-dev deploy-staging deploy-prod i18n-extract i18n-compile translate translate-platform translate-portal translate-ai translate-ai-platform translate-ai-portal translate-review translate-apply translate-diff translate-stats translate-stats-platform translate-stats-portal audit-a11y audit-a11y-strict audit-dark-mode audit-dark-mode-strict
+.PHONY: help install check-env dev dev-e2e dev-e2e-bg dev-platform dev-portal dev-all test test-fast test-file test-platform test-platform-fast test-ci test-ci-focused test-portal test-integration test-e2e test-with-e2e test-e2e-platform test-e2e-portal test-e2e-orm test-security test-cache show-test-deps install-frontend build-css watch-css check-css-tooling migrate fixtures fixtures-light clean-cache clean-dist clean-db-and-logs clean-nuke lint lint-fix lint-platform lint-portal lint-security lint-health lint-credentials lint-audit lint-fsm lint-imports lint-test-layout check-types check-types-platform check-types-portal pre-commit infra-init infra-plan infra-dev infra-staging infra-prod infra-destroy-dev deploy-dev deploy-staging deploy-prod i18n-extract i18n-compile translate translate-platform translate-portal translate-ai translate-ai-platform translate-ai-portal translate-review translate-apply translate-diff translate-stats translate-stats-platform translate-stats-portal audit-a11y audit-a11y-strict audit-dark-mode audit-dark-mode-strict
 
 # ===============================================================================
 # SCOPED PYTHON ENVIRONMENTS 🔒
@@ -73,6 +73,7 @@ help:
 	@echo "  make lint-platform   - Lint platform service only"
 	@echo "  make lint-portal     - Lint portal service only"
 	@echo "  make lint-fsm        - FSM guardrail lint (ADR-0034)"
+	@echo "  make lint-imports    - Cross-app model import lint (ADR-0007)"
 	@echo "  make lint-security   - Security vulnerabilities (Semgrep + credentials)"
 	@echo "  make lint-health     - Code health anti-pattern scan"
 	@echo "  make check-types     - Type check all services"
@@ -573,6 +574,8 @@ else
 	@$(VENV_DIR)/bin/python scripts/code_health_scan.py --min-severity=high --exclude-tests --allowlist=scripts/code_health_allowlist.txt services/platform/apps || true
 	@echo "📋 Phase 7: FSM guardrail lint (ADR-0034)"
 	@$(MAKE) lint-fsm
+	@echo "📋 Phase 8: Cross-app model import lint (ADR-0007)"
+	@$(MAKE) lint-imports
 	@echo "🎉 All services linting complete!"
 endif
 
@@ -600,6 +603,11 @@ lint-fsm:
 	@echo "🔒 [FSM] FSM guardrail lint (ADR-0034)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@$(VENV_DIR)/bin/python scripts/lint_fsm_guardrails.py
+
+lint-imports:
+	@echo "🔗 [Architecture] Cross-app model import lint (ADR-0007)..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@$(VENV_DIR)/bin/python scripts/lint_cross_app_model_imports.py $(if $(PRINT_BASELINE),--print-baseline)
 
 lint-security:
 	@echo "🔒 [Security] Static security analysis..."
