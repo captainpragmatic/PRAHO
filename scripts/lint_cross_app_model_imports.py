@@ -142,6 +142,19 @@ def compare_baseline(violations: list[Violation], baseline: set[str]) -> tuple[l
     return [violation for violation in violations if violation.key not in baseline], sorted(baseline - current)
 
 
+def format_violation(violation: Violation) -> str:
+    """Name the dependency without duplicating the trailing module segment.
+
+    ``import apps.x.y_models`` records name == last module segment; printing
+    ``module.name`` there would render ``...y_models.y_models``.
+    """
+    if violation.imported_module.rsplit(".", maxsplit=1)[-1] == violation.imported_name:
+        dependency = violation.imported_module
+    else:
+        dependency = f"{violation.imported_module}.{violation.imported_name}"
+    return f"{violation.file}:{violation.line}: ADR-0007: defer {dependency} to function scope"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("roots", nargs="*", type=Path, default=[Path(APP_ROOT)])
@@ -156,10 +169,7 @@ def main() -> int:
 
     new, stale = compare_baseline(violations, load_baseline(args.baseline))
     for violation in new:
-        print(
-            f"{violation.file}:{violation.line}: ADR-0007: defer "
-            f"{violation.imported_module}.{violation.imported_name} to function scope"
-        )
+        print(format_violation(violation))
     for entry in stale:
         print(f"ADR-0007 baseline entry is stale and must be removed: {entry}")
     if new or stale:
