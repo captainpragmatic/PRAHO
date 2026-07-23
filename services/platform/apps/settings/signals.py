@@ -84,12 +84,13 @@ def handle_setting_saved(sender: Any, instance: SystemSetting, created: bool, **
                 metadata=metadata,
             )
 
+        # Capture primitives NOW: the instance may be saved again before commit
+        # (multi-key change sets), and a closure over it would log the FINAL
+        # value for every deferred line instead of this save's value.
+        logged_display = instance.get_display_value() if not instance.is_sensitive else "(hidden)"
         transaction.on_commit(
-            lambda: logger.info(
-                "✅ [Settings Signal] Setting %s %s: %s",
-                instance.key,
-                action,
-                instance.get_display_value() if not instance.is_sensitive else "(hidden)",
+            lambda key=instance.key, act=action, val=logged_display: logger.info(
+                "✅ [Settings Signal] Setting %s %s: %s", key, act, val
             )
         )
 
