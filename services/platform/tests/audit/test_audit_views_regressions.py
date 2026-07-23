@@ -1836,3 +1836,30 @@ class ParseDateFiltersTests(TestCase):
         filters = {"start_date": dt}
         result = _parse_date_filters(filters)
         self.assertEqual(result["start_date"], dt)
+
+
+class AuditUiReachabilityTests(AuditViewsBaseTestCase):
+    """C5: the management hub is reachable from staff nav and saved searches render."""
+
+    def test_staff_nav_links_the_management_hub(self):
+        self.client.force_login(self.staff_user)
+        resp = self.client.get(reverse("audit:logs"))
+        self.assertContains(resp, "/audit/management/")
+
+    def test_logs_page_renders_saved_searches(self):
+        AuditSearchQuery.objects.create(
+            name="My failed logins",
+            query_params={"action": "login_failed"},
+            created_by=self.staff_user,
+            is_shared=False,
+        )
+        self.client.force_login(self.staff_user)
+        resp = self.client.get(reverse("audit:logs"))
+        self.assertContains(resp, "Saved Searches")
+        self.assertContains(resp, "My failed logins")
+        self.assertContains(resp, reverse("audit:save_search_query"))
+
+    def test_integrity_dashboard_breadcrumbs_reach_the_hub(self):
+        self.client.force_login(self.staff_user)
+        resp = self.client.get(reverse("audit:integrity_dashboard"))
+        self.assertContains(resp, "/audit/management/")
