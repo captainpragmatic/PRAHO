@@ -9,7 +9,8 @@
   {% trans "Billing controls" as page_title %}
   {% page_header title=page_title subtitle=_("Audited retry policy and legal invoice numbering") icon="settings" %}
     {% url "settings:group" "billing" as billing_settings_url %}
-    {% button "Back to billing settings" href=billing_settings_url variant="secondary" %}
+    {% trans "Back to billing settings" as back_to_billing_label %}
+    {% button back_to_billing_label href=billing_settings_url variant="secondary" %}
   {% end_page_header %}
 
   {% trans "Payment retry policies" as retry_title %}
@@ -80,7 +81,8 @@
         </p>
       </div>
       {% url "billing:invoice_series_create" as series_url %}
-      {% button "Start new series" href=series_url variant="primary" %}
+      {% trans "Start new series" as start_series_label %}
+      {% button start_series_label href=series_url variant="primary" %}
     </div>
 
     {% if invoice_sequences %}

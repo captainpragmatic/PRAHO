@@ -41,7 +41,8 @@
 
     <div class="flex justify-end gap-3">
       {% url "billing:operator_controls" as controls_url %}
-      {% button "Cancel" href=controls_url variant="secondary" %}
+      {% trans "Cancel" as cancel_label %}
+      {% button cancel_label href=controls_url variant="secondary" %}
       {% trans "Start new series" as start_series_label %}
       {% button start_series_label type="submit" variant="danger" %}
     </div>

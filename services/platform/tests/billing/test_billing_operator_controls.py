@@ -5,6 +5,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 from django.core.exceptions import ValidationError
+from django.template.loader import get_template
 from django.test import TestCase
 from django.urls import reverse
 
@@ -51,6 +52,22 @@ class BillingOperatorControlAccessTests(TestCase):
                 response = self.client.get(reverse("settings:group", args=["billing"]))
                 self.assertNotContains(response, reverse("billing:operator_controls"))
                 self.assertNotContains(response, reverse("billing:invoice_series_create"))
+
+
+class BillingOperatorControlTemplateTests(TestCase):
+    def test_component_button_labels_are_translated_before_rendering(self) -> None:
+        expected_labels = {
+            "billing/operator_controls.html": ("Back to billing settings", "Start new series"),
+            "billing/retry_policy_form.html": ("Cancel",),
+            "billing/invoice_series_form.html": ("Cancel",),
+        }
+
+        for template_name, labels in expected_labels.items():
+            source = get_template(template_name).template.source
+            for label in labels:
+                with self.subTest(template=template_name, label=label):
+                    self.assertIn(f'{{% trans "{label}" as ', source)
+                    self.assertNotIn(f'{{% button "{label}"', source)
 
 
 class PaymentRetryPolicyEditorTests(TestCase):
@@ -289,6 +306,40 @@ class InvoiceSeriesControlTests(TestCase):
         self.assertContains(response, "already exists")
         self.current.refresh_from_db()
         self.assertEqual(self.current.scope, "default")
+
+    def test_domain_service_normalizes_prefix_before_persisting(self) -> None:
+        rotate_invoice_series(
+            prefix="  inv-2027  ",
+            baseline="INV:42",
+            actor=BillingControlActor(user=self.user, reason="New fiscal year", ip_address=None),
+        )
+
+        self.current.refresh_from_db()
+        self.assertEqual(self.current.prefix, "INV-2027")
+
+    def test_domain_service_normalizes_prefix_before_reuse_check(self) -> None:
+        InvoiceSequence.objects.create(scope="archived-1", prefix="INV-2027", last_value=100)
+
+        with self.assertRaisesMessage(ValidationError, "already exists"):
+            rotate_invoice_series(
+                prefix=" inv-2027 ",
+                baseline="INV:42",
+                actor=BillingControlActor(user=self.user, reason="Try reused prefix", ip_address=None),
+            )
+
+        self.current.refresh_from_db()
+        self.assertEqual(self.current.prefix, "INV")
+
+    def test_domain_service_rejects_invalid_normalized_prefix(self) -> None:
+        with self.assertRaisesMessage(ValidationError, "letters, digits, and hyphens"):
+            rotate_invoice_series(
+                prefix=" inv/2027 ",
+                baseline="INV:42",
+                actor=BillingControlActor(user=self.user, reason="Invalid direct call", ip_address=None),
+            )
+
+        self.current.refresh_from_db()
+        self.assertEqual(self.current.prefix, "INV")
 
     def test_form_never_exposes_the_legal_counter_as_an_input(self) -> None:
         response = self.client.get(reverse("billing:invoice_series_create"))

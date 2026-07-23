@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -133,6 +134,10 @@ def rotate_invoice_series(
 ) -> InvoiceSequence:
     """Archive the active series and reset its stable, locked control row."""
     _require_audit_reason(actor)
+    prefix = prefix.strip().upper()
+    if re.fullmatch(r"[A-Z0-9][A-Z0-9-]{0,29}", prefix) is None:
+        raise ValidationError({"prefix": _("Use uppercase letters, digits, and hyphens only.")})
+
     current = InvoiceSequence.objects.select_for_update().filter(scope="default").first()
     if current is None:
         if baseline != "missing":
