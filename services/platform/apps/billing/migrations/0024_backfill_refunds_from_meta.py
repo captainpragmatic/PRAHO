@@ -15,8 +15,9 @@ from __future__ import annotations
 
 import logging
 import uuid
+from collections import Counter
 
-from django.db import migrations
+from django.db import migrations, transaction
 
 logger = logging.getLogger(__name__)
 
@@ -31,14 +32,30 @@ def _get_or_create_ron_currency(apps):
     return ron
 
 
+def _get_legacy_refund_entries(entity, entity_field: str) -> tuple[dict, list]:
+    """Return validated legacy refund entries without discarding malformed evidence."""
+    meta = entity.meta if isinstance(entity.meta, dict) else {}
+    legacy_refunds = meta.get("refunds", [])
+    if not legacy_refunds:
+        return meta, []
+    if not isinstance(legacy_refunds, list):
+        logger.warning(
+            "Skipping malformed meta.refunds collection on %s id=%s: %r",
+            entity_field,
+            entity.pk,
+            legacy_refunds,
+        )
+        return meta, []
+    return meta, legacy_refunds
+
+
 def _backfill_entity_refunds(refund_model, entity, entity_field: str, ron_currency) -> int:
     """
     Process one Order or Invoice entity.
 
     Returns the number of Refund rows created for this entity.
     """
-    meta = entity.meta if isinstance(entity.meta, dict) else {}
-    legacy_refunds = meta.get("refunds", [])
+    meta, legacy_refunds = _get_legacy_refund_entries(entity, entity_field)
     if not legacy_refunds:
         return 0
 
@@ -50,6 +67,12 @@ def _backfill_entity_refunds(refund_model, entity, entity_field: str, ron_curren
 
     customer = entity.customer
     created_count = 0
+    entity_filter = {entity_field: entity}
+    existing_amount_counts = Counter(
+        refund_model.objects.filter(**entity_filter).values_list("amount_cents", flat=True)
+    )
+    legacy_amount_occurrences: Counter[int] = Counter()
+    unresolved_entries = []
 
     for entry in legacy_refunds:
         if not isinstance(entry, dict):
@@ -59,6 +82,7 @@ def _backfill_entity_refunds(refund_model, entity, entity_field: str, ron_curren
                 entity.pk,
                 entry,
             )
+            unresolved_entries.append(entry)
             continue
 
         amount_cents = entry.get("amount_cents")
@@ -69,23 +93,24 @@ def _backfill_entity_refunds(refund_model, entity, entity_field: str, ron_curren
                 entity.pk,
                 entry,
             )
+            unresolved_entries.append(entry)
             continue
 
-        # Dedupe: prefer gateway_refund_id (exact match), fall back to amount_cents.
-        # Amount-only dedupe would lose legitimate same-amount refunds on one entity.
+        # Dedupe exact gateway IDs. Without an ID, preserve multiplicity: each
+        # pre-existing same-amount row consumes at most one legacy entry.
         gateway_refund_id = entry.get("refund_id", "")
-        filter_kwargs: dict = {}
-        if entity_field == "order":
-            filter_kwargs["order"] = entity
-        else:
-            filter_kwargs["invoice"] = entity
-
         if gateway_refund_id:
-            filter_kwargs["gateway_refund_id"] = gateway_refund_id
+            already_reconciled = refund_model.objects.filter(
+                **entity_filter,
+                gateway_refund_id=gateway_refund_id,
+            ).exists()
         else:
-            filter_kwargs["amount_cents"] = amount_cents
+            legacy_amount_occurrences[amount_cents] += 1
+            already_reconciled = (
+                legacy_amount_occurrences[amount_cents] <= existing_amount_counts[amount_cents]
+            )
 
-        if refund_model.objects.filter(**filter_kwargs).exists():
+        if already_reconciled:
             logger.info(
                 "Skipping duplicate meta.refunds entry on %s id=%s (refund_id=%s, amount_cents=%s)",
                 entity_field,
@@ -129,9 +154,14 @@ def _backfill_entity_refunds(refund_model, entity, entity_field: str, ron_curren
         refund_model.objects.create(**create_kwargs)
         created_count += 1
 
-    if created_count > 0:
-        # Clear meta["refunds"] after successful backfill.
-        entity.meta = {k: v for k, v in meta.items() if k != "refunds"}
+    if unresolved_entries != legacy_refunds:
+        # Remove only entries reconciled into Refund rows. Malformed evidence is
+        # retained for an operator rather than silently discarded.
+        entity.meta = dict(meta)
+        if unresolved_entries:
+            entity.meta["refunds"] = unresolved_entries
+        else:
+            entity.meta.pop("refunds", None)
         entity.save(update_fields=["meta"])
 
     return created_count
@@ -158,7 +188,8 @@ def backfill_refunds_from_meta(apps, schema_editor):
     # --- Orders ---
     for order in Order.objects.filter(meta__has_key="refunds").iterator():
         try:
-            n = _backfill_entity_refunds(Refund, order, "order", ron_currency)
+            with transaction.atomic():
+                n = _backfill_entity_refunds(Refund, order, "order", ron_currency)
             if n > 0:
                 refunds_created += n
                 orders_processed += 1
@@ -171,7 +202,8 @@ def backfill_refunds_from_meta(apps, schema_editor):
     # --- Invoices ---
     for invoice in Invoice.objects.filter(meta__has_key="refunds").iterator():
         try:
-            n = _backfill_entity_refunds(Refund, invoice, "invoice", ron_currency)
+            with transaction.atomic():
+                n = _backfill_entity_refunds(Refund, invoice, "invoice", ron_currency)
             if n > 0:
                 refunds_created += n
                 invoices_processed += 1
