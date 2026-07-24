@@ -6,7 +6,7 @@ Romanian business formatting for dates, currency, legal compliance
 
 import decimal
 import re
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -603,6 +603,40 @@ def divide(value: TemplateNumeric, divisor: TemplateNumeric) -> Decimal:
         return base / div
     except (ValueError, TypeError, ZeroDivisionError):
         return Decimal("0.00")
+
+
+@register.filter
+def add_years(value: Any, years: TemplateNumeric) -> Any:
+    """
+    Add a whole number of years to a date/datetime.
+
+    Used on the domain renewal page to show the projected new expiry date.
+
+    Usage:
+        {{ domain.expires_at|add_years:option.years }}
+
+    Feb 29 in a leap year rolls back to Feb 28 in a non-leap target year so
+    the result is always a valid date. Returns the input unchanged if it is
+    not a date/datetime or the offset is not a whole number.
+    """
+    if not isinstance(value, date):  # datetime is a subclass of date
+        return value
+    if years is None:
+        return value
+    # value is narrowed to date | datetime here.
+    dt_value: date = value
+
+    try:
+        year_offset = int(years)
+    except (TypeError, ValueError):
+        return dt_value
+
+    target_year = dt_value.year + year_offset
+    try:
+        return dt_value.replace(year=target_year)
+    except ValueError:
+        # Feb 29 → non-leap target year: fall back to Feb 28.
+        return dt_value.replace(year=target_year, day=28)
 
 
 @register.filter
