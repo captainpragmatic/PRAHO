@@ -66,6 +66,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **API token boundary hardening** — direct token authentication now rejects malformed raw-key formats before hashing and returns one generic failure for unknown, expired, or disabled-user tokens; the per-user active-token cap joins the TTL policy as startup-validated deployment configuration (#249, #250)
 - **Virtualmin and infrastructure control plane** — Virtualmin credentials now require HTTPS and either CA verification or a SHA-256 certificate pin enforced during the TLS handshake; auto-registered and existing self-signed nodes obtain their pins through verified SSH rather than network trust-on-first-use; all SSH and Ansible paths reject unknown host keys from a shared operator-provisioned trust file; root maintenance accepts only fixed semantic actions and elevated deploy permission; authentication fallbacks escalate only on typed authentication failures and preserve retry-safety metadata; rate limiting uses atomic fixed-window slot claims; and SSH key generation and revocation are audited and fail closed during node destruction (#327)
 
 ---
