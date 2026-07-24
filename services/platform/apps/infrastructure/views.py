@@ -31,6 +31,7 @@ from apps.infrastructure.audit_service import InfrastructureAuditContext, Infras
 from apps.infrastructure.provider_config import get_provider_sync_fn, get_provider_token, store_provider_token
 from apps.settings.services import SettingsService
 
+from .deployment_preflight import validate_deployment_dns_zone
 from .forms import (
     CloudProviderForm,
     DeploymentDestroyForm,
@@ -265,7 +266,13 @@ def deployment_create(request: HttpRequest) -> HttpResponse:
         messages.error(request, _("Node deployment is disabled in settings."))
         return redirect("infrastructure:deployment_list")
 
-    dns_zone = str(SettingsService.get_setting("node_deployment.dns_default_zone", "") or "")
+    raw_dns_zone = str(SettingsService.get_setting("node_deployment.dns_default_zone", "") or "")
+    zone_result = validate_deployment_dns_zone(raw_dns_zone)
+    if zone_result.is_err():
+        messages.error(request, zone_result.unwrap_err())
+        return redirect("infrastructure:deployment_list")
+    dns_zone = zone_result.unwrap()
+
     if request.method == "POST":
         form = NodeDeploymentForm(request.POST, dns_zone=dns_zone)
         if form.is_valid():
