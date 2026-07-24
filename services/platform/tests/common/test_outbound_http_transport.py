@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import socket
 from unittest.mock import MagicMock, patch
 
@@ -77,6 +78,31 @@ class TestSafeRequest(TestCase):
     def test_rejects_private_ip_target(self):
         with self.assertRaises(OutboundSecurityError):
             safe_request("GET", "https://evil.example.com/")
+
+    @patch("apps.common.outbound_http.socket.getaddrinfo", _mock_getaddrinfo_public)
+    def test_environment_proxies_cannot_bypass_dns_pinning(self):
+        """HTTPS_PROXY in the worker environment must not reroute a pinned request."""
+        captured: dict = {}
+
+        def _capture_send(request, **kwargs):
+            captured.update(kwargs)
+            response = MagicMock()
+            response.status_code = 200
+            response.headers = {}
+            response.is_redirect = False
+            response.history = []
+            return response
+
+        with (
+            patch.dict(os.environ, {"HTTPS_PROXY": "http://127.0.0.1:9"}),
+            patch.object(PinnedIPAdapter, "send", side_effect=_capture_send),
+        ):
+            safe_request("GET", "https://example.com/")
+
+        self.assertFalse(
+            captured.get("proxies"),
+            f"pinned send must ignore environment proxies, got {captured.get('proxies')!r}",
+        )
 
     @patch("apps.common.outbound_http.socket.getaddrinfo", _mock_getaddrinfo_public)
     @patch("apps.common.outbound_http.requests.Session")

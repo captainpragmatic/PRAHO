@@ -656,6 +656,10 @@ def safe_request(
         raise
 
     session = requests.Session()
+    # The worker environment must not inject transport policy: HTTPS_PROXY/HTTP_PROXY
+    # would reroute the pinned connection through a proxy, and REQUESTS_CA_BUNDLE or
+    # ~/.netrc would override policy-owned TLS and auth. Policy owns all of it.
+    session.trust_env = False
     session.headers["User-Agent"] = DEFAULT_USER_AGENT
     try:
         return _execute_pinned_request(session, target, method, url, policy, **kwargs)
