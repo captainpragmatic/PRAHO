@@ -15,6 +15,7 @@ from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.core.files.uploadedfile import UploadedFile
 from django.core.paginator import Paginator
+from django.db import transaction
 from django.db.models import Q
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -391,6 +392,20 @@ def _process_ticket_attachments(request: HttpRequest, ticket: Ticket, comment: T
         )
 
 
+def _ticket_reply_error_response(
+    request: HttpRequest,
+    ticket: Ticket,
+    *,
+    htmx_message: str,
+    flash_message: str,
+) -> HttpResponse:
+    """Render one escaped validation error consistently for HTMX and redirects."""
+    if request.headers.get("HX-Request"):
+        return HttpResponse(format_html('<div class="text-red-500 text-sm">{}</div>', htmx_message))
+    messages.error(request, flash_message)
+    return redirect("tickets:detail", pk=ticket.pk)
+
+
 def _validate_ticket_reply_data(
     request: HttpRequest, user: User, ticket: Ticket, reply_data: TicketReplyData
 ) -> HttpResponse | None:
@@ -400,18 +415,43 @@ def _validate_ticket_reply_data(
     if error_response:
         return error_response
 
+    if ticket.status == "closed" and not user.is_staff_user:
+        return _ticket_reply_error_response(
+            request,
+            ticket,
+            htmx_message=str(_("This ticket is closed and cannot receive new replies.")),
+            flash_message=str(_("❌ This ticket is closed and cannot receive new replies.")),
+        )
     if not reply_data.reply_text:
-        if request.headers.get("HX-Request"):
-            return HttpResponse('<div class="text-red-500 text-sm">Reply cannot be empty.</div>')
-        messages.error(request, _("❌ The reply cannot be empty."))
-        return redirect("tickets:detail", pk=ticket.pk)
+        return _ticket_reply_error_response(
+            request,
+            ticket,
+            htmx_message=str(_("Reply cannot be empty.")),
+            flash_message=str(_("❌ The reply cannot be empty.")),
+        )
+
+    # Fail closed before creating the comment or processing attachments. The
+    # service validates again before mutating ticket state, but request-boundary
+    # validation prevents a forged action from leaving an orphaned comment.
+    if user.is_staff_user:
+        try:
+            TicketStatusService.validate_reply_action(reply_data.reply_action)
+        except ValueError as exc:
+            return _ticket_reply_error_response(
+                request,
+                ticket,
+                htmx_message=str(_("Error: {error}").format(error=str(exc))),
+                flash_message=str(_("❌ Error: {error}").format(error=str(exc))),
+            )
 
     # Validate resolution code if closing
     if reply_data.reply_action == "close_with_resolution" and not reply_data.resolution_code:
-        if request.headers.get("HX-Request"):
-            return HttpResponse('<div class="text-red-500 text-sm">Resolution code required when closing ticket.</div>')
-        messages.error(request, _("❌ Resolution code is required when closing the ticket."))
-        return redirect("tickets:detail", pk=ticket.pk)
+        return _ticket_reply_error_response(
+            request,
+            ticket,
+            htmx_message=str(_("Resolution code required when closing ticket.")),
+            flash_message=str(_("❌ Resolution code is required when closing the ticket.")),
+        )
 
     return None
 
@@ -460,8 +500,12 @@ def _handle_ticket_status_update(
         return "", redirect("tickets:detail", pk=ticket.pk)
 
 
+@transaction.atomic
 def _handle_ticket_reply_post(request: HttpRequest, ticket: Ticket) -> HttpResponse:
     """Handle POST request for ticket reply with new status system."""
+    # Serialize the comment and status transition with lifecycle workers. The
+    # incoming instance may have been loaded before an auto-close committed.
+    ticket = Ticket.objects.select_for_update(of=("self",)).get(pk=ticket.pk)
     user = cast(User, request.user)  # Safe as this is only called from authenticated views
     reply_text = request.POST.get("reply")
     reply_action = request.POST.get("reply_action", "reply")  # New field for agent action
@@ -504,6 +548,7 @@ def _handle_ticket_reply_post(request: HttpRequest, ticket: Ticket) -> HttpRespo
     # Handle status transitions
     success_msg, status_error = _handle_ticket_status_update(request, ticket, user, reply_action, resolution_code)
     if status_error:
+        transaction.set_rollback(True)
         return status_error
 
     # Handle HTMX response

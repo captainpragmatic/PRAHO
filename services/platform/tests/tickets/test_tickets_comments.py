@@ -2,12 +2,15 @@
 Test ticket internal comments security and visibility
 """
 
+from unittest.mock import patch
+
 from django.contrib.auth import get_user_model
 from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 
 from apps.customers.models import Customer, CustomerTaxProfile
 from apps.tickets.models import Ticket, TicketComment
+from apps.tickets.services import TicketStatusService
 from apps.users.models import CustomerMembership
 
 User = get_user_model()
@@ -272,6 +275,54 @@ class TicketInternalCommentsSecurityTest(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'Internal staff note - CONFIDENTIAL')
         self.assertIn(self.internal_comment, list(response.context['comments']))
+
+    def test_invalid_staff_reply_action_does_not_persist_comment_or_mutate_ticket(self):
+        """Reject a forged action before writing either the reply or assignment."""
+        original_comment_count = self.ticket.comments.count()
+        self.client.login(email='admin@example.com', password='testpass123')
+
+        response = self.client.post(
+            reverse('tickets:reply', kwargs={'pk': self.ticket.pk}),
+            {
+                'reply': 'This comment must never be stored',
+                'reply_action': 'forged_action',
+            },
+        )
+
+        self.assertRedirects(response, reverse('tickets:detail', kwargs={'pk': self.ticket.pk}))
+        self.ticket.refresh_from_db()
+        self.assertEqual(self.ticket.comments.count(), original_comment_count)
+        self.assertIsNone(self.ticket.assigned_to)
+        self.assertEqual(self.ticket.status, 'open')
+
+    def test_customer_reply_losing_auto_close_race_does_not_reopen_or_persist(self):
+        """A task that wins the ticket lock must make a stale customer POST fail closed."""
+        ticket = TicketStatusService.handle_first_agent_reply(
+            ticket=self.ticket,
+            agent=self.support_user,
+            reply_action='reply_and_wait',
+        )
+        original_comment_count = ticket.comments.count()
+        original_select_for_update = Ticket.objects.select_for_update
+
+        def auto_close_before_reply_lock(*args, **kwargs):
+            current = Ticket.objects.get(pk=ticket.pk)
+            TicketStatusService.close_ticket(current, 'auto_closed')
+            return original_select_for_update(*args, **kwargs)
+
+        self.client.login(email='customer@example.com', password='testpass123')
+        with patch.object(Ticket.objects, 'select_for_update', side_effect=auto_close_before_reply_lock):
+            response = self.client.post(
+                reverse('tickets:reply', kwargs={'pk': ticket.pk}),
+                {'reply': 'A reply racing the auto-close worker'},
+            )
+
+        self.assertRedirects(response, reverse('tickets:detail', kwargs={'pk': ticket.pk}))
+        ticket.refresh_from_db()
+        self.assertEqual(ticket.status, 'closed')
+        self.assertEqual(ticket.resolution_code, 'auto_closed')
+        self.assertEqual(ticket.comments.count(), original_comment_count)
+        self.assertFalse(ticket.has_customer_replied)
 
     def test_detail_page_shows_empty_state_when_only_internal_notes_exist(self):
         """The detail page must render the filtered queryset, not ticket.comments.all.

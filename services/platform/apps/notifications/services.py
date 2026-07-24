@@ -1368,6 +1368,7 @@ class NotificationService:
         from apps.customers.models import (  # noqa: PLC0415  # Deferred: avoids circular import
             Customer,  # Circular: cross-app  # Deferred: avoids circular import
         )
+        from apps.customers.services import get_customer_locale  # noqa: PLC0415
 
         try:
             customer = Customer.objects.get(id=customer_id)
@@ -1377,7 +1378,14 @@ class NotificationService:
                 logger.warning(f"⚠️ [Notification] No email for customer {customer_id}")
                 return False
 
-            return bool(EmailService.send_template_email(notification_type, recipient, context))
+            result = EmailService.send_template_email(
+                notification_type,
+                recipient,
+                context,
+                locale=get_customer_locale(customer),
+                customer=customer,
+            )
+            return result.success
 
         except Customer.DoesNotExist:
             logger.warning(f"⚠️ [Notification] Customer not found: {customer_id}")

@@ -18,6 +18,7 @@ from django.utils import timezone
 from django_q.tasks import async_task
 
 from apps.audit.services import AuditService
+from apps.customers.services import get_customer_locale as _get_customer_locale
 
 if TYPE_CHECKING:
     from apps.customers.models import Customer
@@ -685,21 +686,6 @@ def _detect_feedback_sentiment(content: str) -> str:
     if neg_count > pos_count:
         return "negative"
     return "neutral"
-
-
-def _get_customer_locale(customer: Customer) -> str:
-    """Get preferred locale for a customer based on their primary user's language."""
-    try:
-        primary_membership = (
-            customer.memberships.filter(is_primary=True, is_active=True).select_related("user__profile").first()
-        )
-        if primary_membership and hasattr(primary_membership.user, "profile"):
-            lang = getattr(primary_membership.user.profile, "preferred_language", None)
-            if lang in ("ro", "en"):
-                return lang
-    except Exception:
-        logger.debug("⚠️ [CustomerLocale] Could not determine locale, defaulting to 'ro'")
-    return "ro"  # Default to Romanian for Romanian hosting provider
 
 
 def _send_reactivation_email(customer: Customer) -> bool:

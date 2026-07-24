@@ -333,6 +333,48 @@ class Command(BaseCommand):
                     "ticket_url": "Ticket link",
                 },
             },
+            {
+                "key": "ticket_auto_closed",
+                "locale": "ro",
+                "category": "support",
+                "subject": "Ticket închis automat #{{ticket_number}}: {{ticket_subject}}",
+                "body_html": """
+                <h2>Ticket de suport închis</h2>
+                <p>Bună ziua {{customer_name}},</p>
+                <p>Ticketul #{{ticket_number}} — <strong>{{ticket_subject}}</strong> a fost închis automat
+                după {{inactive_hours}} ore fără un răspuns nou.</p>
+                <p>Dacă mai aveți nevoie de ajutor, vă rugăm să deschideți un ticket nou din zona client.</p>
+                <p>Echipa PragmaticHost</p>
+                """,
+                "description": "Notificare de închidere automată a unui ticket inactiv",
+                "variables": {
+                    "customer_name": "Numele clientului",
+                    "ticket_number": "Numărul ticket",
+                    "ticket_subject": "Subiectul ticket",
+                    "inactive_hours": "Perioada de inactivitate în ore",
+                },
+            },
+            {
+                "key": "ticket_auto_closed",
+                "locale": "en",
+                "category": "support",
+                "subject": "Ticket automatically closed #{{ticket_number}}: {{ticket_subject}}",
+                "body_html": """
+                <h2>Support ticket closed</h2>
+                <p>Hello {{customer_name}},</p>
+                <p>Ticket #{{ticket_number}} — <strong>{{ticket_subject}}</strong> was automatically closed
+                after {{inactive_hours}} hours without a new reply.</p>
+                <p>If you still need help, please open a new ticket from the customer portal.</p>
+                <p>PragmaticHost Team</p>
+                """,
+                "description": "Notification when an inactive support ticket is automatically closed",
+                "variables": {
+                    "customer_name": "Customer name",
+                    "ticket_number": "Ticket number",
+                    "ticket_subject": "Ticket subject",
+                    "inactive_hours": "Inactivity period in hours",
+                },
+            },
             # ===============================================================================
             # ORDER TEMPLATES
             # ===============================================================================

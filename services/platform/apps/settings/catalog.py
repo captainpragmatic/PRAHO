@@ -2315,6 +2315,20 @@ CATALOG: tuple[SettingDef, ...] = (
         input_kind="chips",
     ),
     SettingDef(
+        key="tickets.auto_close_inactive_hours",
+        data_type="integer",
+        default=0,
+        group="support",
+        section=_("Ticket lifecycle"),
+        label=_("Auto-close inactive tickets"),
+        help_text=_(
+            "Close tickets that have been waiting for a customer response for this many hours. Set to 0 to disable."
+        ),
+        unit="hours",
+        input_kind="number",
+        validation={"min": 0, "max": 8760},
+    ),
+    SettingDef(
         key="tickets.max_file_size_bytes",
         data_type="integer",
         default=2097152,

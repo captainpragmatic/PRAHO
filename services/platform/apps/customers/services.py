@@ -92,6 +92,23 @@ def _get_services_medium_threshold() -> int:
     return SettingsService.get_integer_setting("customers.services_medium_threshold", SERVICES_MEDIUM_THRESHOLD)
 
 
+def get_customer_locale(customer: Customer) -> str:
+    """Resolve a customer's notification locale from their primary active user."""
+    try:
+        primary_membership = (
+            customer.memberships.filter(is_primary=True, is_active=True).select_related("user__profile").first()
+        )
+        if primary_membership and hasattr(primary_membership.user, "profile"):
+            language = getattr(primary_membership.user.profile, "preferred_language", None)
+            if language == "en":
+                return "en"
+            if language == "ro":
+                return "ro"
+    except Exception:
+        logger.debug("⚠️ [CustomerLocale] Could not determine locale, defaulting to 'ro'", exc_info=True)
+    return "ro"
+
+
 class CustomerAnalyticsService:
     """Service for customer analytics and metrics tracking."""
 
@@ -492,4 +509,5 @@ __all__ = [
     "CustomerService",
     "CustomerStatsService",
     "ProfileService",
+    "get_customer_locale",
 ]

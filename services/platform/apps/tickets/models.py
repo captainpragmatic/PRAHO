@@ -75,6 +75,7 @@ class Ticket(models.Model):
         ("by_design", _("By Design")),
         ("refunded", _("Refunded")),
         ("cancelled", _("Cancelled")),
+        ("auto_closed", _("Auto Closed")),
         ("other", _("Other")),
     )
 
@@ -188,6 +189,7 @@ class Ticket(models.Model):
             models.Index(fields=["customer", "status"]),
             models.Index(fields=["assigned_to", "status"]),
             models.Index(fields=["status", "priority"]),
+            models.Index(fields=["status", "updated_at"], name="tickets_status_updated_idx"),
             models.Index(fields=["category"]),
             models.Index(fields=["ticket_number"]),
         )
