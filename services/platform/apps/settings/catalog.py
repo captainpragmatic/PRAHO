@@ -2259,8 +2259,11 @@ CATALOG: tuple[SettingDef, ...] = (
         group="advanced",
         section=_("Security"),
         label=_("Membership invitation limit"),
-        help_text=_("Maximum initial membership invitations per inviter and source IP per hour. Zero blocks invitations."),
-        unit="per inviter/hour",
+        help_text=_(
+            "Maximum initial membership invitations allowed separately for each inviter and each source IP per hour. "
+            "Zero blocks invitations."
+        ),
+        unit="per inviter and IP/hour",
         input_kind="number",
         advanced=True,
         validation={"min": 0},

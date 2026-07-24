@@ -30,8 +30,8 @@ class InvitationRateLimitPolicyTests(TestCase):
         self.owner = User.objects.create_user(email="owner@example.test", password="owner-password")
         CustomerMembership.objects.create(customer=self.customer, user=self.owner, role="owner", is_primary=True)
 
-    @patch("apps.users.services._render_and_send_welcome_email", return_value=True)
-    def test_membership_invitation_limit_follows_inviter_across_source_ips(self, _mock_send) -> None:
+    @patch.object(SecureCustomerUserService, "_send_invitation_email_secure")
+    def test_membership_invitation_limit_follows_inviter_across_source_ips(self, mock_send) -> None:
         result = SettingsService.update_setting(
             "security.membership_invitation_limit_per_inviter_per_hour",
             1,
@@ -54,6 +54,7 @@ class InvitationRateLimitPolicyTests(TestCase):
 
         self.assertTrue(SecureCustomerUserService.invite_user_to_customer(first).is_ok())
         self.assertTrue(SecureCustomerUserService.invite_user_to_customer(second).is_err())
+        self.assertEqual(mock_send.call_count, 1)
         self.assertFalse(User.objects.filter(email="second@example.test").exists())
 
     def test_zero_membership_invitation_limit_blocks_the_first_attempt(self) -> None:

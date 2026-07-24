@@ -60,6 +60,11 @@ class OperatorPolicyMigrationTests(TestCase):
         self.assertEqual(values["security.welcome_invite_limit_per_target_per_hour"], 2)
         self.assertNotIn("security.invitation_rate_limit_per_user", values)
         self.assertNotIn("security.welcome_invite_limit_per_user_per_hour", values)
+        membership_policy = SystemSetting.objects.get(
+            key="security.membership_invitation_limit_per_inviter_per_hour"
+        )
+        self.assertIn("separately for each inviter and each source IP", membership_policy.description)
+        self.assertEqual(membership_policy.help_text, membership_policy.description)
         self.assertFalse(
             SystemSetting.objects.filter(
                 key__in=(

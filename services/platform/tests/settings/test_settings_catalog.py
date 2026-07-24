@@ -86,6 +86,10 @@ class CatalogIntegrityTests(TestCase):
             with self.subTest(key=key):
                 self.assertEqual(CATALOG_BY_KEY[key].default, expected_default)
 
+        membership_policy = CATALOG_BY_KEY["security.membership_invitation_limit_per_inviter_per_hour"]
+        self.assertIn("separately for each inviter and each source IP", str(membership_policy.help_text))
+        self.assertEqual(membership_policy.unit, "per inviter and IP/hour")
+
         self.assertNotIn("security.invitation_rate_limit_per_user", CATALOG_BY_KEY)
         self.assertNotIn("security.welcome_invite_limit_per_user_per_hour", CATALOG_BY_KEY)
 

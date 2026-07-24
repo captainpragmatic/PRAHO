@@ -32,8 +32,14 @@ RETIRED_KEYS = (OLD_MEMBERSHIP_KEY, OLD_WELCOME_KEY)
 POLICY_METADATA = {
     MEMBERSHIP_KEY: {
         "name": "Membership invitation limit",
-        "description": "Maximum initial membership invitations per inviter and source IP per hour. Zero blocks invitations.",
-        "help_text": "Maximum initial membership invitations per inviter and source IP per hour. Zero blocks invitations.",
+        "description": (
+            "Maximum initial membership invitations allowed separately for each inviter and each source IP per hour. "
+            "Zero blocks invitations."
+        ),
+        "help_text": (
+            "Maximum initial membership invitations allowed separately for each inviter and each source IP per hour. "
+            "Zero blocks invitations."
+        ),
         "default_value": 10,
     },
     JOIN_NOTIFICATION_KEY: {
