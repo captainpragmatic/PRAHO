@@ -139,7 +139,21 @@ def _submit_recurring_charge_under_revocation_lock(
 
     # The claim above is the authorization linearization point and has committed.
     # No database transaction or customer lock spans the provider round-trip.
-    result = submit()
+    try:
+        result = submit()
+    except Exception as exc:
+        # The claim stays in flight for the reconciler, but the durable row must
+        # carry the diagnostic — a silent empty last_error hides why it is stale.
+        record_recurring_submission_result(
+            payment.id,
+            PaymentIntentResult(
+                success=False,
+                payment_intent_id="",
+                client_secret=None,
+                error=f"Gateway submission raised: {exc}",
+            ),
+        )
+        raise
     record_recurring_submission_result(payment.id, result)
     return result, True
 

@@ -56,6 +56,26 @@ class RecurringSubmissionStateTestCase(_SubscriptionInvoicePaymentFixture, TestC
         self.assertEqual(submission.state, RecurringPaymentSubmission.State.SUBMITTED)
         self.assertIsNotNone(submission.submitted_at)
 
+    def test_gateway_exception_records_last_error_on_the_durable_row(self) -> None:
+        """A raising gateway must leave a diagnostic on the claim the reconciler
+        will later pick up, not a silent in-flight row with an empty last_error."""
+        gateway = MagicMock()
+        gateway.create_off_session_payment_intent.side_effect = RuntimeError("gateway wiring bug")
+
+        with patch(
+            "apps.billing.payment_service.PaymentGatewayFactory.create_gateway",
+            return_value=gateway,
+        ):
+            result = PaymentService.create_payment_intent_for_invoice(
+                invoice_id=self.invoice.id,
+                payment_method_id=self.payment_method.stripe_payment_method_id,
+            )
+
+        self.assertFalse(result["success"], result)
+        submission = RecurringPaymentSubmission.objects.get(payment__invoice=self.invoice)
+        self.assertEqual(submission.state, RecurringPaymentSubmission.State.IN_FLIGHT)
+        self.assertIn("gateway wiring bug", submission.last_error)
+
     def test_second_worker_cannot_submit_an_in_flight_attempt(self) -> None:
         payment = Payment.objects.create(
             customer=self.customer,
@@ -234,7 +254,7 @@ class RecurringSubmissionStateTestCase(_SubscriptionInvoicePaymentFixture, TestC
             idempotency_key=f"proforma:{legacy_proforma.id}:stripe:legacy-succeeded",
             meta={"source": "recurring_billing"},
         )
-        migration = importlib.import_module("apps.billing.migrations.0042_recurring_payment_submission")
+        migration = importlib.import_module("apps.billing.migrations.0044_recurring_payment_submission")
 
         migration.backfill_unfinished_recurring_submissions(
             django_apps,
@@ -734,3 +754,17 @@ class RecurringSubmissionReconciliationTestCase(_SubscriptionInvoicePaymentFixtu
         self.assertTrue(result["success"], result)
         self.assertTrue(result["skipped"])
         self.assertEqual(result["payments_checked"], 0)
+
+    def test_skipped_run_still_reports_the_real_backlog_to_monitoring(self) -> None:
+        """A lock-skipped run must not report zeros over an actual backlog."""
+        payment = self._create_pending_invoice_payment("pi_skip_backlog_409")
+        self._stale(payment.recurring_submission)
+
+        with patch("apps.billing.tasks.DistributedLock.acquire", return_value=False):
+            result = reconcile_recurring_payment_submissions(stale_after_seconds=0)
+
+        self.assertTrue(result["success"], result)
+        self.assertTrue(result["skipped"])
+        self.assertEqual(result["payments_checked"], 0)
+        self.assertEqual(result["payments_pending"], 0)
+        self.assertGreaterEqual(result["backlog_remaining"], 1)

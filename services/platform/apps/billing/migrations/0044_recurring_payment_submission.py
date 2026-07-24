@@ -48,7 +48,7 @@ def backfill_unfinished_recurring_submissions(apps, schema_editor) -> None:
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("billing", "0041_recover_remaining_legacy_refunds"),
+        ("billing", "0043_billing_operator_controls"),
     ]
 
     operations = [

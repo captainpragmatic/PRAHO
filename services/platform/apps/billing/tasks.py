@@ -1848,14 +1848,18 @@ def reconcile_recurring_payment_submissions(
         blocking=False,
     )
     if not lock.acquire():
+        # Nothing was processed, but monitoring must still see the real state:
+        # hardcoded zeros over an actual backlog would hide a stuck reconciler.
+        skip_stale_before = timezone.now() - timedelta(seconds=stale_after_seconds)
         return {
             "success": True,
             "skipped": True,
             "payments_checked": 0,
             "payments_converged": 0,
             "payments_failed": 0,
-            "manual_review_required": 0,
-            "backlog_remaining": 0,
+            "payments_pending": 0,
+            "manual_review_required": _manual_review_recurring_submission_count(),
+            "backlog_remaining": _recurring_reconciliation_queryset(stale_before=skip_stale_before).count(),
             "errors": [],
         }
 
