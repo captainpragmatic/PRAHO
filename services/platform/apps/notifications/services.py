@@ -1377,7 +1377,8 @@ class NotificationService:
                 logger.warning(f"⚠️ [Notification] No email for customer {customer_id}")
                 return False
 
-            return bool(EmailService.send_template_email(notification_type, recipient, context))
+            result = EmailService.send_template_email(notification_type, recipient, context)
+            return result.success
 
         except Customer.DoesNotExist:
             logger.warning(f"⚠️ [Notification] Customer not found: {customer_id}")

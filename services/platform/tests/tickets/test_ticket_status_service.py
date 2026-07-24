@@ -4,10 +4,9 @@ Tests for TicketStatusService - centralized ticket status management.
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
-from django.utils import timezone
 
 from apps.customers.models import Customer, CustomerTaxProfile
-from apps.tickets.models import Ticket, TicketComment, SupportCategory
+from apps.tickets.models import SupportCategory, Ticket
 from apps.tickets.services import TicketStatusService
 from apps.users.models import CustomerMembership
 from tests.helpers.fsm_helpers import force_status
@@ -231,6 +230,28 @@ class TicketStatusServiceTest(TestCase):
         # Status should remain unchanged
         self.assertEqual(updated_ticket.status, original_status)
 
+    def test_first_internal_note_does_not_assign_ticket(self):
+        """An internal note must not remove an untriaged ticket from the shared inbox."""
+        ticket = TicketStatusService.create_ticket(
+            customer=self.customer,
+            title='Test Ticket',
+            description='Test description',
+            priority='normal',
+            category=self.category,
+            created_by=self.customer_user,
+            contact_email='customer@example.com'
+        )
+
+        updated_ticket = TicketStatusService.handle_first_agent_reply(
+            ticket=ticket,
+            agent=self.agent_user,
+            reply_action='internal_note'
+        )
+
+        self.assertEqual(updated_ticket.status, 'open')
+        self.assertIsNone(updated_ticket.assigned_to)
+        self.assertIsNone(updated_ticket.assigned_at)
+
     def test_invalid_reply_action_raises_error(self):
         """Test that invalid reply action raises ValueError."""
         ticket = TicketStatusService.create_ticket(
@@ -249,6 +270,29 @@ class TicketStatusServiceTest(TestCase):
                 agent=self.agent_user,
                 reply_action='invalid_action'
             )
+
+    def test_invalid_first_reply_action_raises_without_assigning(self):
+        """The first-reply path must reject unknown actions before mutating assignment."""
+        ticket = TicketStatusService.create_ticket(
+            customer=self.customer,
+            title='Test Ticket',
+            description='Test description',
+            priority='normal',
+            category=self.category,
+            created_by=self.customer_user,
+            contact_email='customer@example.com'
+        )
+
+        with self.assertRaisesMessage(ValueError, "Invalid reply action: invalid_action"):
+            TicketStatusService.handle_first_agent_reply(
+                ticket=ticket,
+                agent=self.agent_user,
+                reply_action='invalid_action'
+            )
+
+        ticket.refresh_from_db()
+        self.assertIsNone(ticket.assigned_to)
+        self.assertIsNone(ticket.assigned_at)
 
     def test_close_without_resolution_code_raises_error(self):
         """Test that closing without resolution code raises ValueError."""
@@ -363,6 +407,7 @@ class TicketStatusServiceTest(TestCase):
             'by_design': 'By Design',
             'refunded': 'Refunded',
             'cancelled': 'Cancelled',
+            'auto_closed': 'Auto Closed',
             'other': 'Other'
         }
 
@@ -372,6 +417,27 @@ class TicketStatusServiceTest(TestCase):
         for code in expected_codes:
             self.assertIn(code, choices)
             # Note: The actual display might be translated, so we just check the key exists
+
+    def test_direct_close_clears_customer_reply_indicators(self):
+        """Every close path must clear the actionable customer-reply badge state."""
+        ticket = TicketStatusService.create_ticket(
+            customer=self.customer,
+            title='Test Ticket',
+            description='Test description',
+            priority='normal',
+            category=self.category,
+            created_by=self.customer_user,
+            contact_email='customer@example.com'
+        )
+        ticket = TicketStatusService.handle_customer_reply(ticket)
+
+        closed_ticket = TicketStatusService.close_ticket(ticket, 'fixed')
+        closed_ticket.refresh_from_db()
+
+        self.assertEqual(closed_ticket.status, 'closed')
+        self.assertFalse(closed_ticket.has_customer_replied)
+        self.assertIsNone(closed_ticket.customer_replied_at)
+        self.assertFalse(closed_ticket.customer_replied_recently)
 
     def test_only_valid_statuses_allowed(self):
         """Test that FSMField restricts direct status assignment and invalid choices fail validation."""

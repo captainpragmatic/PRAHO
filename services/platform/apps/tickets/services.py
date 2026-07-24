@@ -52,6 +52,9 @@ class TicketStatusService:
     AUTO_ASSIGN_ACTIONS: ClassVar[list[str]] = ["reply", "reply_and_wait"]
     CUSTOMER_WAITING_ACTIONS: ClassVar[list[str]] = ["reply_and_wait"]
     CLOSING_ACTIONS: ClassVar[list[str]] = ["close_with_resolution"]
+    VALID_REPLY_ACTIONS: ClassVar[frozenset[str]] = frozenset(
+        {"reply", "reply_and_wait", "internal_note", "close_with_resolution"}
+    )
 
     @classmethod
     def create_ticket(cls, **ticket_data: Any) -> Ticket:
@@ -85,21 +88,16 @@ class TicketStatusService:
             )
             return cls.handle_agent_reply(ticket, agent, reply_action, resolution_code)
 
-        # Assign ticket to replying agent
-        ticket.assigned_to = agent
-        ticket.assigned_at = timezone.now()
-
-        # Apply status transition based on reply action
+        # Resolve and validate before mutating assignment.
         new_status = cls._determine_new_status_from_action(
             current_status=ticket.status, reply_action=reply_action, default="in_progress"
         )
+        cls._set_closing_resolution(ticket, reply_action, resolution_code)
 
-        # Handle closing with resolution
-        if reply_action in cls.CLOSING_ACTIONS:
-            if not resolution_code:
-                raise ValueError("Resolution code required when closing ticket")
-            ticket.resolution_code = resolution_code
-            # closed_at is set by the FSM close() transition side effect
+        # Internal notes do not establish ownership of an untriaged ticket.
+        if reply_action != "internal_note":
+            ticket.assigned_to = agent
+            ticket.assigned_at = timezone.now()
 
         # Reset customer replied indicators when agent responds (except for internal notes)
         if reply_action != "internal_note":
@@ -124,30 +122,13 @@ class TicketStatusService:
         Handle subsequent agent replies with explicit action selection.
         """
         current_status = ticket.status
-
-        # Determine new status based on reply action
-        if reply_action == "reply":
-            # Continue working - keep in_progress (or move from waiting_on_customer)
-            new_status = "in_progress" if current_status == "waiting_on_customer" else current_status
-
-        elif reply_action == "reply_and_wait":
-            # Explicit request for customer response
-            new_status = "waiting_on_customer"
-
-        elif reply_action == "internal_note":
-            # No status change for internal notes
-            new_status = current_status
-
-        elif reply_action == "close_with_resolution":
-            # Close ticket with resolution code
-            if not resolution_code:
-                raise ValueError("Resolution code required when closing ticket")
-            new_status = "closed"
-            ticket.resolution_code = resolution_code
-            # closed_at is set by the FSM close() transition side effect
-
-        else:
-            raise ValueError(f"Invalid reply action: {reply_action}")
+        default_status = "in_progress" if current_status == "waiting_on_customer" else current_status
+        new_status = cls._determine_new_status_from_action(
+            current_status=current_status,
+            reply_action=reply_action,
+            default=default_status,
+        )
+        cls._set_closing_resolution(ticket, reply_action, resolution_code)
 
         # Apply FSM transition (close() sets closed_at as side effect)
         if new_status != current_status:
@@ -215,6 +196,8 @@ class TicketStatusService:
         # close() FSM transition sets closed_at as a side effect
         ticket.close()
         ticket.resolution_code = resolution_code
+        ticket.has_customer_replied = False
+        ticket.customer_replied_at = None
         ticket.save()
 
         logger.info(f"✅ [TicketStatus] Closed ticket {ticket.ticket_number} with resolution: {resolution_code}")
@@ -245,7 +228,8 @@ class TicketStatusService:
 
     @classmethod
     def _determine_new_status_from_action(cls, current_status: str, reply_action: str, default: str) -> str:
-        """Determine new status based on reply action with fallback default."""
+        """Determine new status after rejecting unknown reply actions."""
+        cls.validate_reply_action(reply_action)
         if reply_action in cls.CUSTOMER_WAITING_ACTIONS:
             return "waiting_on_customer"
         elif reply_action in cls.CLOSING_ACTIONS:
@@ -254,6 +238,21 @@ class TicketStatusService:
             return current_status
         else:
             return default
+
+    @classmethod
+    def validate_reply_action(cls, reply_action: str) -> None:
+        """Reject unknown actions consistently at every request/service boundary."""
+        if reply_action not in cls.VALID_REPLY_ACTIONS:
+            raise ValueError(f"Invalid reply action: {reply_action}")
+
+    @classmethod
+    def _set_closing_resolution(cls, ticket: Ticket, reply_action: str, resolution_code: str | None) -> None:
+        """Apply the resolution shared by first and subsequent close replies."""
+        if reply_action not in cls.CLOSING_ACTIONS:
+            return
+        if not resolution_code:
+            raise ValueError("Resolution code required when closing ticket")
+        ticket.resolution_code = resolution_code
 
     @staticmethod
     def _apply_fsm_transition(ticket: Ticket, new_status: str) -> None:

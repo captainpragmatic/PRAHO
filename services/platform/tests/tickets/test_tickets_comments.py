@@ -273,6 +273,25 @@ class TicketInternalCommentsSecurityTest(TestCase):
         self.assertContains(response, 'Internal staff note - CONFIDENTIAL')
         self.assertIn(self.internal_comment, list(response.context['comments']))
 
+    def test_invalid_staff_reply_action_does_not_persist_comment_or_mutate_ticket(self):
+        """Reject a forged action before writing either the reply or assignment."""
+        original_comment_count = self.ticket.comments.count()
+        self.client.login(email='admin@example.com', password='testpass123')
+
+        response = self.client.post(
+            reverse('tickets:reply', kwargs={'pk': self.ticket.pk}),
+            {
+                'reply': 'This comment must never be stored',
+                'reply_action': 'forged_action',
+            },
+        )
+
+        self.assertRedirects(response, reverse('tickets:detail', kwargs={'pk': self.ticket.pk}))
+        self.ticket.refresh_from_db()
+        self.assertEqual(self.ticket.comments.count(), original_comment_count)
+        self.assertIsNone(self.ticket.assigned_to)
+        self.assertEqual(self.ticket.status, 'open')
+
     def test_detail_page_shows_empty_state_when_only_internal_notes_exist(self):
         """The detail page must render the filtered queryset, not ticket.comments.all.
 

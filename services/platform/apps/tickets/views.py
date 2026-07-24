@@ -400,11 +400,31 @@ def _validate_ticket_reply_data(
     if error_response:
         return error_response
 
+    validation_error: HttpResponse | None = None
     if not reply_data.reply_text:
         if request.headers.get("HX-Request"):
-            return HttpResponse('<div class="text-red-500 text-sm">Reply cannot be empty.</div>')
-        messages.error(request, _("❌ The reply cannot be empty."))
-        return redirect("tickets:detail", pk=ticket.pk)
+            validation_error = HttpResponse('<div class="text-red-500 text-sm">Reply cannot be empty.</div>')
+        else:
+            messages.error(request, _("❌ The reply cannot be empty."))
+            validation_error = redirect("tickets:detail", pk=ticket.pk)
+
+    # Fail closed before creating the comment or processing attachments. The
+    # service validates again before mutating ticket state, but request-boundary
+    # validation prevents a forged action from leaving an orphaned comment.
+    elif user.is_staff_user:
+        try:
+            TicketStatusService.validate_reply_action(reply_data.reply_action)
+        except ValueError as exc:
+            if request.headers.get("HX-Request"):
+                validation_error = HttpResponse(
+                    format_html('<div class="text-red-500 text-sm">Error: {}</div>', str(exc))
+                )
+            else:
+                messages.error(request, _("❌ Error: {error}").format(error=str(exc)))
+                validation_error = redirect("tickets:detail", pk=ticket.pk)
+
+    if validation_error:
+        return validation_error
 
     # Validate resolution code if closing
     if reply_data.reply_action == "close_with_resolution" and not reply_data.resolution_code:

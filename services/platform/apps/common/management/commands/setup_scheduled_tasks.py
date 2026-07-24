@@ -1,7 +1,7 @@
 """
 Consolidated management command to set up all scheduled tasks for PRAHO Platform.
 
-This command sets up both Virtualmin provisioning tasks and user security tasks.
+This command registers every PRAHO scheduled-task category.
 """
 
 from typing import Any
@@ -13,6 +13,7 @@ from apps.billing.tasks import setup_billing_scheduled_tasks
 from apps.common.tasks import setup_system_status_scheduled_tasks
 from apps.orders.tasks import setup_order_scheduled_tasks
 from apps.provisioning.virtualmin_tasks import setup_virtualmin_scheduled_tasks
+from apps.tickets.tasks import setup_ticket_scheduled_tasks
 from apps.users.tasks import setup_user_security_scheduled_tasks
 
 
@@ -55,6 +56,11 @@ class Command(BaseCommand):
             action="store_true",
             help="Set up only audit integrity/retention tasks",
         )
+        parser.add_argument(
+            "--tickets-only",
+            action="store_true",
+            help="Set up only support ticket lifecycle tasks",
+        )
 
     def _validate_options(self, options: dict[str, Any]) -> dict[str, bool]:
         """Validate mutually exclusive command options."""
@@ -64,13 +70,23 @@ class Command(BaseCommand):
         orders_only = options.get("orders_only", False)
         status_only = options.get("status_only", False)
         audit_only = options.get("audit_only", False)
+        tickets_only = options.get("tickets_only", False)
 
         # Check for mutually exclusive flags
-        exclusive_flags = [virtualmin_only, security_only, billing_only, orders_only, status_only, audit_only]
+        exclusive_flags = [
+            virtualmin_only,
+            security_only,
+            billing_only,
+            orders_only,
+            status_only,
+            audit_only,
+            tickets_only,
+        ]
         if sum(exclusive_flags) > 1:
             raise CommandError(
                 "Cannot specify multiple exclusive flags "
-                "(--virtualmin-only, --security-only, --billing-only, --orders-only, --status-only, --audit-only)"
+                "(--virtualmin-only, --security-only, --billing-only, --orders-only, "
+                "--status-only, --audit-only, --tickets-only)"
             )
 
         return {
@@ -80,6 +96,7 @@ class Command(BaseCommand):
             "orders_only": orders_only,
             "status_only": status_only,
             "audit_only": audit_only,
+            "tickets_only": tickets_only,
         }
 
     def _setup_task_category(
@@ -154,6 +171,11 @@ class Command(BaseCommand):
             self.stdout.write("  - Integrity-Check Cleanup: Weekly")
             self.stdout.write("  - File Integrity Check: Daily")
 
+        if run_all or flags["tickets_only"]:
+            self.stdout.write("")
+            self.stdout.write("🎫 Support Tickets:")
+            self.stdout.write("  - Close inactive waiting-on-customer tickets: Hourly")
+
         self.stdout.write("")
         self.stdout.write("🔧 Start workers: python manage.py qcluster")
         self.stdout.write("📊 Monitor tasks: /admin/django_q/")
@@ -191,6 +213,9 @@ class Command(BaseCommand):
             # Set up Audit tasks
             if run_all or flags["audit_only"]:
                 self._setup_task_category("audit", "🔒", setup_audit_scheduled_tasks, all_results)
+
+            if run_all or flags["tickets_only"]:
+                self._setup_task_category("support tickets", "🎫", setup_ticket_scheduled_tasks, all_results)
 
             # Summary header
             self.stdout.write("")

@@ -27,13 +27,50 @@ from apps.notifications.models import (
 )
 from apps.notifications.services import (
     EmailRateLimiter,
+    EmailResult,
     EmailService,
     EmailSuppressionService,
+    NotificationService,
     render_template_safely,
     validate_template_context,
 )
 from config.settings.test import LOCMEM_TEST_CACHE
 from tests.factories import CurrencyFactory, CustomerFactory, InvoiceFactory
+
+
+class CustomerNotificationResultTests(TestCase):
+    """Customer-notification callers must receive the real template-send outcome."""
+
+    def setUp(self) -> None:
+        self.customer = CustomerFactory(primary_email="customer@example.com")
+
+    @patch.object(
+        EmailService,
+        "send_template_email",
+        return_value=EmailResult(success=False, error="Template unavailable"),
+    )
+    def test_template_failure_returns_false(self, _send_template_email) -> None:
+        result = NotificationService.send_customer_notification(
+            customer_id=str(self.customer.pk),
+            notification_type="ticket_auto_closed",
+            context={"ticket_number": "TK-1"},
+        )
+
+        self.assertFalse(result)
+
+    @patch.object(
+        EmailService,
+        "send_template_email",
+        return_value=EmailResult(success=True, message_id="message-1"),
+    )
+    def test_template_success_returns_true(self, _send_template_email) -> None:
+        result = NotificationService.send_customer_notification(
+            customer_id=str(self.customer.pk),
+            notification_type="ticket_auto_closed",
+            context={"ticket_number": "TK-1"},
+        )
+
+        self.assertTrue(result)
 
 
 class InvoiceEmailRomanianDateTests(TestCase):
