@@ -15,7 +15,7 @@ from apps.settings.services import SettingsService
 
 from .virtualmin_gateway import VirtualminConfig, VirtualminGateway
 from .virtualmin_models import VirtualminAccount, VirtualminServer
-from .virtualmin_service import VirtualminAccountCreationData, VirtualminProvisioningService
+from .virtualmin_service import VirtualminProvisioningService
 
 logger = logging.getLogger(__name__)
 
@@ -109,16 +109,12 @@ class VirtualminDisasterRecoveryService:
 
             for account in praho_accounts:
                 try:
-                    # Recreate account using PRAHO data as authority
-                    creation_data = VirtualminAccountCreationData(
-                        service=account.service,
-                        domain=account.domain,
-                        username=account.virtualmin_username,
-                        # New password will be generated (old one was encrypted)
-                        template=account.template_name or "Default",
-                        server=target_server,
-                    )
-                    result = provisioning_service.create_virtualmin_account(creation_data)
+                    # 🔒 #326: rebuild must REUSE the existing PRAHO row, not create a new one.
+                    # create_virtualmin_account() rejects the domain as "already exists in PRAHO"
+                    # (the row being rebuilt is the collision), so it failed for 100% of accounts.
+                    # reprovision_virtualmin_account re-runs the server-side create against the
+                    # existing row (fresh password, retargeted server).
+                    result = provisioning_service.reprovision_virtualmin_account(account, target_server)
 
                     if result.is_ok():
                         new_account = result.unwrap()
@@ -160,8 +156,14 @@ class VirtualminDisasterRecoveryService:
                     failed_rebuilds += 1
                     logger.exception(f"Error rebuilding {account.domain}: {e}")
 
-            # Update server statistics
-            target_server.current_domains = successful_rebuilds
+            # Reconcile server statistics from the authoritative DB state (#326).
+            # _execute_domain_creation increments current_domains per success on its own
+            # account.server instance, so assigning successful_rebuilds to the loop's
+            # target_server here fought those increments and could under/over-count. Recount
+            # the active accounts actually on this server instead.
+            target_server.current_domains = VirtualminAccount.objects.filter(
+                server=target_server, status="active"
+            ).count()
             target_server.save(update_fields=["current_domains", "updated_at"])
 
             return Ok(
