@@ -553,6 +553,32 @@ class ReverifyExpiredVatValidationsTests(TestCase):
         mock_async.assert_called_once_with("apps.billing.tasks.validate_vat_number", str(profile.id))
 
     @patch("apps.billing.tasks.async_task")
+    def test_failed_format_evidence_never_reenters_the_sweep(self, mock_async: MagicMock) -> None:
+        """A structurally invalid number is terminal evidence: re-verifying it cannot
+        improve it, and it must not inflate the sweep's unmatched report every day."""
+        from apps.billing.tax_models import VATValidation  # noqa: PLC0415
+        from apps.customers.models import CustomerTaxProfile  # noqa: PLC0415
+
+        customer = create_customer(company_name="Bad Format SRL")
+        profile = CustomerTaxProfile.objects.create(
+            customer=customer,
+            vat_number="DE12",
+            vies_verification_status="pending",
+        )
+
+        result = validate_vat_number(str(profile.id))
+
+        self.assertTrue(result["success"])
+        self.assertFalse(result["is_valid"])
+        validation = VATValidation.objects.get(country_code="DE", vat_number="12")
+        self.assertIsNone(validation.expires_at, "failed-format evidence must not expire into the sweep")
+
+        sweep = reverify_expired_vat_validations()
+
+        self.assertEqual(sweep, {"success": True, "queued": 0, "expired_found": 0, "unmatched": 0})
+        mock_async.assert_not_called()
+
+    @patch("apps.billing.tasks.async_task")
     def test_reverification_queues_more_than_one_hundred_profiles(self, mock_async: MagicMock) -> None:
         from apps.billing.tax_models import VATValidation  # noqa: PLC0415
         from apps.customers.models import CustomerTaxProfile  # noqa: PLC0415

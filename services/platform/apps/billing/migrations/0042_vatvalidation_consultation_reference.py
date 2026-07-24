@@ -4,7 +4,7 @@ from django.db import migrations, models
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("billing", "0039_invoice_tax_point_and_fx_snapshot"),
+        ("billing", "0041_recover_remaining_legacy_refunds"),
     ]
 
     operations = [

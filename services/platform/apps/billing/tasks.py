@@ -416,6 +416,7 @@ def validate_vat_number(tax_profile_id: str) -> dict[str, Any]:
                     is_valid=False,
                     source="format_check",
                     response_data={"error": fmt.error_message},
+                    never_expires=True,
                 )
                 _update_tax_profile_vies(tax_profile, status="invalid")
             logger.info("[VAT] Format invalid: %s — %s", fmt.full_vat_number, fmt.error_message)
@@ -519,11 +520,14 @@ def _store_validation(  # noqa: PLR0913
     company_address: str = "",
     consultation_reference: str = "",
     response_data: dict[str, Any] | None = None,
+    never_expires: bool = False,
 ) -> None:
     """Upsert a VATValidation record."""
     from apps.billing.tax_models import VATValidation  # noqa: PLC0415
 
-    expires_at = timezone.now() + timedelta(hours=24 if is_valid else 1)
+    # never_expires marks terminal evidence (a structurally invalid number):
+    # re-verification cannot improve it, so it must not re-enter the daily sweep.
+    expires_at = None if never_expires else timezone.now() + timedelta(hours=24 if is_valid else 1)
     VATValidation.objects.update_or_create(
         country_code=country_code,
         vat_number=vat_number,
