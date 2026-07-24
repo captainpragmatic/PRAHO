@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import importlib
+from unittest.mock import patch
 
 from django.apps import apps
 from django.core.cache import cache
+from django.db import ProgrammingError
 from django.db.models.signals import post_save
 from django.test import TestCase, override_settings
 
@@ -115,3 +117,12 @@ class OperatorPolicyMigrationTests(TestCase):
             [SettingsService.get_integer_setting(key, 99) for key in destination_keys],
             [0, 0, 1],
         )
+
+    def test_fresh_install_tolerates_cache_table_not_existing_yet(self) -> None:
+        migration = importlib.import_module("apps.settings.migrations.0006_rename_invitation_policy_settings")
+
+        with (
+            patch.object(migration.cache, "delete", side_effect=ProgrammingError("cache table does not exist")),
+            self.captureOnCommitCallbacks(execute=True),
+        ):
+            migration.migrate_policy_rows(apps, None)
