@@ -62,6 +62,9 @@ jobs:
     - name: Lint all services (make lint — 8 phases)
       run: make lint
 
+    - name: Check migration state
+      run: make check-migrations
+
     - name: Component parity check (portal ↔ platform)
       run: make check-parity
       continue-on-error: true  # TODO: fix badge.html drift, then make blocking
