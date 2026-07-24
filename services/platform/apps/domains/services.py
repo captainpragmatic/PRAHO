@@ -202,10 +202,29 @@ class DomainValidationService:
 
     @staticmethod
     def extract_tld_from_domain(domain_name: str) -> str:
-        """🌐 Extract TLD from domain name"""
+        """🌐 Extract the TLD from a domain name.
+
+        Multi-label TLDs (``.com.ro``, ``.org.ro``) must not be truncated to their
+        last label: ``rsplit('.', 1)`` turned ``shop.com.ro`` into ``ro``, which then
+        mislinked/mispriced the Domain or falsely rejected it as unsupported (#237).
+
+        Resolve by longest-suffix match against the configured ``TLD.extension`` values
+        so ``shop.com.ro`` → ``com.ro`` while ``example.ro`` → ``ro``. Falls back to the
+        last label when the domain matches no configured TLD, so the caller's own
+        "unsupported TLD" handling still fires instead of crashing.
+        """
         if "." not in domain_name:
             return ""
-        return domain_name.rsplit(".", maxsplit=1)[-1].lower()
+
+        domain_lower = domain_name.lower()
+        # Longest configured extension that the domain ends with wins (".com.ro" over ".ro").
+        matches = [
+            ext for ext in TLD.objects.values_list("extension", flat=True) if domain_lower.endswith(f".{ext.lower()}")
+        ]
+        if matches:
+            return max(matches, key=len).lower()
+
+        return domain_lower.rsplit(".", maxsplit=1)[-1]
 
     @staticmethod
     def is_romanian_domain(domain_name: str) -> bool:
