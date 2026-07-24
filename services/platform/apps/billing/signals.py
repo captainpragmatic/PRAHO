@@ -46,6 +46,7 @@ from .models import (
     PriceGrandfathering,
     ProformaInvoice,
     RecurringPaymentAuthorization,
+    RecurringPaymentSubmission,
     Refund,
     Subscription,
     TaxRule,
@@ -225,6 +226,57 @@ def audit_recurring_payment_authorization_deleted(
             "terms_version": instance.terms_version,
         },
         metadata={"model": "RecurringPaymentAuthorization"},
+    )
+
+
+@receiver(post_save, sender=RecurringPaymentSubmission)
+def audit_recurring_payment_submission_lifecycle(
+    sender: type[RecurringPaymentSubmission],
+    instance: RecurringPaymentSubmission,
+    created: bool,
+    **kwargs: Any,
+) -> None:
+    """Audit durable recurring-payment submission state without gateway secrets."""
+    event_type = "recurring_payment_submission_created" if created else "recurring_payment_submission_updated"
+    _log_billing_model_event(
+        event_type=event_type,
+        instance=instance,
+        description=f"Recurring-payment submission for payment {instance.payment_id} "
+        f"{'created' if created else 'updated'}",
+        new_values={
+            "submission_id": str(instance.id),
+            "payment_id": str(instance.payment_id),
+            "state": instance.state,
+            "claimed_at": instance.claimed_at,
+            "submitted_at": instance.submitted_at,
+            "attempt_count": instance.attempt_count,
+            "has_reconciliation_error": bool(instance.last_error),
+        },
+        metadata={"model": "RecurringPaymentSubmission"},
+    )
+
+
+@receiver(pre_delete, sender=RecurringPaymentSubmission)
+def audit_recurring_payment_submission_deleted(
+    sender: type[RecurringPaymentSubmission],
+    instance: RecurringPaymentSubmission,
+    **kwargs: Any,
+) -> None:
+    """Audit deletion of a recurring-payment submission safety record."""
+    _log_billing_model_event(
+        event_type="recurring_payment_submission_deleted",
+        instance=instance,
+        description=f"Recurring-payment submission for payment {instance.payment_id} deleted",
+        old_values={
+            "submission_id": str(instance.id),
+            "payment_id": str(instance.payment_id),
+            "state": instance.state,
+            "claimed_at": instance.claimed_at,
+            "submitted_at": instance.submitted_at,
+            "attempt_count": instance.attempt_count,
+            "has_reconciliation_error": bool(instance.last_error),
+        },
+        metadata={"model": "RecurringPaymentSubmission"},
     )
 
 

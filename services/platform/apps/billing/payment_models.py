@@ -396,6 +396,124 @@ class Payment(ConcurrentTransitionMixin, models.Model):
             return None
 
 
+class RecurringPaymentSubmission(ConcurrentTransitionMixin, models.Model):
+    """Durable outbox state for one PRAHO-owned off-session payment attempt."""
+
+    class State(models.TextChoices):
+        RESERVED = "reserved", _("Reserved")
+        IN_FLIGHT = "in_flight", _("In flight")
+        SUBMITTED = "submitted", _("Submitted")
+        ABANDONED = "abandoned", _("Abandoned")
+        MANUAL_REVIEW = "manual_review", _("Manual review")
+
+    payment = models.OneToOneField(
+        Payment,
+        on_delete=models.PROTECT,
+        related_name="recurring_submission",
+    )
+    state = FSMField(
+        max_length=24,
+        choices=State.choices,
+        default=State.RESERVED,
+        protected=True,
+    )
+    claimed_at = models.DateTimeField(null=True, blank=True)
+    submitted_at = models.DateTimeField(null=True, blank=True)
+    attempt_count = models.PositiveIntegerField(default=0)
+    reconcile_claim_token = models.UUIDField(null=True, blank=True, editable=False)
+    reconcile_claim_expires_at = models.DateTimeField(null=True, blank=True, editable=False)
+    last_error = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "billing_recurring_payment_submissions"
+        ordering = ("created_at", "id")
+        indexes = (
+            models.Index(fields=("state", "claimed_at"), name="recurring_submit_state_idx"),
+            models.Index(fields=("state", "submitted_at"), name="recurring_submitted_at_idx"),
+            models.Index(
+                fields=("reconcile_claim_expires_at",),
+                name="recurring_reconcile_lease_idx",
+            ),
+        )
+        constraints = (
+            models.CheckConstraint(
+                condition=Q(
+                    state__in=["reserved", "in_flight", "submitted", "abandoned", "manual_review"],
+                ),
+                name="recurring_submission_state_valid",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    Q(
+                        state__in=["reserved", "abandoned", "manual_review"],
+                        claimed_at__isnull=True,
+                        submitted_at__isnull=True,
+                        attempt_count=0,
+                    )
+                    | Q(
+                        state="in_flight",
+                        claimed_at__isnull=False,
+                        submitted_at__isnull=True,
+                        attempt_count__gte=1,
+                    )
+                    | Q(
+                        state="submitted",
+                        claimed_at__isnull=False,
+                        submitted_at__isnull=False,
+                        attempt_count__gte=1,
+                    )
+                ),
+                name="recurring_submission_claim_consistent",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    Q(reconcile_claim_token__isnull=True, reconcile_claim_expires_at__isnull=True)
+                    | Q(reconcile_claim_token__isnull=False, reconcile_claim_expires_at__isnull=False)
+                ),
+                name="recurring_reconcile_claim_consistent",
+            ),
+        )
+
+    def __str__(self) -> str:
+        return f"Recurring submission for payment {self.payment_id}: {self.state}"
+
+    @transition(field=state, source=State.RESERVED, target=State.IN_FLIGHT)
+    def claim(self) -> None:
+        """Record the authorization linearization point."""
+
+    @transition(field=state, source=State.RESERVED, target=State.ABANDONED)
+    def abandon(self) -> None:
+        """Record proof that no gateway request was authorized."""
+
+    @transition(
+        field=state,
+        source=[State.IN_FLIGHT, State.SUBMITTED],
+        target=State.SUBMITTED,
+    )
+    def mark_submitted(self) -> None:
+        """Record that Stripe returned a PaymentIntent identifier."""
+
+    def refresh_from_db(
+        self,
+        using: str | None = None,
+        fields: Any = None,
+        from_queryset: Any = None,
+    ) -> None:
+        """Refresh a protected FSM field through Django's normal reload path."""
+        fsm_fields = ["state"]
+        if fields is not None:
+            fields_set = set(fields)
+            fsm_fields = [field for field in fsm_fields if field in fields_set]
+        saved = {field: self.__dict__.pop(field) for field in fsm_fields if field in self.__dict__}
+        try:
+            super().refresh_from_db(using=using, fields=fields, from_queryset=from_queryset)
+        except Exception:
+            self.__dict__.update(saved)
+            raise
+
+
 class CreditLedger(models.Model):
     """
     Customer credit/balance tracking ledger.

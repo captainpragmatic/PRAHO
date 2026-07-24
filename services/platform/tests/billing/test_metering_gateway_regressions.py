@@ -1680,11 +1680,12 @@ class TestStripeGateway(TestCase):
 
     def test_confirm_payment_success(self):
         mock_stripe = MagicMock()
-        mock_stripe.PaymentIntent.retrieve.return_value = MagicMock(status="succeeded")
+        mock_stripe.PaymentIntent.retrieve.return_value = MagicMock(status="succeeded", amount=12100)
         gw = self._make_gateway(mock_stripe)
         result = gw.confirm_payment("pi_123")
         assert result["success"] is True
         assert result["status"] == "succeeded"
+        assert result["amount"] == 12100
 
     def test_confirm_payment_stripe_error(self):
         mock_stripe = MagicMock()

@@ -524,13 +524,14 @@ class UsageBillingService:
         from .tasks import process_auto_payment  # noqa: PLC0415
 
         run_at = as_of or timezone.now()
-        # Leave a gateway-less pending reservation eligible so PaymentService can
-        # resume its original idempotency key after an interrupted create call.
+        # Any recurring attempt owns this invoice until it reaches a terminal state.
+        # Ambiguous gateway-less submissions are recovered by the reconciliation task
+        # with their original idempotency key, never by the hourly collector.
         blocking_recurring_attempts = Payment.objects.filter(
             invoice_id=OuterRef("usage_invoice_id"),
             payment_method="stripe",
             meta__source="recurring_billing",
-        ).exclude(status="pending", gateway_txn_id__isnull=True)
+        )
         due_invoice_ids = list(
             BillingCycle.objects.filter(
                 status="invoiced",
