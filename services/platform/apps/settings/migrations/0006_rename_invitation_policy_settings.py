@@ -10,7 +10,13 @@ The welcome-invite row is a resend guard scoped to the target user, so it is
 renamed rather than merged with either of those policies.
 """
 
-from django.db import migrations
+from django.core.cache import cache
+from django.db import migrations, transaction
+
+# Embedded migration constants mirror SettingsService without importing mutable
+# application service code from a historical migration.
+_CACHE_PREFIX = "praho_setting"
+_CACHE_VERSION = 1
 
 OLD_MEMBERSHIP_KEY = "security.invitation_rate_limit_per_user"
 OLD_WELCOME_KEY = "security.welcome_invite_limit_per_user_per_hour"
@@ -98,6 +104,14 @@ def migrate_policy_rows(apps, schema_editor):
     welcome_source = system_setting.objects.filter(key=OLD_WELCOME_KEY).first()
     if welcome_source is not None:
         _rename_policy_row(system_setting, welcome_source, WELCOME_KEY)
+
+    # Historical models do not emit the current SystemSetting cache-invalidation
+    # signal. Clear after commit so a rolling-deploy worker cannot repopulate a
+    # destination default before the migrated override becomes visible.
+    for destination_key in (MEMBERSHIP_KEY, JOIN_NOTIFICATION_KEY, WELCOME_KEY):
+        transaction.on_commit(
+            lambda key=destination_key: cache.delete(f"{_CACHE_PREFIX}:{key}", version=_CACHE_VERSION)
+        )
 
 
 class Migration(migrations.Migration):
