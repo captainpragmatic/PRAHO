@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import socket
 from unittest.mock import MagicMock, patch
 
@@ -79,6 +80,31 @@ class TestSafeRequest(TestCase):
             safe_request("GET", "https://evil.example.com/")
 
     @patch("apps.common.outbound_http.socket.getaddrinfo", _mock_getaddrinfo_public)
+    def test_environment_proxies_cannot_bypass_dns_pinning(self):
+        """HTTPS_PROXY in the worker environment must not reroute a pinned request."""
+        captured: dict = {}
+
+        def _capture_send(request, **kwargs):
+            captured.update(kwargs)
+            response = MagicMock()
+            response.status_code = 200
+            response.headers = {}
+            response.is_redirect = False
+            response.history = []
+            return response
+
+        with (
+            patch.dict(os.environ, {"HTTPS_PROXY": "http://127.0.0.1:9"}),
+            patch.object(PinnedIPAdapter, "send", side_effect=_capture_send),
+        ):
+            safe_request("GET", "https://example.com/")
+
+        self.assertFalse(
+            captured.get("proxies"),
+            f"pinned send must ignore environment proxies, got {captured.get('proxies')!r}",
+        )
+
+    @patch("apps.common.outbound_http.socket.getaddrinfo", _mock_getaddrinfo_public)
     @patch("apps.common.outbound_http.requests.Session")
     def test_forces_verify_tls_true(self, mock_session_cls):
         mock_session = MagicMock()
@@ -123,6 +149,69 @@ class TestSafeRequest(TestCase):
 
     @patch("apps.common.outbound_http.socket.getaddrinfo", _mock_getaddrinfo_public)
     @patch("apps.common.outbound_http.requests.Session")
+    def test_routes_transport_kwargs_to_send_without_weakening_policy(self, mock_session_cls):
+        """Transport options belong to Session.send; policy still owns security controls."""
+        mock_session = MagicMock()
+        mock_session_cls.return_value = mock_session
+        mock_response = MagicMock(status_code=200)
+        mock_session.send.return_value = mock_response
+        mock_session.prepare_request.return_value = MagicMock()
+
+        safe_request(
+            "GET",
+            "https://example.com/",
+            timeout=5,
+            stream=True,
+            cert="client.pem",
+            verify=False,
+            allow_redirects=True,
+        )
+
+        send_kwargs = mock_session.send.call_args.kwargs
+        self.assertEqual(send_kwargs["timeout"], (5.0, 5.0))
+        self.assertTrue(send_kwargs["stream"])
+        self.assertEqual(send_kwargs["cert"], "client.pem")
+        self.assertTrue(send_kwargs["verify"])
+        self.assertFalse(send_kwargs["allow_redirects"])
+
+    @patch("apps.common.outbound_http.socket.getaddrinfo", _mock_getaddrinfo_public)
+    @patch("apps.common.outbound_http.requests.Session")
+    def test_rejects_caller_proxy_before_send(self, mock_session_cls):
+        """A caller proxy would bypass the DNS-pinned connection guarantee."""
+        with self.assertRaises(OutboundSecurityError):
+            safe_request(
+                "GET",
+                "https://example.com/",
+                proxies={"https": "https://proxy.example.com"},
+            )
+
+        mock_session_cls.return_value.send.assert_not_called()
+
+    @patch("apps.common.outbound_http.socket.getaddrinfo", _mock_getaddrinfo_public)
+    @patch("apps.common.outbound_http.requests.Session")
+    def test_caller_timeout_cannot_exceed_policy_bounds(self, mock_session_cls):
+        """A requests-compatible timeout override may tighten, never loosen, policy."""
+        mock_session = MagicMock()
+        mock_session_cls.return_value = mock_session
+        mock_session.send.return_value = MagicMock(status_code=200)
+        mock_session.prepare_request.return_value = MagicMock()
+
+        safe_request("GET", "https://example.com/", timeout=(120, None))
+
+        self.assertEqual(mock_session.send.call_args.kwargs["timeout"], (10.0, 30.0))
+
+    @patch("apps.common.outbound_http.socket.getaddrinfo", _mock_getaddrinfo_public)
+    @patch("apps.common.outbound_http.requests.Session")
+    def test_invalid_timeout_rejected_before_send(self, mock_session_cls):
+        """Invalid timeout overrides fail locally instead of reaching requests."""
+        for timeout in (0, -1, float("inf"), "fast", (1, 2, 3)):
+            with self.subTest(timeout=timeout), self.assertRaises((TypeError, ValueError)):
+                safe_request("GET", "https://example.com/", timeout=timeout)
+
+        mock_session_cls.return_value.send.assert_not_called()
+
+    @patch("apps.common.outbound_http.socket.getaddrinfo", _mock_getaddrinfo_public)
+    @patch("apps.common.outbound_http.requests.Session")
     def test_mounts_pinned_adapter(self, mock_session_cls):
         mock_session = MagicMock()
         mock_session_cls.return_value = mock_session
@@ -156,6 +245,7 @@ class TestSafeRequest(TestCase):
         redirect_response.status_code = 302
         redirect_response.headers = {"Location": "https://other.example.com/final"}
         redirect_response.url = "https://example.com/"
+        redirect_response.request.method = "GET"
 
         # Final response: 200
         final_response = MagicMock()
@@ -163,8 +253,12 @@ class TestSafeRequest(TestCase):
 
         mock_session.send.side_effect = [redirect_response, final_response]
 
-        resp = safe_request("GET", "https://example.com/", policy=policy)
+        resp = safe_request("GET", "https://example.com/", policy=policy, timeout=5, stream=True)
         self.assertEqual(resp.status_code, 200)
+        initial_send, redirected_send = mock_session.send.call_args_list
+        for send_call in (initial_send, redirected_send):
+            self.assertEqual(send_call.kwargs["timeout"], (5.0, 5.0))
+            self.assertTrue(send_call.kwargs["stream"])
 
     @patch("apps.common.outbound_http.socket.getaddrinfo")
     @patch("apps.common.outbound_http.requests.Session")
@@ -190,6 +284,7 @@ class TestSafeRequest(TestCase):
         redirect_response.status_code = 302
         redirect_response.headers = {"Location": "https://evil-internal.example.com/steal"}
         redirect_response.url = "https://example.com/"
+        redirect_response.request.method = "GET"
         mock_session.send.return_value = redirect_response
 
         with self.assertRaises(OutboundSecurityError):

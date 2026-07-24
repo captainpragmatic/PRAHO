@@ -45,6 +45,10 @@ _INTERMEDIATE_STATUSES = [
 ]
 _DRIFT_SCAN_LOCK_ID = "drift_scan_running"
 _DRIFT_SCAN_LOCK_TIMEOUT = 900  # 15 minutes
+# A complete node deployment may run four 30-minute Ansible stages plus
+# provider provisioning and validation. Keep the worker alive for the full
+# supported pipeline with one hour of margin.
+NODE_DEPLOYMENT_TASK_TIMEOUT_SECONDS = 3 * 60 * 60
 
 
 def deploy_node_task(
@@ -1159,6 +1163,7 @@ def queue_deploy_node(
         user_id,
         task_name=f"deploy_node_{deployment_id}",
         hook="apps.infrastructure.tasks.deployment_complete_hook",
+        timeout=NODE_DEPLOYMENT_TASK_TIMEOUT_SECONDS,
     )
 
     logger.info(f"[Queue] Deployment queued: deployment_id={deployment_id}, task_id={task_id}")
@@ -1225,6 +1230,7 @@ def queue_retry_deployment(
         user_id,
         task_name=f"retry_deployment_{deployment_id}",
         hook="apps.infrastructure.tasks.deployment_complete_hook",
+        timeout=NODE_DEPLOYMENT_TASK_TIMEOUT_SECONDS,
     )
 
     logger.info(f"[Queue] Retry queued: deployment_id={deployment_id}, task_id={task_id}")

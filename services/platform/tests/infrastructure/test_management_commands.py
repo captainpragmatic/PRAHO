@@ -347,6 +347,27 @@ class TestDeployNodeCommand(TestCase):
         finally:
             self._stop_patches(patches)
 
+    def test_missing_dns_zone_fails_before_creating_deployment(self) -> None:
+        """CLI deploys must reject a bare hostname before saving or queueing."""
+        patches = self._patch_deploy_deps()
+        patches["SettingsService"].get_setting.side_effect = (
+            lambda key, default=True: "" if key == "node_deployment.dns_default_zone" else default
+        )
+        try:
+            with self.assertRaises(CommandError) as ctx:
+                call_command(
+                    "deploy_node",
+                    "--provider=hetzner",
+                    "--environment=prd",
+                    "--region=fsn1",
+                    "--size=cpx21",
+                )
+
+            self.assertIn("node_deployment.dns_default_zone", str(ctx.exception))
+            patches["deployment"].save.assert_not_called()
+        finally:
+            self._stop_patches(patches)
+
 
 # ===========================================================================
 # TestManageNodeCommand

@@ -332,6 +332,13 @@ All outbound HTTP requests **must** use the helpers in `apps.common.outbound_htt
 3. Add tests verifying private IP rejection and redirect blocking
 4. Never use raw `requests.get/post` or `urllib.request.urlopen` outside the helper module
 
+`safe_request()` accepts normal request-construction options plus the transport
+options `timeout`, `stream`, and `cert`. Transport options are applied only after
+DNS pinning. A caller timeout may tighten the policy timeout but cannot increase
+it; caller-supplied `verify` and `allow_redirects` values never override the
+selected `OutboundPolicy`. Caller-supplied proxies are rejected because they
+would bypass the DNS-pinned connection guarantee.
+
 ---
 
 ## 9. Production Validation

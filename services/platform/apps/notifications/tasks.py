@@ -618,15 +618,16 @@ def _get_campaign_recipients(campaign: object) -> list[tuple[str, dict[str, Any]
     audience = campaign.audience
     recipients = []
 
-    # Base queryset
-    customers = Customer.objects.filter(status="active")
+    # Default manager already excludes soft-deleted customers. Apply status
+    # constraints per audience so names and query semantics cannot contradict.
+    customers = Customer.objects.all()
 
     if audience == "all_customers":
         pass  # No additional filter
     elif audience == "active_customers":
-        customers = customers.filter(status="active")
+        customers = customers.filter(status=Customer.CustomerStatus.ACTIVE)
     elif audience == "inactive_customers":
-        customers = customers.filter(status="inactive")
+        customers = customers.filter(status=Customer.CustomerStatus.INACTIVE)
     elif audience == "overdue_payments":
         # Customers with overdue invoices
         from apps.billing.models import (  # noqa: PLC0415  # Deferred: avoids circular import
@@ -635,11 +636,19 @@ def _get_campaign_recipients(campaign: object) -> list[tuple[str, dict[str, Any]
 
         overdue_customer_ids = Invoice.objects.filter(status="overdue").values_list("customer_id", flat=True).distinct()
         customers = customers.filter(id__in=overdue_customer_ids)
+    elif audience == "trial_expiring":
+        # The model exposes this future audience, but no expiry window has been
+        # defined. Fail closed rather than silently broadcasting to all customers.
+        logger.warning("Campaign audience 'trial_expiring' is not implemented; selecting no recipients")
+        customers = customers.none()
     elif audience == "custom_filter":
         # Apply custom filter from audience_filter JSON with WHITELIST validation
         custom_filter = campaign.audience_filter or {}
         if custom_filter:
             customers = _apply_safe_customer_filter(customers, custom_filter)
+    else:
+        logger.error("Unknown campaign audience %r; selecting no recipients", audience)
+        customers = customers.none()
 
     # Check consent for non-transactional campaigns
     if not campaign.is_transactional and campaign.requires_consent:

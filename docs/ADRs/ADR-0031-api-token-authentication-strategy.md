@@ -181,12 +181,13 @@ in `apps/api/users/authentication.py`. No external dependencies were added.
 
 | Capability | Before (DRF authtoken) | After (APIToken) |
 | ---------- | ---------------------- | ---------------- |
-| Tokens per user | 1 (OneToOneField) | Multiple (ForeignKey), capped at 20 active per user |
+| Tokens per user | 1 (OneToOneField) | Multiple (ForeignKey), capped by `API_TOKEN_MAX_ACTIVE_PER_USER` (default 20) |
 | Storage | Plaintext | SHA-256 hashed |
 | Expiry | None | Default 90-day TTL (`API_TOKEN_DEFAULT_TTL_DAYS`); callers may shorten via `ttl_days`, clamped to `API_TOKEN_MAX_TTL_DAYS` (365) — only the server default can select "no expiry" |
 | Usage tracking | None | `last_used_at` (throttled to 5-min intervals, condition evaluated in SQL) |
 | Token naming | None | `name` (API) + `description` (model field, not yet API-exposed) |
 | Auth header | `Token` only | `Bearer` and `Token`; malformed recognized schemes fail closed |
+| Auth failures | Token state exposed | One generic response for unknown, expired, and disabled-user tokens |
 | Raw key visibility | Always readable | Shown once at creation, never stored |
 | Audit trail | None | `api_token_created` / `api_token_deleted` audit events on every create/delete path (ADR-0016) |
 
@@ -201,6 +202,8 @@ in `apps/api/users/authentication.py`. No external dependencies were added.
 4. **Expired tokens are purged automatically** — the `user-api-token-purge` Django-Q
    schedule runs `purge_expired_api_tokens` daily at 3 AM; the `purge_expired_tokens`
    management command remains for manual runs.
+5. **The active-token cap is deployment policy** — `API_TOKEN_MAX_ACTIVE_PER_USER`
+   defaults to 20 and is startup-validated with the two TTL settings.
 
 ### Global authenticator interaction with HMAC / public endpoints
 
@@ -276,9 +279,9 @@ auth).
 | Gap | Description | Status | Closed by |
 | --- | ----------- | ------ | --------- |
 | 1 | `verify_token` broken for token consumers | Closed | `GET /api/users/token/me/` endpoint (prior work) |
-| 2 | No token expiry | Closed | Default 90-day TTL on issuance, `HashedTokenAuthentication` expiry check, daily scheduled purge; startup checks (`security.E062/E063`) keep the TTL settings coherent |
+| 2 | No token expiry | Closed | Default 90-day TTL on issuance, `HashedTokenAuthentication` expiry check, daily scheduled purge; startup checks (`security.E062/E063/E064`) keep issuance policy coherent |
 | 3 | No `last_used_at` tracking | Closed | `APIToken.last_used_at` field, updated at 5-min intervals (SQL-side condition) |
-| 4 | One token per user (OneToOneField) | Closed | `APIToken` uses `ForeignKey(User)` — multiple tokens, capped at 20 active per user |
+| 4 | One token per user (OneToOneField) | Closed | `APIToken` uses `ForeignKey(User)` — multiple tokens, capped by `API_TOKEN_MAX_ACTIVE_PER_USER` (default 20) |
 | 5 | Tokens stored in plaintext | Closed | SHA-256 hashed via `APIToken.key_hash`; raw key shown once; no plaintext rows carried over (clean-break cutover) |
 | 6 | No token name or description | Closed | `APIToken.name` settable via API; `description` exists on the model (API/UI exposure lands with Gap 7) |
 | 7 | No web UI for token management | **Open** | Not yet implemented |

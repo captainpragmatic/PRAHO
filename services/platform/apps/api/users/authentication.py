@@ -5,6 +5,7 @@ Closes ADR-0031 Gaps 2 (expiry), 3 (last_used_at), 5 (hashed storage), 8 (Bearer
 """
 
 import logging
+import re
 
 from django.db.models import Q
 from django.http import HttpRequest
@@ -19,6 +20,8 @@ logger = logging.getLogger(__name__)
 # Both RFC 6750 "Bearer" and DRF-legacy "Token" are accepted.
 _ACCEPTED_KEYWORDS = ("bearer", "token")
 _EXPECTED_AUTH_PARTS = 2
+_AUTH_FAILURE_DETAIL = "Invalid or expired token."
+_RAW_KEY_PATTERN = re.compile(rf"^[0-9a-f]{{{APIToken.TOKEN_BYTE_LENGTH * 2}}}$")
 
 
 class HashedTokenAuthentication(BaseAuthentication):  # type: ignore[misc]  # DRF stub types BaseAuthentication as Any
@@ -45,6 +48,8 @@ class HashedTokenAuthentication(BaseAuthentication):  # type: ignore[misc]  # DR
             raise AuthenticationFailed("Invalid token header.")
 
         raw_key = parts[1]
+        if _RAW_KEY_PATTERN.fullmatch(raw_key) is None:
+            raise AuthenticationFailed(_AUTH_FAILURE_DETAIL)
 
         # Use the model's own hashing so issuance and authentication can never diverge.
         key_hash = APIToken.hash_key(raw_key)
@@ -52,13 +57,13 @@ class HashedTokenAuthentication(BaseAuthentication):  # type: ignore[misc]  # DR
         try:
             token = APIToken.objects.select_related("user").get(key_hash=key_hash)
         except APIToken.DoesNotExist:
-            raise AuthenticationFailed("Invalid token.") from None
+            raise AuthenticationFailed(_AUTH_FAILURE_DETAIL) from None
 
         if not token.user.is_active:
-            raise AuthenticationFailed("User account is disabled.")
+            raise AuthenticationFailed(_AUTH_FAILURE_DETAIL)
 
         if token.is_expired:
-            raise AuthenticationFailed("Token has expired.")
+            raise AuthenticationFailed(_AUTH_FAILURE_DETAIL)
 
         self._update_last_used(token)
 

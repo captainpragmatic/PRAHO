@@ -33,6 +33,7 @@ from apps.infrastructure.cloud_gateway import (
     ServerCreateResult,
     get_cloud_gateway,
 )
+from apps.infrastructure.deployment_preflight import validate_deployment_fqdn
 from apps.infrastructure.maintenance import resolve_maintenance_playbooks
 from apps.infrastructure.provider_config import (
     run_provider_command,
@@ -133,6 +134,10 @@ class NodeDeploymentService:
         Returns:
             Result with DeploymentResult or error
         """
+        fqdn_result = validate_deployment_fqdn(deployment.hostname, deployment.dns_zone)
+        if fqdn_result.is_err():
+            return Err(fqdn_result.unwrap_err())
+
         start_time = timezone.now()
         stages_completed: list[str] = []
         _cloud_result: ServerCreateResult | None = None  # unused; actual tracking via server_create_result
@@ -843,6 +848,10 @@ class NodeDeploymentService:
         """
         if deployment.status != "failed":
             return Err(f"Can only retry failed deployments, current status: {deployment.status}")
+
+        fqdn_result = validate_deployment_fqdn(deployment.hostname, deployment.dns_zone)
+        if fqdn_result.is_err():
+            return Err(fqdn_result.unwrap_err())
 
         # Increment retry count
         deployment.retry_count += 1

@@ -102,6 +102,8 @@ class APITokenModelTests(TestCase):
 class HashedTokenAuthenticationTests(TestCase):
     """Tests for the HashedTokenAuthentication DRF backend."""
 
+    generic_failure_detail = "Invalid or expired token."
+
     def setUp(self) -> None:
         self.client = APIClient()
         self.user = User.objects.create_user(
@@ -121,9 +123,10 @@ class HashedTokenAuthenticationTests(TestCase):
         self.assertEqual(response.status_code, 200)
 
     def test_invalid_token_returns_401(self) -> None:
-        self.client.credentials(HTTP_AUTHORIZATION="Token invalid_key_that_does_not_exist")
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {'0' * 40}")
         response = self.client.get(self.url)
         self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()["detail"], self.generic_failure_detail)
 
     def test_expired_token_returns_401(self) -> None:
         _expired_token, expired_key = _create_token(
@@ -134,7 +137,7 @@ class HashedTokenAuthenticationTests(TestCase):
         self.client.credentials(HTTP_AUTHORIZATION=f"Token {expired_key}")
         response = self.client.get(self.url)
         self.assertEqual(response.status_code, 401)
-        self.assertIn("expired", response.json()["detail"].lower())
+        self.assertEqual(response.json()["detail"], self.generic_failure_detail)
 
     def test_inactive_user_returns_401(self) -> None:
         self.user.is_active = False
@@ -142,6 +145,20 @@ class HashedTokenAuthenticationTests(TestCase):
         self.client.credentials(HTTP_AUTHORIZATION=f"Token {self.raw_key}")
         response = self.client.get(self.url)
         self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()["detail"], self.generic_failure_detail)
+
+    def test_malformed_raw_key_is_rejected_before_hashing(self) -> None:
+        """Only the issued 40-character lowercase-hex format reaches hashing."""
+        malformed_keys = ("a" * 39, "a" * 41, "g" * 40, "a" * 129)
+
+        for raw_key in malformed_keys:
+            with self.subTest(raw_key=raw_key), patch.object(APIToken, "hash_key") as hash_key:
+                self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {raw_key}")
+                response = self.client.get(self.url)
+
+                self.assertEqual(response.status_code, 401)
+                self.assertEqual(response.json()["detail"], self.generic_failure_detail)
+                hash_key.assert_not_called()
 
     def test_last_used_at_updated_on_first_use(self) -> None:
         self.assertIsNone(self.token.last_used_at)
@@ -260,14 +277,15 @@ class ObtainTokenTests(TestCase):
         info_response = self.client.get("/api/users/token/me/")
         self.assertEqual(info_response.status_code, 200)
 
-    def test_obtain_rejects_when_at_token_limit(self) -> None:
+    @override_settings(API_TOKEN_MAX_ACTIVE_PER_USER=2)
+    def test_obtain_rejects_when_at_configured_token_limit(self) -> None:
         """Per-user token limit prevents token sprawl."""
-        for i in range(APIToken.MAX_TOKENS_PER_USER):
+        for i in range(2):
             _create_token(self.user, name=f"token-{i}")
 
         response = self.client.post(self.url, {"email": self.user.email, "password": self.password}, format="json")
         self.assertEqual(response.status_code, 400)
-        self.assertIn("Maximum", response.json()["error"])
+        self.assertEqual(response.json()["error"], "Maximum of 2 active tokens per user. Revoke unused tokens first.")
 
 
 # ===============================================================================
@@ -432,9 +450,10 @@ class ObtainTokenLimitExpiredTests(TestCase):
         self.user = User.objects.create_user(email="limit@test.com", password=self.password)
         self.url = "/api/users/token/"
 
+    @override_settings(API_TOKEN_MAX_ACTIVE_PER_USER=2)
     def test_expired_tokens_do_not_block_new_token(self) -> None:
         # Fill the quota entirely with already-expired tokens.
-        for i in range(APIToken.MAX_TOKENS_PER_USER):
+        for i in range(2):
             _create_token(self.user, name=f"old-{i}", expires_at=timezone.now() - timedelta(days=1))
 
         response = self.client.post(self.url, {"email": self.user.email, "password": self.password}, format="json")
@@ -442,14 +461,15 @@ class ObtainTokenLimitExpiredTests(TestCase):
         # Live count is 0, so issuance must succeed rather than report "Maximum".
         self.assertEqual(response.status_code, 200)
 
-    def test_live_tokens_still_enforce_limit(self) -> None:
-        for i in range(APIToken.MAX_TOKENS_PER_USER):
+    @override_settings(API_TOKEN_MAX_ACTIVE_PER_USER=2)
+    def test_live_tokens_still_enforce_configured_limit(self) -> None:
+        for i in range(2):
             _create_token(self.user, name=f"live-{i}", expires_at=timezone.now() + timedelta(days=30))
 
         response = self.client.post(self.url, {"email": self.user.email, "password": self.password}, format="json")
 
         self.assertEqual(response.status_code, 400)
-        self.assertIn("Maximum", response.json()["error"])
+        self.assertEqual(response.json()["error"], "Maximum of 2 active tokens per user. Revoke unused tokens first.")
 
 
 # ===============================================================================

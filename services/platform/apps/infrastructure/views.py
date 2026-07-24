@@ -31,6 +31,7 @@ from apps.infrastructure.audit_service import InfrastructureAuditContext, Infras
 from apps.infrastructure.provider_config import get_provider_sync_fn, get_provider_token, store_provider_token
 from apps.settings.services import SettingsService
 
+from .deployment_preflight import validate_deployment_dns_zone
 from .forms import (
     CloudProviderForm,
     DeploymentDestroyForm,
@@ -265,8 +266,15 @@ def deployment_create(request: HttpRequest) -> HttpResponse:
         messages.error(request, _("Node deployment is disabled in settings."))
         return redirect("infrastructure:deployment_list")
 
+    raw_dns_zone = str(SettingsService.get_setting("node_deployment.dns_default_zone", "") or "")
+    zone_result = validate_deployment_dns_zone(raw_dns_zone)
+    if zone_result.is_err():
+        messages.error(request, zone_result.unwrap_err())
+        return redirect("infrastructure:deployment_list")
+    dns_zone = zone_result.unwrap()
+
     if request.method == "POST":
-        form = NodeDeploymentForm(request.POST)
+        form = NodeDeploymentForm(request.POST, dns_zone=dns_zone)
         if form.is_valid():
             deployment = form.save(commit=False)
             deployment.initiated_by = request.user
@@ -285,7 +293,7 @@ def deployment_create(request: HttpRequest) -> HttpResponse:
                 deployment.hostname = deployment.generate_hostname()
 
                 # Set DNS zone from settings
-                deployment.dns_zone = SettingsService.get_setting("node_deployment.dns_default_zone", "")
+                deployment.dns_zone = dns_zone
 
                 deployment.save()
 
@@ -321,7 +329,7 @@ def deployment_create(request: HttpRequest) -> HttpResponse:
 
             return redirect("infrastructure:deployment_detail", pk=deployment.id)
     else:
-        form = NodeDeploymentForm()
+        form = NodeDeploymentForm(dns_zone=dns_zone)
 
     # Get data for JS
     providers = list(CloudProvider.objects.filter(is_active=True).values("id", "name", "code"))
@@ -360,7 +368,7 @@ def deployment_create(request: HttpRequest) -> HttpResponse:
         "providers_data": providers,
         "regions_data": regions,
         "sizes_data": sizes,
-        "dns_zone": SettingsService.get_setting("node_deployment.dns_default_zone", ""),
+        "dns_zone": dns_zone,
         "form_action": reverse("infrastructure:deployment_create"),
         "cancel_url": reverse("infrastructure:deployment_list"),
     }

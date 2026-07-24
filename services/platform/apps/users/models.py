@@ -590,7 +590,6 @@ class APIToken(models.Model):
 
     TOKEN_BYTE_LENGTH = 20  # 20 bytes = 40 hex chars, same entropy as DRF authtoken
     LAST_USED_UPDATE_INTERVAL = timedelta(minutes=5)
-    MAX_TOKENS_PER_USER = 20
 
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,

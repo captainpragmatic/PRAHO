@@ -19,6 +19,7 @@ from django.urls import reverse
 
 import apps.common.credential_vault as vault_module
 from apps.common.credential_vault import EncryptedCredential
+from apps.common.types import Ok
 from apps.infrastructure.models import (
     CloudProvider,
     DriftCheck,
@@ -403,3 +404,84 @@ class TestDeploymentCreateUniqueHostnames(_DeploymentTestMixin, TestCase):
                 node_size=size, region=region, panel_type=panel,
                 hostname="prd-sha-het-de-fsn1-001", node_number=2, status="pending",
             )
+
+
+class TestDeploymentCreateDnsZone(TestCase):
+    """The web deployment boundary must reject or canonicalize its configured DNS zone."""
+
+    def setUp(self) -> None:
+        self.superuser = User.objects.create_superuser(email="admin@test.com", password="testpass123")
+        self.client.force_login(self.superuser)
+        self.url = reverse("infrastructure:deployment_create")
+        self.provider = CloudProvider.objects.create(
+            name="Hetzner",
+            provider_type="hetzner",
+            code="het",
+            is_active=True,
+        )
+        self.region = NodeRegion.objects.create(
+            provider=self.provider,
+            name="Falkenstein",
+            provider_region_id="fsn1",
+            normalized_code="fsn1",
+            country_code="de",
+            city="Falkenstein",
+        )
+        self.size = NodeSize.objects.create(
+            provider=self.provider,
+            name="Small",
+            display_name="2 vCPU / 4GB",
+            provider_type_id="cpx21",
+            vcpus=2,
+            memory_gb=4,
+            disk_gb=40,
+            hourly_cost_eur=Decimal("0.0100"),
+            monthly_cost_eur=Decimal("7.20"),
+        )
+        self.panel = PanelType.objects.create(
+            name="Virtualmin",
+            panel_type="virtualmin",
+            ansible_playbook="virtualmin.yml",
+        )
+
+    @patch("apps.infrastructure.views.queue_deploy_node", return_value="task-123")
+    @patch("apps.infrastructure.views.get_provider_token", return_value=Ok("secret"))
+    @patch("apps.infrastructure.views.SettingsService.get_setting")
+    def test_post_persists_normalized_dns_zone(
+        self,
+        mock_get_setting: MagicMock,
+        _mock_token: MagicMock,
+        _mock_queue: MagicMock,
+    ) -> None:
+        mock_get_setting.side_effect = (
+            lambda key, default=None: "Nodes.Example.COM" if key == "node_deployment.dns_default_zone" else default
+        )
+
+        response = self.client.post(
+            self.url,
+            {
+                "environment": "prd",
+                "node_type": "sha",
+                "provider": self.provider.pk,
+                "region": self.region.pk,
+                "node_size": self.size.pk,
+                "panel_type": self.panel.pk,
+                "display_name": "Normalized node",
+                "backup_enabled": True,
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        deployment = NodeDeployment.objects.get(display_name="Normalized node")
+        self.assertEqual(deployment.dns_zone, "nodes.example.com")
+
+    @patch("apps.infrastructure.views.SettingsService.get_setting")
+    def test_get_rejects_invalid_dns_zone_before_rendering_form(self, mock_get_setting: MagicMock) -> None:
+        mock_get_setting.side_effect = (
+            lambda key, default=None: "" if key == "node_deployment.dns_default_zone" else default
+        )
+
+        response = self.client.get(self.url)
+
+        self.assertRedirects(response, reverse("infrastructure:deployment_list"))
+        self.assertEqual(NodeDeployment.objects.count(), 0)

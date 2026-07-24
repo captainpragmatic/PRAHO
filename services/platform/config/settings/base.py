@@ -392,6 +392,7 @@ REST_FRAMEWORK = {
 # Set API_TOKEN_DEFAULT_TTL_DAYS=0 to disable default expiry (not recommended).
 API_TOKEN_DEFAULT_TTL_DAYS = int(os.environ.get("API_TOKEN_DEFAULT_TTL_DAYS", "90"))
 API_TOKEN_MAX_TTL_DAYS = int(os.environ.get("API_TOKEN_MAX_TTL_DAYS", "365"))
+API_TOKEN_MAX_ACTIVE_PER_USER = int(os.environ.get("API_TOKEN_MAX_ACTIVE_PER_USER", "20"))
 
 # Registrar gateway safety gate (ADR/#93). The Gandi/ROTLD response schemas were
 # implemented against documentation and have NOT been validated against a live
@@ -616,7 +617,9 @@ configure_rate_limiting(globals(), enabled=True)
 Q_CLUSTER_BASE = {
     "name": "praho-cluster",
     "timeout": 300,  # 5 minutes
-    "retry": 1800,  # Must exceed the longest per-task timeout override (drift EXECUTION_TASK_TIMEOUT_SECONDS=1500) or q2 redelivers a still-running task
+    # ORM broker visibility must exceed the longest per-task timeout
+    # (node deployment: 3h), or django-q2 redelivers a still-running task.
+    "retry": 4 * 60 * 60,
     "save_limit": 1000,  # Keep last 1000 task results
     "catch_up": False,  # Don't run missed scheduled tasks
     "orm": "default",  # Use PostgreSQL database backend

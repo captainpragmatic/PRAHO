@@ -88,6 +88,11 @@ def _resolve_token_expiry(ttl_days: int | None) -> datetime | None:
     return timezone.now() + timedelta(days=min(ttl_days, max_ttl))
 
 
+def _get_api_token_max_active_per_user() -> int:
+    """Deployment-level active-token cap (ADR-0015/0031)."""
+    return int(getattr(settings, "API_TOKEN_MAX_ACTIVE_PER_USER", 20))
+
+
 @csrf_exempt  # nosemgrep: no-csrf-exempt — HMAC-authenticated inter-service endpoint
 @require_http_methods(["POST"])
 @require_portal_authentication
@@ -302,18 +307,15 @@ def obtain_token(request: HttpRequest) -> Response:
     # let parallel requests exceed the cap), and count only live tokens so a user
     # holding only expired tokens is not locked out of issuing a fresh one.
     now = timezone.now()
+    max_active_tokens = _get_api_token_max_active_per_user()
     with transaction.atomic():
         User.objects.select_for_update().get(pk=user.pk)
         active_count = (
             APIToken.objects.filter(user=user).filter(Q(expires_at__isnull=True) | Q(expires_at__gt=now)).count()
         )
-        if active_count >= APIToken.MAX_TOKENS_PER_USER:
+        if active_count >= max_active_tokens:
             return Response(
-                {
-                    "error": (
-                        f"Maximum of {APIToken.MAX_TOKENS_PER_USER} active tokens per user. Revoke unused tokens first."
-                    )
-                },
+                {"error": f"Maximum of {max_active_tokens} active tokens per user. Revoke unused tokens first."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
