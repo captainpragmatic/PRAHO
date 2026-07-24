@@ -707,10 +707,11 @@ class SubscriptionLifecycleService:
         return finalized
 
     @staticmethod
-    def handle_expired_trials(as_of: Any = None) -> int:
+    def handle_expired_trials(as_of: Any = None) -> tuple[int, int]:
         """Cancel trials that reached expiry without a successfully paid renewal."""
         run_at = as_of or timezone.now()
         count = 0
+        errors = 0
         subscriptions = Subscription.objects.filter(
             status="trialing",
             trial_end__lte=run_at,
@@ -741,15 +742,17 @@ class SubscriptionLifecycleService:
                         service.save(update_fields=["status", "auto_renew", "updated_at"])
                 count += 1
             except Exception:
+                errors += 1
                 logger.exception("Error expiring unpaid trial %s", subscription_id)
 
-        return count
+        return count, errors
 
     @staticmethod
-    def handle_grace_period_expirations(as_of: Any = None) -> int:
+    def handle_grace_period_expirations(as_of: Any = None) -> tuple[int, int]:
         """Pause or cancel subscriptions whose explicit dunning grace has elapsed."""
         run_at = as_of or timezone.now()
         count = 0
+        errors = 0
         retry_limit = get_max_payment_retries()
         subscriptions = Subscription.objects.filter(
             status__in=["past_due", "paused"],
@@ -803,9 +806,10 @@ class SubscriptionLifecycleService:
                     },
                 )
             except Exception:
+                errors += 1
                 logger.exception("Error handling grace expiration for %s", subscription_id)
 
-        return count
+        return count, errors
 
 
 # ===============================================================================

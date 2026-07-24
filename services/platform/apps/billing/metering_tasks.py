@@ -117,7 +117,7 @@ def process_pending_usage_events(limit: int = 1000, meter_id: str | None = None)
         )
 
         return {
-            "success": True,
+            "success": errors == 0,
             "processed": processed,
             "errors": errors,
         }
@@ -147,7 +147,7 @@ def close_expired_billing_cycles() -> dict[str, Any]:
         closed, errors = UsageBillingService.close_expired_cycles()
 
         return {
-            "success": True,
+            "success": errors == 0,
             "closed": closed,
             "errors": errors,
         }
@@ -191,7 +191,7 @@ def rate_pending_aggregations(billing_cycle_id: str | None = None) -> dict[str, 
                 total_errors += 1
 
         return {
-            "success": True,
+            "success": total_errors == 0,
             "rated": total_rated,
             "errors": total_errors,
         }
@@ -216,7 +216,7 @@ def generate_pending_invoices() -> dict[str, Any]:
         generated, errors = UsageBillingService.generate_pending_invoices()
 
         return {
-            "success": True,
+            "success": errors == 0,
             "generated": generated,
             "errors": errors,
         }
@@ -286,7 +286,10 @@ def run_billing_cycle_workflow() -> dict[str, Any]:
             metadata=results,
         )
 
-        return {"success": True, "results": results}
+        return {
+            "success": all(step is not None and step.get("success") is True for step in results.values()),
+            "results": results,
+        }
     except Exception as e:
         logger.exception(f"Error in billing workflow: {e}")
         return {"success": False, "error": str(e), "partial_results": results}
@@ -515,7 +518,7 @@ def collect_virtualmin_usage() -> dict[str, Any]:
         )
 
         return {
-            "success": True,
+            "success": errors == 0,
             "accounts_processed": accounts_processed,
             "events_created": events_created,
             "errors": errors,
@@ -612,7 +615,7 @@ def collect_service_usage() -> dict[str, Any]:
                 errors += 1
 
         return {
-            "success": True,
+            "success": errors == 0,
             "services_processed": services_processed,
             "events_created": events_created,
             "errors": errors,

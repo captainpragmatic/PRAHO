@@ -847,9 +847,10 @@ class SubscriptionLifecycleServiceGracePeriodTestCase(TestCase):
         sub.failed_payment_count = MAX_PAYMENT_RETRIES + 1
         sub.save()
 
-        count = SubscriptionLifecycleService.handle_grace_period_expirations()
+        count, errors = SubscriptionLifecycleService.handle_grace_period_expirations()
 
         self.assertGreaterEqual(count, 1)
+        self.assertEqual(errors, 0)
         sub.refresh_from_db()
         self.assertEqual(sub.status, "cancelled")
         service.refresh_from_db()
@@ -864,16 +865,18 @@ class SubscriptionLifecycleServiceGracePeriodTestCase(TestCase):
         sub.failed_payment_count = 1
         sub.save()
 
-        count = SubscriptionLifecycleService.handle_grace_period_expirations()
+        count, errors = SubscriptionLifecycleService.handle_grace_period_expirations()
 
         self.assertGreaterEqual(count, 1)
+        self.assertEqual(errors, 0)
         sub.refresh_from_db()
         self.assertEqual(sub.status, "paused")
         self.assertIsNotNone(sub.paused_at)
 
     @patch("apps.billing.subscription_service.log_security_event")
     def test_handle_grace_period_no_expired(self, mock_log: MagicMock) -> None:
-        count = SubscriptionLifecycleService.handle_grace_period_expirations()
+        count, errors = SubscriptionLifecycleService.handle_grace_period_expirations()
+        self.assertEqual(errors, 0)
         self.assertEqual(count, 0)
 
     @patch("apps.billing.subscription_service.log_security_event")
@@ -884,8 +887,23 @@ class SubscriptionLifecycleServiceGracePeriodTestCase(TestCase):
         sub.failed_payment_count = 10
         sub.save()
 
-        count = SubscriptionLifecycleService.handle_grace_period_expirations()
+        count, errors = SubscriptionLifecycleService.handle_grace_period_expirations()
+        self.assertEqual(errors, 0)
         self.assertEqual(count, 0)
+
+    @patch("apps.billing.subscription_models.Subscription._pause_now", side_effect=RuntimeError("transition broke"))
+    def test_handle_grace_period_counts_isolated_item_failure(self, mock_pause: MagicMock) -> None:
+        sub = make_subscription(self.customer, self.product, self.currency, status="past_due")
+        sub.grace_period_ends_at = timezone.now() - timedelta(hours=1)
+        sub.failed_payment_count = 1
+        sub.save()
+
+        count, errors = SubscriptionLifecycleService.handle_grace_period_expirations()
+
+        self.assertEqual(count, 0)
+        self.assertEqual(errors, 1)
+        sub.refresh_from_db()
+        self.assertEqual(sub.status, "past_due")
 
 
 # =============================================================================

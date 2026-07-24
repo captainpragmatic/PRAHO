@@ -34,6 +34,25 @@ _DEFAULT_TASK_MAX_RETRIES = 3
 TASK_SOFT_TIME_LIMIT = 300  # 5 minutes
 TASK_TIME_LIMIT = 600  # 10 minutes
 PAYMENT_RETRY_LEASE_TIMEOUT = timedelta(seconds=TASK_TIME_LIMIT * 2)
+_REFUND_RECONCILIATION_LOCK_NAME = "billing-stripe-refund-reconciliation"
+_DEFAULT_REFUND_RECONCILIATION_LIMIT = 500
+
+
+def _get_refund_reconciliation_limit() -> int:
+    """Get the maximum refunds converged by one scheduled sweep."""
+    from apps.billing.gateways.base import MAX_REFUND_LIST_RECORDS  # noqa: PLC0415
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    return min(
+        MAX_REFUND_LIST_RECORDS,
+        max(
+            1,
+            SettingsService.get_integer_setting(
+                "billing.refund_reconciliation_limit",
+                _DEFAULT_REFUND_RECONCILIATION_LIMIT,
+            ),
+        ),
+    )
 
 
 def _get_task_retry_delay() -> int:
@@ -798,25 +817,27 @@ def process_expired_trials() -> dict[str, Any]:
     logger.info("⏰ [Trials] Processing expired trials")
 
     try:
-        count = SubscriptionLifecycleService.handle_expired_trials()
+        count, errors = SubscriptionLifecycleService.handle_expired_trials()
 
-        logger.info(f"⏰ [Trials] Processed {count} expired trials")
+        logger.info("⏰ [Trials] Processed %d expired trials with %d error(s)", count, errors)
 
         AuditService.log_simple_event(
             event_type="expired_trials_processed",
             user=None,
-            description=f"Processed {count} expired trials",
+            description=f"Processed {count} expired trials with {errors} errors",
             actor_type="system",
             metadata={
                 "trials_processed": count,
+                "error_count": errors,
                 "source_app": "billing",
             },
         )
 
         return {
-            "success": True,
+            "success": errors == 0,
             "trials_processed": count,
-            "message": f"Processed {count} expired trials",
+            "errors": errors,
+            "message": f"Processed {count} expired trials, {errors} errors",
         }
 
     except Exception as e:
@@ -843,25 +864,27 @@ def process_grace_period_expirations() -> dict[str, Any]:
     logger.info("⚠️ [Grace] Processing expired grace periods")
 
     try:
-        count = SubscriptionLifecycleService.handle_grace_period_expirations()
+        count, errors = SubscriptionLifecycleService.handle_grace_period_expirations()
 
-        logger.info(f"⚠️ [Grace] Processed {count} grace period expirations")
+        logger.info("⚠️ [Grace] Processed %d grace period expirations with %d error(s)", count, errors)
 
         AuditService.log_simple_event(
             event_type="grace_periods_processed",
             user=None,
-            description=f"Processed {count} grace period expirations",
+            description=f"Processed {count} grace period expirations with {errors} errors",
             actor_type="system",
             metadata={
                 "expirations_processed": count,
+                "error_count": errors,
                 "source_app": "billing",
             },
         )
 
         return {
-            "success": True,
+            "success": errors == 0,
             "expirations_processed": count,
-            "message": f"Processed {count} grace period expirations",
+            "errors": errors,
+            "message": f"Processed {count} grace period expirations, {errors} errors",
         }
 
     except Exception as e:
@@ -890,6 +913,7 @@ def notify_expiring_grandfathering(days_ahead: int = 30) -> dict[str, Any]:
         expiring = GrandfatheringService.check_expiring_grandfathering(days_ahead)
 
         notified_count = 0
+        errors = 0
         for gf in expiring:
             try:
                 # Send notification email
@@ -913,15 +937,17 @@ def notify_expiring_grandfathering(days_ahead: int = 30) -> dict[str, Any]:
                 notified_count += 1
 
             except Exception as e:
+                errors += 1
                 logger.error(f"Failed to notify customer {gf.customer_id} about expiring grandfathering: {e}")
 
         logger.info(f"📢 [Grandfathering] Notified {notified_count} customers about expiring prices")
 
         return {
-            "success": True,
+            "success": errors == 0,
             "customers_notified": notified_count,
             "total_expiring": len(expiring),
-            "message": f"Notified {notified_count} customers about expiring grandfathered prices",
+            "errors": errors,
+            "message": f"Notified {notified_count} customers about expiring grandfathered prices, {errors} errors",
         }
 
     except Exception as e:
@@ -1283,85 +1309,187 @@ def _stripe_refund_facts(source: dict[str, Any], refund_id: str) -> RefundGatewa
 
 
 def _collect_stripe_refund_facts(
-    gateway: Any, *, lookback_days: int, discovery_page_size: int, errors: list[str]
-) -> dict[str, RefundGatewayFacts]:
+    gateway: Any,
+    *,
+    lookback_days: int,
+    discovery_page_size: int,
+    max_refunds: int,
+    errors: list[str],
+) -> tuple[dict[str, RefundGatewayFacts], bool]:
     """Gather refund facts to converge: non-terminal local refunds + recent gateway refunds."""
     from apps.billing.models import Refund  # noqa: PLC0415
 
+    record_budget = max(max_refunds, 1)
     refund_facts: dict[str, RefundGatewayFacts] = {}
-    pending_ids = (
+    # Least-recently-touched first, and the selected rows are stamped below so a
+    # backlog larger than the budget rotates across sweeps instead of starving
+    # the tail behind a head that never converges. Refund.updated_at is pure
+    # bookkeeping (the idempotency staleness window keys on created_at).
+    pending_rows = list(
         Refund.objects.filter(status__in=("pending", "processing", "approved"))
         .exclude(gateway_refund_id="")
-        .values_list("gateway_refund_id", flat=True)
+        .order_by("updated_at", "id")
+        .values_list("pk", "gateway_refund_id")[: record_budget + 1]
     )
-    for refund_id in pending_ids.iterator():
+    pending_truncated = len(pending_rows) > record_budget
+    pending_rows = pending_rows[:record_budget]
+    pending_ids = [gateway_refund_id for _pk, gateway_refund_id in pending_rows]
+    if pending_rows:
+        Refund.objects.filter(pk__in=[pk for pk, _ in pending_rows]).update(updated_at=timezone.now())
+
+    created_gte = int((timezone.now() - timedelta(days=max(lookback_days, 1))).timestamp())
+    listed = gateway.list_refunds(
+        created_gte=created_gte,
+        page_size=discovery_page_size,
+        max_records=record_budget,
+    )
+    discovered_by_id: dict[str, RefundGatewayFacts] = {}
+    discovery_failed = not listed["success"]
+    if discovery_failed:
+        errors.append(f"Stripe refund discovery failed: {listed['error'] or 'unknown error'}")
+    else:
+        for discovered in listed["refunds"]:
+            refund_id = discovered["refund_id"]
+            if refund_id:
+                discovered_by_id[refund_id] = _stripe_refund_facts(discovered, refund_id)
+
+    # Known local non-terminal refunds take priority. Discovery runs first so an ID
+    # returned by Stripe is never immediately retrieved a second time.
+    for refund_id in pending_ids:
+        discovered = discovered_by_id.pop(refund_id, None)
+        if discovered is not None:
+            refund_facts[refund_id] = discovered
+            continue
         retrieved = gateway.retrieve_refund(refund_id)
         if retrieved["success"]:
             refund_facts[refund_id] = _stripe_refund_facts(retrieved, retrieved["refund_id"])
         else:
             errors.append(f"{refund_id}: {retrieved['error'] or 'gateway retrieval failed'}")
 
-    created_gte = int((timezone.now() - timedelta(days=max(lookback_days, 1))).timestamp())
-    listed = gateway.list_refunds(created_gte=created_gte, limit=discovery_page_size)
-    if not listed["success"]:
-        errors.append(f"Stripe refund discovery failed: {listed['error'] or 'unknown error'}")
-        return refund_facts
-    for discovered in listed["refunds"]:
-        refund_id = discovered["refund_id"]
-        if refund_id and refund_id not in refund_facts:
-            refund_facts[refund_id] = _stripe_refund_facts(discovered, refund_id)
-    return refund_facts
+    discovery_deferred = False
+    for refund_id, discovered in discovered_by_id.items():
+        if len(refund_facts) >= record_budget:
+            discovery_deferred = True
+            break
+        refund_facts[refund_id] = discovered
+
+    work_remaining = discovery_failed or pending_truncated or bool(listed.get("truncated", False)) or discovery_deferred
+    return refund_facts, work_remaining
 
 
-def reconcile_stripe_refunds(*, lookback_days: int = 30, discovery_page_size: int = 100) -> dict[str, Any]:
+def reconcile_stripe_refunds(
+    *,
+    lookback_days: int = 30,
+    discovery_page_size: int = 100,
+    max_refunds: int | None = None,
+) -> dict[str, Any]:
     """Converge non-terminal and recently created Stripe refunds into PRAHO."""
     from apps.billing.gateways import PaymentGatewayFactory  # noqa: PLC0415
+    from apps.billing.gateways.base import MAX_REFUND_LIST_RECORDS  # noqa: PLC0415
     from apps.billing.refund_service import RefundConvergenceService  # noqa: PLC0415
+    from apps.common.performance.async_tasks import DistributedLock  # noqa: PLC0415
 
-    errors: list[str] = []
-    try:
-        gateway = PaymentGatewayFactory.create_gateway("stripe")
-    except Exception as exc:
-        logger.exception("[Refund reconciliation] Stripe gateway initialization failed")
-        return {"success": False, "refunds_checked": 0, "refunds_converged": 0, "errors": [str(exc)]}
-
-    refund_facts = _collect_stripe_refund_facts(
-        gateway, lookback_days=lookback_days, discovery_page_size=discovery_page_size, errors=errors
+    refund_limit = (
+        min(max(max_refunds, 1), MAX_REFUND_LIST_RECORDS)
+        if max_refunds is not None
+        else _get_refund_reconciliation_limit()
     )
+    errors: list[str] = []
+    lock = DistributedLock(
+        _REFUND_RECONCILIATION_LOCK_NAME,
+        timeout=TASK_TIME_LIMIT * 2,
+        blocking=False,
+    )
+    try:
+        acquired = lock.acquire()
+    except Exception as exc:
+        logger.exception("[Refund reconciliation] Could not acquire distributed lease")
+        return {
+            "success": False,
+            "refunds_checked": 0,
+            "refunds_converged": 0,
+            "refunds_external_skipped": 0,
+            "skipped_locked": False,
+            "work_remaining": True,
+            "errors": [str(exc)],
+        }
+    if not acquired:
+        logger.info("[Refund reconciliation] Another worker holds the reconciliation lease; skipping")
+        return {
+            "success": True,
+            "refunds_checked": 0,
+            "refunds_converged": 0,
+            "refunds_external_skipped": 0,
+            "skipped_locked": True,
+            "work_remaining": True,
+            "errors": [],
+        }
 
-    converged = 0
-    external_skipped = 0
-    for refund_id, facts in refund_facts.items():
-        result = RefundConvergenceService.converge_gateway_refund(facts)
-        if result.is_err():
-            errors.append(f"{refund_id}: {result.unwrap_err()}")
-            continue
-        # Ok(None) means the PaymentIntent is not in this DB (a refund for another system
-        # sharing the Stripe account) — a skip, not a convergence. Counting it would inflate
-        # the report by every unrelated account refund in the lookback window.
-        if result.unwrap() is None:
-            external_skipped += 1
-        else:
-            converged += 1
+    try:
+        try:
+            gateway = PaymentGatewayFactory.create_gateway("stripe")
+        except Exception as exc:
+            logger.exception("[Refund reconciliation] Stripe gateway initialization failed")
+            return {
+                "success": False,
+                "refunds_checked": 0,
+                "refunds_converged": 0,
+                "refunds_external_skipped": 0,
+                "skipped_locked": False,
+                "work_remaining": True,
+                "errors": [str(exc)],
+            }
 
-    if errors:
-        # django-q marks a task that returns normally as successful even when the returned
-        # payload says success=False; log at error level so a failing nightly reconciliation
-        # is visible to monitoring instead of silently green.
-        logger.error(
-            "🔥 [Refund reconciliation] completed with %d error(s); converged=%d external_skipped=%d",
-            len(errors),
-            converged,
-            external_skipped,
+        refund_facts, work_remaining = _collect_stripe_refund_facts(
+            gateway,
+            lookback_days=lookback_days,
+            discovery_page_size=discovery_page_size,
+            max_refunds=refund_limit,
+            errors=errors,
         )
 
-    return {
-        "success": not errors,
-        "refunds_checked": len(refund_facts),
-        "refunds_converged": converged,
-        "refunds_external_skipped": external_skipped,
-        "errors": errors,
-    }
+        converged = 0
+        external_skipped = 0
+        for refund_id, facts in refund_facts.items():
+            result = RefundConvergenceService.converge_gateway_refund(facts)
+            if result.is_err():
+                errors.append(f"{refund_id}: {result.unwrap_err()}")
+                continue
+            # Ok(None) means the PaymentIntent is not in this DB (a refund for another system
+            # sharing the Stripe account) — a skip, not a convergence. Counting it would inflate
+            # the report by every unrelated account refund in the lookback window.
+            if result.unwrap() is None:
+                external_skipped += 1
+            else:
+                converged += 1
+
+        if errors:
+            # django-q marks a task that returns normally as successful even when the returned
+            # payload says success=False; log at error level so a failing nightly reconciliation
+            # is visible to monitoring instead of silently green.
+            logger.error(
+                "🔥 [Refund reconciliation] completed with %d error(s); converged=%d external_skipped=%d",
+                len(errors),
+                converged,
+                external_skipped,
+            )
+        if work_remaining:
+            logger.warning(
+                "⚠️ [Refund reconciliation] hit its %d-record budget; work remains for the next run",
+                refund_limit,
+            )
+
+        return {
+            "success": not errors,
+            "refunds_checked": len(refund_facts),
+            "refunds_converged": converged,
+            "refunds_external_skipped": external_skipped,
+            "skipped_locked": False,
+            "work_remaining": work_remaining,
+            "errors": errors,
+        }
+    finally:
+        lock.release()
 
 
 def setup_billing_scheduled_tasks() -> dict[str, str]:

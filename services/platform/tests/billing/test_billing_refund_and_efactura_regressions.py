@@ -318,13 +318,41 @@ class StripeRefundTests(TestCase):
             ),
         ]
 
-        result = self._make_gateway(mock_stripe).list_refunds(created_gte=123456, limit=1)
+        result = self._make_gateway(mock_stripe).list_refunds(
+            created_gte=123456,
+            page_size=1,
+            max_records=2,
+        )
 
         mock_stripe.Refund.list.assert_called_once_with(created={"gte": 123456}, limit=1)
         self.assertTrue(result["success"])
         self.assertEqual(len(result["refunds"]), 2)
+        self.assertFalse(result["truncated"])
         self.assertEqual(result["refunds"][0]["payment_intent_id"], "pi_recent")
         self.assertEqual(result["refunds"][0]["amount_cents"], 987)
+
+    def test_list_refunds_stops_at_hard_record_budget(self):
+        mock_stripe = MagicMock()
+        mock_stripe.Refund.list.return_value.auto_paging_iter.return_value = [
+            MagicMock(
+                id=f"re_{index}",
+                payment_intent=f"pi_{index}",
+                amount=100,
+                currency="ron",
+                status="succeeded",
+                reason=None,
+            )
+            for index in range(3)
+        ]
+
+        result = self._make_gateway(mock_stripe).list_refunds(
+            created_gte=123456,
+            page_size=100,
+            max_records=2,
+        )
+
+        self.assertEqual([refund["refund_id"] for refund in result["refunds"]], ["re_0", "re_1"])
+        self.assertTrue(result["truncated"])
 
     def test_list_refunds_skips_malformed_refund_without_dropping_valid_ones(self):
         """One malformed refund must not discard the whole discovery page (#339).
@@ -341,7 +369,11 @@ class StripeRefundTests(TestCase):
             MagicMock(id="re_valid_2", payment_intent="pi_v2", amount=900, currency="ron", status="succeeded", reason=None),
         ]
 
-        result = self._make_gateway(mock_stripe).list_refunds(created_gte=123456, limit=100)
+        result = self._make_gateway(mock_stripe).list_refunds(
+            created_gte=123456,
+            page_size=100,
+            max_records=100,
+        )
 
         self.assertTrue(result["success"])
         self.assertEqual([r["refund_id"] for r in result["refunds"]], ["re_valid_1", "re_valid_2"])

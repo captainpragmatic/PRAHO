@@ -437,6 +437,24 @@ class TestMeteringServiceRecordEvent(TestCase):
         assert "cumulative" in result.error.lower()
         mock_agg.assert_not_called()
 
+    @patch("apps.billing.metering_service.MeteringService._check_thresholds_async")
+    @patch("apps.billing.metering_service.MeteringService._schedule_aggregation_update")
+    def test_cumulative_guard_uses_category_not_canonical_meter_name(self, mock_agg, mock_thresh):
+        meter = _make_meter(name="transfer_gb", aggregation_type="sum", category="bandwidth")
+
+        result = self.svc.record_event(
+            UsageEventData(
+                meter_name=meter.name,
+                customer_id=str(self.customer.id),
+                value=Decimal("5"),
+                source="virtualmin",
+            )
+        )
+
+        assert result.is_err()
+        assert "cumulative bandwidth meter 'transfer_gb'" in result.error.lower()
+        mock_agg.assert_not_called()
+
 
 class TestMeteringServiceBulkEvents(TestCase):
     def setUp(self):

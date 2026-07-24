@@ -606,7 +606,7 @@ class TestUpdateAggregationForEvent(TestCase):
 
 
 class TestProcessPendingUsageEvents(TestCase):
-    def test_success(self) -> None:
+    def test_partial_failure(self) -> None:
         from apps.billing.metering_tasks import process_pending_usage_events  # noqa: PLC0415
 
         with (
@@ -615,7 +615,7 @@ class TestProcessPendingUsageEvents(TestCase):
         ):
             mock_cls.return_value.process_pending_events.return_value = (50, 2)
             result = process_pending_usage_events(limit=100, meter_id="meter-1")
-        assert result["success"] is True
+        assert result["success"] is False
         assert result["processed"] == 50
         assert result["errors"] == 2
 
@@ -692,7 +692,7 @@ class TestRatePendingAggregations(TestCase):
             mock_bc.objects.filter.return_value = [mock_cycle, mock_cycle]
             mock_eng.return_value.rate_billing_cycle.side_effect = [ok_result, err_result]
             result = rate_pending_aggregations()
-        assert result["success"] is True
+        assert result["success"] is False
         assert result["rated"] == 5
         assert result["errors"] == 1
 
@@ -712,7 +712,7 @@ class TestGeneratePendingInvoices(TestCase):
         with patch("apps.billing.usage_invoice_service.UsageBillingService") as mock_cls:
             mock_cls.generate_pending_invoices.return_value = (4, 1)
             result = generate_pending_invoices()
-        assert result["success"] is True
+        assert result["success"] is False
         assert result["generated"] == 4
 
     def test_exception(self) -> None:

@@ -359,11 +359,12 @@ class RecurringPaymentAuthorizationServiceTestCase(TestCase):
             auto_payment_enabled=True,
         )
 
-        result = RecurringPaymentAuthorizationService.withdraw(
-            authorization=authorization,
-            actor=self.owner,
-            reason="Customer disabled automatic collection",
-        )
+        with patch("apps.billing.signals._log_billing_model_event") as lifecycle_audit:
+            result = RecurringPaymentAuthorizationService.withdraw(
+                authorization=authorization,
+                actor=self.owner,
+                reason="Customer disabled automatic collection",
+            )
 
         self.assertTrue(result.is_ok())
         authorization.refresh_from_db()
@@ -375,6 +376,14 @@ class RecurringPaymentAuthorizationServiceTestCase(TestCase):
         self.assertFalse(subscription.auto_payment_enabled)
         self.assertIsNone(subscription.saved_payment_method_id)
         self.assertIsNone(subscription.payment_authorization_id)
+        self.assertTrue(
+            any(
+                call.kwargs.get("event_type") == "subscription_model_updated"
+                and call.kwargs.get("instance").pk == subscription.pk
+                for call in lifecycle_audit.call_args_list
+            ),
+            "Disabling a subscription during mandate withdrawal must emit its normal lifecycle audit",
+        )
 
     def test_billing_staff_can_revoke_but_not_withdraw_for_customer(self) -> None:
         authorization = RecurringPaymentAuthorization.objects.create(
