@@ -4,9 +4,9 @@
 
 import logging
 
+from django.db import transaction
 from django.db.models import Avg, Prefetch, Q
 from django.http import Http404, HttpRequest, HttpResponse
-from django.utils import timezone
 from rest_framework import status
 from rest_framework.decorators import api_view, authentication_classes, permission_classes
 from rest_framework.permissions import AllowAny
@@ -366,6 +366,54 @@ def customer_ticket_create_api(request: HttpRequest, customer: Customer) -> Resp
 # ===============================================================================
 
 
+@transaction.atomic
+def _create_customer_ticket_reply(request: HttpRequest, customer: Customer, ticket_id: int) -> Response:
+    """Create one customer reply while holding the ticket lifecycle lock."""
+    try:
+        ticket = Ticket.objects.select_for_update(of=("self",)).get(id=ticket_id, customer=customer)
+    except Ticket.DoesNotExist:
+        return Response(
+            {"success": False, "error": "Ticket not found or access denied"}, status=status.HTTP_404_NOT_FOUND
+        )
+
+    if ticket.status == "closed":
+        return Response(
+            {"success": False, "error": "Cannot reply to closed tickets"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    request_data = request.data if hasattr(request, "data") else {}
+    serializer = CommentCreateSerializer(data={"content": request_data.get("content", "")})
+    if not serializer.is_valid():
+        return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+
+    comment = TicketComment.objects.create(
+        ticket=ticket,
+        content=serializer.validated_data["content"],
+        comment_type="customer",
+        author_email=ticket.contact_email,
+        author_name=ticket.contact_person or "Customer",
+        is_public=True,
+    )
+    TicketStatusService.handle_customer_reply(ticket)
+
+    return Response(
+        {
+            "success": True,
+            "data": {
+                "comment": {
+                    "id": comment.id,
+                    "content": comment.content,
+                    "author_name": comment.get_author_name(),
+                    "created_at": comment.created_at.isoformat(),
+                },
+                "message": "Reply added successfully",
+            },
+        },
+        status=status.HTTP_201_CREATED,
+    )
+
+
 @api_view(["POST"])
 @authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])  # HMAC auth handled by secure_auth
@@ -398,66 +446,10 @@ def customer_ticket_reply_api(request: HttpRequest, customer: Customer, ticket_i
     - Ticket access restricted to customer only
     """
     try:
-        # Get ticket with access control for the authenticated customer
-        try:
-            ticket = Ticket.objects.get(id=ticket_id, customer=customer)
-        except Ticket.DoesNotExist:
-            return Response(
-                {"success": False, "error": "Ticket not found or access denied"}, status=status.HTTP_404_NOT_FOUND
-            )
-
-        # Check if ticket allows replies
-        if ticket.status in ["closed", "cancelled"]:
-            return Response(
-                {"success": False, "error": "Cannot reply to closed or cancelled tickets"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        # Get comment data from HMAC-signed request body
-        request_data = request.data if hasattr(request, "data") else {}
-        comment_data = {"content": request_data.get("content", "")}
-
-        # Validate comment data
-        serializer = CommentCreateSerializer(data=comment_data)
-        if not serializer.is_valid():
-            return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
-
-        # Create customer comment
-        comment = TicketComment.objects.create(
-            ticket=ticket,
-            content=serializer.validated_data["content"],
-            comment_type="customer",
-            author_email=ticket.contact_email,
-            author_name=ticket.contact_person or "Customer",
-            is_public=True,
-        )
-
-        # Handle customer reply using TicketStatusService
-        try:
-            TicketStatusService.handle_customer_reply(ticket)
-        except ValueError as e:
-            # Log error but don't fail the comment creation
-            logger.warning(f"⚠️ [API] Error handling customer reply for ticket {ticket.ticket_number}: {e}")
-            # Fallback behavior for edge cases
-            ticket.has_customer_replied = True
-            ticket.customer_replied_at = timezone.now()
-            ticket.save(update_fields=["has_customer_replied", "customer_replied_at"])
-
-        response_data = {
-            "success": True,
-            "data": {
-                "comment": {
-                    "id": comment.id,
-                    "content": comment.content,
-                    "author_name": comment.get_author_name(),
-                    "created_at": comment.created_at.isoformat(),
-                },
-                "message": "Reply added successfully",
-            },
-        }
-
-        logger.info(f"✅ [API] Customer ticket reply: #{ticket_id}, customer={customer.company_name}")
-        return Response(response_data, status=status.HTTP_201_CREATED)
+        response = _create_customer_ticket_reply(request, customer, ticket_id)
+        if response.status_code == status.HTTP_201_CREATED:
+            logger.info(f"✅ [API] Customer ticket reply: #{ticket_id}, customer={customer.company_name}")
+        return response
 
     except Exception as e:
         logger.error(f"🔥 [API] Customer ticket reply error for {ticket_id}: {e}")

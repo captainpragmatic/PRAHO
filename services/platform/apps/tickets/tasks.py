@@ -63,7 +63,7 @@ def auto_close_inactive_tickets(*, now: datetime | None = None) -> AutoCloseResu
         notification: tuple[str, dict[str, object]] | None = None
         try:
             with transaction.atomic():
-                ticket = Ticket.objects.select_for_update().select_related("customer").get(pk=ticket_id)
+                ticket = Ticket.objects.select_for_update(of=("self",)).select_related("customer").get(pk=ticket_id)
                 if ticket.status != "waiting_on_customer" or ticket.updated_at > cutoff:
                     continue
 
