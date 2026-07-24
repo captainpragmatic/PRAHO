@@ -13,6 +13,7 @@ from django.utils import timezone
 from apps.billing.models import Currency
 from apps.common.encryption import encrypt_sensitive_data
 from apps.customers.models import Customer
+from apps.domains.domain_names import longest_matching_tld_suffix
 from apps.domains.models import TLD, Domain, DomainOrderItem, Registrar, TLDRegistrarAssignment
 from apps.orders.models import Order
 
@@ -291,15 +292,14 @@ class Command(BaseCommand):
 
         created_count = 0
         available_tlds = list(TLD.objects.all())
+        tlds_by_extension = {tld.extension.lower(): tld for tld in available_tlds}
 
         for i in range(count):
             if i < len(domain_names):
                 domain_name = domain_names[i]
-                # Extract TLD from domain name
-                tld_extension = domain_name.split(".")[-1]
-                try:
-                    tld = TLD.objects.get(extension=tld_extension)
-                except TLD.DoesNotExist:
+                tld_extension = longest_matching_tld_suffix(domain_name, tlds_by_extension)
+                tld = tlds_by_extension.get(tld_extension)
+                if tld is None:
                     # Fallback to random TLD
                     tld = random.choice(  # noqa: S311  # Safe: non-cryptographic usage
                         available_tlds

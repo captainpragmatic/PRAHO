@@ -14,6 +14,8 @@ from django_fsm import ConcurrentTransitionMixin, FSMField, transition
 
 from apps.common.encryption import decrypt_value, encrypt_sensitive_data
 
+from .domain_names import longest_matching_tld_suffix
+
 # ===============================================================================
 # TLD (TOP-LEVEL DOMAIN) MANAGEMENT
 # ===============================================================================
@@ -469,11 +471,12 @@ class Domain(ConcurrentTransitionMixin, models.Model):
 
             # Extract TLD from domain name if not set
             if not self.tld_id and "." in self.name:
-                domain_tld = self.name.split(".")[-1].lower()
-                try:
-                    self.tld = TLD.objects.get(extension=domain_tld)
-                except TLD.DoesNotExist:
-                    raise ValidationError(_(f"TLD '.{domain_tld}' is not supported")) from None
+                configured_tlds = {tld.extension.lower(): tld for tld in TLD.objects.all()}
+                domain_tld = longest_matching_tld_suffix(self.name, configured_tlds)
+                if not domain_tld:
+                    domain_tld = self.name.rsplit(".", maxsplit=1)[-1].lower()
+                    raise ValidationError(_(f"TLD '.{domain_tld}' is not supported"))
+                self.tld = configured_tlds[domain_tld]
 
     # Signal-related attributes for change tracking
     _original_domain_values: dict[str, str | None] | None = None
