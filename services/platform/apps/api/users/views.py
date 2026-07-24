@@ -403,12 +403,6 @@ class SessionValidationThrottle(EndpointRateThrottle):
 
     scope = "session_validation"
 
-    def allow_request(self, request: HttpRequest, view: Any) -> bool:
-        # Skip throttling in test/dev environments (RATE_LIMITING_ENABLED=False)
-        if not getattr(settings, "RATE_LIMITING_ENABLED", True):
-            return True
-        return bool(super().allow_request(request, view))
-
 
 @never_cache  # nosemgrep: no-csrf-exempt — HMAC-authenticated inter-service endpoint
 @csrf_exempt

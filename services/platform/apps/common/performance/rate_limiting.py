@@ -23,6 +23,7 @@ import re
 from collections.abc import Sequence
 from typing import Any, cast
 
+from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 from django.utils.module_loading import import_string
 from rest_framework.request import Request
@@ -171,7 +172,16 @@ class _CustomTimeRateMixin:
         return parse_rate_string(rate)
 
 
-class PortalHMACRateThrottle(SimpleRateThrottle):  # type: ignore[misc]  # DRF throttle base uses dynamic attrs
+class _ConfigurableRateThrottle(SimpleRateThrottle):  # type: ignore[misc]  # dynamic DRF attributes
+    """Honor PRAHO's system-wide rate-limiting kill switch."""
+
+    def allow_request(self, request: Request, view: Any) -> bool:
+        if not getattr(settings, "RATE_LIMITING_ENABLED", True):
+            return True
+        return bool(super().allow_request(request, view))
+
+
+class PortalHMACRateThrottle(_ConfigurableRateThrottle):
     """Per-portal throttling for service-to-service HMAC requests."""
 
     scope = "portal_hmac"
@@ -184,7 +194,7 @@ class PortalHMACRateThrottle(SimpleRateThrottle):  # type: ignore[misc]  # DRF t
         return self.cache_format % {"scope": self.scope, "ident": ident}
 
 
-class PortalHMACBurstThrottle(_CustomTimeRateMixin, SimpleRateThrottle):  # type: ignore[misc]  # DRF throttle base uses dynamic attrs
+class PortalHMACBurstThrottle(_CustomTimeRateMixin, _ConfigurableRateThrottle):
     """Burst throttling for HMAC traffic to protect against request spikes."""
 
     scope = "portal_hmac_burst"
@@ -197,7 +207,7 @@ class PortalHMACBurstThrottle(_CustomTimeRateMixin, SimpleRateThrottle):  # type
         return self.cache_format % {"scope": self.scope, "ident": ident}
 
 
-class PortalHMACCreateUserThrottle(_CustomTimeRateMixin, SimpleRateThrottle):  # type: ignore[misc]  # DRF throttle base uses dynamic attrs
+class PortalHMACCreateUserThrottle(_CustomTimeRateMixin, _ConfigurableRateThrottle):
     """Strict per-portal throttle for the HMAC user-creation mutation.
 
     Layered on top of the global PortalHMAC*Throttle limits to bound account
@@ -219,7 +229,7 @@ class PortalHMACCreateUserThrottle(_CustomTimeRateMixin, SimpleRateThrottle):  #
         return self.cache_format % {"scope": self.scope, "ident": ident}
 
 
-class EndpointRateThrottle(_CustomTimeRateMixin, SimpleRateThrottle):  # type: ignore[misc]  # dynamic DRF attributes
+class EndpointRateThrottle(_CustomTimeRateMixin, _ConfigurableRateThrottle):
     """Per-endpoint throttle for function-based API views.
 
     ``ScopedRateThrottle`` reads its scope from ``view.throttle_scope`` and

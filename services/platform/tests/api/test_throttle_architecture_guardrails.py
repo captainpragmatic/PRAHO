@@ -266,3 +266,37 @@ class EndpointThrottleBehaviorTests(TestCase):
         ]
 
         self.assertEqual([response.status_code for response in responses], [200, 200, 429])
+
+    @override_settings(RATE_LIMITING_ENABLED=False)
+    @patch.object(OrderCreateThrottle, "rate", "1/min", create=True)
+    @patch.object(rate_limiting.PortalHMACBurstThrottle, "rate", "1/min", create=True)
+    @patch.object(rate_limiting.PortalHMACRateThrottle, "rate", "1/min", create=True)
+    def test_disabled_rate_limiting_bypasses_explicit_hmac_throttle_stack(self) -> None:
+        responses = []
+        for request_number in range(2):
+            request = self.factory.post(
+                "/api/orders/create/",
+                {"request_number": request_number},
+                format="json",
+                HTTP_X_PORTAL_ID="portal-disabled-throttle",
+            )
+            request._portal_authenticated = True  # type: ignore[attr-defined]  # middleware contract
+            responses.append(create_order(request))
+
+        self.assertNotEqual(responses[0].status_code, 429)
+        self.assertNotEqual(responses[1].status_code, 429)
+
+    @override_settings(RATE_LIMITING_ENABLED=False)
+    @patch.object(ProductCatalogThrottle, "rate", "1/min", create=True)
+    def test_disabled_rate_limiting_bypasses_explicit_public_endpoint_throttle(self) -> None:
+        responses = [
+            product_list(
+                self.factory.get(
+                    "/api/orders/products/",
+                    REMOTE_ADDR="198.51.100.25",
+                )
+            )
+            for _ in range(2)
+        ]
+
+        self.assertEqual([response.status_code for response in responses], [200, 200])
