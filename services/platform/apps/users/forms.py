@@ -8,6 +8,7 @@ from typing import Any, ClassVar, TypeVar, cast
 
 import pytz
 from django import forms
+from django.conf import settings
 from django.contrib.auth.forms import UserCreationForm
 from django.core.exceptions import ValidationError
 from django.utils import timezone  # For GDPR consent timestamps
@@ -20,6 +21,42 @@ T = TypeVar("T")
 
 # Romanian validation constants
 MIN_VAT_DIGITS = 6  # Minimum number of digits in Romanian VAT number
+
+
+def _api_token_default_ttl_initial() -> int | None:
+    """Mirror the deployment token-expiry default in the creation form."""
+    default_ttl = int(getattr(settings, "API_TOKEN_DEFAULT_TTL_DAYS", 90))
+    return default_ttl if default_ttl > 0 else None
+
+
+class APITokenCreateForm(forms.Form):
+    """Validate staff-created API token metadata."""
+
+    name = forms.CharField(
+        label=_("Name"),
+        max_length=100,
+        help_text=_("A short label identifying the script or integration."),
+    )
+    description = forms.CharField(
+        label=_("Description"),
+        required=False,
+        max_length=500,
+        widget=forms.Textarea(attrs={"rows": 3}),
+        help_text=_("Optional details about this token's purpose."),
+    )
+    ttl_days = forms.IntegerField(
+        label=_("Expires after"),
+        required=False,
+        min_value=1,
+        initial=_api_token_default_ttl_initial,
+        help_text=_("Days until expiry. Leave blank to use the deployment default."),
+    )
+
+    def clean_name(self) -> str:
+        name = cast(str, self.cleaned_data["name"])
+        if not name.isprintable():
+            raise ValidationError(_("Token name must not contain control characters."))
+        return name
 
 
 class LoginForm(forms.Form):

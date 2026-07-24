@@ -10,18 +10,21 @@ from __future__ import annotations
 import json
 import logging
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
+from django.contrib import messages
 from django.contrib.auth.decorators import login_required, user_passes_test
 from django.contrib.auth.models import AnonymousUser
 from django.contrib.contenttypes.models import ContentType
 from django.core.cache import cache
+from django.db.models import Q
 from django.http import Http404, HttpResponse, JsonResponse
-from django.shortcuts import get_object_or_404, render
+from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.utils.translation import gettext_lazy as _
 from django.views import View
+from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_http_methods
 from django_q.models import OrmQ, Schedule, Task
 
@@ -592,6 +595,62 @@ def settings_home(request: HttpRequest) -> HttpResponse:
         "is_admin": _is_admin(request.user),
     }
     return render(request, "settings/home.html", context)
+
+
+@login_required
+@user_passes_test(is_staff_user)
+@never_cache
+@require_http_methods(["GET", "POST"])
+def api_tokens(request: HttpRequest) -> HttpResponse:
+    """List and issue API tokens owned by the current staff user."""
+    from apps.users.forms import APITokenCreateForm  # noqa: PLC0415  # ADR-0007
+    from apps.users.models import APIToken, User  # noqa: PLC0415  # ADR-0007
+    from apps.users.services import APITokenService  # noqa: PLC0415  # ADR-0007
+
+    form = APITokenCreateForm(request.POST or None)
+    new_raw_token: str | None = None
+    if request.method == "POST" and form.is_valid():
+        result = APITokenService.issue_token(
+            user=cast(User, request.user),
+            name=form.cleaned_data["name"],
+            description=form.cleaned_data["description"],
+            ttl_days=form.cleaned_data["ttl_days"],
+        )
+        if result.is_ok():
+            new_raw_token = result.unwrap().raw_key
+            form = APITokenCreateForm()
+        else:
+            form.add_error(None, result.unwrap_err())
+
+    now = timezone.now()
+    tokens = (
+        APIToken.objects.filter(user=request.user)
+        .filter(Q(expires_at__isnull=True) | Q(expires_at__gt=now))
+        .order_by("-created_at")
+    )
+    context = {
+        **_sidebar_context(None, request.user),
+        "form": form,
+        "tokens": tokens,
+        "is_admin": _is_admin(request.user),
+    }
+    if new_raw_token is not None:
+        context["new_raw_token"] = new_raw_token
+    return render(request, "settings/api_tokens.html", context)
+
+
+@login_required
+@user_passes_test(is_staff_user)
+@require_http_methods(["POST"])
+def api_token_revoke(request: HttpRequest, token_id: int) -> HttpResponse:
+    """Revoke one API token owned by the current staff user."""
+    from apps.users.models import APIToken  # noqa: PLC0415  # ADR-0007
+
+    token = get_object_or_404(APIToken, pk=token_id, user=request.user)
+    token_label = token.name
+    token.delete()
+    messages.success(request, _("API token “{name}” revoked.").format(name=token_label))
+    return redirect("settings:api_tokens")
 
 
 @login_required

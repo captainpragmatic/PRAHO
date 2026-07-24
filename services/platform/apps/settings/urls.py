@@ -24,6 +24,8 @@ urlpatterns = [
     path("api/<str:key>/", views.SettingsAPIView.as_view(), name="setting_detail_api"),
     # ── Settings UI ─────────────────────────────────────────────────────────
     path("", views.settings_home, name="home"),
+    path("api-tokens/", views.api_tokens, name="api_tokens"),
+    path("api-tokens/<int:token_id>/revoke/", views.api_token_revoke, name="api_token_revoke"),
     path("save/", views.save_change_set, name="save_change_set"),
     path("search/", views.settings_search, name="search"),
     path("automation/", views.settings_automation, name="automation"),

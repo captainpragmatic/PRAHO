@@ -54,6 +54,7 @@ class TokenObtainRequestSerializer(serializers.Serializer):
     """
 
     name = StrictCharField(required=False, default="default", max_length=100)
+    description = StrictCharField(required=False, default="", allow_blank=True, max_length=500)
     ttl_days = serializers.IntegerField(required=False, allow_null=True, min_value=1)
 
     def validate_name(self, value: str) -> str:
