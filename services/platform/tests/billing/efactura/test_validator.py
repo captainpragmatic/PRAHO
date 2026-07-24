@@ -3,6 +3,7 @@ Tests for CIUS-RO XML validator.
 """
 
 from django.test import TestCase
+from lxml import etree
 
 from apps.billing.efactura.validator import CIUSROValidator, ValidationError, ValidationResult
 
@@ -211,6 +212,53 @@ class CIUSROValidatorTestCase(TestCase):
         result = self.validator.validate(xml)
 
         self.assertTrue(any(error.code == "R051" for error in result.errors))
+
+    def test_r051_rejects_amount_when_currency_id_is_missing(self):
+        xml = self._get_minimal_valid_xml().replace(
+            '<cbc:PayableAmount currencyID="RON">1190.00</cbc:PayableAmount>',
+            "<cbc:PayableAmount>1190.00</cbc:PayableAmount>",
+        )
+
+        result = self.validator.validate(xml)
+
+        self.assertTrue(any(error.code == "R051" for error in result.errors))
+
+    def test_r051_checks_every_supported_amount_context_without_exempting_missing_attributes(self):
+        fragments = {
+            "allowance amount": "<cac:AllowanceCharge><cbc:Amount>1.00</cbc:Amount></cac:AllowanceCharge>",
+            "allowance base": "<cac:AllowanceCharge><cbc:BaseAmount>1.00</cbc:BaseAmount></cac:AllowanceCharge>",
+            "price": "<cac:Price><cbc:PriceAmount>1.00</cbc:PriceAmount></cac:Price>",
+            "document tax": (
+                "<cac:TaxTotal><cbc:TaxAmount>1.00</cbc:TaxAmount>"
+                "<cac:TaxSubtotal/></cac:TaxTotal>"
+            ),
+            "tax subtotal": "<cac:TaxSubtotal><cbc:TaxAmount>1.00</cbc:TaxAmount></cac:TaxSubtotal>",
+            "taxable": "<cbc:TaxableAmount>1.00</cbc:TaxableAmount>",
+            "line extension": "<cbc:LineExtensionAmount>1.00</cbc:LineExtensionAmount>",
+            "tax exclusive": "<cbc:TaxExclusiveAmount>1.00</cbc:TaxExclusiveAmount>",
+            "tax inclusive": "<cbc:TaxInclusiveAmount>1.00</cbc:TaxInclusiveAmount>",
+            "allowance total": "<cbc:AllowanceTotalAmount>1.00</cbc:AllowanceTotalAmount>",
+            "charge total": "<cbc:ChargeTotalAmount>1.00</cbc:ChargeTotalAmount>",
+            "prepaid": "<cbc:PrepaidAmount>1.00</cbc:PrepaidAmount>",
+            "rounding": "<cbc:PayableRoundingAmount>1.00</cbc:PayableRoundingAmount>",
+            "payable": "<cbc:PayableAmount>1.00</cbc:PayableAmount>",
+        }
+
+        for label, fragment in fragments.items():
+            with self.subTest(label=label):
+                xml = (
+                    '<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2" '
+                    'xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2" '
+                    'xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">'
+                    "<cbc:DocumentCurrencyCode>RON</cbc:DocumentCurrencyCode>"
+                    f"{fragment}</Invoice>"
+                )
+                result = ValidationResult(is_valid=True)
+                document = etree.fromstring(xml.encode())
+
+                self.validator._validate_currency_ids(document, "RON", result)
+
+                self.assertEqual([error.code for error in result.errors], ["R051"])
 
     def test_br_53_rejects_accounting_total_with_wrong_currency(self):
         xml = self._get_minimal_valid_eur_xml().replace(

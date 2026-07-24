@@ -102,61 +102,23 @@ INVOICE_STATUS_CHOICES = [
     ("expired", gettext_lazy("Expired")),
     ("void", gettext_lazy("Void")),
     ("refunded", gettext_lazy("Refunded")),
+    ("partially_refunded", gettext_lazy("Partially Refunded")),
+    ("converted", gettext_lazy("Converted")),
 ]
 
-ALLOWED_STATUSES = {"draft", "issued", "paid", "overdue", "void", "refunded", "sent", "accepted", "expired"}
-
-
-def _fetch_filtered_documents(  # noqa: PLR0913
-    customer_id: int,
-    user_id: int,
-    doc_type: str = "all",
-    status_filter: str = "",
-    search_query: str = "",
-    force_sync: bool = False,
-) -> list[Any]:
-    """Fetch and filter billing documents from platform API."""
-    invoice_service = InvoiceViewService()
-    documents: list[Any] = []
-
-    if doc_type in ["all", "invoice"]:
-        invoices = invoice_service.get_customer_invoices(
-            customer_id=customer_id, user_id=user_id, force_sync=force_sync
-        )
-        for inv in invoices:
-            inv.document_type = "invoice"
-        documents.extend(invoices)
-
-    if doc_type in ["all", "proforma"]:
-        proformas = invoice_service.get_customer_proformas(
-            customer_id=customer_id, user_id=user_id, force_sync=force_sync
-        )
-        for pro in proformas:
-            pro.document_type = "proforma"
-        documents.extend(proformas)
-
-    if status_filter and status_filter in ALLOWED_STATUSES:
-        documents = [doc for doc in documents if doc.status == status_filter]
-
-    if search_query:
-        query_lower = search_query.lower()
-        documents = [
-            doc
-            for doc in documents
-            if query_lower in str(getattr(doc, "number", "")).lower()
-            or query_lower in str(getattr(doc, "status", "")).lower()
-            or query_lower in str(getattr(doc, "document_type", "")).lower()
-            or query_lower in str(getattr(doc, "total_cents", "")).lower()
-            or query_lower in str(getattr(doc, "description", "")).lower()
-            or query_lower in str(getattr(doc, "notes", "")).lower()
-            or query_lower in str(getattr(doc, "additional_info", "")).lower()
-            or query_lower in str(getattr(doc, "customer_name", "")).lower()
-            or query_lower in str(getattr(doc, "customer_email", "")).lower()
-            or any(query_lower in str(getattr(line, "description", "")).lower() for line in getattr(doc, "lines", []))
-        ]
-
-    documents.sort(key=lambda x: x.created_at, reverse=True)
-    return documents
+ALLOWED_STATUSES = {
+    "draft",
+    "issued",
+    "paid",
+    "overdue",
+    "void",
+    "refunded",
+    "partially_refunded",
+    "sent",
+    "accepted",
+    "expired",
+    "converted",
+}
 
 
 def _invoices_base_context(  # noqa: PLR0913
@@ -207,6 +169,7 @@ def invoices_list_view(request: HttpRequest) -> HttpResponse:
 
     try:
         status_filter = request.GET.get("status", "")
+        status_filter = status_filter if status_filter in ALLOWED_STATUSES else ""
         doc_type = _validated_doc_type(request.GET.get("type", "all"))
         search_query = request.GET.get("q", "").strip()
         force_sync = request.GET.get("sync") == "true"
@@ -221,54 +184,36 @@ def invoices_list_view(request: HttpRequest) -> HttpResponse:
         user_id = int(request.user.id)
         cid = int(customer_id)
 
-        # Fetch ALL documents (unfiltered by type) for stats, then apply type filter
-        all_documents = _fetch_filtered_documents(
+        page_data = InvoiceViewService().get_customer_documents(
             customer_id=cid,
             user_id=user_id,
-            doc_type="all",
-            status_filter="",
-            search_query="",
+            page=page,
+            limit=20,
+            document_type=doc_type,
+            status=status_filter,
+            search=search_query,
             force_sync=force_sync,
         )
-        invoice_count = sum(1 for d in all_documents if getattr(d, "document_type", "") == "invoice")
-        proforma_count = sum(1 for d in all_documents if getattr(d, "document_type", "") == "proforma")
-        unpaid_statuses = {"draft", "issued", "sent", "overdue", "pending"}
-        unpaid_count = sum(
-            1
-            for d in all_documents
-            if getattr(d, "document_type", "") == "invoice" and getattr(d, "status", "") in unpaid_statuses
+        total_documents = page_data.invoice_count + page_data.proforma_count
+        paginator_data = PaginatorData(
+            total_count=page_data.total_items,
+            current_page=page_data.current_page,
+            page_size=page_data.page_size,
         )
-
-        # Now fetch with actual filters for display
-        documents = _fetch_filtered_documents(
-            customer_id=cid,
-            user_id=user_id,
-            doc_type=doc_type,
-            status_filter=status_filter,
-            search_query=search_query,
-            force_sync=False,
-        )
-
-        total_documents = len(documents)
-        per_page = 20
-        start = (page - 1) * per_page
-        paginated = documents[start : start + per_page]
-
-        paginator_data = PaginatorData(total_count=total_documents, current_page=page, page_size=per_page)
         pagination_params = build_pagination_params(type=doc_type, status=status_filter, q=search_query)
 
         context = {
-            "invoices": paginated,
+            "invoices": page_data.documents,
             "paginator_data": paginator_data,
             "pagination_params": pagination_params,
             **_invoices_base_context(
                 doc_type,
                 status_filter,
                 search_query,
-                len(all_documents),
-                invoice_count=invoice_count,
-                proforma_count=proforma_count,
-                unpaid_count=unpaid_count,
+                total_documents,
+                invoice_count=page_data.invoice_count,
+                proforma_count=page_data.proforma_count,
+                unpaid_count=page_data.unpaid_invoice_count,
             ),
         }
 
@@ -312,29 +257,35 @@ def invoices_search_api(request: HttpRequest) -> HttpResponse:
 
     search_query = request.GET.get("q", "").strip()
     status_filter = request.GET.get("status", "")
+    status_filter = status_filter if status_filter in ALLOWED_STATUSES else ""
     doc_type = _validated_doc_type(request.GET.get("type", "all"))
+    try:
+        page = max(1, int(request.GET.get("page", 1)))
+    except (ValueError, TypeError):
+        page = 1
 
     try:
-        documents = _fetch_filtered_documents(
+        page_data = InvoiceViewService().get_customer_documents(
             customer_id=int(customer_id),
             user_id=int(user_id),
-            doc_type=doc_type,
-            status_filter=status_filter,
-            search_query=search_query,
+            page=page,
+            limit=20,
+            document_type=doc_type,
+            status=status_filter,
+            search=search_query,
         )
-
-        total_documents = len(documents)
-        per_page = 20
-        paginated = documents[:per_page]
-
-        paginator_data = PaginatorData(total_count=total_documents, current_page=1, page_size=per_page)
+        paginator_data = PaginatorData(
+            total_count=page_data.total_items,
+            current_page=page_data.current_page,
+            page_size=page_data.page_size,
+        )
         pagination_params = build_pagination_params(type=doc_type, status=status_filter, q=search_query)
 
         return render(
             request,
             "billing/partials/invoices_table.html",
             {
-                "invoices": paginated,
+                "invoices": page_data.documents,
                 "paginator_data": paginator_data,
                 "pagination_params": pagination_params,
                 "status_choices": INVOICE_STATUS_CHOICES,

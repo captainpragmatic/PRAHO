@@ -71,6 +71,7 @@ class Invoice:
     locked_at: datetime | None
     sent_at: datetime | None
     paid_at: datetime | None
+    document_type: str = "invoice"
 
     # Billing information
     bill_to_name: str = ""
@@ -190,6 +191,7 @@ class Proforma:
     currency: Currency
     valid_until: datetime
     created_at: datetime
+    document_type: str = "proforma"
     notes: str = ""
     bill_to_name: str = ""
     bill_to_email: str = ""
@@ -232,3 +234,16 @@ class Proforma:
             "cancelled": str(_("Cancelled")),
         }
         return labels.get(self.status, self.status.replace("_", " ").title())
+
+
+@dataclass
+class BillingDocumentPage:
+    """One authoritative platform-paginated page of billing documents."""
+
+    documents: list[Invoice | Proforma] = field(default_factory=list)
+    current_page: int = 1
+    page_size: int = 20
+    total_items: int = 0
+    invoice_count: int = 0
+    proforma_count: int = 0
+    unpaid_invoice_count: int = 0

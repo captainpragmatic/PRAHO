@@ -517,15 +517,17 @@ class CIUSROValidator:
         document_currency: str,
         result: ValidationResult,
     ) -> None:
-        for amount in self._find_all(doc, ".//*[@currencyID]"):
-            parent = amount.getparent()
-            is_accounting_tax_amount = (
-                etree.QName(amount).localname == "TaxAmount"
-                and parent is not None
-                and etree.QName(parent).localname == "TaxTotal"
-                and not self._find_all(parent, "./cac:TaxSubtotal")
-            )
-            if not is_accounting_tax_amount and amount.get("currencyID", "") != document_currency:
+        amount_xpath = (
+            ".//cbc:Amount | .//cbc:BaseAmount | .//cbc:PriceAmount | "
+            ".//cac:TaxTotal[cac:TaxSubtotal]/cbc:TaxAmount | "
+            ".//cac:TaxSubtotal/cbc:TaxAmount | .//cbc:TaxableAmount | "
+            ".//cbc:LineExtensionAmount | .//cbc:TaxExclusiveAmount | "
+            ".//cbc:TaxInclusiveAmount | .//cbc:AllowanceTotalAmount | "
+            ".//cbc:ChargeTotalAmount | .//cbc:PrepaidAmount | "
+            ".//cbc:PayableRoundingAmount | .//cbc:PayableAmount"
+        )
+        for amount in self._find_all(doc, amount_xpath):
+            if amount.get("currencyID", "") != document_currency:
                 result.add_error(
                     "R051",
                     f"{etree.QName(amount).localname} must use document currency {document_currency}",

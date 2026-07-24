@@ -57,6 +57,65 @@ class BillingServicesTests(unittest.TestCase):
         called_endpoint = mock_post.call_args.args[0]
         self.assertEqual(called_endpoint, '/billing/proformas/')
 
+    @patch("apps.billing.services.PlatformAPIClient.post")
+    def test_get_customer_documents_forwards_filters_and_preserves_api_pagination(self, mock_post):
+        mock_post.return_value = {
+            "success": True,
+            "documents": [
+                {
+                    "document_type": "invoice",
+                    "id": 41,
+                    "number": "INV-OLD-041",
+                    "status": "overdue",
+                    "total_cents": 1000,
+                    "currency": {
+                        "id": 1,
+                        "code": "RON",
+                        "name": "Romanian Leu",
+                        "symbol": "lei",
+                        "decimals": 2,
+                    },
+                    "due_at": "2025-01-01T00:00:00Z",
+                    "created_at": "2024-01-01T00:00:00Z",
+                }
+            ],
+            "pagination": {"current_page": 3, "limit": 20, "total_items": 45},
+            "summary": {
+                "invoice_count": 45,
+                "proforma_count": 0,
+                "unpaid_invoice_count": 5,
+                "total_count": 45,
+            },
+        }
+
+        page = self.service.get_customer_documents(
+            customer_id=123,
+            user_id=7,
+            page=3,
+            limit=20,
+            document_type="invoice",
+            status="overdue",
+            search="INV-OLD",
+        )
+
+        self.assertEqual([document.number for document in page.documents], ["INV-OLD-041"])
+        self.assertEqual(page.total_items, 45)
+        self.assertEqual(page.current_page, 3)
+        self.assertEqual(page.unpaid_invoice_count, 5)
+        mock_post.assert_called_once_with(
+            "/billing/documents/",
+            data={
+                "customer_id": 123,
+                "user_id": 7,
+                "action": "get_billing_documents",
+                "page": 3,
+                "limit": 20,
+                "document_type": "invoice",
+                "status": "overdue",
+                "search": "INV-OLD",
+            },
+        )
+
 
 class RefundServiceTests(unittest.TestCase):
     """Tests for InvoiceViewService.request_refund."""
