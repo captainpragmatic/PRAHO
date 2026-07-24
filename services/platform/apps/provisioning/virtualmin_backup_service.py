@@ -252,6 +252,14 @@ class VirtualminBackupService:
             self._update_backup_progress(backup_id, "failed", 100)
             return Err(backup_result.unwrap_err())
 
+        # #326: persist the ACTUAL dest returned by the backup step (previously discarded, so
+        # metadata['backup_path'] was never set and verify/upload reconstructed a wrong, token-less
+        # local path). The archive is written by the remote Virtualmin backup-domain API, so it lives
+        # on the Virtualmin host — mark that explicitly so verify/upload don't pretend it is local.
+        backup_metadata["backup_path"] = backup_result.unwrap()
+        backup_metadata["backup_location"] = "remote"
+        backup_metadata["backup_host"] = self.server.hostname
+
         # Verify backup integrity
         self._update_backup_progress(backup_id, "verifying", 85)
         verification_result = self._verify_backup_integrity(backup_id, backup_metadata)
@@ -750,12 +758,27 @@ class VirtualminBackupService:
             logger.error(f"Config backup execution failed: {e}")
             return Err(f"Config backup failed: {e!s}")
 
-    def _verify_backup_integrity(  # noqa: PLR0911  # Complexity: multi-step business logic
+    def _verify_backup_integrity(  # noqa: PLR0911, C901  # Complexity: multi-step business logic
         self, backup_id: str, metadata: dict[str, Any]
     ) -> Result[None, str]:  # Complexity: Virtualmin workflow  # Complexity: multi-step business logic
         """Verify backup file integrity and completeness."""
 
         try:
+            # #326: the archive is created by the remote Virtualmin backup-domain API and lives on
+            # the Virtualmin host, not the PRAHO platform filesystem. Verifying it locally is
+            # impossible until a remote->local (or direct-to-S3) transfer exists. Fail HONESTLY
+            # instead of a misleading local "file not found", and surface that the remote archive
+            # is stranded (remote cleanup + transport is tracked as a separate follow-up).
+            if metadata.get("backup_location") == "remote":
+                remote_path = metadata.get("backup_path", "<unknown>")
+                host = metadata.get("backup_host", self.server.hostname)
+                return Err(
+                    f"Backup archive is on the remote Virtualmin host {host} ({remote_path}); "
+                    "remote retrieval/transfer is not implemented (#326), so the backup cannot be "
+                    "verified or uploaded. The remote temp archive is left in place and must be "
+                    "cleaned up until the transfer mechanism lands."
+                )
+
             # Get backup file path from metadata or construct it
             backup_path = metadata.get("backup_path") or f"{tempfile.gettempdir()}/virtualmin_backup_{backup_id}.tar.gz"
 
@@ -825,17 +848,16 @@ class VirtualminBackupService:
             s3_client = self._get_s3_client()
             bucket_name = self._get_backup_bucket()
 
-            # Upload metadata first
-            metadata_key = f"virtualmin-backups/{backup_id}/metadata.json"
-            s3_client.put_object(
-                Bucket=bucket_name,
-                Key=metadata_key,
-                Body=json.dumps(metadata, indent=2),
-                ContentType="application/json",
-                ServerSideEncryption="AES256",
-            )
+            # #326: defense-in-depth — a remote archive cannot be uploaded from the platform host.
+            # (The workflow already fails at verification, but never claim an upload for a remote
+            # archive even if called directly.)
+            if metadata.get("backup_location") == "remote":
+                return Err(
+                    f"Cannot upload backup {backup_id}: archive is on the remote Virtualmin host and "
+                    "remote transfer is not implemented (#326)"
+                )
 
-            # Upload backup file
+            # Determine the archive path up front.
             backup_path = metadata.get("backup_path") or f"{tempfile.gettempdir()}/virtualmin_backup_{backup_id}.tar.gz"
 
             if not os.path.exists(backup_path):
@@ -883,6 +905,19 @@ class VirtualminBackupService:
                             "backup_type": metadata.get("backup_type", "full"),
                         },
                     )
+
+            # #326: upload metadata AFTER the archive succeeds. Previously metadata was written
+            # first, so an interrupted backup left a metadata.json in S3 with no archive — listed
+            # as restorable and skipping checksum verification. Writing it last means a metadata
+            # object only ever exists alongside its archive.
+            metadata_key = f"virtualmin-backups/{backup_id}/metadata.json"
+            s3_client.put_object(
+                Bucket=bucket_name,
+                Key=metadata_key,
+                Body=json.dumps(metadata, indent=2),
+                ContentType="application/json",
+                ServerSideEncryption="AES256",
+            )
 
             # Clean up local backup file after successful upload
             try:
