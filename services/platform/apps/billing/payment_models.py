@@ -10,8 +10,10 @@ import secrets
 import uuid
 from datetime import datetime, timedelta
 from decimal import Decimal
+from itertools import pairwise
 from typing import Any, ClassVar, TypedDict
 
+from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.db.models import Q
@@ -129,6 +131,12 @@ class Payment(ConcurrentTransitionMixin, models.Model):
     received_at = models.DateTimeField(default=timezone.now)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    failed_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        editable=False,
+        help_text=_("Definitive failure time used as the stable retry-schedule anchor"),
+    )
 
     # Metadata
     meta = models.JSONField(default=dict, blank=True)
@@ -175,6 +183,16 @@ class Payment(ConcurrentTransitionMixin, models.Model):
     def __str__(self) -> str:
         return f"Payment {self.amount} {self.currency.code} for {self.customer}"
 
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        """Keep every persisted failed payment anchored to one stable failure time."""
+        if self.status == "failed":
+            if self.failed_at is None:
+                self.failed_at = timezone.now()
+            update_fields = kwargs.get("update_fields")
+            if update_fields is not None:
+                kwargs["update_fields"] = {*update_fields, "failed_at"}
+        super().save(*args, **kwargs)
+
     @property
     def amount(self) -> Decimal:
         return Decimal(self.amount_cents) / 100
@@ -208,6 +226,8 @@ class Payment(ConcurrentTransitionMixin, models.Model):
     @transition(field=status, source="pending", target="failed")
     def fail_payment(self) -> None:
         """Mark payment as failed."""
+        if self.failed_at is None:
+            self.failed_at = timezone.now()
 
     @transition(field=status, source="succeeded", target="refunded")
     def refund_payment(self) -> None:
@@ -320,7 +340,10 @@ class Payment(ConcurrentTransitionMixin, models.Model):
 
         if meta_update:
             self.meta = {**(self.meta or {}), **meta_update}
-        self.save(update_fields=["status", "meta", "updated_at"])
+        update_fields = ["status", "meta", "updated_at"]
+        if new_status == "failed":
+            update_fields.append("failed_at")
+        self.save(update_fields=update_fields)
         return True
 
     # =========================================================================
@@ -431,7 +454,7 @@ class PaymentRetryPolicy(models.Model):
 
     # Retry configuration
     retry_intervals_days = models.JSONField(
-        default=list, help_text=_("Days after failure to retry (e.g., [1, 3, 7, 14, 30])")
+        default=list, help_text=_("Absolute days after the original payment failure (e.g., [1, 3, 7, 14, 30])")
     )
     max_attempts = models.IntegerField(
         default=4,
@@ -441,10 +464,12 @@ class PaymentRetryPolicy(models.Model):
 
     # Escalation rules
     suspend_service_after_days = models.IntegerField(
-        null=True, blank=True, help_text=_("Days after final failure to suspend service (null = never)")
+        null=True, blank=True, help_text=_("Days after the original payment failure to suspend service (null = never)")
     )
     terminate_service_after_days = models.IntegerField(
-        null=True, blank=True, help_text=_("Days after final failure to terminate service (null = never)")
+        null=True,
+        blank=True,
+        help_text=_("Days after the original payment failure to terminate service (null = never)"),
     )
 
     # Communication settings
@@ -494,22 +519,67 @@ class PaymentRetryPolicy(models.Model):
     def __str__(self) -> str:
         return f"{self.name} ({len(self.retry_intervals_days)} attempts)"
 
+    def clean(self) -> None:
+        """Validate the complete dunning timeline, not just individual columns."""
+        super().clean()
+        errors: dict[str, Any] = {}
+        intervals = self.retry_intervals_days
+        valid_intervals = (
+            isinstance(intervals, list)
+            and len(intervals) == self.max_attempts
+            and all(isinstance(day, int) and not isinstance(day, bool) and day > 0 for day in intervals)
+            and all(previous < current for previous, current in pairwise(intervals))
+        )
+        if not valid_intervals:
+            errors["retry_intervals_days"] = _(
+                "Provide one positive, strictly increasing retry day for each retry attempt."
+            )
+
+        final_retry_day = intervals[-1] if valid_intervals else None
+        if (
+            final_retry_day is not None
+            and self.suspend_service_after_days is not None
+            and self.suspend_service_after_days <= final_retry_day
+        ):
+            errors["suspend_service_after_days"] = _("Suspension must occur after the final retry.")
+        if self.terminate_service_after_days is not None and self.suspend_service_after_days is None:
+            errors["terminate_service_after_days"] = _("Termination requires a preceding suspension.")
+        elif (
+            self.suspend_service_after_days is not None
+            and self.terminate_service_after_days is not None
+            and self.terminate_service_after_days <= self.suspend_service_after_days
+        ):
+            errors["terminate_service_after_days"] = _("Termination must occur after suspension.")
+        elif (
+            final_retry_day is not None
+            and self.terminate_service_after_days is not None
+            and self.terminate_service_after_days <= final_retry_day
+        ):
+            errors["terminate_service_after_days"] = _("Termination must occur after the final retry.")
+        if errors:
+            raise ValidationError(errors)
+
     def get_next_retry_date(self, failure_date: datetime, attempt_number: int) -> datetime | None:
-        """Calculate the next retry date from a strictly validated JSON interval."""
+        """Calculate one absolute retry date from the original payment failure."""
+        intervals = self.retry_intervals_days
+        valid_intervals = (
+            isinstance(intervals, list)
+            and len(intervals) == self.max_attempts
+            and all(isinstance(day, int) and not isinstance(day, bool) and day > 0 for day in intervals)
+            and all(previous < current for previous, current in pairwise(intervals))
+        )
         if (
             isinstance(attempt_number, bool)
             or not isinstance(attempt_number, int)
             or attempt_number < 0
             or attempt_number >= self.max_attempts
-            or not isinstance(self.retry_intervals_days, list)
-            or attempt_number >= len(self.retry_intervals_days)
+            or not valid_intervals
         ):
+            if not valid_intervals:
+                logger.critical("Invalid retry schedule for policy %s; refusing to schedule", self.id)
             return None
 
-        days_to_wait = self.retry_intervals_days[attempt_number]
-        if isinstance(days_to_wait, bool) or not isinstance(days_to_wait, int) or days_to_wait < 0:
-            logger.critical("Invalid retry interval at index %s for policy %s", attempt_number, self.id)
-            return None
+        days_to_wait = intervals[attempt_number]
         return failure_date + timedelta(days=days_to_wait)
 
 

@@ -21,8 +21,8 @@ from django.utils.translation import gettext_lazy as _
 from faker import Faker
 
 from apps.billing.currency_models import FXRate
-from apps.billing.invoice_models import InvoiceSequence
 from apps.billing.models import Currency, Invoice, InvoiceLine, ProformaInvoice, ProformaLine, TaxRule
+from apps.billing.numbering_service import InvoiceNumberingService
 from apps.billing.payment_models import CreditLedger, Payment
 from apps.billing.proforma_models import ProformaSequence
 from apps.billing.refund_models import Refund
@@ -1952,8 +1952,7 @@ class Command(BaseCommand):
             invoice = Invoice.objects.create(**invoice_data)
 
             # Generate proper invoice number using sequence
-            sequence, _ = InvoiceSequence.objects.get_or_create(scope="default")
-            invoice.number = sequence.get_next_number("INV")
+            invoice.number = InvoiceNumberingService.get_next_number()
             invoice.save()
 
             # Set locked_at/paid_at via update() to bypass clean() validation on locked invoices

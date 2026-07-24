@@ -65,7 +65,6 @@ from apps.billing.signals import (
     _requires_efactura_submission,
     _revert_customer_credit_score,
     _schedule_payment_reminders,
-    _schedule_payment_retry,
     _send_invoice_created_email,
     _send_invoice_issued_email,
     _send_invoice_overdue_email,
@@ -1556,14 +1555,13 @@ class TestHandlePaymentSuccess(TestCase):
 
 class TestHandlePaymentFailure(TestCase):
     @patch("apps.billing.signals._update_customer_payment_history")
-    @patch("apps.billing.signals._schedule_payment_retry")
     @patch("apps.billing.signals._send_payment_failed_email")
-    def test_flow(self, mock_email, mock_retry, mock_history):
+    def test_failure_side_effects_do_not_create_a_second_retry_owner(self, mock_email, mock_history):
         payment = MagicMock()
-        with self.captureOnCommitCallbacks(execute=True):
+        with self.captureOnCommitCallbacks(execute=True) as callbacks:
             _handle_payment_failure(payment)
+        self.assertEqual(len(callbacks), 2)
         mock_email.assert_called_once()
-        mock_retry.assert_called_once()
         mock_history.assert_called_once_with(payment.customer, "negative")
 
 
@@ -1910,33 +1908,6 @@ class TestTriggerDunningProcess(TestCase):
         _trigger_dunning_process(invoice)
 
 
-class TestSchedulePaymentRetry(TestCase):
-    @patch("apps.billing.services.PaymentRetryService")
-    def test_active_policy(self, mock_prs):
-        policy = MagicMock()
-        policy.is_active = True
-        mock_prs.get_customer_retry_policy.return_value = policy
-        payment = MagicMock()
-        _schedule_payment_retry(payment)
-        mock_prs.schedule_retry.assert_called_once()
-
-    @patch("apps.billing.services.PaymentRetryService")
-    def test_inactive_policy(self, mock_prs):
-        policy = MagicMock()
-        policy.is_active = False
-        mock_prs.get_customer_retry_policy.return_value = policy
-        payment = MagicMock()
-        _schedule_payment_retry(payment)
-        mock_prs.schedule_retry.assert_not_called()
-
-    @patch("apps.billing.services.PaymentRetryService")
-    def test_no_policy(self, mock_prs):
-        mock_prs.get_customer_retry_policy.return_value = None
-        payment = MagicMock()
-        _schedule_payment_retry(payment)
-        mock_prs.schedule_retry.assert_not_called()
-
-
 class TestUpdateCustomerPaymentHistory(TestCase):
     def test_positive(self):
         customer = MagicMock()
@@ -2277,10 +2248,9 @@ class TestPaymentHandlersOnCommitDeferred(TestCase):
         mock_cancel.assert_not_called()
 
     @patch("apps.billing.signals._update_customer_payment_history")
-    @patch("apps.billing.signals._schedule_payment_retry")
     @patch("apps.billing.signals._send_payment_failed_email")
     def test_failure_side_effects_not_called_on_rollback(
-        self, mock_email: MagicMock, mock_retry: MagicMock, mock_history: MagicMock
+        self, mock_email: MagicMock, mock_history: MagicMock
     ) -> None:
         payment = MagicMock()
         payment.amount = "100.00"
@@ -2291,7 +2261,6 @@ class TestPaymentHandlersOnCommitDeferred(TestCase):
             raise RuntimeError("Force rollback")
 
         mock_email.assert_not_called()
-        mock_retry.assert_not_called()
         mock_history.assert_not_called()
 
     @patch("apps.billing.signals._send_payment_refund_email")

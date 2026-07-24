@@ -159,30 +159,30 @@ class InvoiceSequenceModelAdditionalTestCase(TestCase):
 
     def test_get_next_number_concurrency_safety(self):
         """Test get_next_number atomicity under concurrent access"""
-        sequence = InvoiceSequence.objects.create(scope='concurrency_test')
+        sequence = InvoiceSequence.objects.create(scope='concurrency_test', prefix='TEST')
 
         # Simulate concurrent access
         results = []
         for _ in range(5):
-            next_number = sequence.get_next_number('TEST')
+            next_number = sequence.get_next_number()
             results.append(next_number)
 
         # All numbers should be unique and sequential
         expected = ['TEST-000001', 'TEST-000002', 'TEST-000003', 'TEST-000004', 'TEST-000005']
         self.assertEqual(results, expected)
 
-    def test_get_next_number_custom_prefix(self):
-        """Test get_next_number with custom prefix"""
-        sequence = InvoiceSequence.objects.create(scope='custom_prefix')
+    def test_get_next_number_persisted_prefix(self):
+        """Test get_next_number with a persisted series prefix."""
+        sequence = InvoiceSequence.objects.create(scope='custom_prefix', prefix='CUSTOM')
 
-        custom_number = sequence.get_next_number('CUSTOM')
+        custom_number = sequence.get_next_number()
         self.assertEqual(custom_number, 'CUSTOM-000001')
 
     def test_get_next_number_padding(self):
         """Test get_next_number number padding"""
-        sequence = InvoiceSequence.objects.create(scope='padding_test', last_value=999999)
+        sequence = InvoiceSequence.objects.create(scope='padding_test', prefix='PAD', last_value=999999)
 
-        next_number = sequence.get_next_number('PAD')
+        next_number = sequence.get_next_number()
         self.assertEqual(next_number, 'PAD-1000000')  # Should handle large numbers
 
     def test_invoice_sequence_meta_attributes(self):
@@ -422,6 +422,54 @@ class PaymentRetryPolicyModelAdditionalTestCase(TestCase):
             with self.subTest(invalid_interval=invalid_interval):
                 self.policy.retry_intervals_days = [invalid_interval]
                 self.assertIsNone(self.policy.get_next_retry_date(timezone.now(), 0))
+
+    def test_payment_retry_policy_fails_closed_when_any_interval_is_invalid(self) -> None:
+        self.policy.retry_intervals_days = [1, 1, 7]
+        self.policy.max_attempts = 3
+
+        self.assertIsNone(self.policy.get_next_retry_date(timezone.now(), 0))
+
+    def test_payment_retry_policy_requires_one_strictly_increasing_day_per_attempt(self) -> None:
+        self.policy.retry_intervals_days = [1, 3, 3]
+        self.policy.max_attempts = 3
+
+        with self.assertRaises(ValidationError) as context:
+            self.policy.full_clean()
+
+        self.assertIn("retry_intervals_days", context.exception.message_dict)
+
+    def test_payment_retry_policy_rejects_termination_before_suspension(self) -> None:
+        self.policy.retry_intervals_days = [1, 3, 7]
+        self.policy.max_attempts = 3
+        self.policy.suspend_service_after_days = 14
+        self.policy.terminate_service_after_days = 10
+
+        with self.assertRaises(ValidationError) as context:
+            self.policy.full_clean()
+
+        self.assertIn("terminate_service_after_days", context.exception.message_dict)
+
+    def test_payment_retry_policy_rejects_termination_without_suspension(self) -> None:
+        self.policy.retry_intervals_days = [1, 3, 7]
+        self.policy.max_attempts = 3
+        self.policy.suspend_service_after_days = None
+        self.policy.terminate_service_after_days = 30
+
+        with self.assertRaises(ValidationError) as context:
+            self.policy.full_clean()
+
+        self.assertIn("terminate_service_after_days", context.exception.message_dict)
+
+    def test_payment_retry_policy_requires_final_retry_before_escalation(self) -> None:
+        self.policy.retry_intervals_days = [1, 3, 14]
+        self.policy.max_attempts = 3
+        self.policy.suspend_service_after_days = 14
+        self.policy.terminate_service_after_days = 30
+
+        with self.assertRaises(ValidationError) as context:
+            self.policy.full_clean()
+
+        self.assertIn("suspend_service_after_days", context.exception.message_dict)
 
 
 class PaymentRetryAttemptModelAdditionalTestCase(TestCase):

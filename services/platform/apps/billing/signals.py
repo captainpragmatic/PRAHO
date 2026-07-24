@@ -499,9 +499,9 @@ def handle_invoice_number_generation(sender: type[Invoice], instance: Invoice, c
     try:
         if not created and instance.status == "issued" and instance.number.startswith("TMP-"):
             # Generate proper invoice number
-            from .services import InvoiceNumberingService
+            from .numbering_service import InvoiceNumberingService
 
-            new_number = InvoiceNumberingService.get_next_number(prefix="INV", scope="default")
+            new_number = InvoiceNumberingService.get_next_number()
 
             # Update without triggering signals again
             Invoice.objects.filter(pk=instance.pk).update(number=new_number, issued_at=timezone.now())
@@ -1361,9 +1361,11 @@ def _handle_payment_success(payment: Payment) -> None:
 def _handle_payment_failure(payment: Payment) -> None:
     """Handle failed payment"""
     try:
-        # All external side-effects deferred to post-commit
+        # Notification/history side-effects are deferred to post-commit.
+        # Retry creation is deliberately owned by recurring convergence or
+        # invoice dunning; a generic post-save signal would create a second
+        # retry chain for the same definitive failure.
         transaction.on_commit(lambda p=payment: _send_payment_failed_email(p))
-        transaction.on_commit(lambda p=payment: _schedule_payment_retry(p))
         transaction.on_commit(lambda p=payment: _update_customer_payment_history(p.customer, "negative"))
 
         logger.warning(f"⚠️ [Payment] Failed: {payment.amount} {payment.currency.code}")
@@ -1686,19 +1688,6 @@ def _trigger_dunning_process(invoice: Invoice) -> None:
         async_task("apps.billing.tasks.start_dunning_process", str(invoice.id))
     except ImportError:
         logger.warning(f"⚠️ [Invoice] Would start dunning for {invoice.number}")
-
-
-def _schedule_payment_retry(payment: Payment) -> None:
-    """Schedule payment retry according to policy"""
-    try:
-        from apps.billing.services import PaymentRetryService
-
-        policy = PaymentRetryService.get_customer_retry_policy(payment.customer)
-        if policy and policy.is_active:
-            PaymentRetryService.schedule_retry(payment, policy)
-            logger.info(f"🔄 [Payment] Retry scheduled for payment {payment.id}")
-    except Exception as e:
-        logger.exception(f"🔥 [Payment] Failed to schedule retry: {e}")
 
 
 def _update_customer_payment_history(customer: Any, event_type: str) -> None:

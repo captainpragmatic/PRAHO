@@ -46,6 +46,11 @@ class InvoiceSequence(models.Model):
     """Invoice number sequencing for legal compliance"""
 
     scope = models.CharField(max_length=50, default="default", unique=True)
+    prefix = models.CharField(
+        max_length=30,
+        default="INV",
+        help_text=_("Persisted legal series prefix used for every number issued from this sequence"),
+    )
     last_value = models.BigIntegerField(default=0)
 
     class Meta:
@@ -53,7 +58,7 @@ class InvoiceSequence(models.Model):
         verbose_name = _("Invoice Sequence")
         verbose_name_plural = _("Invoice Sequences")
 
-    def get_next_number(self, prefix: str = "INV", user_email: str | None = None) -> str:
+    def get_next_number(self, *, user_email: str | None = None) -> str:
         """Get next invoice number and increment sequence atomically with security logging"""
         with transaction.atomic():
             # Log critical financial operation
@@ -63,7 +68,7 @@ class InvoiceSequence(models.Model):
             InvoiceSequence.objects.filter(pk=self.pk).update(last_value=F("last_value") + 1)
             # Refresh the instance to get the updated value
             self.refresh_from_db()
-            new_number = f"{prefix}-{self.last_value:06d}"
+            new_number = f"{self.prefix}-{self.last_value:06d}"
 
             # Comprehensive security logging for audit trail
             log_security_event(
@@ -73,13 +78,23 @@ class InvoiceSequence(models.Model):
                     "old_value": old_value,
                     "new_value": self.last_value,
                     "generated_number": new_number,
-                    "prefix": prefix,
+                    "prefix": self.prefix,
                     "critical_financial_operation": True,
                 },
                 user_email=user_email,
             )
 
             return new_number
+
+    @property
+    def next_number_preview(self) -> str:
+        """Return the next formatted number without consuming it."""
+        return f"{self.prefix}-{self.last_value + 1:06d}"
+
+    @property
+    def is_archived(self) -> bool:
+        """Archived snapshots are evidence, never issuable sequences."""
+        return self.scope.startswith("archived:")
 
 
 # ===============================================================================

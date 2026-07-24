@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% load ui_components %}
+
+{% block title %}{% trans "Billing controls" %} - PRAHO Platform{% endblock %}
+
+{% block content %}
+<div class="px-4 py-6 space-y-6">
+  {% trans "Billing controls" as page_title %}
+  {% page_header title=page_title subtitle=_("Audited retry policy and legal invoice numbering") icon="settings" %}
+    {% url "settings:group" "billing" as billing_settings_url %}
+    {% trans "Back to billing settings" as back_to_billing_label %}
+    {% button back_to_billing_label href=billing_settings_url variant="secondary" %}
+  {% end_page_header %}
+
+  {% trans "Payment retry policies" as retry_title %}
+  {% section_card title=retry_title %}
+    <div class="overflow-x-auto">
+      <table class="min-w-full divide-y divide-slate-700 text-sm">
+        <thead>
+          <tr class="text-left text-slate-400">
+            <th class="py-2 pr-4">{% trans "Policy" %}</th>
+            <th class="py-2 pr-4">{% trans "Retry days" %}</th>
+            <th class="py-2 pr-4">{% trans "Email" %}</th>
+            <th class="py-2 pr-4">{% trans "State" %}</th>
+            <th class="py-2 text-right">{% trans "Action" %}</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-700/60">
+          {% for policy in retry_policies %}
+          <tr>
+            <td class="py-3 pr-4 text-white">
+              {{ policy.name }}
+              {% if policy.is_default %}<span class="ml-2 text-xs text-blue-300">{% trans "Default" %}</span>{% endif %}
+            </td>
+            <td class="py-3 pr-4 font-mono text-slate-300">{{ policy.retry_intervals_days|join:", " }}</td>
+            <td class="py-3 pr-4 text-slate-300">
+              {% if policy.send_dunning_emails %}
+              {% trans "Enabled" %}
+              {% else %}
+              {% trans "Disabled" %}
+              {% endif %}
+            </td>
+            <td class="py-3 pr-4">
+              {% if policy.is_active %}
+              <span class="text-green-400">{% trans "Active" %}</span>
+              {% else %}
+              <span class="text-slate-500">{% trans "Inactive" %}</span>
+              {% endif %}
+            </td>
+            <td class="py-3 text-right">
+              <a class="text-blue-400 hover:text-blue-300" href="{% url 'billing:retry_policy_edit' policy.pk %}">{% trans "Edit" %}</a>
+            </td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="5" class="py-6 text-center text-slate-400">{% trans "No retry policies configured." %}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="mt-3 text-xs text-slate-500">
+      {% trans "Service suspension and cancellation remain governed by subscription grace-period controls." %}
+    </p>
+  {% end_section_card %}
+
+  {% trans "Invoice numbering series" as sequence_title %}
+  {% section_card title=sequence_title %}
+    <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+      <div>
+        {% if current_sequence %}
+        <p class="text-sm text-slate-300">
+          {% trans "Active prefix" %}: <code class="text-blue-300">{{ current_sequence.prefix }}</code>
+          · {% trans "last issued sequence value" %}: <strong class="text-white">{{ current_sequence.last_value }}</strong>
+          · {% trans "next number" %}: <strong class="font-mono text-white">{{ current_sequence.next_number_preview }}</strong>
+        </p>
+        {% else %}
+        <p class="text-sm text-amber-300">{% trans "No active default invoice series exists." %}</p>
+        {% endif %}
+        <p class="mt-2 text-xs text-slate-500">
+          {% trans "Archived series remain read-only, and counters have no free-form edit. Starting a new series first snapshots the active counter." %}
+        </p>
+      </div>
+      {% url "billing:invoice_series_create" as series_url %}
+      {% trans "Start new series" as start_series_label %}
+      {% button start_series_label href=series_url variant="primary" %}
+    </div>
+
+    {% if invoice_sequences %}
+    <div class="mt-5 overflow-x-auto">
+      <table class="min-w-full divide-y divide-slate-700 text-sm">
+        <thead>
+          <tr class="text-left text-slate-400">
+            <th class="py-2 pr-4">{% trans "Scope" %}</th>
+            <th class="py-2 pr-4">{% trans "Prefix" %}</th>
+            <th class="py-2 pr-4">{% trans "Last value" %}</th>
+            <th class="py-2">{% trans "Next number" %}</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-700/60">
+          {% for sequence in invoice_sequences %}
+          <tr>
+            <td class="py-3 pr-4 text-slate-300">{{ sequence.scope }}</td>
+            <td class="py-3 pr-4 font-mono text-slate-200">{{ sequence.prefix }}</td>
+            <td class="py-3 pr-4 text-slate-200">{{ sequence.last_value }}</td>
+            <td class="py-3 font-mono text-slate-200">
+              {% if sequence.is_archived %}
+              <span class="font-sans text-slate-500">{% trans "Archived" %}</span>
+              {% else %}
+              {{ sequence.next_number_preview }}
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+  {% end_section_card %}
+</div>
+{% endblock %}

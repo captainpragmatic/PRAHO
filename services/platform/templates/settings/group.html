@@ -40,6 +40,21 @@
         </div>
         {% endif %}
 
+        {% if group.slug == "billing" %}
+        {% if request.user.is_superuser or request.user.staff_role == "admin" or request.user.staff_role == "billing" %}
+        <div class="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <a href="{% url 'billing:operator_controls' %}" class="rounded-lg border border-slate-700 bg-slate-800 p-4 hover:border-blue-500">
+            <p class="text-sm font-medium text-white">{% trans "Payment retry policies" %}</p>
+            <p class="mt-1 text-xs text-slate-400">{% trans "Edit retry cadence and dunning email delivery in the Billing domain." %}</p>
+          </a>
+          <a href="{% url 'billing:invoice_series_create' %}" class="rounded-lg border border-slate-700 bg-slate-800 p-4 hover:border-blue-500">
+            <p class="text-sm font-medium text-white">{% trans "Invoice numbering series" %}</p>
+            <p class="mt-1 text-xs text-slate-400">{% trans "Review the current counter or start a guarded legal series." %}</p>
+          </a>
+        </div>
+        {% endif %}
+        {% endif %}
+
         <div x-show="conflicts.length" x-cloak class="mt-4 bg-amber-500/10 border border-amber-500/40 rounded-lg p-4 text-sm text-amber-300">
           <p class="font-medium">{% trans "Someone else changed these settings while you were editing:" %}</p>
           <ul class="mt-1 list-disc list-inside font-mono text-xs">

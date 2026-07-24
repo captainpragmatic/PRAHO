@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% load ui_components %}
+
+{% block title %}{% trans "Edit retry policy" %} - PRAHO Platform{% endblock %}
+
+{% block content %}
+<div class="px-4 py-6 max-w-4xl mx-auto space-y-6">
+  {% trans "Edit retry policy" as page_title %}
+  {% page_header title=page_title subtitle=policy.name icon="settings" %}{% end_page_header %}
+
+  <form method="post" class="space-y-6">
+    {% csrf_token %}
+    {{ form.baseline }}
+    {% if form.non_field_errors %}
+    <div class="rounded-lg border border-red-500/40 bg-red-500/10 p-3 text-sm text-red-300">{{ form.non_field_errors }}</div>
+    {% endif %}
+
+    {% trans "Collection policy" as policy_title %}
+    {% section_card title=policy_title %}
+      <p class="mb-4 text-xs text-slate-500">
+        {% trans "This policy controls payment retry timing and dunning email delivery. Service suspension and cancellation remain governed by subscription grace-period controls." %}
+      </p>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {% for field in form.visible_fields %}
+        <div class="{% if field.name == 'description' or field.name == 'reason' %}md:col-span-2{% endif %}">
+          <label for="{{ field.id_for_label }}" class="block text-sm font-medium text-slate-300 mb-1">{{ field.label }}</label>
+          {{ field }}
+          {% if field.help_text %}<p class="mt-1 text-xs text-slate-500">{{ field.help_text }}</p>{% endif %}
+          {% for error in field.errors %}<p class="mt-1 text-sm text-red-400">{{ error }}</p>{% endfor %}
+        </div>
+        {% endfor %}
+      </div>
+    {% end_section_card %}
+
+    <div class="flex justify-end gap-3">
+      {% url "billing:operator_controls" as controls_url %}
+      {% trans "Cancel" as cancel_label %}
+      {% button cancel_label href=controls_url variant="secondary" %}
+      {% trans "Save policy" as save_policy_label %}
+      {% button save_policy_label type="submit" variant="primary" %}
+    </div>
+  </form>
+</div>
+{% endblock %}

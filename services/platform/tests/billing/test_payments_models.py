@@ -3,6 +3,7 @@
 # ===============================================================================
 
 from datetime import timedelta
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
@@ -215,6 +216,56 @@ class PaymentTestCase(TestCase):
 
         result = payment.apply_gateway_event('refunded')
         self.assertFalse(result)
+
+    def test_gateway_failure_persists_the_definitive_failure_time_once(self):
+        """Retry timing must use the decline time, not when the pending attempt was created."""
+        payment = Payment.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            amount_cents=1000,
+            payment_method='stripe',
+        )
+        original_created_at = timezone.now() - timedelta(days=10)
+        Payment.objects.filter(pk=payment.pk).update(created_at=original_created_at)
+        definitive_failure_at = timezone.now()
+
+        with patch("apps.billing.payment_models.timezone.now", return_value=definitive_failure_at):
+            changed = payment.apply_gateway_event("failed", {"gateway_error": "card declined"})
+
+        self.assertTrue(changed)
+        payment.refresh_from_db()
+        self.assertEqual(payment.failed_at, definitive_failure_at)
+        self.assertEqual(payment.created_at, original_created_at)
+
+        later_update = definitive_failure_at + timedelta(hours=3)
+        with patch("apps.billing.payment_models.timezone.now", return_value=later_update):
+            duplicate_changed = payment.apply_gateway_event("failed", {"gateway_error": "duplicate webhook"})
+
+        self.assertFalse(duplicate_changed)
+        payment.refresh_from_db()
+        self.assertEqual(payment.failed_at, definitive_failure_at)
+
+    def test_direct_failed_payment_is_given_a_stable_failure_time(self):
+        """Imports and fixtures cannot persist a failed Payment without an anchor."""
+        definitive_failure_at = timezone.now()
+
+        with patch("apps.billing.payment_models.timezone.now", return_value=definitive_failure_at):
+            payment = Payment.objects.create(
+                customer=self.customer,
+                currency=self.currency,
+                amount_cents=1000,
+                payment_method='stripe',
+                status='failed',
+            )
+        with patch(
+            "apps.billing.payment_models.timezone.now",
+            return_value=definitive_failure_at + timedelta(hours=3),
+        ):
+            payment.notes = "Later reconciliation note"
+            payment.save(update_fields=["notes", "updated_at"])
+
+        payment.refresh_from_db()
+        self.assertEqual(payment.failed_at, definitive_failure_at)
 
 
 class PaymentIntegrationTestCase(TestCase):

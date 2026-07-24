@@ -10,7 +10,7 @@ import logging
 import uuid
 from datetime import datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     pass
@@ -20,7 +20,7 @@ from django.contrib import messages
 from django.contrib.auth import REDIRECT_FIELD_NAME
 from django.contrib.auth.decorators import login_required
 from django.contrib.contenttypes.models import ContentType
-from django.core.exceptions import ImproperlyConfigured, PermissionDenied
+from django.core.exceptions import ImproperlyConfigured, PermissionDenied, ValidationError
 from django.core.paginator import Paginator
 from django.db import DatabaseError, transaction
 from django.db.models import Count, Q, QuerySet, Sum
@@ -45,7 +45,13 @@ from apps.api.secure_auth import get_authenticated_customer
 from apps.billing.efactura.settings import ro_local_date
 from apps.billing.pdf_generators import RomanianInvoicePDFGenerator, RomanianProformaPDFGenerator
 from apps.common.constants import DEFAULT_PAGE_SIZE
-from apps.common.decorators import billing_staff_required, can_edit_proforma, staff_rate_limit, staff_required
+from apps.common.decorators import (
+    billing_configuration_required,
+    billing_staff_required,
+    can_edit_proforma,
+    staff_rate_limit,
+    staff_required,
+)
 from apps.common.mixins import get_search_context
 from apps.common.tax_service import TaxService
 from apps.common.utils import json_error, json_success
@@ -58,7 +64,9 @@ from apps.users.models import User
 from .models import (
     Currency,
     Invoice,
+    InvoiceSequence,
     Payment,
+    PaymentRetryPolicy,
     ProformaInvoice,
     ProformaLine,
     ProformaSequence,
@@ -74,6 +82,18 @@ _DEFAULT_MAX_PAYMENT_AMOUNT_CENTS = 100_000_000
 # Staff may record only offline settlement. Gateway methods must arrive through
 # their verified gateway convergence path, never through an admin form.
 ALLOWED_PAYMENT_METHODS: frozenset[str] = frozenset({"bank_transfer", "bank", "cash", "other"})
+
+
+def _add_validation_errors(form: Any, error: ValidationError) -> None:
+    """Attach service-layer validation to the originating form."""
+    if hasattr(error, "message_dict"):
+        for field_name, field_errors in error.message_dict.items():
+            target = field_name if field_name in form.fields and not form.fields[field_name].widget.is_hidden else None
+            for field_error in field_errors:
+                form.add_error(target, field_error)
+        return
+    for field_error in error.messages:
+        form.add_error(None, field_error)
 
 
 def _get_max_payment_amount_cents() -> int:
@@ -2237,3 +2257,84 @@ def efactura_documents_htmx(request: HttpRequest) -> HttpResponse:
     }
 
     return render(request, "billing/partials/efactura_document_list.html", context)
+
+
+@billing_configuration_required
+@require_http_methods(["GET"])
+def operator_controls(request: HttpRequest) -> HttpResponse:
+    """List the Billing-owned policy models linked by ADR-0042."""
+    retry_policies = PaymentRetryPolicy.objects.order_by("-is_default", "-is_active", "name")
+    invoice_sequences = InvoiceSequence.objects.order_by("scope", "pk")
+    return render(
+        request,
+        "billing/operator_controls.html",
+        {
+            "retry_policies": retry_policies,
+            "invoice_sequences": invoice_sequences,
+            "current_sequence": invoice_sequences.filter(scope="default").first(),
+        },
+    )
+
+
+@billing_configuration_required
+@require_http_methods(["GET", "POST"])
+def retry_policy_edit(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
+    """Edit one retry policy through a locked, attributed write."""
+    from apps.common.request_ip import get_safe_client_ip  # noqa: PLC0415
+
+    from .forms import PaymentRetryPolicyForm  # noqa: PLC0415
+    from .operator_controls import BillingControlActor, update_retry_policy  # noqa: PLC0415
+
+    policy = get_object_or_404(PaymentRetryPolicy, pk=pk)
+    form = PaymentRetryPolicyForm(request.POST or None, instance=policy)
+    if request.method == "POST" and form.is_valid():
+        try:
+            update_retry_policy(
+                policy_id=policy.pk,
+                values=form.cleaned_data,
+                baseline=form.cleaned_data["baseline"],
+                actor=BillingControlActor(
+                    user=cast(User, request.user),
+                    reason=form.cleaned_data["reason"],
+                    ip_address=get_safe_client_ip(request),
+                ),
+            )
+        except ValidationError as error:
+            _add_validation_errors(form, error)
+        else:
+            messages.success(request, _("Payment retry policy updated."))
+            return redirect("billing:operator_controls")
+    return render(request, "billing/retry_policy_form.html", {"form": form, "policy": policy})
+
+
+@billing_configuration_required
+@require_http_methods(["GET", "POST"])
+def invoice_series_create(request: HttpRequest) -> HttpResponse:
+    """Rotate the active invoice series without exposing its numeric counter."""
+    from apps.common.request_ip import get_safe_client_ip  # noqa: PLC0415
+
+    from .forms import InvoiceSeriesForm  # noqa: PLC0415
+    from .operator_controls import BillingControlActor, rotate_invoice_series  # noqa: PLC0415
+
+    current = InvoiceSequence.objects.filter(scope="default").first()
+    form = InvoiceSeriesForm(
+        request.POST or None,
+        initial={"baseline": f"{current.prefix}:{current.last_value}" if current is not None else "missing"},
+    )
+    if request.method == "POST" and form.is_valid():
+        try:
+            rotate_invoice_series(
+                prefix=form.cleaned_data["prefix"],
+                baseline=form.cleaned_data["baseline"],
+                actor=BillingControlActor(
+                    user=cast(User, request.user),
+                    reason=form.cleaned_data["reason"],
+                    ip_address=get_safe_client_ip(request),
+                ),
+            )
+        except ValidationError as error:
+            _add_validation_errors(form, error)
+        else:
+            messages.success(request, _("New invoice series started."))
+            return redirect("billing:operator_controls")
+    return render(request, "billing/invoice_series_form.html", {"form": form, "current_sequence": current})
