@@ -483,6 +483,8 @@ migrate:
 check-migrations:
 	@echo "🔎 [Platform] Checking model and migration state..."
 	@$(PYTHON_PLATFORM_MANAGE) makemigrations --check --dry-run --settings=config.settings.test
+	@echo "🔎 [Portal] Checking model and migration state..."
+	@$(PYTHON_PORTAL_MANAGE) makemigrations --check --dry-run --settings=config.settings.dev
 
 portal-clearsessions:
 	@echo "🧹 [Portal] Clearing expired sessions..."
