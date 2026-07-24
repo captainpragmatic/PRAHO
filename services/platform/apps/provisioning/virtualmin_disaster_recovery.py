@@ -342,16 +342,37 @@ class VirtualminDisasterRecoveryService:
             # Additional recovery readiness checks
             health_check_service = VirtualminProvisioningService(server)
             connection_test = health_check_service.test_server_connection(server)
+            connection_healthy = connection_test.is_ok()
+
+            # 🔒 FAIL-CLOSED (#326): a dry-run only counts PRAHO rows — it does NOT prove the
+            # rebuild create-path works. Readiness previously hardcoded True and claimed
+            # "✅ ready" even when this connection test FAILED, so operators trusted a
+            # capability that was 0%-functional. Readiness now requires, at minimum, a
+            # reachable server; and because the create-path itself is not yet exercised
+            # here, the message is explicit that this is a data-presence check, not a
+            # proven end-to-end recovery.
+            recovery_ready = connection_healthy
+            if not connection_healthy:
+                message = (
+                    f"❌ Server {server.hostname} is NOT recovery-ready: "
+                    f"connection test failed ({connection_test.unwrap_err()})"
+                )
+            else:
+                message = (
+                    f"Server {server.hostname} reachable and {rebuild_data['accounts_to_rebuild']} "
+                    "account(s) present in PRAHO (data-presence check only — the rebuild create-path "
+                    "is not exercised by this dry run)"
+                )
 
             return Ok(
                 {
                     "server": server.hostname,
-                    "recovery_ready": True,
+                    "recovery_ready": recovery_ready,
                     "accounts_recoverable": rebuild_data["accounts_to_rebuild"],
-                    "connection_status": "healthy" if connection_test.is_ok() else "failed",
+                    "connection_status": "healthy" if connection_healthy else "failed",
                     "rebuild_plan": rebuild_data.get("rebuild_plan", []),
                     "test_timestamp": timezone.now().isoformat(),
-                    "message": f"✅ Server {server.hostname} is ready for disaster recovery",
+                    "message": message,
                 }
             )
         else:
