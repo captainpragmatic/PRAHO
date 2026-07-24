@@ -81,7 +81,9 @@
                   {% if token.last_used_at %}{{ token.last_used_at|date:"Y-m-d H:i" }}{% else %}{% trans "Never" %}{% endif %}
                 </td>
                 <td class="px-5 py-4 text-right">
-                  <form method="post" action="{% url 'settings:api_token_revoke' token.pk %}" hx-post="{% url 'settings:api_token_revoke' token.pk %}" hx-confirm="{% trans 'Revoke this API token? Any script using it will stop authenticating.' %}" hx-target="body" hx-swap="innerHTML">
+                  {% trans "Revoke this API token? Any script using it will stop authenticating." as revoke_confirm %}
+                  {# nosemgrep: django-no-csrf-token — csrf_token present on adjacent line #}
+                  <form method="post" action="{% url 'settings:api_token_revoke' token.pk %}" onsubmit="return confirm('{% filter force_escape %}{{ revoke_confirm|escapejs }}{% endfilter %}')">
                     {% csrf_token %}
                     {% trans "Revoke" as revoke_label %}
                     {% button revoke_label type="submit" variant="danger" size="sm" %}

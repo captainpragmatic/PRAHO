@@ -103,6 +103,9 @@ class APITokenService:
         ttl_days: int | None = None,
     ) -> Result[IssuedAPIToken, str]:
         """Issue one hashed token while enforcing the deployment's live-token cap."""
+        if ttl_days is not None and ttl_days <= 0:
+            return Err(str(_("Token expiry must be at least 1 day when supplied.")))
+
         raw_key = APIToken.generate_key()
         now = timezone.now()
         max_active_tokens = int(getattr(settings, "API_TOKEN_MAX_ACTIVE_PER_USER", 20))

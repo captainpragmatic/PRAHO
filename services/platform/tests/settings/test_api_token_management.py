@@ -1,5 +1,6 @@
 """Staff API-token management UI tests (ADR-0031 Gap 7)."""
 
+import re
 from datetime import datetime, timedelta
 
 from django.test import Client, TestCase, override_settings
@@ -8,6 +9,7 @@ from django.utils import timezone
 
 from apps.users.forms import APITokenCreateForm
 from apps.users.models import APIToken, User
+from apps.users.services import APITokenService
 
 
 def _create_token(
@@ -83,6 +85,31 @@ class APITokenManagementFormTests(TestCase):
         self.assertIsNone(form["ttl_days"].value())
 
 
+class APITokenServiceTests(TestCase):
+    def setUp(self) -> None:
+        self.user = User.objects.create_user(email="service-token@example.com", password="StrongPass123!")
+
+    @override_settings(API_TOKEN_DEFAULT_TTL_DAYS=90)
+    def test_explicit_non_positive_ttl_cannot_disable_expiry(self) -> None:
+        for invalid_ttl in (0, -1):
+            with self.subTest(ttl_days=invalid_ttl):
+                result = APITokenService.issue_token(
+                    user=self.user,
+                    name="invalid-expiry",
+                    ttl_days=invalid_ttl,
+                )
+
+                self.assertTrue(result.is_err())
+                self.assertFalse(APIToken.objects.filter(user=self.user).exists())
+
+    @override_settings(API_TOKEN_DEFAULT_TTL_DAYS=0)
+    def test_deployment_default_can_still_select_no_expiry(self) -> None:
+        result = APITokenService.issue_token(user=self.user, name="deployment-default")
+
+        self.assertTrue(result.is_ok())
+        self.assertIsNone(result.unwrap().token.expires_at)
+
+
 class APITokenManagementTests(TestCase):
     def setUp(self) -> None:
         self.user = User.objects.create_user(
@@ -120,6 +147,22 @@ class APITokenManagementTests(TestCase):
         self.assertContains(response, "Production deployment")
         self.assertNotContains(response, other_token.key_prefix)
         self.assertNotContains(response, expired_token.key_prefix)
+
+    def test_revoke_uses_native_post_redirect_flow(self) -> None:
+        _create_token(self.user, name="native-revoke")
+
+        response = self.client.get(self.url)
+
+        revoke_form = re.search(
+            rb'<form[^>]+action="/settings/api-tokens/\d+/revoke/"[^>]*>',
+            response.content,
+        )
+        self.assertIsNotNone(revoke_form)
+        form_tag = revoke_form.group() if revoke_form else b""
+        self.assertIn(b"return confirm(", form_tag)
+        self.assertNotIn(b"hx-post=", form_tag)
+        self.assertNotIn(b"hx-target=", form_tag)
+        self.assertNotIn(b"hx-swap=", form_tag)
 
     def test_create_shows_raw_key_once_and_persists_metadata(self) -> None:
         response = self.client.post(
