@@ -93,6 +93,7 @@ def _create_deployment(
     count = NodeDeployment.objects.count() + 1
     defaults: dict[str, Any] = {
         "hostname": f"test-audit-node-{count}",
+        "dns_zone": "nodes.example.com",
         "environment": "prd",
         "node_type": "sha",
         "node_number": count,

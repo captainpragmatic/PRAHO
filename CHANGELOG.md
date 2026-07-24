@@ -36,6 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Node deployment guardrails** — initial and retry deployments now receive a three-hour worker budget while the ORM broker waits four hours before redelivery, preventing duplicate execution of legitimate long-running installs; web, CLI, and orchestration paths reject missing, malformed, or oversized DNS zones before creating records, consuming retries, changing deployment state, or calling external systems (#362, #365)
 - **Notification delivery and targeting** — requests-compatible transport options now reach the DNS-pinned send path without weakening TLS, redirect, or timeout policy, so SNS certificate verification no longer fails on its timeout override; inactive and all-customer campaign audiences now select what their names promise, while the undefined trial-expiry audience fails closed instead of broadcasting (#215, #216)
 - **VAT quote and evidence integrity** — cart and preflight calculations now use the same customer tax profile and billing country as issued documents, incomplete VAT contexts fail closed, VIES checks retain attributable consultation references and fresh timestamps, expired validations are fully scheduled and drained, and PDF/e-Factura reverse-charge notices share the Article 196 legal basis (#404)
 - **PostgreSQL order billing fixtures** — persistence-reaching order transition tests now use ISO country codes that fit the billing document schema (#315)

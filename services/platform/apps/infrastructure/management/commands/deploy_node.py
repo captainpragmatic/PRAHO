@@ -38,6 +38,7 @@ from typing import Any
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
+from apps.infrastructure.deployment_preflight import validate_deployment_dns_zone
 from apps.infrastructure.provider_config import get_provider_token
 
 
@@ -158,6 +159,11 @@ class Command(BaseCommand):
         if not SettingsService.get_setting("node_deployment.enabled", True):
             raise CommandError("Node deployment is disabled in settings.")
 
+        dns_zone = str(SettingsService.get_setting("node_deployment.dns_default_zone", "") or "")
+        zone_result = validate_deployment_dns_zone(dns_zone)
+        if zone_result.is_err():
+            raise CommandError(zone_result.unwrap_err())
+
         # --- Resolve provider ---
         provider = CloudProvider.objects.filter(
             provider_type=options["provider"],
@@ -246,7 +252,7 @@ class Command(BaseCommand):
             # else: save() calls generate_hostname() automatically
 
             # Set DNS zone from settings (same as web UI)
-            deployment.dns_zone = str(SettingsService.get_setting("node_deployment.dns_default_zone", "") or "")
+            deployment.dns_zone = zone_result.unwrap()
 
             deployment.save()
 
