@@ -152,6 +152,16 @@ jobs:
         PYTHONPATH=$(pwd) ${{ env.UV_PROJECT_ENVIRONMENT }}/bin/python manage.py migrate --no-input
         PYTHONPATH=$(pwd) ${{ env.UV_PROJECT_ENVIRONMENT }}/bin/python manage.py createcachetable
 
+    - name: API token concurrency tests (PostgreSQL)
+      timeout-minutes: 3
+      env:
+        DJANGO_SETTINGS_MODULE: config.settings.ci
+      run: |
+        cd services/platform
+        PYTHONPATH="$PWD" "$UV_PROJECT_ENVIRONMENT/bin/python" manage.py test \
+          tests.api.test_api_token_concurrency.APITokenPostgresConcurrencyTests \
+          --settings=config.settings.ci --verbosity=2
+
     - name: Service isolation security tests (make test-security)
       run: make test-security
 

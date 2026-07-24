@@ -53,6 +53,7 @@ class StartupThrottleValidationTests(SimpleTestCase):
                 "order_list": "100/min",
                 "product_catalog": "200/min",
                 "portal_hmac_create_user": "30/min",
+                "session_validation": "60/min",
             },
         }
     )
@@ -104,6 +105,7 @@ class StartupThrottleValidationTests(SimpleTestCase):
                 "order_list": "100/min",
                 "product_catalog": "200/min",
                 "portal_hmac_create_user": "30/min",
+                "session_validation": "60/min",
             },
         }
     )

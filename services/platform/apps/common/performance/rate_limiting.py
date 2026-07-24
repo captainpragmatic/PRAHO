@@ -62,6 +62,7 @@ _KNOWN_THROTTLE_CLASS_SCOPES: dict[str, str] = {
     "apps.api.orders.views.OrderCalculateThrottle": "order_calculate",
     "apps.api.orders.views.OrderListThrottle": "order_list",
     "apps.api.orders.views.ProductCatalogThrottle": "product_catalog",
+    "apps.api.users.views.SessionValidationThrottle": "session_validation",
     "rest_framework.throttling.AnonRateThrottle": "anon",
 }
 
@@ -215,6 +216,28 @@ class PortalHMACCreateUserThrottle(_CustomTimeRateMixin, SimpleRateThrottle):  #
         if not _is_portal_authenticated(request):
             return None
         ident = _extract_hmac_identity(request)
+        return self.cache_format % {"scope": self.scope, "ident": ident}
+
+
+class EndpointRateThrottle(_CustomTimeRateMixin, SimpleRateThrottle):  # type: ignore[misc]  # dynamic DRF attributes
+    """Per-endpoint throttle for function-based API views.
+
+    ``ScopedRateThrottle`` reads its scope from ``view.throttle_scope`` and
+    therefore silently disables subclasses attached to DRF ``@api_view``
+    functions. Endpoint subclasses declare their scope directly and use the
+    verified portal identity for HMAC traffic, the authenticated user for
+    direct API traffic, and the client IP for public endpoints.
+    """
+
+    cache_format = "throttle_endpoint_%(scope)s_%(ident)s"
+
+    def get_cache_key(self, request: Request, view: Any) -> str:
+        if _is_portal_authenticated(request):
+            ident = f"portal_{_extract_hmac_identity(request)}"
+        elif request.user and request.user.is_authenticated:
+            ident = f"user_{request.user.pk}"
+        else:
+            ident = f"ip_{self.get_ident(request)}"
         return self.cache_format % {"scope": self.scope, "ident": ident}
 
 

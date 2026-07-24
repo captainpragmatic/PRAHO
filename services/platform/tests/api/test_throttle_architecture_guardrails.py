@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import inspect
 from copy import deepcopy
+from unittest.mock import patch
 
 from django.conf import settings
+from django.core.cache import cache
 from django.core.exceptions import ImproperlyConfigured
-from django.test import RequestFactory, SimpleTestCase, override_settings
+from django.test import RequestFactory, SimpleTestCase, TestCase, override_settings
 from django.utils.module_loading import import_string
-from rest_framework.throttling import AnonRateThrottle, SimpleRateThrottle
+from rest_framework.test import APIRequestFactory
+from rest_framework.throttling import AnonRateThrottle, ScopedRateThrottle, SimpleRateThrottle
 
 from apps.api.core import throttling as core_throttling
 from apps.api.core.throttling import AuthThrottle, BurstAPIThrottle, StandardAPIThrottle
@@ -17,10 +20,19 @@ from apps.api.orders.views import (
     OrderCreateThrottle,
     OrderListThrottle,
     ProductCatalogThrottle,
+    calculate_cart_totals,
+    confirm_order,
+    create_order,
+    order_detail,
+    order_list,
+    preflight_order,
+    product_list,
 )
 from apps.api.users import views as users_views
+from apps.api.users.views import SessionValidationThrottle, validate_session_secure
 from apps.common.apps import _validate_throttle_rates_at_startup
 from apps.common.performance import rate_limiting
+from config.settings.test import LOCMEM_TEST_CACHE
 
 
 class ThrottleArchitectureGuardrailTests(SimpleTestCase):
@@ -43,6 +55,7 @@ class ThrottleArchitectureGuardrailTests(SimpleTestCase):
             OrderCalculateThrottle,
             OrderListThrottle,
             ProductCatalogThrottle,
+            SessionValidationThrottle,
             AnonRateThrottle,
             rate_limiting.PortalHMACCreateUserThrottle,
         ]
@@ -67,8 +80,60 @@ class ThrottleArchitectureGuardrailTests(SimpleTestCase):
             "order_calculate",
             "order_list",
             "product_catalog",
+            "session_validation",
         }
         self.assertEqual(set(rates.keys()), required_scopes)
+
+    def test_function_view_endpoint_throttles_do_not_use_scoped_rate_throttle(self) -> None:
+        """DRF ScopedRateThrottle ignores a subclass scope on @api_view functions."""
+        for throttle_cls in (
+            OrderCreateThrottle,
+            OrderCalculateThrottle,
+            OrderListThrottle,
+            ProductCatalogThrottle,
+            SessionValidationThrottle,
+        ):
+            self.assertFalse(
+                issubclass(throttle_cls, ScopedRateThrottle),
+                f"{throttle_cls.__name__} would silently no-op without view.throttle_scope",
+            )
+
+    def test_hmac_function_views_preserve_global_portal_throttles(self) -> None:
+        protected_views = (
+            (calculate_cart_totals, OrderCalculateThrottle),
+            (preflight_order, OrderCalculateThrottle),
+            (create_order, OrderCreateThrottle),
+            (order_list, OrderListThrottle),
+            (order_detail, OrderListThrottle),
+            (confirm_order, OrderListThrottle),
+            (validate_session_secure, SessionValidationThrottle),
+        )
+        for view, endpoint_throttle in protected_views:
+            configured = view.cls.throttle_classes
+            self.assertIn(rate_limiting.PortalHMACRateThrottle, configured)
+            self.assertIn(rate_limiting.PortalHMACBurstThrottle, configured)
+            self.assertIn(endpoint_throttle, configured)
+
+    def test_hmac_endpoint_throttle_cannot_be_bypassed_by_rotating_ip(self) -> None:
+        factory = RequestFactory()
+        first = factory.post(
+            "/api/orders/create/",
+            REMOTE_ADDR="198.51.100.10",
+            HTTP_X_PORTAL_ID="portal-stable",
+        )
+        second = factory.post(
+            "/api/orders/create/",
+            REMOTE_ADDR="203.0.113.20",
+            HTTP_X_PORTAL_ID="portal-stable",
+        )
+        first._portal_authenticated = True  # type: ignore[attr-defined]  # middleware contract
+        second._portal_authenticated = True  # type: ignore[attr-defined]  # middleware contract
+
+        throttle = OrderCreateThrottle()
+        self.assertEqual(
+            throttle.get_cache_key(first, view=None),
+            throttle.get_cache_key(second, view=None),
+        )
 
     def test_users_module_uses_canonical_auth_throttle(self) -> None:
         self.assertIs(users_views.AuthThrottle, AuthThrottle)
@@ -161,3 +226,43 @@ class ThrottleArchitectureGuardrailTests(SimpleTestCase):
         key2 = throttle.get_cache_key(request2, view=None)
 
         self.assertEqual(key1, key2)
+
+
+@override_settings(CACHES=LOCMEM_TEST_CACHE, RATE_LIMITING_ENABLED=True)
+class EndpointThrottleBehaviorTests(TestCase):
+    """Prove the endpoint-specific order cap reaches the real DRF view boundary."""
+
+    def setUp(self) -> None:
+        cache.clear()
+        self.factory = APIRequestFactory()
+
+    @patch.object(OrderCreateThrottle, "rate", "2/min", create=True)
+    def test_order_create_throttle_returns_429_after_configured_limit(self) -> None:
+        responses = []
+        for request_number in range(3):
+            request = self.factory.post(
+                "/api/orders/create/",
+                {"request_number": request_number},
+                format="json",
+                HTTP_X_PORTAL_ID="portal-throttle-test",
+            )
+            request._portal_authenticated = True  # type: ignore[attr-defined]  # middleware contract
+            responses.append(create_order(request))
+
+        self.assertNotEqual(responses[0].status_code, 429)
+        self.assertNotEqual(responses[1].status_code, 429)
+        self.assertEqual(responses[2].status_code, 429)
+
+    @patch.object(ProductCatalogThrottle, "rate", "2/min", create=True)
+    def test_public_product_throttle_returns_429_by_client_ip(self) -> None:
+        responses = [
+            product_list(
+                self.factory.get(
+                    "/api/orders/products/",
+                    REMOTE_ADDR="198.51.100.25",
+                )
+            )
+            for _ in range(3)
+        ]
+
+        self.assertEqual([response.status_code for response in responses], [200, 200, 429])
