@@ -10,6 +10,7 @@ from django import forms
 from django.core.exceptions import ValidationError
 from django.utils.translation import gettext_lazy as _
 
+from apps.infrastructure.deployment_preflight import validate_deployment_dns_zone
 from apps.infrastructure.models import (
     CloudProvider,
     NodeDeployment,
@@ -69,7 +70,8 @@ class NodeDeploymentForm(forms.ModelForm):
             ),
         }
 
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
+    def __init__(self, *args: Any, dns_zone: str | None = None, **kwargs: Any) -> None:
+        self._dns_zone = dns_zone
         super().__init__(*args, **kwargs)
 
         # Filter to only active providers
@@ -94,6 +96,11 @@ class NodeDeploymentForm(forms.ModelForm):
         provider = cleaned_data.get("provider")
         region = cleaned_data.get("region")
         node_size = cleaned_data.get("node_size")
+
+        if self._dns_zone is not None:
+            zone_result = validate_deployment_dns_zone(self._dns_zone)
+            if zone_result.is_err():
+                raise ValidationError(zone_result.unwrap_err())
 
         # Validate region belongs to selected provider
         if provider and region and region.provider != provider:

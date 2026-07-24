@@ -23,6 +23,7 @@ from apps.common.types import Err, Ok, Retriability
 from apps.infrastructure.audit_service import InfrastructureAuditContext
 from apps.infrastructure.cloud_gateway import ServerCreateResult
 from apps.infrastructure.deployment_service import NodeDeploymentService
+from apps.infrastructure.forms import NodeDeploymentForm
 from apps.infrastructure.models import (
     CloudProvider,
     NodeDeployment,
@@ -704,6 +705,92 @@ class TestDeployNodeStatusChecks(TestCase):
 
         self.assertTrue(result.is_err())
         self.assertIn("disabled", result.unwrap_err())
+
+
+class TestDeploymentFqdnPreflight(TestCase):
+    """Deployment must fail closed before any mutation when its FQDN is unusable."""
+
+    def test_deploy_rejects_blank_dns_zone_before_state_or_external_mutation(self) -> None:
+        deployment = _create_deployment("pending")
+        deployment.dns_zone = ""
+        deployment.save(update_fields=["dns_zone", "updated_at"])
+        service = _make_service()
+
+        with patch("apps.infrastructure.deployment_service.SettingsService.get_setting", return_value=True):
+            result = service.deploy_node(deployment=deployment, credentials={"api_token": "test"})
+
+        self.assertTrue(result.is_err())
+        self.assertIn("node_deployment.dns_default_zone", result.unwrap_err())
+        deployment.refresh_from_db()
+        self.assertEqual(deployment.status, "pending")
+        self.assertFalse(NodeDeploymentLog.objects.filter(deployment=deployment).exists())
+        service._ssh_manager.generate_deployment_key.assert_not_called()
+
+    def test_deploy_rejects_malformed_dns_zone_before_state_transition(self) -> None:
+        deployment = _create_deployment("pending")
+        deployment.dns_zone = "bad..example.com"
+        deployment.save(update_fields=["dns_zone", "updated_at"])
+        service = _make_service()
+
+        with patch("apps.infrastructure.deployment_service.SettingsService.get_setting", return_value=True):
+            result = service.deploy_node(deployment=deployment, credentials={"api_token": "test"})
+
+        self.assertTrue(result.is_err())
+        self.assertIn("DNS zone is invalid", result.unwrap_err())
+        deployment.refresh_from_db()
+        self.assertEqual(deployment.status, "pending")
+
+    def test_retry_rejects_blank_dns_zone_without_consuming_retry(self) -> None:
+        deployment = _create_deployment("failed")
+        deployment.dns_zone = ""
+        deployment.save(update_fields=["dns_zone", "updated_at"])
+        service = _make_service()
+
+        result = service.retry_deployment(deployment=deployment, credentials={"api_token": "test"})
+
+        self.assertTrue(result.is_err())
+        deployment.refresh_from_db()
+        self.assertEqual(deployment.status, "failed")
+        self.assertEqual(deployment.retry_count, 0)
+
+    def test_creation_form_rejects_blank_deployment_zone(self) -> None:
+        deployment = _create_deployment("pending")
+        form = NodeDeploymentForm(
+            data={
+                "environment": deployment.environment,
+                "node_type": deployment.node_type,
+                "provider": deployment.provider_id,
+                "region": deployment.region_id,
+                "node_size": deployment.node_size_id,
+                "panel_type": deployment.panel_type_id,
+                "display_name": "Guarded node",
+                "backup_enabled": True,
+            },
+            dns_zone="",
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("node_deployment.dns_default_zone", str(form.non_field_errors()))
+
+    def test_creation_form_rejects_zone_too_long_for_generated_hostname(self) -> None:
+        deployment = _create_deployment("pending")
+        dns_zone = f"{'a' * 63}.{'b' * 63}.{'c' * 63}.{'d' * 38}"
+        form = NodeDeploymentForm(
+            data={
+                "environment": deployment.environment,
+                "node_type": deployment.node_type,
+                "provider": deployment.provider_id,
+                "region": deployment.region_id,
+                "node_size": deployment.node_size_id,
+                "panel_type": deployment.panel_type_id,
+                "display_name": "Guarded node",
+                "backup_enabled": True,
+            },
+            dns_zone=dns_zone,
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("too long", str(form.non_field_errors()))
 
 
 class TestDeployNodeNoApiToken(TestCase):
