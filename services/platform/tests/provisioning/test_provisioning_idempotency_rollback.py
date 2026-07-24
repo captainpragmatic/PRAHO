@@ -513,6 +513,23 @@ class DeleteAccountIdempotencyTest(TestCase):
         self.assertTrue(result.is_err())
         self.assertIn("must be terminated or in error state", result.unwrap_err())
 
+    def test_delete_logs_cleanup_failure_without_masking_original_error(self):
+        gateway = MagicMock()
+        gateway.call.side_effect = RuntimeError("Virtualmin request exploded")
+        service = VirtualminProvisioningService(self.server)
+
+        with (
+            patch.object(service, "_get_gateway", return_value=gateway),
+            patch.object(IdempotencyManager, "check_and_set", return_value=(True, None)),
+            patch.object(IdempotencyManager, "clear", side_effect=RuntimeError("cache cleanup failed")),
+            self.assertLogs("apps.provisioning.virtualmin_service", level="WARNING") as logs,
+        ):
+            result = service.delete_account(self.account)
+
+        self.assertTrue(result.is_err())
+        self.assertIn("Virtualmin request exploded", str(result.unwrap_err()))
+        self.assertTrue(any("Failed to clear idempotency key" in line for line in logs.output))
+
 
 class RollbackMechanismTest(TestCase):
     """Test rollback mechanisms using MockVirtualminGateway for realistic API simulation."""

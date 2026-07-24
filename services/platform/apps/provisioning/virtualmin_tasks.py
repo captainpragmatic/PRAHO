@@ -970,9 +970,13 @@ def reconcile_divergent_services_task() -> dict[str, Any]:
         try:
             reconcile_virtualmin_service_state_async(service_id)
             queued += 1
-        except Exception as e:
+        except Exception:
             failed += 1
-            logger.warning(f"⚠️ [VirtualminTask] Failed to queue divergence reconcile for {service_id}: {e}")
+            logger.warning(
+                "⚠️ [VirtualminTask] Failed to queue divergence reconcile for %s",
+                service_id,
+                exc_info=True,
+            )
 
     if queued:
         logger.info(f"🔄 [VirtualminTask] Divergence backstop queued {queued} reconciliations")

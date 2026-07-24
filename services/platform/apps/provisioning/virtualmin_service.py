@@ -890,6 +890,7 @@ class VirtualminProvisioningService:
             logger.warning(f"🛡️ [VirtualminService] {error_msg}")
             return Err(error_msg)
 
+        idempotency_key: str | None = None
         try:
             # Generate idempotency key for this operation
             idempotency_key = IdempotencyManager.generate_key(
@@ -975,7 +976,7 @@ class VirtualminProvisioningService:
                                 rollback_status="failed",
                                 rollback_details=rollback_details,
                             )
-                            IdempotencyManager.clear(idempotency_key)
+                            _clear_idempotency_key(idempotency_key, operation="delete", domain=account.domain)
 
                             # Try to at least revert server stats
                             try:
@@ -993,21 +994,21 @@ class VirtualminProvisioningService:
                         error_msg = response.data.get("error", "Deletion failed")
                         retriability = classify_virtualmin_application_error(response)
                         job.mark_failed(error_msg, response.data, retriability=retriability)
-                        IdempotencyManager.clear(idempotency_key)
+                        _clear_idempotency_key(idempotency_key, operation="delete", domain=account.domain)
                         return Err(error_msg, retriability=retriability)
 
                 else:
                     error = result.unwrap_err()
                     error_msg = str(error)
                     job.mark_failed(error_msg, retriability=retriability_of(result))
-                    IdempotencyManager.clear(idempotency_key)
+                    _clear_idempotency_key(idempotency_key, operation="delete", domain=account.domain)
                     return Err(error_msg, retriability=retriability_of(result))
 
             except Exception:
-                IdempotencyManager.clear(idempotency_key)
                 raise
 
         except Exception as e:
+            _clear_idempotency_key(idempotency_key, operation="delete", domain=account.domain)
             logger.exception(f"Error deleting account {account.domain}: {e}")
             return Err(str(e))
 
