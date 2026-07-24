@@ -337,6 +337,18 @@ class VirtualminBackupService:
                 # Execute restore components
                 errors = self._execute_restore_components(gateway, account, backup_path, config, restore_id)
 
+                # 🔒 FAIL-CLOSED (#326): component errors were collected then discarded, so a
+                # partial or total restore failure still finalized as "Restore completed
+                # successfully". Any component failure must roll back and surface as an error
+                # instead of reporting a fictional success.
+                if errors:
+                    logger.error(
+                        f"Restore for {account.domain} had {len(errors)} component failure(s); "
+                        f"rolling back: {'; '.join(errors)}"
+                    )
+                    self._execute_restore_rollback(account, rollback_data)
+                    return Err(f"Restore failed ({len(errors)} component error(s)): {'; '.join(errors)}")
+
                 # Finalize restore operation
                 return self._finalize_restore_operation(
                     RestoreOperationParams(
