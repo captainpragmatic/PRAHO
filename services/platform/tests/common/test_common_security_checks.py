@@ -223,7 +223,7 @@ class TestAPITokenConfigurationChecks(TestCase):
             self.assertEqual(check_api_token_configuration(None), [])
 
     def test_non_positive_max_is_an_error(self):
-        """MAX < 1 would turn every caller-supplied TTL into 'no expiry'."""
+        """MAX < 1 clamps every issued TTL to <= 0 days — tokens would expire immediately."""
         for bad_max in (0, -30):
             with self.subTest(max_ttl=bad_max), override_settings(
                 API_TOKEN_DEFAULT_TTL_DAYS=90, API_TOKEN_MAX_TTL_DAYS=bad_max
