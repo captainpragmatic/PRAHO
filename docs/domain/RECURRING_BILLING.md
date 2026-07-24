@@ -1,7 +1,7 @@
 # Recurring Billing Operations
 
 > **Status**: Active reference
-> **Last updated**: 2026-07-19
+> **Last updated**: 2026-07-23
 > **Architecture decision**: [ADR-0039](../ADRs/ADR-0039-praho-owned-recurring-billing.md)
 
 ## Ownership Boundary
@@ -10,7 +10,7 @@ PRAHO owns subscriptions, periods, proformas, invoices, taxes, usage rating, ret
 
 ## Rollout Checklist
 
-1. Apply migrations through billing migration `0036`, customers migration `0018`, and settings migration `0002`.
+1. Apply migrations through billing migration `0041`, customers migration `0020`, and settings migration `0005`.
 2. Verify every active or suspended auto-renew service has exactly one linked PRAHO subscription. Scheduler setup refuses to replace the legacy renewal engine while any such service is unmanaged; migrate those services from their authoritative service price, currency, billing cycle, and paid-through date first.
 3. Run `python manage.py setup_dunning_policies` and verify exactly one active default payment-retry policy exists.
    Billing administrators can review and edit the live retry cadence and dunning-email switch from
@@ -39,6 +39,7 @@ From 1 January 2026, the submission deadline is five Romanian working days. A CN
 |---|---|
 | `billing-recurring-orchestrator` | Prepare grouped renewal proformas and create due authorized PaymentIntents |
 | `billing-payment-retries` | Create fresh PaymentIntents for due failed-payment retries every 15 minutes |
+| `billing-recurring-payment-reconciliation` | Reconcile stale or unbound recurring PaymentIntents every 10 minutes |
 | `billing-expired-trials` | Cancel unpaid expired trials and expire their services |
 | `billing-grace-expirations` | Apply subscription and service non-payment lifecycle |
 | `Process Pending Usage Events` | Retry usage events that were not aggregated immediately |
@@ -69,15 +70,15 @@ The first paid order is the initial entitlement. Once payment and any review gat
 
 ## Revocation and In-Flight Charges
 
-Final recurring authorization and Stripe submission share a PostgreSQL ordering boundary. PRAHO locks the global collection-switch row and then the customer row, revalidates the document and every enrolled service, and retains those locks only until the gateway request returns. Mandate withdrawal/revocation, subscription cancellation, per-service auto-payment changes, renewal opt-out, and terminal service lifecycle changes take the same customer lock before changing authority.
+Final recurring authorization and a durable submission claim share a PostgreSQL ordering boundary. PRAHO locks the global collection-switch row and then the customer row, revalidates the document and every enrolled service, and commits an `in_flight` submission record before Stripe I/O. Mandate withdrawal/revocation, subscription cancellation, per-service auto-payment changes, renewal opt-out, and terminal service lifecycle changes take the same customer lock before changing authority.
 
 The customer mutex uses PostgreSQL `NO KEY UPDATE`: all boundary participants still serialize, while manual Payments and other rows may safely retain or add foreign keys to the customer instead of creating a document/customer lock inversion.
 
 - If a disabling mutation obtains the boundary first, the charge waits, observes the committed opt-out, and abandons its unbound local Payment before contacting Stripe.
-- If a charge obtains the boundary first, it is considered in flight. The disabling mutation waits until the gateway request has returned; PRAHO then records the opt-out without automatically refunding that already-submitted attempt.
-- Once a withdrawal, cancellation, opt-out, or kill-switch update returns successfully, no later automatic PaymentIntent may be submitted under the old authority.
+- If a charge commits its durable claim first, it is considered in flight. The disabling mutation may complete while Stripe is still processing; PRAHO preserves the authorized attempt and does not automatically refund it.
+- Once a withdrawal, cancellation, opt-out, or kill-switch update returns successfully, no new automatic submission may become authorized under the old authority. An attempt whose durable claim committed first remains authorized and may still reach Stripe afterward with its original idempotency key.
 
-This short database transaction intentionally spans one Stripe request. Do not add unrelated work inside it or acquire service/subscription locks before the customer boundary.
+The short database transaction ends before Stripe is contacted. The durable claim—not an in-memory flag or an open transaction—is the ordering evidence. Do not add provider I/O inside the boundary or acquire service/subscription locks before the customer boundary.
 
 ## Plan Changes
 
@@ -88,6 +89,9 @@ The historical `SubscriptionChange` table is read-only. Do not apply mid-cycle p
 Monitor for:
 
 - gateway fact mismatch and recovered early-webhook security events;
+- `reserved` submissions that do not promptly become `in_flight` or `abandoned`;
+- any `manual_review` submission created from an unbound pre-migration Payment;
+- recurring submissions whose reconciliation lease repeatedly expires or whose `last_error` persists;
 - pending usage events with aggregation errors;
 - failed recurring Payments without a pending or completed retry chain;
 - cycles stuck in `prepared`, `processing`, `past_due`, or `closing`;
@@ -97,7 +101,7 @@ Monitor for:
 
 A successful Stripe object is not sufficient evidence by itself. PRAHO accepts success only after amount, currency, customer, payment method, metadata, document, and local Payment state reconcile.
 
-An automatic attempt reserves its document locally, then revalidates the locked order, proforma or invoice balance immediately before contacting Stripe. Manual settlement and cancellation reject unresolved automatic card reservations. If a Stripe success or failure webhook wins the race with local PaymentIntent-ID persistence, PRAHO binds it only to one exact, fact-matched recurring attempt; unmatched renewal events are not acknowledged as external traffic and must be retried by Stripe.
+An automatic attempt reserves its document locally, then revalidates the locked order, proforma or invoice balance and commits its durable submission claim immediately before contacting Stripe. Manual settlement and cancellation reject unresolved automatic card reservations. If a Stripe success or failure webhook wins the race with local PaymentIntent-ID persistence, PRAHO binds it only to one exact, fact-matched recurring attempt; unmatched renewal events are not acknowledged as external traffic and must be retried by Stripe. If no webhook arrives, the scheduled reconciler waits for the stale window, leases a bounded batch, replays only durably claimed unbound requests with their original idempotency keys, and retrieves bound PaymentIntents. Amount, currency, customer, saved method, document metadata, and attempt identity must match before local terminal state advances. Unbound recurring Payments that predate the durable claim migration are `manual_review`: verify their idempotency key in Stripe and repair them through the existing convergence service; never change them to `reserved` or replay them speculatively.
 
 ## Emergency Stop and Recovery
 
@@ -106,7 +110,7 @@ Set `billing.recurring_auto_collection_enabled` to `false` to stop all new autom
 After an incident:
 
 1. Leave automatic collection disabled.
-2. Reconcile Stripe PaymentIntents against PRAHO Payments and invoices.
+2. Run the recurring-payment reconciliation task and investigate any remaining submission `last_error` values before manually reconciling Stripe PaymentIntents against PRAHO Payments and invoices.
 3. Repair local state through the established convergence services; do not edit FSM status fields directly.
 4. Reprocess pending usage events and failed retries only after their ownership and period are unambiguous.
 5. Re-enable collection after a test-mode end-to-end payment succeeds.

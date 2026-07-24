@@ -27,6 +27,12 @@ from .payment_convergence import PaymentSuccessService, converge_recurring_payme
 from .payment_models import TERMINAL_PAYMENT_STATUSES, PaymentRetryAttempt
 from .recurring_billing import RecurringCollectionGate
 from .recurring_locking import recurring_charge_submission_boundary
+from .recurring_submission_service import (
+    claim_recurring_submission,
+    ensure_recurring_submission,
+    mark_recurring_submission_abandoned_if_reserved,
+    record_recurring_submission_result,
+)
 
 # Order statuses that permit a new payment intent to be created (H18).
 _PAYABLE_ORDER_STATUSES: frozenset[str] = frozenset({"draft", "awaiting_payment"})
@@ -61,22 +67,26 @@ def _abandon_unbound_payment_reservation(payment: Payment, reason: str) -> None:
     customer. A gateway-bound attempt is never abandoned here because its
     external outcome must be reconciled instead.
     """
-    if payment.status != "pending" or payment.gateway_txn_id:
-        return
-    changed = payment.apply_gateway_event(
-        "failed",
-        {
-            "reservation_abandoned": True,
-            "reservation_error": reason,
-        },
-    )
+    with transaction.atomic():
+        locked_payment = Payment.objects.select_for_update(of=("self",)).get(id=payment.id)
+        if locked_payment.status != "pending" or locked_payment.gateway_txn_id:
+            return
+        if not mark_recurring_submission_abandoned_if_reserved(locked_payment.id):
+            return
+        changed = locked_payment.apply_gateway_event(
+            "failed",
+            {
+                "reservation_abandoned": True,
+                "reservation_error": reason,
+            },
+        )
     if changed:
         log_security_event(
             "automatic_payment_reservation_abandoned",
             {
-                "payment_id": str(payment.id),
-                "invoice_id": str(payment.invoice_id or ""),
-                "proforma_id": str(payment.proforma_id or ""),
+                "payment_id": str(locked_payment.id),
+                "invoice_id": str(locked_payment.invoice_id or ""),
+                "proforma_id": str(locked_payment.proforma_id or ""),
                 "reason": reason,
                 "critical_financial_operation": True,
             },
@@ -89,20 +99,11 @@ def _submit_recurring_charge_under_revocation_lock(
     payment: Payment,
     revalidate: Callable[[], str | None],
     submit: Callable[[], PaymentIntentResult],
-    reservation_is_resumed: bool = False,
 ) -> tuple[PaymentIntentResult, bool]:
-    """Order revocation and gateway submission, returning whether submission was attempted.
-
-    A RESUMED reservation (carried over from a prior attempt) may already have
-    reached Stripe — the charge could have succeeded with its binding lost to a
-    worker death and its success webhook not yet delivered. Such a reservation
-    is never abandoned inline; its outcome is left to webhook reconciliation.
-    Only a freshly-created reservation is provably pre-submit and safe to fail.
-    """
+    """Commit one durable submission claim, then perform gateway I/O."""
     with recurring_charge_submission_boundary(customer_id) as boundary_error:
         if boundary_error is not None:
-            if not reservation_is_resumed:
-                _abandon_unbound_payment_reservation(payment, boundary_error)
+            _abandon_unbound_payment_reservation(payment, boundary_error)
             return (
                 PaymentIntentResult(
                     success=False,
@@ -124,17 +125,46 @@ def _submit_recurring_charge_under_revocation_lock(
                 ),
                 False,
             )
-        return submit(), True
+        claim_error = claim_recurring_submission(payment.id)
+        if claim_error is not None:
+            return (
+                PaymentIntentResult(
+                    success=False,
+                    payment_intent_id=payment.gateway_txn_id or "",
+                    client_secret=None,
+                    error=claim_error,
+                ),
+                False,
+            )
+
+    # The claim above is the authorization linearization point and has committed.
+    # No database transaction or customer lock spans the provider round-trip.
+    try:
+        result = submit()
+    except Exception as exc:
+        # The claim stays in flight for the reconciler, but the durable row must
+        # carry the diagnostic — a silent empty last_error hides why it is stale.
+        record_recurring_submission_result(
+            payment.id,
+            PaymentIntentResult(
+                success=False,
+                payment_intent_id="",
+                client_secret=None,
+                error=f"Gateway submission raised: {exc}",
+            ),
+        )
+        raise
+    record_recurring_submission_result(payment.id, result)
+    return result, True
 
 
-def _revalidate_invoice_payment_reservation(  # noqa: PLR0913  # Keyword-only reservation identity + abandon policy
+def _revalidate_invoice_payment_reservation(
     *,
     invoice_id: int,
     payment_id: int,
     expected_amount_cents: int,
     expected_currency_id: str,
     expected_saved_method_id: int,
-    abandon_on_failure: bool = True,
 ) -> str | None:
     """Serialize the final local balance check immediately before collection."""
     with transaction.atomic():
@@ -147,8 +177,7 @@ def _revalidate_invoice_payment_reservation(  # noqa: PLR0913  # Keyword-only re
             or invoice.get_remaining_amount() != expected_amount_cents
         ):
             reason = "Invoice balance changed before gateway collection"
-            if abandon_on_failure:
-                _abandon_unbound_payment_reservation(payment, reason)
+            _abandon_unbound_payment_reservation(payment, reason)
             return reason
         if (
             payment.status != "pending"
@@ -160,8 +189,7 @@ def _revalidate_invoice_payment_reservation(  # noqa: PLR0913  # Keyword-only re
             or payment.meta.get("source") != "recurring_billing"
         ):
             reason = "Invoice payment reservation changed before gateway collection"
-            if abandon_on_failure:
-                _abandon_unbound_payment_reservation(payment, reason)
+            _abandon_unbound_payment_reservation(payment, reason)
             return reason
         saved_method = (
             CustomerPaymentMethod.objects.select_for_update(of=("self",))
@@ -171,8 +199,7 @@ def _revalidate_invoice_payment_reservation(  # noqa: PLR0913  # Keyword-only re
         )
         if saved_method is None:
             reason = "Recurring payment method became inactive before gateway collection"
-            if abandon_on_failure:
-                _abandon_unbound_payment_reservation(payment, reason)
+            _abandon_unbound_payment_reservation(payment, reason)
             return reason
         collection_authorization = RecurringCollectionGate.authorize_invoice(invoice, saved_method)
         if collection_authorization.is_err():
@@ -180,20 +207,18 @@ def _revalidate_invoice_payment_reservation(  # noqa: PLR0913  # Keyword-only re
                 "Recurring collection authorization changed before gateway collection: "
                 f"{collection_authorization.unwrap_err()}"
             )
-            if abandon_on_failure:
-                _abandon_unbound_payment_reservation(payment, reason)
+            _abandon_unbound_payment_reservation(payment, reason)
             return reason
     return None
 
 
-def _revalidate_order_payment_reservation(  # noqa: PLR0913  # Keyword-only reservation identity + abandon policy
+def _revalidate_order_payment_reservation(
     *,
     order_id: str,
     proforma_id: int,
     payment_id: int,
     expected_amount_cents: int,
     expected_currency_id: str,
-    abandon_on_failure: bool = True,
 ) -> str | None:
     """Serialize order, document, and reservation immediately before checkout."""
     from .proforma_models import ProformaInvoice  # noqa: PLC0415
@@ -214,8 +239,7 @@ def _revalidate_order_payment_reservation(  # noqa: PLR0913  # Keyword-only rese
             or proforma.total_cents != expected_amount_cents
         ):
             reason = "Order billing document changed before gateway collection"
-            if abandon_on_failure:
-                _abandon_unbound_payment_reservation(payment, reason)
+            _abandon_unbound_payment_reservation(payment, reason)
             return reason
         if (
             payment.status != "pending"
@@ -229,20 +253,18 @@ def _revalidate_order_payment_reservation(  # noqa: PLR0913  # Keyword-only rese
             or payment.meta.get("order_id") != str(order.id)
         ):
             reason = "Order payment reservation changed before gateway collection"
-            if abandon_on_failure:
-                _abandon_unbound_payment_reservation(payment, reason)
+            _abandon_unbound_payment_reservation(payment, reason)
             return reason
     return None
 
 
-def _revalidate_proforma_payment_reservation(  # noqa: PLR0913  # Keyword-only reservation identity + abandon policy
+def _revalidate_proforma_payment_reservation(
     *,
     proforma_id: int,
     payment_id: int,
     expected_amount_cents: int,
     expected_currency_id: str,
     expected_saved_method_id: int,
-    abandon_on_failure: bool = True,
 ) -> str | None:
     """Serialize the final proforma-state check immediately before collection."""
     from .proforma_models import ProformaInvoice  # noqa: PLC0415
@@ -258,8 +280,7 @@ def _revalidate_proforma_payment_reservation(  # noqa: PLR0913  # Keyword-only r
             or proforma.currency_id != expected_currency_id
         ):
             reason = "Proforma document changed before gateway collection"
-            if abandon_on_failure:
-                _abandon_unbound_payment_reservation(payment, reason)
+            _abandon_unbound_payment_reservation(payment, reason)
             return reason
         if (
             payment.status != "pending"
@@ -271,8 +292,7 @@ def _revalidate_proforma_payment_reservation(  # noqa: PLR0913  # Keyword-only r
             or payment.meta.get("source") != "recurring_billing"
         ):
             reason = "Proforma payment reservation changed before gateway collection"
-            if abandon_on_failure:
-                _abandon_unbound_payment_reservation(payment, reason)
+            _abandon_unbound_payment_reservation(payment, reason)
             return reason
         saved_method = (
             CustomerPaymentMethod.objects.select_for_update(of=("self",))
@@ -282,8 +302,7 @@ def _revalidate_proforma_payment_reservation(  # noqa: PLR0913  # Keyword-only r
         )
         if saved_method is None:
             reason = "Recurring payment method became inactive before gateway collection"
-            if abandon_on_failure:
-                _abandon_unbound_payment_reservation(payment, reason)
+            _abandon_unbound_payment_reservation(payment, reason)
             return reason
         collection_authorization = RecurringCollectionGate.authorize_proforma(proforma, saved_method)
         if collection_authorization.is_err():
@@ -291,8 +310,7 @@ def _revalidate_proforma_payment_reservation(  # noqa: PLR0913  # Keyword-only r
                 "Recurring collection authorization changed before gateway collection: "
                 f"{collection_authorization.unwrap_err()}"
             )
-            if abandon_on_failure:
-                _abandon_unbound_payment_reservation(payment, reason)
+            _abandon_unbound_payment_reservation(payment, reason)
             return reason
     return None
 
@@ -778,8 +796,18 @@ class PaymentService:
                     error="Invoice customer has no matching active Stripe payment method",
                 )
 
+            existing_pending = _preferred_existing_payment(
+                Payment.objects.filter(invoice=invoice, payment_method=gateway, status="pending")
+            )
             collection_authorization = RecurringCollectionGate.authorize_invoice(invoice, saved_method)
             if collection_authorization.is_err():
+                if (
+                    existing_pending is not None
+                    and existing_pending.meta.get("source") == "recurring_billing"
+                    and existing_pending.idempotency_key
+                ):
+                    ensure_recurring_submission(existing_pending, payment_created=False)
+                    _abandon_unbound_payment_reservation(existing_pending, collection_authorization.unwrap_err())
                 return PaymentIntentResult(
                     success=False,
                     payment_intent_id="",
@@ -787,9 +815,6 @@ class PaymentService:
                     error=collection_authorization.unwrap_err(),
                 )
 
-            existing_pending = _preferred_existing_payment(
-                Payment.objects.filter(invoice=invoice, payment_method=gateway, status="pending")
-            )
             payment: Payment | None = None
             idempotency_key = ""
             if existing_pending is not None:
@@ -833,7 +858,7 @@ class PaymentService:
                     )
                 payment = existing_pending
                 idempotency_key = existing_idempotency_key
-                reservation_is_resumed = True
+                ensure_recurring_submission(payment, payment_created=False)
 
             if remaining_amount_cents <= 0:
                 existing_succeeded = (
@@ -896,7 +921,7 @@ class PaymentService:
                             },
                         },
                     )
-                reservation_is_resumed = not created
+                    ensure_recurring_submission(payment, payment_created=created)
                 if not created and (
                     payment.invoice_id != invoice.id
                     or payment.proforma_id is not None
@@ -946,10 +971,7 @@ class PaymentService:
 
             retry_binding_error = _bind_retry_result_before_gateway(payment, retry_attempt_id)
             if retry_binding_error is not None:
-                # Resumed reservations may already carry a live intent — never fail
-                # them inline; a fresh one is provably pre-submit.
-                if not reservation_is_resumed:
-                    _abandon_unbound_payment_reservation(payment, retry_binding_error)
+                _abandon_unbound_payment_reservation(payment, retry_binding_error)
                 return PaymentIntentResult(
                     success=False,
                     payment_intent_id="",
@@ -964,14 +986,12 @@ class PaymentService:
             result, submitted = _submit_recurring_charge_under_revocation_lock(
                 customer_id=invoice.customer_id,
                 payment=payment,
-                reservation_is_resumed=reservation_is_resumed,
                 revalidate=lambda: _revalidate_invoice_payment_reservation(
                     invoice_id=invoice.id,
                     payment_id=payment_id,
                     expected_amount_cents=remaining_amount_cents,
                     expected_currency_id=invoice.currency_id,
                     expected_saved_method_id=saved_method.id,
-                    abandon_on_failure=not reservation_is_resumed,
                 ),
                 submit=lambda: payment_gateway.create_off_session_payment_intent(
                     document_id=str(invoice.id),
@@ -1111,15 +1131,6 @@ class PaymentService:
                     error="Proforma customer has no matching active Stripe payment method",
                 )
 
-            authorization = RecurringCollectionGate.authorize_proforma(proforma, saved_method)
-            if authorization.is_err():
-                return PaymentIntentResult(
-                    success=False,
-                    payment_intent_id="",
-                    client_secret=None,
-                    error=authorization.unwrap_err(),
-                )
-
             existing = _preferred_existing_payment(
                 Payment.objects.filter(
                     proforma=proforma,
@@ -1127,6 +1138,23 @@ class PaymentService:
                     status__in=["pending", "succeeded"],
                 )
             )
+            authorization = RecurringCollectionGate.authorize_proforma(proforma, saved_method)
+            if authorization.is_err():
+                if (
+                    existing is not None
+                    and existing.status == "pending"
+                    and existing.meta.get("source") == "recurring_billing"
+                    and existing.idempotency_key
+                ):
+                    ensure_recurring_submission(existing, payment_created=False)
+                    _abandon_unbound_payment_reservation(existing, authorization.unwrap_err())
+                return PaymentIntentResult(
+                    success=False,
+                    payment_intent_id="",
+                    client_secret=None,
+                    error=authorization.unwrap_err(),
+                )
+
             if existing is not None:
                 if existing.amount_cents != proforma.total_cents or existing.currency_id != proforma.currency_id:
                     return PaymentIntentResult(
@@ -1163,7 +1191,7 @@ class PaymentService:
                     )
                 payment = existing
                 idempotency_key = existing.idempotency_key
-                reservation_is_resumed = True
+                ensure_recurring_submission(payment, payment_created=False)
             else:
                 attempt_number = Payment.objects.filter(proforma=proforma, payment_method=gateway).count() + 1
                 idempotency_key = f"proforma:{proforma.id}:{gateway}:{attempt_number}"
@@ -1198,7 +1226,7 @@ class PaymentService:
                             },
                         },
                     )
-                reservation_is_resumed = not created
+                    ensure_recurring_submission(payment, payment_created=created)
                 if not created and (
                     payment.proforma_id != proforma.id
                     or payment.invoice_id is not None
@@ -1235,10 +1263,7 @@ class PaymentService:
 
             retry_binding_error = _bind_retry_result_before_gateway(payment, retry_attempt_id)
             if retry_binding_error is not None:
-                # Resumed reservations may already carry a live intent — never fail
-                # them inline; a fresh one is provably pre-submit.
-                if not reservation_is_resumed:
-                    _abandon_unbound_payment_reservation(payment, retry_binding_error)
+                _abandon_unbound_payment_reservation(payment, retry_binding_error)
                 return PaymentIntentResult(
                     success=False,
                     payment_intent_id="",
@@ -1260,14 +1285,12 @@ class PaymentService:
             result, submitted = _submit_recurring_charge_under_revocation_lock(
                 customer_id=proforma.customer_id,
                 payment=payment,
-                reservation_is_resumed=reservation_is_resumed,
                 revalidate=lambda: _revalidate_proforma_payment_reservation(
                     proforma_id=proforma.id,
                     payment_id=payment_id,
                     expected_amount_cents=proforma.total_cents,
                     expected_currency_id=proforma.currency_id,
                     expected_saved_method_id=saved_method.id,
-                    abandon_on_failure=not reservation_is_resumed,
                 ),
                 submit=lambda: payment_gateway.create_off_session_payment_intent(
                     document_id=str(proforma.id),

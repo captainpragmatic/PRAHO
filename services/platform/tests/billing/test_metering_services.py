@@ -18,7 +18,7 @@ from django.db.models import Sum
 from django.test import TestCase, TransactionTestCase
 from django.utils import timezone
 
-from apps.billing.gateways.base import PaymentIntentResult
+from apps.billing.gateways.base import PaymentConfirmResult, PaymentIntentResult
 from apps.billing.models import (
     BillingCycle,
     CreditLedger,
@@ -45,6 +45,7 @@ from apps.billing.services import (
     UsageEventData,
     UsageInvoiceService,
 )
+from apps.billing.tasks import reconcile_recurring_payment_submissions
 from apps.billing.usage_invoice_service import UsageBillingService
 from apps.common.types import Err
 from apps.customers.models import Customer, CustomerAddress, CustomerPaymentMethod
@@ -1100,7 +1101,7 @@ class UsageInvoiceServiceTestCase(TestCase):
         gateway.create_off_session_payment_intent.assert_called_once()
 
     @patch("apps.billing.payment_service.PaymentGatewayFactory.create_gateway")
-    def test_usage_collection_resumes_an_uncertain_gateway_attempt(self, mock_create_gateway):
+    def test_usage_collection_defers_an_uncertain_gateway_attempt_to_reconciliation(self, mock_create_gateway):
         self._enable_usage_auto_payment()
         SettingsService.update_setting(
             key="billing.recurring_auto_collection_enabled",
@@ -1129,14 +1130,31 @@ class UsageInvoiceServiceTestCase(TestCase):
                 error=None,
             ),
         ]
+        gateway.confirm_payment.return_value = PaymentConfirmResult(
+            success=True,
+            status="processing",
+            error=None,
+        )
         mock_create_gateway.return_value = gateway
 
         uncertain = UsageBillingService.collect_due_usage_invoices(as_of=usage_invoice.due_at)
-        resumed = UsageBillingService.collect_due_usage_invoices(as_of=usage_invoice.due_at + timedelta(hours=1))
+        duplicate_collection = UsageBillingService.collect_due_usage_invoices(
+            as_of=usage_invoice.due_at + timedelta(hours=1)
+        )
 
         self.assertEqual(uncertain, (0, 1))
-        self.assertEqual(resumed, (1, 0))
+        self.assertEqual(duplicate_collection, (0, 0))
+        self.assertEqual(gateway.create_off_session_payment_intent.call_count, 1)
         payment = Payment.objects.get(invoice=usage_invoice, payment_method="stripe")
+        payment.recurring_submission.__class__.objects.filter(payment=payment).update(
+            claimed_at=timezone.now() - timedelta(hours=1),
+            updated_at=timezone.now() - timedelta(hours=1),
+        )
+
+        reconciliation = reconcile_recurring_payment_submissions(stale_after_seconds=0)
+
+        self.assertTrue(reconciliation["success"], reconciliation)
+        payment.refresh_from_db()
         self.assertEqual(payment.gateway_txn_id, "pi_usage_resumed_305")
         self.assertEqual(gateway.create_off_session_payment_intent.call_count, 2)
         first_key = gateway.create_off_session_payment_intent.call_args_list[0].kwargs["idempotency_key"]

@@ -22,7 +22,7 @@ from apps.billing.gateways.stripe_gateway import StripeGateway
 from apps.billing.invoice_models import Invoice, InvoiceLine
 from apps.billing.metering_models import BillingCycle, UsageAggregation, UsageMeter
 from apps.billing.payment_convergence import PaymentSuccessService
-from apps.billing.payment_models import Payment, PaymentRetryAttempt, PaymentRetryPolicy
+from apps.billing.payment_models import Payment, PaymentRetryAttempt, PaymentRetryPolicy, RecurringPaymentSubmission
 from apps.billing.payment_service import (
     PaymentService,
     _revalidate_invoice_payment_reservation,
@@ -38,7 +38,11 @@ from apps.billing.recurring_billing import (
 from apps.billing.recurring_models import RecurringPaymentAuthorization
 from apps.billing.subscription_models import Subscription
 from apps.billing.subscription_service import SubscriptionLifecycleService
-from apps.billing.tasks import process_auto_payment, run_payment_collection
+from apps.billing.tasks import (
+    process_auto_payment,
+    reconcile_recurring_payment_submissions,
+    run_payment_collection,
+)
 from apps.customers.models import Customer, CustomerAddress, CustomerPaymentMethod
 from apps.products.models import Product
 from apps.provisioning.models import Service, ServicePlan
@@ -1087,6 +1091,59 @@ class SubscriptionInvoicePaymentTestCase(_SubscriptionInvoicePaymentFixture, Tes
         self.assertEqual(gateway_call_savepoint_depth, [outer_savepoint_depth])
 
     @patch("apps.billing.payment_service.PaymentGatewayFactory.create_gateway")
+    def test_proforma_collection_defers_an_uncertain_gateway_attempt_to_reconciliation(
+        self,
+        mock_create_gateway: MagicMock,
+    ) -> None:
+        now = timezone.now()
+        self._create_aligned_subscription("UNCERTAIN", now)
+        preparation = RecurringBillingOrchestrator.prepare_due_proformas(as_of=now)
+        self.assertEqual(preparation["proformas_created"], 1, preparation)
+        proforma = ProformaInvoice.objects.get(meta__source="recurring_billing")
+        gateway = MagicMock()
+        gateway.create_off_session_payment_intent.side_effect = [
+            PaymentIntentResult(
+                success=False,
+                payment_intent_id="",
+                client_secret=None,
+                error="connection interrupted",
+                retryable=True,
+            ),
+            _intent_result(payment_intent_id="pi_proforma_recovered_301"),
+        ]
+        gateway.confirm_payment.return_value = PaymentConfirmResult(
+            success=True,
+            status="processing",
+            error=None,
+        )
+        mock_create_gateway.return_value = gateway
+
+        first = RecurringBillingOrchestrator.collect_due_proformas(as_of=now + timedelta(days=8))
+        duplicate_collection = RecurringBillingOrchestrator.collect_due_proformas(
+            as_of=now + timedelta(days=8, hours=1)
+        )
+
+        self.assertEqual(first["payments_failed"], 1, first)
+        self.assertEqual(duplicate_collection["payments_created"], 0, duplicate_collection)
+        self.assertEqual(duplicate_collection["payments_failed"], 0, duplicate_collection)
+        self.assertEqual(gateway.create_off_session_payment_intent.call_count, 1)
+        payment = Payment.objects.get(proforma=proforma)
+        payment.recurring_submission.__class__.objects.filter(payment=payment).update(
+            claimed_at=timezone.now() - timedelta(hours=1),
+            updated_at=timezone.now() - timedelta(hours=1),
+        )
+
+        reconciliation = reconcile_recurring_payment_submissions(stale_after_seconds=0)
+
+        self.assertTrue(reconciliation["success"], reconciliation)
+        payment.refresh_from_db()
+        self.assertEqual(payment.gateway_txn_id, "pi_proforma_recovered_301")
+        self.assertEqual(gateway.create_off_session_payment_intent.call_count, 2)
+        first_key = gateway.create_off_session_payment_intent.call_args_list[0].kwargs["idempotency_key"]
+        second_key = gateway.create_off_session_payment_intent.call_args_list[1].kwargs["idempotency_key"]
+        self.assertEqual(first_key, second_key)
+
+    @patch("apps.billing.payment_service.PaymentGatewayFactory.create_gateway")
     def test_definitive_renewal_decline_enters_grace_and_waits_for_dunning_scheduler(
         self,
         mock_create_gateway: MagicMock,
@@ -1988,7 +2045,7 @@ class SubscriptionInvoicePaymentTestCase(_SubscriptionInvoicePaymentFixture, Tes
 
     @patch("apps.billing.payment_service.log_security_event")
     @patch("apps.billing.payment_service.PaymentGatewayFactory.create_gateway")
-    def test_uncertain_gateway_failure_retries_same_pending_attempt_and_key(
+    def test_uncertain_gateway_failure_is_replayed_by_the_durable_reconciler(
         self,
         mock_create_gateway: MagicMock,
         _mock_log_security_event: MagicMock,
@@ -2005,6 +2062,11 @@ class SubscriptionInvoicePaymentTestCase(_SubscriptionInvoicePaymentFixture, Tes
             uncertain,
             _intent_result(payment_intent_id="pi_recovered_301"),
         ]
+        gateway.confirm_payment.return_value = PaymentConfirmResult(
+            success=True,
+            status="processing",
+            error=None,
+        )
         mock_create_gateway.return_value = gateway
 
         first = PaymentService.create_payment_intent_for_invoice(
@@ -2024,7 +2086,19 @@ class SubscriptionInvoicePaymentTestCase(_SubscriptionInvoicePaymentFixture, Tes
         )
 
         self.assertFalse(first["success"])
-        self.assertTrue(second["success"], second)
+        self.assertFalse(second["success"], second)
+        self.assertIn("in flight", (second.get("error") or "").lower())
+        self.assertEqual(gateway.create_off_session_payment_intent.call_count, 1)
+        pending_after_uncertain_result.recurring_submission.__class__.objects.filter(
+            payment=pending_after_uncertain_result
+        ).update(
+            claimed_at=timezone.now() - timedelta(hours=1),
+            updated_at=timezone.now() - timedelta(hours=1),
+        )
+
+        reconciliation = reconcile_recurring_payment_submissions(stale_after_seconds=0)
+
+        self.assertTrue(reconciliation["success"], reconciliation)
         payment = Payment.objects.get(invoice=self.invoice)
         self.assertEqual(payment.status, "pending")
         self.assertEqual(payment.gateway_txn_id, "pi_recovered_301")
@@ -2979,13 +3053,10 @@ class WebhookAttemptMisbindingRegressionTests(TestCase):
 
 
 class RecurringChargeAbandonGuardTests(_SubscriptionInvoicePaymentFixture, TestCase):
-    """A resumed reservation may already carry a live Stripe intent from a prior
-    attempt (worker died before binding, success webhook not yet delivered).
-    Abandoning it inline would record a real charge as failed — only a
-    freshly-created reservation is provably pre-submit and safe to abandon."""
+    """Only durable pre-submit state permits a recurring reservation to be abandoned."""
 
-    def _pending_recurring_payment(self) -> Payment:
-        return Payment.objects.create(
+    def _pending_recurring_payment(self, state: RecurringPaymentSubmission.State) -> Payment:
+        payment = Payment.objects.create(
             customer=self.customer,
             invoice_id=self.invoice.id,
             amount_cents=self.invoice.total_cents,
@@ -2995,14 +3066,19 @@ class RecurringChargeAbandonGuardTests(_SubscriptionInvoicePaymentFixture, TestC
             idempotency_key=f"invoice:{self.invoice.id}:stripe:guard",
             meta={"source": "recurring_billing"},
         )
+        recurring_fields: dict[str, object] = {"payment": payment, "state": state}
+        if state == RecurringPaymentSubmission.State.IN_FLIGHT:
+            recurring_fields.update(claimed_at=timezone.now(), attempt_count=1)
+        RecurringPaymentSubmission.objects.create(**recurring_fields)
+        return payment
 
     def _disable_kill_switch(self) -> None:
         result = SettingsService.update_setting("billing.recurring_auto_collection_enabled", False)
         assert result.is_ok(), f"Failed to disable recurring collection: {result}"
 
-    def test_resumed_reservation_is_not_abandoned_when_collection_disabled(self) -> None:
+    def test_in_flight_reservation_is_not_abandoned_when_collection_disabled(self) -> None:
         self._disable_kill_switch()
-        payment = self._pending_recurring_payment()
+        payment = self._pending_recurring_payment(RecurringPaymentSubmission.State.IN_FLIGHT)
         submit_called = {"v": False}
 
         def _submit() -> PaymentIntentResult:
@@ -3014,7 +3090,6 @@ class RecurringChargeAbandonGuardTests(_SubscriptionInvoicePaymentFixture, TestC
             payment=payment,
             revalidate=lambda: None,
             submit=_submit,
-            reservation_is_resumed=True,
         )
 
         self.assertFalse(submitted)
@@ -3025,14 +3100,13 @@ class RecurringChargeAbandonGuardTests(_SubscriptionInvoicePaymentFixture, TestC
 
     def test_fresh_reservation_is_abandoned_when_collection_disabled(self) -> None:
         self._disable_kill_switch()
-        payment = self._pending_recurring_payment()
+        payment = self._pending_recurring_payment(RecurringPaymentSubmission.State.RESERVED)
 
         _result, submitted = _submit_recurring_charge_under_revocation_lock(
             customer_id=self.customer.id,
             payment=payment,
             revalidate=lambda: None,
             submit=lambda: _intent_result(payment_intent_id="pi_never"),
-            reservation_is_resumed=False,
         )
 
         self.assertFalse(submitted)
@@ -3040,8 +3114,8 @@ class RecurringChargeAbandonGuardTests(_SubscriptionInvoicePaymentFixture, TestC
         self.assertEqual(payment.status, "failed")
         self.assertTrue(payment.meta.get("reservation_abandoned"))
 
-    def test_revalidation_failure_skips_abandon_for_resumed_reservation(self) -> None:
-        payment = self._pending_recurring_payment()
+    def test_revalidation_failure_preserves_an_in_flight_reservation(self) -> None:
+        payment = self._pending_recurring_payment(RecurringPaymentSubmission.State.IN_FLIGHT)
         # Force a revalidation failure by expecting a different amount.
         reason = _revalidate_invoice_payment_reservation(
             invoice_id=self.invoice.id,
@@ -3049,7 +3123,6 @@ class RecurringChargeAbandonGuardTests(_SubscriptionInvoicePaymentFixture, TestC
             expected_amount_cents=payment.amount_cents + 1,
             expected_currency_id=self.currency.code,
             expected_saved_method_id=self.payment_method.id,
-            abandon_on_failure=False,
         )
 
         self.assertIsNotNone(reason)

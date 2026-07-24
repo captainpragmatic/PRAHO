@@ -40,6 +40,7 @@ class PaymentConfirmResult(TypedDict):
     success: bool
     status: str  # succeeded, failed, requires_action, etc.
     error: str | None
+    amount: NotRequired[int]
     amount_received: NotRequired[int]
     currency: NotRequired[str]
     customer_id: NotRequired[str | None]
