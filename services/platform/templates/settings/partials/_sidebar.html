@@ -25,6 +25,7 @@
       <div>
         <p class="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">{% trans "System" %}</p>
         <ul class="space-y-1">
+          <li><a href="{% url 'settings:api_tokens' %}" class="block px-3 py-1.5 rounded-md text-sm transition-colors {% if request.resolver_match.url_name == 'api_tokens' %}bg-blue-600/20 text-blue-300 font-medium{% else %}text-slate-300 hover:text-white hover:bg-slate-700/60{% endif %}">{% trans "API Tokens" %}</a></li>
           <li><a href="{% url 'settings:automation' %}" class="block px-3 py-1.5 rounded-md text-sm text-slate-300 hover:text-white hover:bg-slate-700/60">{% trans "Automation & Schedules" %}</a></li>
           {% if is_admin %}
           <li><a href="{% url 'settings:export_settings' %}" class="block px-3 py-1.5 rounded-md text-sm text-slate-300 hover:text-white hover:bg-slate-700/60">{% trans "Export settings" %}</a></li>

@@ -1,7 +1,7 @@
 # ADR-0031: API Token Authentication Strategy
 
-**Status:** Accepted (partial — Gap 7 web UI remaining)
-**Date:** 2026-03-06 (updated 2026-03-31)
+**Status:** Accepted
+**Date:** 2026-03-06 (updated 2026-07-24)
 **Authors:** Development Team
 **Related:** ADR-0017 (Portal Auth Fail-Open), ADR-0024 (User Role Clarification)
 **Gap tracking:** [Issue #77 — close ADR-0031 token authentication gaps](https://github.com/captainpragmatic/PRAHO/issues/77)
@@ -17,7 +17,7 @@ against it:
 |----------|-----------|--------|
 | Portal service (backend) | HMAC-signed `X-User-Context` requests | Production-ready |
 | Platform web UI (staff) | Django session cookies | Production-ready |
-| Scripts, CLI tools, automation | DRF opaque bearer tokens | Partial — gaps documented below |
+| Scripts, CLI tools, automation | DRF opaque bearer tokens | Production-ready |
 
 This ADR covers the third category: **API token authentication for direct API consumers**
 such as operator scripts, future CLI tools, and future mobile clients.
@@ -185,7 +185,7 @@ in `apps/api/users/authentication.py`. No external dependencies were added.
 | Storage | Plaintext | SHA-256 hashed |
 | Expiry | None | Default 90-day TTL (`API_TOKEN_DEFAULT_TTL_DAYS`); callers may shorten via `ttl_days`, clamped to `API_TOKEN_MAX_TTL_DAYS` (365) — only the server default can select "no expiry" |
 | Usage tracking | None | `last_used_at` (throttled to 5-min intervals, condition evaluated in SQL) |
-| Token naming | None | `name` (API) + `description` (model field, not yet API-exposed) |
+| Token naming | None | `name` + `description` through both API and staff UI |
 | Auth header | `Token` only | `Bearer` and `Token`; malformed recognized schemes fail closed |
 | Auth failures | Token state exposed | One generic response for unknown, expired, and disabled-user tokens |
 | Raw key visibility | Always readable | Shown once at creation, never stored |
@@ -218,10 +218,17 @@ mechanism is authoritative. `tests/api/test_api_token_auth.py::StrayAuthorizatio
 locks this in; the CI auth-coverage test (`public_api_endpoint` marker) enforces that every
 API view has an explicit auth posture.
 
-### Remaining: Gap 7 (web UI for token management)
+### Implemented: Gap 7 (web UI for token management)
 
-A staff-facing page at `/app/settings/api-tokens/` is not yet implemented. Token
-management is currently API-only. This is tracked separately and is not blocking.
+Authenticated staff can manage only their own active tokens at
+`/settings/api-tokens/`. The page lists the token name, description, key prefix,
+creation time, expiry, and last-use time; creates tokens through the same issuance
+service and deployment policy as the API; and revokes a selected token with
+CSRF protection and an ownership-scoped lookup.
+
+The raw key is rendered only in the successful creation response. The response is
+marked `no-store`, and neither the raw key nor its hash is retained in session data,
+logs, templates rendered later, or audit events.
 
 ---
 
@@ -249,14 +256,15 @@ management is currently API-only. This is tracked separately and is not blocking
 - `last_used_at` tracking — stale tokens are detectable
 - Both `Bearer` and `Token` auth headers accepted — RFC 6750 compliant
 - No external dependencies — pure Django/DRF implementation
-- Token issuance input is validated (`name`, `ttl_days`) — malformed requests get 400s,
-  and names cannot inject control characters into security logs
+- Token issuance input is validated (`name`, `description`, `ttl_days`) — malformed
+  requests get 400s, descriptions are bounded, and names cannot inject control
+  characters into security logs
 - Token lifecycle reaches the immutable audit trail (ADR-0016)
 - Account lockout integration preserved from original implementation
+- Staff can create, inspect, and independently revoke their own tokens without shell access
 
 ### Negative
 
-- No web UI for token management (Gap 7 — tracked separately)
 - Raw token shown only once at creation — if lost, must create a new one
 
 ### Migration note
@@ -283,6 +291,6 @@ auth).
 | 3 | No `last_used_at` tracking | Closed | `APIToken.last_used_at` field, updated at 5-min intervals (SQL-side condition) |
 | 4 | One token per user (OneToOneField) | Closed | `APIToken` uses `ForeignKey(User)` — multiple tokens, capped by `API_TOKEN_MAX_ACTIVE_PER_USER` (default 20) |
 | 5 | Tokens stored in plaintext | Closed | SHA-256 hashed via `APIToken.key_hash`; raw key shown once; no plaintext rows carried over (clean-break cutover) |
-| 6 | No token name or description | Closed | `APIToken.name` settable via API; `description` exists on the model (API/UI exposure lands with Gap 7) |
-| 7 | No web UI for token management | **Open** | Not yet implemented |
+| 6 | No token name or description | Closed | `name` and bounded `description` accepted and returned by the API and staff UI |
+| 7 | No web UI for token management | Closed | Owner-scoped `/settings/api-tokens/` list/create/revoke UI with one-time raw-key display |
 | 8 | `Authorization: Token` vs RFC 6750 `Bearer` | Closed | `HashedTokenAuthentication` accepts both schemes |

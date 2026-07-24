@@ -264,6 +264,40 @@ class ObtainTokenTests(TestCase):
         )
         self.assertEqual(response.json()["name"], "ci-pipeline")
 
+    def test_obtain_accepts_and_returns_description(self) -> None:
+        response = self.client.post(
+            self.url,
+            {
+                "email": self.user.email,
+                "password": self.password,
+                "name": "ci-pipeline",
+                "description": "Deploys the production application",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["description"], "Deploys the production application")
+        self.assertEqual(
+            APIToken.objects.get(user=self.user).description,
+            "Deploys the production application",
+        )
+
+    def test_obtain_rejects_oversized_description(self) -> None:
+        response = self.client.post(
+            self.url,
+            {
+                "email": self.user.email,
+                "password": self.password,
+                "description": "x" * 501,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("description", response.json()["details"])
+        self.assertFalse(APIToken.objects.filter(user=self.user).exists())
+
     def test_obtain_default_name(self) -> None:
         response = self.client.post(self.url, {"email": self.user.email, "password": self.password}, format="json")
         self.assertEqual(response.json()["name"], "default")
@@ -342,7 +376,11 @@ class TokenInfoTests(TestCase):
         self.user = User.objects.create_user(
             email="info@test.com", password="StrongPass123!", first_name="Info", last_name="Test"
         )
-        self.token, self.raw_key = _create_token(self.user, name="my-script")
+        self.token, self.raw_key = _create_token(
+            self.user,
+            name="my-script",
+            description="Nightly customer synchronization",
+        )
         self.url = "/api/users/token/me/"
 
     def test_returns_token_metadata(self) -> None:
@@ -353,6 +391,7 @@ class TokenInfoTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(data["user_id"], self.user.id)
         self.assertEqual(data["token_name"], "my-script")
+        self.assertEqual(data["token_description"], "Nightly customer synchronization")
         self.assertEqual(data["key_prefix"], self.token.key_prefix)
         self.assertIn("created_at", data)
         self.assertIn("expires_at", data)

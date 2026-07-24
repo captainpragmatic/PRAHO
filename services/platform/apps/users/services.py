@@ -4,7 +4,7 @@ import hashlib
 import logging
 import time
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, ClassVar, TypedDict, cast
 
 from django.conf import settings
@@ -16,6 +16,7 @@ from django.core.exceptions import ValidationError
 from django.core.mail import send_mail
 from django.core.signing import BadSignature
 from django.db import transaction
+from django.db.models import Q
 from django.http import HttpRequest
 from django.template.loader import render_to_string
 from django.utils import timezone
@@ -50,7 +51,7 @@ from apps.customers.models import Customer
 from apps.customers.profile_models import CustomerBillingProfile, CustomerTaxProfile
 from apps.settings.services import SettingsService
 
-from .models import CustomerMembership
+from .models import APIToken, CustomerMembership
 
 """
 SECURE User Registration Services - PRAHO Platform
@@ -65,6 +66,70 @@ else:
     User = get_user_model()
 
 logger = logging.getLogger(__name__)
+
+
+# ===============================================================================
+# API TOKEN SERVICES
+# ===============================================================================
+
+
+@dataclass(frozen=True)
+class IssuedAPIToken:
+    """An API token plus its one-time raw credential."""
+
+    token: APIToken
+    raw_key: str
+
+
+class APITokenService:
+    """Shared API-token issuance policy for HTTP API and staff UI callers."""
+
+    @staticmethod
+    def _resolve_expiry(ttl_days: int | None) -> datetime | None:
+        default_ttl = int(getattr(settings, "API_TOKEN_DEFAULT_TTL_DAYS", 90))
+        max_ttl = int(getattr(settings, "API_TOKEN_MAX_TTL_DAYS", 365))
+        resolved_ttl = default_ttl if ttl_days is None else ttl_days
+        if resolved_ttl <= 0:
+            return None
+        return timezone.now() + timedelta(days=min(resolved_ttl, max_ttl))
+
+    @classmethod
+    def issue_token(
+        cls,
+        *,
+        user: User,
+        name: str,
+        description: str = "",
+        ttl_days: int | None = None,
+    ) -> Result[IssuedAPIToken, str]:
+        """Issue one hashed token while enforcing the deployment's live-token cap."""
+        raw_key = APIToken.generate_key()
+        now = timezone.now()
+        max_active_tokens = int(getattr(settings, "API_TOKEN_MAX_ACTIVE_PER_USER", 20))
+
+        with transaction.atomic():
+            User.objects.select_for_update().get(pk=user.pk)
+            active_count = (
+                APIToken.objects.filter(user=user).filter(Q(expires_at__isnull=True) | Q(expires_at__gt=now)).count()
+            )
+            if active_count >= max_active_tokens:
+                return Err(
+                    cast(
+                        str,
+                        _("Maximum of {count} active tokens per user. Revoke unused tokens first."),
+                    ).format(count=max_active_tokens)
+                )
+
+            token = APIToken.objects.create(
+                user=user,
+                key_hash=APIToken.hash_key(raw_key),
+                key_prefix=raw_key[:8],
+                name=name,
+                description=description,
+                expires_at=cls._resolve_expiry(ttl_days),
+            )
+
+        return Ok(IssuedAPIToken(token=token, raw_key=raw_key))
 
 
 # Conversion factor between settings.PASSWORD_RESET_TIMEOUT (seconds) and the
