@@ -469,7 +469,13 @@ class Domain(ConcurrentTransitionMixin, models.Model):
 
             # Extract TLD from domain name if not set
             if not self.tld_id and "." in self.name:
-                domain_tld = self.name.split(".")[-1].lower()
+                # Longest-suffix match so multi-label TLDs (.com.ro) resolve correctly;
+                # a bare split(".")[-1] turned shop.com.ro into "ro" and mislinked it (#237).
+                from apps.domains.services import (  # noqa: PLC0415  # Deferred: services imports models
+                    DomainValidationService,
+                )
+
+                domain_tld = DomainValidationService.extract_tld_from_domain(self.name)
                 try:
                     self.tld = TLD.objects.get(extension=domain_tld)
                 except TLD.DoesNotExist:
