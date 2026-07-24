@@ -1128,12 +1128,14 @@ class TestAtoZReviewFixes(VirtualminTaskTestBase):
         self.account.save(update_fields=["status"])
         force_status(self.service, "suspended")
 
-        result = reconcile_divergent_services_task()
+        with patch("apps.provisioning.virtualmin_tasks.logger") as mock_logger:
+            result = reconcile_divergent_services_task()
 
         self.assertFalse(result["success"])
         self.assertEqual(result["queued"], 0)
         self.assertEqual(result["failed"], 1)
         mock_reconcile.assert_called_once_with(str(self.service.id))
+        self.assertTrue(mock_logger.warning.call_args.kwargs["exc_info"])
 
     @patch("apps.provisioning.virtualmin_tasks.reconcile_virtualmin_service_state_async", return_value="t-1")
     def test_raw_fixture_load_does_not_trigger_reconciliation(self, mock_reconcile):
