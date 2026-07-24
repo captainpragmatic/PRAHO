@@ -115,6 +115,34 @@ class CoercionMatrixTests(TestCase):
 
 
 @override_settings(CACHES=LOCMEM_TEST_CACHE)
+class RenewalScheduleValidationTests(TestCase):
+    """The chips UI may submit strings, but the stored schedule is canonical integers."""
+
+    def setUp(self) -> None:
+        cache.clear()
+
+    def test_numeric_chip_values_are_coerced_to_integers(self) -> None:
+        result = SettingsService.update_setting("domains.renewal_notice_schedule_days", ["30", "7", "1"])
+
+        self.assertTrue(result.is_ok(), result)
+        self.assertEqual(result.unwrap().get_typed_value(), [30, 7, 1])
+
+    def test_invalid_schedules_are_rejected(self) -> None:
+        invalid_values = (
+            [],
+            [30, 0, 1],
+            [7, 30, 1],
+            [30, 7, 7],
+            [30, True, 1],
+        )
+
+        for value in invalid_values:
+            with self.subTest(value=value):
+                result = SettingsService.update_setting("domains.renewal_notice_schedule_days", value)
+                self.assertTrue(result.is_err(), result)
+
+
+@override_settings(CACHES=LOCMEM_TEST_CACHE)
 class SensitiveFirstWriteTests(TestCase):
     """First write for a rowless sensitive key must encrypt at rest and never cache."""
 

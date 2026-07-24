@@ -199,6 +199,23 @@ class SettingsService:
             parsed = _safe_json_loads(value) if isinstance(value, str) else value
             if data_type == "list" and not isinstance(parsed, list):
                 raise ValidationError(_("%(key)s: value must be a JSON list") % {"key": key})
+            rules = validation_rules_for_key(key)
+            if data_type == "list" and rules.get("item_type") == "integer":
+                integer_items: list[int] = []
+                for item in parsed:
+                    if isinstance(item, bool):
+                        raise ValidationError(_("%(key)s: list values must be integers") % {"key": key})
+                    if isinstance(item, int):
+                        integer_items.append(item)
+                        continue
+                    if isinstance(item, str):
+                        try:
+                            integer_items.append(int(item.strip()))
+                            continue
+                        except ValueError:
+                            pass
+                    raise ValidationError(_("%(key)s: list values must be integers") % {"key": key})
+                return integer_items
             return parsed
         # string
         if not isinstance(value, str):
@@ -235,6 +252,35 @@ class SettingsService:
             or any(not isinstance(item, int) or isinstance(item, bool) for item in value.values())
         ):
             raise ValidationError(_("%(key)s: all JSON object values must be integers") % {"key": key})
+        min_items = rules.get("min_items")
+        if min_items is not None and isinstance(value, list) and len(value) < int(min_items):
+            raise ValidationError(
+                _("%(key)s: list must contain at least %(min_items)s item(s)")
+                % {"key": key, "min_items": min_items}
+            )
+        item_type = rules.get("item_type")
+        if item_type == "integer" and (
+            not isinstance(value, list)
+            or any(not isinstance(item, int) or isinstance(item, bool) for item in value)
+        ):
+            raise ValidationError(_("%(key)s: list values must be integers") % {"key": key})
+        item_minimum = rules.get("item_min")
+        if (
+            item_minimum is not None
+            and isinstance(value, list)
+            and any(item < int(item_minimum) for item in value)
+        ):
+            raise ValidationError(
+                _("%(key)s: list values must be at least %(item_min)s")
+                % {"key": key, "item_min": item_minimum}
+            )
+        if rules.get("unique_items") and isinstance(value, list) and any(
+            item in value[:index] for index, item in enumerate(value)
+        ):
+            raise ValidationError(_("%(key)s: list values must be unique") % {"key": key})
+        order = rules.get("order")
+        if order == "descending" and isinstance(value, list) and value != sorted(value, reverse=True):
+            raise ValidationError(_("%(key)s: list values must be in descending order") % {"key": key})
 
     @classmethod
     def _validation_error(cls, key: str, exc: ValidationError) -> SettingValidationError:

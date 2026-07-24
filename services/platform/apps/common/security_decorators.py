@@ -52,6 +52,7 @@ class SecurityConfig:
     validation_type: str = "general"
     rate_limit_key: str | None = None
     rate_limit: int | None = None
+    rate_limit_setting_key: str | None = None
     requires_permission: str | None = None
     log_attempts: bool = True
     prevent_timing_attacks: bool = True
@@ -81,6 +82,7 @@ def secure_service_method(
         validation_type: Type of validation ('user_registration', 'customer_data', 'invitation')
         rate_limit_key: Cache key prefix for rate limiting
         rate_limit: Number of attempts allowed per hour
+        rate_limit_setting_key: Optional SettingsService key resolved at call time
         requires_permission: Required permission level
         log_attempts: Whether to log security events
         prevent_timing_attacks: Whether to normalize response times
@@ -184,7 +186,8 @@ def secure_invitation_system() -> Callable[[Callable[..., Any]], Callable[..., A
     return secure_service_method(
         validation_type="invitation",
         rate_limit_key="invitation",
-        rate_limit=10,  # 10 invitations per hour
+        rate_limit=10,
+        rate_limit_setting_key="security.membership_invitation_limit_per_inviter_per_hour",
         requires_permission="owner",
         log_attempts=True,
         prevent_timing_attacks=True,
@@ -269,8 +272,16 @@ def _execute_security_checks(
 ) -> None:
     """Execute all security checks for the decorator"""
     # 1. Rate Limiting Check
-    if config.rate_limit_key and config.rate_limit:
-        _check_rate_limit(config.rate_limit_key, config.rate_limit, request_ip, user)
+    if config.rate_limit_key and config.rate_limit is not None:
+        rate_limit = config.rate_limit
+        if config.rate_limit_setting_key:
+            from apps.settings.services import SettingsService  # noqa: PLC0415  # Deferred: avoids app import cycle
+
+            rate_limit = SettingsService.get_integer_setting(config.rate_limit_setting_key, rate_limit)
+        rate_limit_user = user
+        if config.validation_type == "invitation":
+            rate_limit_user, _ = _extract_user_and_customer(args, kwargs, user)
+        _check_rate_limit(config.rate_limit_key, rate_limit, request_ip, rate_limit_user)
 
     # 2. Input Validation
     if config.validation_type == "user_registration":
