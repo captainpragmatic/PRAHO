@@ -1095,7 +1095,9 @@ class NotifyExpiringGrandfatheringTests(TestCase):
 
     @patch("apps.notifications.services.EmailService.send_template_email")
     @patch("apps.billing.subscription_service.GrandfatheringService.check_expiring_grandfathering")
-    def test_email_failure_skips_one_but_continues(self, mock_check: MagicMock, mock_email: MagicMock) -> None:
+    def test_email_failure_continues_but_fails_the_result_truthfully(
+        self, mock_check: MagicMock, mock_email: MagicMock
+    ) -> None:
         gf_fail = _make_mock_grandfathering("fail@example.com")
         gf_ok = _make_mock_grandfathering("ok@example.com")
         mock_check.return_value = [gf_fail, gf_ok]
@@ -1103,9 +1105,11 @@ class NotifyExpiringGrandfatheringTests(TestCase):
 
         result = notify_expiring_grandfathering()
 
-        self.assertTrue(result["success"])
+        self.assertFalse(result["success"])
         self.assertEqual(result["customers_notified"], 1)
         self.assertEqual(result["total_expiring"], 2)
+        self.assertEqual(result["errors"], 1)
+        self.assertIn("1 errors", result["message"])
 
     @patch(
         "apps.billing.subscription_service.GrandfatheringService.check_expiring_grandfathering",

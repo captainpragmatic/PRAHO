@@ -917,6 +917,61 @@ class RefundGatewayIntegrityTests(TestCase):
         gateway.list_refunds.assert_called_once()
         self.assertEqual(converge.call_count, 2)
 
+    def test_refund_sweep_rotates_pending_selection_across_sweeps(self) -> None:
+        """With more non-terminal refunds than the budget, consecutive sweeps must
+        rotate through the backlog instead of re-selecting the same head forever."""
+        invoice = self._make_invoice()
+        payment = self._make_payment(invoice, transaction_id="pi_rotation_sweep")
+        for suffix in ("a", "b"):
+            Refund.objects.create(
+                customer=self.customer,
+                invoice=invoice,
+                payment=payment,
+                amount_cents=1_000,
+                currency=self.currency,
+                original_amount_cents=10_000,
+                status="processing",
+                gateway_refund_id=f"re_rot_{suffix}",
+                reference_number=f"REF-ROT-{suffix.upper()}",
+            )
+
+        def _still_pending(refund_id: str) -> dict[str, Any]:
+            return {
+                "success": True,
+                "refund_id": refund_id,
+                "payment_intent_id": "pi_rotation_sweep",
+                "amount_cents": 1_000,
+                "currency": "ron",
+                "status": "pending",
+                "reason": "requested_by_customer",
+                "error": None,
+            }
+
+        gateway = MagicMock()
+        gateway.retrieve_refund.side_effect = _still_pending
+        gateway.list_refunds.return_value = {"success": True, "refunds": [], "error": None}
+        from apps.billing import tasks as billing_tasks  # noqa: PLC0415
+        from apps.common.types import Ok  # noqa: PLC0415
+
+        with (
+            patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway", return_value=gateway),
+            patch(
+                "apps.billing.refund_service.RefundConvergenceService.converge_gateway_refund",
+                side_effect=lambda facts: Ok(MagicMock()),
+            ),
+        ):
+            first = billing_tasks.reconcile_stripe_refunds(max_refunds=1)
+            second = billing_tasks.reconcile_stripe_refunds(max_refunds=1)
+
+        self.assertTrue(first["work_remaining"])
+        self.assertTrue(second["work_remaining"])
+        retrieved_ids = {call.args[0] if call.args else call.kwargs["refund_id"] for call in gateway.retrieve_refund.call_args_list}
+        self.assertEqual(
+            retrieved_ids,
+            {"re_rot_a", "re_rot_b"},
+            "consecutive budget-limited sweeps must cover the whole pending backlog",
+        )
+
     def test_refund_reconciliation_skips_when_distributed_lease_is_held(self) -> None:
         from apps.billing import tasks as billing_tasks  # noqa: PLC0415
 

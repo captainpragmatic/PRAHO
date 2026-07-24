@@ -837,7 +837,7 @@ def process_expired_trials() -> dict[str, Any]:
             "success": errors == 0,
             "trials_processed": count,
             "errors": errors,
-            "message": f"Processed {count} expired trials",
+            "message": f"Processed {count} expired trials, {errors} errors",
         }
 
     except Exception as e:
@@ -884,7 +884,7 @@ def process_grace_period_expirations() -> dict[str, Any]:
             "success": errors == 0,
             "expirations_processed": count,
             "errors": errors,
-            "message": f"Processed {count} grace period expirations",
+            "message": f"Processed {count} grace period expirations, {errors} errors",
         }
 
     except Exception as e:
@@ -913,6 +913,7 @@ def notify_expiring_grandfathering(days_ahead: int = 30) -> dict[str, Any]:
         expiring = GrandfatheringService.check_expiring_grandfathering(days_ahead)
 
         notified_count = 0
+        errors = 0
         for gf in expiring:
             try:
                 # Send notification email
@@ -936,15 +937,17 @@ def notify_expiring_grandfathering(days_ahead: int = 30) -> dict[str, Any]:
                 notified_count += 1
 
             except Exception as e:
+                errors += 1
                 logger.error(f"Failed to notify customer {gf.customer_id} about expiring grandfathering: {e}")
 
         logger.info(f"📢 [Grandfathering] Notified {notified_count} customers about expiring prices")
 
         return {
-            "success": True,
+            "success": errors == 0,
             "customers_notified": notified_count,
             "total_expiring": len(expiring),
-            "message": f"Notified {notified_count} customers about expiring grandfathered prices",
+            "errors": errors,
+            "message": f"Notified {notified_count} customers about expiring grandfathered prices, {errors} errors",
         }
 
     except Exception as e:
@@ -1318,14 +1321,21 @@ def _collect_stripe_refund_facts(
 
     record_budget = max(max_refunds, 1)
     refund_facts: dict[str, RefundGatewayFacts] = {}
-    pending_ids = list(
+    # Least-recently-touched first, and the selected rows are stamped below so a
+    # backlog larger than the budget rotates across sweeps instead of starving
+    # the tail behind a head that never converges. Refund.updated_at is pure
+    # bookkeeping (the idempotency staleness window keys on created_at).
+    pending_rows = list(
         Refund.objects.filter(status__in=("pending", "processing", "approved"))
         .exclude(gateway_refund_id="")
-        .order_by("id")
-        .values_list("gateway_refund_id", flat=True)[: record_budget + 1]
+        .order_by("updated_at", "id")
+        .values_list("pk", "gateway_refund_id")[: record_budget + 1]
     )
-    pending_truncated = len(pending_ids) > record_budget
-    pending_ids = pending_ids[:record_budget]
+    pending_truncated = len(pending_rows) > record_budget
+    pending_rows = pending_rows[:record_budget]
+    pending_ids = [gateway_refund_id for _pk, gateway_refund_id in pending_rows]
+    if pending_rows:
+        Refund.objects.filter(pk__in=[pk for pk, _ in pending_rows]).update(updated_at=timezone.now())
 
     created_gte = int((timezone.now() - timedelta(days=max(lookback_days, 1))).timestamp())
     listed = gateway.list_refunds(
