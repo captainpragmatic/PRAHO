@@ -167,8 +167,6 @@ class PaymentSuccessService:
                         return Err(convergence_error)
 
                 return Ok(payment)
-        except Payment.DoesNotExist:
-            return Err(f"Payment not found for gateway transaction {gateway_txn_id}")
         except Exception as exc:
             logger.exception("Payment-success convergence failed for %s", gateway_txn_id)
             return Err(f"Payment-success convergence failed: {exc}")
@@ -458,6 +456,11 @@ class PaymentSuccessService:
             return (
                 f"Subscription period overlap for {subscription.subscription_number}: "
                 f"paid through {current_end.isoformat()}, cycle ends {cycle.period_end.isoformat()}"
+            )
+        if current_end > cycle.period_end:
+            return (
+                f"Stale billing cycle for {subscription.subscription_number}: "
+                f"paid through {current_end.isoformat()}, cycle ended {cycle.period_end.isoformat()}"
             )
 
         if current_end == cycle.period_start:

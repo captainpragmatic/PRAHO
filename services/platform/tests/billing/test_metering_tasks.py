@@ -154,15 +154,15 @@ class ProcessPendingUsageEventsTestCase(TestCase):
 
     @patch("apps.audit.services.AuditService")
     @patch("apps.billing.metering_service.AggregationService")
-    def test_successful_batch_processing(self, mock_service_class, mock_audit):
-        """Test successful batch processing of pending events."""
+    def test_partial_batch_failure_is_reported(self, mock_service_class, mock_audit):
+        """Per-event failures make the scheduled batch result unsuccessful."""
         mock_service = MagicMock()
         mock_service.process_pending_events.return_value = (50, 2)
         mock_service_class.return_value = mock_service
 
         result = process_pending_usage_events(limit=100)
 
-        self.assertTrue(result["success"])
+        self.assertFalse(result["success"])
         self.assertEqual(result["processed"], 50)
         self.assertEqual(result["errors"], 2)
         mock_service.process_pending_events.assert_called_once_with(meter_id=None, limit=100)
@@ -232,6 +232,16 @@ class BillingCycleTasksTestCase(TestCase):
         self.assertEqual(result["errors"], 0)
 
     @patch("apps.billing.usage_invoice_service.UsageBillingService")
+    def test_close_expired_billing_cycles_reports_partial_failure(self, mock_service_class):
+        mock_service_class.close_expired_cycles.return_value = (9, 1)
+
+        result = close_expired_billing_cycles()
+
+        self.assertFalse(result["success"])
+        self.assertEqual(result["closed"], 9)
+        self.assertEqual(result["errors"], 1)
+
+    @patch("apps.billing.usage_invoice_service.UsageBillingService")
     def test_generate_pending_invoices(self, mock_service_class):
         """Test generating pending invoices."""
         mock_service_class.generate_pending_invoices.return_value = (3, 0)
@@ -240,6 +250,16 @@ class BillingCycleTasksTestCase(TestCase):
 
         self.assertTrue(result["success"])
         self.assertEqual(result["generated"], 3)
+
+    @patch("apps.billing.usage_invoice_service.UsageBillingService")
+    def test_generate_pending_invoices_reports_partial_failure(self, mock_service_class):
+        mock_service_class.generate_pending_invoices.return_value = (2, 1)
+
+        result = generate_pending_invoices()
+
+        self.assertFalse(result["success"])
+        self.assertEqual(result["generated"], 2)
+        self.assertEqual(result["errors"], 1)
 
     @patch("apps.billing.usage_invoice_service.UsageBillingService")
     def test_collect_due_usage_invoices(self, mock_service_class):
@@ -359,6 +379,29 @@ class BillingWorkflowTestCase(TestCase):
         mock_generate.assert_called_once()
         mock_collect.assert_called_once()
         self.assertEqual(result["results"]["usage_collection"]["collected"], 2)
+
+    @patch("apps.audit.services.AuditService")
+    @patch("apps.billing.metering_tasks.collect_due_usage_invoices")
+    @patch("apps.billing.metering_tasks.generate_pending_invoices")
+    @patch("apps.billing.metering_tasks.rate_pending_aggregations")
+    @patch("apps.billing.metering_tasks.close_expired_billing_cycles")
+    def test_workflow_reports_nested_step_failure(
+        self,
+        mock_close,
+        mock_rate,
+        mock_generate,
+        mock_collect,
+        mock_audit,
+    ):
+        mock_close.return_value = {"success": True, "closed": 5, "errors": 0}
+        mock_rate.return_value = {"success": False, "rated": 9, "errors": 1}
+        mock_generate.return_value = {"success": True, "generated": 3, "errors": 0}
+        mock_collect.return_value = {"success": True, "collected": 2, "errors": 0}
+
+        result = run_billing_cycle_workflow()
+
+        self.assertFalse(result["success"])
+        self.assertEqual(result["results"]["rated"]["errors"], 1)
 
 
 class AlertTasksTestCase(TestCase):

@@ -655,9 +655,10 @@ class SubscriptionInvoicePaymentTestCase(_SubscriptionInvoicePaymentFixture, Tes
             "select_for_update",
             wraps=Subscription.objects.select_for_update,
         ) as lock_subscription:
-            processed = SubscriptionLifecycleService.handle_expired_trials(as_of=timezone.now())
+            processed, errors = SubscriptionLifecycleService.handle_expired_trials(as_of=timezone.now())
 
         self.assertEqual(processed, 1)
+        self.assertEqual(errors, 0)
         lock_subscription.assert_called()
         subscription.refresh_from_db()
         service.refresh_from_db()
@@ -703,9 +704,10 @@ class SubscriptionInvoicePaymentTestCase(_SubscriptionInvoicePaymentFixture, Tes
         self.subscription.grace_period_ends_at = timezone.now() - timedelta(minutes=1)
         self.subscription.save(update_fields=["grace_period_ends_at", "updated_at"])
 
-        processed = SubscriptionLifecycleService.handle_grace_period_expirations()
+        processed, errors = SubscriptionLifecycleService.handle_grace_period_expirations()
 
         self.assertEqual(processed, 1)
+        self.assertEqual(errors, 0)
         self.subscription.refresh_from_db()
         self.service.refresh_from_db()
         self.assertEqual(self.subscription.status, "paused")
@@ -723,9 +725,10 @@ class SubscriptionInvoicePaymentTestCase(_SubscriptionInvoicePaymentFixture, Tes
         self.assertEqual(self.subscription.status, "paused")
 
         self.subscription.mark_payment_failed()
-        processed = SubscriptionLifecycleService.handle_grace_period_expirations()
+        processed, errors = SubscriptionLifecycleService.handle_grace_period_expirations()
 
         self.assertEqual(processed, 1)
+        self.assertEqual(errors, 0)
         self.subscription.refresh_from_db()
         self.service.refresh_from_db()
         self.assertEqual(self.subscription.status, "cancelled")
@@ -1244,6 +1247,35 @@ class SubscriptionInvoicePaymentTestCase(_SubscriptionInvoicePaymentFixture, Tes
         self.assertEqual(subscription.failed_payment_count, 0)
         self.assertIsNotNone(subscription.grace_period_ends_at)
         self.assertEqual(cycle.collection_status, "past_due")
+
+    def test_multiple_overdue_cycles_for_one_subscription_enter_grace_without_rolling_back(self) -> None:
+        now = timezone.now()
+        subscription = self._create_aligned_subscription("DUPLICATE-CYCLES", now)
+        RecurringBillingOrchestrator.prepare_due_proformas(as_of=now)
+        first_cycle = BillingCycle.objects.get(subscription=subscription)
+        second_cycle = BillingCycle.objects.create(
+            subscription=subscription,
+            period_start=first_cycle.period_end,
+            period_end=first_cycle.period_end + timedelta(days=30),
+            status="upcoming",
+            collection_status="prepared",
+            proforma=first_cycle.proforma,
+            base_charge_cents=first_cycle.base_charge_cents,
+            tax_cents=first_cycle.tax_cents,
+            total_cents=first_cycle.total_cents,
+        )
+
+        marked = RecurringBillingOrchestrator.mark_overdue_renewals(
+            as_of=second_cycle.period_start + timedelta(minutes=1)
+        )
+
+        self.assertEqual(marked, 2)
+        subscription.refresh_from_db()
+        first_cycle.refresh_from_db()
+        second_cycle.refresh_from_db()
+        self.assertEqual(subscription.status, "past_due")
+        self.assertEqual(first_cycle.collection_status, "past_due")
+        self.assertEqual(second_cycle.collection_status, "past_due")
 
     @patch("apps.billing.payment_service.PaymentGatewayFactory.create_gateway")
     def test_cancelled_subscription_cannot_create_a_fixed_renewal_charge(
@@ -2374,6 +2406,23 @@ class SubscriptionInvoicePaymentTestCase(_SubscriptionInvoicePaymentFixture, Tes
         self.assertIsNone(self.billing_cycle.entitlement_applied_at)
         self.assertNotEqual(self.subscription.current_period_end, self.billing_cycle.period_end)
         self.assertNotEqual(self.service.expires_at, self.billing_cycle.period_end)
+
+    def test_stale_cycle_cannot_reapply_entitlement_or_advance_schedule(self) -> None:
+        self.subscription.current_period_end = self.billing_cycle.period_end + timedelta(days=1)
+        self.subscription.save(update_fields=["current_period_end", "updated_at"])
+        original_next_billing = self.subscription.next_billing_date
+
+        error = PaymentSuccessService._apply_cycle_entitlement(
+            cycle=self.billing_cycle,
+            subscription=self.subscription,
+            service=self.service,
+            paid_at=timezone.now(),
+        )
+
+        self.assertIsNotNone(error)
+        self.assertIn("stale", error.lower())
+        self.subscription.refresh_from_db()
+        self.assertEqual(self.subscription.next_billing_date, original_next_billing)
 
     def test_partial_payment_does_not_advance_recurring_entitlement(self) -> None:
         from apps.integrations.webhooks.stripe import StripeWebhookProcessor  # noqa: PLC0415

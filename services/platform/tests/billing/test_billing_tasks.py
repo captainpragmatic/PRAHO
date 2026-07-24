@@ -170,6 +170,19 @@ class GetTaskMaxRetriesTests(TestCase):
         self.assertEqual(result, 5)
 
 
+class RefundReconciliationLimitTests(TestCase):
+    def test_runtime_setting_is_capped_at_hard_gateway_budget(self) -> None:
+        from apps.billing.tasks import _get_refund_reconciliation_limit  # noqa: PLC0415
+
+        with patch(
+            "apps.settings.services.SettingsService.get_integer_setting",
+            return_value=999_999,
+        ):
+            result = _get_refund_reconciliation_limit()
+
+        self.assertEqual(result, 5_000)
+
+
 # ---------------------------------------------------------------------------
 # submit_efactura tests
 # ---------------------------------------------------------------------------
@@ -926,7 +939,7 @@ class ProcessExpiredTrialsTests(TestCase):
     @patch("apps.audit.services.AuditService.log_simple_event")
     @patch(
         "apps.billing.subscription_service.SubscriptionLifecycleService.handle_expired_trials",
-        return_value=4,
+        return_value=(4, 0),
     )
     def test_success(self, mock_handle: MagicMock, mock_audit: MagicMock) -> None:
         result = process_expired_trials()
@@ -951,13 +964,25 @@ class ProcessExpiredTrialsTests(TestCase):
     @patch("apps.audit.services.AuditService.log_simple_event")
     @patch(
         "apps.billing.subscription_service.SubscriptionLifecycleService.handle_expired_trials",
-        return_value=0,
+        return_value=(0, 0),
     )
     def test_zero_trials_processed(self, mock_handle: MagicMock, mock_audit: MagicMock) -> None:
         result = process_expired_trials()
 
         self.assertTrue(result["success"])
         self.assertEqual(result["trials_processed"], 0)
+
+    @patch("apps.audit.services.AuditService.log_simple_event")
+    @patch(
+        "apps.billing.subscription_service.SubscriptionLifecycleService.handle_expired_trials",
+        return_value=(3, 1),
+    )
+    def test_partial_failure_is_reported(self, mock_handle: MagicMock, mock_audit: MagicMock) -> None:
+        result = process_expired_trials()
+
+        self.assertFalse(result["success"])
+        self.assertEqual(result["trials_processed"], 3)
+        self.assertEqual(result["errors"], 1)
 
 
 # ---------------------------------------------------------------------------
@@ -971,7 +996,7 @@ class ProcessGracePeriodExpirationsTests(TestCase):
     @patch("apps.audit.services.AuditService.log_simple_event")
     @patch(
         "apps.billing.subscription_service.SubscriptionLifecycleService.handle_grace_period_expirations",
-        return_value=2,
+        return_value=(2, 0),
     )
     def test_success(self, mock_handle: MagicMock, mock_audit: MagicMock) -> None:
         result = process_grace_period_expirations()
@@ -995,13 +1020,25 @@ class ProcessGracePeriodExpirationsTests(TestCase):
     @patch("apps.audit.services.AuditService.log_simple_event")
     @patch(
         "apps.billing.subscription_service.SubscriptionLifecycleService.handle_grace_period_expirations",
-        return_value=0,
+        return_value=(0, 0),
     )
     def test_zero_expirations(self, mock_handle: MagicMock, mock_audit: MagicMock) -> None:
         result = process_grace_period_expirations()
 
         self.assertTrue(result["success"])
         self.assertEqual(result["expirations_processed"], 0)
+
+    @patch("apps.audit.services.AuditService.log_simple_event")
+    @patch(
+        "apps.billing.subscription_service.SubscriptionLifecycleService.handle_grace_period_expirations",
+        return_value=(2, 1),
+    )
+    def test_partial_failure_is_reported(self, mock_handle: MagicMock, mock_audit: MagicMock) -> None:
+        result = process_grace_period_expirations()
+
+        self.assertFalse(result["success"])
+        self.assertEqual(result["expirations_processed"], 2)
+        self.assertEqual(result["errors"], 1)
 
 
 # ---------------------------------------------------------------------------
@@ -1058,7 +1095,9 @@ class NotifyExpiringGrandfatheringTests(TestCase):
 
     @patch("apps.notifications.services.EmailService.send_template_email")
     @patch("apps.billing.subscription_service.GrandfatheringService.check_expiring_grandfathering")
-    def test_email_failure_skips_one_but_continues(self, mock_check: MagicMock, mock_email: MagicMock) -> None:
+    def test_email_failure_continues_but_fails_the_result_truthfully(
+        self, mock_check: MagicMock, mock_email: MagicMock
+    ) -> None:
         gf_fail = _make_mock_grandfathering("fail@example.com")
         gf_ok = _make_mock_grandfathering("ok@example.com")
         mock_check.return_value = [gf_fail, gf_ok]
@@ -1066,9 +1105,11 @@ class NotifyExpiringGrandfatheringTests(TestCase):
 
         result = notify_expiring_grandfathering()
 
-        self.assertTrue(result["success"])
+        self.assertFalse(result["success"])
         self.assertEqual(result["customers_notified"], 1)
         self.assertEqual(result["total_expiring"], 2)
+        self.assertEqual(result["errors"], 1)
+        self.assertIn("1 errors", result["message"])
 
     @patch(
         "apps.billing.subscription_service.GrandfatheringService.check_expiring_grandfathering",

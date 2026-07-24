@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from datetime import datetime
 
 from django.db import transaction
 from django.utils import timezone
@@ -31,6 +32,32 @@ class RecurringPaymentAuthorizationService:
         "withdraw this card authorization at any time. Withdrawal stops future automatic collection but does not "
         "cancel services, erase issued documents, or remove amounts already owed."
     )
+
+    @staticmethod
+    def _disable_authorized_subscriptions(
+        authorization: RecurringPaymentAuthorization,
+        *,
+        at: datetime,
+    ) -> None:
+        """Disable each enrolled subscription through save() so lifecycle audits fire."""
+        subscriptions = (
+            Subscription.objects.select_for_update(of=("self",))
+            .filter(payment_authorization=authorization)
+            .order_by("id")
+        )
+        for subscription in subscriptions:
+            subscription.auto_payment_enabled = False
+            subscription.payment_authorization = None
+            subscription.saved_payment_method = None
+            subscription.updated_at = at
+            subscription.save(
+                update_fields=[
+                    "auto_payment_enabled",
+                    "payment_authorization",
+                    "saved_payment_method",
+                    "updated_at",
+                ]
+            )
 
     @staticmethod
     def _customer_billing_role(
@@ -255,12 +282,7 @@ class RecurringPaymentAuthorizationService:
                         "updated_at",
                     ]
                 )
-                Subscription.objects.filter(payment_authorization=previous).update(
-                    auto_payment_enabled=False,
-                    payment_authorization=None,
-                    saved_payment_method=None,
-                    updated_at=now,
-                )
+                cls._disable_authorized_subscriptions(previous, at=now)
 
             authorization = RecurringPaymentAuthorization(
                 customer=customer,
@@ -305,12 +327,7 @@ class RecurringPaymentAuthorizationService:
             now = timezone.now()
             locked.withdraw(actor=actor, reason=reason, at=now)
             locked.save(update_fields=["status", "withdrawn_at", "withdrawn_by", "withdrawal_reason", "updated_at"])
-            Subscription.objects.filter(payment_authorization=locked).update(
-                auto_payment_enabled=False,
-                payment_authorization=None,
-                saved_payment_method=None,
-                updated_at=now,
-            )
+            cls._disable_authorized_subscriptions(locked, at=now)
             return Ok(locked)
 
     @classmethod
@@ -397,10 +414,5 @@ class RecurringPaymentAuthorizationService:
             now = timezone.now()
             locked.revoke(actor=actor, reason=reason, at=now)
             locked.save(update_fields=["status", "revoked_at", "revoked_by", "revocation_reason", "updated_at"])
-            Subscription.objects.filter(payment_authorization=locked).update(
-                auto_payment_enabled=False,
-                payment_authorization=None,
-                saved_payment_method=None,
-                updated_at=now,
-            )
+            RecurringPaymentAuthorizationService._disable_authorized_subscriptions(locked, at=now)
             return Ok(locked)

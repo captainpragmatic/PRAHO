@@ -10,6 +10,7 @@ import types
 from typing import Any
 
 from .base import (
+    MAX_REFUND_LIST_RECORDS,
     BasePaymentGateway,
     PaymentConfirmResult,
     PaymentGatewayFactory,
@@ -163,8 +164,6 @@ class StripeGateway(BasePaymentGateway):
                 payment_intent_params["idempotency_key"] = idempotency_key
 
             # Create payment intent
-            if idempotency_key:
-                payment_intent_params["idempotency_key"] = idempotency_key
             payment_intent = self._stripe.PaymentIntent.create(**payment_intent_params)
 
             self.logger.info(
@@ -514,14 +513,25 @@ class StripeGateway(BasePaymentGateway):
                 error=str(e),
             )
 
-    def list_refunds(self, *, created_gte: int, limit: int = 100) -> RefundListResult:
-        """List all Stripe refunds in the lookback window via auto-pagination."""
-        page_size = min(max(limit, 1), 100)
+    def list_refunds(
+        self,
+        *,
+        created_gte: int,
+        page_size: int = 100,
+        max_records: int = 500,
+    ) -> RefundListResult:
+        """List Stripe refunds via auto-pagination without exceeding the record budget."""
+        provider_page_size = min(max(page_size, 1), 100)
+        record_budget = min(max(max_records, 1), MAX_REFUND_LIST_RECORDS)
         try:
-            page = self._stripe.Refund.list(created={"gte": created_gte}, limit=page_size)
+            page = self._stripe.Refund.list(created={"gte": created_gte}, limit=provider_page_size)
             refunds: list[RefundStatusResult] = []
             skipped = 0
-            for refund in page.auto_paging_iter():
+            truncated = False
+            for scanned, refund in enumerate(page.auto_paging_iter(), start=1):
+                if scanned > record_budget:
+                    truncated = True
+                    break
                 try:
                     refunds.append(self._normalize_refund(refund))
                 except ValueError as item_error:
@@ -535,10 +545,10 @@ class StripeGateway(BasePaymentGateway):
                     )
             if skipped:
                 self.logger.warning("⚠️ Stripe refund listing skipped %d malformed refund(s)", skipped)
-            return RefundListResult(success=True, refunds=refunds, error=None)
+            return RefundListResult(success=True, refunds=refunds, truncated=truncated, error=None)
         except Exception as e:
             self.logger.error("🔥 Stripe refund listing failed: %s", e)
-            return RefundListResult(success=False, refunds=[], error=str(e))
+            return RefundListResult(success=False, refunds=[], truncated=False, error=str(e))
 
 
 # ===============================================================================

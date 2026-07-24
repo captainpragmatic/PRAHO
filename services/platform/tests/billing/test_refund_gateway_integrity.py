@@ -913,9 +913,144 @@ class RefundGatewayIntegrityTests(TestCase):
         self.assertTrue(result["success"])
         self.assertEqual(result["refunds_checked"], 2)
         self.assertEqual(result["refunds_converged"], 2)
-        gateway.retrieve_refund.assert_called_once_with("re_pending_sweep")
+        gateway.retrieve_refund.assert_not_called()
         gateway.list_refunds.assert_called_once()
         self.assertEqual(converge.call_count, 2)
+
+    def test_refund_sweep_rotates_pending_selection_across_sweeps(self) -> None:
+        """With more non-terminal refunds than the budget, consecutive sweeps must
+        rotate through the backlog instead of re-selecting the same head forever."""
+        invoice = self._make_invoice()
+        payment = self._make_payment(invoice, transaction_id="pi_rotation_sweep")
+        for suffix in ("a", "b"):
+            Refund.objects.create(
+                customer=self.customer,
+                invoice=invoice,
+                payment=payment,
+                amount_cents=1_000,
+                currency=self.currency,
+                original_amount_cents=10_000,
+                status="processing",
+                gateway_refund_id=f"re_rot_{suffix}",
+                reference_number=f"REF-ROT-{suffix.upper()}",
+            )
+
+        def _still_pending(refund_id: str) -> dict[str, Any]:
+            return {
+                "success": True,
+                "refund_id": refund_id,
+                "payment_intent_id": "pi_rotation_sweep",
+                "amount_cents": 1_000,
+                "currency": "ron",
+                "status": "pending",
+                "reason": "requested_by_customer",
+                "error": None,
+            }
+
+        gateway = MagicMock()
+        gateway.retrieve_refund.side_effect = _still_pending
+        gateway.list_refunds.return_value = {"success": True, "refunds": [], "error": None}
+        from apps.billing import tasks as billing_tasks  # noqa: PLC0415
+        from apps.common.types import Ok  # noqa: PLC0415
+
+        with (
+            patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway", return_value=gateway),
+            patch(
+                "apps.billing.refund_service.RefundConvergenceService.converge_gateway_refund",
+                side_effect=lambda facts: Ok(MagicMock()),
+            ),
+        ):
+            first = billing_tasks.reconcile_stripe_refunds(max_refunds=1)
+            second = billing_tasks.reconcile_stripe_refunds(max_refunds=1)
+
+        self.assertTrue(first["work_remaining"])
+        self.assertTrue(second["work_remaining"])
+        retrieved_ids = {call.args[0] if call.args else call.kwargs["refund_id"] for call in gateway.retrieve_refund.call_args_list}
+        self.assertEqual(
+            retrieved_ids,
+            {"re_rot_a", "re_rot_b"},
+            "consecutive budget-limited sweeps must cover the whole pending backlog",
+        )
+
+    def test_refund_reconciliation_skips_when_distributed_lease_is_held(self) -> None:
+        from apps.billing import tasks as billing_tasks  # noqa: PLC0415
+
+        with (
+            patch("apps.common.performance.async_tasks.DistributedLock.acquire", return_value=False),
+            patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway") as gateway_factory,
+        ):
+            result = billing_tasks.reconcile_stripe_refunds()
+
+        self.assertTrue(result["success"])
+        self.assertTrue(result["skipped_locked"])
+        self.assertEqual(result["refunds_checked"], 0)
+        gateway_factory.assert_not_called()
+
+    def test_refund_reconciliation_caps_convergence_and_reports_remaining_work(self) -> None:
+        from apps.billing import tasks as billing_tasks  # noqa: PLC0415
+        from apps.common.types import Ok  # noqa: PLC0415
+
+        facts = [
+            {
+                "success": True,
+                "refund_id": f"re_budget_{index}",
+                "payment_intent_id": f"pi_budget_{index}",
+                "amount_cents": 100,
+                "currency": "ron",
+                "status": "succeeded",
+                "reason": None,
+                "failure_reason": None,
+                "error": None,
+            }
+            for index in range(3)
+        ]
+        gateway = MagicMock()
+        gateway.list_refunds.return_value = {
+            "success": True,
+            "refunds": facts[:2],
+            "truncated": True,
+            "error": None,
+        }
+
+        with (
+            patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway", return_value=gateway),
+            patch(
+                "apps.billing.refund_service.RefundConvergenceService.converge_gateway_refund",
+                return_value=Ok(None),
+            ) as converge,
+        ):
+            result = billing_tasks.reconcile_stripe_refunds(max_refunds=2)
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["refunds_checked"], 2)
+        self.assertTrue(result["work_remaining"])
+        self.assertEqual(converge.call_count, 2)
+        gateway.list_refunds.assert_called_once_with(
+            created_gte=mock.ANY,
+            page_size=100,
+            max_records=2,
+        )
+
+    def test_refund_reconciliation_reports_remaining_work_when_discovery_fails(self) -> None:
+        from apps.billing import tasks as billing_tasks  # noqa: PLC0415
+
+        gateway = MagicMock()
+        gateway.list_refunds.return_value = {
+            "success": False,
+            "refunds": [],
+            "truncated": False,
+            "error": "Stripe unavailable",
+        }
+
+        with patch(
+            "apps.billing.gateways.base.PaymentGatewayFactory.create_gateway",
+            return_value=gateway,
+        ):
+            result = billing_tasks.reconcile_stripe_refunds(max_refunds=2)
+
+        self.assertFalse(result["success"])
+        self.assertTrue(result["work_remaining"])
+        self.assertEqual(result["refunds_checked"], 0)
 
     def test_gateway_refund_id_is_unique_when_present_but_blank_is_reusable(self) -> None:
         invoice = self._make_invoice()
