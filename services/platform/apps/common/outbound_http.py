@@ -13,6 +13,7 @@ from __future__ import annotations
 import http.client
 import ipaddress
 import logging
+import math
 import re
 import socket
 import ssl
@@ -499,14 +500,97 @@ class PinnedIPAdapter(HTTPAdapter):
 _REDIRECT_STATUSES: frozenset[int] = frozenset({301, 302, 303, 307, 308})
 
 
+@dataclass(frozen=True)
+class _TransportOptions:
+    """Requests transport options separated from Request-construction kwargs."""
+
+    timeout: tuple[float, float]
+    stream: bool
+    cert: str | tuple[str, str] | None
+
+
+def _bounded_timeout_part(value: object, upper_bound: float) -> float:
+    """Validate one timeout component and cap it at the policy maximum."""
+    if value is None:
+        return upper_bound
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise TypeError("timeout values must be positive numbers or None")
+
+    numeric_value = float(value)
+    if not math.isfinite(numeric_value) or numeric_value <= 0:
+        raise ValueError("timeout values must be finite positive numbers")
+    return min(numeric_value, upper_bound)
+
+
+def _extract_transport_options(kwargs: dict[str, object], policy: OutboundPolicy) -> _TransportOptions:
+    """Remove Session.send options from request kwargs without weakening policy."""
+    timeout_override = kwargs.pop("timeout", None)
+    if isinstance(timeout_override, tuple):
+        try:
+            connect_override, read_override = timeout_override
+        except ValueError:
+            raise ValueError("timeout tuple must contain connect and read values") from None
+        connect_timeout = _bounded_timeout_part(connect_override, policy.connect_timeout_seconds)
+        read_timeout = _bounded_timeout_part(read_override, policy.timeout_seconds)
+    else:
+        connect_timeout = _bounded_timeout_part(timeout_override, policy.connect_timeout_seconds)
+        read_timeout = _bounded_timeout_part(timeout_override, policy.timeout_seconds)
+
+    stream = kwargs.pop("stream", False)
+    if not isinstance(stream, bool):
+        raise TypeError("stream must be a boolean")
+
+    cert_value = kwargs.pop("cert", None)
+    cert: str | tuple[str, str] | None
+    match cert_value:
+        case None | str():
+            cert = cert_value
+        case (str() as certificate_path, str() as key_path):
+            cert = (certificate_path, key_path)
+        case _:
+            raise TypeError("cert must be a path or a (certificate, key) path tuple")
+
+    if kwargs.pop("proxies", None) is not None:
+        raise OutboundSecurityError("Caller-supplied proxies are not supported by DNS-pinned requests")
+
+    # These controls are policy-owned. Pop caller values so they cannot either
+    # reach requests.Request (which rejects them) or weaken the outbound policy.
+    kwargs.pop("verify", None)
+    kwargs.pop("allow_redirects", None)
+
+    return _TransportOptions(
+        timeout=(connect_timeout, read_timeout),
+        stream=stream,
+        cert=cert,
+    )
+
+
+def _send_prepared_request(
+    session: requests.Session,
+    request: requests.PreparedRequest,
+    policy: OutboundPolicy,
+    transport: _TransportOptions,
+) -> requests.Response:
+    """Send one prepared request with policy-owned security controls."""
+    return session.send(
+        request,
+        allow_redirects=False,
+        verify=policy.verify_tls,
+        timeout=transport.timeout,
+        stream=transport.stream,
+        cert=transport.cert,
+    )
+
+
 def _follow_redirects(
     session: requests.Session,
     response: requests.Response,
     policy: OutboundPolicy,
     remaining: int,
-    method: str,
+    transport: _TransportOptions,
 ) -> requests.Response:
     """Manually follow redirects, re-validating each hop."""
+    method = response.request.method or "GET"
     while response.status_code in _REDIRECT_STATUSES and remaining > 0:
         location = response.headers.get("Location")
         if not location:
@@ -531,12 +615,7 @@ def _follow_redirects(
             method = "GET"
 
         prepared = session.prepare_request(requests.Request(method=method, url=location))
-        response = session.send(
-            prepared,
-            allow_redirects=False,
-            verify=policy.verify_tls,
-            timeout=(policy.connect_timeout_seconds, policy.timeout_seconds),
-        )
+        response = _send_prepared_request(session, prepared, policy, transport)
         remaining -= 1
 
     return response
@@ -558,7 +637,9 @@ def safe_request(
         method: HTTP method (GET, POST, etc.)
         url: Target URL
         policy: Security policy to enforce (default: STRICT_EXTERNAL)
-        **kwargs: Additional arguments passed to requests.Request constructor
+        **kwargs: Requests-compatible request and transport options. Caller
+            timeouts may tighten but never exceed policy bounds; TLS and
+            redirect behavior always remain policy-owned.
 
     Returns:
         requests.Response
@@ -575,6 +656,10 @@ def safe_request(
         raise
 
     session = requests.Session()
+    # The worker environment must not inject transport policy: HTTPS_PROXY/HTTP_PROXY
+    # would reroute the pinned connection through a proxy, and REQUESTS_CA_BUNDLE or
+    # ~/.netrc would override policy-owned TLS and auth. Policy owns all of it.
+    session.trust_env = False
     session.headers["User-Agent"] = DEFAULT_USER_AGENT
     try:
         return _execute_pinned_request(session, target, method, url, policy, **kwargs)
@@ -604,18 +689,13 @@ def _execute_pinned_request(
             ),
         )
 
-    # Strip transport kwargs from Request constructor kwargs
+    transport = _extract_transport_options(kwargs, policy)
     req = requests.Request(method=method.upper(), url=url, **kwargs)
     prepared = session.prepare_request(req)
-    response = session.send(
-        prepared,
-        verify=policy.verify_tls,
-        timeout=(policy.connect_timeout_seconds, policy.timeout_seconds),
-        allow_redirects=False,
-    )
+    response = _send_prepared_request(session, prepared, policy, transport)
 
     if policy.allow_redirects and policy.max_redirects > 0:
-        response = _follow_redirects(session, response, policy, policy.max_redirects, method.upper())
+        response = _follow_redirects(session, response, policy, policy.max_redirects, transport)
 
     logger.info(
         "✅ [OutboundHTTP] Allow: policy=%s url=%s ip=%s status=%s",

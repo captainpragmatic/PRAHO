@@ -36,6 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Notification delivery and targeting** — requests-compatible transport options now reach the DNS-pinned send path without weakening TLS, redirect, or timeout policy, so SNS certificate verification no longer fails on its timeout override; inactive and all-customer campaign audiences now select what their names promise, while the undefined trial-expiry audience fails closed instead of broadcasting (#215, #216)
 - **VAT quote and evidence integrity** — cart and preflight calculations now use the same customer tax profile and billing country as issued documents, incomplete VAT contexts fail closed, VIES checks retain attributable consultation references and fresh timestamps, expired validations are fully scheduled and drained, and PDF/e-Factura reverse-charge notices share the Article 196 legal basis (#404)
 - **PostgreSQL order billing fixtures** — persistence-reaching order transition tests now use ISO country codes that fit the billing document schema (#315)
 - **Billing document completeness and e-Factura R051 validation** — the portal now searches, filters, counts, and paginates invoices and proformas against the customer's complete server-side document set instead of two independently truncated 20-row slices; CIUS-RO validation now rejects every R051 amount context that omits or mismatches the document currency while preserving the BT-111 accounting-currency exception (#227, #371)
