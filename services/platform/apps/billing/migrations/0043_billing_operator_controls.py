@@ -17,7 +17,7 @@ def backfill_payment_failure_times(apps, schema_editor):
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("billing", "0039_invoice_tax_point_and_fx_snapshot"),
+        ("billing", "0042_vatvalidation_consultation_reference"),
     ]
 
     operations = [

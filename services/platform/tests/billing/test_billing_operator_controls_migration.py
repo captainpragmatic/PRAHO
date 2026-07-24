@@ -9,8 +9,8 @@ from django.db.migrations.executor import MigrationExecutor
 from django.test import TransactionTestCase
 from django.utils import timezone
 
-MIGRATE_FROM = ("billing", "0039_invoice_tax_point_and_fx_snapshot")
-MIGRATE_TO = ("billing", "0040_billing_operator_controls")
+MIGRATE_FROM = ("billing", "0042_vatvalidation_consultation_reference")
+MIGRATE_TO = ("billing", "0043_billing_operator_controls")
 
 
 class PaymentFailureTimestampMigrationTest(TransactionTestCase):
