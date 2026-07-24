@@ -203,7 +203,12 @@ class VATValidation(models.Model):
         CACHED = "cached", _("Previous Validation")
 
     # Validation metadata
-    validation_date = models.DateTimeField(auto_now_add=True)
+    validation_date = models.DateTimeField(default=timezone.now)
+    consultation_reference = models.CharField(
+        max_length=100,
+        blank=True,
+        help_text=_("VIES proof-of-consultation request identifier"),
+    )
     validation_source = models.CharField(
         max_length=20,
         choices=ValidationSource.choices,

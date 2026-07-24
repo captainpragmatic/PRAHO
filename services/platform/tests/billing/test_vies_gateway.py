@@ -15,6 +15,7 @@ class TestVIESResponse(SimpleTestCase):
         self.assertTrue(r.is_valid)
         self.assertTrue(r.api_available)
         self.assertEqual(r.company_name, "")
+        self.assertEqual(r.request_identifier, "")
         self.assertEqual(r.error_message, "")
         self.assertEqual(r.raw_response, {})
 
@@ -33,17 +34,32 @@ class TestVIESGateway(SimpleTestCase):
             "name": "Test GmbH",
             "address": "Berlin, Germany",
             "requestDate": "2026-03-10",
+            "requestIdentifier": "WAPIAAABy123456789",
         }
         mock_response.raise_for_status = MagicMock()
         mock_request.return_value = mock_response
 
-        result = VIESGateway.check_vat("DE", "123456789")
+        result = VIESGateway.check_vat(
+            "DE",
+            "123456789",
+            requester_member_state_code="RO",
+            requester_number="12345678",
+        )
 
         self.assertTrue(result.is_valid)
         self.assertTrue(result.api_available)
         self.assertEqual(result.company_name, "Test GmbH")
         self.assertEqual(result.company_address, "Berlin, Germany")
-        mock_request.assert_called_once()
+        self.assertEqual(result.request_identifier, "WAPIAAABy123456789")
+        self.assertEqual(
+            mock_request.call_args.kwargs["json"],
+            {
+                "countryCode": "DE",
+                "vatNumber": "123456789",
+                "requesterMemberStateCode": "RO",
+                "requesterNumber": "12345678",
+            },
+        )
 
     @patch("apps.billing.gateways.vies_gateway.safe_request")
     def test_invalid_vat_returns_invalid_response(self, mock_request):
@@ -79,6 +95,7 @@ class TestVIESGateway(SimpleTestCase):
             "is_valid": True, "country_code": "FR", "vat_number": "12345678901",
             "company_name": "Cached Co", "api_available": True,
             "company_address": "", "request_date": "", "error_message": "",
+            "request_identifier": "",
             "raw_response": {},
         }
         mock_cache.get.return_value = cached

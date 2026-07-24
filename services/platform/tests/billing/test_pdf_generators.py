@@ -1179,7 +1179,9 @@ class EN16931PDFComplianceTests(TestCase):
         )
         calls = self._get_canvas_calls()
         text = ' '.join(calls)
-        self.assertIn('Taxare invers', text)  # Partial match avoids encoding issues
+        self.assertIn('Taxare invers', text)
+        self.assertIn('Art. 196 Council Directive 2006/112/EC', text)
+        self.assertNotIn('Art. 331', text)
 
     def test_currency_code_not_hardcoded(self):
         """Line totals must use the invoice's currency code, not hardcoded RON."""

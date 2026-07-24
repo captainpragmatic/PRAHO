@@ -15,7 +15,7 @@ from datetime import timedelta
 from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from apps.billing.models import Invoice
@@ -41,6 +41,7 @@ from apps.billing.tasks import (
     process_expired_trials_async,
     process_grace_period_expirations,
     process_grace_period_expirations_async,
+    reverify_expired_vat_validations,
     run_daily_billing,
     run_daily_billing_async,
     run_payment_collection,
@@ -475,6 +476,137 @@ class ValidateVatNumberTests(TestCase):
         # Validation succeeded; audit failure is swallowed and logged but not propagated
         self.assertTrue(result["success"])
         self.assertNotIn("error", result)
+
+    @override_settings(COMPANY_CUI="RO87654321")
+    @patch("apps.billing.gateways.vies_gateway.VIESGateway.check_vat")
+    @patch("apps.audit.services.AuditService.log_simple_event")
+    def test_revalidation_refreshes_timestamp_and_consultation_reference(
+        self,
+        _mock_audit: MagicMock,
+        mock_vies: MagicMock,
+    ) -> None:
+        from apps.billing.gateways.vies_gateway import VIESResponse  # noqa: PLC0415
+        from apps.billing.tax_models import VATValidation  # noqa: PLC0415
+
+        profile = self._make_tax_profile(vat_number="RO1234567")
+        validation = VATValidation.objects.create(
+            country_code="RO",
+            vat_number="1234567",
+            full_vat_number="RO1234567",
+            is_valid=True,
+            is_active=True,
+            validation_source="vies",
+            expires_at=timezone.now() - timedelta(hours=1),
+        )
+        old_validation_date = timezone.now() - timedelta(days=30)
+        VATValidation.objects.filter(pk=validation.pk).update(validation_date=old_validation_date)
+        mock_vies.return_value = VIESResponse(
+            is_valid=True,
+            country_code="RO",
+            vat_number="1234567",
+            company_name="Test SRL",
+            request_identifier="WAPIAAABy123456789",
+            api_available=True,
+        )
+
+        result = validate_vat_number(str(profile.id))
+
+        self.assertTrue(result["success"])
+        mock_vies.assert_called_once_with(
+            "RO",
+            "1234567",
+            requester_member_state_code="RO",
+            requester_number="87654321",
+        )
+        validation.refresh_from_db()
+        self.assertGreater(validation.validation_date, old_validation_date)
+        self.assertEqual(validation.consultation_reference, "WAPIAAABy123456789")
+
+
+class ReverifyExpiredVatValidationsTests(TestCase):
+    """Expired VIES evidence must be fully drained rather than silently capped."""
+
+    @patch("apps.billing.tasks.async_task")
+    def test_reverification_matches_formatted_profile_vat_number(self, mock_async: MagicMock) -> None:
+        from apps.billing.tax_models import VATValidation  # noqa: PLC0415
+        from apps.customers.models import CustomerTaxProfile  # noqa: PLC0415
+
+        customer = create_customer(company_name="Formatted VIES Test")
+        profile = CustomerTaxProfile.objects.create(
+            customer=customer,
+            vat_number="de 123-456.789",
+            vies_verification_status="valid",
+        )
+        VATValidation.objects.create(
+            country_code="DE",
+            vat_number="123456789",
+            full_vat_number="DE123456789",
+            is_valid=True,
+            is_active=True,
+            validation_source="vies",
+            expires_at=timezone.now() - timedelta(hours=1),
+        )
+
+        result = reverify_expired_vat_validations()
+
+        self.assertEqual(result, {"success": True, "queued": 1, "expired_found": 1, "unmatched": 0})
+        mock_async.assert_called_once_with("apps.billing.tasks.validate_vat_number", str(profile.id))
+
+    @patch("apps.billing.tasks.async_task")
+    def test_failed_format_evidence_never_reenters_the_sweep(self, mock_async: MagicMock) -> None:
+        """A structurally invalid number is terminal evidence: re-verifying it cannot
+        improve it, and it must not inflate the sweep's unmatched report every day."""
+        from apps.billing.tax_models import VATValidation  # noqa: PLC0415
+        from apps.customers.models import CustomerTaxProfile  # noqa: PLC0415
+
+        customer = create_customer(company_name="Bad Format SRL")
+        profile = CustomerTaxProfile.objects.create(
+            customer=customer,
+            vat_number="DE12",
+            vies_verification_status="pending",
+        )
+
+        result = validate_vat_number(str(profile.id))
+
+        self.assertTrue(result["success"])
+        self.assertFalse(result["is_valid"])
+        validation = VATValidation.objects.get(country_code="DE", vat_number="12")
+        self.assertIsNone(validation.expires_at, "failed-format evidence must not expire into the sweep")
+
+        sweep = reverify_expired_vat_validations()
+
+        self.assertEqual(sweep, {"success": True, "queued": 0, "expired_found": 0, "unmatched": 0})
+        mock_async.assert_not_called()
+
+    @patch("apps.billing.tasks.async_task")
+    def test_reverification_queues_more_than_one_hundred_profiles(self, mock_async: MagicMock) -> None:
+        from apps.billing.tax_models import VATValidation  # noqa: PLC0415
+        from apps.customers.models import CustomerTaxProfile  # noqa: PLC0415
+
+        expired_at = timezone.now() - timedelta(hours=1)
+        for index in range(101):
+            vat_number = f"DE{index:09d}"
+            customer = create_customer(company_name=f"VIES Test {index}")
+            CustomerTaxProfile.objects.create(
+                customer=customer,
+                vat_number=vat_number,
+                vies_verification_status="valid",
+            )
+            VATValidation.objects.create(
+                country_code="DE",
+                vat_number=f"{index:09d}",
+                full_vat_number=vat_number,
+                is_valid=True,
+                is_active=True,
+                validation_source="vies",
+                expires_at=expired_at,
+            )
+
+        result = reverify_expired_vat_validations()
+
+        self.assertEqual(result["expired_found"], 101)
+        self.assertEqual(result["queued"], 101)
+        self.assertEqual(mock_async.call_count, 101)
 
 
 # ---------------------------------------------------------------------------

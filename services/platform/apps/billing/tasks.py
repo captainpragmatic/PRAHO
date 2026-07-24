@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta
+from itertools import batched
 from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
@@ -15,8 +16,10 @@ if TYPE_CHECKING:
     from apps.billing.refund_service import RefundGatewayFacts
     from apps.customers.profile_models import CustomerTaxProfile
 
+from django.conf import settings
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Q, Value
+from django.db.models.functions import Replace, Upper
 from django.utils import timezone
 from django_q.tasks import async_task
 
@@ -413,6 +416,7 @@ def validate_vat_number(tax_profile_id: str) -> dict[str, Any]:
                     is_valid=False,
                     source="format_check",
                     response_data={"error": fmt.error_message},
+                    never_expires=True,
                 )
                 _update_tax_profile_vies(tax_profile, status="invalid")
             logger.info("[VAT] Format invalid: %s — %s", fmt.full_vat_number, fmt.error_message)
@@ -424,7 +428,14 @@ def validate_vat_number(tax_profile_id: str) -> dict[str, Any]:
             }
 
         # Step 3: VIES API verification
-        vies = VIESGateway.check_vat(country_code, vat_digits)
+        requester_country, requester_number = parse_vat_number(str(settings.COMPANY_CUI))
+        requester_kwargs: dict[str, str] = {}
+        if is_eu_country(requester_country) and requester_number:
+            requester_kwargs = {
+                "requester_member_state_code": requester_country,
+                "requester_number": requester_number,
+            }
+        vies = VIESGateway.check_vat(country_code, vat_digits, **requester_kwargs)
 
         source: Literal["vies", "format_check", "manual", "cached"]
         if vies.api_available:
@@ -453,6 +464,7 @@ def validate_vat_number(tax_profile_id: str) -> dict[str, Any]:
                 source=source,
                 company_name=vies.company_name,
                 company_address=vies.company_address,
+                consultation_reference=vies.request_identifier,
                 response_data=vies.raw_response,
             )
             _update_tax_profile_vies(
@@ -506,12 +518,16 @@ def _store_validation(  # noqa: PLR0913
     source: Literal["vies", "format_check", "manual", "cached"],
     company_name: str = "",
     company_address: str = "",
+    consultation_reference: str = "",
     response_data: dict[str, Any] | None = None,
+    never_expires: bool = False,
 ) -> None:
     """Upsert a VATValidation record."""
     from apps.billing.tax_models import VATValidation  # noqa: PLC0415
 
-    expires_at = timezone.now() + timedelta(hours=24 if is_valid else 1)
+    # never_expires marks terminal evidence (a structurally invalid number):
+    # re-verification cannot improve it, so it must not re-enter the daily sweep.
+    expires_at = None if never_expires else timezone.now() + timedelta(hours=24 if is_valid else 1)
     VATValidation.objects.update_or_create(
         country_code=country_code,
         vat_number=vat_number,
@@ -521,7 +537,9 @@ def _store_validation(  # noqa: PLR0913
             "is_active": is_valid,
             "company_name": company_name,
             "company_address": company_address,
+            "validation_date": timezone.now(),
             "validation_source": source,
+            "consultation_reference": consultation_reference,
             "response_data": response_data or {},
             "expires_at": expires_at,
         },
@@ -1375,6 +1393,11 @@ def setup_billing_scheduled_tasks() -> dict[str, str]:
             "apps.billing.tasks.reconcile_stripe_refunds",
             "45 2 * * *",
         ),
+        (
+            "billing-vies-reverification",
+            "apps.billing.tasks.reverify_expired_vat_validations",
+            "15 2 * * *",
+        ),
     )
     results: dict[str, str] = {}
     for name, func, cron in schedule_definitions:
@@ -1404,7 +1427,7 @@ def reverify_expired_vat_validations() -> dict[str, Any]:
 
     logger.info("[VAT] Starting periodic VIES re-verification")
 
-    expired = list(
+    expired = (
         VATValidation.objects.filter(
             expires_at__lt=timezone.now(),
         )
@@ -1413,25 +1436,49 @@ def reverify_expired_vat_validations() -> dict[str, Any]:
             # but NOT records that failed format validation (status="invalid") — those won't improve.
             Q(is_valid=True) | Q(validation_source="format_check")
         )
-        .values_list("vat_number", "country_code")[:100]
+        .values_list("vat_number", "country_code")
     )
+    expired_found = expired.count()
 
     from apps.customers.models import CustomerTaxProfile  # noqa: PLC0415
 
     queued = 0
-    for vat_number, country_code in expired:
-        full_vat = f"{country_code}{vat_number}"
-        # Only re-queue profiles that are valid or format_only (not hard-invalid format failures)
-        profile = CustomerTaxProfile.objects.filter(
-            vat_number=full_vat,
-            vies_verification_status__in=["valid", "format_only"],
-        ).first()
-        if profile:
-            async_task("apps.billing.tasks.validate_vat_number", str(profile.id))
+    unmatched = 0
+    for validation_batch in batched(expired.iterator(chunk_size=500), 500, strict=False):
+        full_vat_numbers = {f"{country_code}{vat_number}" for vat_number, country_code in validation_batch}
+        eligible_profiles = list(
+            CustomerTaxProfile.objects.filter(
+                vies_verification_status__in=["valid", "format_only"],
+            )
+            .annotate(
+                normalized_vat_number=Upper(
+                    Replace(
+                        Replace(
+                            Replace("vat_number", Value(" "), Value("")),
+                            Value("-"),
+                            Value(""),
+                        ),
+                        Value("."),
+                        Value(""),
+                    )
+                )
+            )
+            .filter(normalized_vat_number__in=full_vat_numbers)
+            .values_list("id", "normalized_vat_number")
+        )
+        matched_vat_numbers = {vat_number for _profile_id, vat_number in eligible_profiles}
+        unmatched += len(full_vat_numbers - matched_vat_numbers)
+        for profile_id, _vat_number in eligible_profiles:
+            async_task("apps.billing.tasks.validate_vat_number", str(profile_id))
             queued += 1
 
-    logger.info("[VAT] Re-verification: queued %d of %d expired validations", queued, len(expired))
-    return {"success": True, "queued": queued, "expired_found": len(expired)}
+    if unmatched:
+        logger.warning(
+            "[VAT] Re-verification found %d expired validation(s) without an eligible customer profile",
+            unmatched,
+        )
+    logger.info("[VAT] Re-verification: queued %d profile(s) for %d expired validation(s)", queued, expired_found)
+    return {"success": True, "queued": queued, "expired_found": expired_found, "unmatched": unmatched}
 
 
 def reverify_expired_vat_validations_async() -> str:

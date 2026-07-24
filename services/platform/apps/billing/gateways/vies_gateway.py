@@ -37,6 +37,7 @@ class VIESResponse:
     company_name: str = ""
     company_address: str = ""
     request_date: str = ""
+    request_identifier: str = ""
     api_available: bool = True
     error_message: str = ""
     raw_response: dict[str, Any] = field(default_factory=dict)
@@ -46,7 +47,13 @@ class VIESGateway:
     """VIES REST API client with caching and graceful degradation."""
 
     @staticmethod
-    def check_vat(country_code: str, vat_number: str) -> VIESResponse:
+    def check_vat(
+        country_code: str,
+        vat_number: str,
+        *,
+        requester_member_state_code: str | None = None,
+        requester_number: str | None = None,
+    ) -> VIESResponse:
         """Verify a VAT number against the VIES REST API.
 
         Args:
@@ -57,8 +64,19 @@ class VIESGateway:
             VIESResponse. Check api_available to distinguish
             "VIES says invalid" from "VIES is down".
         """
+        if bool(requester_member_state_code) != bool(requester_number):
+            raise ValueError("VIES requester member state and number must be supplied together")
+
         country_code = country_code.upper()
-        cache_key = f"{VIES_CACHE_PREFIX}{country_code}_{vat_number}"
+        requester_member_state_code = (
+            requester_member_state_code.upper() if requester_member_state_code is not None else None
+        )
+        requester_cache_part = (
+            f"{requester_member_state_code}_{requester_number}"
+            if requester_member_state_code and requester_number
+            else "anonymous"
+        )
+        cache_key = f"{VIES_CACHE_PREFIX}{country_code}_{vat_number}_{requester_cache_part}"
 
         cached = cache.get(cache_key)
         if isinstance(cached, dict):
@@ -71,11 +89,19 @@ class VIESGateway:
 
         logger.info("[VIES] Querying API: %s%s", country_code, vat_number)
         try:
+            request_payload = {"countryCode": country_code, "vatNumber": vat_number}
+            if requester_member_state_code and requester_number:
+                request_payload.update(
+                    {
+                        "requesterMemberStateCode": requester_member_state_code,
+                        "requesterNumber": requester_number,
+                    }
+                )
             response = safe_request(
                 "POST",
                 VIES_API_URL,
                 policy=VIES_POLICY,
-                json={"countryCode": country_code, "vatNumber": vat_number},
+                json=request_payload,
             )
             response.raise_for_status()
             data: dict[str, Any] = response.json()
@@ -87,6 +113,7 @@ class VIESGateway:
                 company_name=data.get("name", "") or "",
                 company_address=data.get("address", "") or "",
                 request_date=data.get("requestDate", ""),
+                request_identifier=data.get("requestIdentifier", "") or "",
                 api_available=True,
                 raw_response=data,
             )

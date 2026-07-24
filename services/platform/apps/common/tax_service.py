@@ -455,7 +455,8 @@ class TaxConfiguration:
 
                 # 3. Reverse charge via profile flag (EU B2B shortcut)
                 if (
-                    customer_info.get("reverse_charge_eligible")
+                    customer_info.get("is_vat_payer") is True
+                    and customer_info.get("reverse_charge_eligible")
                     and vat_number
                     and country_code in cls.get_eu_countries()
                     and country_code != "RO"
@@ -474,7 +475,7 @@ class TaxConfiguration:
 
         # EU member states with valid codes
         elif country_code in cls.get_eu_countries():
-            if is_business and vat_number:
+            if is_business and vat_number and customer_info and customer_info.get("is_vat_payer") is True:
                 # B2B EU: Reverse charge (0% VAT, customer pays in their country)
                 return VATScenario.EU_B2B_REVERSE_CHARGE, Decimal("0.0"), is_business, vat_number
             else:

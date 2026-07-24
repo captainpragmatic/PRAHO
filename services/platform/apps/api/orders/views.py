@@ -10,6 +10,7 @@ from decimal import Decimal
 from typing import Any
 
 from django.core.cache import cache
+from django.core.exceptions import ObjectDoesNotExist
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
@@ -51,6 +52,34 @@ logger = logging.getLogger(__name__)
 ISO_COUNTRY_CODE_LENGTH = 2
 IDEMPOTENCY_KEY_MIN_LENGTH = 16
 IDEMPOTENCY_KEY_MAX_LENGTH = 64
+
+
+def _customer_vat_info(
+    customer: Customer,
+    *,
+    country: str,
+    is_business: bool,
+    vat_number: str,
+    order_id: str,
+) -> CustomerVATInfo:
+    """Build the profile-aware VAT context used by persisted order paths."""
+    try:
+        tax_profile = customer.tax_profile
+    except ObjectDoesNotExist:
+        tax_profile = None
+    info: CustomerVATInfo = {
+        "country": country,
+        "is_business": is_business,
+        "vat_number": vat_number or None,
+        "customer_id": str(customer.id),
+        "order_id": order_id,
+    }
+    if tax_profile is not None:
+        info["is_vat_payer"] = tax_profile.is_vat_payer
+        info["reverse_charge_eligible"] = tax_profile.reverse_charge_eligible
+        if tax_profile.vat_rate is not None:
+            info["custom_vat_rate"] = tax_profile.vat_rate
+    return info
 
 
 # 🔒 SECURITY: Custom throttle classes for order endpoints
@@ -138,7 +167,7 @@ def product_detail(request: Request, slug: str) -> Response:
 @permission_classes([AllowAny])
 @throttle_classes([OrderCalculateThrottle])
 @require_customer_authentication
-def calculate_cart_totals(  # noqa: PLR0912, PLR0915  # Complexity: multi-step business logic
+def calculate_cart_totals(  # noqa: PLR0915  # Complexity: multi-step business logic
     request: Request, customer: Customer
 ) -> Response:  # Complexity: order processing pipeline  # Complexity: multi-step business logic
     """
@@ -248,36 +277,25 @@ def calculate_cart_totals(  # noqa: PLR0912, PLR0915  # Complexity: multi-step b
                 }
             )
 
-        # 🔒 SECURITY: Calculate totals with proper VAT compliance
-        # Get customer for VAT calculation - DEFAULT TO ROMANIAN SETTINGS for compliance
-        try:
-            customer_obj = customer  # Already injected by @require_customer_authentication
-            customer_country = getattr(customer_obj, "country", "RO") or "RO"
-            is_business = bool(getattr(customer_obj, "company_name", ""))
-            vat_number = (
-                getattr(customer_obj.tax_profile, "vat_number", "") if hasattr(customer_obj, "tax_profile") else ""
-            )
-
-            # Normalize country - default to RO for compliance if unclear
-            if not customer_country or customer_country.strip() == "":
-                customer_country = "RO"
-        except Customer.DoesNotExist:
-            # Default to Romanian consumer for compliance
+        # Use the same current billing address and tax profile as order creation.
+        billing_address = OrderService.build_billing_address_from_customer(customer)
+        customer_country = str(billing_address.get("country") or "RO").upper().strip()
+        if len(customer_country) != ISO_COUNTRY_CODE_LENGTH:
             customer_country = "RO"
-            is_business = False
-            vat_number = ""
+        vat_number = str(billing_address.get("vat_number") or "")
+        is_business = bool(billing_address.get("company_name")) or bool(vat_number)
 
         # Calculate subtotal from order items
         subtotal_cents = sum(item["unit_price_cents"] * item["quantity"] + item["setup_cents"] for item in order_items)
 
         # Calculate VAT with full compliance
-        customer_vat_info: CustomerVATInfo = {
-            "country": customer_country,
-            "is_business": is_business,
-            "vat_number": vat_number,
-            "customer_id": str(customer_id),
-            "order_id": "cart-calculation",
-        }
+        customer_vat_info = _customer_vat_info(
+            customer,
+            country=customer_country,
+            is_business=is_business,
+            vat_number=vat_number,
+            order_id="cart-calculation",
+        )
         vat_result = OrderVATCalculator.calculate_vat(subtotal_cents=subtotal_cents, customer_info=customer_vat_info)
 
         totals = {
@@ -485,19 +503,19 @@ def preflight_order(  # noqa: PLR0911, PLR0912, PLR0915  # Complexity: multi-ste
             # If country code looks invalid, default to RO for compliance
             if len(country) != ISO_COUNTRY_CODE_LENGTH:
                 country = "RO"
-        is_business = bool(company_name)
+        is_business = bool(company_name) or bool(vat_number)
 
         logger.info(
             f"🔎 [API] VAT calculation inputs: subtotal={subtotal_cents}¢, country={country}, is_business={is_business}, vat_number={vat_number}"
         )
 
-        customer_vat_info: CustomerVATInfo = {
-            "country": country,
-            "is_business": is_business,
-            "vat_number": vat_number or None,
-            "customer_id": str(customer.id),
-            "order_id": "preflight-preview",
-        }
+        customer_vat_info = _customer_vat_info(
+            customer,
+            country=country,
+            is_business=is_business,
+            vat_number=vat_number,
+            order_id="preflight-preview",
+        )
         vat_result = OrderVATCalculator.calculate_vat(subtotal_cents=subtotal_cents, customer_info=customer_vat_info)
 
         # Create a temporary order object for validation (not saved to DB)

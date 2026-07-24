@@ -30,6 +30,7 @@ from apps.billing.document_adjustments import (
 from apps.billing.efactura.settings import ro_local_date
 from apps.billing.exchange_rate_service import ExchangeRateService
 from apps.billing.fiscal_identity import normalize_business_tax_id, normalize_country_code, validated_cnp_or_empty
+from apps.billing.tax_evidence import REVERSE_CHARGE_LEGAL_BASIS
 from apps.common.tax_service import TaxService
 
 # UBL 2.1 Namespaces
@@ -77,7 +78,7 @@ TAX_CATEGORY_NOT_SUBJECT = "O"  # Not subject to VAT
 
 # EN16931 BT-121: Tax exemption reason text
 TAX_EXEMPTION_REASONS: dict[str, str] = {
-    "AE": "Reverse charge — Art. 196 Council Directive 2006/112/EC",
+    "AE": f"Reverse charge — {REVERSE_CHARGE_LEGAL_BASIS}",
     "E": "Exempt from tax",
     "K": "Intra-community supply — Art. 138 Council Directive 2006/112/EC",
     "O": "Not subject to VAT",

@@ -424,7 +424,7 @@ class OrderStatusChangeViewTestCase(TestCase):
                 'city': 'Bucuresti',
                 'county': 'Bucuresti',
                 'postal_code': '010001',
-                'country': 'Romania',
+                'country': 'RO',
             }
         )
         # FSM: draft → pending (submit) requires at least one item + a price for the currency

@@ -21,7 +21,7 @@ from unittest.mock import MagicMock, patch
 from django.test import RequestFactory, TestCase
 
 from apps.billing.models import Currency
-from apps.customers.models import Customer
+from apps.customers.models import Customer, CustomerAddress, CustomerTaxProfile
 from apps.products.models import Product, ProductPrice
 
 # ---------------------------------------------------------------------------
@@ -200,6 +200,33 @@ class CartCalculateProductByUUIDTestCase(TestCase):
 
         self.assertEqual(data["subtotal_cents"], 32_400)
         self.assertEqual(data["items"][0]["unit_price_cents"], 32_400)
+
+    def test_non_vat_payer_eu_business_uses_profile_and_billing_country(self) -> None:
+        """The cart quote must match the invoice path's profile-aware VAT decision."""
+        CustomerAddress.objects.create(
+            customer=self.customer,
+            is_billing=True,
+            address_line1="Teststrasse 1",
+            city="Berlin",
+            county="Berlin",
+            postal_code="10115",
+            country="DE",
+        )
+        CustomerTaxProfile.objects.create(
+            customer=self.customer,
+            vat_number="DE123456789",
+            is_vat_payer=False,
+        )
+
+        data = _call_calculate(
+            self.customer,
+            self.currency,
+            [_cart_item(product_id=self.product.id, quantity=1)],
+        )
+
+        self.assertEqual(data["subtotal_cents"], 3000)
+        self.assertEqual(data["tax_cents"], 570)
+        self.assertEqual(data["total_cents"], 3570)
 
     def test_fractional_vat_rate_is_preserved_exactly(self) -> None:
         vat_result = MagicMock(

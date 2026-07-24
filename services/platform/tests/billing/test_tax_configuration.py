@@ -662,6 +662,7 @@ class OrderVATCalculatorTests(TestCase):
             "country": "DE",
             "is_business": True,
             "vat_number": "DE123456789",
+            "is_vat_payer": True,
         }
         result = OrderVATCalculator.calculate_vat(10000, info)
 
@@ -1084,6 +1085,7 @@ class PerCustomerVATOverrideTests(TestCase):
             "country": "DE",
             "is_business": True,
             "vat_number": "DE123456789",
+            "is_vat_payer": True,
             "reverse_charge_eligible": True,
         }
         result = OrderVATCalculator.calculate_vat(10000, info)
@@ -1098,6 +1100,7 @@ class PerCustomerVATOverrideTests(TestCase):
             "country": "RO",
             "is_business": True,
             "vat_number": "RO12345678",
+            "is_vat_payer": True,
             "reverse_charge_eligible": True,
         }
         result = OrderVATCalculator.calculate_vat(10000, info)
@@ -1188,6 +1191,7 @@ class CrossCalculatorConsistencyTests(TestCase):
                 "country": "DE",
                 "is_business": True,
                 "vat_number": "DE123456789",
+                "is_vat_payer": True,
             }
         )
         self.assertEqual(ts_result["vat_cents"], 0)
@@ -1368,6 +1372,7 @@ class BusinessDetectionConsistencyTests(TestCase):
             "country": "DE",
             "is_business": True,  # Set by: bool(company_name) or bool(vat_number)
             "vat_number": "DE123456789",
+            "is_vat_payer": True,
         }
         result = OrderVATCalculator.calculate_vat(10000, info)
 
