@@ -949,18 +949,38 @@ def reconcile_divergent_services_task() -> dict[str, Any]:
         "service_id", flat=True
     )[:50]:
         divergent_ids.add(str(sid))
+    # (c) active hosting Service whose original on_commit enqueue was lost
+    # before any VirtualminAccount row existed. Apply the hosting predicates
+    # before the safety cap so unrelated services cannot starve this scan.
+    for sid in (
+        Service.objects.filter(
+            status="active",
+            virtualmin_account__isnull=True,
+            service_plan__plan_type__in=Service.VIRTUALMIN_HOSTING_PLAN_TYPES,
+        )
+        .exclude(domain="")
+        .order_by("pk")
+        .values_list("pk", flat=True)[:50]
+    ):
+        divergent_ids.add(str(sid))
 
     queued = 0
+    failed = 0
     for service_id in divergent_ids:
         try:
             reconcile_virtualmin_service_state_async(service_id)
             queued += 1
-        except Exception as e:
-            logger.warning(f"⚠️ [VirtualminTask] Failed to queue divergence reconcile for {service_id}: {e}")
+        except Exception:
+            failed += 1
+            logger.warning(
+                "⚠️ [VirtualminTask] Failed to queue divergence reconcile for %s",
+                service_id,
+                exc_info=True,
+            )
 
     if queued:
         logger.info(f"🔄 [VirtualminTask] Divergence backstop queued {queued} reconciliations")
-    return {"success": True, "queued": queued}
+    return {"success": failed == 0, "queued": queued, "failed": failed}
 
 
 def reconcile_virtualmin_service_state_async(service_id: str) -> str:

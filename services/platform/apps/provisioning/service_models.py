@@ -290,6 +290,10 @@ class Server(models.Model):
 class Service(ConcurrentTransitionMixin, models.Model):
     """Customer services (hosting accounts, domains, etc.)"""
 
+    VIRTUALMIN_HOSTING_PLAN_TYPES: ClassVar[frozenset[str]] = frozenset(
+        {"shared_hosting", "vps", "dedicated", "reseller"}
+    )
+
     STATUS_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
         ("pending", _("Pending")),
         ("provisioning", _("Provisioning")),
@@ -504,10 +508,8 @@ class Service(ConcurrentTransitionMixin, models.Model):
 
         Cross-app integration helper for billing → provisioning triggers.
         """
-        # Check if service plan is a hosting type that needs control panel account
-        hosting_plan_types = ["shared_hosting", "vps", "dedicated", "reseller"]
         return (
-            self.service_plan.plan_type in hosting_plan_types
+            self.service_plan.plan_type in self.VIRTUALMIN_HOSTING_PLAN_TYPES
             and self.status in ["active", "provisioning"]
             and bool(self.domain)  # Must have a domain
         )

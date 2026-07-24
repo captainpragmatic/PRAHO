@@ -25,7 +25,7 @@ from apps.customers.models import Customer
 from apps.provisioning.models import Service, ServicePlan
 from apps.provisioning.signals import handle_service_virtualmin_reconciliation
 from apps.provisioning.tasks import queue_service_provisioning
-from apps.provisioning.virtualmin_gateway import VirtualminConfig, VirtualminGateway
+from apps.provisioning.virtualmin_gateway import VirtualminConfig, VirtualminGateway, VirtualminResponse
 from apps.provisioning.virtualmin_models import (
     VirtualminAccount,
     VirtualminDriftRecord,
@@ -725,6 +725,42 @@ class TestReviewHardening325(VirtualminTaskTestBase):
         job.refresh_from_db()
         self.assertEqual(job.status, "failed")
 
+    def test_aged_legacy_pending_job_without_lease_or_start_is_recovered(self):
+        """Pre-lease pending rows have neither claimed_at nor started_at.
+        Once older than the lease, they are abandoned work and must re-enter
+        the failed pool instead of remaining invisible forever."""
+        job = self._failed_job(
+            status="pending",
+            claimed_at=None,
+            started_at=None,
+            next_retry_at=None,
+        )
+        stale_at = timezone.now() - timedelta(minutes=31)
+        VirtualminProvisioningJob.objects.filter(pk=job.pk).update(updated_at=stale_at)
+
+        recovered = VirtualminProvisioningJob.recover_expired_claims(
+            timezone.now() - timedelta(minutes=30), timezone.now() + timedelta(minutes=5)
+        )
+
+        self.assertEqual(recovered, 1)
+        job.refresh_from_db()
+        self.assertEqual(job.status, "failed")
+        self.assertIsNotNone(job.next_retry_at)
+
+    def test_fresh_unclaimed_pending_job_is_not_recovered(self):
+        """A newly-created initial job may briefly be pending before the
+        worker calls mark_started; the legacy backstop must honor the lease
+        window and not steal live work."""
+        job = self._failed_job(status="pending", claimed_at=None, started_at=None)
+
+        recovered = VirtualminProvisioningJob.recover_expired_claims(
+            timezone.now() - timedelta(minutes=30), timezone.now() + timedelta(minutes=5)
+        )
+
+        self.assertEqual(recovered, 0)
+        job.refresh_from_db()
+        self.assertEqual(job.status, "pending")
+
     def test_exhausted_job_opts_out_of_future_sweeps(self):
         job = self._failed_job(retry_count=3, max_retries=3)
 
@@ -762,6 +798,39 @@ class TestReviewHardening325(VirtualminTaskTestBase):
         self.assertFalse(result["success"])
         job.refresh_from_db()
         self.assertEqual(job.status, "failed")
+        self.assertIsNotNone(job.next_retry_at)
+
+    def test_lifecycle_retry_arms_next_retry_on_application_rate_limit(self):
+        """HTTP 200 can still carry a rejected Virtualmin command. An explicit
+        application-level rate limit must retain retry eligibility."""
+        self.account.status = "active"
+        self.account.save(update_fields=["status"])
+        force_status(self.service, "suspended")
+        job = self._failed_job(
+            operation="suspend_domain",
+            status="pending",
+            retry_count=1,
+            claimed_at=timezone.now(),
+        )
+        gateway = MagicMock()
+        gateway.call.return_value = Ok(
+            VirtualminResponse(
+                success=False,
+                data={"error": "Rate limit exceeded, try again later"},
+                raw_response='{"status":"failure"}',
+                http_status=200,
+                execution_time=0.01,
+                program="disable-domain",
+                server_hostname=self.server.hostname,
+            )
+        )
+
+        with patch("apps.provisioning.virtualmin_service.VirtualminGateway", return_value=gateway):
+            result = retry_virtualmin_job(str(job.id))
+
+        self.assertFalse(result["success"])
+        job.refresh_from_db()
+        self.assertEqual(job.result["retriability"], Retriability.RETRIABLE.value)
         self.assertIsNotNone(job.next_retry_at)
 
     def test_stale_unsuspend_job_is_superseded_by_current_state(self):
@@ -980,6 +1049,93 @@ class TestAtoZReviewFixes(VirtualminTaskTestBase):
 
         self.assertEqual(result["queued"], 1)
         mock_reconcile.assert_called_once_with(str(self.service.id))
+
+    @patch("apps.provisioning.virtualmin_tasks.reconcile_virtualmin_service_state_async", return_value="t-1")
+    def test_divergence_backstop_requeues_active_hosting_service_without_account(self, mock_reconcile):
+        """A broker outage can lose the original on_commit enqueue before a
+        VirtualminAccount exists; the periodic scan must discover the Service
+        row itself, not only account-state divergence."""
+        unprovisioned = Service.objects.create(
+            customer=self.customer,
+            service_plan=self.plan,
+            currency=self.currency,
+            service_name="lost.example.com",
+            domain="lost.example.com",
+            username="lostuser",
+            billing_cycle="monthly",
+            price=Decimal("10.00"),
+            status="active",
+        )
+
+        result = reconcile_divergent_services_task()
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["queued"], 1)
+        mock_reconcile.assert_called_once_with(str(unprovisioned.id))
+
+    @patch("apps.provisioning.virtualmin_tasks.reconcile_virtualmin_service_state_async", return_value="t-1")
+    def test_non_hosting_services_cannot_starve_missing_account_scan(self, mock_reconcile):
+        """The 50-row safety cap belongs after the hosting predicates; a busy
+        deployment may have many active domain/SSL services that must not hide
+        a recoverable hosting service forever."""
+        domain_plan = ServicePlan.objects.create(
+            name="Domain only",
+            plan_type="domain",
+            price_monthly=Decimal("1.00"),
+        )
+        Service.objects.bulk_create(
+            [
+                Service(
+                    customer=self.customer,
+                    service_plan=domain_plan,
+                    currency=self.currency,
+                    service_name=f"domain-{index}.example",
+                    domain=f"domain-{index}.example",
+                    username=f"domain{index}",
+                    billing_cycle="annual",
+                    price=Decimal("1.00"),
+                    status="active",
+                )
+                for index in range(50)
+            ]
+        )
+        unprovisioned = Service.objects.create(
+            customer=self.customer,
+            service_plan=self.plan,
+            currency=self.currency,
+            service_name="recover-me.example.com",
+            domain="recover-me.example.com",
+            username="recoverme",
+            billing_cycle="monthly",
+            price=Decimal("10.00"),
+            status="active",
+        )
+
+        result = reconcile_divergent_services_task()
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["queued"], 1)
+        mock_reconcile.assert_called_once_with(str(unprovisioned.id))
+
+    @patch(
+        "apps.provisioning.virtualmin_tasks.reconcile_virtualmin_service_state_async",
+        side_effect=RuntimeError("broker unavailable"),
+    )
+    def test_divergence_backstop_reports_enqueue_failures(self, mock_reconcile):
+        """A failed broker enqueue is an unhealthy scan result, never the
+        same success payload as a clean scan with no divergence."""
+        self.account.status = "active"
+        self.account.save(update_fields=["status"])
+        force_status(self.service, "suspended")
+
+        with patch("apps.provisioning.virtualmin_tasks.logger") as mock_logger:
+            result = reconcile_divergent_services_task()
+
+        self.assertFalse(result["success"])
+        self.assertEqual(result["queued"], 0)
+        self.assertEqual(result["failed"], 1)
+        mock_reconcile.assert_called_once_with(str(self.service.id))
+        self.assertTrue(mock_logger.warning.call_args.kwargs["exc_info"])
 
     @patch("apps.provisioning.virtualmin_tasks.reconcile_virtualmin_service_state_async", return_value="t-1")
     def test_raw_fixture_load_does_not_trigger_reconciliation(self, mock_reconcile):

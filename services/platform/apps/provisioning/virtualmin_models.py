@@ -12,7 +12,6 @@ from datetime import timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, ClassVar
 
-from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
 from django.db import models
 from django.urls import reverse
@@ -677,14 +676,18 @@ class VirtualminProvisioningJob(models.Model):
     def recover_expired_claims(cls, cutoff: Any, retry_at: Any) -> int:
         """Return orphaned in-flight jobs to the failed pool so the sweep retries them.
 
-        Two orphan classes, both recovered by age:
+        Three orphan classes, all recovered by age:
         - a leased retry whose claimed_at lease expired; and
         - an INITIAL execution that died mid-run — mark_started() sets
           status='running' and started_at but never claims (claimed_at stays
           NULL), so without the started_at arm a first-execution worker death
           (SIGKILL/OOM/deploy restart) would strand the job in 'running'
-          forever. started_at is only compared for unclaimed rows so a live
-          leased job is never reclaimed on started_at alone.
+          forever; and
+        - a legacy pre-lease pending/running row with neither timestamp, aged
+          by updated_at so a freshly-created initial job keeps its full lease.
+
+        started_at/updated_at are only compared for unclaimed rows so a live
+        leased job is never reclaimed on either timestamp alone.
         """
         return (
             cls.objects.filter(
@@ -692,7 +695,12 @@ class VirtualminProvisioningJob(models.Model):
             )
             .filter(
                 models.Q(claimed_at__isnull=False, claimed_at__lt=cutoff)
-                | models.Q(claimed_at__isnull=True, started_at__isnull=False, started_at__lt=cutoff),
+                | models.Q(claimed_at__isnull=True, started_at__isnull=False, started_at__lt=cutoff)
+                | models.Q(
+                    claimed_at__isnull=True,
+                    started_at__isnull=True,
+                    updated_at__lt=cutoff,
+                ),
             )
             .update(status="failed", next_retry_at=retry_at, claimed_at=None, updated_at=timezone.now())
         )
@@ -799,37 +807,6 @@ class VirtualminProvisioningJob(models.Model):
                 "result",
                 "execution_time_seconds",
                 "next_retry_at",
-                "rollback_executed",
-                "rollback_status",
-                "rollback_details",
-                "updated_at",
-            ]
-        )
-
-    def schedule_retry(self) -> None:
-        """Schedule job for retry"""
-        if not self.can_retry:
-            raise ValidationError(_("Job cannot be retried"))
-
-        self.retry_count += 1
-        self.status = "pending"
-        self.status_message = ""
-        self.started_at = None
-        self.completed_at = None
-        self.execution_time_seconds = None
-        # Reset rollback tracking for new attempt
-        self.rollback_executed = False
-        self.rollback_status = ""
-        self.rollback_details = {}
-
-        self.save(
-            update_fields=[
-                "retry_count",
-                "status",
-                "status_message",
-                "started_at",
-                "completed_at",
-                "execution_time_seconds",
                 "rollback_executed",
                 "rollback_status",
                 "rollback_details",
