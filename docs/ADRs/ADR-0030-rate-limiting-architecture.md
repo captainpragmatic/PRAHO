@@ -41,7 +41,10 @@ Canonical classes also defined in `apps.common.performance.rate_limiting`, re-ex
 - `BurstAPIThrottle` (`api_burst`)
 - `AuthThrottle` (`auth`)
 
-Order-specific scoped throttles remain in `apps.api.orders.views` with explicit scopes.
+Function-based endpoint throttles subclass the canonical `EndpointRateThrottle`,
+declare explicit scopes, and choose a stable identity from the verified portal,
+authenticated user, or client IP. Protected HMAC function views explicitly stack
+the global portal sustained/burst throttles with their endpoint-specific limit.
 
 ### Layer 3: Portal middleware throttles
 
@@ -59,6 +62,7 @@ For those requests, customer/burst fallback classes skip throttling to avoid dou
 - `portal_hmac`, `portal_hmac_burst`, `customer`, `burst`
 - `auth`, `sustained`, `api_burst`, `anon`
 - `order_create`, `order_calculate`, `order_list`, `product_catalog`
+- `session_validation`
 
 ### Startup validation
 

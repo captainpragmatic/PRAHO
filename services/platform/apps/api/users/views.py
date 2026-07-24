@@ -9,7 +9,6 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
-from django.conf import settings
 from django.contrib.auth import authenticate
 from django.http import HttpRequest, JsonResponse
 from django.views.decorators.cache import never_cache
@@ -19,7 +18,7 @@ from rest_framework import status
 from rest_framework.decorators import api_view, authentication_classes, permission_classes, throttle_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
-from rest_framework.throttling import AnonRateThrottle, ScopedRateThrottle
+from rest_framework.throttling import AnonRateThrottle
 
 from apps.api.core.throttling import AuthThrottle
 from apps.api.secure_auth import (
@@ -30,7 +29,7 @@ from apps.api.secure_auth import (
 )
 from apps.api.users.authentication import HashedTokenAuthentication
 from apps.common.constants import HMAC_NTP_SKEW_SECONDS, HMAC_TIMESTAMP_WINDOW_SECONDS
-from apps.common.performance.rate_limiting import PortalHMACBurstThrottle, PortalHMACRateThrottle
+from apps.common.performance.rate_limiting import EndpointRateThrottle, PortalHMACBurstThrottle, PortalHMACRateThrottle
 from apps.common.request_ip import get_safe_client_ip
 from apps.customers.models import Customer
 from apps.users.forms import UserRegistrationForm
@@ -398,16 +397,10 @@ def verify_token(request: HttpRequest, customer: Customer) -> Response:
 # ===============================================================================
 
 
-class SessionValidationThrottle(ScopedRateThrottle):
-    """DRF scoped throttle for session validation — rate defined in DEFAULT_THROTTLE_RATES["session_validation"]."""
+class SessionValidationThrottle(EndpointRateThrottle):
+    """Per-portal endpoint throttle for session validation."""
 
     scope = "session_validation"
-
-    def allow_request(self, request: HttpRequest, view: Any) -> bool:
-        # Skip throttling in test/dev environments (RATE_LIMITING_ENABLED=False)
-        if not getattr(settings, "RATE_LIMITING_ENABLED", True):
-            return True
-        return bool(super().allow_request(request, view))
 
 
 @never_cache  # nosemgrep: no-csrf-exempt — HMAC-authenticated inter-service endpoint
@@ -415,7 +408,7 @@ class SessionValidationThrottle(ScopedRateThrottle):
 @api_view(["POST"])
 @authentication_classes([])  # No DRF authentication - HMAC handled by middleware
 @permission_classes([AllowAny])  # HMAC authentication via @require_portal_authentication below
-@throttle_classes([SessionValidationThrottle])
+@throttle_classes([PortalHMACRateThrottle, PortalHMACBurstThrottle, SessionValidationThrottle])
 @require_portal_authentication
 def validate_session_secure(request: HttpRequest) -> Response:
     """

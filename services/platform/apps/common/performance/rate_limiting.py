@@ -23,6 +23,7 @@ import re
 from collections.abc import Sequence
 from typing import Any, cast
 
+from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 from django.utils.module_loading import import_string
 from rest_framework.request import Request
@@ -62,6 +63,7 @@ _KNOWN_THROTTLE_CLASS_SCOPES: dict[str, str] = {
     "apps.api.orders.views.OrderCalculateThrottle": "order_calculate",
     "apps.api.orders.views.OrderListThrottle": "order_list",
     "apps.api.orders.views.ProductCatalogThrottle": "product_catalog",
+    "apps.api.users.views.SessionValidationThrottle": "session_validation",
     "rest_framework.throttling.AnonRateThrottle": "anon",
 }
 
@@ -157,10 +159,12 @@ def _extract_hmac_identity(request: Request) -> str:
     """
     Build a stable HMAC throttle identity.
 
-    Use a portal-only key so callers cannot bypass limits by rotating signed
-    payload fields (customer_id/user_id) and creating unbounded cache keys.
+    Prefer the canonical portal ID stored by HMAC middleware after signature
+    verification. The header fallback supports isolated tests and defensive
+    compatibility with already-authenticated request adapters.
     """
-    return str(request.headers.get("X-Portal-Id", "unknown"))
+    verified_portal_id = getattr(request, "_portal_id", None)
+    return str(verified_portal_id or request.headers.get("X-Portal-Id", "unknown"))
 
 
 class _CustomTimeRateMixin:
@@ -170,7 +174,16 @@ class _CustomTimeRateMixin:
         return parse_rate_string(rate)
 
 
-class PortalHMACRateThrottle(SimpleRateThrottle):  # type: ignore[misc]  # DRF throttle base uses dynamic attrs
+class _ConfigurableRateThrottle(SimpleRateThrottle):  # type: ignore[misc]  # dynamic DRF attributes
+    """Honor PRAHO's system-wide rate-limiting kill switch."""
+
+    def allow_request(self, request: Request, view: Any) -> bool:
+        if not getattr(settings, "RATE_LIMITING_ENABLED", True):
+            return True
+        return bool(super().allow_request(request, view))
+
+
+class PortalHMACRateThrottle(_ConfigurableRateThrottle):
     """Per-portal throttling for service-to-service HMAC requests."""
 
     scope = "portal_hmac"
@@ -183,7 +196,7 @@ class PortalHMACRateThrottle(SimpleRateThrottle):  # type: ignore[misc]  # DRF t
         return self.cache_format % {"scope": self.scope, "ident": ident}
 
 
-class PortalHMACBurstThrottle(_CustomTimeRateMixin, SimpleRateThrottle):  # type: ignore[misc]  # DRF throttle base uses dynamic attrs
+class PortalHMACBurstThrottle(_CustomTimeRateMixin, _ConfigurableRateThrottle):
     """Burst throttling for HMAC traffic to protect against request spikes."""
 
     scope = "portal_hmac_burst"
@@ -196,7 +209,7 @@ class PortalHMACBurstThrottle(_CustomTimeRateMixin, SimpleRateThrottle):  # type
         return self.cache_format % {"scope": self.scope, "ident": ident}
 
 
-class PortalHMACCreateUserThrottle(_CustomTimeRateMixin, SimpleRateThrottle):  # type: ignore[misc]  # DRF throttle base uses dynamic attrs
+class PortalHMACCreateUserThrottle(_CustomTimeRateMixin, _ConfigurableRateThrottle):
     """Strict per-portal throttle for the HMAC user-creation mutation.
 
     Layered on top of the global PortalHMAC*Throttle limits to bound account
@@ -215,6 +228,28 @@ class PortalHMACCreateUserThrottle(_CustomTimeRateMixin, SimpleRateThrottle):  #
         if not _is_portal_authenticated(request):
             return None
         ident = _extract_hmac_identity(request)
+        return self.cache_format % {"scope": self.scope, "ident": ident}
+
+
+class EndpointRateThrottle(_CustomTimeRateMixin, _ConfigurableRateThrottle):
+    """Per-endpoint throttle for function-based API views.
+
+    ``ScopedRateThrottle`` reads its scope from ``view.throttle_scope`` and
+    therefore silently disables subclasses attached to DRF ``@api_view``
+    functions. Endpoint subclasses declare their scope directly and use the
+    verified portal identity for HMAC traffic, the authenticated user for
+    direct API traffic, and the client IP for public endpoints.
+    """
+
+    cache_format = "throttle_endpoint_%(scope)s_%(ident)s"
+
+    def get_cache_key(self, request: Request, view: Any) -> str:
+        if _is_portal_authenticated(request):
+            ident = f"portal_{_extract_hmac_identity(request)}"
+        elif request.user and request.user.is_authenticated:
+            ident = f"user_{request.user.pk}"
+        else:
+            ident = f"ip_{self.get_ident(request)}"
         return self.cache_format % {"scope": self.scope, "ident": ident}
 
 

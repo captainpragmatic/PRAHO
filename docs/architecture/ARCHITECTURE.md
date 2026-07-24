@@ -333,10 +333,12 @@ Rate limiting runs in three layers and is intentionally cumulative:
    - `StandardAPIThrottle` (`sustained`)
    - `BurstAPIThrottle` (`api_burst`)
    - `AuthThrottle` (`auth`)
+   - `EndpointRateThrottle` subclasses for order, catalog, and session-validation scopes
 
 For internal HMAC traffic, `request._portal_authenticated` drives mutual exclusion:
 - portal HMAC throttles apply
 - customer/burst fallback classes skip processing for the same request
+- endpoint throttles key on the verified portal identity rather than client IP
 
 Throttle scope rates are centrally configured via `THROTTLE_RATES` and validated at startup
 to fail fast on invalid rate strings or missing scopes.

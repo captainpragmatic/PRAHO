@@ -19,10 +19,14 @@ from rest_framework.decorators import api_view, authentication_classes, permissi
 from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
 from rest_framework.response import Response
-from rest_framework.throttling import ScopedRateThrottle
 
 from apps.api.secure_auth import public_api_endpoint, require_customer_authentication
 from apps.billing.models import Currency
+from apps.common.performance.rate_limiting import (
+    EndpointRateThrottle,
+    PortalHMACBurstThrottle,
+    PortalHMACRateThrottle,
+)
 from apps.common.types import CurrencyCode, Err, Ok
 from apps.customers.models import Customer
 from apps.orders.models import Order
@@ -83,25 +87,25 @@ def _customer_vat_info(
 
 
 # 🔒 SECURITY: Custom throttle classes for order endpoints
-class OrderCreateThrottle(ScopedRateThrottle):
+class OrderCreateThrottle(EndpointRateThrottle):
     """Throttling for order creation endpoints"""
 
     scope = "order_create"
 
 
-class OrderCalculateThrottle(ScopedRateThrottle):
+class OrderCalculateThrottle(EndpointRateThrottle):
     """Throttling for cart calculation endpoints"""
 
     scope = "order_calculate"
 
 
-class OrderListThrottle(ScopedRateThrottle):
+class OrderListThrottle(EndpointRateThrottle):
     """Throttling for order listing endpoints"""
 
     scope = "order_list"
 
 
-class ProductCatalogThrottle(ScopedRateThrottle):
+class ProductCatalogThrottle(EndpointRateThrottle):
     """Throttling for product catalog endpoints"""
 
     scope = "product_catalog"
@@ -165,7 +169,7 @@ def product_detail(request: Request, slug: str) -> Response:
 @api_view(["POST"])
 @authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])
-@throttle_classes([OrderCalculateThrottle])
+@throttle_classes([PortalHMACRateThrottle, PortalHMACBurstThrottle, OrderCalculateThrottle])
 @require_customer_authentication
 def calculate_cart_totals(  # noqa: PLR0915  # Complexity: multi-step business logic
     request: Request, customer: Customer
@@ -371,7 +375,7 @@ def _resolve_currency(raw_code: object) -> tuple[Currency | None, Response | Non
 @api_view(["POST"])
 @authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])  # No permissions required (auth handled by secure_auth)
-@throttle_classes([OrderCalculateThrottle])
+@throttle_classes([PortalHMACRateThrottle, PortalHMACBurstThrottle, OrderCalculateThrottle])
 @require_customer_authentication
 def preflight_order(  # noqa: PLR0911, PLR0912, PLR0915  # Complexity: multi-step business logic
     request: Request, customer: Customer
@@ -585,7 +589,7 @@ def preflight_order(  # noqa: PLR0911, PLR0912, PLR0915  # Complexity: multi-ste
 @api_view(["POST"])
 @authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])  # No permissions required (auth handled by secure_auth)
-@throttle_classes([OrderCreateThrottle])
+@throttle_classes([PortalHMACRateThrottle, PortalHMACBurstThrottle, OrderCreateThrottle])
 @require_customer_authentication
 def create_order(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-step business logic
     request: Request, customer: Customer
@@ -858,7 +862,7 @@ def create_order(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-
 @api_view(["POST"])
 @authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])  # No permissions required (auth handled by secure_auth)
-@throttle_classes([OrderListThrottle])
+@throttle_classes([PortalHMACRateThrottle, PortalHMACBurstThrottle, OrderListThrottle])
 @require_customer_authentication
 def order_list(request: Request, customer: Customer) -> Response:
     """
@@ -890,7 +894,7 @@ def order_list(request: Request, customer: Customer) -> Response:
 @api_view(["POST"])
 @authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])  # No permissions required (auth handled by secure_auth)
-@throttle_classes([OrderListThrottle])
+@throttle_classes([PortalHMACRateThrottle, PortalHMACBurstThrottle, OrderListThrottle])
 @require_customer_authentication
 def order_detail(request: Request, customer: Customer, order_id: str) -> Response:
     """
@@ -985,7 +989,7 @@ def _provision_confirmed_order_item(item: Any, customer: Any, order: Any) -> dic
 @api_view(["POST"])
 @authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])
-@throttle_classes([OrderListThrottle])
+@throttle_classes([PortalHMACRateThrottle, PortalHMACBurstThrottle, OrderListThrottle])
 @require_customer_authentication
 def confirm_order(request: Request, customer: Customer, order_id: str) -> Response:  # noqa: PLR0911, PLR0912, PLR0915, C901
     """

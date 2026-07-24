@@ -94,6 +94,7 @@ def _validate_throttle_rates_at_startup() -> None:
         "apps.api.orders.views.OrderCalculateThrottle",
         "apps.api.orders.views.OrderListThrottle",
         "apps.api.orders.views.ProductCatalogThrottle",
+        "apps.api.users.views.SessionValidationThrottle",
         "rest_framework.throttling.AnonRateThrottle",
     ]
     validate_throttle_class_scopes(scoped_class_paths, throttle_rates)

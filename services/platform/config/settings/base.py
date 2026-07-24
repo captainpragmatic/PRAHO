@@ -691,6 +691,7 @@ THROTTLE_RATES = {
     "order_calculate": "60/min",
     "order_list": "200/min",
     "product_catalog": "400/min",
+    "session_validation": "60/min",
 }
 
 # Add throttling classes to REST_FRAMEWORK
