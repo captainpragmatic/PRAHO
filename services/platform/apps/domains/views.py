@@ -7,6 +7,7 @@ from __future__ import annotations
 import logging
 from typing import Any, cast
 
+from dateutil.relativedelta import relativedelta
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
@@ -39,11 +40,22 @@ logger = logging.getLogger(__name__)
 # Module-level defaults for domain expiry thresholds (configurable via SettingsService)
 _DEFAULT_DOMAIN_EXPIRY_CRITICAL_DAYS = 7
 _DEFAULT_DOMAIN_EXPIRY_WARNING_DAYS = 30
+_SINGLE_YEAR = 1
 
 
 # ===============================================================================
 # HELPER FUNCTIONS
 # ===============================================================================
+
+
+def _parse_requested_years(raw_years: str | None) -> int | None:
+    """Parse a customer-submitted period without allowing malformed input to raise."""
+    if raw_years is None:
+        return _SINGLE_YEAR
+    try:
+        return int(raw_years)
+    except ValueError:
+        return None
 
 
 def _get_accessible_customer_ids(user: User) -> list[int]:
@@ -358,12 +370,14 @@ def domain_register(  # Complexity: multi-step workflow  # noqa: PLR0912  # Comp
     if request.method == "POST":
         domain_name = request.POST.get("domain_name", "").strip().lower()
         selected_customer_id = request.POST.get("customer_id")
-        years = int(request.POST.get("years", 1))
+        years = _parse_requested_years(request.POST.get("years"))
         whois_privacy = request.POST.get("whois_privacy") == "on"
         auto_renew = request.POST.get("auto_renew") == "on"
 
         # Validate inputs
-        if not domain_name:
+        if years is None:
+            messages.error(request, _("Please select a valid registration period"))
+        elif not domain_name:
             messages.error(request, _("Please enter a domain name"))
         elif not selected_customer_id:
             messages.error(request, _("Please select a customer"))
@@ -396,12 +410,13 @@ def domain_register(  # Complexity: multi-step workflow  # noqa: PLR0912  # Comp
     # Calculate costs for featured TLDs
     tld_pricing = []
     for tld in featured_tlds:
-        pricing = TLDService.calculate_domain_cost(tld, 1, False)
+        pricing = TLDService.calculate_domain_cost(tld, tld.min_registration_period, False)
         tld_pricing.append(
             {
                 "tld": tld,
                 "cost": pricing["total_cost"],
                 "cost_cents": pricing["total_cost_cents"],
+                "years": tld.min_registration_period,
             }
         )
 
@@ -410,7 +425,6 @@ def domain_register(  # Complexity: multi-step workflow  # noqa: PLR0912  # Comp
         "featured_tlds": featured_tlds,
         "all_tlds": all_tlds,
         "tld_pricing": tld_pricing,
-        "years_choices": list(range(1, 11)),  # 1-10 years
     }
 
     return render(request, "domains/domain_register.html", context)
@@ -462,9 +476,21 @@ def check_availability(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911  
             {"success": True, "available": False, "message": _("Domain is not available"), "domain_name": domain_name}
         )
 
-    # Calculate pricing
-    pricing_1yr = TLDService.calculate_domain_cost(tld, 1, False)
-    pricing_2yr = TLDService.calculate_domain_cost(tld, 2, False)
+    # Return only periods allowed by the resolved TLD. The registration form
+    # consumes this policy-authoritative list instead of advertising global
+    # 1-10 year choices that the server may later reject.
+    registration_periods: list[dict[str, int]] = []
+    pricing: dict[str, dict[str, Any]] = {}
+    for years in range(tld.min_registration_period, tld.max_registration_period + 1):
+        period_pricing = TLDService.calculate_domain_cost(tld, years, False)
+        registration_periods.append(
+            {
+                "years": years,
+                "total_cost_cents": period_pricing["total_cost_cents"],
+            }
+        )
+        period_key = f"{years}_year" if years == _SINGLE_YEAR else f"{years}_years"
+        pricing[period_key] = period_pricing
 
     return JsonResponse(
         {
@@ -472,10 +498,8 @@ def check_availability(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911  
             "available": True,
             "domain_name": domain_name,
             "tld_extension": tld_extension,
-            "pricing": {
-                "1_year": pricing_1yr,
-                "2_years": pricing_2yr,
-            },
+            "pricing": pricing,
+            "registration_periods": registration_periods,
             "whois_privacy_available": tld.whois_privacy_available,
             "registrar": registrar.display_name,
         }
@@ -501,25 +525,28 @@ def domain_renew(request: HttpRequest, domain_id: str) -> HttpResponse:
 
     # Handle renewal request
     if request.method == "POST":
-        years = int(request.POST.get("years", 1))
-
-        renewal_result = DomainLifecycleService.process_domain_renewal(domain=domain, years=years)
-
-        if renewal_result.is_ok():
-            messages.success(request, _(f"✅ Domain renewed for {years} year(s)!"))
-            return redirect("domains:detail", domain_id=domain_id)
+        years = _parse_requested_years(request.POST.get("years"))
+        if years is None:
+            messages.error(request, _("❌ Please select a valid renewal period"))
         else:
-            messages.error(request, _(f"❌ Renewal failed: {renewal_result.unwrap_err()}"))
+            renewal_result = DomainLifecycleService.process_domain_renewal(domain=domain, years=years)
+
+            if renewal_result.is_ok():
+                messages.success(request, _(f"✅ Domain renewed for {years} year(s)!"))
+                return redirect("domains:detail", domain_id=domain_id)
+            else:
+                messages.error(request, _(f"❌ Renewal failed: {renewal_result.unwrap_err()}"))
 
     # Calculate renewal costs
     renewal_costs = []
-    for years in [1, 2, 3, 5]:
-        cost = TLDService.calculate_domain_cost(domain.tld, years, domain.whois_privacy)
+    for years in range(domain.tld.min_registration_period, domain.tld.max_registration_period + 1):
+        cost = TLDService.calculate_domain_cost(domain.tld, years, domain.whois_privacy, action="renew")
         renewal_costs.append(
             {
                 "years": years,
                 "cost": cost["total_cost"],
                 "cost_cents": cost["total_cost_cents"],
+                "new_expiry": domain.expires_at + relativedelta(years=years) if domain.expires_at else None,
             }
         )
 
