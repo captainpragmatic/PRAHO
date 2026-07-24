@@ -227,6 +227,19 @@ class ThrottleArchitectureGuardrailTests(SimpleTestCase):
 
         self.assertEqual(key1, key2)
 
+    def test_portal_hmac_throttle_prefers_middleware_verified_portal_id(self) -> None:
+        request = RequestFactory().post(
+            "/api/users/customers/",
+            HTTP_X_PORTAL_ID="header-portal",
+        )
+        request._portal_authenticated = True  # type: ignore[attr-defined]  # middleware contract
+        request._portal_id = "verified-portal"  # type: ignore[attr-defined]  # middleware contract
+
+        key = rate_limiting.PortalHMACRateThrottle().get_cache_key(request, view=None)
+
+        self.assertIn("verified-portal", key or "")
+        self.assertNotIn("header-portal", key or "")
+
 
 @override_settings(CACHES=LOCMEM_TEST_CACHE, RATE_LIMITING_ENABLED=True)
 class EndpointThrottleBehaviorTests(TestCase):

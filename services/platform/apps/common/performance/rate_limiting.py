@@ -159,10 +159,12 @@ def _extract_hmac_identity(request: Request) -> str:
     """
     Build a stable HMAC throttle identity.
 
-    Use a portal-only key so callers cannot bypass limits by rotating signed
-    payload fields (customer_id/user_id) and creating unbounded cache keys.
+    Prefer the canonical portal ID stored by HMAC middleware after signature
+    verification. The header fallback supports isolated tests and defensive
+    compatibility with already-authenticated request adapters.
     """
-    return str(request.headers.get("X-Portal-Id", "unknown"))
+    verified_portal_id = getattr(request, "_portal_id", None)
+    return str(verified_portal_id or request.headers.get("X-Portal-Id", "unknown"))
 
 
 class _CustomTimeRateMixin:
