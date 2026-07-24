@@ -226,6 +226,67 @@ class VirtualminProvisioningService:
             logger.exception(f"Unexpected error creating Virtualmin account: {e}")
             return Err(f"Internal error: {e}")
 
+    def reprovision_virtualmin_account(
+        self, account: VirtualminAccount, target_server: VirtualminServer | None = None
+    ) -> Result[VirtualminAccount, str]:
+        """Re-create an EXISTING PRAHO account's domain on a Virtualmin server.
+
+        Disaster recovery (#326): create_virtualmin_account() rejects any domain that
+        already has a VirtualminAccount row ("already exists in PRAHO"), so driving a
+        rebuild through it fails for 100% of surviving rows — the row being rebuilt is
+        the collision. Rebuild must REUSE the existing row, not insert a new one (which
+        would also violate the OneToOne `service` and unique `domain`/`virtualmin_username`
+        constraints).
+
+        This re-runs the same server-side create-domain workflow used by new provisioning
+        (`_execute_domain_creation`) against the existing account: it rotates to a fresh
+        password (the old one is unrecoverable after a server loss), optionally retargets
+        the server, resets the account to `provisioning`, and drives a new provisioning job.
+        """
+        try:
+            # account.server is a non-nullable FK, so this is always a real server.
+            server = target_server or account.server
+
+            with transaction.atomic():
+                # Rotate password — the pre-loss secret cannot be recovered.
+                account.set_password(self._generate_secure_password())  # nosemgrep: unvalidated-password
+                account.server = server
+                account.status = "provisioning"
+                account.status_message = "Reprovisioning from PRAHO (disaster recovery)"
+                account.save(update_fields=["server", "status", "status_message", "updated_at"])
+
+                job = VirtualminProvisioningJob(
+                    operation="create_domain",
+                    server=server,
+                    account=account,
+                    parameters={
+                        "domain": account.domain,
+                        "username": account.virtualmin_username,
+                        "template": account.template_name or "Default",
+                        "recovery_seed": account.get_recovery_seed(),
+                    },
+                    correlation_id=f"reprovision_domain_{account.id}",
+                )
+                job.save()
+
+            provisioning_result = self._execute_domain_creation(account, job)
+            if provisioning_result.is_ok():
+                logger.info(f"✅ [VirtualminService] Reprovisioned account {account.domain}")
+                return Ok(account)
+
+            error_msg = provisioning_result.unwrap_err()
+            logger.error(f"❌ [VirtualminService] Failed to reprovision {account.domain}: {error_msg}")
+            account.status = "error"
+            account.status_message = error_msg
+            account.save(update_fields=["status", "status_message", "updated_at"])
+            return Err(error_msg, retriability=retriability_of(provisioning_result))
+
+        except ValidationError as e:
+            return Err(f"Validation error: {e}")
+        except Exception as e:
+            logger.exception(f"Unexpected error reprovisioning Virtualmin account: {e}")
+            return Err(f"Internal error: {e}")
+
     def _execute_domain_creation(
         self, account: VirtualminAccount, job: VirtualminProvisioningJob
     ) -> Result[dict[str, Any], str]:
