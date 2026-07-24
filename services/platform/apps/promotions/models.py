@@ -838,7 +838,10 @@ class CouponRedemption(models.Model):
         self.status = "applied"  # fsm-bypass: CouponRedemption uses CharField, not FSMField
         self.discount_cents = discount_cents
         self.applied_at = timezone.now()
-        self.save(update_fields=["status", "discount_cents", "applied_at"])
+        # order_total_cents documents the total *after* discount. apply_coupon reassigns it
+        # on the instance once the order is recalculated, so it must be persisted here;
+        # omitting it left the pre-discount total (set at row creation) in the database (#233).
+        self.save(update_fields=["status", "discount_cents", "applied_at", "order_total_cents"])
 
         # Update coupon usage statistics
         Coupon.objects.filter(pk=self.coupon_id).update(

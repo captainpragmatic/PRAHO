@@ -170,6 +170,30 @@ class StackedCouponDiscountTestCase(PromotionsMoneyTestCase):
         self.assertEqual(result.discount_cents, 0)
 
 
+class RedemptionOrderTotalTestCase(PromotionsMoneyTestCase):
+    """#233: order_total_cents on a redemption must record the total AFTER the discount.
+
+    apply_coupon creates the row with the pre-discount total, then recalculates the order and
+    reassigns redemption.order_total_cents to the post-discount total before mark_applied().
+    mark_applied() originally omitted order_total_cents from update_fields, so the reassignment
+    was never persisted and the row kept the pre-discount total, contradicting the field's
+    documented meaning ("Order total after discount").
+    """
+
+    def test_order_total_cents_persists_post_discount_total(self) -> None:
+        """A 20% coupon on a 100.00 order must store 80.00 as the redemption's order total."""
+        self._coupon("SAVE20", "20.00")
+
+        result = CouponService.apply_coupon(code="SAVE20", order=self.order, customer=self.customer)
+
+        self.assertTrue(result.success, f"apply failed: {result.error_message}")
+        redemption = CouponRedemption.objects.get(id=result.redemption_id)
+        self.order.refresh_from_db()
+        # Post-discount total: 10000 - 2000 = 8000. The value must be the PERSISTED one.
+        self.assertEqual(redemption.order_total_cents, 8000)
+        self.assertEqual(redemption.order_total_cents, self.order.total_cents)
+
+
 class DisjointCouponStackingTestCase(TestCase):
     """#311: the stacking cap must measure each coupon's headroom against prior discounts on
     ITS OWN targeted items, not the order-wide discount total.
