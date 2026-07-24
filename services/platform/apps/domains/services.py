@@ -870,19 +870,39 @@ class DomainNotificationService:
     Handles expiration notices, renewal reminders, and domain alerts.
     """
 
-    @staticmethod
-    def get_domains_needing_renewal_notice() -> QuerySet[Domain]:
-        """📧 Get domains that need renewal notices"""
+    DEFAULT_RENEWAL_NOTICE_SCHEDULE: tuple[int, ...] = (30, 14, 7, 3, 1)
 
-        # Domains expiring in 30, 14, 7, 3, 1 days
-        notice_periods = [30, 14, 7, 3, 1]
+    @classmethod
+    def _renewal_notice_schedule(cls) -> list[int]:
+        """Return a safe canonical schedule even if a row bypassed service validation."""
+        raw_schedule = SettingsService.get_list_setting(
+            "domains.renewal_notice_schedule_days",
+            list(cls.DEFAULT_RENEWAL_NOTICE_SCHEDULE),
+        )
+        valid_items = bool(raw_schedule) and all(
+            isinstance(days, int) and not isinstance(days, bool) and days > 0 for days in raw_schedule
+        )
+        if (
+            not valid_items
+            or len(set(raw_schedule)) != len(raw_schedule)
+            or raw_schedule != sorted(raw_schedule, reverse=True)
+        ):
+            logger.error("Invalid domains.renewal_notice_schedule_days; using the safe default")
+            return list(cls.DEFAULT_RENEWAL_NOTICE_SCHEDULE)
+        return raw_schedule
+
+    @classmethod
+    def get_domains_needing_renewal_notice(cls) -> QuerySet[Domain]:
+        """📧 Get domains that need renewal notices"""
+        notice_periods = cls._renewal_notice_schedule()
+        now = timezone.now()
 
         conditions = Q()
         for days in notice_periods:
-            cutoff_date = timezone.now() + timedelta(days=days)
-            conditions |= Q(
-                expires_at__date=cutoff_date.date(),
-                renewal_notices_sent__lt=days,  # Haven't sent notice for this period yet
+            cutoff_date = now + timedelta(days=days)
+            conditions |= (
+                Q(expires_at__date=cutoff_date.date())
+                & ~Q(renewal_notices_sent=days)  # The current threshold has not been sent yet.
             )
 
         return Domain.objects.filter(conditions, status="active").select_related("customer", "tld")
@@ -890,7 +910,7 @@ class DomainNotificationService:
     @staticmethod
     def mark_renewal_notice_sent(domain: Domain, notice_period: int) -> None:
         """📧 Mark renewal notice as sent"""
-        domain.renewal_notices_sent = max(domain.renewal_notices_sent, notice_period)
+        domain.renewal_notices_sent = notice_period
         domain.last_renewal_notice = timezone.now()
         domain.save(update_fields=["renewal_notices_sent", "last_renewal_notice", "updated_at"])
 

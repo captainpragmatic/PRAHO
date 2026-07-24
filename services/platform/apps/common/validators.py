@@ -39,7 +39,6 @@ logger = logging.getLogger(__name__)
 
 # Rate limiting thresholds — defaults; authoritative source is SettingsService
 _DEFAULT_RATE_LIMIT_REGISTRATION_PER_IP = 5  # per hour
-_DEFAULT_RATE_LIMIT_INVITATION_PER_USER = 10  # per hour
 _DEFAULT_RATE_LIMIT_COMPANY_CHECK_PER_IP = 30  # per hour
 
 
@@ -51,17 +50,6 @@ def get_registration_rate_limit() -> int:
 
     return SettingsService.get_integer_setting(
         "security.registration_rate_limit_per_ip", _DEFAULT_RATE_LIMIT_REGISTRATION_PER_IP
-    )
-
-
-def get_invitation_rate_limit() -> int:
-    """Get invitation rate limit per user from SettingsService (runtime)."""
-    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
-        SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
-    )
-
-    return SettingsService.get_integer_setting(
-        "security.invitation_rate_limit_per_user", _DEFAULT_RATE_LIMIT_INVITATION_PER_USER
     )
 
 
@@ -713,10 +701,13 @@ class BusinessLogicValidator:
                 raise ValidationError(_("Account not active"))
 
     @staticmethod
-    @rate_limited("invitation", _DEFAULT_RATE_LIMIT_INVITATION_PER_USER, 60)
     def validate_invitation_request(inviter: Any, invitee_email: str, customer: Any, role: str, **kwargs: Any) -> None:
         """
-        Comprehensive invitation validation with rate limiting
+        Comprehensive invitation validation.
+
+        Invitation rate limiting is enforced once by ``secure_invitation_system``
+        before this validator runs. Keeping a second cache counter here made the
+        effective limit depend on two independent, differently keyed windows.
         """
         # Validate inviter permissions (TOCTOU-safe)
         BusinessLogicValidator.validate_user_permissions(inviter, customer, "owner")

@@ -58,6 +58,37 @@ class CatalogIntegrityTests(TestCase):
         self.assertEqual(definition.default, 14)
         self.assertEqual(definition.validation, {"min": 7, "max": 30})
 
+    def test_domain_renewal_notice_schedule_is_a_validated_integer_list(self) -> None:
+        definition = CATALOG_BY_KEY["domains.renewal_notice_schedule_days"]
+
+        self.assertEqual(definition.default, [30, 14, 7, 3, 1])
+        self.assertEqual(definition.data_type, "list")
+        self.assertEqual(definition.input_kind, "chips")
+        self.assertEqual(
+            definition.validation,
+            {
+                "min_items": 1,
+                "item_type": "integer",
+                "item_min": 1,
+                "unique_items": True,
+                "order": "descending",
+            },
+        )
+
+    def test_invitation_rate_limits_have_unambiguous_policy_identities(self) -> None:
+        expected_defaults = {
+            "security.membership_invitation_limit_per_inviter_per_hour": 10,
+            "security.welcome_invite_limit_per_target_per_hour": 3,
+            "security.join_request_notification_limit_per_customer_per_hour": 10,
+        }
+
+        for key, expected_default in expected_defaults.items():
+            with self.subTest(key=key):
+                self.assertEqual(CATALOG_BY_KEY[key].default, expected_default)
+
+        self.assertNotIn("security.invitation_rate_limit_per_user", CATALOG_BY_KEY)
+        self.assertNotIn("security.welcome_invite_limit_per_user_per_hour", CATALOG_BY_KEY)
+
     def test_retired_keys_are_not_in_catalog(self) -> None:
         overlap = set(_MIGRATION.RETIRED_KEYS) & set(CATALOG_BY_KEY)
         self.assertEqual(overlap, set())

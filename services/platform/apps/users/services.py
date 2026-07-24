@@ -504,7 +504,7 @@ class SecureUserRegistrationService:
             cache_key = f"join_notifications:{customer.id}"
             notifications = cache.get(cache_key, 0)
             if notifications >= SettingsService.get_integer_setting(
-                "security.invitation_rate_limit_per_user", 10
+                "security.join_request_notification_limit_per_customer_per_hour", 10
             ):  # Max notifications per hour per customer
                 return
             cache.set(cache_key, notifications + 1, timeout=3600)
@@ -890,7 +890,7 @@ class SecureCustomerUserService:
         can surface a warning to staff.
         """
         guard_key = f"welcome_invite:{user.pk}"
-        invite_limit = SettingsService.get_integer_setting("security.welcome_invite_limit_per_user_per_hour", 3)
+        invite_limit = SettingsService.get_integer_setting("security.welcome_invite_limit_per_target_per_hour", 3)
 
         # Atomic check-and-claim: cache.add seeds the counter at 0 only if it
         # does not already exist (no-op when the window is in flight); cache.incr
@@ -938,7 +938,7 @@ class SecureCustomerUserService:
             cache_key = f"join_notifications:{customer.id}"
             notifications = cache.get(cache_key, 0)
             if notifications >= SettingsService.get_integer_setting(
-                "security.invitation_rate_limit_per_user", 10
+                "security.join_request_notification_limit_per_customer_per_hour", 10
             ):  # Max notifications per hour per customer
                 return
             cache.set(cache_key, notifications + 1, timeout=3600)
