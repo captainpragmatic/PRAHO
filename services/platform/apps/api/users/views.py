@@ -9,7 +9,6 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
-from django.conf import settings
 from django.contrib.auth import authenticate
 from django.http import HttpRequest, JsonResponse
 from django.views.decorators.cache import never_cache
