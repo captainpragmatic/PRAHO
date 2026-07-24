@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from unittest.mock import patch
 
 from dateutil.relativedelta import relativedelta
 from django.contrib.auth import get_user_model
@@ -48,6 +49,7 @@ class DomainRenewTemplateTests(TestCase):
             registrar=self.registrar,
             customer=self.customer,
             status="active",
+            registrar_domain_id="RENEW-1",
             expires_at=timezone.now() + timedelta(days=90),
         )
         self.client.force_login(self.user)
@@ -69,5 +71,40 @@ class DomainRenewTemplateTests(TestCase):
         self.assertIn("totalCostValue.textContent = cost.displayCost", html)
         renewal_costs = response.context["renewal_costs"]
         self.assertEqual(renewal_costs[0]["new_expiry"], self.domain.expires_at + relativedelta(years=1))
-        self.assertEqual(renewal_costs[-1]["new_expiry"], self.domain.expires_at + relativedelta(years=5))
+        self.assertEqual(renewal_costs[-1]["new_expiry"], self.domain.expires_at + relativedelta(years=10))
         self.assertRegex(html, r'<script nonce="[^"]*">')
+
+    def test_renewal_page_offers_only_tld_policy_periods_at_renewal_price(self) -> None:
+        self.tld.min_registration_period = 2
+        self.tld.max_registration_period = 3
+        self.tld.save(update_fields=["min_registration_period", "max_registration_period", "updated_at"])
+
+        response = self.client.get(reverse("domains:renew", kwargs={"domain_id": self.domain.id}))
+
+        self.assertEqual(response.status_code, 200)
+        renewal_costs = response.context["renewal_costs"]
+        self.assertEqual([option["years"] for option in renewal_costs], [2, 3])
+        self.assertEqual([option["cost_cents"] for option in renewal_costs], [2400, 3600])
+        html = response.content.decode()
+        self.assertIn('value="2"', html)
+        self.assertIn('value="3"', html)
+        self.assertNotIn('value="1"', html)
+        self.assertNotIn('value="5"', html)
+        self.assertRegex(html, r'value="2"[\s\S]*?checked')
+
+    @patch("apps.domains.services.DomainRegistrarGateway.renew_domain")
+    def test_renewal_post_rejects_invalid_periods_before_registrar(self, mock_renew) -> None:
+        mock_renew.return_value = (False, {"error": "unexpected registrar call"})
+        self.tld.min_registration_period = 2
+        self.tld.max_registration_period = 3
+        self.tld.save(update_fields=["min_registration_period", "max_registration_period", "updated_at"])
+
+        for years in ("not-a-number", "0", "-1", "1", "4"):
+            with self.subTest(years=years):
+                response = self.client.post(
+                    reverse("domains:renew", kwargs={"domain_id": self.domain.id}),
+                    {"years": years},
+                )
+                self.assertEqual(response.status_code, 200)
+
+        mock_renew.assert_not_called()

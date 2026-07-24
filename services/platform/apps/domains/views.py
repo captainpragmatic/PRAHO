@@ -48,6 +48,16 @@ _SINGLE_YEAR = 1
 # ===============================================================================
 
 
+def _parse_requested_years(raw_years: str | None) -> int | None:
+    """Parse a customer-submitted period without allowing malformed input to raise."""
+    if raw_years is None:
+        return _SINGLE_YEAR
+    try:
+        return int(raw_years)
+    except ValueError:
+        return None
+
+
 def _get_accessible_customer_ids(user: User) -> list[int]:
     """🔒 Helper to get customer IDs that user can access"""
     accessible_customers = user.get_accessible_customers()
@@ -360,12 +370,14 @@ def domain_register(  # Complexity: multi-step workflow  # noqa: PLR0912  # Comp
     if request.method == "POST":
         domain_name = request.POST.get("domain_name", "").strip().lower()
         selected_customer_id = request.POST.get("customer_id")
-        years = int(request.POST.get("years", 1))
+        years = _parse_requested_years(request.POST.get("years"))
         whois_privacy = request.POST.get("whois_privacy") == "on"
         auto_renew = request.POST.get("auto_renew") == "on"
 
         # Validate inputs
-        if not domain_name:
+        if years is None:
+            messages.error(request, _("Please select a valid registration period"))
+        elif not domain_name:
             messages.error(request, _("Please enter a domain name"))
         elif not selected_customer_id:
             messages.error(request, _("Please select a customer"))
@@ -513,20 +525,22 @@ def domain_renew(request: HttpRequest, domain_id: str) -> HttpResponse:
 
     # Handle renewal request
     if request.method == "POST":
-        years = int(request.POST.get("years", 1))
-
-        renewal_result = DomainLifecycleService.process_domain_renewal(domain=domain, years=years)
-
-        if renewal_result.is_ok():
-            messages.success(request, _(f"✅ Domain renewed for {years} year(s)!"))
-            return redirect("domains:detail", domain_id=domain_id)
+        years = _parse_requested_years(request.POST.get("years"))
+        if years is None:
+            messages.error(request, _("❌ Please select a valid renewal period"))
         else:
-            messages.error(request, _(f"❌ Renewal failed: {renewal_result.unwrap_err()}"))
+            renewal_result = DomainLifecycleService.process_domain_renewal(domain=domain, years=years)
+
+            if renewal_result.is_ok():
+                messages.success(request, _(f"✅ Domain renewed for {years} year(s)!"))
+                return redirect("domains:detail", domain_id=domain_id)
+            else:
+                messages.error(request, _(f"❌ Renewal failed: {renewal_result.unwrap_err()}"))
 
     # Calculate renewal costs
     renewal_costs = []
-    for years in [1, 2, 3, 5]:
-        cost = TLDService.calculate_domain_cost(domain.tld, years, domain.whois_privacy)
+    for years in range(domain.tld.min_registration_period, domain.tld.max_registration_period + 1):
+        cost = TLDService.calculate_domain_cost(domain.tld, years, domain.whois_privacy, action="renew")
         renewal_costs.append(
             {
                 "years": years,

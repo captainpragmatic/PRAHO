@@ -180,3 +180,31 @@ class DomainServiceLogicTests(TestCase):
                 self.assertEqual(item.total_price_cents, 2500 * years)
 
         self.assertEqual(DomainOrderItem.objects.count(), 2)
+
+    def test_renewal_order_items_enforce_tld_bounds_and_preserve_pricing(self) -> None:
+        for years in (1, 4):
+            with self.subTest(years=years):
+                success, error = DomainOrderService.create_domain_order_item(
+                    order=self.order,
+                    domain_name=f"renew-invalid-{years}.com.ro",
+                    action="renew",
+                    years=years,
+                )
+                self.assertFalse(success)
+                self.assertIn("between 2 and 3 years", str(error))
+
+        for years in (2, 3):
+            with self.subTest(years=years):
+                success, item_or_error = DomainOrderService.create_domain_order_item(
+                    order=self.order,
+                    domain_name=f"renew-valid-{years}.com.ro",
+                    action="renew",
+                    years=years,
+                )
+                self.assertTrue(success, item_or_error)
+                item = DomainOrderItem.objects.get(domain_name=f"renew-valid-{years}.com.ro")
+                self.assertEqual(item.tld, self.com_ro)
+                self.assertEqual(item.unit_price_cents, 2300)
+                self.assertEqual(item.total_price_cents, 2300 * years)
+
+        self.assertEqual(DomainOrderItem.objects.count(), 2)

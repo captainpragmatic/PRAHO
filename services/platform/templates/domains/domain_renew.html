@@ -117,7 +117,7 @@
                                     type="radio"
                                     name="years"
                                     value="{{ option.years }}"
-                                    {% if option.years == 1 %}checked{% endif %}
+                                    {% if forloop.first %}checked{% endif %}
                                     class="sr-only peer"
                                 {# nosemgrep: no-interpolation-js-template-string — safe numeric template variable #}
                                 >
