@@ -13,7 +13,7 @@ from unittest.mock import MagicMock, patch
 
 from django.test import TestCase
 
-from apps.common.types import Ok
+from apps.common.types import Err, Ok
 from apps.provisioning.virtualmin_disaster_recovery import VirtualminDisasterRecoveryService
 from apps.provisioning.virtualmin_gateway import VirtualminConfig
 
@@ -135,6 +135,60 @@ class RestoreQuotasZeroValueTests(TestCase):
         _program, params = mock_gateway.call.call_args[0]
         self.assertEqual(params["quota"], "0")
         self.assertEqual(params["bw"], "0")
+
+
+class RecoveryCapabilityFailClosedTests(TestCase):
+    """#326: test_recovery_capability must not claim recovery-ready when the server is unreachable.
+
+    Previously it hardcoded recovery_ready=True and "✅ ready for disaster recovery" whenever the
+    dry-run rebuild succeeded — even when the connection test failed. A dry-run only counts PRAHO
+    rows; readiness now requires, at minimum, a reachable server.
+    """
+
+    def setUp(self) -> None:
+        self.service = VirtualminDisasterRecoveryService()
+        self.mock_server = MagicMock()
+        self.mock_server.hostname = "dead.example.com"
+
+    @patch("apps.provisioning.virtualmin_disaster_recovery.VirtualminProvisioningService")
+    def test_unreachable_server_is_not_recovery_ready(self, mock_provisioning_cls: MagicMock) -> None:
+        """A failed connection test must yield recovery_ready=False and no readiness claim."""
+        mock_provisioning = MagicMock()
+        mock_provisioning.test_server_connection.return_value = Err("connection refused")
+        mock_provisioning_cls.return_value = mock_provisioning
+
+        with patch.object(
+            self.service,
+            "rebuild_server_from_praho",
+            return_value=Ok({"accounts_to_rebuild": 5, "rebuild_plan": []}),
+        ):
+            result = self.service.test_recovery_capability(self.mock_server)
+
+        self.assertTrue(result.is_ok())
+        data = result.unwrap()
+        self.assertFalse(data["recovery_ready"])
+        self.assertEqual(data["connection_status"], "failed")
+        self.assertNotIn("ready for disaster recovery", data["message"])
+
+    @patch("apps.provisioning.virtualmin_disaster_recovery.VirtualminProvisioningService")
+    def test_reachable_server_is_not_falsely_certified_end_to_end(self, mock_provisioning_cls: MagicMock) -> None:
+        """A reachable server is recovery_ready, but the message must not overstate a dry run."""
+        mock_provisioning = MagicMock()
+        mock_provisioning.test_server_connection.return_value = Ok({"status": "healthy"})
+        mock_provisioning_cls.return_value = mock_provisioning
+
+        with patch.object(
+            self.service,
+            "rebuild_server_from_praho",
+            return_value=Ok({"accounts_to_rebuild": 5, "rebuild_plan": []}),
+        ):
+            result = self.service.test_recovery_capability(self.mock_server)
+
+        data = result.unwrap()
+        self.assertTrue(data["recovery_ready"])
+        self.assertEqual(data["connection_status"], "healthy")
+        # The dry run does not exercise the create-path, so it must not claim proven recovery.
+        self.assertIn("data-presence check only", data["message"])
 
     @patch("apps.provisioning.virtualmin_disaster_recovery.VirtualminGateway")
     @patch("apps.provisioning.virtualmin_disaster_recovery.VirtualminConfig")
