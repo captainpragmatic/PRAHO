@@ -9,7 +9,6 @@ Implements:
 
 from __future__ import annotations
 
-import contextlib
 import logging
 import secrets
 import string
@@ -26,7 +25,12 @@ from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 
 from .security_utils import IdempotencyManager
 from .virtualmin_backup_service import BackupConfig, RestoreConfig
-from .virtualmin_gateway import VirtualminConfig, VirtualminGateway, get_virtualmin_config
+from .virtualmin_gateway import (
+    VirtualminConfig,
+    VirtualminGateway,
+    classify_virtualmin_application_error,
+    get_virtualmin_config,
+)
 from .virtualmin_models import (
     HEALTH_AUTO_FAIL_THRESHOLD,
     VirtualminAccount,
@@ -45,6 +49,21 @@ logger = logging.getLogger(__name__)
 MIN_USERNAME_LENGTH = 3
 _DEFAULT_MAX_USERNAME_UNIQUENESS_ATTEMPTS = 1000
 MAX_USERNAME_UNIQUENESS_ATTEMPTS = _DEFAULT_MAX_USERNAME_UNIQUENESS_ATTEMPTS
+
+
+def _clear_idempotency_key(idempotency_key: str | None, *, operation: str, domain: str) -> None:
+    """Best-effort cleanup that preserves and exposes the primary failure."""
+    if not idempotency_key:
+        return
+    try:
+        IdempotencyManager.clear(idempotency_key)
+    except Exception:
+        logger.warning(
+            "Failed to clear idempotency key after %s failure for %s; the operation may remain blocked until TTL",
+            operation,
+            domain,
+            exc_info=True,
+        )
 
 
 def get_max_username_uniqueness_attempts() -> int:
@@ -331,8 +350,9 @@ class VirtualminProvisioningService:
 
                 else:
                     error_msg = response.data.get("error", "Domain creation failed")
-                    job.mark_failed(error_msg, response.data, retriability=Retriability.NOT_RETRIABLE)
-                    return Err(error_msg, retriability=Retriability.NOT_RETRIABLE)
+                    retriability = classify_virtualmin_application_error(response)
+                    job.mark_failed(error_msg, response.data, retriability=retriability)
+                    return Err(error_msg, retriability=retriability)
 
             else:
                 error = result.unwrap_err()
@@ -587,6 +607,7 @@ class VirtualminProvisioningService:
             If database update fails after API call succeeds, will attempt
             to re-enable the domain in Virtualmin.
         """
+        idempotency_key: str | None = None
         try:
             # Idempotency check - already suspended
             if account.status == "suspended":
@@ -609,7 +630,7 @@ class VirtualminProvisioningService:
                 if cached_success:
                     # Cached success no longer matches reality (flip-flop inside
                     # the TTL) — self-heal: clear and execute for real.
-                    IdempotencyManager.clear(idempotency_key)
+                    _clear_idempotency_key(idempotency_key, operation="suspend", domain=account.domain)
                     is_new, _ = IdempotencyManager.check_and_set(idempotency_key)
                     if not is_new:
                         return Err("Operation already in progress")
@@ -675,28 +696,27 @@ class VirtualminProvisioningService:
                                 rollback_status=rollback_status,
                                 rollback_details=rollback_details,
                             )
-                            IdempotencyManager.clear(idempotency_key)
+                            _clear_idempotency_key(idempotency_key, operation="suspend", domain=account.domain)
                             return Err(f"Suspension failed during database update: {db_error}")
                     else:
                         error_msg = response.data.get("error", "Suspension failed")
-                        job.mark_failed(error_msg, response.data, retriability=Retriability.NOT_RETRIABLE)
-                        IdempotencyManager.clear(idempotency_key)
-                        return Err(error_msg, retriability=Retriability.NOT_RETRIABLE)
+                        retriability = classify_virtualmin_application_error(response)
+                        job.mark_failed(error_msg, response.data, retriability=retriability)
+                        _clear_idempotency_key(idempotency_key, operation="suspend", domain=account.domain)
+                        return Err(error_msg, retriability=retriability)
 
                 else:
                     error = result.unwrap_err()
                     error_msg = str(error)
                     job.mark_failed(error_msg, retriability=retriability_of(result))
-                    IdempotencyManager.clear(idempotency_key)
+                    _clear_idempotency_key(idempotency_key, operation="suspend", domain=account.domain)
                     return Err(error_msg, retriability=retriability_of(result))
 
             except Exception:
-                IdempotencyManager.clear(idempotency_key)
                 raise
 
         except Exception as e:
-            with contextlib.suppress(Exception):
-                IdempotencyManager.clear(idempotency_key)
+            _clear_idempotency_key(idempotency_key, operation="suspend", domain=account.domain)
             logger.exception(f"Error suspending account {account.domain}: {e}")
             return Err(str(e))
 
@@ -719,6 +739,7 @@ class VirtualminProvisioningService:
             If database update fails after API call succeeds, will attempt
             to re-disable the domain in Virtualmin.
         """
+        idempotency_key: str | None = None
         try:
             # Idempotency check - already active
             if account.status == "active":
@@ -739,7 +760,7 @@ class VirtualminProvisioningService:
                     logger.info(f"✅ [VirtualminService] Returning cached unsuspend result for {account.domain}")
                     return Ok(True)
                 if cached_success:
-                    IdempotencyManager.clear(idempotency_key)
+                    _clear_idempotency_key(idempotency_key, operation="unsuspend", domain=account.domain)
                     is_new, _ = IdempotencyManager.check_and_set(idempotency_key)
                     if not is_new:
                         return Err("Operation already in progress")
@@ -807,28 +828,27 @@ class VirtualminProvisioningService:
                                 rollback_status=rollback_status,
                                 rollback_details=rollback_details,
                             )
-                            IdempotencyManager.clear(idempotency_key)
+                            _clear_idempotency_key(idempotency_key, operation="unsuspend", domain=account.domain)
                             return Err(f"Unsuspension failed during database update: {db_error}")
                     else:
                         error_msg = response.data.get("error", "Unsuspension failed")
-                        job.mark_failed(error_msg, response.data, retriability=Retriability.NOT_RETRIABLE)
-                        IdempotencyManager.clear(idempotency_key)
-                        return Err(error_msg, retriability=Retriability.NOT_RETRIABLE)
+                        retriability = classify_virtualmin_application_error(response)
+                        job.mark_failed(error_msg, response.data, retriability=retriability)
+                        _clear_idempotency_key(idempotency_key, operation="unsuspend", domain=account.domain)
+                        return Err(error_msg, retriability=retriability)
 
                 else:
                     error = result.unwrap_err()
                     error_msg = str(error)
                     job.mark_failed(error_msg, retriability=retriability_of(result))
-                    IdempotencyManager.clear(idempotency_key)
+                    _clear_idempotency_key(idempotency_key, operation="unsuspend", domain=account.domain)
                     return Err(error_msg, retriability=retriability_of(result))
 
             except Exception:
-                IdempotencyManager.clear(idempotency_key)
                 raise
 
         except Exception as e:
-            with contextlib.suppress(Exception):
-                IdempotencyManager.clear(idempotency_key)
+            _clear_idempotency_key(idempotency_key, operation="unsuspend", domain=account.domain)
             logger.exception(f"Error unsuspending account {account.domain}: {e}")
             return Err(str(e))
 
@@ -971,9 +991,10 @@ class VirtualminProvisioningService:
 
                     else:
                         error_msg = response.data.get("error", "Deletion failed")
-                        job.mark_failed(error_msg, response.data, retriability=Retriability.NOT_RETRIABLE)
+                        retriability = classify_virtualmin_application_error(response)
+                        job.mark_failed(error_msg, response.data, retriability=retriability)
                         IdempotencyManager.clear(idempotency_key)
-                        return Err(error_msg, retriability=Retriability.NOT_RETRIABLE)
+                        return Err(error_msg, retriability=retriability)
 
                 else:
                     error = result.unwrap_err()
@@ -1112,10 +1133,10 @@ class VirtualminProvisioningService:
 
         response = result.unwrap()
         if not response.success:
-            # A structured application rejection is a proven, permanent failure.
             error_msg = response.data.get("error", f"{program} failed")
-            job.mark_failed(error_msg, response.data, retriability=Retriability.NOT_RETRIABLE)
-            return Err(error_msg, retriability=Retriability.NOT_RETRIABLE)
+            retriability = classify_virtualmin_application_error(response)
+            job.mark_failed(error_msg, response.data, retriability=retriability)
+            return Err(error_msg, retriability=retriability)
 
         previous_status = account.status
         with transaction.atomic():

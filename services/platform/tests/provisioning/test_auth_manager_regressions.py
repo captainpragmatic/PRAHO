@@ -182,6 +182,32 @@ class ExecuteWithMethodDispatchTests(TestCase):
         self.assertEqual(result.unwrap(), {"domains": []})
         self.assertEqual(execute.call_count, 2)
 
+    def test_list_prefix_does_not_allow_ambiguous_mutation_fallback(self) -> None:
+        ambiguous = Err("response lost", retriability=Retriability.UNKNOWN)
+
+        with (
+            patch(
+                "apps.provisioning.virtualmin_auth_manager.VirtualminValidator.validate_virtualmin_program",
+                return_value="list-and-clean-cache",
+            ),
+            patch.object(
+                self.manager,
+                "_get_auth_method_priority",
+                return_value=[AuthMethod.ACL, AuthMethod.MASTER_PROXY],
+            ),
+            patch.object(
+                self.manager,
+                "_execute_with_method",
+                side_effect=[ambiguous, Ok({"success": True})],
+            ) as execute,
+            patch.object(self.manager, "_cache_failed_auth_method"),
+        ):
+            result = self.manager.execute_virtualmin_command("list-and-clean-cache", {})
+
+        self.assertTrue(result.is_err())
+        self.assertEqual(result.retriability, Retriability.UNKNOWN)
+        execute.assert_called_once()
+
     def test_auth_fallback_stops_after_unexpected_mutation_exception(self) -> None:
         with (
             patch.object(

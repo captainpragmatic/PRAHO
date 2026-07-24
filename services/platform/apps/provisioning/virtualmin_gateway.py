@@ -33,7 +33,7 @@ from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 from apps.settings.services import SettingsService
 
 from .virtualmin_models import VirtualminServer
-from .virtualmin_validators import VirtualminValidator
+from .virtualmin_validators import VirtualminValidator, is_virtualmin_read_only_program
 
 if TYPE_CHECKING:
     from apps.common.credential_vault import CredentialVault
@@ -343,6 +343,61 @@ class VirtualminResponse:
     server_hostname: str
 
 
+_TRANSIENT_APPLICATION_ERROR_PATTERNS = (
+    "rate limit",
+    "too many requests",
+    "server busy",
+    "service unavailable",
+    "temporarily unavailable",
+    "temporary failure",
+    "try again",
+    "overload",
+)
+_PERMANENT_APPLICATION_ERROR_PATTERNS = (
+    "already exists",
+    "does not exist",
+    "forbidden",
+    "invalid",
+    "missing parameter",
+    "not allowed",
+    "not found",
+    "permission denied",
+    "quota exceeded",
+    "unauthorized",
+    "unknown command",
+)
+_TRANSIENT_APPLICATION_ERROR_CODES = frozenset({"429", "500", "502", "503", "504"})
+_PERMANENT_APPLICATION_ERROR_CODES = frozenset({"400", "401", "403", "404", "409", "422"})
+
+
+def classify_virtualmin_application_error(response: VirtualminResponse) -> Retriability:
+    """Classify an explicit command rejection without guessing replay safety.
+
+    Virtualmin's remote API documents an exit-status success/failure envelope,
+    not a stable error-code taxonomy. Recognize only conservative operational
+    signals; an unfamiliar rejection remains UNKNOWN so mutations are not
+    replayed while operators retain honest diagnostics.
+    """
+    code = response.data.get("error_code", response.data.get("code", ""))
+    code_text = str(code).strip()
+    if code_text in _TRANSIENT_APPLICATION_ERROR_CODES:
+        return Retriability.RETRIABLE
+    if code_text in _PERMANENT_APPLICATION_ERROR_CODES:
+        return Retriability.NOT_RETRIABLE
+
+    parts = (
+        response.data.get("error", ""),
+        response.data.get("message", ""),
+        response.data.get("detail", ""),
+    )
+    error_text = " ".join(str(part) for part in parts if part).lower()
+    if any(pattern in error_text for pattern in _TRANSIENT_APPLICATION_ERROR_PATTERNS):
+        return Retriability.RETRIABLE
+    if any(pattern in error_text for pattern in _PERMANENT_APPLICATION_ERROR_PATTERNS):
+        return Retriability.NOT_RETRIABLE
+    return Retriability.UNKNOWN
+
+
 @dataclass(frozen=True)
 class VirtualminConfig:
     """Virtualmin server configuration"""
@@ -532,8 +587,16 @@ class VirtualminResponseParser:
     def _normalize_json_response(data: dict[str, Any]) -> dict[str, Any]:
         """Normalize JSON response to standard format"""
         if isinstance(data, dict):
-            # Check for common success indicators
-            success = data.get("status") == "success" or data.get("success") is True or "error" not in data
+            status = str(data.get("status", "")).strip().lower()
+            success_flag = data.get("success")
+            explicit_failure = (
+                status in {"error", "failed", "failure"} or success_flag is False or bool(data.get("error"))
+            )
+            explicit_success = status == "success" or success_flag is True
+            success = explicit_success if not explicit_failure else False
+            if not explicit_failure and not explicit_success:
+                # Some read APIs return a bare payload without an envelope.
+                success = "error" not in data
 
             return {
                 "success": success,
@@ -776,7 +839,7 @@ class VirtualminGateway:
 
         return Ok(True)
 
-    def call(  # noqa: PLR0911, C901  # Explicit per-stage guard returns (validate/health/rate-limit/auth) + retry loop
+    def call(  # noqa: PLR0911, PLR0912, C901  # Explicit per-stage guards + retry loop
         self,
         program: str,
         params: dict[str, Any] | None = None,
@@ -869,7 +932,7 @@ class VirtualminGateway:
 
         # Make API request with retries
         last_error: VirtualminAPIError | None = None
-        is_read_only = program == "info" or program.startswith("list-")
+        is_read_only = is_virtualmin_read_only_program(program)
         for attempt in range(VIRTUALMIN_MAX_RETRIES):
             try:
                 response = self._make_request(api_params, attempt + 1, auth=call_auth)
@@ -879,9 +942,16 @@ class VirtualminGateway:
                 parsed_data = VirtualminResponseParser.parse_response(response.text, program)
 
                 # Create normalized response
+                response_data = parsed_data.get("data", {})
+                if not isinstance(response_data, dict):
+                    response_data = {"data": response_data}
+                parsed_error = parsed_data.get("error")
+                if parsed_error and not response_data.get("error"):
+                    response_data = {**response_data, "error": str(parsed_error)}
+
                 virtualmin_response = VirtualminResponse(
                     success=parsed_data["success"],
-                    data=parsed_data.get("data", {}),
+                    data=response_data,
                     raw_response=response.text[:10000],  # Limit logged response size
                     http_status=response.status_code,
                     execution_time=execution_time,
@@ -1102,7 +1172,7 @@ class VirtualminGateway:
             else:
                 return Err(
                     f"Failed to get server info: {response.data.get('error', 'Unknown error')}",
-                    retriability=Retriability.NOT_RETRIABLE,
+                    retriability=classify_virtualmin_application_error(response),
                 )
         else:
             return Err(f"API call failed: {result.unwrap_err()}", retriability=retriability_of(result))
@@ -1128,7 +1198,7 @@ class VirtualminGateway:
             else:
                 return Err(
                     f"Failed to list domains: {response.data.get('error', 'Unknown error')}",
-                    retriability=Retriability.NOT_RETRIABLE,
+                    retriability=classify_virtualmin_application_error(response),
                 )
         else:
             return Err(f"API call failed: {result.unwrap_err()}", retriability=retriability_of(result))
@@ -1181,24 +1251,46 @@ class VirtualminGateway:
         """List available server template names (normalized across formats)."""
         result = self.call("list-templates", {"name-only": ""})
         if result.is_err():
-            return Err(f"API call failed: {result.unwrap_err()}")
+            return Err(f"API call failed: {result.unwrap_err()}", retriability=retriability_of(result))
         response = result.unwrap()
         if not response.success:
-            return Err(f"Failed to list templates: {response.data.get('error', 'Unknown error')}")
+            return Err(
+                f"Failed to list templates: {response.data.get('error', 'Unknown error')}",
+                retriability=classify_virtualmin_application_error(response),
+            )
+        return VirtualminGateway._parse_template_names(response.data)
 
-        data = response.data
+    @staticmethod
+    def _parse_template_names(data: dict[str, Any]) -> Result[list[str], str]:
+        """Parse only documented/recognized list-templates response shapes."""
         if "templates" in data:
-            return Ok([t["name"] if isinstance(t, dict) else str(t) for t in data["templates"]])
+            templates = data["templates"]
+            if not isinstance(templates, list):
+                return Err("Template listing returned an unrecognized response shape")
+            return VirtualminGateway._normalize_template_items(templates)
         if "data" in data:
-            names = []
-            for item in data["data"]:
-                if isinstance(item, dict) and "name" in item:
-                    line = item["name"].strip()
-                    if line and not line.startswith(("Template", "---")):
-                        names.append(line.split()[0])
-            return Ok(names)
-        raw = data.get("raw_response", "")
-        return Ok([line.strip() for line in raw.split("\n") if line.strip()])
+            items = data["data"]
+            if not isinstance(items, list):
+                return Err("Template listing returned an unrecognized response shape")
+            return VirtualminGateway._normalize_template_items(items, skip_table_headers=True)
+        if "raw_response" in data:
+            raw = data["raw_response"]
+            if isinstance(raw, str) and raw.strip():
+                return Ok([line.strip() for line in raw.splitlines() if line.strip()])
+        return Err("Template listing returned an unrecognized response shape")
+
+    @staticmethod
+    def _normalize_template_items(items: list[Any], *, skip_table_headers: bool = False) -> Result[list[str], str]:
+        """Normalize template rows without turning malformed rows into absence."""
+        names: list[str] = []
+        for item in items:
+            name = item.get("name") if isinstance(item, dict) else item
+            if not isinstance(name, str) or not name.strip():
+                return Err("Template listing returned an unrecognized response shape")
+            normalized = name.strip()
+            if not skip_table_headers or not normalized.startswith(("Template", "---")):
+                names.append(normalized)
+        return Ok(names)
 
     def ping_server(self) -> bool:
         """Ping server to check connectivity"""
@@ -1223,10 +1315,13 @@ class VirtualminGateway:
         """Full multiline listing normalized to [{'domain', 'username'}] rows."""
         result = self.call("list-domains", {"multiline": ""})
         if result.is_err():
-            return Err(f"Domain listing failed: {result.unwrap_err()}")
+            return Err(f"Domain listing failed: {result.unwrap_err()}", retriability=retriability_of(result))
         response = result.unwrap()
         if not response.success:
-            return Err(f"Domain listing rejected: {response.data.get('error', 'Unknown error')}")
+            return Err(
+                f"Domain listing rejected: {response.data.get('error', 'Unknown error')}",
+                retriability=classify_virtualmin_application_error(response),
+            )
 
         if not isinstance(response.data, dict) or not isinstance(response.data.get("data"), list):
             return Err("Domain listing returned an unrecognized response shape")
@@ -1244,10 +1339,13 @@ class VirtualminGateway:
         """Normalized existence/enabled/owner snapshot for one domain."""
         result = self.call("list-domains", {"domain": domain, "multiline": ""})
         if result.is_err():
-            return Err(f"Domain state probe failed: {result.unwrap_err()}")
+            return Err(f"Domain state probe failed: {result.unwrap_err()}", retriability=retriability_of(result))
         response = result.unwrap()
         if not response.success:
-            return Err(f"Domain state probe rejected: {response.data.get('error', 'Unknown error')}")
+            return Err(
+                f"Domain state probe rejected: {response.data.get('error', 'Unknown error')}",
+                retriability=classify_virtualmin_application_error(response),
+            )
         if not isinstance(response.data, dict) or not isinstance(response.data.get("data"), list):
             return Err(f"Domain state probe returned an unrecognized response shape for {domain}")
 
@@ -1279,10 +1377,13 @@ class VirtualminGateway:
         """
         result = self.call("list-domains", {"domain": domain, "multiline": ""})
         if result.is_err():
-            return Err(f"Ownership probe failed: {result.unwrap_err()}")
+            return Err(f"Ownership probe failed: {result.unwrap_err()}", retriability=retriability_of(result))
         response = result.unwrap()
         if not response.success:
-            return Err(f"Ownership probe rejected: {response.data.get('error', 'Unknown error')}")
+            return Err(
+                f"Ownership probe rejected: {response.data.get('error', 'Unknown error')}",
+                retriability=classify_virtualmin_application_error(response),
+            )
 
         if not isinstance(response.data, dict) or not isinstance(response.data.get("data"), list):
             # Unrecognized shape is NOT proof of absence — treating it as
@@ -1336,7 +1437,7 @@ class VirtualminGateway:
         if not response.success:
             return Err(
                 f"Failed to get disk usage: {response.data.get('error', 'Unknown error')}",
-                retriability=Retriability.NOT_RETRIABLE,
+                retriability=classify_virtualmin_application_error(response),
             )
 
         disk_info = self._parse_multiline_domain_response(response.data)
