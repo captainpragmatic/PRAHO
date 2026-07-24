@@ -26,6 +26,24 @@ class CheckAvailabilityViewTests(TestCase):
             api_endpoint="https://api.r.example", status="active",
         )
         TLDRegistrarAssignment.objects.create(tld=self.tld, registrar=self.registrar, is_primary=True, is_active=True, priority=1)
+        self.com_ro_tld = TLD.objects.create(
+            extension="com.ro",
+            description=".com.ro",
+            registration_price_cents=2500,
+            renewal_price_cents=2300,
+            transfer_price_cents=2100,
+            registrar_cost_cents=1500,
+            min_registration_period=2,
+            max_registration_period=3,
+            is_featured=True,
+        )
+        TLDRegistrarAssignment.objects.create(
+            tld=self.com_ro_tld,
+            registrar=self.registrar,
+            is_primary=True,
+            is_active=True,
+            priority=1,
+        )
         self.url = reverse("domains:check_availability")
 
     def test_registrar_says_unavailable(self) -> None:
@@ -47,3 +65,34 @@ class CheckAvailabilityViewTests(TestCase):
             resp = self.client.post(self.url, {"domain_name": "unknown.com"})
         data = resp.json()
         self.assertFalse(data.get("available", False))
+
+    def test_available_domain_advertises_only_resolved_tld_registration_periods(self) -> None:
+        with patch("apps.domains.services.DomainRegistrarGateway.check_domain_availability", return_value=(True, True)):
+            response = self.client.post(self.url, {"domain_name": "free.com.ro"})
+
+        data = response.json()
+        self.assertEqual(
+            data["registration_periods"],
+            [
+                {"years": 2, "total_cost_cents": 5000},
+                {"years": 3, "total_cost_cents": 7500},
+            ],
+        )
+        self.assertEqual(set(data["pricing"]), {"2_years", "3_years"})
+        self.assertNotIn("1_year", data["pricing"])
+
+    def test_registration_form_populates_periods_from_availability_policy(self) -> None:
+        response = self.client.get(reverse("domains:register"))
+
+        self.assertEqual(response.status_code, 200)
+        html = response.content.decode()
+        self.assertNotIn('<option value="1" selected>', html)
+        self.assertIn("selectDomain(this.dataset.domain, data.registration_periods)", html)
+        self.assertIn("registrationPeriods.forEach", html)
+        self.assertIn("registrationPrices[period.years] = period.total_cost_cents", html)
+        self.assertIn("yearsSelect.value = String(registrationPeriods[0].years)", html)
+        featured_price = next(
+            price for price in response.context["tld_pricing"] if price["tld"] == self.com_ro_tld
+        )
+        self.assertEqual(featured_price["years"], 2)
+        self.assertEqual(featured_price["cost_cents"], 5000)

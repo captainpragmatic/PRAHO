@@ -40,6 +40,7 @@ logger = logging.getLogger(__name__)
 # Module-level defaults for domain expiry thresholds (configurable via SettingsService)
 _DEFAULT_DOMAIN_EXPIRY_CRITICAL_DAYS = 7
 _DEFAULT_DOMAIN_EXPIRY_WARNING_DAYS = 30
+_SINGLE_YEAR = 1
 
 
 # ===============================================================================
@@ -397,12 +398,13 @@ def domain_register(  # Complexity: multi-step workflow  # noqa: PLR0912  # Comp
     # Calculate costs for featured TLDs
     tld_pricing = []
     for tld in featured_tlds:
-        pricing = TLDService.calculate_domain_cost(tld, 1, False)
+        pricing = TLDService.calculate_domain_cost(tld, tld.min_registration_period, False)
         tld_pricing.append(
             {
                 "tld": tld,
                 "cost": pricing["total_cost"],
                 "cost_cents": pricing["total_cost_cents"],
+                "years": tld.min_registration_period,
             }
         )
 
@@ -411,7 +413,6 @@ def domain_register(  # Complexity: multi-step workflow  # noqa: PLR0912  # Comp
         "featured_tlds": featured_tlds,
         "all_tlds": all_tlds,
         "tld_pricing": tld_pricing,
-        "years_choices": list(range(1, 11)),  # 1-10 years
     }
 
     return render(request, "domains/domain_register.html", context)
@@ -463,9 +464,21 @@ def check_availability(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911  
             {"success": True, "available": False, "message": _("Domain is not available"), "domain_name": domain_name}
         )
 
-    # Calculate pricing
-    pricing_1yr = TLDService.calculate_domain_cost(tld, 1, False)
-    pricing_2yr = TLDService.calculate_domain_cost(tld, 2, False)
+    # Return only periods allowed by the resolved TLD. The registration form
+    # consumes this policy-authoritative list instead of advertising global
+    # 1-10 year choices that the server may later reject.
+    registration_periods: list[dict[str, int]] = []
+    pricing: dict[str, dict[str, Any]] = {}
+    for years in range(tld.min_registration_period, tld.max_registration_period + 1):
+        period_pricing = TLDService.calculate_domain_cost(tld, years, False)
+        registration_periods.append(
+            {
+                "years": years,
+                "total_cost_cents": period_pricing["total_cost_cents"],
+            }
+        )
+        period_key = f"{years}_year" if years == _SINGLE_YEAR else f"{years}_years"
+        pricing[period_key] = period_pricing
 
     return JsonResponse(
         {
@@ -473,10 +486,8 @@ def check_availability(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911  
             "available": True,
             "domain_name": domain_name,
             "tld_extension": tld_extension,
-            "pricing": {
-                "1_year": pricing_1yr,
-                "2_years": pricing_2yr,
-            },
+            "pricing": pricing,
+            "registration_periods": registration_periods,
             "whois_privacy_available": tld.whois_privacy_available,
             "registrar": registrar.display_name,
         }
