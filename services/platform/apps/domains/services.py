@@ -28,6 +28,7 @@ from django.utils.translation import gettext_lazy as _
 from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 from apps.settings.services import SettingsService
 
+from .domain_names import longest_matching_tld_suffix
 from .models import TLD, Domain, DomainOperation, DomainOrderItem, Registrar
 
 if TYPE_CHECKING:
@@ -42,10 +43,6 @@ _DEFAULT_WHOIS_PRIVACY_PRICE_CENTS = 500
 # Domain name validation constants
 MIN_DOMAIN_NAME_LENGTH = 3  # Minimum length for domain names
 MAX_DOMAIN_NAME_LENGTH = 253  # Maximum length per RFC 1035
-
-# Domain registration constants
-MIN_REGISTRATION_YEARS = 1  # Minimum registration period
-MAX_REGISTRATION_YEARS = 10  # Maximum registration period
 
 
 @dataclass
@@ -202,10 +199,12 @@ class DomainValidationService:
 
     @staticmethod
     def extract_tld_from_domain(domain_name: str) -> str:
-        """🌐 Extract TLD from domain name"""
+        """🌐 Resolve the longest configured TLD suffix for a domain name."""
         if "." not in domain_name:
             return ""
-        return domain_name.rsplit(".", maxsplit=1)[-1].lower()
+        configured_extensions = TLD.objects.values_list("extension", flat=True)
+        resolved = longest_matching_tld_suffix(domain_name, configured_extensions)
+        return resolved or domain_name.rsplit(".", maxsplit=1)[-1].lower()
 
     @staticmethod
     def is_romanian_domain(domain_name: str) -> bool:
@@ -251,6 +250,19 @@ class TLDService:
             return TLD.objects.get(extension=tld_extension.lower(), is_active=True)
         except TLD.DoesNotExist:
             return None
+
+    @staticmethod
+    def validate_registration_period(tld: TLD, years: int) -> str | None:
+        """Return a customer-safe error when ``years`` violates TLD policy."""
+        if tld.min_registration_period <= years <= tld.max_registration_period:
+            return None
+        return str(
+            _("Registration period for .{tld} must be between {min} and {max} years").format(
+                tld=tld.extension,
+                min=tld.min_registration_period,
+                max=tld.max_registration_period,
+            )
+        )
 
     @staticmethod
     def calculate_domain_cost(tld: TLD, years: int, include_whois_privacy: bool = False) -> dict[str, Any]:
@@ -375,7 +387,7 @@ class DomainLifecycleService:
         Returns Ok(Domain) on success, Err(message) on failure.
         """
         # Run all validation checks
-        validation_result = DomainLifecycleService._validate_registration_preconditions(domain_name, years)
+        validation_result = DomainLifecycleService._validate_registration_preconditions(domain_name)
         if validation_result is not None:
             return Err(validation_result)
 
@@ -385,6 +397,10 @@ class DomainLifecycleService:
             return Err(components.unwrap_err())
 
         tld, registrar = components.unwrap()
+
+        period_error = TLDService.validate_registration_period(tld, years)
+        if period_error is not None:
+            return Err(period_error)
 
         # Build + validate registrant data BEFORE creating any row, so a customer
         # missing required contact/tax data is rejected without leaving an orphan
@@ -406,18 +422,11 @@ class DomainLifecycleService:
         return DomainLifecycleService._execute_domain_registration(config)
 
     @staticmethod
-    def _validate_registration_preconditions(domain_name: str, years: int) -> str | None:
+    def _validate_registration_preconditions(domain_name: str) -> str | None:
         """Validate all preconditions for domain registration."""
         is_valid, error_msg = DomainValidationService.validate_domain_name(domain_name)
         if not is_valid:
             return error_msg
-
-        if years < MIN_REGISTRATION_YEARS or years > MAX_REGISTRATION_YEARS:
-            return str(
-                _("Registration period must be between {min} and {max} years").format(
-                    min=MIN_REGISTRATION_YEARS, max=MAX_REGISTRATION_YEARS
-                )
-            )
 
         if Domain.objects.filter(name=domain_name.lower()).exists():
             return cast(str, _("Domain is already registered in the system"))
@@ -949,6 +958,11 @@ class DomainOrderService:
         tld = TLDService.get_tld_pricing(tld_extension)
         if not tld:
             return False, cast(str, _(f"TLD '.{tld_extension}' is not supported"))
+
+        if action == "register":
+            period_error = TLDService.validate_registration_period(tld, years)
+            if period_error is not None:
+                return False, period_error
 
         # Calculate pricing based on action
         if action == "register":

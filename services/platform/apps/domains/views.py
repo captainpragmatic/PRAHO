@@ -7,6 +7,7 @@ from __future__ import annotations
 import logging
 from typing import Any, cast
 
+from dateutil.relativedelta import relativedelta
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
@@ -520,6 +521,7 @@ def domain_renew(request: HttpRequest, domain_id: str) -> HttpResponse:
                 "years": years,
                 "cost": cost["total_cost"],
                 "cost_cents": cost["total_cost_cents"],
+                "new_expiry": domain.expires_at + relativedelta(years=years) if domain.expires_at else None,
             }
         )
 
