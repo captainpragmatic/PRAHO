@@ -25,6 +25,74 @@ MAX_DOMAIN_LENGTH = 253  # RFC 1035 limit
 MIN_USERNAME_LENGTH = 3
 MAX_USERNAME_LENGTH = 32
 
+# Keep replay safety beside the command allowlist. A name prefix is not a
+# capability: future Virtualmin plugins may expose a mutating `list-*` command.
+VIRTUALMIN_ALLOWED_PROGRAMS = frozenset(
+    {
+        "create-domain",
+        "delete-domain",
+        "list-domains",
+        "modify-domain",
+        "enable-domain",
+        "disable-domain",
+        "get-domain",
+        "create-alias",
+        "delete-alias",
+        "list-aliases",
+        "create-subdomain",
+        "delete-subdomain",
+        "list-subdomains",
+        "create-user",
+        "delete-user",
+        "list-users",
+        "modify-user",
+        "create-database",
+        "delete-database",
+        "list-databases",
+        "request-letsencrypt-cert",
+        "install-cert",
+        "list-certs",
+        "create-dns",
+        "delete-dns",
+        "list-dns",
+        "modify-dns",
+        "backup-domain",
+        "restore-domain",
+        "list-backups",
+        "get-template",
+        "list-templates",
+        "list-bandwidth",
+        "list-plans",
+        "get-plan",
+        "info",
+    }
+)
+
+VIRTUALMIN_READ_ONLY_PROGRAMS = frozenset(
+    {
+        "get-domain",
+        "get-plan",
+        "get-template",
+        "info",
+        "list-aliases",
+        "list-backups",
+        "list-bandwidth",
+        "list-certs",
+        "list-databases",
+        "list-dns",
+        "list-domains",
+        "list-plans",
+        "list-subdomains",
+        "list-templates",
+        "list-users",
+    }
+)
+
+
+def is_virtualmin_read_only_program(program: str) -> bool:
+    """Return whether an audited command is safe to replay after ambiguity."""
+    return program in VIRTUALMIN_READ_ONLY_PROGRAMS
+
 
 class VirtualminValidator:
     """
@@ -452,58 +520,7 @@ class VirtualminValidator:
         # XSS/injection check
         SecureInputValidator._check_malicious_patterns(program)
 
-        # Allowed Virtualmin programs (whitelist approach)
-        allowed_programs = {
-            # Domain management
-            "create-domain",
-            "delete-domain",
-            "list-domains",
-            "modify-domain",
-            "enable-domain",
-            "disable-domain",
-            "get-domain",
-            # Alias management
-            "create-alias",
-            "delete-alias",
-            "list-aliases",
-            # Subdomain management
-            "create-subdomain",
-            "delete-subdomain",
-            "list-subdomains",
-            # User management
-            "create-user",
-            "delete-user",
-            "list-users",
-            "modify-user",
-            # Database management
-            "create-database",
-            "delete-database",
-            "list-databases",
-            # SSL management
-            "request-letsencrypt-cert",
-            "install-cert",
-            "list-certs",
-            # DNS management
-            "create-dns",
-            "delete-dns",
-            "list-dns",
-            "modify-dns",
-            # Backup management
-            "backup-domain",
-            "restore-domain",
-            "list-backups",
-            # Template management
-            "get-template",
-            "list-templates",
-            # Monitoring
-            "list-bandwidth",
-            # System info
-            "list-plans",
-            "get-plan",
-            "info",
-        }
-
-        if program not in allowed_programs:
+        if program not in VIRTUALMIN_ALLOWED_PROGRAMS:
             raise ValidationError(_("Program '%(program)s' is not allowed") % {"program": program})
 
         return program
