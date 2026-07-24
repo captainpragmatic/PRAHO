@@ -215,6 +215,20 @@ class RenewalGatewayWiringTests(TestCase):
         self.assertTrue(result.is_err(), result)
         mock_renew.assert_not_called()
 
+    def test_renewal_rejects_years_outside_tld_policy_before_gateway(self) -> None:
+        self.tld.min_registration_period = 2
+        self.tld.max_registration_period = 3
+        self.tld.save(update_fields=["min_registration_period", "max_registration_period", "updated_at"])
+
+        with patch("apps.domains.services.DomainRegistrarGateway.renew_domain") as mock_renew:
+            for years in (0, -1, 1, 4):
+                with self.subTest(years=years):
+                    result = DomainLifecycleService.process_domain_renewal(self.domain, years=years)
+                    self.assertTrue(result.is_err(), result)
+                    self.assertIn("between 2 and 3 years", str(result.unwrap_err()))
+
+        mock_renew.assert_not_called()
+
 
 class RegistrantDataBuildingTests(TestCase):
     """_build_registrant_data must produce the exact keys the gateway mappers read,

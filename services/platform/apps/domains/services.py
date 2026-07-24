@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from django.db import transaction
 from django.db.models import Q, QuerySet
@@ -265,9 +265,29 @@ class TLDService:
         )
 
     @staticmethod
-    def calculate_domain_cost(tld: TLD, years: int, include_whois_privacy: bool = False) -> dict[str, Any]:
+    def validate_renewal_period(tld: TLD, years: int) -> str | None:
+        """Return a customer-safe error when a renewal violates TLD policy."""
+        if tld.min_registration_period <= years <= tld.max_registration_period:
+            return None
+        return str(
+            _("Renewal period for .{tld} must be between {min} and {max} years").format(
+                tld=tld.extension,
+                min=tld.min_registration_period,
+                max=tld.max_registration_period,
+            )
+        )
+
+    @staticmethod
+    def calculate_domain_cost(
+        tld: TLD,
+        years: int,
+        include_whois_privacy: bool = False,
+        *,
+        action: Literal["register", "renew"] = "register",
+    ) -> dict[str, Any]:
         """💰 Calculate total domain cost with options"""
-        base_cost_cents = tld.registration_price_cents * years
+        unit_price_cents = tld.registration_price_cents if action == "register" else tld.renewal_price_cents
+        base_cost_cents = unit_price_cents * years
         whois_cost_cents = 0
 
         # Add WHOIS privacy cost if requested and available
@@ -633,6 +653,10 @@ class DomainLifecycleService:
         if precondition_error is not None:
             return Err(precondition_error)
 
+        period_error = TLDService.validate_renewal_period(domain.tld, years)
+        if period_error is not None:
+            return Err(period_error)
+
         success, payload = DomainRegistrarGateway.renew_domain(domain.registrar, domain, years)
         if not success:
             logger.warning("Registrar did not confirm renewal of %s: %s", domain.name, payload.get("error"))
@@ -959,8 +983,12 @@ class DomainOrderService:
         if not tld:
             return False, cast(str, _(f"TLD '.{tld_extension}' is not supported"))
 
-        if action == "register":
-            period_error = TLDService.validate_registration_period(tld, years)
+        if action in {"register", "renew"}:
+            period_error = (
+                TLDService.validate_registration_period(tld, years)
+                if action == "register"
+                else TLDService.validate_renewal_period(tld, years)
+            )
             if period_error is not None:
                 return False, period_error
 
