@@ -127,7 +127,7 @@ jobs:
     - name: Full lint (all 7 phases)
       run: make lint
 
-    - name: Financial concurrency tests (PostgreSQL)
+    - name: Concurrency tests (PostgreSQL)
       timeout-minutes: 5
       env:
         DJANGO_SETTINGS_MODULE: config.settings.ci
@@ -141,6 +141,7 @@ jobs:
           tests.billing.test_payment_intent_security.DirectPaymentIntentPostgresConcurrencyTests \
           tests.promotions.test_order_discount_concurrency.PromotionOrderPostgresConcurrencyTests \
           tests.billing.test_recurring_collection_concurrency.RecurringCollectionPostgresConcurrencyTests \
+          tests.api.test_api_token_concurrency.APITokenPostgresConcurrencyTests \
           --settings=config.settings.ci --verbosity=2
 
     - name: Platform tests with coverage (no failfast — complete picture)
