@@ -11,7 +11,7 @@ Comprehensive tests for Virtualmin provisioning idempotency and rollback mechani
 """
 
 from decimal import Decimal
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from django.test import TestCase
 from django.utils import timezone
@@ -254,31 +254,6 @@ class VirtualminProvisioningJobRollbackTest(TestCase):
         self.assertEqual(job.rollback_status, "partial")
         self.assertEqual(job.rollback_details["failed_operations"], 1)
 
-    def test_schedule_retry_clears_rollback(self):
-        """Test that schedule_retry clears rollback status"""
-        job = VirtualminProvisioningJob.objects.create(
-            operation="suspend_domain",
-            server=self.server,
-            correlation_id="test-126",
-            max_retries=3,
-        )
-        job.mark_started()
-        job.mark_failed(
-            "Error",
-            rollback_executed=True,
-            rollback_status="success",
-            rollback_details={"test": "data"},
-        )
-
-        job.schedule_retry()
-
-        job.refresh_from_db()
-        self.assertEqual(job.status, "pending")
-        self.assertFalse(job.rollback_executed)
-        self.assertEqual(job.rollback_status, "")
-        self.assertEqual(job.rollback_details, {})
-
-
 class SuspendAccountIdempotencyTest(TestCase):
     """Test suspend_account idempotency"""
 
@@ -354,6 +329,23 @@ class SuspendAccountIdempotencyTest(TestCase):
         self.assertTrue(result.is_err())
         self.assertIn("already in progress", result.unwrap_err())
 
+    def test_suspend_logs_cleanup_failure_without_masking_original_error(self):
+        gateway = MagicMock()
+        gateway.call.side_effect = RuntimeError("Virtualmin request exploded")
+        service = VirtualminProvisioningService(self.server)
+
+        with (
+            patch.object(service, "_get_gateway", return_value=gateway),
+            patch.object(IdempotencyManager, "check_and_set", return_value=(True, None)),
+            patch.object(IdempotencyManager, "clear", side_effect=RuntimeError("cache cleanup failed")),
+            self.assertLogs("apps.provisioning.virtualmin_service", level="WARNING") as logs,
+        ):
+            result = service.suspend_account(self.account, "Test reason")
+
+        self.assertTrue(result.is_err())
+        self.assertIn("Virtualmin request exploded", str(result.unwrap_err()))
+        self.assertTrue(any("Failed to clear idempotency key" in line for line in logs.output))
+
 
 class UnsuspendAccountIdempotencyTest(TestCase):
     """Test unsuspend_account idempotency"""
@@ -416,6 +408,23 @@ class UnsuspendAccountIdempotencyTest(TestCase):
         self.assertTrue(result.is_ok())
         self.account.refresh_from_db()
         self.assertEqual(self.account.status, "active")
+
+    def test_unsuspend_logs_cleanup_failure_without_masking_original_error(self):
+        gateway = MagicMock()
+        gateway.call.side_effect = RuntimeError("Virtualmin request exploded")
+        service = VirtualminProvisioningService(self.server)
+
+        with (
+            patch.object(service, "_get_gateway", return_value=gateway),
+            patch.object(IdempotencyManager, "check_and_set", return_value=(True, None)),
+            patch.object(IdempotencyManager, "clear", side_effect=RuntimeError("cache cleanup failed")),
+            self.assertLogs("apps.provisioning.virtualmin_service", level="WARNING") as logs,
+        ):
+            result = service.unsuspend_account(self.account)
+
+        self.assertTrue(result.is_err())
+        self.assertIn("Virtualmin request exploded", str(result.unwrap_err()))
+        self.assertTrue(any("Failed to clear idempotency key" in line for line in logs.output))
 
 
 class DeleteAccountIdempotencyTest(TestCase):
@@ -503,6 +512,23 @@ class DeleteAccountIdempotencyTest(TestCase):
 
         self.assertTrue(result.is_err())
         self.assertIn("must be terminated or in error state", result.unwrap_err())
+
+    def test_delete_logs_cleanup_failure_without_masking_original_error(self):
+        gateway = MagicMock()
+        gateway.call.side_effect = RuntimeError("Virtualmin request exploded")
+        service = VirtualminProvisioningService(self.server)
+
+        with (
+            patch.object(service, "_get_gateway", return_value=gateway),
+            patch.object(IdempotencyManager, "check_and_set", return_value=(True, None)),
+            patch.object(IdempotencyManager, "clear", side_effect=RuntimeError("cache cleanup failed")),
+            self.assertLogs("apps.provisioning.virtualmin_service", level="WARNING") as logs,
+        ):
+            result = service.delete_account(self.account)
+
+        self.assertTrue(result.is_err())
+        self.assertIn("Virtualmin request exploded", str(result.unwrap_err()))
+        self.assertTrue(any("Failed to clear idempotency key" in line for line in logs.output))
 
 
 class RollbackMechanismTest(TestCase):

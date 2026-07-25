@@ -11,7 +11,11 @@ from django.test import SimpleTestCase
 
 from apps.common.outbound_http import OutboundSecurityError
 from apps.common.types import Err, Retriability
-from apps.provisioning.virtualmin_gateway import VirtualminConfig, VirtualminGateway
+from apps.provisioning.virtualmin_gateway import (
+    VirtualminConfig,
+    VirtualminGateway,
+    classify_virtualmin_application_error,
+)
 from apps.provisioning.virtualmin_models import VirtualminServer
 
 
@@ -120,6 +124,73 @@ class VirtualminRetryContractTests(SimpleTestCase):
         self.assertIsInstance(result, Err)
         self.assertEqual(result.retriability, Retriability.UNKNOWN)
         self.assertEqual(request_mock.call_count, 3)
+
+    def test_list_prefix_does_not_make_unknown_program_replay_safe(self) -> None:
+        """A future/plugin mutation named list-* must not inherit read-only
+        replay semantics merely from its spelling."""
+        gateway = _gateway()
+
+        with (
+            patch(
+                "apps.provisioning.virtualmin_gateway.VirtualminValidator.validate_virtualmin_program",
+                return_value="list-and-clean-cache",
+            ),
+            patch.object(gateway, "_check_rate_limit", return_value=True),
+            patch.object(
+                gateway,
+                "_execute_http_request",
+                side_effect=requests.exceptions.ReadTimeout("response lost"),
+            ) as request_mock,
+            patch("apps.provisioning.virtualmin_gateway.time.sleep"),
+        ):
+            result = gateway.call("list-and-clean-cache")
+
+        self.assertIsInstance(result, Err)
+        self.assertEqual(result.retriability, Retriability.UNKNOWN)
+        request_mock.assert_called_once()
+
+    def test_text_application_error_survives_normalization_for_classification(self) -> None:
+        """The plain-text API format stores its error outside `data`; the
+        normalized response must retain it for downstream retry policy."""
+        gateway = _gateway()
+        response = _response(200)
+        response._content = b"Error: Service temporarily unavailable, try again later"
+
+        with (
+            patch.object(gateway, "_check_rate_limit", return_value=True),
+            patch.object(gateway, "_execute_http_request", return_value=response),
+        ):
+            result = gateway.call("create-domain", {"domain": "example.com"})
+
+        self.assertTrue(result.is_ok())
+        application_response = result.unwrap()
+        self.assertFalse(application_response.success)
+        self.assertIn("temporarily unavailable", application_response.data["error"])
+        self.assertEqual(
+            classify_virtualmin_application_error(application_response),
+            Retriability.RETRIABLE,
+        )
+
+    def test_explicit_json_failure_without_error_key_is_not_success(self) -> None:
+        """An explicit failure status wins even when Virtualmin provides only
+        a message; otherwise the application classifier is bypassed."""
+        gateway = _gateway()
+        response = _response(200)
+        response._content = b'{"status":"failure","message":"Service temporarily unavailable"}'
+
+        with (
+            patch.object(gateway, "_check_rate_limit", return_value=True),
+            patch.object(gateway, "_execute_http_request", return_value=response),
+        ):
+            result = gateway.call("create-domain", {"domain": "example.com"})
+
+        self.assertTrue(result.is_ok())
+        application_response = result.unwrap()
+        self.assertFalse(application_response.success)
+        self.assertEqual(
+            classify_virtualmin_application_error(application_response),
+            Retriability.RETRIABLE,
+        )
 
     def test_client_error_is_not_retried(self) -> None:
         gateway = _gateway()

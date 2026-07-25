@@ -33,7 +33,7 @@ from .virtualmin_gateway import (
     resolve_server_credentials,
 )
 from .virtualmin_models import VirtualminServer
-from .virtualmin_validators import VirtualminValidator
+from .virtualmin_validators import VirtualminValidator, is_virtualmin_read_only_program
 
 logger = logging.getLogger(__name__)
 
@@ -185,7 +185,7 @@ class VirtualminAuthenticationManager:
 
         # Determine authentication method to try
         methods_to_try = [force_method] if force_method else self._get_auth_method_priority()
-        is_read_only = program == "info" or program.startswith("list-")
+        is_read_only = is_virtualmin_read_only_program(program)
 
         last_error = ""
         last_retriability = Retriability.UNKNOWN
