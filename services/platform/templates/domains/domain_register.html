@@ -85,7 +85,9 @@
                                 <p class="text-sm text-slate-500 dark:text-slate-400 mt-1">{{ tld_price.tld.description }}</p>
                                 <p class="text-lg font-bold text-primary-600 dark:text-primary-400 mt-2">
                                     {{ tld_price.cost_cents|cents_to_currency|romanian_currency }}
-                                    <span class="text-sm font-normal text-slate-500">/{% trans "year" %}</span>
+                                    <span class="text-sm font-normal text-slate-500">
+                                        /{{ tld_price.years }} {% trans "year" %}{{ tld_price.years|pluralize }}
+                                    </span>
                                 </p>
                             </div>
                         </div>
@@ -145,11 +147,6 @@
                                 id="years"
                                 class="block w-full rounded-md border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
                             >
-                                {% for year in years_choices %}
-                                    <option value="{{ year }}" {% if year == 1 %}selected{% endif %}>
-                                        {{ year }} {% trans "year" %}{{ year|pluralize }}
-                                    </option>
-                                {% endfor %}
                             </select>
                         </div>
 
@@ -216,6 +213,8 @@
 {% endblock %}
 
 {% block extra_js %}
+{% trans "year" as year_label %}
+{% trans "years" as years_label %}
 <script nonce="{{ csp_nonce }}">
 document.addEventListener('DOMContentLoaded', function() {
     const searchForm = document.getElementById('domain-search-form');
@@ -232,7 +231,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const whoisPrivacyCheck = document.getElementById('whois_privacy');
 
     let currentDomain = null;
-    let baseCost = 0;
+    let registrationPrices = {};
 
     // Domain search
     searchForm.addEventListener('submit', async function(e) {
@@ -295,7 +294,9 @@ document.addEventListener('DOMContentLoaded', function() {
 
                     const priceEl = document.createElement('p');
                     priceEl.className = 'text-lg font-bold text-slate-900 dark:text-white';
-                    priceEl.textContent = (data.pricing['1_year'].total_cost_cents / 100).toFixed(2) + ' RON';
+                    const firstPeriod = data.registration_periods[0];
+                    const periodUnit = firstPeriod.years === 1 ? '{{ year_label|escapejs }}' : '{{ years_label|escapejs }}';
+                    priceEl.textContent = `${(firstPeriod.total_cost_cents / 100).toFixed(2)} RON / ${firstPeriod.years} ${periodUnit}`;
 
                     const selectBtn = document.createElement('button');
                     selectBtn.type = 'button';
@@ -303,9 +304,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     selectBtn.textContent = '{% trans "Select" %}';
                     // Use data attributes and an event listener — no inline onclick with interpolated values
                     selectBtn.dataset.domain = data.domain_name;
-                    selectBtn.dataset.costCents = String(data.pricing['1_year'].total_cost_cents);
                     selectBtn.addEventListener('click', function() {
-                        selectDomain(this.dataset.domain, parseInt(this.dataset.costCents, 10));
+                        selectDomain(this.dataset.domain, data.registration_periods);
                     });
 
                     actionDiv.appendChild(priceEl);
@@ -377,9 +377,11 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     // Select domain function
-    window.selectDomain = function(domainName, costCents) {
+    window.selectDomain = function(domainName, registrationPeriods) {
         currentDomain = domainName;
-        baseCost = costCents;
+        registrationPrices = {};
+        yearsSelect.replaceChildren();
+        populateRegistrationPeriodOptions(registrationPeriods);
 
         domainNameDisplay.textContent = domainName;
         domainNameInput.value = domainName;
@@ -391,6 +393,18 @@ document.addEventListener('DOMContentLoaded', function() {
         updateTotalCost();
     };
 
+    function populateRegistrationPeriodOptions(registrationPeriods) {
+        registrationPeriods.forEach(period => {
+            const option = document.createElement('option');
+            const periodUnit = period.years === 1 ? '{{ year_label|escapejs }}' : '{{ years_label|escapejs }}';
+            option.value = String(period.years);
+            option.textContent = `${period.years} ${periodUnit}`;
+            yearsSelect.appendChild(option);
+            registrationPrices[period.years] = period.total_cost_cents;
+        });
+        yearsSelect.value = String(registrationPeriods[0].years);
+    }
+
     // Update total cost when options change
     function updateTotalCost() {
         if (!currentDomain) return;
@@ -398,15 +412,16 @@ document.addEventListener('DOMContentLoaded', function() {
         const years = parseInt(yearsSelect.value);
         const whoisPrivacy = whoisPrivacyCheck.checked;
 
-        let totalCost = baseCost * years;
+        let totalCost = registrationPrices[years];
 
         if (whoisPrivacy) {
             totalCost += {% setting_int "domains.whois_privacy_price_cents" default=500 %} * years;
         }
 
         const costInRon = (totalCost / 100).toFixed(2);
+        const periodUnit = years === 1 ? '{{ year_label|escapejs }}' : '{{ years_label|escapejs }}';
         totalCostDisplay.textContent = `${costInRon} RON`;
-        domainCostDisplay.textContent = `${costInRon} RON for ${years} year${years > 1 ? 's' : ''}`;
+        domainCostDisplay.textContent = `${costInRon} RON / ${years} ${periodUnit}`;
     }
 
     yearsSelect.addEventListener('change', updateTotalCost);
