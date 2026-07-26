@@ -10,6 +10,7 @@ This command supports both manual and scheduled execution to:
 
 Usage:
     python manage.py run_integrity_check --type hash_verification --period 24h
+    python manage.py run_integrity_check --type chain_verification  # walks the whole ledger
     python manage.py run_integrity_check --type all --period 7d --alert
     python manage.py run_integrity_check --schedule  # Configure scheduled task
 """
@@ -20,6 +21,7 @@ import logging
 from datetime import timedelta
 from typing import Any, ClassVar
 
+from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError, CommandParser
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
@@ -38,6 +40,7 @@ class Command(BaseCommand):
     # Check types supported
     CHECK_TYPES: ClassVar[list[str]] = [
         "hash_verification",
+        "chain_verification",
         "sequence_check",
         "gdpr_compliance",
         "all",
@@ -228,6 +231,13 @@ class Command(BaseCommand):
         """Run all integrity check types."""
         results = []
         check_types = ["hash_verification", "sequence_check", "gdpr_compliance"]
+
+        # #313 — the chain ledger only carries meaning once the backfill has run and live
+        # appends are on. Sweeping it before that would report every event as unlinked, so
+        # "all" opts in only when the ledger is live. Explicit --type chain_verification
+        # still runs unconditionally (that is how you verify the backfill itself).
+        if getattr(settings, "AUDIT_CHAIN_ENABLED", False):
+            check_types.insert(1, "chain_verification")
 
         for check_type in check_types:
             result = self._run_check(check_type, period_start, period_end, verbose)

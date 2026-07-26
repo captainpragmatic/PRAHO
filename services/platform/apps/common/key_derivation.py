@@ -20,6 +20,10 @@ _DOMAIN_ENV_VARS: dict[str, str] = {
     "siem-hash-chain": "SIEM_HASH_CHAIN_SECRET",
     "sensitive-data-hash": "SENSITIVE_DATA_HASH_KEY",
     "audit-integrity": "AUDIT_INTEGRITY_SECRET",
+    # Audit hash-chain ledger (#313). Deliberately a DISTINCT domain from audit-integrity:
+    # the per-row v2 MAC and the chain MAC must be computed under cryptographically
+    # independent keys so neither can be replayed as material for the other.
+    "audit-chain": "AUDIT_CHAIN_SECRET",
 }
 
 VALID_DOMAINS: frozenset[str] = frozenset(_DOMAIN_ENV_VARS.keys())

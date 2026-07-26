@@ -888,6 +888,26 @@ def stamp_audit_event_integrity_hash(sender: Any, instance: AuditEvent, created:
         except Exception:
             logger.error(f"🔥 [Audit Integrity] Could not mark event {instance.pk} for critical follow-up")
 
+    # #313 — append the event to the hash-chain ledger, AFTER the v2 MAC is stamped so the link
+    # commits the final integrity_hash. Gated behind AUDIT_CHAIN_ENABLED, in its own savepoint, and
+    # fail-open: an append failure must never roll back the caller's (money-moving) transaction — an
+    # audit event without a chain link is far better than a lost financial transaction (same doctrine
+    # as the stamp above). A failure lands a chain_link_pending marker for the verifier to flag.
+    if getattr(settings, "AUDIT_CHAIN_ENABLED", False):
+        try:
+            with atomic():
+                AuditIntegrityService.append_chain_link(instance)
+        except Exception as e:
+            logger.error(f"🔥 [Audit Chain] Failed to append chain link for event {instance.pk}: {e}")
+            try:
+                pending_metadata = dict(instance.metadata) if isinstance(instance.metadata, dict) else {}
+                pending_metadata["chain_link_pending"] = True
+                with atomic(), audit_mutation_allowed("chain_append"):
+                    AuditEvent.objects.filter(pk=instance.pk).update(metadata=pending_metadata)
+                instance.metadata = pending_metadata
+            except Exception:
+                logger.error(f"🔥 [Audit Chain] Could not mark event {instance.pk} chain_link_pending")
+
 
 # ===============================================================================
 # SIGNAL REGISTRATION HELPER

@@ -288,6 +288,24 @@ AUDIT_INTEGRITY_REQUIRE_V2 = os.environ.get("AUDIT_INTEGRITY_REQUIRE_V2", "true"
     "yes",
 )
 
+# #313 audit hash-chain ledger. Default OFF: the append hook stays dark until the historical
+# backfill has run (backfill_audit_chain), else live appends and the backfill would interleave
+# over the chain-head lock and corrupt the sequence.
+AUDIT_CHAIN_ENABLED = os.environ.get("AUDIT_CHAIN_ENABLED", "false").strip().lower() in (
+    "true",
+    "1",
+    "on",
+    "yes",
+)
+# Post-backfill: treat an AuditEvent with no chain link as a critical finding rather than benign.
+# Flip only after the backfill completes and AUDIT_CHAIN_ENABLED is on.
+AUDIT_CHAIN_REQUIRE = os.environ.get("AUDIT_CHAIN_REQUIRE", "false").strip().lower() in (
+    "true",
+    "1",
+    "on",
+    "yes",
+)
+
 DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "PRAHO Platform <noreply@pragmatichost.com>")
 SERVER_EMAIL = os.environ.get("SERVER_EMAIL", "server@pragmatichost.com")
 

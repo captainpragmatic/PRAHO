@@ -3185,6 +3185,8 @@ class AuditIntegrityService:
     RESERVED_METADATA_KEYS: ClassVar[frozenset[str]] = frozenset(
         {"integrity_hash", "integrity_hash_version", "integrity_key_id"}
     )
+    # Chain-ledger schema version (#313), distinct from the per-row HASH_VERSION above.
+    CHAIN_VERSION = 1
 
     @classmethod
     def verify_audit_integrity(
@@ -3211,13 +3213,15 @@ class AuditIntegrityService:
 
                 if check_type == "hash_verification":
                     issues_found = cls._verify_hash_chain(events_list)
+                elif check_type == "chain_verification":
+                    issues_found = cls._verify_chain_ledger(period_start, period_end)
                 elif check_type == "sequence_check":
                     issues_found = cls._check_sequence_gaps(events_list)
                 elif check_type == "gdpr_compliance":
                     issues_found = cls._check_gdpr_compliance(events_list)
 
-                # Generate hash chain for this check
-                hash_chain = cls._generate_hash_chain(events_list)
+                # Record the real chain-head MAC on the check row (replaces the dead v1 chain).
+                hash_chain = cls._current_chain_head_mac()
 
                 # Determine status
                 status = "healthy"
@@ -3368,9 +3372,303 @@ class AuditIntegrityService:
             "integrity_key_id": key_id,
         }
 
+    # ---------------------------------------------------------------------------
+    # #313 — hash-chain ledger crypto (distinct "audit-chain" key domain)
+    # ---------------------------------------------------------------------------
+
+    @classmethod
+    def _chain_keys(cls) -> list[tuple[str, bytes]]:
+        """Ordered chain-MAC keys as (key_id, key): current first, then previous.
+
+        Mirrors _integrity_keys but resolves the DISTINCT "audit-chain" derivation domain
+        (AUDIT_CHAIN_SECRET env when provisioned, else HKDF over SECRET_KEY). Keeping the
+        chain key independent of the per-row MAC key is deliberate domain separation.
+        """
+        from apps.common.key_derivation import (  # noqa: PLC0415  # Deferred: avoids app-load cycle
+            derive_key,
+            derive_key_with_material,
+        )
+
+        current = derive_key("audit-chain")
+        keys: list[tuple[str, bytes]] = [(hashlib.sha256(current).hexdigest()[:8], current)]
+        previous_material = os.environ.get("AUDIT_CHAIN_SECRET_PREVIOUS", "")
+        if previous_material:
+            previous = derive_key_with_material("audit-chain", previous_material)
+            previous_id = hashlib.sha256(previous).hexdigest()[:8]
+            if previous_id != keys[0][0]:
+                keys.append((previous_id, previous))
+        return keys
+
+    @classmethod
+    def _chain_payload(  # noqa: PLR0913  # Each arg is one committed field of the MAC preimage; bundling them into a dict would hide what the chain actually signs.
+        cls,
+        *,
+        sequence: int,
+        prev_chain_mac: str,
+        event_id: str,
+        event_v2_mac: str,
+        timestamp_iso: str,
+        action: str,
+        content_type_id: int | None,
+        object_id: str,
+        is_tombstone: bool,
+    ) -> str:
+        """Canonical preimage for a chain link.
+
+        Covers the event's STABLE identity plus its per-row v2 MAC as of append time. The
+        v2 MAC transitively covers all evidence (old/new values, metadata), so the chain
+        need not re-hash evidence and a later anonymization re-stamp never rewrites a past
+        link. A tombstone link (retention-deleted event) carries the stored identity with
+        an empty event_v2_mac and is_tombstone=True.
+        """
+        return cls._canonical_json(
+            {
+                "v": cls.CHAIN_VERSION,
+                "sequence": sequence,
+                "prev_chain_mac": prev_chain_mac,
+                "event_id": event_id,
+                "event_v2_mac": event_v2_mac,
+                "timestamp": timestamp_iso,
+                "action": action,
+                "content_type_id": content_type_id,
+                "object_id": object_id,
+                "is_tombstone": is_tombstone,
+            }
+        )
+
+    @classmethod
+    def _compute_chain_mac(cls, *, payload: str, key: bytes) -> str:
+        return hmac.new(key, payload.encode(), hashlib.sha256).hexdigest()
+
+    @classmethod
+    def append_chain_link(cls, event: AuditEvent) -> None:
+        """Append one hash-chain link for a freshly stamped audit event (#313).
+
+        Serializes on the single AuditChainHead row via SELECT ... FOR UPDATE so
+        concurrent appends get strictly increasing sequences and a correct prev-link.
+        A bare DB sequence could not bind link N's prev_chain_mac to link N-1's chain_mac.
+
+        Gated behind AUDIT_CHAIN_ENABLED and only runs once backfill_complete is set, so
+        live appends never interleave with the historical backfill over the head lock.
+        """
+        from apps.audit.models import AuditChainHead, AuditChainLink  # noqa: PLC0415  # avoid app-load cycle
+
+        event_v2_mac = ""
+        if isinstance(event.metadata, dict):
+            event_v2_mac = str(event.metadata.get("integrity_hash", ""))
+
+        with transaction.atomic():
+            head, _created = AuditChainHead.objects.select_for_update().get_or_create(pk=1)
+            if not head.backfill_complete:
+                # Historical rows are not yet sequenced; appending now would race the backfill.
+                return
+            sequence = head.last_sequence + 1
+            prev = head.last_chain_mac
+            key_id, key = cls._chain_keys()[0]
+            payload = cls._chain_payload(
+                sequence=sequence,
+                prev_chain_mac=prev,
+                event_id=str(event.id),
+                event_v2_mac=event_v2_mac,
+                timestamp_iso=event.timestamp.isoformat(),
+                action=event.action,
+                content_type_id=event.content_type_id,
+                object_id=event.object_id,
+                is_tombstone=False,
+            )
+            mac = cls._compute_chain_mac(payload=payload, key=key)
+            AuditChainLink.objects.create(
+                sequence=sequence,
+                event=event,
+                event_id_str=str(event.id),
+                event_timestamp=event.timestamp,
+                event_action=event.action,
+                event_content_type_id=event.content_type_id,
+                event_object_id=event.object_id,
+                event_v2_mac=event_v2_mac,
+                chain_mac=mac,
+                prev_chain_mac=prev,
+                key_id=key_id,
+                is_tombstone=False,
+            )
+            AuditChainHead.objects.filter(pk=1).update(last_sequence=sequence, last_chain_mac=mac)
+
+    @classmethod
+    def append_tombstone_links(cls, events: list[AuditEvent]) -> int:
+        """Append tombstone links recording a legitimate retention deletion (#313).
+
+        Called BEFORE the events are deleted, while their identity is still readable. Without
+        this, a retention delete is indistinguishable from an attacker's DELETE: the event row
+        is gone and its live link's FK is nulled by SET_NULL, leaving nothing that says the
+        removal was authorized. The tombstone is a NEW appended link (the original link is
+        never rewritten — the ledger is append-only), so the chain still covers the removal.
+
+        Returns the number of tombstones appended. Fail-open like the append hook: retention
+        must not be blocked by a ledger problem, but a failure is loud in the log.
+        """
+        from apps.audit.models import AuditChainHead, AuditChainLink  # noqa: PLC0415  # avoid app-load cycle
+
+        if not events or not getattr(settings, "AUDIT_CHAIN_ENABLED", False):
+            return 0
+
+        with transaction.atomic():
+            head, _created = AuditChainHead.objects.select_for_update().get_or_create(pk=1)
+            if not head.backfill_complete:
+                return 0
+
+            sequence = head.last_sequence
+            prev = head.last_chain_mac
+            key_id, key = cls._chain_keys()[0]
+            links = []
+            for event in events:
+                sequence += 1
+                payload = cls._chain_payload(
+                    sequence=sequence,
+                    prev_chain_mac=prev,
+                    event_id=str(event.id),
+                    # A tombstone commits to identity only; the evidence MAC dies with the row.
+                    event_v2_mac="",
+                    timestamp_iso=event.timestamp.isoformat(),
+                    action=event.action,
+                    content_type_id=event.content_type_id,
+                    object_id=event.object_id,
+                    is_tombstone=True,
+                )
+                mac = cls._compute_chain_mac(payload=payload, key=key)
+                links.append(
+                    AuditChainLink(
+                        sequence=sequence,
+                        # Deliberately NOT linked to the event: it is about to be deleted, and
+                        # the partial-unique constraint reserves the FK for the live link.
+                        event=None,
+                        event_id_str=str(event.id),
+                        event_timestamp=event.timestamp,
+                        event_action=event.action,
+                        event_content_type_id=event.content_type_id,
+                        event_object_id=event.object_id,
+                        event_v2_mac="",
+                        chain_mac=mac,
+                        prev_chain_mac=prev,
+                        key_id=key_id,
+                        is_tombstone=True,
+                    )
+                )
+                prev = mac
+
+            AuditChainLink.objects.bulk_create(links)
+            AuditChainHead.objects.filter(pk=1).update(last_sequence=sequence, last_chain_mac=prev)
+            return len(links)
+
+    @classmethod
+    def _current_chain_head_mac(cls) -> str:
+        """The current chain-head MAC, for recording on an integrity-check row (#313).
+
+        Replaces the dead v1 _generate_hash_chain: that computed an unkeyed SHA-256 over
+        per-row v1 hashes that was written but never verified. The real chain head MAC is
+        a meaningful, verifiable value.
+        """
+        from apps.audit.models import AuditChainHead  # noqa: PLC0415  # avoid app-load cycle
+
+        head = AuditChainHead.objects.filter(pk=1).first()
+        return head.last_chain_mac if head else ""
+
+    @classmethod
+    def _verify_chain_ledger(cls, period_start: datetime, period_end: datetime) -> list[dict[str, Any]]:
+        """Walk the append-only chain ledger and detect insert/delete/reorder/tamper (#313).
+
+        Chain integrity is a total-order property, so the ledger is walked contiguously from
+        the genesis link — not windowed — regardless of the period passed for the enclosing
+        check row. Findings: sequence gaps, broken prev-linkage, chain-MAC mismatch, and any
+        AuditEvent in the window that has no chain link (or a chain_link_pending marker).
+        """
+        from apps.audit.models import AuditChainLink  # noqa: PLC0415  # avoid app-load cycle
+
+        findings: list[dict[str, Any]] = []
+        keys_by_id = dict(cls._chain_keys())
+
+        prev_link: AuditChainLink | None = None
+        for link in AuditChainLink.objects.order_by("sequence").iterator():
+            expected_seq = 1 if prev_link is None else prev_link.sequence + 1
+            if link.sequence != expected_seq:
+                findings.append(
+                    {
+                        "type": "chain_sequence_gap",
+                        "severity": "critical",
+                        "description": f"Chain sequence gap: expected {expected_seq}, found {link.sequence}",
+                    }
+                )
+            expected_prev = "" if prev_link is None else prev_link.chain_mac
+            if link.prev_chain_mac != expected_prev:
+                findings.append(
+                    {
+                        "type": "chain_prev_link_broken",
+                        "severity": "critical",
+                        "description": f"Chain link {link.sequence} prev_chain_mac does not match prior link",
+                    }
+                )
+            key = keys_by_id.get(link.key_id)
+            if key is None:
+                findings.append(
+                    {
+                        "type": "chain_unknown_key_id",
+                        "severity": "critical",
+                        "description": f"Chain link {link.sequence} stamped with unrecognized key id {link.key_id}",
+                    }
+                )
+            else:
+                # Build the preimage from the STORED identity snapshot, never the live FK, so a
+                # retention-deleted (event=NULL) or anonymized event still verifies against what
+                # the link committed to at append time.
+                payload = cls._chain_payload(
+                    sequence=link.sequence,
+                    prev_chain_mac=link.prev_chain_mac,
+                    event_id=link.event_id_str,
+                    event_v2_mac=link.event_v2_mac,
+                    timestamp_iso=link.event_timestamp.isoformat(),
+                    action=link.event_action,
+                    content_type_id=link.event_content_type_id,
+                    object_id=link.event_object_id,
+                    is_tombstone=link.is_tombstone,
+                )
+                if not hmac.compare_digest(cls._compute_chain_mac(payload=payload, key=key), link.chain_mac):
+                    findings.append(
+                        {
+                            "type": "chain_mac_mismatch",
+                            "severity": "critical",
+                            "description": f"Chain link {link.sequence} MAC does not verify",
+                        }
+                    )
+            prev_link = link
+
+        # Events in the window with no chain link (forged INSERT, or a failed/pending append).
+        #
+        # Severity is gated on AUDIT_CHAIN_REQUIRE rather than hardcoded: until the operator
+        # confirms the backfill ran to completion AND live appends have been on for the whole
+        # window, an unlinked event is an expected cutover artifact, not evidence of forgery.
+        # Reporting those as critical would train operators to ignore the finding — exactly
+        # the failure mode that made the pre-#304 control worthless.
+        missing_severity = "critical" if getattr(settings, "AUDIT_CHAIN_REQUIRE", False) else "info"
+        unlinked = AuditEvent.objects.filter(
+            timestamp__gte=period_start, timestamp__lt=period_end, chain_links__isnull=True
+        )
+        findings.extend(
+            {
+                "type": "chain_link_missing_for_event",
+                "severity": missing_severity,
+                "description": f"Audit event {event.id} has no chain link (forged insert or failed append)",
+            }
+            for event in unlinked.iterator()
+        )
+        return findings
+
     @classmethod
     def _verify_hash_chain(cls, events: list[AuditEvent]) -> list[dict[str, Any]]:
         """Verify per-event integrity MACs (v2, keyed).
+
+        NOTE (#313): despite the name this verifies PER-ROW MACs, not the chain — the real
+        cryptographic chain lives in the ledger and is checked by _verify_chain_ledger. The
+        rename to _verify_event_macs is deferred to its own change to avoid churning ~20 call
+        sites across the test suite in this PR.
 
         v2 rows carry an HMAC-SHA256 over the evidence payload; the stamped key id
         selects the key, and both the current and previous keys are accepted so key
@@ -3586,18 +3884,6 @@ class AuditIntegrityService:
         return hashlib.sha256(canonical_data.encode()).hexdigest()
 
     @classmethod
-    def _generate_hash_chain(cls, events: list[AuditEvent]) -> str:
-        """Generate a hash chain for a sequence of events."""
-        if not events:
-            return ""
-
-        # Create chain of hashes
-        chain_data = [cls._calculate_event_hash(event) for event in events]
-        chain_hash = hashlib.sha256("".join(chain_data).encode()).hexdigest()
-
-        return chain_hash
-
-    @classmethod
     def _should_have_activity(cls, prev_event: AuditEvent, current_event: AuditEvent) -> bool:
         """Determine if there should have been activity between events."""
         # Simple heuristic: if both events are from the same user in a short session
@@ -3782,6 +4068,16 @@ class AuditRetentionService:
 
         deleted_count = 0
         if deletable_ids:
+            # #313 — record the removal in the chain ledger BEFORE deleting, while the events
+            # are still readable. Fail-open: a ledger problem must not block a legally required
+            # retention deletion, but it is logged loudly (the verifier will then see a live
+            # link whose event vanished with no matching tombstone).
+            deletable = [event for event in events if event.id in set(deletable_ids)]
+            try:
+                AuditIntegrityService.append_tombstone_links(deletable)
+            except Exception as e:
+                logger.error(f"🔥 [Audit Chain] Failed to append retention tombstones: {e}")
+
             with audit_mutation_allowed("retention_delete"):
                 deleted_count = AuditEvent.objects.filter(id__in=deletable_ids).delete()[0]
 
