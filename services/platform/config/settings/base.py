@@ -305,6 +305,15 @@ AUDIT_CHAIN_REQUIRE = os.environ.get("AUDIT_CHAIN_REQUIRE", "false").strip().low
     "on",
     "yes",
 )
+# External anchor sink for the chain head (#313). Chaining cannot detect TAIL truncation —
+# only a record held outside this database can. "logfile" appends one signed JSON record per
+# anchor run to AUDIT_ANCHOR_LOG_PATH, intended to be shipped off-host by the log pipeline;
+# "none" disables external publication (anchors stay local, truncation stays undetectable).
+# In production point AUDIT_ANCHOR_LOG_PATH at /var/log/praho/ alongside the other logs, and
+# make sure the pipeline ships it OFF-HOST — an anchor file sitting on the compromised box is
+# no better evidence than the database rows it is supposed to corroborate.
+AUDIT_ANCHOR_SINK = os.environ.get("AUDIT_ANCHOR_SINK", "logfile").strip().lower()
+AUDIT_ANCHOR_LOG_PATH = os.environ.get("AUDIT_ANCHOR_LOG_PATH", str(BASE_DIR / "logs" / "audit_chain_anchors.jsonl"))
 
 DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "PRAHO Platform <noreply@pragmatichost.com>")
 SERVER_EMAIL = os.environ.get("SERVER_EMAIL", "server@pragmatichost.com")

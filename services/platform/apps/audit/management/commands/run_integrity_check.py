@@ -41,6 +41,7 @@ class Command(BaseCommand):
     CHECK_TYPES: ClassVar[list[str]] = [
         "hash_verification",
         "chain_verification",
+        "anchor_verification",
         "sequence_check",
         "gdpr_compliance",
         "all",
@@ -238,6 +239,7 @@ class Command(BaseCommand):
         # still runs unconditionally (that is how you verify the backfill itself).
         if getattr(settings, "AUDIT_CHAIN_ENABLED", False):
             check_types.insert(1, "chain_verification")
+            check_types.insert(2, "anchor_verification")
 
         for check_type in check_types:
             result = self._run_check(check_type, period_start, period_end, verbose)

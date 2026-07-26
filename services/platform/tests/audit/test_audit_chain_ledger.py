@@ -17,6 +17,10 @@ These tests are written as attacks, one per failure mode named in #313.
 
 from __future__ import annotations
 
+import json
+import shutil
+import tempfile
+from pathlib import Path
 from typing import Any
 
 from django.contrib.contenttypes.models import ContentType
@@ -26,6 +30,7 @@ from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from apps.audit.models import (
+    AuditChainAnchor,
     AuditChainHead,
     AuditChainLink,
     AuditEvent,
@@ -142,9 +147,9 @@ class ChainTamperDetectionTests(AuditChainLedgerTestCase):
         with connection.cursor() as cursor:
             cursor.execute("DELETE FROM audit_chain_links WHERE sequence = %s", [last_link.sequence])
 
-        # Walking the surviving links is clean — truncation leaves no internal gap. This is
-        # precisely why #313 asks for an external anchor: the head row records where the
-        # chain must reach, and it still points past the end.
+        # Walking the surviving links is clean — truncation leaves no internal gap. The head
+        # row still points past the end, which is the in-database tell; the control that does
+        # not depend on attacker-writable state is the external anchor (see ChainAnchorTests).
         head = AuditChainHead.objects.get(pk=1)
         self.assertEqual(head.last_sequence, last_link.sequence)
         self.assertFalse(AuditChainLink.objects.filter(sequence=last_link.sequence).exists())
@@ -347,6 +352,199 @@ class ChainBackfillTests(TestCase):
 
         self.assertEqual(AuditChainLink.objects.count(), history_count + 1)
         self.assertEqual(self._verify(), [])
+
+
+class ChainAnchorTests(AuditChainLedgerTestCase):
+    """The external anchor: the only control that survives an attacker owning the database.
+
+    Every test writes to a temp-dir sink, so the log-file sink is exercised for real rather
+    than mocked — the file format IS the evidence an operator reads back.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self._sink_dir = tempfile.mkdtemp()
+        self.anchor_path = Path(self._sink_dir) / "anchors.jsonl"
+        self.addCleanup(shutil.rmtree, self._sink_dir, True)
+        overrides = override_settings(AUDIT_ANCHOR_SINK="logfile", AUDIT_ANCHOR_LOG_PATH=str(self.anchor_path))
+        overrides.enable()
+        self.addCleanup(overrides.disable)
+
+    def _sink_records(self) -> list[dict[str, Any]]:
+        """Read back what the sink actually holds — the operator's view of the evidence."""
+        if not self.anchor_path.exists():
+            return []
+        return [json.loads(line) for line in self.anchor_path.read_text().splitlines() if line.strip()]
+
+    def test_publishing_writes_a_verifiable_record_to_the_sink(self) -> None:
+        self._event()
+        self._event()
+
+        result = AuditIntegrityService.publish_chain_anchor()
+        self.assertTrue(result.is_ok())
+
+        records = self._sink_records()
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["sequence"], 2)
+        self.assertEqual(records[0]["link_count"], 2)
+        self.assertEqual(AuditIntegrityService._verify_chain_anchors(), [])
+
+    def test_tail_truncation_is_caught_by_the_anchor(self) -> None:
+        """The gap chaining cannot close: truncation leaves the surviving links consistent."""
+        for index in range(3):
+            self._event(description=f"event {index}")
+        AuditIntegrityService.publish_chain_anchor()
+
+        # Attacker lops off the tail AND repairs the head row to match, so nothing in the
+        # database contradicts itself any more.
+        with connection.cursor() as cursor:
+            cursor.execute("DELETE FROM audit_chain_links WHERE sequence = 3")
+        surviving = AuditChainLink.objects.order_by("-sequence").first()
+        assert surviving is not None
+        AuditChainHead.objects.filter(pk=1).update(last_sequence=surviving.sequence, last_chain_mac=surviving.chain_mac)
+
+        # The chain walk finds no structural break — no gap, no snapped prev-link, no bad MAC.
+        # This is exactly the blind spot #313 names. (The orphaned event does surface as an
+        # informational "missing link", but that is a benign cutover signal pre-REQUIRE, not
+        # something an operator would treat as evidence of tampering.)
+        chain_findings = self._finding_types(self._verify())
+        self.assertNotIn("chain_sequence_gap", chain_findings)
+        self.assertNotIn("chain_prev_link_broken", chain_findings)
+        self.assertNotIn("chain_mac_mismatch", chain_findings)
+
+        # The anchor catches it, because it was published before the truncation.
+        findings = AuditIntegrityService._verify_chain_anchors()
+        self.assertIn("chain_truncated_below_anchor", self._finding_types(findings))
+
+    def test_truncation_is_caught_from_the_sink_copy_alone(self) -> None:
+        """The real verification path: anchors read back from the sink, not from the database.
+
+        An attacker who owns the database deletes the local anchor rows too. What they cannot
+        reach is the off-host sink, so verification must work from those records alone.
+        """
+        for index in range(3):
+            self._event(description=f"event {index}")
+        AuditIntegrityService.publish_chain_anchor()
+        sink_records = self._sink_records()
+
+        with connection.cursor() as cursor:
+            cursor.execute("DELETE FROM audit_chain_links WHERE sequence = 3")
+            # ...and destroy the local anchor copy, which the append-only manager blocks but
+            # raw SQL does not.
+            cursor.execute("DELETE FROM audit_chain_anchors")
+        self.assertEqual(AuditChainAnchor.objects.count(), 0)
+
+        # Nothing left in the database to check against — but the sink copy still convicts.
+        findings = AuditIntegrityService.verify_anchor_records(sink_records)
+        self.assertIn("chain_truncated_below_anchor", self._finding_types(findings))
+
+    def test_rewriting_an_anchored_link_is_caught(self) -> None:
+        """Truncation is not the only post-anchor rewrite; the head MAC is pinned too."""
+        self._event()
+        self._event()
+        AuditIntegrityService.publish_chain_anchor()
+        sink_records = self._sink_records()
+
+        # Re-chain link 2 under the real key so the ledger walk itself stays clean.
+        link = AuditChainLink.objects.get(sequence=2)
+        payload = AuditIntegrityService._chain_payload(
+            sequence=link.sequence,
+            prev_chain_mac=link.prev_chain_mac,
+            event_id=link.event_id_str,
+            event_v2_mac=link.event_v2_mac,
+            timestamp_iso=link.event_timestamp.isoformat(),
+            action="payment_refunded",
+            content_type_id=link.event_content_type_id,
+            object_id=link.event_object_id,
+            is_tombstone=link.is_tombstone,
+        )
+        _key_id, key = AuditIntegrityService._chain_keys()[0]
+        forged_mac = AuditIntegrityService._compute_chain_mac(payload=payload, key=key)
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE audit_chain_links SET event_action = %s, chain_mac = %s WHERE sequence = 2",
+                ["payment_refunded", forged_mac],
+            )
+
+        findings = AuditIntegrityService.verify_anchor_records(sink_records)
+        self.assertIn("anchor_head_mismatch", self._finding_types(findings))
+
+    def test_forged_anchor_record_is_rejected(self) -> None:
+        """An attacker minting an anchor to match a rewritten chain lacks the anchor key."""
+        self._event()
+        AuditIntegrityService.publish_chain_anchor()
+        records = self._sink_records()
+        records[0]["link_count"] = 99
+
+        findings = AuditIntegrityService.verify_anchor_records(records)
+        self.assertIn("anchor_mac_mismatch", self._finding_types(findings))
+        # A forged anchor proves nothing about the chain, so it must not also emit
+        # chain-truncation findings derived from its own bogus numbers.
+        self.assertNotIn("chain_truncated_below_anchor", self._finding_types(findings))
+
+    def test_anchor_key_is_independent_of_the_chain_key(self) -> None:
+        """Domain separation: recovering the chain key must not let an attacker mint anchors."""
+        chain_key = AuditIntegrityService._chain_keys()[0][1]
+        anchor_key = AuditIntegrityService._anchor_keys()[0][1]
+        self.assertNotEqual(chain_key, anchor_key)
+
+    def test_publishing_without_a_chain_head_is_an_error(self) -> None:
+        """Anchoring an empty chain would publish a meaningless record."""
+        AuditChainHead.objects.filter(pk=1).update(last_sequence=0, last_chain_mac="")
+
+        result = AuditIntegrityService.publish_chain_anchor()
+
+        self.assertTrue(result.is_err())
+        self.assertEqual(self._sink_records(), [])
+
+    def test_sink_failure_does_not_record_a_local_anchor(self) -> None:
+        """A local row written despite a failed publish would overstate the real protection."""
+        self._event()
+
+        # Point the sink at a path that cannot be created.
+        with override_settings(AUDIT_ANCHOR_LOG_PATH="/proc/praho-nonexistent/anchors.jsonl"):
+            result = AuditIntegrityService.publish_chain_anchor()
+
+        self.assertTrue(result.is_err())
+        self.assertEqual(AuditChainAnchor.objects.count(), 0)
+
+    def test_none_sink_records_locally_but_publishes_nothing(self) -> None:
+        """The explicit opt-out still tracks heads locally — with no external evidence."""
+        self._event()
+
+        with override_settings(AUDIT_ANCHOR_SINK="none"):
+            result = AuditIntegrityService.publish_chain_anchor()
+
+        self.assertTrue(result.is_ok())
+        self.assertEqual(AuditChainAnchor.objects.count(), 1)
+        self.assertEqual(self._sink_records(), [])
+
+    def test_unknown_sink_is_rejected(self) -> None:
+        self._event()
+
+        with override_settings(AUDIT_ANCHOR_SINK="carrier-pigeon"):
+            result = AuditIntegrityService.publish_chain_anchor()
+
+        self.assertTrue(result.is_err())
+        self.assertEqual(AuditChainAnchor.objects.count(), 0)
+
+    def test_anchor_rows_are_append_only(self) -> None:
+        self._event()
+        AuditIntegrityService.publish_chain_anchor()
+
+        with self.assertRaises(AuditLedgerImmutabilityError):
+            AuditChainAnchor.objects.update(sequence=99)
+        with self.assertRaises(AuditLedgerImmutabilityError):
+            AuditChainAnchor.objects.delete()
+
+    def test_anchor_command_publishes_and_verifies(self) -> None:
+        self._event()
+
+        call_command("anchor_audit_chain", verbosity=0)
+        self.assertEqual(len(self._sink_records()), 1)
+
+        # --verify is the operator's clean-bill-of-health path; it must not raise.
+        call_command("anchor_audit_chain", "--verify", verbosity=0)
 
 
 class ChainImmutabilityTests(AuditChainLedgerTestCase):

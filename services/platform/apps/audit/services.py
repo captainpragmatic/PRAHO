@@ -11,6 +11,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from decimal import Decimal
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, TypedDict
 
 from django.conf import settings
@@ -3215,6 +3216,8 @@ class AuditIntegrityService:
                     issues_found = cls._verify_hash_chain(events_list)
                 elif check_type == "chain_verification":
                     issues_found = cls._verify_chain_ledger(period_start, period_end)
+                elif check_type == "anchor_verification":
+                    issues_found = cls._verify_chain_anchors()
                 elif check_type == "sequence_check":
                     issues_found = cls._check_sequence_gaps(events_list)
                 elif check_type == "gdpr_compliance":
@@ -3558,6 +3561,240 @@ class AuditIntegrityService:
             AuditChainLink.objects.bulk_create(links)
             AuditChainHead.objects.filter(pk=1).update(last_sequence=sequence, last_chain_mac=prev)
             return len(links)
+
+    # ---------------------------------------------------------------------------
+    # #313 — external anchor over the chain head
+    # ---------------------------------------------------------------------------
+
+    @classmethod
+    def _anchor_keys(cls) -> list[tuple[str, bytes]]:
+        """Ordered anchor-MAC keys as (key_id, key): current first, then previous.
+
+        Resolves the "audit-anchor" domain, kept separate from "audit-chain" so recovering
+        the chain key does not let an attacker mint anchors that match a rewritten chain.
+        """
+        from apps.common.key_derivation import (  # noqa: PLC0415  # Deferred: avoids app-load cycle
+            derive_key,
+            derive_key_with_material,
+        )
+
+        current = derive_key("audit-anchor")
+        keys: list[tuple[str, bytes]] = [(hashlib.sha256(current).hexdigest()[:8], current)]
+        previous_material = os.environ.get("AUDIT_ANCHOR_SECRET_PREVIOUS", "")
+        if previous_material:
+            previous = derive_key_with_material("audit-anchor", previous_material)
+            previous_id = hashlib.sha256(previous).hexdigest()[:8]
+            if previous_id != keys[0][0]:
+                keys.append((previous_id, previous))
+        return keys
+
+    @classmethod
+    def _anchor_payload(cls, *, sequence: int, head_chain_mac: str, link_count: int) -> str:
+        """Canonical preimage for an anchor.
+
+        link_count is committed alongside the head so a truncation that also rewrites the
+        head row cannot produce a chain matching any previously published anchor.
+        """
+        return cls._canonical_json(
+            {
+                "v": cls.CHAIN_VERSION,
+                "sequence": sequence,
+                "head_chain_mac": head_chain_mac,
+                "link_count": link_count,
+            }
+        )
+
+    @classmethod
+    def publish_chain_anchor(cls) -> Result[dict[str, Any], str]:
+        """Publish the current chain head to the configured external sink (#313).
+
+        Run on a schedule. Each anchor pins "the chain reached at least this far", which is
+        what makes tail truncation detectable — chaining alone cannot see it, because lopping
+        off the tail leaves the surviving links internally consistent.
+        """
+        from apps.audit.models import AuditChainAnchor, AuditChainHead, AuditChainLink  # noqa: PLC0415
+
+        head = AuditChainHead.objects.filter(pk=1).first()
+        if head is None or not head.last_chain_mac:
+            return Err("No chain head to anchor - run backfill_audit_chain first")
+
+        link_count = AuditChainLink.objects.count()
+        key_id, key = cls._anchor_keys()[0]
+        payload = cls._anchor_payload(
+            sequence=head.last_sequence, head_chain_mac=head.last_chain_mac, link_count=link_count
+        )
+        anchor_mac = hmac.new(key, payload.encode(), hashlib.sha256).hexdigest()
+
+        sink_name = getattr(settings, "AUDIT_ANCHOR_SINK", "logfile")
+        record = {
+            "v": cls.CHAIN_VERSION,
+            "sequence": head.last_sequence,
+            "head_chain_mac": head.last_chain_mac,
+            "link_count": link_count,
+            "anchor_mac": anchor_mac,
+            "key_id": key_id,
+            "anchored_at": timezone.now().isoformat(),
+        }
+
+        # Publish to the sink FIRST. The external record is the actual control; the local row
+        # is a convenience copy. Writing the local row on a sink failure would overstate the
+        # protection an operator has.
+        sink_result = cls._publish_to_anchor_sink(sink_name, record)
+        if sink_result.is_err():
+            return sink_result
+
+        AuditChainAnchor.objects.create(
+            sequence=head.last_sequence,
+            head_chain_mac=head.last_chain_mac,
+            link_count=link_count,
+            anchor_mac=anchor_mac,
+            key_id=key_id,
+            sink=sink_name,
+        )
+        logger.info(f"⚓ [Audit Anchor] Published chain anchor seq={head.last_sequence} to {sink_name}")
+        return Ok(record)
+
+    @classmethod
+    def _publish_to_anchor_sink(cls, sink_name: str, record: dict[str, Any]) -> Result[dict[str, Any], str]:
+        """Dispatch an anchor record to the named sink.
+
+        Sinks are deliberately dumb append-only writers. Adding an S3 Object Lock or external
+        timestamping sink means adding a branch here, nothing else.
+        """
+        if sink_name == "none":
+            # Explicit opt-out. Anchors still land in the local table, but there is NO external
+            # evidence — tail truncation is undetectable in this mode. Loud on purpose.
+            logger.warning("⚠️ [Audit Anchor] AUDIT_ANCHOR_SINK=none - anchors are not externally published")
+            return Ok(record)
+
+        if sink_name == "logfile":
+            path = getattr(settings, "AUDIT_ANCHOR_LOG_PATH", "")
+            if not path:
+                return Err("AUDIT_ANCHOR_LOG_PATH is not configured")
+            try:
+                anchor_path = Path(path)
+                anchor_path.parent.mkdir(parents=True, exist_ok=True)
+                # Append-only open, one JSON record per line, flushed before returning so a
+                # crash between here and the local row cannot lose the external evidence.
+                with anchor_path.open("a", encoding="utf-8") as handle:
+                    handle.write(json.dumps(record, sort_keys=True) + "\n")
+                    handle.flush()
+                    os.fsync(handle.fileno())
+            except OSError as e:
+                return Err(f"Anchor sink write failed: {e}")
+            return Ok(record)
+
+        return Err(f"Unknown anchor sink {sink_name!r}")
+
+    @classmethod
+    def _verify_chain_anchors(cls) -> list[dict[str, Any]]:
+        """Check the live chain against published anchors — this is what catches truncation.
+
+        For each anchor: the chain must still reach the anchored sequence, the link at that
+        sequence must still carry the anchored head MAC, and the anchor's own MAC must verify
+        under a known anchor key.
+
+        NOTE: read against the LOCAL anchor table, which an attacker who owns the database can
+        delete outright. A real verification runs this against the sink's records — see
+        verify_anchor_records, which takes externally supplied anchors.
+        """
+        from apps.audit.models import AuditChainAnchor  # noqa: PLC0415  # avoid app-load cycle
+
+        anchors = [
+            {
+                "sequence": anchor.sequence,
+                "head_chain_mac": anchor.head_chain_mac,
+                "link_count": anchor.link_count,
+                "anchor_mac": anchor.anchor_mac,
+                "key_id": anchor.key_id,
+            }
+            for anchor in AuditChainAnchor.objects.order_by("sequence")
+        ]
+        return cls.verify_anchor_records(anchors)
+
+    @classmethod
+    def verify_anchor_records(cls, anchors: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Verify the live chain against externally supplied anchor records (#313).
+
+        Takes anchors as plain dicts precisely so an operator can feed in lines read back from
+        the sink — the copy an in-database attacker could not reach.
+        """
+        from apps.audit.models import AuditChainLink  # noqa: PLC0415  # avoid app-load cycle
+
+        findings: list[dict[str, Any]] = []
+        keys_by_id = dict(cls._anchor_keys())
+
+        for anchor in anchors:
+            sequence = anchor["sequence"]
+
+            key = keys_by_id.get(anchor.get("key_id", ""))
+            if key is None:
+                findings.append(
+                    {
+                        "type": "anchor_unknown_key_id",
+                        "severity": "critical",
+                        "description": f"Anchor at sequence {sequence} uses unrecognized key id {anchor.get('key_id')}",
+                    }
+                )
+            else:
+                payload = cls._anchor_payload(
+                    sequence=sequence,
+                    head_chain_mac=anchor["head_chain_mac"],
+                    link_count=anchor["link_count"],
+                )
+                expected = hmac.new(key, payload.encode(), hashlib.sha256).hexdigest()
+                if not hmac.compare_digest(expected, anchor["anchor_mac"]):
+                    findings.append(
+                        {
+                            "type": "anchor_mac_mismatch",
+                            "severity": "critical",
+                            "description": f"Anchor at sequence {sequence} does not verify - forged or altered anchor",
+                        }
+                    )
+                    # A forged anchor proves nothing about the chain; comparing against it would
+                    # produce misleading follow-on findings.
+                    continue
+
+            link = AuditChainLink.objects.filter(sequence=sequence).first()
+            if link is None:
+                findings.append(
+                    {
+                        "type": "chain_truncated_below_anchor",
+                        "severity": "critical",
+                        "description": (
+                            f"Chain no longer reaches anchored sequence {sequence} - "
+                            f"the ledger tail was truncated after it was anchored"
+                        ),
+                    }
+                )
+                continue
+
+            if not hmac.compare_digest(link.chain_mac, anchor["head_chain_mac"]):
+                findings.append(
+                    {
+                        "type": "anchor_head_mismatch",
+                        "severity": "critical",
+                        "description": (
+                            f"Link at anchored sequence {sequence} no longer carries the anchored "
+                            f"head MAC - the chain was rewritten after it was anchored"
+                        ),
+                    }
+                )
+
+            live_count = AuditChainLink.objects.filter(sequence__lte=sequence).count()
+            if live_count != anchor["link_count"]:
+                findings.append(
+                    {
+                        "type": "anchor_link_count_mismatch",
+                        "severity": "critical",
+                        "description": (
+                            f"Anchored {anchor['link_count']} links at or below sequence {sequence}, "
+                            f"but the ledger now holds {live_count} - links were removed"
+                        ),
+                    }
+                )
+
+        return findings
 
     @classmethod
     def _current_chain_head_mac(cls) -> str:

@@ -707,6 +707,67 @@ class AuditChainLink(models.Model):
         raise AuditLedgerImmutabilityError("AuditChainLink is append-only; delete() is never permitted")
 
 
+class AuditChainAnchorQuerySet(models.QuerySet["AuditChainAnchor"]):
+    """Append-only, same doctrine as AuditChainLinkQuerySet — an anchor is never rewritten."""
+
+    def update(self, **kwargs: Any) -> int:
+        raise AuditLedgerImmutabilityError("AuditChainAnchor is append-only; update() is never permitted")
+
+    def bulk_update(
+        self, objs: Iterable[AuditChainAnchor], fields: Iterable[str], batch_size: int | None = None
+    ) -> int:
+        raise AuditLedgerImmutabilityError("AuditChainAnchor is append-only; bulk_update() is never permitted")
+
+    def delete(self) -> tuple[int, dict[str, int]]:
+        raise AuditLedgerImmutabilityError("AuditChainAnchor is append-only; delete() is never permitted")
+
+
+class AuditChainAnchor(models.Model):
+    """Local record of a chain head published to an external sink (#313).
+
+    Chaining detects insert/reorder/mid-chain deletion, but NOT tail truncation: lop off the
+    last N links and update the head row and the remaining chain walks clean. The fix must
+    live somewhere the database attacker does not control, so each anchor run publishes
+    (sequence, head MAC, link count) to an external sink under the SEPARATE "audit-anchor"
+    key domain.
+
+    THIS ROW IS NOT THE CONTROL — it is a local convenience copy, in the same database an
+    attacker would own, and they can delete it alongside the links. The evidence is what the
+    sink holds. Verification compares the sink's highest anchor against the live chain: a
+    chain that no longer reaches an anchored sequence has been truncated.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    sequence = models.BigIntegerField(db_index=True)
+    head_chain_mac = models.CharField(max_length=64)
+    link_count = models.BigIntegerField()
+    # MAC over the anchored tuple under the audit-anchor domain. What the sink records, and
+    # what makes a forged anchor line detectable by whoever holds the anchor key.
+    anchor_mac = models.CharField(max_length=64)
+    key_id = models.CharField(max_length=8)
+    sink = models.CharField(max_length=32)
+    anchored_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    objects: ClassVar[models.Manager[AuditChainAnchor]] = AuditChainAnchorQuerySet.as_manager()
+
+    class Meta:
+        db_table = "audit_chain_anchors"
+        ordering: ClassVar[tuple[str, ...]] = ("-sequence",)
+
+    def __str__(self) -> str:
+        return f"AuditChainAnchor(seq={self.sequence}, sink={self.sink})"
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        if not self._state.adding:
+            raise AuditLedgerImmutabilityError(
+                "AuditChainAnchor is append-only; save() on an existing row is forbidden"
+            )
+        super().save(*args, **kwargs)
+
+    def delete(self, *args: Any, **kwargs: Any) -> tuple[int, dict[str, int]]:
+        raise AuditLedgerImmutabilityError("AuditChainAnchor is append-only; delete() is never permitted")
+
+
 class DataExport(models.Model):
     """Track GDPR data exports and similar compliance operations."""
 
