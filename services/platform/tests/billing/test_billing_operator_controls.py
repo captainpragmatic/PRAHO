@@ -339,6 +339,19 @@ class InvoiceSeriesControlTests(TestCase):
         self.current.refresh_from_db()
         self.assertEqual(self.current.prefix, "INV")
 
+    def test_domain_service_rejects_reserved_subscription_prefix(self) -> None:
+        """SUB belongs to the subscription scope and must not be claimable for the
+        invoice series, even before the subscription sequence row exists."""
+        with self.assertRaisesMessage(ValidationError, "reserved"):
+            rotate_invoice_series(
+                prefix="sub",
+                baseline="INV:42",
+                actor=BillingControlActor(user=self.user, reason="Try reserved prefix", ip_address=None),
+            )
+
+        self.current.refresh_from_db()
+        self.assertEqual(self.current.prefix, "INV")
+
     def test_domain_service_rejects_invalid_normalized_prefix(self) -> None:
         with self.assertRaisesMessage(ValidationError, "letters, digits, and hyphens"):
             rotate_invoice_series(

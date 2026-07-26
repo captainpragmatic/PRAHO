@@ -22,7 +22,9 @@ def _strip_comment_polluted_env(env_path: Path) -> list[str]:
     Known limitation: a genuinely intended value that begins with ``#`` (e.g. ``KEY=#ffffff``) is
     indistinguishable from a leaked comment at the value level — dotenv yields ``"#..."`` for both —
     so it is also treated as pollution and unset. This is dev-only and fails safe (the var becomes
-    unset, never a wrong value); no config key here legitimately starts with ``#``.
+    unset, never a wrong value); no config key here legitimately starts with ``#``. Quote such a
+    value (``KEY="#ffffff"``) only if you must — note that dotenv keeps the ``#`` either way, so the
+    guard still unsets it; a ``#``-leading literal simply isn't supported via ``.env`` in dev.
     """
     stripped = []
     for key, value in dotenv_values(env_path).items():
@@ -40,7 +42,7 @@ if _env_path.exists():
     _polluted = _strip_comment_polluted_env(_env_path)
     if _polluted:
         logging.getLogger(__name__).warning(
-            "Ignored %d comment-polluted .env var(s) (#364): %s", len(_polluted), ", ".join(_polluted)
+            "⚠️ [Config] Ignored %d comment-polluted .env var(s) (#364): %s", len(_polluted), ", ".join(_polluted)
         )
 
 from .base import *  # noqa: E402, F403

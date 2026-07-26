@@ -73,7 +73,6 @@ from ._billing_service_task_cases import (
     InvoiceNumberingServiceTests,
     InvoiceRefundViewTests,
     PaymentCollectionRetryTests,
-    PaymentRetryServiceTests,
     ProformaConversionServiceTests,
     ProformaModelConvertTests,
     SendPaymentReminderHelperTests,
@@ -90,7 +89,6 @@ _IMPORTED_TASK_CASES = (
     InvoiceNumberingServiceTests,
     InvoiceRefundViewTests,
     PaymentCollectionRetryTests,
-    PaymentRetryServiceTests,
     ProformaConversionServiceTests,
     ProformaModelConvertTests,
     SendPaymentReminderHelperTests,
@@ -687,6 +685,31 @@ class ReverifyExpiredVatValidationsTests(TestCase):
         sweep = reverify_expired_vat_validations()
 
         self.assertEqual(sweep, {"success": True, "queued": 0, "expired_found": 0, "unmatched": 0})
+        mock_async.assert_not_called()
+
+    @patch("apps.billing.tasks.async_task")
+    def test_legacy_unmatched_format_check_row_is_retired_from_the_sweep(self, mock_async: MagicMock) -> None:
+        """A legacy format_check row with no eligible profile can never improve on
+        re-verification; the sweep retires it so it stops inflating the report."""
+        from apps.billing.tax_models import VATValidation  # noqa: PLC0415
+
+        legacy = VATValidation.objects.create(
+            country_code="DE",
+            vat_number="99",
+            full_vat_number="DE99",
+            is_valid=False,
+            is_active=False,
+            validation_source="format_check",
+            expires_at=timezone.now() - timedelta(hours=1),
+        )
+
+        first = reverify_expired_vat_validations()
+        self.assertEqual(first["unmatched"], 1)
+        legacy.refresh_from_db()
+        self.assertIsNone(legacy.expires_at, "unmatched legacy evidence must be retired")
+
+        second = reverify_expired_vat_validations()
+        self.assertEqual(second, {"success": True, "queued": 0, "expired_found": 0, "unmatched": 0})
         mock_async.assert_not_called()
 
     @patch("apps.billing.tasks.async_task")

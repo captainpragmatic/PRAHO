@@ -255,8 +255,9 @@ document.addEventListener('DOMContentLoaded', function() {
     // Renewal costs data from Django
     const renewalCosts = {
         {% for option in renewal_costs %}
+            {% trans "year" as year_word %}
             {{ option.years }}: {
-                periodLabel: '{{ option.years }} {% trans "year" %}{{ option.years|pluralize }}',
+                periodLabel: '{{ option.years }} {{ year_word|escapejs }}{{ option.years|pluralize|escapejs }}',
                 newExpiryLabel: '{{ option.new_expiry|romanian_date:"long"|escapejs }}',
                 displayCost: '{{ option.cost_cents|cents_to_currency|romanian_currency|escapejs }}'
             }{% if not forloop.last %},{% endif %}

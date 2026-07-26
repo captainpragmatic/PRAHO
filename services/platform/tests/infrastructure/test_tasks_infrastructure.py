@@ -29,6 +29,7 @@ from apps.infrastructure.models import (
     PanelType,
 )
 from apps.infrastructure.tasks import (
+    NODE_DEPLOYMENT_TASK_TIMEOUT_SECONDS,
     calculate_daily_costs_task,
     cleanup_failed_deployments_task,
     deploy_node_task,
@@ -230,7 +231,7 @@ class TestQueueFunctionsNoCloudflareInPayload(TestCase):
         # Positional args after the function path should be: deployment_id, provider_id, user_id
         positional_args = args[0]
         self.assertEqual(positional_args, ("apps.infrastructure.tasks.deploy_node_task", 1, 2, 3))
-        self.assertGreaterEqual(args.kwargs["timeout"], 3 * 60 * 60)
+        self.assertGreaterEqual(args.kwargs["timeout"], NODE_DEPLOYMENT_TASK_TIMEOUT_SECONDS)
 
     @patch("django_q.tasks.async_task", return_value="task-123")
     def test_queue_destroy_no_cloudflare_in_args(self, mock_async: MagicMock) -> None:
@@ -245,11 +246,11 @@ class TestQueueFunctionsNoCloudflareInPayload(TestCase):
         args = mock_async.call_args
         positional_args = args[0]
         self.assertEqual(positional_args, ("apps.infrastructure.tasks.retry_deployment_task", 1, 2, 3))
-        self.assertGreaterEqual(args.kwargs["timeout"], 3 * 60 * 60)
+        self.assertGreaterEqual(args.kwargs["timeout"], NODE_DEPLOYMENT_TASK_TIMEOUT_SECONDS)
 
     def test_cluster_retry_exceeds_longest_deployment_task(self) -> None:
         """ORM broker visibility must outlast a legitimate node deployment."""
-        longest_deployment_task = 3 * 60 * 60
+        longest_deployment_task = NODE_DEPLOYMENT_TASK_TIMEOUT_SECONDS
         self.assertGreater(int(django_settings.Q_CLUSTER["retry"]), longest_deployment_task)
 
 

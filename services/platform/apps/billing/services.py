@@ -249,64 +249,6 @@ def _build_customer_vat_info(
     return info
 
 
-class PaymentRetryService:
-    """Schedule payment retries using dunning policies."""
-
-    @staticmethod
-    def retry_payment(payment_id: str) -> Result[bool, str]:  # noqa: PLR0911  # Fail-closed retry eligibility gates
-        """Find customer's retry policy and schedule a PaymentRetryAttempt."""
-        from apps.billing.models import Payment  # noqa: PLC0415  # Deferred: test mockability
-        from apps.billing.payment_models import (  # noqa: PLC0415  # Deferred: test mockability
-            PaymentRetryAttempt,
-            PaymentRetryPolicy,
-        )
-
-        try:
-            payment = Payment.objects.select_related("customer").get(id=payment_id)
-        except Payment.DoesNotExist:
-            return Err(f"Payment not found: {payment_id}")
-
-        if payment.status == "succeeded":
-            return Ok(True)  # Already succeeded
-
-        if payment.failed_at is None:
-            _services_logger.critical(
-                "Payment %s has no definitive failure timestamp; refusing to schedule a retry",
-                payment_id,
-            )
-            return Err("Payment has no definitive failure timestamp")
-
-        # Find applicable retry policy (customer-specific or default)
-        policy = PaymentRetryPolicy.objects.filter(is_active=True, is_default=True).first()
-        if not policy:
-            _services_logger.warning(f"⚠️ [Retry] No active retry policy for payment {payment_id}")
-            return Err("No retry policy configured")
-
-        # Check if max attempts reached
-        existing_attempts = PaymentRetryAttempt.objects.filter(payment=payment).count()
-        if existing_attempts >= policy.max_attempts:
-            return Err(f"Max retry attempts ({policy.max_attempts}) reached")
-
-        # Schedule next retry
-        next_retry_date = policy.get_next_retry_date(payment.failed_at, existing_attempts)
-        if not next_retry_date:
-            return Err("No more retry dates available")
-
-        PaymentRetryAttempt.objects.get_or_create(
-            payment=payment,
-            attempt_number=existing_attempts + 1,
-            defaults={
-                "policy": policy,
-                "scheduled_at": next_retry_date,
-                "status": "pending",
-            },
-        )
-        _services_logger.info(
-            f"✅ [Retry] Scheduled retry #{existing_attempts + 1} for payment {payment_id} at {next_retry_date}"
-        )
-        return Ok(True)
-
-
 class EFacturaService:
     """Compatibility facade over the canonical e-Factura document lifecycle."""
 
@@ -467,7 +409,6 @@ __all__ = [
     "InvoiceNumberingService",
     "InvoiceService",
     "MeteringService",
-    "PaymentRetryService",
     "ProformaConversionService",
     "ProformaService",
     "RatingEngine",

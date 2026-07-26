@@ -1650,6 +1650,10 @@ CATALOG: tuple[SettingDef, ...] = (
         section=_("DNS (Cloudflare)"),
         label=_("DNS default zone"),
         help_text=_("Nodes will be created as {hostname}.{zone}. Use infra.example.com pattern."),
+        # Empty (deployment disabled) or a lowercase dotted DNS zone. The runtime
+        # validate_deployment_dns_zone stays authoritative; this rejects obviously
+        # malformed zones at the settings UI instead of at deploy time.
+        validation={"pattern": r"|[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+"},
     ),
     SettingDef(
         key="node_deployment.enabled",
@@ -2287,7 +2291,9 @@ CATALOG: tuple[SettingDef, ...] = (
         group="advanced",
         section=_("Security"),
         label=_("Welcome-invite resend limit"),
-        help_text=_("Maximum welcome or password-reset invite emails sent to one target user per hour. Zero blocks resends."),
+        help_text=_(
+            "Maximum welcome or password-reset invite emails sent to one target user per hour. Zero blocks resends."
+        ),
         unit="per target/hour",
         input_kind="number",
         advanced=True,

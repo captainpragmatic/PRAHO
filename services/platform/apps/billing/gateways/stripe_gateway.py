@@ -522,12 +522,16 @@ class StripeGateway(BasePaymentGateway):
         created_gte: int,
         page_size: int = 100,
         max_records: int = 500,
+        starting_after: str | None = None,
     ) -> RefundListResult:
         """List Stripe refunds via auto-pagination without exceeding the record budget."""
         provider_page_size = min(max(page_size, 1), 100)
         record_budget = min(max(max_records, 1), MAX_REFUND_LIST_RECORDS)
+        list_params: dict[str, Any] = {"created": {"gte": created_gte}, "limit": provider_page_size}
+        if starting_after:
+            list_params["starting_after"] = starting_after
         try:
-            page = self._stripe.Refund.list(created={"gte": created_gte}, limit=provider_page_size)
+            page = self._stripe.Refund.list(**list_params)
             refunds: list[RefundStatusResult] = []
             skipped = 0
             truncated = False

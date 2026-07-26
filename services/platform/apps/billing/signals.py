@@ -1047,7 +1047,7 @@ def _revert_customer_payment_credit(payment: Payment, event_type: str) -> bool:
     applied_adjustment = _get_payment_credit_adjustment(payment, event_type)
     if applied_adjustment is None:
         logger.warning(
-            "Skipping unrecorded credit-score reversion for payment %s event %s",
+            "⚠️ [Billing] Skipping unrecorded credit-score reversion for payment %s event %s",
             payment.id,
             event_type,
         )

@@ -94,6 +94,12 @@ class TLD(models.Model):
         verbose_name = _("🌐 TLD")
         verbose_name_plural = _("🌐 TLDs")
         ordering: ClassVar[tuple[str, ...]] = ("extension",)
+        constraints: ClassVar[tuple[models.BaseConstraint, ...]] = (
+            models.CheckConstraint(
+                condition=models.Q(min_registration_period__lte=models.F("max_registration_period")),
+                name="tld_min_registration_period_lte_max",
+            ),
+        )
 
     def __str__(self) -> str:
         return f".{self.extension}"

@@ -17,12 +17,11 @@ from django.test import RequestFactory, TestCase
 from django.utils import timezone
 
 from apps.billing.metering_service import UsageAlertService
-from apps.billing.models import Invoice, InvoiceSequence, Payment, ProformaInvoice
+from apps.billing.models import Invoice, InvoiceSequence, ProformaInvoice
 from apps.billing.proforma_models import ProformaInvoice as ProformaInvoiceModel
 from apps.billing.services import (
     EFacturaService,
     InvoiceNumberingService,
-    PaymentRetryService,
     ProformaConversionService,
 )
 from apps.billing.signals import _handle_efactura_refund_reporting
@@ -42,62 +41,6 @@ from apps.users.models import User
 # ===============================================================================
 # GROUP A: services.py Placeholder Classes
 # ===============================================================================
-
-
-class PaymentRetryServiceTests(TestCase):
-    """A1: PaymentRetryService.retry_payment()"""
-
-    @patch("apps.billing.payment_models.PaymentRetryAttempt")
-    @patch("apps.billing.payment_models.PaymentRetryPolicy")
-    @patch("apps.billing.models.Payment")
-    def test_retry_creates_attempt(self, mock_payment_cls, mock_policy_cls, mock_attempt_cls):
-        failure_at = timezone.now()
-        mock_payment = MagicMock(status="failed", failed_at=failure_at, created_at=failure_at - timedelta(days=10))
-        mock_payment_cls.objects.select_related.return_value.get.return_value = mock_payment
-
-        mock_policy = MagicMock(max_attempts=3)
-        mock_policy.get_next_retry_date.return_value = timezone.now() + timedelta(days=1)
-        mock_policy_cls.objects.filter.return_value.first.return_value = mock_policy
-
-        mock_attempt_cls.objects.filter.return_value.count.return_value = 0
-
-        result = PaymentRetryService.retry_payment("payment-123")
-        self.assertTrue(result.is_ok())
-        mock_policy.get_next_retry_date.assert_called_once_with(failure_at, 0)
-        mock_attempt_cls.objects.get_or_create.assert_called_once()
-
-    @patch("apps.billing.payment_models.PaymentRetryAttempt")
-    @patch("apps.billing.payment_models.PaymentRetryPolicy")
-    @patch("apps.billing.models.Payment")
-    def test_retry_fails_closed_without_failure_timestamp(
-        self,
-        mock_payment_cls: MagicMock,
-        mock_policy_cls: MagicMock,
-        mock_attempt_cls: MagicMock,
-    ) -> None:
-        mock_payment_cls.objects.select_related.return_value.get.return_value = MagicMock(
-            status="failed",
-            failed_at=None,
-        )
-
-        result = PaymentRetryService.retry_payment("payment-123")
-
-        self.assertTrue(result.is_err())
-        self.assertIn("failure timestamp", result.unwrap_err().lower())
-        mock_policy_cls.objects.filter.assert_not_called()
-        mock_attempt_cls.objects.get_or_create.assert_not_called()
-
-    @patch("apps.billing.payment_models.Payment.objects")
-    def test_retry_payment_not_found(self, mock_objects):
-        mock_objects.select_related.return_value.get.side_effect = Payment.DoesNotExist
-        result = PaymentRetryService.retry_payment("bad-id")
-        self.assertTrue(result.is_err())
-
-    @patch("apps.billing.models.Payment")
-    def test_retry_already_succeeded(self, mock_payment_cls):
-        mock_payment_cls.objects.select_related.return_value.get.return_value = MagicMock(status="succeeded")
-        result = PaymentRetryService.retry_payment("payment-123")
-        self.assertTrue(result.is_ok())
 
 
 class EFacturaServiceTests(TestCase):

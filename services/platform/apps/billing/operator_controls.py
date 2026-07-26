@@ -17,6 +17,11 @@ if TYPE_CHECKING:
     from apps.users.models import User
 
 
+# Prefixes owned by non-default numbering scopes. The subscription sequence uses
+# "SUB" and may not have a row yet, so the existing-rows reuse check cannot catch
+# it — reserving the name prevents the invoice series from colliding with it later.
+_RESERVED_SEQUENCE_PREFIXES = frozenset({"SUB"})
+
 _RETRY_POLICY_FIELDS = (
     "name",
     "description",
@@ -137,6 +142,8 @@ def rotate_invoice_series(
     prefix = prefix.strip().upper()
     if re.fullmatch(r"[A-Z0-9][A-Z0-9-]{0,29}", prefix) is None:
         raise ValidationError({"prefix": _("Use uppercase letters, digits, and hyphens only.")})
+    if prefix in _RESERVED_SEQUENCE_PREFIXES:
+        raise ValidationError({"prefix": _("This prefix is reserved for another numbering scope.")})
 
     current = InvoiceSequence.objects.select_for_update().filter(scope="default").first()
     if current is None:

@@ -10,7 +10,7 @@ PRAHO owns subscriptions, periods, proformas, invoices, taxes, usage rating, ret
 
 ## Rollout Checklist
 
-1. Apply migrations through billing migration `0041`, customers migration `0020`, and settings migration `0005`.
+1. Apply migrations through billing migration `0045`, customers migration `0021`, and settings migration `0006`.
 2. Verify every active or suspended auto-renew service has exactly one linked PRAHO subscription. Scheduler setup refuses to replace the legacy renewal engine while any such service is unmanaged; migrate those services from their authoritative service price, currency, billing cycle, and paid-through date first.
 3. Run `python manage.py setup_dunning_policies` and verify exactly one active default payment-retry policy exists.
    Billing administrators can review and edit the live retry cadence and dunning-email switch from
@@ -46,7 +46,7 @@ From 1 January 2026, the submission deadline is five Romanian working days. A CN
 | `Run Billing Cycle Workflow` | Close expired cycles, rate usage, issue usage invoices, and collect due authorized usage charges |
 | `Collect Virtualmin Usage` / `Collect Service Usage` | Record local cumulative hosting snapshots |
 
-The fixed renewal schedule is proforma at period end minus 14 days and automatic charge at period end minus 7 days. A definitive recurring decline schedules exactly one policy-controlled retry chain; duplicate webhook or synchronous handling cannot consume another retry slot. Retry ownership is persisted before the Stripe call, and stale worker leases resume idempotently after two task timeouts without recharging an already-succeeded result. Usage is rated and invoiced after the measured period ends; its automatic charge is scheduled for period end plus 7 days and is not attempted when the invoice is issued.
+The fixed renewal schedule is proforma at period end minus the configurable `billing.invoice_generation_lead_days` (default 14, bounded 7-30) and automatic charge at period end minus the fixed 7-day collection lead; the invoice lead is floored at the collection lead so a charge can never precede its billing notice. A definitive recurring decline schedules exactly one policy-controlled retry chain; duplicate webhook or synchronous handling cannot consume another retry slot. Retry ownership is persisted before the Stripe call, and stale worker leases resume idempotently after two task timeouts without recharging an already-succeeded result. Usage is rated and invoiced after the measured period ends; its automatic charge is scheduled for period end plus 7 days and is not attempted when the invoice is issued.
 
 Retry attempts are created only by recurring-payment convergence or invoice dunning. The generic Payment status signal sends failure notifications and updates customer history, but must not create a second retry chain.
 

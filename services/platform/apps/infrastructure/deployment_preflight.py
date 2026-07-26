@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from django.utils.translation import gettext_lazy as _
+
 from apps.common.types import Err, Ok, Result, validate_domain_name
 
 DNS_ZONE_SETTING_KEY = "node_deployment.dns_default_zone"
@@ -16,16 +18,19 @@ def validate_deployment_dns_zone(dns_zone: str) -> Result[str, str]:
     normalized_zone = raw_zone.strip().lower()
     if not normalized_zone:
         return Err(
-            f"Node deployment requires a fully-qualified hostname; configure {DNS_ZONE_SETTING_KEY} before deploying."
+            str(
+                _("Node deployment requires a fully-qualified hostname; configure %(key)s before deploying.")
+                % {"key": DNS_ZONE_SETTING_KEY}
+            )
         )
     if raw_zone != raw_zone.strip():
-        return Err("Node deployment DNS zone is invalid: surrounding whitespace is not allowed.")
+        return Err(str(_("Node deployment DNS zone is invalid: surrounding whitespace is not allowed.")))
     if len(normalized_zone) > MAX_NODE_DNS_ZONE_LENGTH:
-        return Err("Node deployment DNS zone is too long for the generated node hostname.")
+        return Err(str(_("Node deployment DNS zone is too long for the generated node hostname.")))
 
     result = validate_domain_name(normalized_zone)
     if result.is_err():
-        return Err(f"Node deployment DNS zone is invalid: {result.unwrap_err()}.")
+        return Err(str(_("Node deployment DNS zone is invalid: %(error)s.") % {"error": result.unwrap_err()}))
     return Ok(str(result.unwrap()))
 
 
@@ -37,5 +42,10 @@ def validate_deployment_fqdn(hostname: str, dns_zone: str) -> Result[str, str]:
 
     fqdn_result = validate_domain_name(f"{hostname.strip().lower()}.{zone_result.unwrap()}")
     if fqdn_result.is_err():
-        return Err(f"Node deployment fully-qualified hostname is invalid: {fqdn_result.unwrap_err()}.")
+        return Err(
+            str(
+                _("Node deployment fully-qualified hostname is invalid: %(error)s.")
+                % {"error": fqdn_result.unwrap_err()}
+            )
+        )
     return Ok(str(fqdn_result.unwrap()))

@@ -37,6 +37,8 @@ TASK_SOFT_TIME_LIMIT = 300  # 5 minutes
 TASK_TIME_LIMIT = 600  # 10 minutes
 PAYMENT_RETRY_LEASE_TIMEOUT = timedelta(seconds=TASK_TIME_LIMIT * 2)
 _REFUND_RECONCILIATION_LOCK_NAME = "billing-stripe-refund-reconciliation"
+_REFUND_DISCOVERY_CURSOR_KEY = "billing:stripe-refund-discovery-cursor"
+_REFUND_DISCOVERY_CURSOR_TTL = 7 * 24 * 60 * 60
 _DEFAULT_REFUND_RECONCILIATION_LIMIT = 500
 RECURRING_RECONCILIATION_BATCH_SIZE = 100
 RECURRING_RECONCILIATION_MAX_BATCH_SIZE = 500
@@ -1318,6 +1320,25 @@ def _stripe_refund_facts(source: dict[str, Any], refund_id: str) -> RefundGatewa
     return facts
 
 
+def _advance_refund_discovery_cursor(
+    cache: Any,
+    listed: dict[str, Any],
+    *,
+    previous_cursor: str | None,
+    discovered_ids: dict[str, RefundGatewayFacts],
+) -> None:
+    """Resume from the last-seen id while the window is truncated; clear on drain.
+
+    A backlog larger than the budget advances across sweeps instead of
+    re-scanning the newest records forever.
+    """
+    last_discovered_id = next(reversed(discovered_ids), None) if discovered_ids else None
+    if listed.get("truncated") and last_discovered_id:
+        cache.set(_REFUND_DISCOVERY_CURSOR_KEY, last_discovered_id, timeout=_REFUND_DISCOVERY_CURSOR_TTL)
+    elif previous_cursor is not None:
+        cache.delete(_REFUND_DISCOVERY_CURSOR_KEY)
+
+
 def _collect_stripe_refund_facts(
     gateway: Any,
     *,
@@ -1347,11 +1368,15 @@ def _collect_stripe_refund_facts(
     if pending_rows:
         Refund.objects.filter(pk__in=[pk for pk, _ in pending_rows]).update(updated_at=timezone.now())
 
+    from django.core.cache import cache  # noqa: PLC0415
+
     created_gte = int((timezone.now() - timedelta(days=max(lookback_days, 1))).timestamp())
+    discovery_cursor = cache.get(_REFUND_DISCOVERY_CURSOR_KEY)
     listed = gateway.list_refunds(
         created_gte=created_gte,
         page_size=discovery_page_size,
         max_records=record_budget,
+        starting_after=discovery_cursor,
     )
     discovered_by_id: dict[str, RefundGatewayFacts] = {}
     discovery_failed = not listed["success"]
@@ -1362,6 +1387,9 @@ def _collect_stripe_refund_facts(
             refund_id = discovered["refund_id"]
             if refund_id:
                 discovered_by_id[refund_id] = _stripe_refund_facts(discovered, refund_id)
+        _advance_refund_discovery_cursor(
+            cache, listed, previous_cursor=discovery_cursor, discovered_ids=discovered_by_id
+        )
 
     # Known local non-terminal refunds take priority. Discovery runs first so an ID
     # returned by Stripe is never immediately retrieved a second time.
@@ -2139,7 +2167,18 @@ def reverify_expired_vat_validations() -> dict[str, Any]:
             .values_list("id", "normalized_vat_number")
         )
         matched_vat_numbers = {vat_number for _profile_id, vat_number in eligible_profiles}
-        unmatched += len(full_vat_numbers - matched_vat_numbers)
+        unmatched_vat_numbers = full_vat_numbers - matched_vat_numbers
+        unmatched += len(unmatched_vat_numbers)
+        # An expired format_check row with no eligible (valid/format_only) profile is
+        # legacy terminal evidence: re-verification cannot help it, so retire it from
+        # the sweep instead of re-reporting it as unmatched every day (#406 follow-up).
+        if unmatched_vat_numbers:
+            VATValidation.objects.filter(
+                full_vat_number__in=unmatched_vat_numbers,
+                validation_source="format_check",
+                is_valid=False,
+                expires_at__isnull=False,
+            ).update(expires_at=None)
         for profile_id, _vat_number in eligible_profiles:
             async_task("apps.billing.tasks.validate_vat_number", str(profile_id))
             queued += 1
