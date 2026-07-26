@@ -25,10 +25,12 @@ class InfrastructureConfig(AppConfig):
         from django.db.models.signals import post_migrate
 
         # Import provider modules so register_cloud_gateway() fires at startup
+        # Import dns_gateway so register_dns_gateway() fires at startup
         # Import provider_sync so register_sync_fn() calls fire at startup
         from . import (  # noqa: F401  # Circular: app registry
             aws_service,
             digitalocean_service,
+            dns_gateway,  # Circular: app registry
             hcloud_service,
             provider_sync,  # Circular: app registry
             signals,  # Circular: app registry
