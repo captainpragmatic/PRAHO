@@ -32,9 +32,7 @@ class RebuildServerFromPrahoTests(TestCase):
         self.plan = ServicePlan.objects.create(
             name="DR Plan", plan_type="shared_hosting", price_monthly=Decimal("10.00"), setup_fee=Decimal("0.00")
         )
-        self.currency, _ = Currency.objects.get_or_create(
-            code="RON", defaults={"symbol": "lei", "decimals": 2}
-        )
+        self.currency, _ = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei", "decimals": 2})
         self.service = Service.objects.create(
             customer=self.customer,
             service_plan=self.plan,
@@ -120,3 +118,95 @@ class RebuildServerFromPrahoTests(TestCase):
         self.server.refresh_from_db()
         # One active account exists on this server after rebuild.
         self.assertEqual(self.server.current_domains, 1)
+
+    def test_suspended_account_is_re_suspended_using_pre_reprovision_status(self) -> None:
+        """reprovision mutates account.status to provisioning/active, so the suspend
+        decision must use the status captured BEFORE reprovisioning."""
+        self.account.status = "suspended"
+        self.account.save(update_fields=["status"])
+        service = VirtualminDisasterRecoveryService()
+
+        def fake_reprovision(account: VirtualminAccount, _target: object) -> object:
+            # Mirror the real method: the row is mutated away from 'suspended'.
+            account.status = "active"
+            account.save(update_fields=["status"])
+            return Ok(account)
+
+        with (
+            patch(
+                "apps.provisioning.virtualmin_service.VirtualminProvisioningService.reprovision_virtualmin_account",
+                side_effect=fake_reprovision,
+            ),
+            patch(
+                "apps.provisioning.virtualmin_service.VirtualminProvisioningService.suspend_account",
+                return_value=Ok(True),
+            ) as mock_suspend,
+        ):
+            result = service.rebuild_server_from_praho(self.server, dry_run=False)
+
+        mock_suspend.assert_called_once()
+        data = result.unwrap()
+        self.assertEqual(data["rebuild_results"][0]["original_status"], "suspended")
+
+
+class ReprovisionAccountTests(TestCase):
+    """reprovision_virtualmin_account must persist the rotated password."""
+
+    def setUp(self) -> None:
+        self.customer = Customer.objects.create(
+            name="Reprov Customer", primary_email="reprov@example.com", customer_type="individual"
+        )
+        self.plan = ServicePlan.objects.create(
+            name="Reprov Plan", plan_type="shared_hosting", price_monthly=Decimal("10.00"), setup_fee=Decimal("0.00")
+        )
+        self.currency, _ = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei", "decimals": 2})
+        self.service = Service.objects.create(
+            customer=self.customer,
+            service_plan=self.plan,
+            currency=self.currency,
+            service_name="Reprov Service",
+            username="reprov_user",
+            price=Decimal("10.00"),
+            status="active",
+        )
+        self.server = VirtualminServer.objects.create(
+            name="reprov-server",
+            hostname="reprov.example.com",
+            api_username="api_user",
+            max_domains=1000,
+            current_domains=0,
+        )
+        self.server.set_api_password("pw")
+        self.server.save()
+        self.account = VirtualminAccount.objects.create(
+            domain="reprov.ro",
+            service=self.service,
+            server=self.server,
+            virtualmin_username="reprov",
+            status="active",
+            praho_customer_id=self.customer.id,
+            praho_service_id=self.service.id,
+        )
+        self.account.set_password("pre-loss-secret")
+        self.account.save()
+
+    def test_reprovision_persists_the_rotated_password(self) -> None:
+        """The pre-loss secret is unrecoverable, so the rotated password must reach the DB."""
+        from apps.provisioning.virtualmin_service import VirtualminProvisioningService  # noqa: PLC0415
+
+        stored_before = VirtualminAccount.objects.get(pk=self.account.pk).encrypted_password
+
+        with patch.object(
+            VirtualminProvisioningService,
+            "_execute_domain_creation",
+            side_effect=lambda account, _job: Ok({"created": True}),
+        ):
+            result = VirtualminProvisioningService().reprovision_virtualmin_account(self.account, self.server)
+
+        self.assertTrue(result.is_ok(), result.unwrap_err() if result.is_err() else "")
+        stored_after = VirtualminAccount.objects.get(pk=self.account.pk).encrypted_password
+        self.assertNotEqual(
+            bytes(stored_after),
+            bytes(stored_before),
+            "the rotated password must be persisted, not dropped from update_fields",
+        )

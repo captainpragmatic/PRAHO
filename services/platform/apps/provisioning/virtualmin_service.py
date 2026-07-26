@@ -272,7 +272,7 @@ class VirtualminProvisioningService:
                 account.server = server
                 account.status = "provisioning"
                 account.status_message = "Reprovisioning from PRAHO (disaster recovery)"
-                account.save(update_fields=["server", "status", "status_message", "updated_at"])
+                account.save(update_fields=["encrypted_password", "server", "status", "status_message", "updated_at"])
 
                 job = VirtualminProvisioningJob(
                     operation="create_domain",

@@ -109,6 +109,12 @@ class VirtualminDisasterRecoveryService:
 
             for account in praho_accounts:
                 try:
+                    # Capture the pre-loss status BEFORE reprovisioning: the call below
+                    # mutates account.status to provisioning/active, so reading it after
+                    # would never re-suspend a suspended account and would misreport the
+                    # original status in the results.
+                    original_status = account.status
+
                     # 🔒 #326: rebuild must REUSE the existing PRAHO row, not create a new one.
                     # create_virtualmin_account() rejects the domain as "already exists in PRAHO"
                     # (the row being rebuilt is the collision), so it failed for 100% of accounts.
@@ -120,7 +126,7 @@ class VirtualminDisasterRecoveryService:
                         new_account = result.unwrap()
 
                         # Apply original status
-                        if account.status == "suspended":
+                        if original_status == "suspended":
                             provisioning_service.suspend_account(new_account, "Restored as suspended from PRAHO data")
 
                         # Apply quotas if they existed (use `is not None` to allow zero = unlimited)
@@ -137,7 +143,7 @@ class VirtualminDisasterRecoveryService:
                                 "domain": account.domain,
                                 "status": "success",
                                 "new_account_id": str(new_account.id),
-                                "original_status": account.status,
+                                "original_status": original_status,
                             }
                         )
                         successful_rebuilds += 1
