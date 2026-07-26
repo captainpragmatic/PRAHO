@@ -3,7 +3,7 @@
 # ===============================================================================
 # Enhanced for Platform/Portal separation with scoped PYTHONPATH security
 
-.PHONY: help install check-env dev dev-e2e dev-e2e-bg dev-platform dev-portal dev-all test test-fast test-file test-platform test-platform-fast test-ci test-ci-focused test-portal test-integration test-e2e test-with-e2e test-e2e-platform test-e2e-portal test-e2e-orm test-security test-cache show-test-deps install-frontend build-css watch-css check-css-tooling migrate fixtures fixtures-light clean-cache clean-dist clean-db-and-logs clean-nuke lint lint-fix lint-platform lint-portal lint-security lint-health lint-credentials lint-audit lint-fsm lint-imports lint-test-layout check-types check-types-platform check-types-portal pre-commit infra-init infra-plan infra-dev infra-staging infra-prod infra-destroy-dev deploy-dev deploy-staging deploy-prod i18n-extract i18n-compile translate translate-platform translate-portal translate-ai translate-ai-platform translate-ai-portal translate-review translate-apply translate-diff translate-stats translate-stats-platform translate-stats-portal audit-a11y audit-a11y-strict audit-dark-mode audit-dark-mode-strict
+.PHONY: help install check-env dev dev-e2e dev-e2e-bg dev-platform dev-portal dev-all test test-fast test-file test-platform test-platform-fast test-ci test-ci-focused test-portal test-integration test-e2e test-with-e2e test-e2e-platform test-e2e-portal test-e2e-orm test-security test-cache show-test-deps install-frontend build-css watch-css check-css-tooling migrate check-migrations fixtures fixtures-light clean-cache clean-dist clean-db-and-logs clean-nuke lint lint-fix lint-platform lint-portal lint-security lint-health lint-credentials lint-audit lint-fsm lint-imports lint-test-layout check-types check-types-platform check-types-portal pre-commit infra-init infra-plan infra-dev infra-staging infra-prod infra-destroy-dev deploy-dev deploy-staging deploy-prod i18n-extract i18n-compile translate translate-platform translate-portal translate-ai translate-ai-platform translate-ai-portal translate-review translate-apply translate-diff translate-stats translate-stats-platform translate-stats-portal audit-a11y audit-a11y-strict audit-dark-mode audit-dark-mode-strict
 
 # ===============================================================================
 # SCOPED PYTHON ENVIRONMENTS 🔒
@@ -62,6 +62,7 @@ help:
 	@echo ""
 	@echo "🔧 DATABASE & ASSETS:"
 	@echo "  make migrate         - Run platform database migrations"
+	@echo "  make check-migrations - Verify model and migration state match"
 	@echo "  make fixtures        - Load comprehensive sample data (platform only)"
 	@echo "  make fixtures-light  - Load minimal sample data (fast, platform only)"
 	@echo "  make install-frontend - Install Node.js dependencies"
@@ -478,6 +479,12 @@ migrate:
 	@$(PYTHON_PLATFORM_MANAGE) migrate --settings=config.settings.dev
 	@echo "🗄️ [Portal] Running session table migration..."
 	@$(PYTHON_PORTAL_MANAGE) migrate sessions --settings=config.settings.dev
+
+check-migrations:
+	@echo "🔎 [Platform] Checking model and migration state..."
+	@$(PYTHON_PLATFORM_MANAGE) makemigrations --check --dry-run --settings=config.settings.test
+	@echo "🔎 [Portal] Checking model and migration state..."
+	@$(PYTHON_PORTAL_MANAGE) makemigrations --check --dry-run --settings=config.settings.dev
 
 portal-clearsessions:
 	@echo "🧹 [Portal] Clearing expired sessions..."
