@@ -13,7 +13,7 @@ from unittest.mock import MagicMock, patch
 
 from django.test import TestCase
 
-from apps.common.types import Ok
+from apps.common.types import Err, Ok
 from apps.provisioning.virtualmin_backup_service import RestoreConfig, VirtualminBackupService
 
 
@@ -57,6 +57,56 @@ class RestoreFailClosedTests(TestCase):
         mock_rollback.assert_called_once()
         # A failed restore must NOT be finalized as success.
         mock_finalize.assert_not_called()
+
+    @patch("apps.provisioning.virtualmin_backup_service.VirtualminGateway")
+    @patch("apps.provisioning.virtualmin_backup_service.VirtualminConfig")
+    def test_component_failure_marks_restore_progress_failed(
+        self, _mock_config_cls: MagicMock, _mock_gateway_cls: MagicMock
+    ) -> None:
+        """An operator polling progress must see 'failed', not a stuck intermediate phase."""
+        with (
+            patch.object(
+                self.service,
+                "_prepare_restore_session",
+                return_value=Ok(("/var/backups/praho/backup.tar", {"meta": True}, {"rollback": True})),
+            ),
+            patch.object(self.service, "_execute_restore_components", return_value=["Files restore failed"]),
+            patch.object(self.service, "_execute_restore_rollback", return_value=Ok(None)),
+            patch.object(self.service, "_update_restore_progress") as mock_progress,
+            patch.object(self.service, "_generate_restore_id", return_value="rs-fail"),
+        ):
+            self.service.restore_domain(self.account, self.config)
+
+        phases = [call.args[1] for call in mock_progress.call_args_list if len(call.args) > 1]
+        self.assertIn("failed", phases, f"progress must reach 'failed', got {phases}")
+
+    @patch("apps.provisioning.virtualmin_backup_service.VirtualminGateway")
+    @patch("apps.provisioning.virtualmin_backup_service.VirtualminConfig")
+    def test_rollback_failure_is_surfaced_in_the_error(
+        self, _mock_config_cls: MagicMock, _mock_gateway_cls: MagicMock
+    ) -> None:
+        """A failed rollback after a failed restore leaves the account in an unknown
+        state — the operator must be told, not left with only the component errors."""
+        with (
+            patch.object(
+                self.service,
+                "_prepare_restore_session",
+                return_value=Ok(("/var/backups/praho/backup.tar", {"meta": True}, {"rollback": True})),
+            ),
+            patch.object(self.service, "_execute_restore_components", return_value=["Database restore failed"]),
+            patch.object(
+                self.service,
+                "_execute_restore_rollback",
+                return_value=Err("rollback could not reach the server"),
+            ),
+            patch.object(self.service, "_update_restore_progress"),
+            patch.object(self.service, "_generate_restore_id", return_value="rs-rbfail"),
+        ):
+            result = self.service.restore_domain(self.account, self.config)
+
+        self.assertTrue(result.is_err())
+        err = result.unwrap_err().lower()
+        self.assertIn("rollback", err, f"a failed rollback must be surfaced, got: {result.unwrap_err()}")
 
     @patch("apps.provisioning.virtualmin_backup_service.VirtualminGateway")
     @patch("apps.provisioning.virtualmin_backup_service.VirtualminConfig")

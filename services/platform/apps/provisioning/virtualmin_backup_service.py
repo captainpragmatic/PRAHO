@@ -343,11 +343,23 @@ class VirtualminBackupService:
                 # instead of reporting a fictional success.
                 if errors:
                     logger.error(
-                        f"Restore for {account.domain} had {len(errors)} component failure(s); "
+                        f"🔥 [Backup] Restore for {account.domain} had {len(errors)} component failure(s); "
                         f"rolling back: {'; '.join(errors)}"
                     )
-                    self._execute_restore_rollback(account, rollback_data)
-                    return Err(f"Restore failed ({len(errors)} component error(s)): {'; '.join(errors)}")
+                    self._update_restore_progress(restore_id, "failed", 100)
+                    rollback_result = self._execute_restore_rollback(account, rollback_data)
+                    error_detail = f"Restore failed ({len(errors)} component error(s)): {'; '.join(errors)}"
+                    if rollback_result.is_err():
+                        # A failed rollback leaves the account in an unknown state — the
+                        # operator must be told, not left with only the component errors.
+                        logger.error(
+                            f"🔥 [Backup] Rollback for {account.domain} ALSO failed: {rollback_result.unwrap_err()}"
+                        )
+                        error_detail += (
+                            f" — rollback ALSO failed ({rollback_result.unwrap_err()}); "
+                            "account may be in an inconsistent state and needs manual reconciliation"
+                        )
+                    return Err(error_detail)
 
                 # Finalize restore operation
                 return self._finalize_restore_operation(
