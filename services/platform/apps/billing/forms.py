@@ -70,9 +70,9 @@ class PaymentRetryPolicyForm(forms.Form):
             "is_active",
         }
         if required_fields.issubset(cleaned):
+            # Only the fields this form exposes participate in validation; the
+            # dormant suspend/terminate escalation columns are not copied.
             candidate = PaymentRetryPolicy(pk=self.instance.pk)
-            candidate.suspend_service_after_days = self.instance.suspend_service_after_days
-            candidate.terminate_service_after_days = self.instance.terminate_service_after_days
             for field_name in (
                 "name",
                 "description",

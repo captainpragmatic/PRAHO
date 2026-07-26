@@ -438,38 +438,25 @@ class PaymentRetryPolicyModelAdditionalTestCase(TestCase):
 
         self.assertIn("retry_intervals_days", context.exception.message_dict)
 
-    def test_payment_retry_policy_rejects_termination_before_suspension(self) -> None:
-        self.policy.retry_intervals_days = [1, 3, 7]
+    def test_dormant_escalation_columns_do_not_constrain_the_schedule(self) -> None:
+        """suspend/terminate are dormant (ADR-0039: subscription lifecycle owns
+        suspension): whatever they contain, a valid retry schedule validates.
+        The timeline-ordering rules return with the feature that consumes them."""
+        self.policy.retry_intervals_days = [1, 3, 14]
         self.policy.max_attempts = 3
         self.policy.suspend_service_after_days = 14
         self.policy.terminate_service_after_days = 10
 
-        with self.assertRaises(ValidationError) as context:
-            self.policy.full_clean()
+        self.policy.full_clean()
 
-        self.assertIn("terminate_service_after_days", context.exception.message_dict)
-
-    def test_payment_retry_policy_rejects_termination_without_suspension(self) -> None:
-        self.policy.retry_intervals_days = [1, 3, 7]
+    def test_payment_retry_policy_still_rejects_invalid_schedules(self) -> None:
+        self.policy.retry_intervals_days = [7, 3, 1]
         self.policy.max_attempts = 3
-        self.policy.suspend_service_after_days = None
-        self.policy.terminate_service_after_days = 30
 
         with self.assertRaises(ValidationError) as context:
             self.policy.full_clean()
 
-        self.assertIn("terminate_service_after_days", context.exception.message_dict)
-
-    def test_payment_retry_policy_requires_final_retry_before_escalation(self) -> None:
-        self.policy.retry_intervals_days = [1, 3, 14]
-        self.policy.max_attempts = 3
-        self.policy.suspend_service_after_days = 14
-        self.policy.terminate_service_after_days = 30
-
-        with self.assertRaises(ValidationError) as context:
-            self.policy.full_clean()
-
-        self.assertIn("suspend_service_after_days", context.exception.message_dict)
+        self.assertIn("retry_intervals_days", context.exception.message_dict)
 
 
 class PaymentRetryAttemptModelAdditionalTestCase(TestCase):

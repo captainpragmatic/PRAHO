@@ -58,3 +58,21 @@ class CampaignAudienceRecipientTests(TestCase):
     def test_unimplemented_trial_expiring_audience_fails_closed(self) -> None:
         """Never turn an unsupported audience into an accidental broadcast."""
         self.assertEqual(self._recipient_emails("trial_expiring"), set())
+
+    def _custom_filter_emails(self, audience_filter: dict) -> set[str]:
+        campaign = EmailCampaign.objects.create(
+            name="custom filter campaign",
+            template=self.template,
+            audience="custom_filter",
+            audience_filter=audience_filter,
+            requires_consent=True,
+        )
+        return {email for email, _context in _get_campaign_recipients(campaign)}
+
+    def test_empty_custom_filter_fails_closed(self) -> None:
+        """A custom-filter campaign with no filter must not broadcast."""
+        self.assertEqual(self._custom_filter_emails({}), set())
+
+    def test_fully_rejected_custom_filter_fails_closed(self) -> None:
+        """A filter whose every key is rejected by the whitelist selects nobody."""
+        self.assertEqual(self._custom_filter_emails({"password": "x", "__proto__": "y"}), set())

@@ -103,6 +103,15 @@ class PaymentRetryPolicyEditorTests(TestCase):
         data.update(overrides)
         return self.client.post(reverse("billing:retry_policy_edit", args=[self.policy.pk]), data)
 
+    def test_schedule_may_extend_past_dormant_escalation_columns(self) -> None:
+        """The dormant, unexposed suspend/terminate columns must not veto a
+        legitimate schedule extension with an error the operator cannot act on."""
+        response = self._post(retry_intervals_days="1, 7, 20")
+
+        self.assertEqual(response.status_code, 302)
+        self.policy.refresh_from_db()
+        self.assertEqual(self.policy.retry_intervals_days, [1, 7, 20])
+
     def test_valid_change_is_persisted_and_attributed_in_audit(self) -> None:
         response = self._post()
 

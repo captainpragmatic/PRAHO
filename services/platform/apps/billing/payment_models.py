@@ -553,6 +553,20 @@ class CreditLedger(models.Model):
 # ===============================================================================
 
 
+def _valid_retry_intervals(intervals: object, max_attempts: int) -> bool:
+    """One positive, strictly increasing retry day per attempt.
+
+    Shared by clean() and get_next_retry_date() so the editor and the
+    scheduler can never diverge on what a valid schedule means.
+    """
+    return (
+        isinstance(intervals, list)
+        and len(intervals) == max_attempts
+        and all(isinstance(day, int) and not isinstance(day, bool) and day > 0 for day in intervals)
+        and all(previous < current for previous, current in pairwise(intervals))
+    )
+
+
 class PaymentRetryPolicy(models.Model):
     """
     Configurable dunning schedules for failed payment recovery.
@@ -638,54 +652,27 @@ class PaymentRetryPolicy(models.Model):
         return f"{self.name} ({len(self.retry_intervals_days)} attempts)"
 
     def clean(self) -> None:
-        """Validate the complete dunning timeline, not just individual columns."""
-        super().clean()
-        errors: dict[str, Any] = {}
-        intervals = self.retry_intervals_days
-        valid_intervals = (
-            isinstance(intervals, list)
-            and len(intervals) == self.max_attempts
-            and all(isinstance(day, int) and not isinstance(day, bool) and day > 0 for day in intervals)
-            and all(previous < current for previous, current in pairwise(intervals))
-        )
-        if not valid_intervals:
-            errors["retry_intervals_days"] = _(
-                "Provide one positive, strictly increasing retry day for each retry attempt."
-            )
+        """Validate the retry schedule the operator can actually edit.
 
-        final_retry_day = intervals[-1] if valid_intervals else None
-        if (
-            final_retry_day is not None
-            and self.suspend_service_after_days is not None
-            and self.suspend_service_after_days <= final_retry_day
-        ):
-            errors["suspend_service_after_days"] = _("Suspension must occur after the final retry.")
-        if self.terminate_service_after_days is not None and self.suspend_service_after_days is None:
-            errors["terminate_service_after_days"] = _("Termination requires a preceding suspension.")
-        elif (
-            self.suspend_service_after_days is not None
-            and self.terminate_service_after_days is not None
-            and self.terminate_service_after_days <= self.suspend_service_after_days
-        ):
-            errors["terminate_service_after_days"] = _("Termination must occur after suspension.")
-        elif (
-            final_retry_day is not None
-            and self.terminate_service_after_days is not None
-            and self.terminate_service_after_days <= final_retry_day
-        ):
-            errors["terminate_service_after_days"] = _("Termination must occur after the final retry.")
-        if errors:
-            raise ValidationError(errors)
+        The suspend/terminate escalation columns are dormant (ADR-0039:
+        subscription lifecycle owns suspension), so no timeline ordering is
+        enforced against them here — that validation must return together
+        with whatever feature gives those columns a consumer and an editor.
+        """
+        super().clean()
+        if not _valid_retry_intervals(self.retry_intervals_days, self.max_attempts):
+            raise ValidationError(
+                {
+                    "retry_intervals_days": _(
+                        "Provide one positive, strictly increasing retry day for each retry attempt."
+                    )
+                }
+            )
 
     def get_next_retry_date(self, failure_date: datetime, attempt_number: int) -> datetime | None:
         """Calculate one absolute retry date from the original payment failure."""
         intervals = self.retry_intervals_days
-        valid_intervals = (
-            isinstance(intervals, list)
-            and len(intervals) == self.max_attempts
-            and all(isinstance(day, int) and not isinstance(day, bool) and day > 0 for day in intervals)
-            and all(previous < current for previous, current in pairwise(intervals))
-        )
+        valid_intervals = _valid_retry_intervals(intervals, self.max_attempts)
         if (
             isinstance(attempt_number, bool)
             or not isinstance(attempt_number, int)
