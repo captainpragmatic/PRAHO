@@ -122,7 +122,9 @@ class RestoreFailClosedTests(TestCase):
             ),
             patch.object(self.service, "_execute_restore_components", return_value=[]),
             patch.object(self.service, "_execute_restore_rollback") as mock_rollback,
-            patch.object(self.service, "_finalize_restore_operation", return_value=Ok({"restored": True})) as mock_finalize,
+            patch.object(
+                self.service, "_finalize_restore_operation", return_value=Ok({"restored": True})
+            ) as mock_finalize,
             patch.object(self.service, "_update_restore_progress"),
             patch.object(self.service, "_generate_restore_id", return_value="rs-2"),
         ):
@@ -131,3 +133,43 @@ class RestoreFailClosedTests(TestCase):
         self.assertTrue(result.is_ok())
         mock_finalize.assert_called_once()
         mock_rollback.assert_not_called()
+
+
+class FinalizeIntegrityFailureTests(TestCase):
+    """_finalize_restore_operation must also fail closed on a failed rollback."""
+
+    def setUp(self) -> None:
+        self.server = MagicMock()
+        self.server.hostname = "vm.example.com"
+        self.service = VirtualminBackupService(self.server)
+        self.account = MagicMock()
+        self.account.domain = "example.com"
+
+    def _params(self) -> dict:
+        from apps.provisioning.virtualmin_backup_service import RestoreOperationParams  # noqa: PLC0415
+
+        return RestoreOperationParams(
+            gateway=MagicMock(),
+            account=self.account,
+            backup_metadata={"meta": True},
+            restore_id="rs-final",
+            config=RestoreConfig(backup_id="bk-1"),
+            rollback_data={"rollback": True},
+        )
+
+    def test_integrity_failure_with_failed_rollback_is_surfaced(self) -> None:
+        """A post-restore integrity failure whose rollback also fails must report both,
+        mark progress failed, and never claim success."""
+        with (
+            patch.object(self.service, "_verify_restore_integrity", return_value=Err("integrity mismatch")),
+            patch.object(self.service, "_execute_restore_rollback", return_value=Err("rollback unreachable")),
+            patch.object(self.service, "_update_restore_progress") as mock_progress,
+        ):
+            result = self.service._finalize_restore_operation(self._params())
+
+        self.assertTrue(result.is_err())
+        err = result.unwrap_err().lower()
+        self.assertIn("integrity", err)
+        self.assertIn("rollback", err)
+        phases = [call.args[1] for call in mock_progress.call_args_list if len(call.args) > 1]
+        self.assertIn("failed", phases, f"progress must reach 'failed', got {phases}")

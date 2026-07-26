@@ -198,9 +198,21 @@ class VirtualminBackupService:
             params["gateway"], params["account"], params["backup_metadata"]
         )
         if integrity_result.is_err():
-            # Attempt rollback on verification failure
-            self._execute_restore_rollback(params["account"], params["rollback_data"])
-            return Err(integrity_result.unwrap_err())
+            # Fail closed like the component-error path: mark progress failed and
+            # surface a rollback that itself failed, so the account is never left
+            # in an unknown state with only the integrity error reported.
+            self._update_restore_progress(params["restore_id"], "failed", 100)
+            rollback_result = self._execute_restore_rollback(params["account"], params["rollback_data"])
+            error_detail = f"Restore integrity check failed: {integrity_result.unwrap_err()}"
+            if rollback_result.is_err():
+                logger.error(
+                    f"🔥 [Backup] Rollback for {params['account'].domain} ALSO failed: {rollback_result.unwrap_err()}"
+                )
+                error_detail += (
+                    f" — rollback ALSO failed ({rollback_result.unwrap_err()}); "
+                    "account may be in an inconsistent state and needs manual reconciliation"
+                )
+            return Err(error_detail)
 
         # Finalize restore
         self._update_restore_progress(params["restore_id"], "completed", 100)
