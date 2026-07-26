@@ -337,17 +337,32 @@ class EFacturaDocument(models.Model):
     def __str__(self) -> str:
         return f"e-Factura {self.invoice.number} [{self.status}]"
 
+    # XML may never change while these are the STORED status: an active upload
+    # owns the bytes, and anything at-or-past ANAF (including ambiguity) must
+    # keep the exact evidence. ERROR/rejected with no active claim may
+    # regenerate — a refusal proves those bytes were never accepted.
+    _XML_FROZEN_STATUSES: ClassVar[set[str]] = {
+        "uploading",
+        "submitted",
+        "processing",
+        "accepted",
+        "outcome_unknown",
+    }
+
     def save(self, *args: Any, **kwargs: Any) -> None:
         """Save with an atomic XML hash and post-claim immutability guard."""
         update_fields = kwargs.get("update_fields")
         xml_write = update_fields is None or "xml_content" in update_fields or "xml_hash" in update_fields
         if self.pk and xml_write:
             stored = (
-                type(self).objects.filter(pk=self.pk).values("submission_claimed_at", "xml_content", "xml_hash").first()
+                type(self)
+                .objects.filter(pk=self.pk)
+                .values("submission_claim_token", "status", "xml_content", "xml_hash")
+                .first()
             )
             if (
                 stored
-                and stored["submission_claimed_at"] is not None
+                and (stored["submission_claim_token"] is not None or stored["status"] in self._XML_FROZEN_STATUSES)
                 and (stored["xml_content"] != self.xml_content or stored["xml_hash"] != self.xml_hash)
             ):
                 raise ValidationError(_("Claimed e-Factura XML content and hash are immutable"))

@@ -940,6 +940,19 @@ class DomainNotificationService:
 
         return Domain.objects.filter(conditions, status="active").select_related("customer", "tld")
 
+    @classmethod
+    def due_renewal_notices(cls) -> list[tuple[Domain, int]]:
+        """📧 Pair each due domain with the schedule threshold it matched."""
+        schedule_days = cls._renewal_notice_schedule()
+        now = timezone.now()
+        pairs: list[tuple[Domain, int]] = []
+        for domain in cls.get_domains_needing_renewal_notice():
+            for days in schedule_days:
+                if domain.expires_at.date() == (now + timedelta(days=days)).date():
+                    pairs.append((domain, days))
+                    break
+        return pairs
+
     @staticmethod
     def mark_renewal_notice_sent(domain: Domain, notice_period: int) -> None:
         """📧 Mark renewal notice as sent"""

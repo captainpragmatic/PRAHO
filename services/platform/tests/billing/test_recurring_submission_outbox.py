@@ -774,6 +774,43 @@ class RecurringSubmissionReconciliationTestCase(_SubscriptionInvoicePaymentFixtu
         self.assertEqual(second["payments_checked"], 0)
         gateway.confirm_payment.assert_called_once_with("pi_poll_cooldown_409")
 
+    def test_stale_reserved_submission_is_abandoned_and_reservation_released(self) -> None:
+        """A crash between reservation-commit and claim-commit must not stall the
+        cycle forever: reserved means the claim never committed, so Stripe was
+        never called and the reservation is safe to abandon."""
+        payment = Payment.objects.create(
+            customer=self.customer,
+            invoice=self.invoice,
+            payment_method="stripe",
+            amount_cents=self.invoice.total_cents,
+            currency=self.currency,
+            status="pending",
+            idempotency_key=f"invoice:{self.invoice.id}:stripe:reserved-stall",
+            meta={"source": "recurring_billing"},
+        )
+        submission = RecurringPaymentSubmission.objects.create(
+            payment=payment,
+            state=RecurringPaymentSubmission.State.RESERVED,
+        )
+        old = timezone.now() - timedelta(hours=1)
+        RecurringPaymentSubmission.objects.filter(id=submission.id).update(updated_at=old)
+        gateway = MagicMock()
+
+        with patch(
+            "apps.billing.payment_service.PaymentGatewayFactory.create_gateway",
+            return_value=gateway,
+        ):
+            result = reconcile_recurring_payment_submissions(stale_after_seconds=0)
+
+        self.assertTrue(result["success"], result)
+        self.assertEqual(result["reservations_abandoned"], 1)
+        submission.refresh_from_db()
+        self.assertEqual(submission.state, RecurringPaymentSubmission.State.ABANDONED)
+        payment.refresh_from_db()
+        self.assertEqual(payment.status, "failed")
+        self.assertTrue(payment.meta.get("reservation_abandoned"))
+        gateway.confirm_payment.assert_not_called()
+
     def test_reconciliation_claims_under_postgresql_row_locks(self) -> None:
         if connection.vendor != "postgresql":
             self.skipTest("PostgreSQL row-lock behavior required")

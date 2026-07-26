@@ -561,21 +561,25 @@ def _store_validation(  # noqa: PLR0913
     # never_expires marks terminal evidence (a structurally invalid number):
     # re-verification cannot improve it, so it must not re-enter the daily sweep.
     expires_at = None if never_expires else timezone.now() + timedelta(hours=24 if is_valid else 1)
+    defaults: dict[str, Any] = {
+        "full_vat_number": full_vat_number,
+        "is_valid": is_valid,
+        "is_active": is_valid,
+        "company_name": company_name,
+        "company_address": company_address,
+        "validation_date": timezone.now(),
+        "validation_source": source,
+        "response_data": response_data or {},
+        "expires_at": expires_at,
+    }
+    # Proof-of-consultation is evidence, not state: a VIES outage yields an empty
+    # identifier and must not erase the reference from an earlier real check.
+    if consultation_reference:
+        defaults["consultation_reference"] = consultation_reference
     VATValidation.objects.update_or_create(
         country_code=country_code,
         vat_number=vat_number,
-        defaults={
-            "full_vat_number": full_vat_number,
-            "is_valid": is_valid,
-            "is_active": is_valid,
-            "company_name": company_name,
-            "company_address": company_address,
-            "validation_date": timezone.now(),
-            "validation_source": source,
-            "consultation_reference": consultation_reference,
-            "response_data": response_data or {},
-            "expires_at": expires_at,
-        },
+        defaults=defaults,
     )
 
 
@@ -1847,6 +1851,49 @@ def _process_recurring_reconciliation_batch(
     return converged, failed, pending, errors
 
 
+def _abandon_stale_reserved_submissions(*, stale_before: datetime, batch_size: int) -> tuple[int, list[str]]:
+    """Release reservations whose claim never committed.
+
+    The claim is the pre-gateway linearization point: a submission stuck in
+    ``reserved`` past the stale window proves the worker died before any Stripe
+    request was authorized, so abandoning the reservation is safe and frees the
+    billing cycle for the next collection run. The payment-service helper
+    re-validates everything under the payment row lock, so a submission that
+    progressed concurrently is left untouched.
+    """
+    from apps.billing.payment_models import RecurringPaymentSubmission  # noqa: PLC0415
+    from apps.billing.payment_service import _abandon_unbound_payment_reservation  # noqa: PLC0415
+
+    abandoned = 0
+    errors: list[str] = []
+    stale_reserved = list(
+        RecurringPaymentSubmission.objects.filter(
+            state="reserved",
+            updated_at__lte=stale_before,
+            payment__payment_method="stripe",
+            payment__meta__source="recurring_billing",
+        )
+        .select_related("payment")
+        .order_by("updated_at", "id")[: max(batch_size, 1)]
+    )
+    for submission in stale_reserved:
+        try:
+            _abandon_unbound_payment_reservation(
+                submission.payment,
+                "Recurring submission stalled in reserved state before its claim committed",
+            )
+        except Exception as exc:
+            errors.append(f"submission {submission.id}: failed to abandon stale reservation: {exc}")
+            logger.exception("Failed to abandon stale reserved submission %s", submission.id)
+            continue
+        submission.refresh_from_db()
+        if submission.state == "abandoned":
+            abandoned += 1
+    if abandoned:
+        logger.info("\U0001f9f9 [Billing] Abandoned %d stale reserved recurring submission(s)", abandoned)
+    return abandoned, errors
+
+
 def reconcile_recurring_payment_submissions(
     *,
     batch_size: int = RECURRING_RECONCILIATION_BATCH_SIZE,
@@ -1875,6 +1922,7 @@ def reconcile_recurring_payment_submissions(
             "payments_converged": 0,
             "payments_failed": 0,
             "payments_pending": 0,
+            "reservations_abandoned": 0,
             "manual_review_required": _manual_review_recurring_submission_count(),
             "backlog_remaining": _recurring_reconciliation_queryset(stale_before=skip_stale_before).count(),
             "errors": [],
@@ -1888,6 +1936,11 @@ def reconcile_recurring_payment_submissions(
             errors.append(
                 f"{manual_review_required} legacy recurring payment submission(s) require manual Stripe reconciliation"
             )
+        reservations_abandoned, abandon_errors = _abandon_stale_reserved_submissions(
+            stale_before=stale_before,
+            batch_size=batch_size,
+        )
+        errors.extend(abandon_errors)
         submission_ids, backlog_before, claim_token = _claim_recurring_reconciliation_batch(
             batch_size=batch_size,
             stale_before=stale_before,
@@ -1902,6 +1955,7 @@ def reconcile_recurring_payment_submissions(
                 "payments_converged": 0,
                 "payments_failed": 0,
                 "payments_pending": 0,
+                "reservations_abandoned": reservations_abandoned,
                 "manual_review_required": manual_review_required,
                 "backlog_remaining": 0,
                 "errors": errors,
@@ -1925,6 +1979,7 @@ def reconcile_recurring_payment_submissions(
                 "payments_converged": 0,
                 "payments_failed": 0,
                 "payments_pending": 0,
+                "reservations_abandoned": reservations_abandoned,
                 "manual_review_required": manual_review_required,
                 "backlog_remaining": backlog_before,
                 "errors": errors,
@@ -1952,6 +2007,7 @@ def reconcile_recurring_payment_submissions(
             "payments_converged": converged,
             "payments_failed": failed,
             "payments_pending": pending,
+            "reservations_abandoned": reservations_abandoned,
             "manual_review_required": manual_review_required,
             "backlog_remaining": backlog_remaining,
             "errors": errors,

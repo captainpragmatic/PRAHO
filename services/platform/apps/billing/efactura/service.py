@@ -244,8 +244,12 @@ class EFacturaService:
             return SubmissionResult.error(f"Document cannot be submitted from status {document.status}")
 
         xml_content = document.xml_content
+        # An ERROR document with no ACTIVE claim may regenerate: an explicit
+        # refusal proves ANAF rejected those bytes, so retrying identical XML can
+        # never succeed and a corrected invoice needs new bytes. Historical claim
+        # timestamps alone must not freeze the document forever.
         should_regenerate_after_local_error = (
-            document.status == EFacturaStatus.ERROR.value and document.submission_claimed_at is None
+            document.status == EFacturaStatus.ERROR.value and document.submission_claim_token is None
         )
         if not xml_content or should_regenerate_after_local_error:
             try:

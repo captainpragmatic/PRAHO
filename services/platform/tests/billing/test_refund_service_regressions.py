@@ -1897,6 +1897,37 @@ class TestBackfillRefundsFromMeta(TestCase):
         mod = importlib.import_module("apps.billing.migrations.0041_recover_remaining_legacy_refunds")
         mod.recover_remaining_legacy_refunds(django_apps, None)
 
+    def test_backfill_does_not_double_consume_a_gateway_id_row(self):
+        """One completed gateway-ID row must satisfy only its own ID entry: a
+        distinct same-amount no-ID entry still gets its own Refund row."""
+        order = _make_order(self.customer, self.currency, status="completed", total_cents=10000)
+        Refund.objects.create(
+            customer=self.customer,
+            order=order,
+            amount_cents=3000,
+            currency=self.currency,
+            original_amount_cents=10000,
+            status="completed",
+            gateway_refund_id="gw_double_consume",
+            reference_number="REF-DOUBLE-CONSUME",
+        )
+        Order.objects.filter(pk=order.pk).update(
+            meta={
+                "refunds": [
+                    {"amount_cents": 3000, "reason": "customer_request", "refund_id": "gw_double_consume"},
+                    {"amount_cents": 3000, "reason": "customer_request"},
+                ]
+            }
+        )
+
+        self._forward()
+
+        refunds = list(Refund.objects.filter(order=order).order_by("created_at"))
+        assert len(refunds) == 2, "the no-ID legacy entry must create its own row"
+        assert sum(r.amount_cents for r in refunds) == 6000
+        order.refresh_from_db()
+        assert "refunds" not in order.meta
+
     def test_backfill_creates_refund_rows_for_order(self):
         """Legacy meta.refunds entries on an Order are converted to Refund model rows."""
         order = _make_order(self.customer, self.currency, status="completed", total_cents=10000)
