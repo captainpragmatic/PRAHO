@@ -124,12 +124,13 @@ class OrderPreflightValidationService:
                 # check below rejects the transition with a false mismatch.
                 try:
                     tax_profile = order.customer.tax_profile
+                except ObjectDoesNotExist:
+                    tax_profile = None  # No tax profile yet — use defaults
+                if tax_profile is not None:
                     customer_vat_info["is_vat_payer"] = tax_profile.is_vat_payer
                     customer_vat_info["reverse_charge_eligible"] = tax_profile.reverse_charge_eligible
                     if tax_profile.vat_rate is not None:
                         customer_vat_info["custom_vat_rate"] = tax_profile.vat_rate
-                except (ObjectDoesNotExist, AttributeError):
-                    pass  # No tax profile yet — use defaults
                 vat_result = OrderVATCalculator.calculate_vat(
                     subtotal_cents=taxable_subtotal_cents, customer_info=customer_vat_info
                 )

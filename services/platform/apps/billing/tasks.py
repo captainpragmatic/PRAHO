@@ -1325,16 +1325,19 @@ def _advance_refund_discovery_cursor(
     listed: dict[str, Any],
     *,
     previous_cursor: str | None,
-    discovered_ids: dict[str, RefundGatewayFacts],
 ) -> None:
-    """Resume from the last-seen id while the window is truncated; clear on drain.
+    """Resume from the last listed id while the window is truncated; clear on drain.
 
-    A backlog larger than the budget advances across sweeps instead of
-    re-scanning the newest records forever.
+    Caller guarantees the whole listed page was consumed (no deferred refunds),
+    so the last listed id is a safe resume point: a backlog larger than the
+    budget advances across sweeps instead of re-scanning the newest records.
     """
-    last_discovered_id = next(reversed(discovered_ids), None) if discovered_ids else None
-    if listed.get("truncated") and last_discovered_id:
-        cache.set(_REFUND_DISCOVERY_CURSOR_KEY, last_discovered_id, timeout=_REFUND_DISCOVERY_CURSOR_TTL)
+    last_listed_id = next(
+        (r["refund_id"] for r in reversed(listed["refunds"]) if r.get("refund_id")),
+        None,
+    )
+    if listed.get("truncated") and last_listed_id:
+        cache.set(_REFUND_DISCOVERY_CURSOR_KEY, last_listed_id, timeout=_REFUND_DISCOVERY_CURSOR_TTL)
     elif previous_cursor is not None:
         cache.delete(_REFUND_DISCOVERY_CURSOR_KEY)
 
@@ -1387,9 +1390,6 @@ def _collect_stripe_refund_facts(
             refund_id = discovered["refund_id"]
             if refund_id:
                 discovered_by_id[refund_id] = _stripe_refund_facts(discovered, refund_id)
-        _advance_refund_discovery_cursor(
-            cache, listed, previous_cursor=discovery_cursor, discovered_ids=discovered_by_id
-        )
 
     # Known local non-terminal refunds take priority. Discovery runs first so an ID
     # returned by Stripe is never immediately retrieved a second time.
@@ -1410,6 +1410,14 @@ def _collect_stripe_refund_facts(
             discovery_deferred = True
             break
         refund_facts[refund_id] = discovered
+
+    # Advance the cursor only when the whole listed page was consumed. If any
+    # discovered refund was deferred (the budget filled with pending refunds),
+    # leave the cursor so the next sweep re-lists from the same point and picks
+    # them up — advancing past deferred refunds would skip them forever under a
+    # continuously truncated backlog.
+    if not discovery_failed and not discovery_deferred:
+        _advance_refund_discovery_cursor(cache, listed, previous_cursor=discovery_cursor)
 
     work_remaining = discovery_failed or pending_truncated or bool(listed.get("truncated", False)) or discovery_deferred
     return refund_facts, work_remaining

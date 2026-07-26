@@ -928,13 +928,15 @@ class DomainNotificationService:
     def get_domains_needing_renewal_notice(cls) -> QuerySet[Domain]:
         """📧 Get domains that need renewal notices"""
         notice_periods = cls._renewal_notice_schedule()
-        now = timezone.now()
+        # localdate() so the cutoff matches the local-time semantics of the
+        # `expires_at__date` lookup (Django applies TIME_ZONE), and so the
+        # day-pairing in due_renewal_notices lands on the same calendar day.
+        today = timezone.localdate()
 
         conditions = Q()
         for days in notice_periods:
-            cutoff_date = now + timedelta(days=days)
             conditions |= (
-                Q(expires_at__date=cutoff_date.date())
+                Q(expires_at__date=today + timedelta(days=days))
                 & ~Q(renewal_notices_sent=days)  # The current threshold has not been sent yet.
             )
 
@@ -944,13 +946,17 @@ class DomainNotificationService:
     def due_renewal_notices(cls) -> list[tuple[Domain, int]]:
         """📧 Pair each due domain with the schedule threshold it matched."""
         schedule_days = cls._renewal_notice_schedule()
-        now = timezone.now()
+        # Compare in Django's configured timezone: the DB `expires_at__date`
+        # lookup that selected these rows evaluates in local time, so a
+        # late-evening UTC expiry must be matched on the same local calendar day.
+        today = timezone.localdate()
         pairs: list[tuple[Domain, int]] = []
         for domain in cls.get_domains_needing_renewal_notice():
             if domain.expires_at is None:
                 continue
+            expiry_local_date = timezone.localdate(domain.expires_at)
             for days in schedule_days:
-                if domain.expires_at.date() == (now + timedelta(days=days)).date():
+                if expiry_local_date == today + timedelta(days=days):
                     pairs.append((domain, days))
                     break
         return pairs

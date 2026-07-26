@@ -1048,6 +1048,63 @@ class RefundGatewayIntegrityTests(TestCase):
         self.assertEqual(gateway.list_refunds.call_args_list[1].kwargs["starting_after"], "re_cursor_b")
         self.assertIsNone(cache.get(billing_tasks._REFUND_DISCOVERY_CURSOR_KEY))
 
+    @override_settings(CACHES=LOCMEM_TEST_CACHE)
+    def test_discovery_cursor_does_not_advance_past_deferred_refunds(self) -> None:
+        """When pending refunds fill the budget and discovered refunds are deferred,
+        the cursor must not advance — else the deferred refunds are skipped forever."""
+        from django.core.cache import cache  # noqa: PLC0415
+
+        from apps.billing import tasks as billing_tasks  # noqa: PLC0415
+        from apps.common.types import Ok  # noqa: PLC0415
+
+        cache.delete(billing_tasks._REFUND_DISCOVERY_CURSOR_KEY)
+        invoice = self._make_invoice()
+        payment = self._make_payment(invoice, transaction_id="pi_deferred_cursor")
+        Refund.objects.create(
+            customer=self.customer,
+            invoice=invoice,
+            payment=payment,
+            amount_cents=1_000,
+            currency=self.currency,
+            original_amount_cents=10_000,
+            status="processing",
+            gateway_refund_id="re_pending_fills_budget",
+            reference_number="REF-PENDING-FILLS",
+        )
+        pending_fact = {
+            "success": True,
+            "refund_id": "re_pending_fills_budget",
+            "payment_intent_id": "pi_deferred_cursor",
+            "amount_cents": 1_000,
+            "currency": "ron",
+            "status": "succeeded",
+            "reason": None,
+            "failure_reason": None,
+            "error": None,
+        }
+        discovered_fact = {**pending_fact, "refund_id": "re_discovered_deferred"}
+        gateway = MagicMock()
+        gateway.retrieve_refund.return_value = pending_fact
+        gateway.list_refunds.return_value = {
+            "success": True,
+            "refunds": [discovered_fact],
+            "truncated": True,
+            "error": None,
+        }
+        with (
+            patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway", return_value=gateway),
+            patch(
+                "apps.billing.refund_service.RefundConvergenceService.converge_gateway_refund",
+                side_effect=lambda facts: Ok(MagicMock()),
+            ),
+        ):
+            billing_tasks.reconcile_stripe_refunds(max_refunds=1)
+
+        self.assertIsNone(
+            cache.get(billing_tasks._REFUND_DISCOVERY_CURSOR_KEY),
+            "cursor must not advance past a deferred discovered refund",
+        )
+
     def test_refund_reconciliation_caps_convergence_and_reports_remaining_work(self) -> None:
         from apps.billing import tasks as billing_tasks  # noqa: PLC0415
         from apps.common.types import Ok  # noqa: PLC0415
