@@ -153,6 +153,59 @@ class TestPreflightOrderService(TestCase):
             "Expected error about missing contact_name"
         )
 
+    def test_preflight_honors_reverse_charge_evidence_from_tax_profile(self) -> None:
+        """The transition guard must consult the same tax-profile evidence as
+        order creation — otherwise every EU B2B reverse-charge order is blocked
+        at draft→awaiting_payment with a false VAT mismatch."""
+        customer = Customer.objects.create(
+            name='DE Reverse GmbH',
+            customer_type='company',
+            company_name='DE Reverse GmbH',
+            primary_email='rc@test.de',
+            status='active',
+        )
+        CustomerTaxProfile.objects.create(
+            customer=customer,
+            vat_number='DE123456789',
+            is_vat_payer=True,
+            reverse_charge_eligible=True,
+        )
+        order = Order.objects.create(
+            customer=customer,
+            currency=self.currency,
+            customer_email=customer.primary_email,
+            customer_name=customer.name,
+            customer_company=customer.company_name,
+            billing_address=_billing_address(
+                company_name='DE Reverse GmbH',
+                country='DE',
+                vat_number='DE123456789',
+                fiscal_code='DE123456789',
+            ),
+            subtotal_cents=0,
+            tax_cents=0,
+            total_cents=0,
+        )
+        OrderItem.objects.create(
+            order=order,
+            product=self.product,
+            product_name=self.product.name,
+            product_type=self.product.product_type,
+            billing_period='monthly',
+            quantity=1,
+            unit_price_cents=10000,
+            setup_cents=0,
+            tax_rate=Decimal('0.0000'),
+        )
+        order.refresh_from_db()
+
+        errors, _warnings = OrderPreflightValidationService.validate(order)
+
+        self.assertFalse(
+            [e for e in errors if 'VAT mismatch' in e],
+            f'reverse-charge order must pass the VAT consistency check, got: {errors}',
+        )
+
     def test_preflight_with_complete_billing_address_passes_required_fields(self) -> None:
         """Preflight should not report field-level errors for a fully populated address."""
         order = self._make_order(billing_address=_billing_address())

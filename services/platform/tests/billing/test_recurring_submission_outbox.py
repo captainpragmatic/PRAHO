@@ -9,7 +9,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from django.apps import apps as django_apps
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, connection, connections, transaction
 from django.test import TestCase
 from django.utils import timezone
 
@@ -273,6 +273,33 @@ class RecurringSubmissionStateTestCase(_SubscriptionInvoicePaymentFixture, TestC
         self.assertIsNone(unbound.recurring_submission.submitted_at)
         self.assertIsNotNone(bound.recurring_submission.submitted_at)
         self.assertIsNotNone(succeeded_unconverted.recurring_submission.submitted_at)
+
+
+class RecurringReconciliationLockScopeTests(TestCase):
+    """#410 follow-up: the batch claim must lock ONLY the submission table.
+
+    The reconciliation queryset filters through payment__proforma, which Django
+    promotes to a LEFT OUTER JOIN; PostgreSQL refuses FOR UPDATE on the nullable
+    side of an outer join, so an unrestricted lock kills every production run.
+    """
+
+    def test_claim_lock_is_restricted_to_the_submission_table_on_postgresql(self) -> None:
+        from django.db.backends.postgresql.base import DatabaseWrapper  # noqa: PLC0415
+
+        from apps.billing.tasks import _recurring_reconciliation_claim_queryset  # noqa: PLC0415
+
+        pg_settings = connections.databases["default"].copy()
+        pg_settings["ENGINE"] = "django.db.backends.postgresql"
+        pg = DatabaseWrapper(pg_settings, alias="pg-compile-check")
+        # Compile offline: the FOR UPDATE branch consults autocommit state, which
+        # would otherwise open a live connection to a server this test never needs.
+        pg.autocommit = False
+        queryset = _recurring_reconciliation_claim_queryset(stale_before=timezone.now())
+        with patch.object(pg, "ensure_connection", lambda: None):
+            sql, _params = queryset.query.get_compiler(connection=pg).as_sql()
+
+        self.assertIn("FOR UPDATE OF", sql, "lock must target only the submission table")
+        self.assertNotIn('FOR UPDATE OF "billing_proforma', sql)
 
 
 class RecurringSubmissionReconciliationTestCase(_SubscriptionInvoicePaymentFixture, TestCase):
@@ -746,6 +773,23 @@ class RecurringSubmissionReconciliationTestCase(_SubscriptionInvoicePaymentFixtu
         self.assertTrue(second["success"], second)
         self.assertEqual(second["payments_checked"], 0)
         gateway.confirm_payment.assert_called_once_with("pi_poll_cooldown_409")
+
+    def test_reconciliation_claims_under_postgresql_row_locks(self) -> None:
+        if connection.vendor != "postgresql":
+            self.skipTest("PostgreSQL row-lock behavior required")
+        payment = self._create_pending_invoice_payment("pi_pg_claim_lock")
+        self._stale(payment.recurring_submission)
+        gateway = MagicMock()
+        gateway.confirm_payment.return_value = PaymentConfirmResult(success=True, status="processing", error=None)
+
+        with patch(
+            "apps.billing.payment_service.PaymentGatewayFactory.create_gateway",
+            return_value=gateway,
+        ):
+            result = reconcile_recurring_payment_submissions(stale_after_seconds=0)
+
+        self.assertTrue(result["success"], result)
+        self.assertEqual(result["payments_checked"], 1)
 
     def test_overlapping_reconciliation_run_skips_without_gateway_io(self) -> None:
         with patch("apps.billing.tasks.DistributedLock.acquire", return_value=False):

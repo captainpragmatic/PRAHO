@@ -150,6 +150,58 @@ class OrderCreateCustomerScopingTests(TestCase):
         self.assertEqual(order.tax_cents, 2_100)
         self.assertEqual(order.total_cents, 12_100)
 
+    def test_preview_matches_reverse_charge_evidence(self) -> None:
+        """The staff preview must quote the same reverse-charge VAT the
+        persisted order will carry, not destination-country VAT."""
+        Customer.objects.filter(pk=self.customer_a.pk).update(company_name="Accessible GmbH")
+        CustomerAddress.objects.create(
+            customer=self.customer_a,
+            is_billing=True,
+            address_line1="Teststrasse 1",
+            city="Berlin",
+            county="Berlin",
+            postal_code="10115",
+            country="DE",
+        )
+        CustomerTaxProfile.objects.create(
+            customer=self.customer_a,
+            vat_number="DE123456789",
+            is_vat_payer=True,
+            reverse_charge_eligible=True,
+        )
+        product = Product.objects.create(
+            slug="preview-reverse-charge-hosting",
+            name="Preview reverse-charge hosting",
+            product_type="shared_hosting",
+            is_active=True,
+        )
+        ProductPrice.objects.create(
+            product=product,
+            currency=self.currency,
+            monthly_price_cents=10_000,
+        )
+        self.client.force_login(self.staff)
+
+        with patch(
+            "apps.orders.views._get_accessible_customer_ids",
+            return_value=[self.customer_a.id],
+        ):
+            response = self.client.post(
+                "/orders/create/preview/",
+                {
+                    "customer": str(self.customer_a.id),
+                    "currency": "RON",
+                    "first_product": str(product.id),
+                    "first_billing_period": "monthly",
+                    "first_quantity": "1",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.context["error"])
+        self.assertEqual(response.context["vat_cents"], 0, "reverse charge must quote 0% VAT")
+        self.assertEqual(response.context["total_cents"], 10_000)
+
 
 class DraftOrderMassAssignmentTests(TestCase):
     """H14: Financial fields must not be mass-assignable on draft orders."""

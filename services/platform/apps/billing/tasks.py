@@ -1543,6 +1543,19 @@ def _manual_review_recurring_submission_count() -> int:
     )
 
 
+def _recurring_reconciliation_claim_queryset(*, stale_before: datetime) -> Any:
+    """The lock acquisition used by the batch claim, exposed for SQL-level tests.
+
+    of=("self",) is load-bearing: the reconciliation filters traverse
+    payment__proforma, which Django promotes to a LEFT OUTER JOIN, and
+    PostgreSQL refuses FOR UPDATE on the nullable side of an outer join.
+    Only submission columns are mutated, so only the base table needs the lock.
+    """
+    return _recurring_reconciliation_queryset(stale_before=stale_before).select_for_update(
+        skip_locked=True, of=("self",)
+    )
+
+
 def _claim_recurring_reconciliation_batch(
     *,
     batch_size: int,
@@ -1556,7 +1569,11 @@ def _claim_recurring_reconciliation_batch(
     queryset = _recurring_reconciliation_queryset(stale_before=stale_before)
     backlog = queryset.count()
     with transaction.atomic():
-        submissions = list(queryset.select_for_update(skip_locked=True).order_by("created_at", "id")[:batch_size])
+        submissions = list(
+            _recurring_reconciliation_claim_queryset(stale_before=stale_before).order_by("created_at", "id")[
+                :batch_size
+            ]
+        )
         for submission in submissions:
             submission.reconcile_claim_token = claim_token
             submission.reconcile_claim_expires_at = now + RECURRING_RECONCILIATION_LEASE
