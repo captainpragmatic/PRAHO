@@ -8,6 +8,7 @@ from unittest.mock import patch
 from django.test import TestCase
 
 from apps.billing.models import Currency
+from apps.common.types import Ok as _Ok
 from apps.customers.models import Customer, CustomerAddress, CustomerTaxProfile
 from apps.domains.models import TLD, Domain, DomainOrderItem, Registrar, TLDRegistrarAssignment
 from apps.domains.services import DomainLifecycleService, DomainOrderService, DomainValidationService
@@ -223,3 +224,71 @@ class DomainServiceLogicTests(TestCase):
                 self.assertEqual(item.total_price_cents, 2300 * years)
 
         self.assertEqual(DomainOrderItem.objects.count(), 2)
+
+
+class DomainOrderRenewTransferProcessingTests(DomainServiceLogicTests):
+    """#430: renew items must link the owned Domain and be processable; transfer/unhandled
+    actions must be logged, not silently dropped."""
+
+    def _owned_domain(self, name: str) -> Domain:
+        return Domain.objects.create(
+            name=name, tld=self.ro, registrar=self.ro_registrar, customer=self.customer, status="active"
+        )
+
+    def test_renew_item_links_owned_domain(self) -> None:
+        domain = self._owned_domain("owned.ro")
+
+        success, item = DomainOrderService.create_domain_order_item(
+            order=self.order, domain_name="owned.ro", action="renew", years=1
+        )
+
+        self.assertTrue(success, item)
+        self.assertEqual(item.domain_id, domain.id)
+
+    def test_renew_item_without_owned_domain_is_created_unlinked(self) -> None:
+        """Not-yet-owned renew still creates the item (ownership validated at processing)."""
+        success, item = DomainOrderService.create_domain_order_item(
+            order=self.order, domain_name="not-owned.ro", action="renew", years=1
+        )
+
+        self.assertTrue(success, item)
+        self.assertIsNone(item.domain)
+
+    def test_process_reaches_renew_branch_for_linked_item(self) -> None:
+        domain = self._owned_domain("renewme.ro")
+        DomainOrderService.create_domain_order_item(
+            order=self.order, domain_name="renewme.ro", action="renew", years=1
+        )
+
+        with patch.object(
+            DomainLifecycleService, "process_domain_renewal", return_value=_Ok("renewed")
+        ) as mock_renew:
+            processed = DomainOrderService.process_domain_order_items(self.order)
+
+        mock_renew.assert_called_once()
+        _args, kwargs = mock_renew.call_args
+        self.assertEqual(kwargs.get("domain"), domain)
+        self.assertIn(domain, processed)
+
+    def test_process_logs_unlinked_renew_instead_of_silent_skip(self) -> None:
+        DomainOrderService.create_domain_order_item(
+            order=self.order, domain_name="unlinked.ro", action="renew", years=1
+        )
+
+        with self.assertLogs("apps.domains.services", level="ERROR") as logs:
+            processed = DomainOrderService.process_domain_order_items(self.order)
+
+        self.assertEqual(processed, [])
+        self.assertTrue(any("no linked domain" in m for m in logs.output))
+
+    def test_process_logs_transfer_instead_of_silent_drop(self) -> None:
+        DomainOrderItem.objects.create(
+            order=self.order, domain_name="transfer.ro", tld=self.ro, action="transfer", years=1,
+            unit_price_cents=800, total_price_cents=800,
+        )
+
+        with self.assertLogs("apps.domains.services", level="WARNING") as logs:
+            processed = DomainOrderService.process_domain_order_items(self.order)
+
+        self.assertEqual(processed, [])
+        self.assertTrue(any("not auto-processed" in m for m in logs.output))

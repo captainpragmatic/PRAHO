@@ -1029,6 +1029,16 @@ class DomainOrderService:
                 "domains.whois_privacy_price_cents", _DEFAULT_WHOIS_PRIVACY_PRICE_CENTS
             )
 
+        # #430: a renew acts on an EXISTING domain the customer owns. Link it here so
+        # process_domain_order_items can reach the renew branch — its guard was
+        # `item.action == "renew" and item.domain`, never true because .domain was never set, so
+        # every renew item was silently skipped. Link the owned Domain when it exists; if it does
+        # not, still create the item (ownership is validated at processing time, where an
+        # unlinked renew now logs loudly instead of being dropped).
+        existing_domain: Domain | None = None
+        if action == "renew":
+            existing_domain = Domain.objects.filter(name=domain_name.lower(), customer=order.customer).first()
+
         try:
             order_item = DomainOrderItem.objects.create(
                 order=order,
@@ -1041,6 +1051,7 @@ class DomainOrderService:
                 whois_privacy=whois_privacy,
                 auto_renew=auto_renew,
                 epp_code="",
+                domain=existing_domain,
             )
 
             # Encrypt EPP code via model setter (single encryption boundary)
@@ -1082,7 +1093,13 @@ class DomainOrderService:
                 else:
                     logger.error("Failed to process registration %s: %s", item.domain_name, result.unwrap_err())
 
-            elif item.action == "renew" and item.domain:
+            elif item.action == "renew":
+                # #430: a renew item without a linked domain is a data defect (create_domain_order_item
+                # now always links it). Log loudly instead of silently skipping.
+                if item.domain is None:
+                    logger.error("Renew item %s has no linked domain — skipping (data defect)", item.domain_name)
+                    continue
+
                 renewal_result = DomainLifecycleService.process_domain_renewal(domain=item.domain, years=item.years)
 
                 if renewal_result.is_ok():
@@ -1090,6 +1107,21 @@ class DomainOrderService:
                     logger.info("Processed renewal: %s", item.domain_name)
                 else:
                     logger.error("Failed to process renewal %s: %s", item.domain_name, renewal_result.unwrap_err())
+
+            elif item.action == "transfer":
+                # #430: inbound transfer creates a new Domain via initiate_transfer, which needs a
+                # resolved registrar — there is no registrar on the order item yet, so this path is
+                # intentionally NOT auto-processed here. Log explicitly instead of dropping it
+                # silently; wiring registrar selection for transfers is tracked separately.
+                logger.warning(
+                    "Transfer item %s is not auto-processed (registrar selection for order-driven "
+                    "transfers is not wired yet) — handle via initiate_transfer",
+                    item.domain_name,
+                )
+
+            else:
+                # #430: any unhandled action must be visible, not silently dropped.
+                logger.error("Unhandled domain order item action %r for %s", item.action, item.domain_name)
 
         return processed_domains
 
