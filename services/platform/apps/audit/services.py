@@ -4115,8 +4115,11 @@ class AuditSearchService:
             action_choices = [choice[0] for choice in AuditEvent.ACTION_CHOICES if query.lower() in choice[0].lower()]
             suggestions["actions"] = action_choices[:limit]
 
-            # User suggestions (staff only for privacy)
-            if user.is_staff:
+            # User suggestions (staff only for privacy). Use the canonical is_staff_user so
+            # role-only staff (staff_role set, is_staff=False) — who already pass the endpoint's
+            # staff_required_strict guard — are treated consistently and not silently denied
+            # suggestions (#271).
+            if user.is_staff_user:
                 users = User.objects.filter(
                     Q(email__icontains=query) | Q(first_name__icontains=query) | Q(last_name__icontains=query)
                 ).values_list("email", flat=True)[:limit]
