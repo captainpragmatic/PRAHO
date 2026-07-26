@@ -198,9 +198,21 @@ class VirtualminBackupService:
             params["gateway"], params["account"], params["backup_metadata"]
         )
         if integrity_result.is_err():
-            # Attempt rollback on verification failure
-            self._execute_restore_rollback(params["account"], params["rollback_data"])
-            return Err(integrity_result.unwrap_err())
+            # Fail closed like the component-error path: mark progress failed and
+            # surface a rollback that itself failed, so the account is never left
+            # in an unknown state with only the integrity error reported.
+            self._update_restore_progress(params["restore_id"], "failed", 100)
+            rollback_result = self._execute_restore_rollback(params["account"], params["rollback_data"])
+            error_detail = f"Restore integrity check failed: {integrity_result.unwrap_err()}"
+            if rollback_result.is_err():
+                logger.error(
+                    f"🔥 [Backup] Rollback for {params['account'].domain} ALSO failed: {rollback_result.unwrap_err()}"
+                )
+                error_detail += (
+                    f" — rollback ALSO failed ({rollback_result.unwrap_err()}); "
+                    "account may be in an inconsistent state and needs manual reconciliation"
+                )
+            return Err(error_detail)
 
         # Finalize restore
         self._update_restore_progress(params["restore_id"], "completed", 100)
@@ -336,6 +348,30 @@ class VirtualminBackupService:
             try:
                 # Execute restore components
                 errors = self._execute_restore_components(gateway, account, backup_path, config, restore_id)
+
+                # 🔒 FAIL-CLOSED (#326): component errors were collected then discarded, so a
+                # partial or total restore failure still finalized as "Restore completed
+                # successfully". Any component failure must roll back and surface as an error
+                # instead of reporting a fictional success.
+                if errors:
+                    logger.error(
+                        f"🔥 [Backup] Restore for {account.domain} had {len(errors)} component failure(s); "
+                        f"rolling back: {'; '.join(errors)}"
+                    )
+                    self._update_restore_progress(restore_id, "failed", 100)
+                    rollback_result = self._execute_restore_rollback(account, rollback_data)
+                    error_detail = f"Restore failed ({len(errors)} component error(s)): {'; '.join(errors)}"
+                    if rollback_result.is_err():
+                        # A failed rollback leaves the account in an unknown state — the
+                        # operator must be told, not left with only the component errors.
+                        logger.error(
+                            f"🔥 [Backup] Rollback for {account.domain} ALSO failed: {rollback_result.unwrap_err()}"
+                        )
+                        error_detail += (
+                            f" — rollback ALSO failed ({rollback_result.unwrap_err()}); "
+                            "account may be in an inconsistent state and needs manual reconciliation"
+                        )
+                    return Err(error_detail)
 
                 # Finalize restore operation
                 return self._finalize_restore_operation(
