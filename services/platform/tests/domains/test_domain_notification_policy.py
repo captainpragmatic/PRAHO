@@ -102,3 +102,92 @@ class DomainRenewalNoticePolicyTests(TestCase):
         due_ids = set(DomainNotificationService.get_domains_needing_renewal_notice().values_list("pk", flat=True))
 
         self.assertEqual(due_ids, {due.pk})
+
+
+class DomainRenewalNoticeTaskTests(TestCase):
+    """The scheduled worker must send, mark, and report truthfully."""
+
+    now = datetime(2026, 7, 24, 10, 0, tzinfo=UTC)
+
+    def setUp(self) -> None:
+        cache.clear()
+        self.tld = TLD.objects.create(
+            extension="com",
+            description=".com",
+            registration_price_cents=1000,
+            renewal_price_cents=1000,
+            transfer_price_cents=1000,
+        )
+        self.registrar = Registrar.objects.create(
+            name="notice-task-registrar",
+            display_name="Notice Task Registrar",
+            website_url="https://example.test",
+            api_endpoint="https://api.example.test",
+        )
+        self.customer = Customer.objects.create(
+            name="Notice Task Customer",
+            company_name="Notice Task Customer",
+            primary_email="notice-task@example.test",
+            customer_type="company",
+        )
+
+    def _domain(self, name: str, days_until_expiry: int) -> Domain:
+        return Domain.objects.create(
+            name=name,
+            tld=self.tld,
+            registrar=self.registrar,
+            customer=self.customer,
+            status="active",
+            expires_at=self.now + timedelta(days=days_until_expiry),
+        )
+
+    @patch("apps.domains.services.timezone.now")
+    @patch("apps.notifications.services.NotificationService.send_customer_notification", return_value=True)
+    def test_task_sends_and_marks_only_matched_thresholds(self, mock_send, mock_now) -> None:
+        mock_now.return_value = self.now
+        due = self._domain("expiring-now.com", 30)
+        self._domain("expiring-later.com", 60)
+        from apps.domains.tasks import process_domain_renewal_notices  # noqa: PLC0415
+
+        result = process_domain_renewal_notices()
+
+        self.assertTrue(result["success"], result)
+        self.assertEqual(result["notified"], 1)
+        self.assertEqual(result["errors"], 0)
+        mock_send.assert_called_once()
+        kwargs = mock_send.call_args.kwargs
+        self.assertEqual(kwargs["customer_id"], str(self.customer.id))
+        self.assertEqual(kwargs["notification_type"], "domain_renewal_notice")
+        self.assertEqual(kwargs["context"]["domain_name"], "expiring-now.com")
+        self.assertEqual(kwargs["context"]["days_until_expiry"], 30)
+        due.refresh_from_db()
+        self.assertEqual(due.renewal_notices_sent, 30)
+        self.assertIsNotNone(due.last_renewal_notice)
+
+    @patch("apps.domains.services.timezone.now")
+    @patch("apps.notifications.services.NotificationService.send_customer_notification", return_value=False)
+    def test_task_reports_send_failures_and_leaves_domain_unmarked(self, mock_send, mock_now) -> None:
+        mock_now.return_value = self.now
+        due = self._domain("expiring-fail.com", 30)
+        from apps.domains.tasks import process_domain_renewal_notices  # noqa: PLC0415
+
+        result = process_domain_renewal_notices()
+
+        self.assertFalse(result["success"])
+        self.assertEqual(result["notified"], 0)
+        self.assertEqual(result["errors"], 1)
+        self.assertIn("1 errors", result["message"])
+        due.refresh_from_db()
+        self.assertEqual(due.renewal_notices_sent, 0, "a failed send must stay eligible for the next run")
+
+    def test_schedule_registration_is_idempotent(self) -> None:
+        from django_q.models import Schedule  # noqa: PLC0415
+
+        from apps.domains.tasks import setup_domain_scheduled_tasks  # noqa: PLC0415
+
+        first = setup_domain_scheduled_tasks()
+        second = setup_domain_scheduled_tasks()
+
+        self.assertEqual(first, {"renewal_notices": "created"})
+        self.assertEqual(second, {"renewal_notices": "already_exists"})
+        self.assertEqual(Schedule.objects.filter(name="domains-renewal-notices").count(), 1)

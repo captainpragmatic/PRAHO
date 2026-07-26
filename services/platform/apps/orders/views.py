@@ -668,6 +668,13 @@ def order_create_preview(request: HttpRequest) -> HttpResponse:
             "customer_id": str(customer.id),
             "order_id": None,
         }
+        # Inject per-customer overrides (must match order creation) so the staff
+        # preview quotes the same VAT the persisted order will carry.
+        if tax_profile is not None:
+            customer_vat_info["is_vat_payer"] = tax_profile.is_vat_payer
+            customer_vat_info["reverse_charge_eligible"] = tax_profile.reverse_charge_eligible
+            if tax_profile.vat_rate is not None:
+                customer_vat_info["custom_vat_rate"] = tax_profile.vat_rate
         vat_result = OrderVATCalculator.calculate_vat(subtotal_cents=subtotal_cents, customer_info=customer_vat_info)
 
         context = {

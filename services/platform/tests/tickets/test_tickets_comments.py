@@ -307,7 +307,7 @@ class TicketInternalCommentsSecurityTest(TestCase):
 
         def auto_close_before_reply_lock(*args, **kwargs):
             current = Ticket.objects.get(pk=ticket.pk)
-            TicketStatusService.close_ticket(current, 'auto_closed')
+            TicketStatusService.close_ticket(current, 'auto_closed', allow_system_codes=True)
             return original_select_for_update(*args, **kwargs)
 
         self.client.login(email='customer@example.com', password='testpass123')

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 
+from django.core.exceptions import ObjectDoesNotExist
 from django.utils.translation import gettext_lazy as _
 
 from apps.common.financial_arithmetic import calculate_document_totals
@@ -117,6 +118,19 @@ class OrderPreflightValidationService:
                     "customer_id": str(order.customer_id),
                     "order_id": str(order.id),
                 }
+                # Inject per-customer overrides (must match order creation) — without
+                # them, TaxService's fail-closed is_vat_payer requirement routes an
+                # EU B2B reverse-charge order to destination VAT and the consistency
+                # check below rejects the transition with a false mismatch.
+                try:
+                    tax_profile = order.customer.tax_profile
+                except ObjectDoesNotExist:
+                    tax_profile = None  # No tax profile yet — use defaults
+                if tax_profile is not None:
+                    customer_vat_info["is_vat_payer"] = tax_profile.is_vat_payer
+                    customer_vat_info["reverse_charge_eligible"] = tax_profile.reverse_charge_eligible
+                    if tax_profile.vat_rate is not None:
+                        customer_vat_info["custom_vat_rate"] = tax_profile.vat_rate
                 vat_result = OrderVATCalculator.calculate_vat(
                     subtotal_cents=taxable_subtotal_cents, customer_info=customer_vat_info
                 )

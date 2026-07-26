@@ -11,6 +11,7 @@ from django.core.management.base import BaseCommand, CommandError, CommandParser
 from apps.audit.tasks import setup_audit_scheduled_tasks
 from apps.billing.tasks import setup_billing_scheduled_tasks
 from apps.common.tasks import setup_system_status_scheduled_tasks
+from apps.domains.tasks import setup_domain_scheduled_tasks
 from apps.orders.tasks import setup_order_scheduled_tasks
 from apps.provisioning.virtualmin_tasks import setup_virtualmin_scheduled_tasks
 from apps.tickets.tasks import setup_ticket_scheduled_tasks
@@ -61,6 +62,11 @@ class Command(BaseCommand):
             action="store_true",
             help="Set up only support ticket lifecycle tasks",
         )
+        parser.add_argument(
+            "--domains-only",
+            action="store_true",
+            help="Set up only domain lifecycle tasks",
+        )
 
     def _validate_options(self, options: dict[str, Any]) -> dict[str, bool]:
         """Validate mutually exclusive command options."""
@@ -71,6 +77,7 @@ class Command(BaseCommand):
         status_only = options.get("status_only", False)
         audit_only = options.get("audit_only", False)
         tickets_only = options.get("tickets_only", False)
+        domains_only = options.get("domains_only", False)
 
         # Check for mutually exclusive flags
         exclusive_flags = [
@@ -81,12 +88,13 @@ class Command(BaseCommand):
             status_only,
             audit_only,
             tickets_only,
+            domains_only,
         ]
         if sum(exclusive_flags) > 1:
             raise CommandError(
                 "Cannot specify multiple exclusive flags "
                 "(--virtualmin-only, --security-only, --billing-only, --orders-only, "
-                "--status-only, --audit-only, --tickets-only)"
+                "--status-only, --audit-only, --tickets-only, --domains-only)"
             )
 
         return {
@@ -97,6 +105,7 @@ class Command(BaseCommand):
             "status_only": status_only,
             "audit_only": audit_only,
             "tickets_only": tickets_only,
+            "domains_only": domains_only,
         }
 
     def _setup_task_category(
@@ -176,6 +185,9 @@ class Command(BaseCommand):
             self.stdout.write("🎫 Support Tickets:")
             self.stdout.write("  - Close inactive waiting-on-customer tickets: Hourly")
 
+        if run_all or flags["domains_only"]:
+            self.stdout.write("\n🌐 Domains:\n  - Renewal notices for expiring domains: Daily")
+
         self.stdout.write("")
         self.stdout.write("🔧 Start workers: python manage.py qcluster")
         self.stdout.write("📊 Monitor tasks: /admin/django_q/")
@@ -216,6 +228,9 @@ class Command(BaseCommand):
 
             if run_all or flags["tickets_only"]:
                 self._setup_task_category("support tickets", "🎫", setup_ticket_scheduled_tasks, all_results)
+
+            if run_all or flags["domains_only"]:
+                self._setup_task_category("domains", "🌐", setup_domain_scheduled_tasks, all_results)
 
             # Summary header
             self.stdout.write("")

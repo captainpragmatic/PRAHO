@@ -9,7 +9,7 @@ from unittest import mock
 from unittest.mock import MagicMock, patch
 
 from django.db import IntegrityError, OperationalError, transaction
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from apps.billing.models import Currency, Invoice, Payment, ProformaInvoice, Refund, RefundStatusHistory
@@ -17,6 +17,7 @@ from apps.billing.refund_service import Err, RefundConvergenceService, RefundDat
 from apps.common.types import Retriability
 from apps.customers.models import Customer
 from apps.orders.models import Order
+from config.settings.test import LOCMEM_TEST_CACHE
 
 
 class RefundGatewayIntegrityTests(TestCase):
@@ -986,6 +987,124 @@ class RefundGatewayIntegrityTests(TestCase):
         self.assertEqual(result["refunds_checked"], 0)
         gateway_factory.assert_not_called()
 
+    @override_settings(CACHES=LOCMEM_TEST_CACHE)
+    def test_truncated_discovery_resumes_from_cursor_next_sweep(self) -> None:
+        """A truncated discovery window must advance across sweeps via starting_after."""
+        from django.core.cache import cache  # noqa: PLC0415
+
+        from apps.billing import tasks as billing_tasks  # noqa: PLC0415
+        from apps.common.types import Ok  # noqa: PLC0415
+
+        cache.delete(billing_tasks._REFUND_DISCOVERY_CURSOR_KEY)
+
+        def _fact(refund_id: str) -> dict[str, Any]:
+            return {
+                "success": True,
+                "refund_id": refund_id,
+                "payment_intent_id": f"pi_{refund_id}",
+                "amount_cents": 100,
+                "currency": "ron",
+                "status": "succeeded",
+                "reason": None,
+                "failure_reason": None,
+                "error": None,
+            }
+
+        gateway = MagicMock()
+        gateway.list_refunds.return_value = {
+            "success": True,
+            "refunds": [_fact("re_cursor_a"), _fact("re_cursor_b")],
+            "truncated": True,
+            "error": None,
+        }
+        with (
+            patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway", return_value=gateway),
+            patch(
+                "apps.billing.refund_service.RefundConvergenceService.converge_gateway_refund",
+                side_effect=lambda facts: Ok(MagicMock()),
+            ),
+        ):
+            first = billing_tasks.reconcile_stripe_refunds(max_refunds=5)
+
+        self.assertTrue(first["work_remaining"])
+        self.assertIsNone(gateway.list_refunds.call_args_list[0].kwargs["starting_after"])
+        self.assertEqual(cache.get(billing_tasks._REFUND_DISCOVERY_CURSOR_KEY), "re_cursor_b")
+
+        gateway.list_refunds.return_value = {
+            "success": True,
+            "refunds": [_fact("re_cursor_c")],
+            "truncated": False,
+            "error": None,
+        }
+        with (
+            patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway", return_value=gateway),
+            patch(
+                "apps.billing.refund_service.RefundConvergenceService.converge_gateway_refund",
+                side_effect=lambda facts: Ok(MagicMock()),
+            ),
+        ):
+            billing_tasks.reconcile_stripe_refunds(max_refunds=5)
+
+        self.assertEqual(gateway.list_refunds.call_args_list[1].kwargs["starting_after"], "re_cursor_b")
+        self.assertIsNone(cache.get(billing_tasks._REFUND_DISCOVERY_CURSOR_KEY))
+
+    @override_settings(CACHES=LOCMEM_TEST_CACHE)
+    def test_discovery_cursor_does_not_advance_past_deferred_refunds(self) -> None:
+        """When pending refunds fill the budget and discovered refunds are deferred,
+        the cursor must not advance — else the deferred refunds are skipped forever."""
+        from django.core.cache import cache  # noqa: PLC0415
+
+        from apps.billing import tasks as billing_tasks  # noqa: PLC0415
+        from apps.common.types import Ok  # noqa: PLC0415
+
+        cache.delete(billing_tasks._REFUND_DISCOVERY_CURSOR_KEY)
+        invoice = self._make_invoice()
+        payment = self._make_payment(invoice, transaction_id="pi_deferred_cursor")
+        Refund.objects.create(
+            customer=self.customer,
+            invoice=invoice,
+            payment=payment,
+            amount_cents=1_000,
+            currency=self.currency,
+            original_amount_cents=10_000,
+            status="processing",
+            gateway_refund_id="re_pending_fills_budget",
+            reference_number="REF-PENDING-FILLS",
+        )
+        pending_fact = {
+            "success": True,
+            "refund_id": "re_pending_fills_budget",
+            "payment_intent_id": "pi_deferred_cursor",
+            "amount_cents": 1_000,
+            "currency": "ron",
+            "status": "succeeded",
+            "reason": None,
+            "failure_reason": None,
+            "error": None,
+        }
+        discovered_fact = {**pending_fact, "refund_id": "re_discovered_deferred"}
+        gateway = MagicMock()
+        gateway.retrieve_refund.return_value = pending_fact
+        gateway.list_refunds.return_value = {
+            "success": True,
+            "refunds": [discovered_fact],
+            "truncated": True,
+            "error": None,
+        }
+        with (
+            patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway", return_value=gateway),
+            patch(
+                "apps.billing.refund_service.RefundConvergenceService.converge_gateway_refund",
+                side_effect=lambda facts: Ok(MagicMock()),
+            ),
+        ):
+            billing_tasks.reconcile_stripe_refunds(max_refunds=1)
+
+        self.assertIsNone(
+            cache.get(billing_tasks._REFUND_DISCOVERY_CURSOR_KEY),
+            "cursor must not advance past a deferred discovered refund",
+        )
+
     def test_refund_reconciliation_caps_convergence_and_reports_remaining_work(self) -> None:
         from apps.billing import tasks as billing_tasks  # noqa: PLC0415
         from apps.common.types import Ok  # noqa: PLC0415
@@ -1029,6 +1148,7 @@ class RefundGatewayIntegrityTests(TestCase):
             created_gte=mock.ANY,
             page_size=100,
             max_records=2,
+            starting_after=None,
         )
 
     def test_refund_reconciliation_reports_remaining_work_when_discovery_fails(self) -> None:

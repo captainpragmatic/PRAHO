@@ -104,41 +104,6 @@ RESTRICTED_USER_FIELDS = [
 F = TypeVar("F", bound=Callable[..., Any])
 
 
-def rate_limited(key_prefix: str, limit: int, window_minutes: int = 60) -> Callable[[F], F]:
-    """
-    Rate limiting decorator with Redis-like behavior using Django cache
-    Prevents DoS and abuse attacks
-    """
-
-    def decorator(func: F) -> F:
-        @wraps(func)
-        def wrapper(*args: Any, **kwargs: Any) -> Any:
-            # Extract IP or user identifier
-            request_ip = kwargs.get("request_ip") or "unknown"
-            user_id = kwargs.get("user_id", "")
-
-            # Create rate limit key
-            rate_key = f"{key_prefix}:{request_ip}:{user_id}"
-
-            # Check current count
-            current_count = cache.get(rate_key, 0)
-            if current_count >= limit:
-                logger.warning(f"🚨 [Security] Rate limit exceeded for {rate_key}")
-                raise ValidationError(_("Too many requests. Please try again later."))
-
-            # Execute function
-            result = func(*args, **kwargs)
-
-            # Increment counter (only on success)
-            cache.set(rate_key, current_count + 1, timeout=window_minutes * 60)
-
-            return result
-
-        return cast(F, wrapper)
-
-    return decorator
-
-
 def timing_safe_validator[F: Callable[..., Any]](func: F) -> F:
     """
     Decorator to prevent timing attacks by ensuring consistent execution time

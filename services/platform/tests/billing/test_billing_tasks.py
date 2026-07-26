@@ -73,7 +73,6 @@ from ._billing_service_task_cases import (
     InvoiceNumberingServiceTests,
     InvoiceRefundViewTests,
     PaymentCollectionRetryTests,
-    PaymentRetryServiceTests,
     ProformaConversionServiceTests,
     ProformaModelConvertTests,
     SendPaymentReminderHelperTests,
@@ -90,7 +89,6 @@ _IMPORTED_TASK_CASES = (
     InvoiceNumberingServiceTests,
     InvoiceRefundViewTests,
     PaymentCollectionRetryTests,
-    PaymentRetryServiceTests,
     ProformaConversionServiceTests,
     ProformaModelConvertTests,
     SendPaymentReminderHelperTests,
@@ -509,6 +507,44 @@ class ValidateVatNumberTests(TestCase):
         last_call = _last_audit_call_kwargs(mock_audit)
         self.assertEqual(last_call["event_type"], "vat_validation_completed")
 
+    @patch("apps.billing.gateways.vies_gateway.VIESGateway.check_vat")
+    @patch("apps.audit.services.AuditService.log_simple_event")
+    def test_vies_outage_preserves_stored_consultation_reference(
+        self, mock_audit: MagicMock, mock_vies: MagicMock
+    ) -> None:
+        """A transient VIES outage must not overwrite proof-of-consultation
+        evidence from an earlier successful check with an empty string."""
+        from apps.billing.gateways.vies_gateway import VIESResponse  # noqa: PLC0415
+        from apps.billing.tax_models import VATValidation  # noqa: PLC0415
+
+        profile = self._make_tax_profile(vat_number="RO1234567")
+        mock_vies.return_value = VIESResponse(
+            is_valid=True,
+            country_code="RO",
+            vat_number="1234567",
+            company_name="Test SRL",
+            request_identifier="WAPI-PRESERVED-123",
+            api_available=True,
+        )
+        self.assertTrue(validate_vat_number(str(profile.id))["success"])
+        validation = VATValidation.objects.get(country_code="RO", vat_number="1234567")
+        self.assertEqual(validation.consultation_reference, "WAPI-PRESERVED-123")
+
+        mock_vies.return_value = VIESResponse(
+            is_valid=False,
+            country_code="RO",
+            vat_number="1234567",
+            api_available=False,
+        )
+        self.assertTrue(validate_vat_number(str(profile.id))["success"])
+
+        validation.refresh_from_db()
+        self.assertEqual(
+            validation.consultation_reference,
+            "WAPI-PRESERVED-123",
+            "an outage must not destroy the stored consultation evidence",
+        )
+
     def test_no_vat_number_returns_success_with_skip_message(self) -> None:
         profile = self._make_tax_profile(vat_number="")
         result = validate_vat_number(str(profile.id))
@@ -649,6 +685,31 @@ class ReverifyExpiredVatValidationsTests(TestCase):
         sweep = reverify_expired_vat_validations()
 
         self.assertEqual(sweep, {"success": True, "queued": 0, "expired_found": 0, "unmatched": 0})
+        mock_async.assert_not_called()
+
+    @patch("apps.billing.tasks.async_task")
+    def test_legacy_unmatched_format_check_row_is_retired_from_the_sweep(self, mock_async: MagicMock) -> None:
+        """A legacy format_check row with no eligible profile can never improve on
+        re-verification; the sweep retires it so it stops inflating the report."""
+        from apps.billing.tax_models import VATValidation  # noqa: PLC0415
+
+        legacy = VATValidation.objects.create(
+            country_code="DE",
+            vat_number="99",
+            full_vat_number="DE99",
+            is_valid=False,
+            is_active=False,
+            validation_source="format_check",
+            expires_at=timezone.now() - timedelta(hours=1),
+        )
+
+        first = reverify_expired_vat_validations()
+        self.assertEqual(first["unmatched"], 1)
+        legacy.refresh_from_db()
+        self.assertIsNone(legacy.expires_at, "unmatched legacy evidence must be retired")
+
+        second = reverify_expired_vat_validations()
+        self.assertEqual(second, {"success": True, "queued": 0, "expired_found": 0, "unmatched": 0})
         mock_async.assert_not_called()
 
     @patch("apps.billing.tasks.async_task")

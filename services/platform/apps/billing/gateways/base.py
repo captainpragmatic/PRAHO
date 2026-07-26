@@ -223,8 +223,14 @@ class BasePaymentGateway(ABC):
         created_gte: int,
         page_size: int = 100,
         max_records: int = 500,
+        starting_after: str | None = None,
     ) -> RefundListResult:
-        """List recent refunds within a hard record budget."""
+        """List recent refunds within a hard record budget.
+
+        ``starting_after`` resumes pagination after a given provider refund id so
+        a backlog larger than the budget advances across sweeps instead of
+        re-scanning the newest records every run.
+        """
 
     def validate_configuration(self) -> bool:
         """

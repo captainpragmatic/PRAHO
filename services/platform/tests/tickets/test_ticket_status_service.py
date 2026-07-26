@@ -294,6 +294,48 @@ class TicketStatusServiceTest(TestCase):
         self.assertIsNone(ticket.assigned_to)
         self.assertIsNone(ticket.assigned_at)
 
+    def test_close_rejects_unknown_resolution_code(self):
+        """Staff must not persist an arbitrary resolution string."""
+        ticket = TicketStatusService.create_ticket(
+            customer=self.customer,
+            title='Bad Resolution',
+            description='Test description',
+            priority='normal',
+            category=self.category,
+            created_by=self.customer_user,
+            contact_email='customer@example.com',
+        )
+        with self.assertRaises(ValueError):
+            TicketStatusService.close_ticket(ticket, 'totally-made-up')
+
+    def test_staff_close_cannot_claim_the_system_auto_closed_code(self):
+        """auto_closed is reserved for the inactivity worker, not staff input."""
+        ticket = TicketStatusService.create_ticket(
+            customer=self.customer,
+            title='Reserved Resolution',
+            description='Test description',
+            priority='normal',
+            category=self.category,
+            created_by=self.customer_user,
+            contact_email='customer@example.com',
+        )
+        with self.assertRaises(ValueError):
+            TicketStatusService.close_ticket(ticket, 'auto_closed')
+
+    def test_auto_close_worker_may_use_the_system_code(self):
+        """The worker passes the explicit allow flag."""
+        ticket = TicketStatusService.create_ticket(
+            customer=self.customer,
+            title='System Close',
+            description='Test description',
+            priority='normal',
+            category=self.category,
+            created_by=self.customer_user,
+            contact_email='customer@example.com',
+        )
+        closed = TicketStatusService.close_ticket(ticket, 'auto_closed', allow_system_codes=True)
+        self.assertEqual(closed.resolution_code, 'auto_closed')
+
     def test_close_without_resolution_code_raises_error(self):
         """Test that closing without resolution code raises ValueError."""
         ticket = TicketStatusService.create_ticket(

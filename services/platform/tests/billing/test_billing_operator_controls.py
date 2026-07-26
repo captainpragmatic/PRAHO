@@ -103,6 +103,15 @@ class PaymentRetryPolicyEditorTests(TestCase):
         data.update(overrides)
         return self.client.post(reverse("billing:retry_policy_edit", args=[self.policy.pk]), data)
 
+    def test_schedule_may_extend_past_dormant_escalation_columns(self) -> None:
+        """The dormant, unexposed suspend/terminate columns must not veto a
+        legitimate schedule extension with an error the operator cannot act on."""
+        response = self._post(retry_intervals_days="1, 7, 20")
+
+        self.assertEqual(response.status_code, 302)
+        self.policy.refresh_from_db()
+        self.assertEqual(self.policy.retry_intervals_days, [1, 7, 20])
+
     def test_valid_change_is_persisted_and_attributed_in_audit(self) -> None:
         response = self._post()
 
@@ -325,6 +334,19 @@ class InvoiceSeriesControlTests(TestCase):
                 prefix=" inv-2027 ",
                 baseline="INV:42",
                 actor=BillingControlActor(user=self.user, reason="Try reused prefix", ip_address=None),
+            )
+
+        self.current.refresh_from_db()
+        self.assertEqual(self.current.prefix, "INV")
+
+    def test_domain_service_rejects_reserved_subscription_prefix(self) -> None:
+        """SUB belongs to the subscription scope and must not be claimable for the
+        invoice series, even before the subscription sequence row exists."""
+        with self.assertRaisesMessage(ValidationError, "reserved"):
+            rotate_invoice_series(
+                prefix="sub",
+                baseline="INV:42",
+                actor=BillingControlActor(user=self.user, reason="Try reserved prefix", ip_address=None),
             )
 
         self.current.refresh_from_db()

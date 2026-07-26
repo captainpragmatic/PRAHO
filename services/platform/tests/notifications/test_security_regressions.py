@@ -255,7 +255,7 @@ class CampaignFilterSQLInjectionTests(TestCase):
         self.assertNotIn("user__is_superuser", call_kwargs)
 
     def test_whitelist_blocks_all_dangerous(self):
-        """Test that entirely dangerous filter results in no filtering."""
+        """An entirely dangerous filter fails closed to an empty selection."""
         from apps.notifications.tasks import _apply_safe_customer_filter
 
         mock_qs = MagicMock()
@@ -267,8 +267,8 @@ class CampaignFilterSQLInjectionTests(TestCase):
 
         result = _apply_safe_customer_filter(mock_qs, all_dangerous)
 
-        # Should return original queryset without calling filter
-        self.assertEqual(result, mock_qs)
+        # Fail closed: never fall through to an unfiltered broadcast.
+        self.assertEqual(result, mock_qs.none.return_value)
         mock_qs.filter.assert_not_called()
 
 

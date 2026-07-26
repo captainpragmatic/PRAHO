@@ -90,6 +90,21 @@ class DomainServiceLogicTests(TestCase):
         self.assertEqual(DomainValidationService.extract_tld_from_domain("Shop.Example.COM.RO"), "com.ro")
         self.assertEqual(DomainValidationService.extract_tld_from_domain("example.ro"), "ro")
 
+    def test_inverted_registration_period_bounds_are_rejected(self) -> None:
+        """min > max silently produced an empty period list; the DB now rejects it."""
+        from django.db import IntegrityError, transaction  # noqa: PLC0415
+
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            TLD.objects.create(
+                extension="xyz",
+                description=".xyz",
+                registration_price_cents=1000,
+                renewal_price_cents=900,
+                transfer_price_cents=800,
+                min_registration_period=5,
+                max_registration_period=2,
+            )
+
     def test_domain_model_clean_uses_longest_configured_tld_suffix(self) -> None:
         domain = Domain(
             name="shop.example.com.ro",

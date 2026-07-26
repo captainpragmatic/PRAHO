@@ -37,6 +37,8 @@ TASK_SOFT_TIME_LIMIT = 300  # 5 minutes
 TASK_TIME_LIMIT = 600  # 10 minutes
 PAYMENT_RETRY_LEASE_TIMEOUT = timedelta(seconds=TASK_TIME_LIMIT * 2)
 _REFUND_RECONCILIATION_LOCK_NAME = "billing-stripe-refund-reconciliation"
+_REFUND_DISCOVERY_CURSOR_KEY = "billing:stripe-refund-discovery-cursor"
+_REFUND_DISCOVERY_CURSOR_TTL = 7 * 24 * 60 * 60
 _DEFAULT_REFUND_RECONCILIATION_LIMIT = 500
 RECURRING_RECONCILIATION_BATCH_SIZE = 100
 RECURRING_RECONCILIATION_MAX_BATCH_SIZE = 500
@@ -561,21 +563,25 @@ def _store_validation(  # noqa: PLR0913
     # never_expires marks terminal evidence (a structurally invalid number):
     # re-verification cannot improve it, so it must not re-enter the daily sweep.
     expires_at = None if never_expires else timezone.now() + timedelta(hours=24 if is_valid else 1)
+    defaults: dict[str, Any] = {
+        "full_vat_number": full_vat_number,
+        "is_valid": is_valid,
+        "is_active": is_valid,
+        "company_name": company_name,
+        "company_address": company_address,
+        "validation_date": timezone.now(),
+        "validation_source": source,
+        "response_data": response_data or {},
+        "expires_at": expires_at,
+    }
+    # Proof-of-consultation is evidence, not state: a VIES outage yields an empty
+    # identifier and must not erase the reference from an earlier real check.
+    if consultation_reference:
+        defaults["consultation_reference"] = consultation_reference
     VATValidation.objects.update_or_create(
         country_code=country_code,
         vat_number=vat_number,
-        defaults={
-            "full_vat_number": full_vat_number,
-            "is_valid": is_valid,
-            "is_active": is_valid,
-            "company_name": company_name,
-            "company_address": company_address,
-            "validation_date": timezone.now(),
-            "validation_source": source,
-            "consultation_reference": consultation_reference,
-            "response_data": response_data or {},
-            "expires_at": expires_at,
-        },
+        defaults=defaults,
     )
 
 
@@ -1314,6 +1320,28 @@ def _stripe_refund_facts(source: dict[str, Any], refund_id: str) -> RefundGatewa
     return facts
 
 
+def _advance_refund_discovery_cursor(
+    cache: Any,
+    listed: dict[str, Any],
+    *,
+    previous_cursor: str | None,
+) -> None:
+    """Resume from the last listed id while the window is truncated; clear on drain.
+
+    Caller guarantees the whole listed page was consumed (no deferred refunds),
+    so the last listed id is a safe resume point: a backlog larger than the
+    budget advances across sweeps instead of re-scanning the newest records.
+    """
+    last_listed_id = next(
+        (r["refund_id"] for r in reversed(listed["refunds"]) if r.get("refund_id")),
+        None,
+    )
+    if listed.get("truncated") and last_listed_id:
+        cache.set(_REFUND_DISCOVERY_CURSOR_KEY, last_listed_id, timeout=_REFUND_DISCOVERY_CURSOR_TTL)
+    elif previous_cursor is not None:
+        cache.delete(_REFUND_DISCOVERY_CURSOR_KEY)
+
+
 def _collect_stripe_refund_facts(
     gateway: Any,
     *,
@@ -1343,11 +1371,15 @@ def _collect_stripe_refund_facts(
     if pending_rows:
         Refund.objects.filter(pk__in=[pk for pk, _ in pending_rows]).update(updated_at=timezone.now())
 
+    from django.core.cache import cache  # noqa: PLC0415
+
     created_gte = int((timezone.now() - timedelta(days=max(lookback_days, 1))).timestamp())
+    discovery_cursor = cache.get(_REFUND_DISCOVERY_CURSOR_KEY)
     listed = gateway.list_refunds(
         created_gte=created_gte,
         page_size=discovery_page_size,
         max_records=record_budget,
+        starting_after=discovery_cursor,
     )
     discovered_by_id: dict[str, RefundGatewayFacts] = {}
     discovery_failed = not listed["success"]
@@ -1378,6 +1410,14 @@ def _collect_stripe_refund_facts(
             discovery_deferred = True
             break
         refund_facts[refund_id] = discovered
+
+    # Advance the cursor only when the whole listed page was consumed. If any
+    # discovered refund was deferred (the budget filled with pending refunds),
+    # leave the cursor so the next sweep re-lists from the same point and picks
+    # them up — advancing past deferred refunds would skip them forever under a
+    # continuously truncated backlog.
+    if not discovery_failed and not discovery_deferred:
+        _advance_refund_discovery_cursor(cache, listed, previous_cursor=discovery_cursor)
 
     work_remaining = discovery_failed or pending_truncated or bool(listed.get("truncated", False)) or discovery_deferred
     return refund_facts, work_remaining
@@ -1543,6 +1583,19 @@ def _manual_review_recurring_submission_count() -> int:
     )
 
 
+def _recurring_reconciliation_claim_queryset(*, stale_before: datetime) -> Any:
+    """The lock acquisition used by the batch claim, exposed for SQL-level tests.
+
+    of=("self",) is load-bearing: the reconciliation filters traverse
+    payment__proforma, which Django promotes to a LEFT OUTER JOIN, and
+    PostgreSQL refuses FOR UPDATE on the nullable side of an outer join.
+    Only submission columns are mutated, so only the base table needs the lock.
+    """
+    return _recurring_reconciliation_queryset(stale_before=stale_before).select_for_update(
+        skip_locked=True, of=("self",)
+    )
+
+
 def _claim_recurring_reconciliation_batch(
     *,
     batch_size: int,
@@ -1556,7 +1609,11 @@ def _claim_recurring_reconciliation_batch(
     queryset = _recurring_reconciliation_queryset(stale_before=stale_before)
     backlog = queryset.count()
     with transaction.atomic():
-        submissions = list(queryset.select_for_update(skip_locked=True).order_by("created_at", "id")[:batch_size])
+        submissions = list(
+            _recurring_reconciliation_claim_queryset(stale_before=stale_before).order_by("created_at", "id")[
+                :batch_size
+            ]
+        )
         for submission in submissions:
             submission.reconcile_claim_token = claim_token
             submission.reconcile_claim_expires_at = now + RECURRING_RECONCILIATION_LEASE
@@ -1830,6 +1887,49 @@ def _process_recurring_reconciliation_batch(
     return converged, failed, pending, errors
 
 
+def _abandon_stale_reserved_submissions(*, stale_before: datetime, batch_size: int) -> tuple[int, list[str]]:
+    """Release reservations whose claim never committed.
+
+    The claim is the pre-gateway linearization point: a submission stuck in
+    ``reserved`` past the stale window proves the worker died before any Stripe
+    request was authorized, so abandoning the reservation is safe and frees the
+    billing cycle for the next collection run. The payment-service helper
+    re-validates everything under the payment row lock, so a submission that
+    progressed concurrently is left untouched.
+    """
+    from apps.billing.payment_models import RecurringPaymentSubmission  # noqa: PLC0415
+    from apps.billing.payment_service import _abandon_unbound_payment_reservation  # noqa: PLC0415
+
+    abandoned = 0
+    errors: list[str] = []
+    stale_reserved = list(
+        RecurringPaymentSubmission.objects.filter(
+            state="reserved",
+            updated_at__lte=stale_before,
+            payment__payment_method="stripe",
+            payment__meta__source="recurring_billing",
+        )
+        .select_related("payment")
+        .order_by("updated_at", "id")[: max(batch_size, 1)]
+    )
+    for submission in stale_reserved:
+        try:
+            _abandon_unbound_payment_reservation(
+                submission.payment,
+                "Recurring submission stalled in reserved state before its claim committed",
+            )
+        except Exception as exc:
+            errors.append(f"submission {submission.id}: failed to abandon stale reservation: {exc}")
+            logger.exception("Failed to abandon stale reserved submission %s", submission.id)
+            continue
+        submission.refresh_from_db()
+        if submission.state == "abandoned":
+            abandoned += 1
+    if abandoned:
+        logger.info("\U0001f9f9 [Billing] Abandoned %d stale reserved recurring submission(s)", abandoned)
+    return abandoned, errors
+
+
 def reconcile_recurring_payment_submissions(
     *,
     batch_size: int = RECURRING_RECONCILIATION_BATCH_SIZE,
@@ -1858,6 +1958,7 @@ def reconcile_recurring_payment_submissions(
             "payments_converged": 0,
             "payments_failed": 0,
             "payments_pending": 0,
+            "reservations_abandoned": 0,
             "manual_review_required": _manual_review_recurring_submission_count(),
             "backlog_remaining": _recurring_reconciliation_queryset(stale_before=skip_stale_before).count(),
             "errors": [],
@@ -1871,6 +1972,11 @@ def reconcile_recurring_payment_submissions(
             errors.append(
                 f"{manual_review_required} legacy recurring payment submission(s) require manual Stripe reconciliation"
             )
+        reservations_abandoned, abandon_errors = _abandon_stale_reserved_submissions(
+            stale_before=stale_before,
+            batch_size=batch_size,
+        )
+        errors.extend(abandon_errors)
         submission_ids, backlog_before, claim_token = _claim_recurring_reconciliation_batch(
             batch_size=batch_size,
             stale_before=stale_before,
@@ -1885,6 +1991,7 @@ def reconcile_recurring_payment_submissions(
                 "payments_converged": 0,
                 "payments_failed": 0,
                 "payments_pending": 0,
+                "reservations_abandoned": reservations_abandoned,
                 "manual_review_required": manual_review_required,
                 "backlog_remaining": 0,
                 "errors": errors,
@@ -1908,6 +2015,7 @@ def reconcile_recurring_payment_submissions(
                 "payments_converged": 0,
                 "payments_failed": 0,
                 "payments_pending": 0,
+                "reservations_abandoned": reservations_abandoned,
                 "manual_review_required": manual_review_required,
                 "backlog_remaining": backlog_before,
                 "errors": errors,
@@ -1935,6 +2043,7 @@ def reconcile_recurring_payment_submissions(
             "payments_converged": converged,
             "payments_failed": failed,
             "payments_pending": pending,
+            "reservations_abandoned": reservations_abandoned,
             "manual_review_required": manual_review_required,
             "backlog_remaining": backlog_remaining,
             "errors": errors,
@@ -2066,7 +2175,18 @@ def reverify_expired_vat_validations() -> dict[str, Any]:
             .values_list("id", "normalized_vat_number")
         )
         matched_vat_numbers = {vat_number for _profile_id, vat_number in eligible_profiles}
-        unmatched += len(full_vat_numbers - matched_vat_numbers)
+        unmatched_vat_numbers = full_vat_numbers - matched_vat_numbers
+        unmatched += len(unmatched_vat_numbers)
+        # An expired format_check row with no eligible (valid/format_only) profile is
+        # legacy terminal evidence: re-verification cannot help it, so retire it from
+        # the sweep instead of re-reporting it as unmatched every day (#406 follow-up).
+        if unmatched_vat_numbers:
+            VATValidation.objects.filter(
+                full_vat_number__in=unmatched_vat_numbers,
+                validation_source="format_check",
+                is_valid=False,
+                expires_at__isnull=False,
+            ).update(expires_at=None)
         for profile_id, _vat_number in eligible_profiles:
             async_task("apps.billing.tasks.validate_vat_number", str(profile_id))
             queued += 1

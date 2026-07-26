@@ -132,6 +132,12 @@ class APITokenService:
                 expires_at=cls._resolve_expiry(ttl_days),
             )
 
+        logger.info(
+            "🔑 [Auth] API token '%s' (%s…) issued for user %s",
+            name,
+            token.key_prefix,
+            user.pk,
+        )
         return Ok(IssuedAPIToken(token=token, raw_key=raw_key))
 
 

@@ -47,7 +47,7 @@ if _env_path.exists():
     _polluted = _strip_comment_polluted_env(_env_path)
     if _polluted:
         logging.getLogger(__name__).warning(
-            "Ignored %d comment-polluted .env var(s) (#364): %s", len(_polluted), ", ".join(_polluted)
+            "⚠️ [Config] Ignored %d comment-polluted .env var(s) (#364): %s", len(_polluted), ", ".join(_polluted)
         )
 
 from .base import *  # noqa: E402, F403  # After django.setup()

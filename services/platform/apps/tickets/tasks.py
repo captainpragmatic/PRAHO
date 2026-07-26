@@ -67,7 +67,7 @@ def auto_close_inactive_tickets(*, now: datetime | None = None) -> AutoCloseResu
                 if ticket.status != "waiting_on_customer" or ticket.updated_at > cutoff:
                     continue
 
-                TicketStatusService.close_ticket(ticket, _AUTO_CLOSE_RESOLUTION)
+                TicketStatusService.close_ticket(ticket, _AUTO_CLOSE_RESOLUTION, allow_system_codes=True)
                 notification = (
                     str(ticket.customer_id),
                     {
@@ -80,7 +80,7 @@ def auto_close_inactive_tickets(*, now: datetime | None = None) -> AutoCloseResu
         except Ticket.DoesNotExist:
             continue
         except Exception:
-            logger.exception("Failed to auto-close inactive ticket %s", ticket_id)
+            logger.exception("🔥 [Tickets] Failed to auto-close inactive ticket %s", ticket_id)
             continue
 
         closed += 1
@@ -92,13 +92,13 @@ def auto_close_inactive_tickets(*, now: datetime | None = None) -> AutoCloseResu
                 context=context,
             )
         except Exception:
-            logger.exception("Failed to notify customer after auto-closing ticket %s", ticket_id)
+            logger.exception("🔥 [Tickets] Failed to notify customer after auto-closing ticket %s", ticket_id)
             notified = False
         if not notified:
             notification_failures += 1
 
     logger.info(
-        "Inactive-ticket auto-close finished: eligible=%d closed=%d notification_failures=%d",
+        "🎫 [Tickets] Auto-close finished: eligible=%d closed=%d notification_failures=%d",
         len(candidate_ids),
         closed,
         notification_failures,

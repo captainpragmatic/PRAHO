@@ -29,7 +29,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[4]
 # the leading-whitespace and `export KEY=` variants — dotenv leaks the comment for those too, so
 # the hygiene guardrail must reject them in future edits even though the current templates use
 # neither.
-_EMPTY_VALUE_INLINE_COMMENT = re.compile(r"^\s*(?:export\s+)?[A-Za-z_][A-Za-z0-9_]*=[ \t]*#")
+_EMPTY_VALUE_INLINE_COMMENT = re.compile(r"^\s*(?:export\s+)?[A-Za-z_][A-Za-z0-9_]*[ \t]*=[ \t]*#")
 
 
 class TestEnvLoading(TestCase):
@@ -181,6 +181,8 @@ class TestEnvTemplateHygiene(TestCase):
             "\tKEY=   # note",
             "  KEY= # note",
             "export KEY=   # note",
+            "KEY = # note",
+            "KEY =   # note",
         ):
             self.assertIsNotNone(_EMPTY_VALUE_INLINE_COMMENT.match(line), line)
         for ok in (
@@ -189,3 +191,28 @@ class TestEnvTemplateHygiene(TestCase):
             "KEY=",
         ):
             self.assertIsNone(_EMPTY_VALUE_INLINE_COMMENT.match(ok), ok)
+
+
+class TestDotenvGuardParity(TestCase):
+    """The dotenv guard is duplicated across services (portal cannot import platform).
+
+    Nothing enforces they stay in sync, so a fix to one could silently diverge.
+    This test pins the two function bodies as textually identical.
+    """
+
+    def _guard_source(self, service: str) -> str:
+        import ast  # noqa: PLC0415
+
+        dev_py = _REPO_ROOT / "services" / service / "config" / "settings" / "dev.py"
+        tree = ast.parse(dev_py.read_text())
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and node.name == "_strip_comment_polluted_env":
+                return ast.unparse(node)
+        raise AssertionError(f"_strip_comment_polluted_env not found in {service} dev.py")
+
+    def test_platform_and_portal_guards_are_identical(self) -> None:
+        self.assertEqual(
+            self._guard_source("platform"),
+            self._guard_source("portal"),
+            "the duplicated dotenv guard has diverged between platform and portal",
+        )

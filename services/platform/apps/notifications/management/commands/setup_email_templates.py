@@ -376,6 +376,47 @@ class Command(BaseCommand):
                 },
             },
             # ===============================================================================
+            # DOMAIN TEMPLATES
+            # ===============================================================================
+            {
+                "key": "domain_renewal_notice",
+                "locale": "ro",
+                "category": "domains",
+                "subject": "Domeniul {{domain_name}} expiră în {{days_until_expiry}} zile",
+                "body_html": """
+                <h2>Reînnoire domeniu</h2>
+                <p>Bună ziua {{customer_name}},</p>
+                <p>Domeniul <strong>{{domain_name}}</strong> expiră în {{days_until_expiry}} zile.</p>
+                <p>Pentru a evita întreruperea serviciilor, vă rugăm să reînnoiți domeniul din zona client.</p>
+                <p>Echipa PragmaticHost</p>
+                """,
+                "description": "Notificare de reînnoire pentru un domeniu care expiră",
+                "variables": {
+                    "customer_name": "Numele clientului",
+                    "domain_name": "Numele domeniului",
+                    "days_until_expiry": "Zile până la expirare",
+                },
+            },
+            {
+                "key": "domain_renewal_notice",
+                "locale": "en",
+                "category": "domains",
+                "subject": "Domain {{domain_name}} expires in {{days_until_expiry}} days",
+                "body_html": """
+                <h2>Domain renewal</h2>
+                <p>Hello {{customer_name}},</p>
+                <p>Your domain <strong>{{domain_name}}</strong> expires in {{days_until_expiry}} days.</p>
+                <p>To avoid any service interruption, please renew the domain from the customer portal.</p>
+                <p>PragmaticHost Team</p>
+                """,
+                "description": "Renewal notice for an expiring domain",
+                "variables": {
+                    "customer_name": "Customer name",
+                    "domain_name": "Domain name",
+                    "days_until_expiry": "Days until expiry",
+                },
+            },
+            # ===============================================================================
             # ORDER TEMPLATES
             # ===============================================================================
             {

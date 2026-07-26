@@ -97,8 +97,19 @@ def _backfill_entity_refunds(refund_model, entity, entity_field: str, ron_curren
     customer = entity.customer
     created_count = 0
     entity_filter = {entity_field: entity}
+    # A completed row must satisfy at most ONE legacy entry. Rows whose gateway
+    # ID appears in this entity's meta are consumed by their own ID entries, so
+    # they are excluded from the amount pool — otherwise the same physical row
+    # would also swallow a distinct same-amount no-ID entry.
+    meta_gateway_ids = {
+        entry.get("refund_id")
+        for entry in legacy_refunds
+        if isinstance(entry, dict) and entry.get("refund_id")
+    }
     existing_amount_counts = Counter(
-        refund_model.objects.filter(**entity_filter, status="completed").values_list("amount_cents", flat=True)
+        refund_model.objects.filter(**entity_filter, status="completed")
+        .exclude(gateway_refund_id__in=meta_gateway_ids)
+        .values_list("amount_cents", flat=True)
     )
     legacy_amount_occurrences: Counter[int] = Counter()
     unresolved_entries = []

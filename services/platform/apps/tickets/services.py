@@ -186,12 +186,15 @@ class TicketStatusService:
         return ticket
 
     @classmethod
-    def close_ticket(cls, ticket: Ticket, resolution_code: str) -> Ticket:
+    def close_ticket(cls, ticket: Ticket, resolution_code: str, *, allow_system_codes: bool = False) -> Ticket:
         """
         Close ticket with resolution code.
+
+        The code must be a member of RESOLUTION_CHOICES; system-reserved codes
+        (e.g. ``auto_closed``) are rejected unless the caller is the inactivity
+        worker and opts in with ``allow_system_codes``.
         """
-        if not resolution_code:
-            raise ValueError("Resolution code is required when closing ticket")
+        cls._validate_resolution_code(resolution_code, allow_system_codes=allow_system_codes)
 
         # close() FSM transition sets closed_at as a side effect
         ticket.close()
@@ -245,13 +248,27 @@ class TicketStatusService:
         if reply_action not in cls.VALID_REPLY_ACTIONS:
             raise ValueError(f"Invalid reply action: {reply_action}")
 
+    #: Resolution codes only the system may assign (never accepted from staff input).
+    SYSTEM_RESOLUTION_CODES: ClassVar[frozenset[str]] = frozenset({"auto_closed"})
+
+    @classmethod
+    def _validate_resolution_code(cls, resolution_code: str | None, *, allow_system_codes: bool = False) -> None:
+        """Reject empty, unknown, or system-reserved resolution codes."""
+        if not resolution_code:
+            raise ValueError("Resolution code is required when closing ticket")
+        valid_codes = {code for code, _label in Ticket.RESOLUTION_CHOICES}
+        if resolution_code not in valid_codes:
+            raise ValueError(f"Unknown resolution code: {resolution_code}")
+        if resolution_code in cls.SYSTEM_RESOLUTION_CODES and not allow_system_codes:
+            raise ValueError(f"Resolution code '{resolution_code}' is reserved for the system")
+
     @classmethod
     def _set_closing_resolution(cls, ticket: Ticket, reply_action: str, resolution_code: str | None) -> None:
         """Apply the resolution shared by first and subsequent close replies."""
         if reply_action not in cls.CLOSING_ACTIONS:
             return
-        if not resolution_code:
-            raise ValueError("Resolution code required when closing ticket")
+        cls._validate_resolution_code(resolution_code)
+        assert resolution_code is not None  # _validate_resolution_code rejects None
         ticket.resolution_code = resolution_code
 
     @staticmethod

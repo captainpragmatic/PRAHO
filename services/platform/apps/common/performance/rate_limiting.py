@@ -29,6 +29,8 @@ from django.utils.module_loading import import_string
 from rest_framework.request import Request
 from rest_framework.throttling import AnonRateThrottle, SimpleRateThrottle, UserRateThrottle
 
+from apps.common.request_ip import get_safe_client_ip
+
 logger = logging.getLogger(__name__)
 
 _RATE_PATTERN = re.compile(r"^\s*(?P<num>\d+)\s*/\s*(?P<period>[A-Za-z0-9]+)\s*$")
@@ -249,7 +251,8 @@ class EndpointRateThrottle(_CustomTimeRateMixin, _ConfigurableRateThrottle):
         elif request.user and request.user.is_authenticated:
             ident = f"user_{request.user.pk}"
         else:
-            ident = f"ip_{self.get_ident(request)}"
+            # Canonical trusted-proxy-aware client IP (raw X-Forwarded-For is spoofable).
+            ident = f"ip_{get_safe_client_ip(request)}"
         return self.cache_format % {"scope": self.scope, "ident": ident}
 
 
@@ -274,8 +277,8 @@ class CustomerRateThrottle(SimpleRateThrottle):  # type: ignore[misc]
             return None
 
         if not request.user or not request.user.is_authenticated:
-            # Use IP for unauthenticated requests
-            ident = self.get_ident(request)
+            # Use the canonical trusted-proxy-aware client IP for unauthenticated requests.
+            ident = get_safe_client_ip(request)
             return self.cache_format % {"scope": self.scope, "ident": ident}
 
         # Get customer ID from session or user
@@ -306,7 +309,7 @@ class BurstRateThrottle(_CustomTimeRateMixin, SimpleRateThrottle):  # type: igno
             # Portal HMAC traffic is handled by PortalHMAC*Throttle classes.
             return None
 
-        ident = str(request.user.pk) if request.user and request.user.is_authenticated else self.get_ident(request)
+        ident = str(request.user.pk) if request.user and request.user.is_authenticated else get_safe_client_ip(request)
         return cast("str | None", self.cache_format % {"scope": self.scope, "ident": ident})
 
 

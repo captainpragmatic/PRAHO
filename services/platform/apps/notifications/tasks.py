@@ -560,7 +560,10 @@ def _apply_safe_customer_filter(queryset: object, custom_filter: dict[str, Any])
 
     if safe_filter:
         return queryset.filter(**safe_filter)
-    return queryset
+    # Fail closed: a filter that whitelisting emptied out must select nobody,
+    # not fall through to an unfiltered broadcast.
+    logger.error("🔥 [Notifications] Custom campaign filter had no valid fields; selecting no recipients")
+    return queryset.none()
 
 
 def send_scheduled_campaign(campaign_id: str) -> dict[str, Any]:
@@ -642,10 +645,15 @@ def _get_campaign_recipients(campaign: object) -> list[tuple[str, dict[str, Any]
         logger.warning("Campaign audience 'trial_expiring' is not implemented; selecting no recipients")
         customers = customers.none()
     elif audience == "custom_filter":
-        # Apply custom filter from audience_filter JSON with WHITELIST validation
+        # Apply custom filter from audience_filter JSON with WHITELIST validation.
+        # An empty filter fails closed — custom_filter with no filter is a
+        # misconfiguration, never a broadcast to every customer.
         custom_filter = campaign.audience_filter or {}
         if custom_filter:
             customers = _apply_safe_customer_filter(customers, custom_filter)
+        else:
+            logger.error("🔥 [Notifications] Campaign audience 'custom_filter' has no filter; selecting no recipients")
+            customers = customers.none()
     else:
         logger.error("Unknown campaign audience %r; selecting no recipients", audience)
         customers = customers.none()

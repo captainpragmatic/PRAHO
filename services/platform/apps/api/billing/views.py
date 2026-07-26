@@ -551,6 +551,13 @@ def customer_billing_documents_api(request: HttpRequest, customer: Customer) -> 
         offset = (page - 1) * limit
         rows = list(ordered_rows[offset : offset + limit])
 
+        logger.info(
+            "✅ [Billing API] Returned %d document(s) (page %d/%d) for customer %s",
+            len(rows),
+            page,
+            total_pages,
+            customer.id,
+        )
         return Response(
             {
                 "success": True,
@@ -572,7 +579,7 @@ def customer_billing_documents_api(request: HttpRequest, customer: Customer) -> 
             }
         )
     except Exception as error:
-        logger.exception("Billing document list failed for customer %s: %s", customer.id, error)
+        logger.exception("🔥 [Billing API] Document list failed for customer %s: %s", customer.id, error)
         return Response(
             {"success": False, "error": "Billing document service temporarily unavailable"},
             status=status.HTTP_503_SERVICE_UNAVAILABLE,
