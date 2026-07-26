@@ -613,3 +613,150 @@ class ChainSurvivesLegitimateEventChangesTests(AuditChainLedgerTestCase):
         self.assertIsNone(original_link.event_id)
         # And the whole ledger, tombstone included, still verifies.
         self.assertEqual(self._verify(), [])
+
+
+class ChainAdversarialReviewRegressionTests(AuditChainLedgerTestCase):
+    """Attacks found by adversarial review of the first implementation.
+
+    Each one verified clean against the original code — the ledger reported healthy while
+    evidence had in fact been destroyed or suppressed.
+    """
+
+    def test_deleting_the_event_row_without_a_tombstone_is_detected(self) -> None:
+        """The link verifies from its own snapshot, so deleting the EVENT left no trace.
+
+        SET_NULL nulls the link's FK and the chain still walks clean: an attacker could erase
+        the actual evidence and pass verification.
+        """
+        self._event(description="first")
+        victim = self._event(description="incriminating")
+        self.assertEqual(self._verify(), [])
+
+        # Delete the event the way the ORM's SET_NULL would leave things: FK nulled, link row
+        # intact. (Raw SQL alone would strand a dangling FK that SQLite rejects at commit; the
+        # attacker-relevant end state is the same either way — event gone, link still there.)
+        with audit_mutation_allowed("attacker_delete"):
+            AuditEvent.objects.filter(pk=victim.pk).delete()
+        self.assertFalse(AuditEvent.objects.filter(pk=victim.pk).exists())
+        self.assertTrue(AuditChainLink.objects.filter(event_id_str=str(victim.id), is_tombstone=False).exists())
+
+        findings = self._verify()
+        self.assertIn("chain_link_event_deleted_without_tombstone", self._finding_types(findings))
+
+    def test_authorized_retention_delete_is_not_flagged(self) -> None:
+        """The counterpart: a tombstoned deletion is authorized and must stay clean, or the
+        new check would cry wolf on every retention run."""
+        event = self._event(description="aged out")
+        AuditIntegrityService.append_tombstone_links([event])
+        with audit_mutation_allowed("retention_delete"):
+            AuditEvent.objects.filter(pk=event.pk).delete()
+
+        findings = self._verify()
+        self.assertNotIn("chain_link_event_deleted_without_tombstone", self._finding_types(findings))
+
+    def test_chain_link_pending_marker_is_reported_critical(self) -> None:
+        """An attacker can force an append to fail (e.g. by squatting the next sequence).
+
+        The append path is fail-open by design, so the marker is the only remaining signal —
+        and nothing read it, despite the verifier docstring claiming otherwise.
+        """
+        event = self._event()
+        with audit_mutation_allowed("test"):
+            AuditEvent.objects.filter(pk=event.pk).update(metadata={**event.metadata, "chain_link_pending": True})
+
+        findings = self._verify()
+        pending = [f for f in findings if f["type"] == "chain_link_pending"]
+        self.assertEqual(len(pending), 1)
+        # Always critical: unlike an unlinked event, this marker only appears when a live
+        # append actually broke, so it is never a benign cutover artifact.
+        self.assertEqual(pending[0]["severity"], "critical")
+
+    def test_forced_append_failure_surfaces_as_a_finding(self) -> None:
+        """End to end: squat the next sequence, let the app create an event, and confirm the
+        suppressed link does not pass silently."""
+        head = AuditChainHead.objects.get(pk=1)
+        AuditChainLink.objects.create(
+            sequence=head.last_sequence + 1,
+            event=None,
+            event_id_str="squatted",
+            event_timestamp=timezone.now(),
+            event_action="squat",
+            event_content_type_id=None,
+            event_object_id="",
+            event_v2_mac="",
+            chain_mac="0" * 64,
+            prev_chain_mac="",
+            key_id="00000000",
+            is_tombstone=True,
+        )
+
+        self._event(description="append will fail")
+
+        findings = self._verify()
+        self.assertIn("chain_link_pending", self._finding_types(findings))
+
+
+class AnchorFailClosedTests(AuditChainLedgerTestCase):
+    """_verify_chain_anchors must read the SINK and fail closed (adversarial review finding).
+
+    Originally it read the local AuditChainAnchor table. An attacker who can truncate the
+    chain can equally delete those rows — the verifier then found nothing to check and
+    reported healthy, disabling the control precisely when it was needed.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self._sink_dir = tempfile.mkdtemp()
+        self.anchor_path = Path(self._sink_dir) / "anchors.jsonl"
+        self.addCleanup(shutil.rmtree, self._sink_dir, True)
+        overrides = override_settings(AUDIT_ANCHOR_SINK="logfile", AUDIT_ANCHOR_LOG_PATH=str(self.anchor_path))
+        overrides.enable()
+        self.addCleanup(overrides.disable)
+
+    def test_truncation_is_caught_even_after_local_anchor_rows_are_deleted(self) -> None:
+        """The headline bypass: delete the local anchors and the old verifier passed."""
+        for index in range(3):
+            self._event(description=f"event {index}")
+        AuditIntegrityService.publish_chain_anchor()
+
+        with connection.cursor() as cursor:
+            cursor.execute("DELETE FROM audit_chain_links WHERE sequence = 3")
+            cursor.execute("DELETE FROM audit_chain_anchors WHERE sequence >= 0")
+        surviving = AuditChainLink.objects.order_by("-sequence").first()
+        assert surviving is not None
+        AuditChainHead.objects.filter(pk=1).update(last_sequence=surviving.sequence, last_chain_mac=surviving.chain_mac)
+        self.assertEqual(AuditChainAnchor.objects.count(), 0)
+
+        findings = AuditIntegrityService._verify_chain_anchors()
+        self.assertIn("chain_truncated_below_anchor", self._finding_types(findings))
+
+    def test_missing_sink_is_critical_not_healthy(self) -> None:
+        """No readable external evidence must never read as a pass."""
+        self._event()
+
+        with override_settings(AUDIT_ANCHOR_LOG_PATH=str(Path(self._sink_dir) / "absent.jsonl")):
+            findings = AuditIntegrityService._verify_chain_anchors()
+
+        self.assertIn("anchor_sink_unavailable", self._finding_types(findings))
+        self.assertEqual(findings[0]["severity"], "critical")
+
+    def test_sink_disabled_is_critical(self) -> None:
+        """AUDIT_ANCHOR_SINK=none means truncation is undetectable — say so, loudly."""
+        self._event()
+
+        with override_settings(AUDIT_ANCHOR_SINK="none"):
+            findings = AuditIntegrityService._verify_chain_anchors()
+
+        self.assertIn("anchor_sink_unavailable", self._finding_types(findings))
+
+    def test_anchor_removed_from_sink_is_detected_via_the_local_copy(self) -> None:
+        """The mirror image: the local table corroborates the sink, catching sink tampering."""
+        self._event()
+        AuditIntegrityService.publish_chain_anchor()
+        self.assertEqual(AuditChainAnchor.objects.count(), 1)
+
+        # Attacker with filesystem access empties the anchor file.
+        self.anchor_path.write_text("")
+
+        findings = AuditIntegrityService._verify_chain_anchors()
+        self.assertIn("anchor_missing_from_sink", self._finding_types(findings))

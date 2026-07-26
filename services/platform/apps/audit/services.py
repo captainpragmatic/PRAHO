@@ -3695,30 +3695,83 @@ class AuditIntegrityService:
         return Err(f"Unknown anchor sink {sink_name!r}")
 
     @classmethod
+    def read_anchor_sink_records(cls) -> Result[list[dict[str, Any]], str]:
+        """Read back published anchors from the external sink.
+
+        This is the copy that survives an attacker with database access, so it — not
+        AuditChainAnchor — is the authority for verification.
+        """
+        sink_name = getattr(settings, "AUDIT_ANCHOR_SINK", "logfile")
+        if sink_name == "none":
+            return Err("AUDIT_ANCHOR_SINK=none - no external anchors exist to verify against")
+
+        if sink_name == "logfile":
+            path = getattr(settings, "AUDIT_ANCHOR_LOG_PATH", "")
+            if not path:
+                return Err("AUDIT_ANCHOR_LOG_PATH is not configured")
+            anchor_path = Path(path)
+            if not anchor_path.exists():
+                return Err(f"Anchor sink {path} does not exist - anchors were never published or were removed")
+            try:
+                records = [
+                    json.loads(line) for line in anchor_path.read_text(encoding="utf-8").splitlines() if line.strip()
+                ]
+            except (OSError, ValueError) as e:
+                return Err(f"Anchor sink read failed: {e}")
+            return Ok(records)
+
+        return Err(f"Unknown anchor sink {sink_name!r}")
+
+    @classmethod
     def _verify_chain_anchors(cls) -> list[dict[str, Any]]:
-        """Check the live chain against published anchors — this is what catches truncation.
+        """Check the live chain against EXTERNALLY published anchors (#313).
 
         For each anchor: the chain must still reach the anchored sequence, the link at that
         sequence must still carry the anchored head MAC, and the anchor's own MAC must verify
         under a known anchor key.
 
-        NOTE: read against the LOCAL anchor table, which an attacker who owns the database can
-        delete outright. A real verification runs this against the sink's records — see
-        verify_anchor_records, which takes externally supplied anchors.
+        Reads the sink, never the local AuditChainAnchor table. An attacker who can truncate
+        the chain can equally delete local anchor rows, and a verifier that then found nothing
+        to check would report healthy — turning the whole control off exactly when it matters.
+        So this FAILS CLOSED: an unreadable sink is a critical finding, not a pass.
+
+        The local table is retained only as corroboration: an anchor recorded locally but
+        absent from the sink means the sink was tampered with after publication.
         """
         from apps.audit.models import AuditChainAnchor  # noqa: PLC0415  # avoid app-load cycle
 
-        anchors = [
+        sink_result = cls.read_anchor_sink_records()
+        if sink_result.is_err():
+            return [
+                {
+                    "type": "anchor_sink_unavailable",
+                    "severity": "critical",
+                    "description": (
+                        f"Cannot read external anchors: {sink_result.unwrap_err()}. "
+                        f"Tail truncation cannot be ruled out."
+                    ),
+                }
+            ]
+
+        sink_records = sink_result.unwrap()
+        findings = cls.verify_anchor_records(sink_records)
+
+        # Corroborate against the local copy: anything anchored locally but missing from the
+        # sink means records were removed from the sink after they were written.
+        sink_sequences = {record.get("sequence") for record in sink_records}
+        findings.extend(
             {
-                "sequence": anchor.sequence,
-                "head_chain_mac": anchor.head_chain_mac,
-                "link_count": anchor.link_count,
-                "anchor_mac": anchor.anchor_mac,
-                "key_id": anchor.key_id,
+                "type": "anchor_missing_from_sink",
+                "severity": "critical",
+                "description": (
+                    f"Anchor for sequence {sequence} was recorded locally but is absent from the "
+                    f"sink - published anchor records were removed"
+                ),
             }
-            for anchor in AuditChainAnchor.objects.order_by("sequence")
-        ]
-        return cls.verify_anchor_records(anchors)
+            for sequence in AuditChainAnchor.objects.values_list("sequence", flat=True)
+            if sequence not in sink_sequences
+        )
+        return findings
 
     @classmethod
     def verify_anchor_records(cls, anchors: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -3823,8 +3876,9 @@ class AuditIntegrityService:
 
         Chain integrity is a total-order property, so the ledger is walked contiguously from
         the genesis link — not windowed — regardless of the period passed for the enclosing
-        check row. Findings: sequence gaps, broken prev-linkage, chain-MAC mismatch, and any
-        AuditEvent in the window that has no chain link (or a chain_link_pending marker).
+        check row. Findings: sequence gaps, broken prev-linkage, chain-MAC mismatch, links
+        whose event row was deleted without a retention tombstone, events left marked
+        chain_link_pending by a failed append, and events in the window with no link at all.
         """
         from apps.audit.models import AuditChainLink  # noqa: PLC0415  # avoid app-load cycle
 
@@ -3884,6 +3938,43 @@ class AuditIntegrityService:
                         }
                     )
             prev_link = link
+
+        # A non-tombstone link whose event row has vanished. SET_NULL means a raw
+        # DELETE FROM audit_events nulls the FK while the link itself still verifies from its
+        # snapshot — so without this check the ledger reports healthy after an attacker has
+        # erased the actual evidence. Authorized retention deletes append a tombstone for the
+        # same event_id_str, so the presence of one is what separates the two cases.
+        orphaned = AuditChainLink.objects.filter(event__isnull=True, is_tombstone=False)
+        tombstoned_ids = set(AuditChainLink.objects.filter(is_tombstone=True).values_list("event_id_str", flat=True))
+        findings.extend(
+            {
+                "type": "chain_link_event_deleted_without_tombstone",
+                "severity": "critical",
+                "description": (
+                    f"Chain link {link.sequence} references event {link.event_id_str}, which no "
+                    f"longer exists and has no retention tombstone - the event row was deleted"
+                ),
+            }
+            for link in orphaned.iterator()
+            if link.event_id_str not in tombstoned_ids
+        )
+
+        # Events whose chain append failed and left a pending marker. The append path is
+        # fail-open by design (an audit event without a link beats a lost financial
+        # transaction), but a failure an attacker can induce must not stay invisible: this is
+        # always critical, independent of AUDIT_CHAIN_REQUIRE, because the marker only ever
+        # appears when a live append actually broke.
+        findings.extend(
+            {
+                "type": "chain_link_pending",
+                "severity": "critical",
+                "description": (
+                    f"Audit event {event.id} is marked chain_link_pending - its chain append "
+                    f"failed and was never retried"
+                ),
+            }
+            for event in AuditEvent.objects.filter(metadata__chain_link_pending=True).iterator()
+        )
 
         # Events in the window with no chain link (forged INSERT, or a failed/pending append).
         #
