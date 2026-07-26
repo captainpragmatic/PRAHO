@@ -268,6 +268,7 @@ class TicketStatusService:
         if reply_action not in cls.CLOSING_ACTIONS:
             return
         cls._validate_resolution_code(resolution_code)
+        assert resolution_code is not None  # _validate_resolution_code rejects None
         ticket.resolution_code = resolution_code
 
     @staticmethod

@@ -947,6 +947,8 @@ class DomainNotificationService:
         now = timezone.now()
         pairs: list[tuple[Domain, int]] = []
         for domain in cls.get_domains_needing_renewal_notice():
+            if domain.expires_at is None:
+                continue
             for days in schedule_days:
                 if domain.expires_at.date() == (now + timedelta(days=days)).date():
                     pairs.append((domain, days))
