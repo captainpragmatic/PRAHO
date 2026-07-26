@@ -1716,6 +1716,22 @@ CATALOG: tuple[SettingDef, ...] = (
         validation={"min": 0},
     ),
     SettingDef(
+        key="notifications.max_async_attachment_kb",
+        data_type="integer",
+        default=5120,
+        group="advanced",
+        section=_("Notifications"),
+        label=_("Max async email attachment size (KB)"),
+        help_text=_(
+            "Emails whose attachments exceed this total size are sent synchronously instead of "
+            "through the async task broker, so large attachment bytes do not transit the queue "
+            "table. Set 0 to always allow async attachments."
+        ),
+        input_kind="number",
+        advanced=True,
+        validation={"min": 0},
+    ),
+    SettingDef(
         key="notifications.email_max_retries",
         data_type="integer",
         default=3,
