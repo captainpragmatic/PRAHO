@@ -15,6 +15,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.contenttypes.fields import GenericForeignKey
 from django.contrib.contenttypes.models import ContentType
 from django.db import models
+from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 User = get_user_model()
@@ -533,7 +534,15 @@ class AuditEvent(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
     # When and where
-    timestamp = models.DateTimeField(auto_now_add=True, db_index=True)
+    #
+    # default= rather than auto_now_add= (#313, point 4). auto_now_add populates the field
+    # inside _save_table, i.e. AFTER the pre_save signal, so a pre_save receiver would MAC
+    # over timestamp=None; the integrity stamp was therefore forced into post_save as a
+    # second write. With a plain default the value exists as soon as the instance does, so
+    # create and stamp collapse into a single INSERT. Behaviour is otherwise identical for
+    # callers that omit timestamp — and callers that PASS one are now honoured rather than
+    # silently overridden, which is what several tests already assumed.
+    timestamp = models.DateTimeField(default=timezone.now, db_index=True)
     ip_address = models.GenericIPAddressField(null=True, blank=True)
     user_agent = models.TextField(blank=True)
 

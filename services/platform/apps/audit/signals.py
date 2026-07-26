@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from django.conf import settings
-from django.db.models.signals import post_save, pre_delete
+from django.db.models.signals import post_save, pre_delete, pre_save
 
 # Bound directly (not via the transaction module attribute): tests elsewhere patch
 # django.db.transaction.atomic through their own module's reference, which mutates the
@@ -842,19 +842,28 @@ except ImportError:  # pragma: no cover
 # ===============================================================================
 
 
-@receiver(post_save, sender=AuditEvent)
-def stamp_audit_event_integrity_hash(sender: Any, instance: AuditEvent, created: bool, **kwargs: Any) -> None:
-    """Stamp a tamper-detection hash onto every newly created audit event.
+@receiver(pre_save, sender=AuditEvent)
+def stamp_audit_event_integrity_hash(sender: Any, instance: AuditEvent, **kwargs: Any) -> None:
+    """Stamp the tamper-detection MAC into metadata BEFORE the row is written (#313 point 4).
 
     _verify_hash_chain has always read metadata["integrity_hash"], but nothing ever wrote it, so
     the stored hash was always absent, the mismatch branch was unreachable, and every integrity
     check reported compliant no matter how the rows had been altered (#217).
 
-    Hooked on post_save rather than the three AuditEvent.objects.create() call sites because the
-    hash covers event.id and event.timestamp, which only exist once the row is written — and
-    because a signal also covers any creation site added later.
+    Previously this ran on post_save and issued a SECOND write (create, then UPDATE metadata),
+    because the MAC covers id and timestamp and timestamp was auto_now_add — populated inside
+    _save_table, after pre_save fires. AuditEvent.timestamp is now a plain default=timezone.now,
+    so both values exist by the time this receiver runs and the stamp rides along on the INSERT.
+
+    Why that matters beyond saving a write: with two writes there was a real window in which the
+    row existed unstamped. A verifier reading during that window saw a row with no marker and
+    classified it legacy/unverifiable, and a crash between the two writes left it that way
+    permanently. One write means a row is never observable without its MAC.
+
+    This receiver performs NO database access — it only mutates the in-memory instance — so it
+    cannot mark the caller's connection needs_rollback, and needs no savepoint of its own.
     """
-    if not created:
+    if not instance._state.adding:
         # Audit events are append-only; re-hashing on update would launder a tampered row.
         return
 
@@ -864,49 +873,57 @@ def stamp_audit_event_integrity_hash(sender: Any, instance: AuditEvent, created:
     try:
         metadata = dict(base_metadata)
         metadata.update(AuditIntegrityService.integrity_stamp_marker(instance))
-        # QuerySet.update() cannot re-enter this handler (updates emit no post_save), and a
-        # nested atomic() is essential, not decorative: a DB error in this statement marks the
-        # CALLER's connection needs_rollback, and this handler fires inside money-moving atomic
-        # blocks (order confirmation). Without the savepoint, swallowing the exception below
-        # would let the caller "commit" a transaction Django then silently rolls back — the
-        # exact SFH-3 failure mode (audit failure must never undo a financial transaction).
-        with atomic(), audit_mutation_allowed("integrity_stamp"):
-            AuditEvent.objects.filter(pk=instance.pk).update(metadata=metadata)
         instance.metadata = metadata
     except Exception as e:
-        # An audit event that exists without a hash is far better than a lost audit event.
+        # An audit event that exists without a hash is far better than a lost audit event, so
+        # the write proceeds regardless. Land the version marker alone so the verifier reports
+        # this row as missing_integrity_hash (critical) — without it the row is byte-identical
+        # to a pre-hashing legacy row and demotes to an info-level "unverifiable" finding,
+        # which is precisely the low-visibility outcome #217 exists to eliminate.
         logger.error(f"🔥 [Audit Integrity] Failed to stamp integrity hash on event {instance.pk}: {e}")
-        # Best effort: land the version marker alone so the verifier reports this row as
-        # missing_integrity_hash (critical) — without it the row is byte-identical to a
-        # pre-hashing legacy row and demotes to an info-level "unverifiable" finding, which
-        # is precisely the low-visibility outcome #217 exists to eliminate.
         try:
-            with atomic(), audit_mutation_allowed("integrity_stamp"):
-                AuditEvent.objects.filter(pk=instance.pk).update(
-                    metadata={**base_metadata, "integrity_hash_version": AuditIntegrityService.HASH_VERSION}
-                )
+            instance.metadata = {**base_metadata, "integrity_hash_version": AuditIntegrityService.HASH_VERSION}
         except Exception:
             logger.error(f"🔥 [Audit Integrity] Could not mark event {instance.pk} for critical follow-up")
 
-    # #313 — append the event to the hash-chain ledger, AFTER the v2 MAC is stamped so the link
-    # commits the final integrity_hash. Gated behind AUDIT_CHAIN_ENABLED, in its own savepoint, and
-    # fail-open: an append failure must never roll back the caller's (money-moving) transaction — an
-    # audit event without a chain link is far better than a lost financial transaction (same doctrine
-    # as the stamp above). A failure lands a chain_link_pending marker for the verifier to flag.
-    if getattr(settings, "AUDIT_CHAIN_ENABLED", False):
+
+@receiver(post_save, sender=AuditEvent)
+def append_audit_event_chain_link(sender: Any, instance: AuditEvent, created: bool, **kwargs: Any) -> None:
+    """Append the event to the hash-chain ledger (#313).
+
+    Stays on post_save, unlike the stamp above: a link references the event row by FK, so the
+    row has to exist first. The link commits the final integrity_hash, which pre_save has
+    already written into instance.metadata.
+
+    Gated behind AUDIT_CHAIN_ENABLED, in its own savepoint, and fail-open: an append failure
+    must never roll back the caller's (money-moving) transaction — an audit event without a
+    chain link is far better than a lost financial transaction. A nested atomic() is essential,
+    not decorative: a DB error here marks the CALLER's connection needs_rollback, and this
+    fires inside money-moving atomic blocks (order confirmation). Without the savepoint,
+    swallowing the exception would let the caller "commit" a transaction Django then silently
+    rolls back — the exact SFH-3 failure mode. A failure lands a chain_link_pending marker.
+    """
+    if not created:
+        return
+
+    if not getattr(settings, "AUDIT_CHAIN_ENABLED", False):
+        return
+
+    from .services import AuditIntegrityService  # noqa: PLC0415  # Deferred: avoids circular import
+
+    try:
+        with atomic():
+            AuditIntegrityService.append_chain_link(instance)
+    except Exception as e:
+        logger.error(f"🔥 [Audit Chain] Failed to append chain link for event {instance.pk}: {e}")
         try:
-            with atomic():
-                AuditIntegrityService.append_chain_link(instance)
-        except Exception as e:
-            logger.error(f"🔥 [Audit Chain] Failed to append chain link for event {instance.pk}: {e}")
-            try:
-                pending_metadata = dict(instance.metadata) if isinstance(instance.metadata, dict) else {}
-                pending_metadata["chain_link_pending"] = True
-                with atomic(), audit_mutation_allowed("chain_append"):
-                    AuditEvent.objects.filter(pk=instance.pk).update(metadata=pending_metadata)
-                instance.metadata = pending_metadata
-            except Exception:
-                logger.error(f"🔥 [Audit Chain] Could not mark event {instance.pk} chain_link_pending")
+            pending_metadata = dict(instance.metadata) if isinstance(instance.metadata, dict) else {}
+            pending_metadata["chain_link_pending"] = True
+            with atomic(), audit_mutation_allowed("chain_append"):
+                AuditEvent.objects.filter(pk=instance.pk).update(metadata=pending_metadata)
+            instance.metadata = pending_metadata
+        except Exception:
+            logger.error(f"🔥 [Audit Chain] Could not mark event {instance.pk} chain_link_pending")
 
 
 # ===============================================================================

@@ -3184,7 +3184,15 @@ class AuditIntegrityService:
 
     HASH_VERSION = 2
     RESERVED_METADATA_KEYS: ClassVar[frozenset[str]] = frozenset(
-        {"integrity_hash", "integrity_hash_version", "integrity_key_id"}
+        {
+            "integrity_hash",
+            "integrity_hash_version",
+            "integrity_key_id",
+            # Written AFTER the MAC is computed, when a chain append fails (#313). It must be
+            # excluded from the covered payload or a failed append would flip the row to
+            # "MAC mismatch" — reporting a ledger problem as evidence tampering.
+            "chain_link_pending",
+        }
     )
     # Chain-ledger schema version (#313), distinct from the per-row HASH_VERSION above.
     CHAIN_VERSION = 1
