@@ -6,11 +6,14 @@ import time
 import urllib.parse
 from unittest.mock import patch
 
+from django.contrib.auth import get_user_model
 from django.http import HttpResponse
 from django.test import RequestFactory, TestCase, override_settings
 
 from apps.common import middleware as _middleware_module
 from apps.common.middleware import PortalServiceHMACMiddleware
+
+User = get_user_model()
 
 LOCMEM_TEST_CACHE = {
     "default": {
@@ -111,6 +114,34 @@ class PortalHMACTests(TestCase):
         self.assertNotIn("HMAC signature verification failed", body_text)
 
     @override_settings(PLATFORM_API_SECRET="unit-test-secret")
+    def test_role_only_staff_session_bypass_allowed(self):
+        """#271: a role-only staff user (staff_role set, is_staff=False) is admitted to the
+        session-auth GET bypass for /api/customers/ (the ticket form's browser fetch)."""
+        user = User.objects.create_user(email="support@test.com", password="x", staff_role="support")
+        self.assertFalse(user.is_staff)
+        self.assertTrue(user.is_staff_user)
+
+        request = self.factory.get("/api/customers/")  # no HMAC headers → HMAC fails → bypass check
+        request.user = user
+        middleware = PortalServiceHMACMiddleware(lambda req: HttpResponse("ok", status=200))
+        response = middleware(request)
+
+        self.assertEqual(response.status_code, 200)
+
+    @override_settings(PLATFORM_API_SECRET="unit-test-secret")
+    def test_customer_user_session_bypass_denied(self):
+        """A non-staff customer user gets no session bypass — HMAC remains required."""
+        user = User.objects.create_user(email="cust@test.com", password="x")
+        self.assertFalse(user.is_staff_user)
+
+        request = self.factory.get("/api/customers/")
+        request.user = user
+        middleware = PortalServiceHMACMiddleware(lambda req: HttpResponse("ok", status=200))
+        response = middleware(request)
+
+        self.assertEqual(response.status_code, 401)
+
+    @override_settings(PLATFORM_API_SECRET="unit-test-secret")
     def test_stale_timestamp_rejected(self):
         # Stale timestamp (unix epoch 222 = 1970) is outside the 5-minute window.
         # The body-timestamp cross-check was removed; the window check alone covers this.
@@ -144,8 +175,6 @@ class PortalHMACTests(TestCase):
         raw_path = "/api/test/"
         portal_id = "portal-xyz"
         nonce = self.nonce
-
-        import urllib.parse
 
         parsed = urllib.parse.urlsplit(raw_path)
         normalized_path = parsed.path

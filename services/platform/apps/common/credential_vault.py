@@ -645,16 +645,18 @@ class CredentialVault:
         return "".join(secrets.choice(alphabet) for _ in range(length))
 
     def _check_credential_access_permission(self, credential: EncryptedCredential, user: Any | None) -> bool:
-        """Check if user has permission to access credential.
+        """Check if user has permission to decrypt/read a credential.
 
-        Access rules:
+        Access rules (#271):
         - System/task access (user=None): allowed for management commands, gateways
-        - Superuser or staff: allowed
-        - All others: denied
+        - Superuser or admin-role staff: allowed
+        - All other staff (support/billing/manager, or a bare is_staff flag) and everyone
+          else: denied — decrypting infra secrets (Virtualmin/SSH/cloud keys) is an admin
+          capability, not a general-staff one.
         """
         if user is None:
             return True
-        return getattr(user, "is_superuser", False) or getattr(user, "is_staff", False)
+        return getattr(user, "is_superuser", False) or getattr(user, "staff_role", "") == "admin"
 
     def _log_credential_access(self, access_data: AccessLogData) -> None:
         """Log credential access for audit trail"""
