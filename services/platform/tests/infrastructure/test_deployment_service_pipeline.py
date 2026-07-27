@@ -23,6 +23,7 @@ from apps.common.types import Err, Ok, Retriability
 from apps.infrastructure.audit_service import InfrastructureAuditContext
 from apps.infrastructure.cloud_gateway import ServerCreateResult
 from apps.infrastructure.deployment_service import NodeDeploymentService
+from apps.infrastructure.dns_gateway import ReconcileOutcome
 from apps.infrastructure.forms import NodeDeploymentForm
 from apps.infrastructure.models import (
     CloudProvider,
@@ -34,6 +35,20 @@ from apps.infrastructure.models import (
 )
 
 User = get_user_model()
+
+
+def _ok_dns_gateway() -> MagicMock:
+    """A DNS gateway mock whose preflight zone check + reconcile both succeed.
+
+    Deploy tests that aren't about DNS use this so the new configuring_dns stage is a
+    no-op success (no records persisted) instead of a real Cloudflare call (#347 GAP 3).
+    Zone name matches the test dns_zone so the fqdn-containment preflight passes.
+    """
+    gw = MagicMock()
+    gw.get_zone_name.return_value = Ok("test.example.com")
+    gw.reconcile_records.return_value = ReconcileOutcome(applied=[], error=None)
+    gw.delete_owned_records.return_value = Ok([])
+    return gw
 
 
 def _create_deployment(status: str = "pending", external_node_id: str = "") -> NodeDeployment:
@@ -148,6 +163,7 @@ class TestDeployNodeReachesCompletedThroughFSM(TestCase):
 
         with (
             patch("apps.infrastructure.deployment_service.SettingsService.get_setting", return_value=True),
+            patch("apps.infrastructure.deployment_service.get_dns_gateway", return_value=_ok_dns_gateway()),
             patch("apps.infrastructure.deployment_service.get_cloud_gateway", return_value=gateway),
         ):
             result = service.deploy_node(deployment=deployment, credentials={"api_token": "test-token"})
@@ -187,6 +203,7 @@ class TestCredentialSeamWiring(TestCase):
 
         with (
             patch("apps.infrastructure.deployment_service.SettingsService.get_setting", return_value=True),
+            patch("apps.infrastructure.deployment_service.get_dns_gateway", return_value=_ok_dns_gateway()),
             patch("apps.infrastructure.deployment_service.get_cloud_gateway", return_value=gateway),
         ):
             result = service.deploy_node(deployment=deployment, credentials={"api_token": "test-token"})
@@ -246,6 +263,7 @@ class TestCredentialSeamWiring(TestCase):
 
         with (
             patch("apps.infrastructure.deployment_service.SettingsService.get_setting", return_value=True),
+            patch("apps.infrastructure.deployment_service.get_dns_gateway", return_value=_ok_dns_gateway()),
             patch("apps.infrastructure.deployment_service.get_cloud_gateway", return_value=gateway),
         ):
             result = service.deploy_node(deployment=deployment, credentials={"api_token": "test-token"})
@@ -271,6 +289,7 @@ class TestCredentialSeamWiring(TestCase):
 
         with (
             patch("apps.infrastructure.deployment_service.SettingsService.get_setting", return_value=True),
+            patch("apps.infrastructure.deployment_service.get_dns_gateway", return_value=_ok_dns_gateway()),
             patch("apps.infrastructure.deployment_service.get_cloud_gateway", return_value=gateway),
         ):
             result = service.deploy_node(deployment=deployment, credentials={"api_token": "test-token"})
