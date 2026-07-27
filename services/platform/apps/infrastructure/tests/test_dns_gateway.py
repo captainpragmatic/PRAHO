@@ -224,6 +224,20 @@ class ReconcileRecordsTests(SimpleTestCase):
         self.assertIn("op1", fake.store)
         self.assertEqual(fake.store["op1"]["content"], "198.51.100.9")
 
+    def test_unowned_conflict_blocks_all_mutations(self) -> None:
+        # An unowned A must block the ENTIRE reconcile atomically — the AAAA must NOT be
+        # created either, so we never leave a half-configured record set (Copilot).
+        fake = FakeCloudflare(
+            [{"id": "op", "type": "A", "name": _FQDN, "content": "198.51.100.9", "comment": "operator-manual"}]
+        )
+        with patch("apps.infrastructure.dns_gateway.safe_request", fake):
+            out = self._gw().reconcile_records(
+                _ZONE, [_spec("A", "203.0.113.10"), _spec("AAAA", "2001:db8::1")], _OWNER
+            )
+        self.assertIsNotNone(out.error)
+        self.assertEqual(fake.n_posts(), 0)  # neither A nor AAAA created
+        self.assertEqual(out.applied, [])
+
     def test_partial_failure_returns_applied_a_before_failing_aaaa(self) -> None:
         # A succeeds, AAAA POST fails → applied carries A so it is not leaked.
         fake = FakeCloudflare(post_fail_types={"AAAA"})

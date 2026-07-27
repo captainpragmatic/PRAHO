@@ -138,6 +138,16 @@ class DeleteOwnedDnsTests(TestCase):
             NodeDeploymentLog.objects.filter(deployment=dep, message__icontains="orphan").exists()
         )
 
+    def test_provider_unavailable_writes_orphan_marker(self) -> None:
+        # If the DNS provider can't be built, teardown must still record a durable orphan
+        # marker (not just log) so the records remain discoverable for reconciliation (Copilot).
+        dep = _create_deployment("completed")
+        dep.dns_record_ids = [_entry()]
+        dep.save()
+        with patch(_DNS_GW, side_effect=ValueError("unknown provider")), patch(_GET_SETTING, return_value="tok"):
+            NodeDeploymentService._delete_owned_dns(dep)
+        self.assertTrue(NodeDeploymentLog.objects.filter(deployment=dep, message__icontains="orphan").exists())
+
     def test_no_entries_is_noop(self) -> None:
         dep = _create_deployment("completed")  # dns_record_ids defaults to []
         gw = MagicMock()
