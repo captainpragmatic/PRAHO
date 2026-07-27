@@ -280,16 +280,17 @@ class CloudflareDnsGateway(DnsProviderGateway):
             return outcome
         existing: list[dict[str, Any]] = env.unwrap() or []
 
+        # Fail closed atomically: if ANY desired record type collides with an unowned record,
+        # refuse to mutate anything — never leave a half-configured record set (Copilot).
+        for spec in specs:
+            if any(r.get("type") == spec.record_type and r.get("comment") != owner_tag for r in existing):
+                outcome.error = f"unowned {spec.record_type} record exists for {name}; refusing to manage"
+                return outcome
+
         delete_failures: list[str] = []
         try:
             for spec in specs:
-                same = [r for r in existing if r.get("type") == spec.record_type]
-                unowned = [r for r in same if r.get("comment") != owner_tag]
-                owned = [r for r in same if r.get("comment") == owner_tag]
-                if unowned:
-                    # Never touch a record we do not own (operator-managed) — fail closed.
-                    outcome.error = f"unowned {spec.record_type} record exists for {name}; refusing to manage"
-                    continue
+                owned = [r for r in existing if r.get("type") == spec.record_type and r.get("comment") == owner_tag]
                 if not owned:
                     res = self._create(zone_id, spec)
                 else:

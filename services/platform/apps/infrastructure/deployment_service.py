@@ -1536,7 +1536,12 @@ class NodeDeploymentService:
         try:
             gateway = get_dns_gateway("cloudflare", token)
         except ValueError as exc:
-            logger.warning(f"[Deployment:{deployment.hostname}] DNS teardown: provider unavailable: {exc}")
+            NodeDeploymentLog.objects.create(
+                deployment=deployment,
+                level="WARNING",
+                message=f"DNS teardown skipped (provider unavailable: {exc}); {len(entries)} record(s) may be orphaned",
+                phase="destroy",
+            )
             return
 
         remaining: list[dict[str, Any]] = []
