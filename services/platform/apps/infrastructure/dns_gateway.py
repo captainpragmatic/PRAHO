@@ -231,10 +231,20 @@ class CloudflareDnsGateway(DnsProviderGateway):
             return Err(env.unwrap_err())
         return Ok(self._to_result(zone_id, env.unwrap() or {}, spec))
 
-    def _delete_ids(self, zone_id: str, ids: list[str]) -> None:
-        """Best-effort delete (dedupe / stale cleanup); envelope errors ignored."""
+    def _delete_ids(self, zone_id: str, ids: list[str]) -> list[str]:
+        """Delete records; return ids whose deletion was NOT confirmed (envelope error).
+
+        A 404 counts as deleted (already gone). Callers surface any returned ids so a failed
+        stale/duplicate cleanup is never reported as a successful reconciliation (P1).
+        """
+        failed: list[str] = []
         for rid in ids:
-            self._request("DELETE", f"/zones/{zone_id}/dns_records/{rid}")
+            resp = self._request("DELETE", f"/zones/{zone_id}/dns_records/{rid}")
+            if resp.status_code == _HTTP_NOT_FOUND:
+                continue
+            if self._envelope(resp).is_err():
+                failed.append(rid)
+        return failed
 
     # -- Operations ----------------------------------------------------------
 
@@ -270,6 +280,7 @@ class CloudflareDnsGateway(DnsProviderGateway):
             return outcome
         existing: list[dict[str, Any]] = env.unwrap() or []
 
+        delete_failures: list[str] = []
         try:
             for spec in specs:
                 same = [r for r in existing if r.get("type") == spec.record_type]
@@ -289,7 +300,7 @@ class CloudflareDnsGateway(DnsProviderGateway):
                         else Ok(self._to_result(zone_id, keep, spec))
                     )
                     # Converge replay duplicates down to the single kept record.
-                    self._delete_ids(zone_id, [str(r["id"]) for r in owned[1:]])
+                    delete_failures += self._delete_ids(zone_id, [str(r["id"]) for r in owned[1:]])
                 if res.is_err():
                     outcome.error = res.unwrap_err()
                     continue
@@ -299,9 +310,14 @@ class CloudflareDnsGateway(DnsProviderGateway):
             stale = [
                 str(r["id"]) for r in existing if r.get("comment") == owner_tag and r.get("type") not in desired_types
             ]
-            self._delete_ids(zone_id, stale)
+            delete_failures += self._delete_ids(zone_id, stale)
         except (requests.RequestException, OutboundSecurityError) as exc:
             outcome.error = f"cloudflare transport error: {exc}"
+
+        # A failed stale/duplicate deletion must not read as success — a lingering wrong
+        # record (e.g. a stale AAAA) would keep sending clients to a reassigned address (P1).
+        if delete_failures and not outcome.error:
+            outcome.error = f"failed to delete {len(delete_failures)} stale/duplicate record(s): {delete_failures}"
         return outcome
 
     def delete_owned_records(self, zone_id: str, owner_tag: str) -> Result[list[str], str]:

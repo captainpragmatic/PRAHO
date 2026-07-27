@@ -1480,6 +1480,22 @@ class NodeDeploymentService:
         if ipv6:
             specs.append(DnsRecordSpec(record_type="AAAA", name=fqdn, content=ipv6, owner_tag=owner_tag))
 
+        # Persist cleanup provenance BEFORE the first mutation: a create can be replayed by
+        # safe_request's DNS fallback, so a POST may reach Cloudflare even when the call ends in
+        # an error with no returned id. This intent marker gives owner-tag teardown a zone to
+        # sweep even when reconcile returns no applied records (codex P1).
+        deployment.dns_record_ids = [
+            {
+                "provider": "cloudflare",
+                "zone_id": zone_id,
+                "record_id": "",
+                "type": "intent",
+                "name": fqdn,
+                "owner_tag": owner_tag,
+            }
+        ]
+        deployment.save(update_fields=["dns_record_ids", "updated_at"])
+
         outcome = gateway.reconcile_records(zone_id, specs, owner_tag)
         if outcome.applied:
             deployment.dns_record_ids = [r.as_provenance() for r in outcome.applied]

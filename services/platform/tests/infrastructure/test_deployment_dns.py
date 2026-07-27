@@ -78,6 +78,19 @@ class ConfigureDnsTests(TestCase):
         dep.refresh_from_db()
         self.assertEqual(len(dep.dns_record_ids), 1)
 
+    def test_reconcile_error_leaves_cleanup_provenance(self) -> None:
+        # A failed/ambiguous create (applied empty, error set — e.g. the POST reached
+        # Cloudflare but the connection dropped) must still leave zone+owner provenance so
+        # owner-tag teardown can sweep the possibly-orphaned record (codex P1).
+        dep = self._dep()
+        gw = self._gw(reconcile=ReconcileOutcome(applied=[], error="connection dropped after POST"))
+        with patch(_DNS_GW, return_value=gw):
+            res = _make_service()._configure_dns(dep, "tok", "zone-xyz", _noop_log)
+        self.assertTrue(res.is_err())
+        dep.refresh_from_db()
+        self.assertTrue(dep.dns_record_ids, "cleanup provenance must survive a failed reconcile")
+        self.assertEqual(dep.dns_record_ids[0]["zone_id"], "zone-xyz")
+
     def test_zone_mismatch_fails_closed_without_reconciling(self) -> None:
         dep = self._dep()
         gw = self._gw(zone="someone-elses-zone.com")

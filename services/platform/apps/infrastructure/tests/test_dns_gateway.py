@@ -51,13 +51,14 @@ class _Resp:
 class FakeCloudflare:
     """In-memory Cloudflare v4 DNS double, callable as ``safe_request``."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913  # test double: keyword-only failure-injection knobs
         self,
         records: list[dict[str, Any]] | None = None,
         *,
         post_fail_types: set[str] | None = None,
         post_raise_types: set[str] | None = None,
         post_badjson_types: set[str] | None = None,
+        delete_fail_ids: set[str] | None = None,
         zone_success: bool = True,
     ) -> None:
         self._ids = itertools.count(1)
@@ -68,6 +69,7 @@ class FakeCloudflare:
         self.post_fail_types = post_fail_types or set()
         self.post_raise_types = post_raise_types or set()
         self.post_badjson_types = post_badjson_types or set()
+        self.delete_fail_ids = delete_fail_ids or set()
         self.zone_success = zone_success
         self.calls: list[tuple[str, str]] = []
 
@@ -128,6 +130,8 @@ class FakeCloudflare:
         return _Resp(200, {"success": True, "result": self.store[rid]})
 
     def _delete(self, rid: str) -> _Resp:
+        if rid in self.delete_fail_ids:  # ordinary API failure — record stays
+            return _Resp(403, {"success": False, "errors": [{"message": "delete denied"}]})
         if self.store.pop(rid, None) is None:
             return _Resp(404, {"success": False, "errors": [{"code": 81044}]})
         return _Resp(200, {"success": True, "result": {"id": rid}})
@@ -229,6 +233,34 @@ class ReconcileRecordsTests(SimpleTestCase):
             )
         self.assertIsNotNone(out.error)
         self.assertEqual([r.record_type for r in out.applied], ["A"])
+
+    def test_failed_stale_delete_surfaces_error(self) -> None:
+        # Retry drops IPv6 → the owned AAAA must be deleted; if that DELETE fails, reconcile
+        # must NOT report success (else IPv6 clients keep reaching a stale address). P1.
+        fake = FakeCloudflare(
+            [
+                {"id": "aid", "type": "A", "name": _FQDN, "content": "203.0.113.10", "comment": _OWNER},
+                {"id": "aaaaid", "type": "AAAA", "name": _FQDN, "content": "2001:db8::1", "comment": _OWNER},
+            ],
+            delete_fail_ids={"aaaaid"},
+        )
+        with patch("apps.infrastructure.dns_gateway.safe_request", fake):
+            out = self._gw().reconcile_records(_ZONE, [_spec("A", "203.0.113.10")], _OWNER)
+        self.assertIsNotNone(out.error)
+        self.assertIn("aaaaid", fake.store)  # stale record indeed lingered
+
+    def test_failed_duplicate_dedupe_surfaces_error(self) -> None:
+        # A replay duplicate that can't be deleted must also surface, not silently succeed. P1.
+        fake = FakeCloudflare(
+            [
+                {"id": "dup1", "type": "A", "name": _FQDN, "content": "203.0.113.10", "comment": _OWNER},
+                {"id": "dup2", "type": "A", "name": _FQDN, "content": "203.0.113.10", "comment": _OWNER},
+            ],
+            delete_fail_ids={"dup2"},
+        )
+        with patch("apps.infrastructure.dns_gateway.safe_request", fake):
+            out = self._gw().reconcile_records(_ZONE, [_spec("A", "203.0.113.10")], _OWNER)
+        self.assertIsNotNone(out.error)
 
     def test_success_false_envelope_is_error(self) -> None:
         fake = FakeCloudflare(post_fail_types={"A"})
