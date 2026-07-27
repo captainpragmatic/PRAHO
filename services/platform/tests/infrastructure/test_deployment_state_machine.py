@@ -346,10 +346,13 @@ class TestDeployNodeTransitionBugFix(TestCase):
             unwrap_err=lambda: "No master key",
         )
 
-        result = service.deploy_node(
-            deployment=deployment,
-            credentials={"api_token": "test"},
-        )
+        # DNS config must be present so the deploy reaches the SSH stage under test
+        # (the DNS presence preflight runs after the status guard, before SSH — #347 GAP 3).
+        with patch("apps.infrastructure.deployment_service.SettingsService.get_setting", return_value=True):
+            result = service.deploy_node(
+                deployment=deployment,
+                credentials={"api_token": "test"},
+            )
 
         # The deploy should fail at SSH stage, NOT at the transition
         self.assertTrue(result.is_err())
