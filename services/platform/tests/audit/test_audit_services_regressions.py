@@ -1141,6 +1141,21 @@ class TestAuditSearchService(TestCase):
         suggestions = AuditSearchService.get_search_suggestions("test", non_staff)
         self.assertEqual(suggestions["users"], [])
 
+    def test_get_search_suggestions_role_only_staff(self):
+        """#271: role-only staff (staff_role set, is_staff=False) get user suggestions.
+
+        The gate previously read native `is_staff`, so a support/admin/billing/manager user
+        without the Django flag was silently denied suggestions despite passing the endpoint's
+        staff guard. It now uses the canonical `is_staff_user`.
+        """
+        role_only_staff = _make_user(is_staff=False, staff_role="support")
+        self.assertTrue(role_only_staff.is_staff_user)  # canonical: role grants staff status
+        _make_user(email="findme@example.com", first_name="Find", last_name="Me")
+
+        suggestions = AuditSearchService.get_search_suggestions("findme", role_only_staff)
+
+        self.assertIn("findme@example.com", suggestions["users"])
+
     def test_get_search_suggestions_ip_like(self):
         self._create_event(ip_address="192.168.1.1")
         suggestions = AuditSearchService.get_search_suggestions("192.168", self.user)
