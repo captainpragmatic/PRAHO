@@ -34,6 +34,7 @@ from apps.infrastructure.cloud_gateway import (
     get_cloud_gateway,
 )
 from apps.infrastructure.deployment_preflight import validate_deployment_fqdn
+from apps.infrastructure.dns_gateway import DnsRecordSpec, get_dns_gateway
 from apps.infrastructure.maintenance import resolve_maintenance_playbooks
 from apps.infrastructure.provider_config import (
     run_provider_command,
@@ -97,6 +98,7 @@ class NodeDeploymentService:
         "ssh_key": (5, "Generating SSH key"),
         "provision_server": (15, "Creating cloud server"),
         "update_deployment": (40, "Updating deployment records"),
+        "configuring_dns": (45, "Configuring DNS records"),
         "ansible_base": (50, "Running base configuration"),
         "ansible_panel": (60, "Installing control panel"),
         "ansible_harden": (70, "Hardening server"),
@@ -199,6 +201,18 @@ class NodeDeploymentService:
                 InfrastructureAuditService.log_deployment_started(deployment, audit_ctx)
             except Exception:
                 logger.warning(f"[Deployment:{deployment.hostname}] Failed to log audit: deployment started")
+
+            # Validate DNS config presence BEFORE any paid/external resource is created, so a
+            # missing token/zone fails before the VM (#347 GAP 3; codex C2). Runs after the
+            # enabled + status guards. The zone-access + fqdn-containment check runs later in
+            # _configure_dns (fail-closed + compensated).
+            dns_config_result = self._resolve_dns_config(deployment, cloudflare_api_token)
+            if dns_config_result.is_err():
+                self._mark_failed(
+                    deployment, dns_config_result.unwrap_err(), stage="provisioning_node", audit_ctx=audit_ctx
+                )
+                return Err(dns_config_result.unwrap_err())
+            dns_token, dns_zone_id = dns_config_result.unwrap()
 
             # Stage 1: Generate SSH key
             report_progress("ssh_key")
@@ -419,6 +433,18 @@ class NodeDeploymentService:
 
             stages_completed.append("update_deployment")
             log_deployment("info", f"Server provisioned with IP: {deployment.ipv4_address}")
+
+            # Stage: configure the node's own DNS (A/AAAA) before panel install. Fail closed —
+            # a leaked record on a released IP is a subdomain-takeover risk (#347 GAP 3). The
+            # HTTP call runs OUTSIDE the atomic block above (no row lock held across the network).
+            report_progress("configuring_dns")
+            dns_result = self._configure_dns(deployment, dns_token, dns_zone_id, log_deployment)
+            if dns_result.is_err():
+                if gateway is not None and created_resources:
+                    self._cleanup_resources(gateway, created_resources, deployment)
+                self._mark_failed(deployment, dns_result.unwrap_err(), stage="configuring_dns", audit_ctx=audit_ctx)
+                return Err(dns_result.unwrap_err())
+            stages_completed.append("configuring_dns")
 
             # Transition to panel installation phase
             deployment.transition_to("installing_panel")
@@ -712,6 +738,11 @@ class NodeDeploymentService:
                 )
                 if unregister_result.is_err():
                     logger.warning(f"Unregistration failed: {unregister_result.unwrap_err()}")
+
+            # Delete DNS first (records point at an IP about to be released) — owner-scoped,
+            # best-effort, independent of external_node_id and before the server-delete
+            # early-return so a server-delete failure never skips DNS cleanup (#347 GAP 3).
+            self._delete_owned_dns(deployment)
 
             # Delete server via cloud provider gateway
             if deployment.external_node_id:
@@ -1384,6 +1415,149 @@ class NodeDeploymentService:
                 logger.warning(f"[Reboot:{deployment.hostname}] Failed to log audit: reboot failed")
             return Err(f"Reboot failed: {e}")
 
+    @staticmethod
+    def _dns_owner_tag(deployment: NodeDeployment) -> str:
+        """Ownership marker stamped on every DNS record this deployment creates."""
+        return f"praho:node-deploy:{deployment.id}"
+
+    def _resolve_dns_config(
+        self, deployment: NodeDeployment, token_override: str | None
+    ) -> Result[tuple[str, str], str]:
+        """Resolve the Cloudflare token + zone and validate PRESENCE before provisioning.
+
+        The token param is an optional override for async callers that already resolved it;
+        sync callers (management commands) rely on the settings lookup here. This runs at
+        preflight so a *missing* DNS config fails before a paid VM is created (#347 GAP 3;
+        codex C2/C3). The read-only zone-access + fqdn-containment check runs in
+        ``_configure_dns`` (after the VM exists) — a wrong/unauthorized zone there fails
+        closed and the VM is compensated.
+        """
+        token = (token_override or "").strip() or str(
+            SettingsService.get_setting("node_deployment.dns_cloudflare_api_token") or ""
+        ).strip()
+        zone_id = str(SettingsService.get_setting("node_deployment.dns_cloudflare_zone_id") or "").strip()
+        if not token:
+            return Err("Cloudflare API token is not configured (node_deployment.dns_cloudflare_api_token)")
+        if not zone_id:
+            return Err("Cloudflare zone id is not configured (node_deployment.dns_cloudflare_zone_id)")
+        return Ok((token, zone_id))
+
+    def _configure_dns(
+        self,
+        deployment: NodeDeployment,
+        token: str,
+        zone_id: str,
+        log: Callable[[str, str], None],
+    ) -> Result[None, str]:
+        """Create/reconcile the node's A (+AAAA) records; persist ids immediately.
+
+        Applied records are persisted with their own ``update_fields`` save BEFORE any error
+        is returned, so a created A record is never leaked when a later record fails (#347
+        GAP 3; codex C5 / reviewer H5 — the update_fields-drop trap).
+        """
+        owner_tag = self._dns_owner_tag(deployment)
+        fqdn = deployment.fqdn
+        try:
+            gateway = get_dns_gateway("cloudflare", token)
+        except ValueError as exc:
+            return Err(f"DNS provider unavailable: {exc}")
+
+        # Read-only zone check: confirm the token has access and the zone actually contains
+        # the node fqdn. Fails closed — the caller compensates the just-provisioned VM
+        # (#347 GAP 3; codex M11).
+        zone_name_result = gateway.get_zone_name(zone_id)
+        if zone_name_result.is_err():
+            return Err(f"Cloudflare zone check failed: {zone_name_result.unwrap_err()}")
+        zone_name = zone_name_result.unwrap().lower().strip(".")
+        if not (fqdn.lower().strip(".") == zone_name or fqdn.lower().strip(".").endswith(f".{zone_name}")):
+            return Err(f"fqdn '{fqdn}' is not within Cloudflare zone '{zone_name}'")
+
+        ipv4 = deployment.ipv4_address
+        if not ipv4:
+            return Err("Cannot configure DNS: node has no IPv4 address")
+        specs = [DnsRecordSpec(record_type="A", name=fqdn, content=ipv4, owner_tag=owner_tag)]
+        ipv6 = deployment.ipv6_address
+        if ipv6:
+            specs.append(DnsRecordSpec(record_type="AAAA", name=fqdn, content=ipv6, owner_tag=owner_tag))
+
+        # Persist cleanup provenance BEFORE the first mutation: a create can be replayed by
+        # safe_request's DNS fallback, so a POST may reach Cloudflare even when the call ends in
+        # an error with no returned id. This intent marker gives owner-tag teardown a zone to
+        # sweep even when reconcile returns no applied records (codex P1).
+        deployment.dns_record_ids = [
+            {
+                "provider": "cloudflare",
+                "zone_id": zone_id,
+                "record_id": "",
+                "type": "intent",
+                "name": fqdn,
+                "owner_tag": owner_tag,
+            }
+        ]
+        deployment.save(update_fields=["dns_record_ids", "updated_at"])
+
+        outcome = gateway.reconcile_records(zone_id, specs, owner_tag)
+        if outcome.applied:
+            deployment.dns_record_ids = [r.as_provenance() for r in outcome.applied]
+            deployment.save(update_fields=["dns_record_ids", "updated_at"])
+            log("info", f"DNS configured: {', '.join(r.record_type for r in outcome.applied)} for {fqdn}")
+        if outcome.error:
+            return Err(f"DNS configuration failed: {outcome.error}")
+        return Ok(None)
+
+    @staticmethod
+    def _delete_owned_dns(deployment: NodeDeployment) -> None:
+        """Owner-scoped, best-effort DNS teardown; safe to call from every compensation path.
+
+        Deletes by owner tag (authoritative — reclaims replay orphans) in each record's own
+        stored zone, never the current setting. On any unconfirmed deletion, writes a durable
+        orphan marker so a future reconciler can find it; never raises (#347 GAP 3; codex
+        C1/C6/M10). No-op when the deployment created no records. Static so the scheduled
+        teardown task can call it without building the whole service.
+        """
+        from apps.infrastructure.models import NodeDeploymentLog  # noqa: PLC0415
+
+        entries = deployment.dns_record_ids or []
+        if not entries:
+            return
+        owner_tag = NodeDeploymentService._dns_owner_tag(deployment)
+        token = str(SettingsService.get_setting("node_deployment.dns_cloudflare_api_token") or "").strip()
+        zone_ids = {str(e.get("zone_id", "")) for e in entries if isinstance(e, dict) and e.get("zone_id")}
+
+        if not token or not zone_ids:
+            NodeDeploymentLog.objects.create(
+                deployment=deployment,
+                level="WARNING",
+                message=f"DNS teardown skipped (no token/zone); {len(entries)} record(s) may be orphaned",
+                phase="destroy",
+            )
+            return
+
+        try:
+            gateway = get_dns_gateway("cloudflare", token)
+        except ValueError as exc:
+            logger.warning(f"[Deployment:{deployment.hostname}] DNS teardown: provider unavailable: {exc}")
+            return
+
+        remaining: list[dict[str, Any]] = []
+        for zone_id in zone_ids:
+            result = gateway.delete_owned_records(zone_id, owner_tag)
+            if result.is_err():
+                logger.warning(
+                    f"[Deployment:{deployment.hostname}] DNS teardown failed for zone {zone_id}: {result.unwrap_err()}"
+                )
+                remaining.extend(e for e in entries if isinstance(e, dict) and e.get("zone_id") == zone_id)
+
+        if remaining:
+            NodeDeploymentLog.objects.create(
+                deployment=deployment,
+                level="WARNING",
+                message=f"DNS teardown incomplete; {len(remaining)} orphaned record(s) need reconciliation",
+                phase="destroy",
+            )
+        deployment.dns_record_ids = remaining
+        deployment.save(update_fields=["dns_record_ids", "updated_at"])
+
     def _cleanup_resources(
         self,
         gateway: CloudProviderGateway,
@@ -1443,6 +1617,11 @@ class NodeDeploymentService:
                 logger.warning(
                     f"[Deployment:{hostname}] Cleanup: exception deleting {resource_type} '{resource_id}': {exc}"
                 )
+
+        # DNS records are created after the VM, so a post-DNS failure reaches this compensator.
+        # Remove any records this deployment owns so we never leave an A record pointing at a
+        # released IP (subdomain-takeover risk) — the third teardown path (#347 GAP 3).
+        self._delete_owned_dns(deployment)
 
         logger.info(f"[Deployment:{hostname}] Cleanup complete")
 
