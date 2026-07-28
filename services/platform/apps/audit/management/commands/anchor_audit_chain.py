@@ -30,7 +30,10 @@ class Command(BaseCommand):
         parser.add_argument(
             "--verify",
             action="store_true",
-            help="Verify the live chain against locally recorded anchors instead of publishing",
+            help=(
+                "Verify the live chain against the external anchor sink instead of publishing "
+                "(the local anchor table is used only to corroborate the sink)"
+            ),
         )
 
     def handle(self, *args: Any, **options: Any) -> None:

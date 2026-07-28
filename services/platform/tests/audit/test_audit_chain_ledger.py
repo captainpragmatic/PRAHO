@@ -713,6 +713,12 @@ class AnchorFailClosedTests(AuditChainLedgerTestCase):
         overrides.enable()
         self.addCleanup(overrides.disable)
 
+    def _sink_records(self) -> list[dict[str, Any]]:
+        """Read back what the sink actually holds — the operator's view of the evidence."""
+        if not self.anchor_path.exists():
+            return []
+        return [json.loads(line) for line in self.anchor_path.read_text().splitlines() if line.strip()]
+
     def test_truncation_is_caught_even_after_local_anchor_rows_are_deleted(self) -> None:
         """The headline bypass: delete the local anchors and the old verifier passed."""
         for index in range(3):
@@ -758,5 +764,69 @@ class AnchorFailClosedTests(AuditChainLedgerTestCase):
         # Attacker with filesystem access empties the anchor file.
         self.anchor_path.write_text("")
 
+        # Emptying the sink is itself critical (nothing left pinning the chain's reach); the
+        # local copy is what identifies WHICH anchor was removed.
         findings = AuditIntegrityService._verify_chain_anchors()
-        self.assertIn("anchor_missing_from_sink", self._finding_types(findings))
+        self.assertIn("anchor_sink_empty", self._finding_types(findings))
+
+    def test_empty_but_readable_sink_is_critical(self) -> None:
+        """A readable sink with zero anchors must not read as healthy (review finding).
+
+        With no anchor to compare against, nothing pins how far the chain must reach — the
+        same fail-open trap as an unreadable sink, just quieter.
+        """
+        self._event()
+        self.anchor_path.write_text("")
+
+        findings = AuditIntegrityService._verify_chain_anchors()
+
+        self.assertIn("anchor_sink_empty", self._finding_types(findings))
+        self.assertEqual(findings[0]["severity"], "critical")
+
+    def test_malformed_sink_record_is_a_finding_not_a_crash(self) -> None:
+        """Sink records are untrusted input; a bad one must not abort the whole check.
+
+        Raising here would be a denial of verification an attacker could trigger at will by
+        appending one junk line.
+        """
+        self._event()
+        AuditIntegrityService.publish_chain_anchor()
+        good = self._sink_records()[0]
+
+        malformed = [
+            {},  # nothing at all
+            {"sequence": "not-an-int", **{k: v for k, v in good.items() if k != "sequence"}},
+            {k: v for k, v in good.items() if k != "anchor_mac"},  # missing a required field
+            {"sequence": True, "link_count": 1, "head_chain_mac": "x", "anchor_mac": "y", "key_id": "z"},
+        ]
+        for record in malformed:
+            with self.subTest(record=record):
+                findings = AuditIntegrityService.verify_anchor_records([record])
+                self.assertIn("anchor_record_malformed", self._finding_types(findings))
+
+    def test_malformed_record_does_not_mask_a_valid_one(self) -> None:
+        """One junk line must not stop the real anchors from being checked."""
+        for index in range(3):
+            self._event(description=f"event {index}")
+        AuditIntegrityService.publish_chain_anchor()
+        good = self._sink_records()[0]
+
+        with connection.cursor() as cursor:
+            cursor.execute("DELETE FROM audit_chain_links WHERE sequence = 3")
+
+        findings = AuditIntegrityService.verify_anchor_records([{"junk": True}, good])
+
+        self.assertIn("anchor_record_malformed", self._finding_types(findings))
+        self.assertIn("chain_truncated_below_anchor", self._finding_types(findings))
+
+    def test_sink_is_read_without_loading_the_whole_file(self) -> None:
+        """Streamed line-by-line; behaviour must stay identical across many records."""
+        for index in range(5):
+            self._event(description=f"event {index}")
+            AuditIntegrityService.publish_chain_anchor()
+
+        result = AuditIntegrityService.read_anchor_sink_records()
+
+        self.assertTrue(result.is_ok())
+        self.assertEqual(len(result.unwrap()), 5)
+        self.assertEqual(AuditIntegrityService._verify_chain_anchors(), [])

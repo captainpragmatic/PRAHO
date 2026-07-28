@@ -3713,9 +3713,10 @@ class AuditIntegrityService:
             if not anchor_path.exists():
                 return Err(f"Anchor sink {path} does not exist - anchors were never published or were removed")
             try:
-                records = [
-                    json.loads(line) for line in anchor_path.read_text(encoding="utf-8").splitlines() if line.strip()
-                ]
+                # Streamed line by line rather than read_text(): this file grows without bound
+                # on a long-running system, and verification must not need it all resident.
+                with anchor_path.open(encoding="utf-8") as handle:
+                    records = [json.loads(line) for line in handle if line.strip()]
             except (OSError, ValueError) as e:
                 return Err(f"Anchor sink read failed: {e}")
             return Ok(records)
@@ -3754,6 +3755,21 @@ class AuditIntegrityService:
             ]
 
         sink_records = sink_result.unwrap()
+        if not sink_records:
+            # A readable but EMPTY sink is not a pass. With no anchor to compare against there
+            # is nothing pinning how far the chain must reach, so truncation cannot be ruled
+            # out — the same fail-open trap as an unreadable sink, just quieter.
+            return [
+                {
+                    "type": "anchor_sink_empty",
+                    "severity": "critical",
+                    "description": (
+                        "External anchor sink contains no anchor records. Tail truncation "
+                        "cannot be ruled out - run anchor_audit_chain."
+                    ),
+                }
+            ]
+
         findings = cls.verify_anchor_records(sink_records)
 
         # Corroborate against the local copy: anything anchored locally but missing from the
@@ -3773,19 +3789,50 @@ class AuditIntegrityService:
         )
         return findings
 
+    @staticmethod
+    def _anchor_record_is_well_formed(anchor: Any) -> bool:
+        """Whether an untrusted anchor record carries every field, at the right type."""
+        if not isinstance(anchor, dict):
+            return False
+        # bool is a subclass of int, so it would otherwise pass as a sequence/count.
+        if not all(
+            isinstance(anchor.get(field), int) and not isinstance(anchor.get(field), bool)
+            for field in ("sequence", "link_count")
+        ):
+            return False
+        return all(isinstance(anchor.get(field), str) for field in ("head_chain_mac", "anchor_mac", "key_id"))
+
     @classmethod
     def verify_anchor_records(cls, anchors: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Verify the live chain against externally supplied anchor records (#313).
 
         Takes anchors as plain dicts precisely so an operator can feed in lines read back from
         the sink — the copy an in-database attacker could not reach.
+
+        Anchor records are UNTRUSTED input: anyone able to append to the sink can write a
+        record with missing or wrong-typed fields. A malformed record is reported as a critical
+        finding and skipped, never allowed to raise — an exception here would abort the whole
+        integrity check, which is a denial of verification an attacker could trigger at will.
         """
         from apps.audit.models import AuditChainLink  # noqa: PLC0415  # avoid app-load cycle
 
         findings: list[dict[str, Any]] = []
         keys_by_id = dict(cls._anchor_keys())
 
-        for anchor in anchors:
+        for index, anchor in enumerate(anchors):
+            if not cls._anchor_record_is_well_formed(anchor):
+                findings.append(
+                    {
+                        "type": "anchor_record_malformed",
+                        "severity": "critical",
+                        "description": (
+                            f"Anchor record at position {index} is malformed or has wrong field "
+                            f"types - it cannot be used to verify the chain"
+                        ),
+                    }
+                )
+                continue
+
             sequence = anchor["sequence"]
 
             key = keys_by_id.get(anchor.get("key_id", ""))
