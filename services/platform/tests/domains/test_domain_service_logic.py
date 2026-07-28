@@ -15,7 +15,14 @@ from apps.domains.services import DomainLifecycleService, DomainOrderService, Do
 from apps.orders.models import Order
 
 
-class DomainServiceLogicTests(TestCase):
+class DomainFixtureMixin:
+    """Shared TLD/registrar/customer fixture.
+
+    A mixin rather than a concrete base: subclassing DomainServiceLogicTests to reuse its setUp
+    made the test runner re-execute all of its tests under the subclass too (21 executed for 13
+    unique).
+    """
+
     def setUp(self) -> None:
         self.ro = TLD.objects.create(
             extension="ro",
@@ -87,6 +94,8 @@ class DomainServiceLogicTests(TestCase):
             customer_name=self.customer.name,
         )
 
+
+class DomainServiceLogicTests(DomainFixtureMixin, TestCase):
     def test_longest_configured_tld_suffix_wins(self) -> None:
         self.assertEqual(DomainValidationService.extract_tld_from_domain("Shop.Example.COM.RO"), "com.ro")
         self.assertEqual(DomainValidationService.extract_tld_from_domain("example.ro"), "ro")
@@ -226,7 +235,7 @@ class DomainServiceLogicTests(TestCase):
         self.assertEqual(DomainOrderItem.objects.count(), 2)
 
 
-class DomainOrderRenewTransferProcessingTests(DomainServiceLogicTests):
+class DomainOrderRenewTransferProcessingTests(DomainFixtureMixin, TestCase):
     """#430: renew items must link the owned Domain and be processable; transfer/unhandled
     actions must be logged, not silently dropped."""
 
@@ -292,3 +301,66 @@ class DomainOrderRenewTransferProcessingTests(DomainServiceLogicTests):
 
         self.assertEqual(processed, [])
         self.assertTrue(any("not auto-processed" in m for m in logs.output))
+
+    def test_process_logs_unhandled_action_instead_of_silent_drop(self) -> None:
+        """The catch-all `else` branch — previously claimed covered, but nothing exercised it."""
+        DomainOrderItem.objects.create(
+            order=self.order, domain_name="mystery.ro", tld=self.ro, action="teleport", years=1,
+            unit_price_cents=100, total_price_cents=100,
+        )
+
+        with self.assertLogs("apps.domains.services", level="ERROR") as logs:
+            processed = DomainOrderService.process_domain_order_items(self.order)
+
+        self.assertEqual(processed, [])
+        self.assertTrue(any("Unhandled domain order item action" in m for m in logs.output))
+
+    def test_unhandled_action_does_not_abort_remaining_items(self) -> None:
+        """One malformed item must not stop the order's valid items from processing."""
+        domain = self._owned_domain("valid.ro")
+        DomainOrderItem.objects.create(
+            order=self.order, domain_name="mystery.ro", tld=self.ro, action="teleport", years=1,
+            unit_price_cents=100, total_price_cents=100,
+        )
+        DomainOrderService.create_domain_order_item(
+            order=self.order, domain_name="valid.ro", action="renew", years=1
+        )
+
+        with (
+            self.assertLogs("apps.domains.services", level="ERROR"),
+            patch.object(DomainLifecycleService, "process_domain_renewal", return_value=_Ok(domain)),
+        ):
+            processed = DomainOrderService.process_domain_order_items(self.order)
+
+        self.assertIn(domain, processed)
+
+    def test_process_refuses_to_renew_another_customers_domain(self) -> None:
+        """Ownership is re-checked at processing time, not only when the link is created.
+
+        DomainOrderItem rows can be created outside create_domain_order_item (admin, imports,
+        direct ORM), so the link-step `customer=` filter is not a boundary this path can rely on.
+        """
+        other_customer = Customer.objects.create(
+            name="Other Owner",
+            company_name="Other Owner SRL",
+            customer_type="company",
+            primary_email="other@example.test",
+            primary_phone="+40799999999",
+        )
+        foreign_domain = Domain.objects.create(
+            name="foreign.ro", tld=self.ro, registrar=self.ro_registrar, customer=other_customer, status="active"
+        )
+        DomainOrderItem.objects.create(
+            order=self.order, domain_name="foreign.ro", tld=self.ro, action="renew", years=1,
+            unit_price_cents=900, total_price_cents=900, domain=foreign_domain,
+        )
+
+        with (
+            self.assertLogs("apps.domains.services", level="ERROR") as logs,
+            patch.object(DomainLifecycleService, "process_domain_renewal") as mock_renew,
+        ):
+            processed = DomainOrderService.process_domain_order_items(self.order)
+
+        mock_renew.assert_not_called()
+        self.assertEqual(processed, [])
+        self.assertTrue(any("refusing to renew" in m for m in logs.output))

@@ -1032,9 +1032,16 @@ class DomainOrderService:
         # #430: a renew acts on an EXISTING domain the customer owns. Link it here so
         # process_domain_order_items can reach the renew branch — its guard was
         # `item.action == "renew" and item.domain`, never true because .domain was never set, so
-        # every renew item was silently skipped. Link the owned Domain when it exists; if it does
-        # not, still create the item (ownership is validated at processing time, where an
-        # unlinked renew now logs loudly instead of being dropped).
+        # every renew item was silently skipped.
+        #
+        # The `customer=` filter means an unlinked renew is the EXPECTED shape when this customer
+        # does not own the domain — the item is still created, and processing logs it rather than
+        # renewing anything. This filter is not the security boundary on its own (rows can be
+        # created outside this method); process_domain_order_items re-checks ownership on the
+        # linked domain before renewing.
+        #
+        # TODO(#442): `.lower()` assumes Domain.name is stored lowercase, which is not enforced at
+        # the model/DB layer — a stored "Example.RO" would silently fail to link here.
         existing_domain: Domain | None = None
         if action == "renew":
             existing_domain = Domain.objects.filter(name=domain_name.lower(), customer=order.customer).first()
@@ -1072,7 +1079,11 @@ class DomainOrderService:
 
         processed_domains = []
 
-        domain_items = DomainOrderItem.objects.filter(order=order).select_related("tld")
+        # select_related the renew path's dereferences too: item.domain (+ its tld/registrar)
+        # is read per item below, which would otherwise be a query per renewal.
+        domain_items = DomainOrderItem.objects.filter(order=order).select_related(
+            "tld", "domain", "domain__tld", "domain__registrar"
+        )
 
         for item in domain_items:
             if item.action == "register":
@@ -1089,24 +1100,54 @@ class DomainOrderService:
                     item.domain = domain
                     item.save(update_fields=["domain"])
                     processed_domains.append(domain)
-                    logger.info("Processed registration: %s", item.domain_name)
+                    logger.info("✅ [Domain] Processed registration: %s", item.domain_name)
                 else:
-                    logger.error("Failed to process registration %s: %s", item.domain_name, result.unwrap_err())
+                    logger.error(
+                        "🔥 [Domain] Failed to process registration %s: %s",
+                        item.domain_name,
+                        result.unwrap_err(),
+                    )
 
             elif item.action == "renew":
-                # #430: a renew item without a linked domain is a data defect (create_domain_order_item
-                # now always links it). Log loudly instead of silently skipping.
+                # #430: create_domain_order_item links the Domain only when the ordering customer
+                # already owns it, so an unlinked renew is the expected shape for a domain this
+                # customer does not own (or that did not exist at order time) — not necessarily a
+                # data defect. Either way it cannot be renewed here, so log it rather than
+                # silently skipping.
                 if item.domain is None:
-                    logger.error("Renew item %s has no linked domain — skipping (data defect)", item.domain_name)
+                    logger.error(
+                        "🔥 [Domain] Renew item %s has no linked domain (not owned by this customer "
+                        "at order time, or created outside create_domain_order_item) — skipping",
+                        item.domain_name,
+                    )
+                    continue
+
+                # Ownership is re-checked HERE, not just at link time: DomainOrderItem rows can be
+                # created outside create_domain_order_item (admin, imports, direct ORM), so the
+                # link-step `customer=` filter is not a boundary this path can rely on. Without
+                # this, a row pointing at another customer's domain would renew it on their behalf.
+
+                if item.domain.customer_id != order.customer_id:
+                    logger.error(
+                        "🔥 [Domain] Renew item %s links domain owned by customer %s but the order "
+                        "belongs to customer %s — refusing to renew",
+                        item.domain_name,
+                        item.domain.customer_id,
+                        order.customer_id,
+                    )
                     continue
 
                 renewal_result = DomainLifecycleService.process_domain_renewal(domain=item.domain, years=item.years)
 
                 if renewal_result.is_ok():
                     processed_domains.append(item.domain)
-                    logger.info("Processed renewal: %s", item.domain_name)
+                    logger.info("✅ [Domain] Processed renewal: %s", item.domain_name)
                 else:
-                    logger.error("Failed to process renewal %s: %s", item.domain_name, renewal_result.unwrap_err())
+                    logger.error(
+                        "🔥 [Domain] Failed to process renewal %s: %s",
+                        item.domain_name,
+                        renewal_result.unwrap_err(),
+                    )
 
             elif item.action == "transfer":
                 # #430: inbound transfer creates a new Domain via initiate_transfer, which needs a
@@ -1114,14 +1155,21 @@ class DomainOrderService:
                 # intentionally NOT auto-processed here. Log explicitly instead of dropping it
                 # silently; wiring registrar selection for transfers is tracked separately.
                 logger.warning(
-                    "Transfer item %s is not auto-processed (registrar selection for order-driven "
-                    "transfers is not wired yet) — handle via initiate_transfer",
+                    "⚠️ [Domain] Transfer item %s is not auto-processed (registrar selection for "
+                    "order-driven transfers is not wired yet) — handle via initiate_transfer",
                     item.domain_name,
                 )
 
             else:
-                # #430: any unhandled action must be visible, not silently dropped.
-                logger.error("Unhandled domain order item action %r for %s", item.action, item.domain_name)
+                # #430: any unhandled action must be VISIBLE, not silently dropped. This logs and
+                # continues rather than raising: one malformed item must not abort processing of
+                # the order's remaining (valid) items. Per-item outcomes are not yet returned to
+                # the caller — tracked as a before-wiring follow-up.
+                logger.error(
+                    "🔥 [Domain] Unhandled domain order item action %r for %s — item not processed",
+                    item.action,
+                    item.domain_name,
+                )
 
         return processed_domains
 
