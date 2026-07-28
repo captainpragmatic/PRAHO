@@ -460,6 +460,18 @@ def bulk_validate_nodes_task() -> dict[str, Any]:
     }
 
 
+def _teardown_owned_dns(deployment: Any) -> None:
+    """Best-effort owner-scoped DNS deletion for the teardown sweep; never raises."""
+    try:
+        from apps.infrastructure.deployment_service import (  # noqa: PLC0415  # Deferred: avoids circular import
+            NodeDeploymentService,  # Circular: cross-app
+        )
+
+        NodeDeploymentService._delete_owned_dns(deployment)
+    except Exception as dns_exc:
+        logger.warning(f"[Task:cleanup] DNS teardown raised for {deployment.hostname}: {dns_exc}")
+
+
 def _teardown_cloud_deployment(deployment: Any) -> Result[bool, str]:  # noqa: PLR0911  # Convergent teardown: one early Err per distinct failure mode (claim/token/delete/save)
     """Idempotent, convergent teardown for a failed/stranded deployment.
 
@@ -490,6 +502,11 @@ def _teardown_cloud_deployment(deployment: Any) -> Result[bool, str]:  # noqa: P
             deployment.transition_to("destroying", "Scheduled teardown of failed deployment")
         except Exception as e:
             return Err(f"Cannot start teardown for {deployment.hostname}: {e}")
+
+    # Delete owned DNS first (best-effort, owner-scoped). This is the compensation path the
+    # common failed-deploy case actually takes, so DNS cleanup must live here too — not only
+    # in destroy_node (#347 GAP 3). Idempotent on retry; must never crash the sweep.
+    _teardown_owned_dns(deployment)
 
     # Delete the cloud server if one was ever created.
     if deployment.external_node_id and deployment.provider:

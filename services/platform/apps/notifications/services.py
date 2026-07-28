@@ -450,6 +450,24 @@ class EmailService:
                 error="Rate limit exceeded",
             )
 
+        # #358: async tasks travel by value through the django-q2 Postgres ORM broker, so full
+        # attachment bytes (base64-inflated ~1.33x) would be persisted in django_q_ormq and
+        # re-persisted on retry. Above a configurable cap, send synchronously instead: the bytes
+        # are handled in-process and never bloat the broker table. Delivery is preserved.
+        if async_send and attachments:
+            total_attachment_bytes = sum(len(content) for _name, content, _mimetype in attachments)
+            max_async_attachment_bytes = (
+                SettingsService.get_integer_setting("notifications.max_async_attachment_kb", 5120) * 1024
+            )
+            if max_async_attachment_bytes > 0 and total_attachment_bytes > max_async_attachment_bytes:
+                logger.warning(
+                    "Email attachments total %d bytes exceed the async cap (%d bytes); "
+                    "sending synchronously to avoid bloating the task broker (#358)",
+                    total_attachment_bytes,
+                    max_async_attachment_bytes,
+                )
+                async_send = False
+
         # Send asynchronously if requested
         if async_send:
             return cls._send_async(

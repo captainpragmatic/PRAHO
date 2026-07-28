@@ -153,3 +153,79 @@ class RateLimitedQueueTestCase(TestCase):
         self.assertEqual(kwargs.get("cc"), ["cc@example.ro"])
         self.assertEqual(kwargs.get("bcc"), ["bcc@example.ro"])
         self.assertEqual(kwargs.get("tags"), {"kind": "proforma"})
+
+
+class AttachmentSizeGuardTestCase(TestCase):
+    """#358: oversized async attachments are sent synchronously, not through the broker.
+
+    Full attachment bytes travel by value through the django-q2 Postgres ORM broker
+    (base64-inflated ~1.33x, re-persisted on retry). Above a configurable cap the send
+    downgrades to synchronous so the bytes never bloat the queue table.
+    """
+
+    def _get_int_setting(self, cap_kb: int):
+        """Return a get_integer_setting stub honouring the #358 cap, defaults otherwise."""
+
+        def _stub(key: str, default: int = 0) -> int:
+            if key == "notifications.max_async_attachment_kb":
+                return cap_kb
+            return default
+
+        return _stub
+
+    @patch("django_q.tasks.async_task")
+    def test_small_attachment_still_goes_async(self, mock_async_task) -> None:
+        mock_async_task.return_value = "task-1"
+        with patch(
+            "apps.notifications.services.SettingsService.get_integer_setting",
+            side_effect=self._get_int_setting(5120),
+        ):
+            EmailService.send_email(
+                to="customer@example.ro",
+                subject="Small",
+                body_text="ok",
+                attachments=[_PDF],  # a few bytes, well under 5 MB
+                async_send=True,
+            )
+        self.assertTrue(mock_async_task.called, "a small attachment must still be queued async")
+
+    @patch("django_q.tasks.async_task")
+    def test_oversized_attachment_downgrades_to_sync(self, mock_async_task) -> None:
+        mock_async_task.return_value = "task-2"
+        big = ("big.pdf", b"x" * 4096, "application/pdf")  # 4 KB
+        mail.outbox.clear()
+        with patch(
+            "apps.notifications.services.SettingsService.get_integer_setting",
+            side_effect=self._get_int_setting(1),  # 1 KB cap → 4 KB attachment is over
+        ):
+            EmailService.send_email(
+                to="customer@example.ro",
+                subject="Big",
+                body_text="over cap",
+                attachments=[big],
+                async_send=True,
+            )
+        self.assertFalse(
+            mock_async_task.called,
+            "an oversized attachment must NOT be enqueued to the broker",
+        )
+        # It was sent synchronously in-process instead.
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].attachments, [big])
+
+    @patch("django_q.tasks.async_task")
+    def test_cap_zero_always_allows_async(self, mock_async_task) -> None:
+        mock_async_task.return_value = "task-3"
+        big = ("big.pdf", b"x" * 100_000, "application/pdf")
+        with patch(
+            "apps.notifications.services.SettingsService.get_integer_setting",
+            side_effect=self._get_int_setting(0),  # 0 disables the guard
+        ):
+            EmailService.send_email(
+                to="customer@example.ro",
+                subject="Big but allowed",
+                body_text="cap disabled",
+                attachments=[big],
+                async_send=True,
+            )
+        self.assertTrue(mock_async_task.called, "cap=0 must always allow async")

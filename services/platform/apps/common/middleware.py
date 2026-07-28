@@ -567,7 +567,10 @@ class PortalServiceHMACMiddleware:
                     request.method == "GET"
                     and getattr(request, "user", None)
                     and getattr(request.user, "is_authenticated", False)
-                    and getattr(request.user, "is_staff", False)
+                    # Use the canonical is_staff_user so role-only staff (staff_role set,
+                    # is_staff=False) — already admitted to the page by the is_staff_user
+                    # platform gate — aren't denied the browser fetch it makes (#271).
+                    and getattr(request.user, "is_staff_user", False)
                     and any(request.path.startswith(p) for p in staff_session_allowed_prefixes)
                 ):
                     logger.debug(
