@@ -45,6 +45,9 @@ urlpatterns = [
     # Security and Compliance Alerts
     path("alerts/", views.alerts_dashboard, name="alerts_dashboard"),
     path("alerts/<uuid:alert_id>/update/", views.update_alert_status, name="update_alert_status"),
+    # Flagged-Event Review Queue (#400)
+    path("review/", views.review_queue, name="review_queue"),
+    path("review/<uuid:event_id>/mark/", views.mark_event_reviewed, name="mark_event_reviewed"),
     # Legacy/Admin URLs (Maintained for Backward Compatibility)
     path("log/", views.audit_log, name="log"),  # Kept for backward compatibility
     path("export/", views.export_data, name="export"),  # Redirects to GDPR dashboard
