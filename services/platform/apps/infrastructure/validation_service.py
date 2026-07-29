@@ -37,6 +37,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+WEBMIN_PORT = 10000
+
 VIRTUALMIN_CHECK_POLICY = OutboundPolicy(
     name="virtualmin_check",
     require_https=False,
@@ -439,53 +441,126 @@ class NodeValidationService:
             )
 
     def _check_ssl(self, deployment: NodeDeployment) -> ValidationResult:
-        """Check SSL certificate for Webmin"""
+        """Check the Webmin TLS listener, and REPORT whether its certificate is CA-trusted.
+
+        #436 item 3: this check used ``verify_mode=CERT_NONE`` + ``check_hostname=False``
+        and then passed on ``ssock.version()`` alone, so **any** TLS listener passed —
+        self-signed, wrong-SAN, expired, all reported as "SSL/TLS enabled". A node could
+        reach ``active`` while serving a self-signed panel certificate and nothing said so.
+
+        This now performs a real trust-chain handshake (system trust store,
+        ``CERT_REQUIRED``, SNI/hostname validation against the deployment fqdn) and records
+        the verdict in ``details`` and the message.
+
+        It deliberately does **not** fail the check on an untrusted certificate. Per #436
+        that flip is a rollout decision requiring a staging drill against a real node and
+        Let's Encrypt staging — every node currently serving a self-signed cert would start
+        failing validation the moment it lands. Reporting first makes the true per-node
+        state visible (and gives the drill something to read) at zero rollout risk.
+        """
         try:
-            context = ssl.create_default_context()
-            context.check_hostname = False
-            context.verify_mode = ssl.CERT_NONE
-
-            with (
-                socket.create_connection((deployment.ipv4_address, 10000), timeout=self.timeout) as sock,
-                context.wrap_socket(sock) as ssock,
-            ):
-                cert = ssock.getpeercert(binary_form=False)
-
-                # Even with self-signed, we want SSL working
-                if cert or ssock.version():
-                    return ValidationResult(
-                        check_name="ssl",
-                        passed=True,
-                        message=f"SSL/TLS enabled ({ssock.version()})",
-                        details={
-                            "protocol": ssock.version(),
-                            "cipher": ssock.cipher(),
-                        },
-                    )
-                return ValidationResult(
-                    check_name="ssl",
-                    passed=True,
-                    message="SSL/TLS enabled (self-signed certificate)",
-                )
-
-        except ssl.SSLError as e:
-            return ValidationResult(
-                check_name="ssl",
-                passed=False,
-                message=f"SSL error: {e}",
-            )
+            trust = self._probe_tls_trust(deployment)
         except TimeoutError:
             return ValidationResult(
                 check_name="ssl",
                 passed=False,
                 message="SSL connection timed out",
             )
-        except Exception as e:
+        except OSError as e:
             return ValidationResult(
                 check_name="ssl",
                 passed=False,
                 message=f"SSL check failed: {e}",
             )
+
+        if not trust["tls_available"]:
+            return ValidationResult(
+                check_name="ssl",
+                passed=False,
+                message=f"SSL error: {trust['error']}",
+            )
+
+        if trust["trusted"]:
+            message = f"SSL/TLS enabled and certificate is CA-trusted for {trust['expected_hostname']}"
+        else:
+            # Explicit about WHY, so the operator/drill can tell self-signed from
+            # wrong-SAN from expired without re-probing by hand.
+            message = (
+                f"SSL/TLS enabled ({trust['protocol']}) but the certificate is NOT CA-trusted "
+                f"for {trust['expected_hostname']}: {trust['trust_error']} — see #436"
+            )
+
+        return ValidationResult(
+            check_name="ssl",
+            passed=True,  # #436: reporting only; do not gate deployments until the staging drill
+            message=message,
+            details={
+                "protocol": trust["protocol"],
+                "cipher": trust["cipher"],
+                "trusted": trust["trusted"],
+                "expected_hostname": trust["expected_hostname"],
+                "trust_error": trust["trust_error"],
+            },
+        )
+
+    def _probe_tls_trust(self, deployment: NodeDeployment) -> dict[str, Any]:
+        """Handshake twice: once verified (for the trust verdict), once not (for liveness).
+
+        Two handshakes because a verified handshake that fails tells us nothing about the
+        connection — an untrusted certificate and a dead port both raise. The unverified
+        pass establishes that TLS is actually being served and captures protocol/cipher;
+        the verified pass answers only "is this certificate trusted for the fqdn".
+        """
+        host = deployment.ipv4_address
+        expected_hostname = deployment.fqdn or host
+
+        result: dict[str, Any] = {
+            "tls_available": False,
+            "protocol": None,
+            "cipher": None,
+            "trusted": False,
+            "expected_hostname": expected_hostname,
+            "trust_error": None,
+            "error": None,
+        }
+
+        # Pass 1 — liveness (unverified). Mirrors the previous behaviour exactly.
+        unverified = ssl.create_default_context()
+        unverified.check_hostname = False
+        unverified.verify_mode = ssl.CERT_NONE
+        try:
+            with (
+                socket.create_connection((host, WEBMIN_PORT), timeout=self.timeout) as sock,
+                unverified.wrap_socket(sock) as ssock,
+            ):
+                result["tls_available"] = True
+                result["protocol"] = ssock.version()
+                result["cipher"] = ssock.cipher()
+        except ssl.SSLError as e:
+            result["error"] = str(e)
+            return result
+
+        # Pass 2 — trust verdict (verified, with SNI). A failure here is a finding, not an
+        # error: it is the answer to the question, so it must never propagate as an exception.
+        verified = ssl.create_default_context()
+        verified.check_hostname = True
+        verified.verify_mode = ssl.CERT_REQUIRED
+        try:
+            with (
+                socket.create_connection((host, WEBMIN_PORT), timeout=self.timeout) as sock,
+                verified.wrap_socket(sock, server_hostname=expected_hostname),
+            ):
+                result["trusted"] = True
+        except ssl.SSLCertVerificationError as e:
+            result["trust_error"] = e.verify_message or str(e)
+        except ssl.SSLError as e:
+            result["trust_error"] = str(e)
+        except OSError as e:
+            # The port answered on pass 1, so a failure here is about the certificate or
+            # the name — record it rather than letting it look like an outage.
+            result["trust_error"] = str(e)
+
+        return result
 
     def _is_port_open(self, host: str, port: int) -> bool:
         """Check if a TCP port is open"""
