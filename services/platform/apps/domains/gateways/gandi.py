@@ -227,8 +227,19 @@ class GandiGateway(BaseRegistrarGateway):
     # -- Phase 2 operations --------------------------------------------------
 
     def _do_initiate_transfer(self, domain_name: str, epp_code: str) -> Result[DomainTransferResult, RegistrarAPIError]:
+        # #265: the auth code field is `authinfo`, not `auth_info` — Gandi rejects the
+        # latter, so real inbound transfers never started. See
+        # https://api.gandi.net/docs/domains/ (POST /v5/domain/transferin).
+        #
+        # NOTE: Gandi also requires an `owner` contact object on transfer-in. It is not
+        # sent here because the gateway's initiate_transfer(domain_name, epp_code)
+        # signature carries no registrant data — threading it through means changing the
+        # base interface, both adapters, and DomainService.initiate_transfer (which does
+        # have the Customer). Tracked as the remaining half of #265; transfer-in stays
+        # unusable until then, but it now fails on a missing contact rather than on a
+        # field name, which is the error a sandbox run needs to surface.
         url = f"{GANDI_API_BASE}/domain/transferin"
-        body: dict[str, Any] = {"fqdn": domain_name, "auth_info": epp_code}
+        body: dict[str, Any] = {"fqdn": domain_name, "authinfo": epp_code}
 
         sharing_id = self._get_sharing_id()
         if sharing_id:
@@ -284,10 +295,13 @@ class GandiGateway(BaseRegistrarGateway):
     def _do_update_nameservers(
         self, domain_name: str, nameservers: list[str]
     ) -> Result[NameserverUpdateResult, RegistrarAPIError]:
+        # #265: the endpoint expects the documented object wrapper {"nameservers": [...]},
+        # not a bare array. A bare array is a client error, so the update could never
+        # succeed — the service correctly reported failure, but for the wrong reason.
         url = f"{GANDI_API_BASE}/domain/domains/{domain_name}/nameservers"
 
         try:
-            response = self._api_request("PUT", url, json=nameservers, headers=self._auth_headers())
+            response = self._api_request("PUT", url, json={"nameservers": nameservers}, headers=self._auth_headers())
         except requests.RequestException as exc:
             # Nameserver update is a mutation — may have applied; UNKNOWN default.
             return Err(RegistrarTransientError(self.registrar.name, f"Network error: {exc}"))
@@ -297,9 +311,13 @@ class GandiGateway(BaseRegistrarGateway):
         return self._handle_error_response(response, f"update nameservers for {domain_name}")
 
     def _do_set_lock(self, domain_name: str, locked: bool) -> Result[DomainLockResult, RegistrarAPIError]:
-        url = f"{GANDI_API_BASE}/domain/domains/{domain_name}"
-        # Gandi uses PATCH on domain to toggle transfer lock
-        body: dict[str, Any] = {"tags": ["locked"]} if locked else {"autorenew": None}
+        # #265: transfer lock lives on the /status sub-resource, not the domain resource.
+        # The previous body patched the DOMAIN with tags/autorenew, so lock/unlock never
+        # touched the transfer-lock state at all — and unlock sent {"autorenew": None},
+        # which risked clearing autorenew instead. See https://api.gandi.net/docs/domains/
+        # (PATCH /v5/domain/domains/{domain}/status).
+        url = f"{GANDI_API_BASE}/domain/domains/{domain_name}/status"
+        body: dict[str, Any] = {"clientTransferProhibited": locked}
 
         try:
             response = self._api_request("PATCH", url, json=body, headers=self._auth_headers())
