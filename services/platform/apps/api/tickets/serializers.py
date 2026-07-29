@@ -103,12 +103,32 @@ class TicketListSerializer(serializers.ModelSerializer):
         return ""
 
     def get_comments_count(self, obj: "Ticket") -> int:
-        """Get number of comments/replies"""
-        return obj.comments.count()
+        """Get number of comments/replies.
+
+        #278: honors the same ``for_customer`` context as TicketDetailSerializer.get_comments.
+        An unfiltered count told a customer how many internal notes staff had written on
+        their ticket — the same count-disclosure already fixed on the web surface.
+
+        Prefers the queryset annotation (see _visible_count_annotations) so a list of N
+        tickets costs one query rather than N.
+        """
+        annotated = getattr(obj, "visible_comments_count", None)
+        if annotated is not None:
+            return int(annotated)
+        qs = obj.comments.all()
+        if self.context.get("for_customer"):
+            qs = qs.filter(is_public=True)
+        return qs.count()
 
     def get_attachments_count(self, obj: "Ticket") -> int:
-        """Get number of attachments"""
-        return obj.attachments.count()
+        """Get number of attachments (attachments on non-public comments stay hidden)."""
+        annotated = getattr(obj, "visible_attachments_count", None)
+        if annotated is not None:
+            return int(annotated)
+        qs = obj.attachments.all()
+        if self.context.get("for_customer"):
+            qs = qs.filter(comment__is_public=True)
+        return qs.count()
 
 
 # ===============================================================================
