@@ -919,3 +919,86 @@ class CouponRedemptionReveralTests(TestCase):
 
         self.campaign.refresh_from_db()
         self.assertEqual(self.campaign.spent_cents, 0)
+
+    def test_concurrent_reversal_decrements_counters_exactly_once(self):
+        """#421: two removals racing the same redemption must not double-decrement.
+
+        mark_reversed() guarded on an in-memory ``self.status`` read and then wrote
+        blindly, so two callers holding separate instances of the SAME row both passed
+        the guard and both issued ``-1`` / ``-discount_cents``. Fetching the row twice
+        reproduces that interleaving deterministically on any backend (select_for_update
+        is a no-op on SQLite, so a thread-based test would prove nothing here).
+        """
+        result = CouponService.apply_coupon(
+            code="REVERSAL",
+            order=self.order,
+            customer=self.customer,
+        )
+        self.assertTrue(result.success)
+
+        self.coupon.refresh_from_db()
+        self.campaign.refresh_from_db()
+        self.assertEqual(self.coupon.total_uses, 1)
+        self.assertEqual(self.coupon.total_discount_cents, 2000)
+        self.assertEqual(self.campaign.spent_cents, 2000)
+
+        # Two independent instances of the same row — the shape of two concurrent
+        # remove_coupon() calls that both read status='applied' before either wrote.
+        first = CouponRedemption.objects.get(id=result.redemption_id)
+        second = CouponRedemption.objects.get(id=result.redemption_id)
+
+        first.mark_reversed()
+        second.mark_reversed()
+
+        self.coupon.refresh_from_db()
+        self.campaign.refresh_from_db()
+        self.assertEqual(self.coupon.total_uses, 0, "total_uses decremented twice")
+        self.assertEqual(self.coupon.total_discount_cents, 0, "total_discount_cents decremented twice")
+        self.assertEqual(self.campaign.spent_cents, 0, "campaign spend decremented twice")
+
+    def test_counters_never_go_negative_on_repeated_reversal(self):
+        """The observable damage: counters driven below zero are not recoverable."""
+        result = CouponService.apply_coupon(
+            code="REVERSAL",
+            order=self.order,
+            customer=self.customer,
+        )
+        self.assertTrue(result.success)
+
+        for _ in range(3):
+            CouponRedemption.objects.get(id=result.redemption_id).mark_reversed()
+
+        self.coupon.refresh_from_db()
+        self.campaign.refresh_from_db()
+        self.assertGreaterEqual(self.coupon.total_uses, 0)
+        self.assertGreaterEqual(self.coupon.total_discount_cents, 0)
+        self.assertGreaterEqual(self.campaign.spent_cents, 0)
+
+    def test_reversal_is_idempotent_and_reports_whether_it_acted(self):
+        """mark_reversed() must tell the caller whether THIS call did the reversal."""
+        result = CouponService.apply_coupon(
+            code="REVERSAL",
+            order=self.order,
+            customer=self.customer,
+        )
+        redemption = CouponRedemption.objects.get(id=result.redemption_id)
+
+        self.assertTrue(redemption.mark_reversed(), "first reversal should report success")
+        self.assertFalse(
+            CouponRedemption.objects.get(id=result.redemption_id).mark_reversed(),
+            "second reversal should report that it did nothing",
+        )
+
+    def test_stale_instance_reversal_refreshes_local_state(self):
+        """A caller holding a stale instance must not be left thinking it is 'applied'."""
+        result = CouponService.apply_coupon(
+            code="REVERSAL",
+            order=self.order,
+            customer=self.customer,
+        )
+        stale = CouponRedemption.objects.get(id=result.redemption_id)
+        CouponRedemption.objects.get(id=result.redemption_id).mark_reversed()
+
+        self.assertFalse(stale.mark_reversed())
+        self.assertEqual(stale.status, "reversed")
+        self.assertIsNotNone(stale.reversed_at)
