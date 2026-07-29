@@ -8,6 +8,8 @@ from django.db import connection
 from django.db.migrations.executor import MigrationExecutor
 from django.test import TransactionTestCase
 
+from tests.helpers.migrations import restore_to_leaf
+
 MIGRATE_FROM = ("customers", "0019_bind_payment_method_encryption_context")
 MIGRATE_TO = ("customers", "0020_make_vat_rate_override_optional")
 
@@ -44,7 +46,10 @@ class VATRateOverrideMigrationTest(TransactionTestCase):
             self.profile_ids[label] = profile.pk
 
     def tearDown(self) -> None:
-        MigrationExecutor(connection).migrate([MIGRATE_TO])
+        # Restore the CURRENT leaf, not MIGRATE_TO: that name was the leaf only when
+        # this test was written, and every migration added since would be left
+        # unapplied for each later test in the process (#445).
+        restore_to_leaf("customers")
         super().tearDown()
 
     def test_only_proven_generated_defaults_are_cleared(self) -> None:
