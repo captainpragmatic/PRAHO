@@ -362,6 +362,30 @@ class TicketComment(models.Model):
     def __str__(self) -> str:
         return f"Comment pe {self.ticket.ticket_number} de {self.get_author_name()}"
 
+    @staticmethod
+    def visible_to(comments: models.QuerySet[TicketComment], user: Any) -> models.QuerySet[TicketComment]:
+        """Canonical non-staff visibility predicate for ticket comments (#278).
+
+        ``is_public`` is the single source of truth. Previously the web views filtered on
+        ``comment_type__in=("customer", "support")`` while the API filtered on ``is_public``
+        and the template gated on ``comment_type != "internal"`` — three predicates that
+        agree only because every production producer happens to set the two fields from the
+        same expression. They are independent columns with no constraint tying them, so a
+        ``system`` comment (hidden by the web filter, shown by the API) or a ``support``
+        comment with ``is_public=False`` (the reverse) would diverge between surfaces.
+
+        Route every non-staff comment query through here so a future producer cannot
+        reintroduce that split.
+        """
+        if getattr(user, "is_staff_user", False):
+            return comments
+        return comments.filter(is_public=True)
+
+    @property
+    def is_visible_to_customer(self) -> bool:
+        """Row-level counterpart to visible_to(), for templates and per-object checks."""
+        return self.is_public
+
     def get_author_name(self) -> str:
         """Get comment author name"""
         if self.author:
