@@ -27,6 +27,13 @@ Usage:
     python manage.py reencrypt_with_aad --dry-run       # preview only
     python manage.py reencrypt_with_aad --batch=500     # rows read per round
     python manage.py reencrypt_with_aad --allow-corrupt # exit 0 even if corrupt rows found
+    python manage.py reencrypt_with_aad --rekey         # also move stale-key v2 rows to the current key
+
+KEY ROTATION (#270): with ``ENCRYPTION_KEYS=[new, old]`` a v2 row still encrypted under
+``old`` decrypts fine via keyring fallback and is skipped as "already v2" — so ``old`` can
+never be retired and the rotation silently never completes. ``--rekey`` re-encrypts exactly
+those rows under the current (first) key. Retire a previous key only after a ``--rekey`` run
+reports ``0 rekeyed``; a plain run does not inspect already-v2 rows at all and says so.
 """
 
 from __future__ import annotations
@@ -40,7 +47,13 @@ from typing import Any, cast
 from django.core.management.base import BaseCommand, CommandError, CommandParser
 from django.db import connection, models
 
-from apps.common.encryption import ENCRYPTED_PREFIX, VERSIONED_V2_PREFIX, decrypt_sensitive_data, encrypt_sensitive_data
+from apps.common.encryption import (
+    ENCRYPTED_PREFIX,
+    VERSIONED_V2_PREFIX,
+    decrypt_sensitive_data,
+    decrypts_under_current_key,
+    encrypt_sensitive_data,
+)
 from apps.common.fields import EncryptedJSONField
 
 logger = logging.getLogger(__name__)
@@ -78,11 +91,22 @@ class Command(BaseCommand):
             action="store_true",
             help="Exit 0 even when undecryptable rows are found (they are still reported, never migrated)",
         )
+        parser.add_argument(
+            "--rekey",
+            action="store_true",
+            help=(
+                "Also re-encrypt already-v2 rows whose ciphertext decrypts only under a PREVIOUS "
+                "keyring key, so the old key can be retired. Without this, such rows read fine via "
+                "keyring fallback and are skipped as 'already v2' — leaving the old key permanently "
+                "un-droppable. Run with ENCRYPTION_KEYS=[new, old] and drop `old` once this reports 0."
+            ),
+        )
 
     def handle(self, *args: Any, **options: Any) -> None:
         dry_run: bool = options["dry_run"]
         batch_size: int = options["batch"]
         allow_corrupt: bool = options["allow_corrupt"]
+        rekey: bool = options["rekey"]
 
         if batch_size <= 0:
             raise CommandError("--batch must be a positive integer")
@@ -94,14 +118,23 @@ class Command(BaseCommand):
         for model in apps.get_models():
             encrypted_fields = [f for f in model._meta.get_fields() if isinstance(f, EncryptedJSONField)]
             for field in encrypted_fields:
-                self._migrate_field(model, field, batch_size, dry_run, totals)
+                self._migrate_field(model, field, batch_size, dry_run, totals, rekey=rekey)
 
         prefix = "[DRY RUN] " if dry_run else ""
         self.stdout.write("")
         self.stdout.write(
-            f"{prefix}Total: {totals['migrated']} migrated, {totals['skipped_v2']} already v2, "
-            f"{totals['corrupt']} corrupt, {totals['unresolved']} unresolved"
+            f"{prefix}Total: {totals['migrated']} migrated, {totals['rekeyed']} rekeyed, "
+            f"{totals['skipped_v2']} already v2, {totals['corrupt']} corrupt, "
+            f"{totals['unresolved']} unresolved"
         )
+        # #270: a stale-key row is only VISIBLE under --rekey; without the flag it is counted
+        # as skipped_v2 and looks healthy. Say so, so nobody retires a key on a clean run
+        # that never looked.
+        if not rekey and totals["skipped_v2"]:
+            self.stdout.write(
+                f"{prefix}Note: {totals['skipped_v2']} already-v2 row(s) were NOT checked against the "
+                "current key. Re-run with --rekey before retiring a previous ENCRYPTION_KEYS entry."
+            )
 
         # Unresolved rows may still be un-migrated — always fail so require_v2 is not enabled
         # on the false assumption that every row is v2.
@@ -116,13 +149,15 @@ class Command(BaseCommand):
                 "investigate them, then re-run with --allow-corrupt to proceed."
             )
 
-    def _migrate_field(
+    def _migrate_field(  # noqa: PLR0913  # per-field migration context, all required
         self,
         model: type[models.Model],
         field: EncryptedJSONField,
         batch_size: int,
         dry_run: bool,
         totals: Counter[str],
+        *,
+        rekey: bool = False,
     ) -> None:
         table_name = model._meta.db_table
         column_name = field.column  # physical column, used only as the (quoted) SQL identifier
@@ -171,6 +206,7 @@ class Command(BaseCommand):
                     ),
                     dry_run,
                     totals,
+                    rekey=rekey,
                 )
 
     def _read_batch(
@@ -203,10 +239,12 @@ class Command(BaseCommand):
         row: MigrationRow,
         dry_run: bool,
         totals: Counter[str],
+        *,
+        rekey: bool = False,
     ) -> None:
         raw = row.raw
         for _attempt in range(MAX_CAS_ATTEMPTS):
-            kind, new_stored = self._classify(row.expected_aad, raw)
+            kind, new_stored = self._classify(row.expected_aad, raw, rekey=rekey)
 
             if kind == "corrupt":
                 totals["corrupt"] += 1
@@ -220,14 +258,17 @@ class Command(BaseCommand):
                 totals["skipped_v2"] += 1
                 return
 
+            counter = "rekeyed" if kind == "rekey" else "migrated"
+            verb = "rekey" if kind == "rekey" else "migrate"
+
             if dry_run:
-                totals["migrated"] += 1
-                self.stdout.write(f"    Would migrate {row.field.table_name}.{row.field.attname} pk={row.pk}")
+                totals[counter] += 1
+                self.stdout.write(f"    Would {verb} {row.field.table_name}.{row.field.attname} pk={row.pk}")
                 return
 
-            assert new_stored is not None  # kind == "migrate" guarantees this
+            assert new_stored is not None  # kind in ("migrate", "rekey") guarantees this
             if self._cas_update(row.field, row.pk, new_stored, raw) == 1:
-                totals["migrated"] += 1
+                totals[counter] += 1
                 return
 
             # CAS miss: the row changed since we read it. Re-read the current value and retry
@@ -245,11 +286,11 @@ class Command(BaseCommand):
             )
         )
 
-    def _classify(self, expected_aad: bytes, raw: Any) -> tuple[str, str | None]:
+    def _classify(self, expected_aad: bytes, raw: Any, *, rekey: bool = False) -> tuple[str, str | None]:
         """Return (kind, new_stored) for a raw column value.
 
-        kind is 'corrupt', 'skip_v2', or 'migrate' (new_stored set only for 'migrate').
-        The column holds a JSON string, e.g. '"aes:v2:..."' (jsonb / quoted text).
+        kind is 'corrupt', 'skip_v2', 'migrate', or 'rekey' (new_stored set for the
+        latter two). The column holds a JSON string, e.g. '"aes:v2:..."' (jsonb / quoted text).
         """
         try:
             inner = json.loads(raw) if isinstance(raw, str) else raw
@@ -263,9 +304,19 @@ class Command(BaseCommand):
         # skipping, so a corrupt, tampered, or transplanted blob is never reported healthy.
         if isinstance(inner, str) and inner.startswith(VERSIONED_V2_PREFIX):
             try:
-                decrypt_sensitive_data(inner, aad=expected_aad)
+                plaintext = decrypt_sensitive_data(inner, aad=expected_aad)
             except Exception:
                 return "corrupt", None
+
+            # #270: readable is not the same as current. Keyring fallback means a row still
+            # encrypted under a PREVIOUS key decrypts fine and would be skipped as healthy —
+            # which is exactly why the old key can never be retired. Under --rekey, re-encrypt
+            # it under the current key. Note the re-encryption is unconditional on the current
+            # key: encrypt_sensitive_data always uses keys[0].
+            if rekey and not decrypts_under_current_key(inner, aad=expected_aad):
+                new_wire = encrypt_sensitive_data(plaintext, aad=expected_aad)
+                return "rekey", json.dumps(new_wire)
+
             return "skip_v2", None
 
         # Recover the plaintext: decrypt v1/legacy ciphertext, or take stored plaintext as-is.
