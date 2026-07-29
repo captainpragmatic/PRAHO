@@ -5,7 +5,7 @@
 import logging
 
 from django.db import transaction
-from django.db.models import Avg, Prefetch, Q
+from django.db.models import Avg, Count, Prefetch, Q, QuerySet
 from django.http import Http404, HttpRequest, HttpResponse
 from rest_framework import status
 from rest_framework.decorators import api_view, authentication_classes, permission_classes
@@ -26,6 +26,20 @@ from .serializers import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _annotate_visible_counts(queryset: "QuerySet[Ticket]") -> "QuerySet[Ticket]":
+    """Annotate customer-visible comment/attachment counts in one query (#278).
+
+    TicketListSerializer must not report counts that include non-public comments, but
+    filtering per row would be N+1 across a ticket list — and a filtered ``.count()``
+    ignores ``prefetch_related`` anyway, so the prefetch these call sites used to carry
+    bought nothing once the counts became visibility-aware.
+    """
+    return queryset.annotate(
+        visible_comments_count=Count("comments", filter=Q(comments__is_public=True), distinct=True),
+        visible_attachments_count=Count("attachments", filter=Q(attachments__comment__is_public=True), distinct=True),
+    )
 
 
 # ===============================================================================
@@ -87,12 +101,11 @@ def customer_tickets_api(request: HttpRequest, customer: Customer) -> Response:
         request_data = request.data if hasattr(request, "data") else {}
 
         # Get base queryset for the authenticated customer
-        tickets_qs = (
-            Ticket.objects.filter(customer=customer)
-            .select_related("customer", "category", "assigned_to", "created_by", "related_service")
-            .prefetch_related("comments", "attachments")
-            .order_by("-created_at")
-        )
+        tickets_qs = _annotate_visible_counts(
+            Ticket.objects.filter(customer=customer).select_related(
+                "customer", "category", "assigned_to", "created_by", "related_service"
+            )
+        ).order_by("-created_at")
 
         # Apply filters from request body
         status_filter = request_data.get("status", "").strip()
@@ -139,7 +152,7 @@ def customer_tickets_api(request: HttpRequest, customer: Customer) -> Response:
         total_pages = (total_tickets + limit - 1) // limit
 
         # Serialize tickets
-        serializer = TicketListSerializer(paginated_tickets, many=True)
+        serializer = TicketListSerializer(paginated_tickets, many=True, context={"for_customer": True})
 
         response_data = {
             "success": True,
@@ -537,13 +550,11 @@ def customer_tickets_summary_api(request: HttpRequest, customer: Customer) -> Re
         satisfaction_rating = satisfaction_result["avg_rating"] or 0.0
 
         # Get recent tickets (last 5)
-        recent_tickets = (
-            tickets_qs.select_related("category", "assigned_to")
-            .prefetch_related("comments", "attachments")
-            .order_by("-created_at")[:5]
-        )
+        recent_tickets = _annotate_visible_counts(tickets_qs.select_related("category", "assigned_to")).order_by(
+            "-created_at"
+        )[:5]
 
-        recent_serializer = TicketListSerializer(recent_tickets, many=True)
+        recent_serializer = TicketListSerializer(recent_tickets, many=True, context={"for_customer": True})
 
         # Prepare summary data
         summary_data = {

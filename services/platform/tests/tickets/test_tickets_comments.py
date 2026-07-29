@@ -8,6 +8,7 @@ from django.contrib.auth import get_user_model
 from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 
+from apps.api.tickets.serializers import TicketDetailSerializer, TicketListSerializer
 from apps.customers.models import Customer, CustomerTaxProfile
 from apps.tickets.models import Ticket, TicketComment
 from apps.tickets.services import TicketStatusService
@@ -455,16 +456,19 @@ class TicketInternalCommentsSecurityTest(TestCase):
         # Should redirect with error message
         self.assertEqual(response.status_code, 302)  # Redirect due to no permission
 
-    def test_comment_count_by_type(self):
-        """Test that comment counts are correct for different user types"""
-        # Get all comments from database
-        all_comments = TicketComment.objects.filter(ticket=self.ticket)
-        customer_comments = all_comments.filter(comment_type__in=['customer', 'support'])
-        internal_comments = all_comments.filter(comment_type='internal')
+    def test_comment_count_by_visibility(self):
+        """Test that comment counts are correct for different user types.
 
-        self.assertEqual(all_comments.count(), 3)  # Total comments
-        self.assertEqual(customer_comments.count(), 2)  # Public comments
-        self.assertEqual(internal_comments.count(), 1)  # Internal comments
+        #278: asserts on is_public, the canonical predicate, rather than re-deriving
+        visibility from comment_type — which is what let the surfaces diverge.
+        """
+        all_comments = TicketComment.objects.filter(ticket=self.ticket)
+        customer_visible = TicketComment.visible_to(all_comments, self.customer_user)
+        staff_visible = TicketComment.visible_to(all_comments, self.staff_user)
+
+        self.assertEqual(all_comments.count(), 3)
+        self.assertEqual(customer_visible.count(), 2)
+        self.assertEqual(staff_visible.count(), 3)
 
     def test_comment_author_information(self):
         """Test that comment author information is properly displayed"""
@@ -479,3 +483,113 @@ class TicketInternalCommentsSecurityTest(TestCase):
         # Check role badges
         self.assertContains(response, 'Customer')  # Customer badge
         self.assertContains(response, 'Support')   # Support badge
+
+
+@override_settings(DISABLE_AUDIT_SIGNALS=True)
+class TicketCommentVisibilityPredicateTest(TestCase):
+    """#278: is_public is the single visibility predicate across web, template, and API.
+
+    Every pre-existing fixture sets comment_type and is_public to AGREE, so none of them
+    can tell the three predicates apart. These tests deliberately create rows where they
+    DISAGREE — the only shape that distinguishes "filters on is_public" from "filters on
+    comment_type", and therefore the only shape that can catch a regression.
+    """
+
+    def setUp(self):
+        self.staff_user = User.objects.create_user(email='staff-278@example.com', password='testpass123')
+        self.staff_user.is_staff = True
+        self.staff_user.staff_role = 'admin'
+        self.staff_user.save()
+
+        self.customer_user = User.objects.create_user(email='customer-278@example.com', password='testpass123')
+
+        self.customer = Customer.objects.create(
+            name='Predicate Test SRL',
+            company_name='Predicate Test SRL',
+            customer_type='company',
+            status='active',
+            primary_email='customer-278@example.com',
+            primary_phone='+40712345679',
+        )
+        CustomerMembership.objects.create(
+            user=self.customer_user, customer=self.customer, role='owner', is_primary=True
+        )
+
+        self.ticket = Ticket.objects.create(
+            customer=self.customer,
+            title='Predicate Test Ticket',
+            description='desc',
+            priority='normal',
+            status='open',
+            created_by=self.customer_user,
+        )
+
+        # Agreeing baseline.
+        self.public_comment = TicketComment.objects.create(
+            ticket=self.ticket, content='PUBLIC-SUPPORT-REPLY', comment_type='support', is_public=True
+        )
+        # Divergent row A: comment_type says customer-facing, is_public says hidden.
+        # The old comment_type filter SHOWED this; is_public hides it.
+        self.nonpublic_support = TicketComment.objects.create(
+            ticket=self.ticket, content='NONPUBLIC-SUPPORT-SECRET', comment_type='support', is_public=False
+        )
+        # Divergent row B: a public 'system' comment. The old comment_type filter HID this;
+        # is_public (and the old template gate) shows it.
+        self.public_system = TicketComment.objects.create(
+            ticket=self.ticket, content='PUBLIC-SYSTEM-NOTICE', comment_type='system', is_public=True
+        )
+        self.client = Client()
+
+    def test_visible_to_uses_is_public_not_comment_type(self):
+        qs = TicketComment.objects.filter(ticket=self.ticket)
+        visible = set(TicketComment.visible_to(qs, self.customer_user).values_list('content', flat=True))
+        self.assertEqual(visible, {'PUBLIC-SUPPORT-REPLY', 'PUBLIC-SYSTEM-NOTICE'})
+        self.assertEqual(TicketComment.visible_to(qs, self.staff_user).count(), 3)
+
+    def test_detail_view_hides_nonpublic_support_comment(self):
+        """A support comment with is_public=False must not reach a customer's page."""
+        self.client.login(email='customer-278@example.com', password='testpass123')
+        response = self.client.get(reverse('tickets:detail', kwargs={'pk': self.ticket.pk}))
+
+        self.assertNotContains(response, 'NONPUBLIC-SUPPORT-SECRET')
+        self.assertContains(response, 'PUBLIC-SUPPORT-REPLY')
+        # Also proves the template gate moved off comment_type: a public 'system'
+        # comment was previously dropped by the view's comment_type filter.
+        self.assertContains(response, 'PUBLIC-SYSTEM-NOTICE')
+
+    def test_detail_view_shows_everything_to_staff(self):
+        self.client.login(email='staff-278@example.com', password='testpass123')
+        response = self.client.get(reverse('tickets:detail', kwargs={'pk': self.ticket.pk}))
+
+        self.assertContains(response, 'NONPUBLIC-SUPPORT-SECRET')
+        self.assertContains(response, 'PUBLIC-SUPPORT-REPLY')
+
+    def test_comments_htmx_partial_matches_detail_view(self):
+        self.client.login(email='customer-278@example.com', password='testpass123')
+        response = self.client.get(reverse('tickets:comments_htmx', kwargs={'pk': self.ticket.pk}))
+
+        self.assertNotContains(response, 'NONPUBLIC-SUPPORT-SECRET')
+        self.assertContains(response, 'PUBLIC-SUPPORT-REPLY')
+
+    def test_web_and_api_return_the_same_visible_set(self):
+        """The unification's actual promise: both surfaces agree on a mixed-type ticket."""
+        api_contents = {
+            c['content']
+            for c in TicketDetailSerializer(self.ticket, context={'for_customer': True}).data['comments']
+        }
+        web_contents = set(
+            TicketComment.visible_to(
+                TicketComment.objects.filter(ticket=self.ticket), self.customer_user
+            ).values_list('content', flat=True)
+        )
+
+        self.assertEqual(web_contents, api_contents)
+        self.assertNotIn('NONPUBLIC-SUPPORT-SECRET', api_contents)
+
+    def test_list_api_comment_count_excludes_nonpublic(self):
+        """#278: the customer-facing list count leaked how many internal notes exist."""
+        data = TicketListSerializer(self.ticket, context={'for_customer': True}).data
+        self.assertEqual(data['comments_count'], 2)
+
+    def test_staff_list_serializer_still_counts_everything(self):
+        self.assertEqual(TicketListSerializer(self.ticket).data['comments_count'], 3)
