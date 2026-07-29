@@ -170,14 +170,26 @@ def _extract_hmac_identity(request: Request) -> str:
 
 
 class _CustomTimeRateMixin:
-    """Support custom shorthand rates such as `50/10s`."""
+    """Support custom shorthand rates such as `50/10s`.
+
+    #277: startup validation (``validate_throttle_rate_map``) accepts every format
+    ``parse_rate_string`` accepts, but DRF's stock ``parse_rate`` keys the window on
+    ``period[0]`` alone — so a multi-digit window like ``50/10s`` reads as ``'1'`` and
+    raises KeyError at REQUEST time after passing deploy checks cleanly. Any throttle
+    whose rate is env-overridable must therefore parse with this mixin, not DRF's.
+    """
 
     def parse_rate(self, rate: str) -> tuple[int, int]:
         return parse_rate_string(rate)
 
 
-class _ConfigurableRateThrottle(SimpleRateThrottle):  # type: ignore[misc]  # dynamic DRF attributes
-    """Honor PRAHO's system-wide rate-limiting kill switch."""
+class _ConfigurableRateThrottle(_CustomTimeRateMixin, SimpleRateThrottle):  # type: ignore[misc]  # dynamic DRF attributes
+    """Honor PRAHO's system-wide rate-limiting kill switch.
+
+    Inherits ``_CustomTimeRateMixin`` so shorthand-window parsing is the default for
+    every project throttle rather than something each subclass must remember to opt
+    into — see the mixin docstring for the startup/request-time asymmetry it closes.
+    """
 
     def allow_request(self, request: Request, view: Any) -> bool:
         if not getattr(settings, "RATE_LIMITING_ENABLED", True):
@@ -198,7 +210,7 @@ class PortalHMACRateThrottle(_ConfigurableRateThrottle):
         return self.cache_format % {"scope": self.scope, "ident": ident}
 
 
-class PortalHMACBurstThrottle(_CustomTimeRateMixin, _ConfigurableRateThrottle):
+class PortalHMACBurstThrottle(_ConfigurableRateThrottle):
     """Burst throttling for HMAC traffic to protect against request spikes."""
 
     scope = "portal_hmac_burst"
@@ -211,7 +223,7 @@ class PortalHMACBurstThrottle(_CustomTimeRateMixin, _ConfigurableRateThrottle):
         return self.cache_format % {"scope": self.scope, "ident": ident}
 
 
-class PortalHMACCreateUserThrottle(_CustomTimeRateMixin, _ConfigurableRateThrottle):
+class PortalHMACCreateUserThrottle(_ConfigurableRateThrottle):
     """Strict per-portal throttle for the HMAC user-creation mutation.
 
     Layered on top of the global PortalHMAC*Throttle limits to bound account
@@ -233,7 +245,7 @@ class PortalHMACCreateUserThrottle(_CustomTimeRateMixin, _ConfigurableRateThrott
         return self.cache_format % {"scope": self.scope, "ident": ident}
 
 
-class EndpointRateThrottle(_CustomTimeRateMixin, _ConfigurableRateThrottle):
+class EndpointRateThrottle(_ConfigurableRateThrottle):
     """Per-endpoint throttle for function-based API views.
 
     ``ScopedRateThrottle`` reads its scope from ``view.throttle_scope`` and
@@ -256,7 +268,7 @@ class EndpointRateThrottle(_CustomTimeRateMixin, _ConfigurableRateThrottle):
         return self.cache_format % {"scope": self.scope, "ident": ident}
 
 
-class CustomerRateThrottle(SimpleRateThrottle):  # type: ignore[misc]
+class CustomerRateThrottle(_CustomTimeRateMixin, SimpleRateThrottle):  # type: ignore[misc]  # DRF throttle base uses dynamic attrs
     """
     Rate throttling based on customer account.
     Customers share rate limits across all their users.
@@ -313,20 +325,32 @@ class BurstRateThrottle(_CustomTimeRateMixin, SimpleRateThrottle):  # type: igno
         return cast("str | None", self.cache_format % {"scope": self.scope, "ident": ident})
 
 
-class StandardAPIThrottle(UserRateThrottle):  # type: ignore[misc]  # DRF throttle base uses dynamic attrs
-    """Per-view sustained throttle for standard API operations."""
+class StandardAPIThrottle(_CustomTimeRateMixin, UserRateThrottle):  # type: ignore[misc]  # DRF throttle base uses dynamic attrs
+    """Per-view sustained throttle for standard API operations.
+
+    Keys on the authenticated user (or client IP when anonymous). Do NOT attach this
+    to an HMAC endpoint running ``authentication_classes([])`` — request.user is
+    AnonymousUser there, so it degrades to IP keying; use the PortalHMAC* throttles.
+    """
 
     scope = "sustained"
 
 
-class BurstAPIThrottle(UserRateThrottle):  # type: ignore[misc]  # DRF throttle base uses dynamic attrs
-    """Per-view burst throttle for read-heavy API operations."""
+class BurstAPIThrottle(_CustomTimeRateMixin, UserRateThrottle):  # type: ignore[misc]  # DRF throttle base uses dynamic attrs
+    """Per-view burst throttle for read-heavy API operations.
+
+    Same user/IP keying caveat as StandardAPIThrottle — see its docstring.
+    """
 
     scope = "api_burst"
 
 
-class AuthThrottle(AnonRateThrottle):  # type: ignore[misc]  # DRF throttle base uses dynamic attrs
-    """Restrictive anonymous throttle for authentication-related endpoints."""
+class AuthThrottle(_CustomTimeRateMixin, AnonRateThrottle):  # type: ignore[misc]  # DRF throttle base uses dynamic attrs
+    """Restrictive anonymous throttle for authentication-related endpoints.
+
+    IP-keyed by design: correct for genuinely public/anonymous endpoints such as
+    registration, wrong for HMAC service traffic.
+    """
 
     scope = "auth"
 

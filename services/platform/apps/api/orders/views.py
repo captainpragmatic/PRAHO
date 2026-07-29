@@ -110,6 +110,13 @@ class ProductCatalogThrottle(EndpointRateThrottle):
 
     scope = "product_catalog"
 
+    # #277: deliberately NOT layered with the global PortalHMAC* throttles, unlike the
+    # HMAC-authenticated order endpoints below. Those return None (no limit) for
+    # non-portal traffic, so on a public endpoint they would add nothing. EndpointRateThrottle
+    # never returns None — it keys on the verified portal id for portal callers and on the
+    # trusted-proxy-aware client IP for anonymous ones, so product_catalog is the sole and
+    # intended ceiling on these two views for both traffic shapes.
+
 
 @api_view(["GET"])
 @permission_classes([AllowAny])
