@@ -692,12 +692,28 @@ class CouponService:
                 status="applied",
             )
 
-        for redemption in redemptions:
-            # Reverse the redemption
-            redemption.mark_reversed()
+        # Materialize once: the queryset is iterated twice below (lock ids, then reverse),
+        # and re-querying after taking the lock would drop rows a concurrent remove just
+        # reversed, changing which redemptions this call reports on.
+        pending = list(redemptions)
 
-            # Update order discount
-            order.discount_cents = max(0, order.discount_cents - redemption.discount_cents)
+        # #421: lock the coupon rows before reversing, mirroring apply_coupon's
+        # select_for_update at the top of this class. Without it, two concurrent removes
+        # of the same redemption raced and both ran the counter decrements, which drove
+        # total_uses below zero and raised IntegrityError against its CHECK constraint.
+        # mark_reversed()'s compare-and-swap is the correctness guarantee; this lock keeps
+        # the loser from doing useless work and serializes the counter updates.
+        coupon_ids = sorted({r.coupon_id for r in pending})
+        if coupon_ids:
+            # sorted() to pin a consistent lock order and avoid deadlocking against a
+            # concurrent multi-coupon removal on the same order.
+            list(Coupon.objects.select_for_update(of=("self",)).filter(pk__in=coupon_ids).order_by("pk"))
+
+        for redemption in pending:
+            # Only adjust the order when THIS call actually performed the reversal —
+            # otherwise a lost race would subtract the discount a second time.
+            if redemption.mark_reversed():
+                order.discount_cents = max(0, order.discount_cents - redemption.discount_cents)
 
         order.save(update_fields=["discount_cents"])
         order.calculate_totals()
