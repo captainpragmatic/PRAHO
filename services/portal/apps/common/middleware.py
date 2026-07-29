@@ -10,6 +10,7 @@ import time
 import uuid
 from collections.abc import Callable
 
+from django.conf import settings
 from django.contrib.auth import logout
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect
@@ -268,10 +269,56 @@ class CSPNonceMiddleware:
 
 
 class SecurityHeadersMiddleware:
-    """Enhanced security headers middleware with CSP and comprehensive protections"""
+    """Enhanced security headers middleware with CSP and comprehensive protections."""
+
+    # Byte-exact current policy (see #104 [M7]). The default profile MUST emit
+    # this unchanged so the CSP-hardening rollout never regresses the live header.
+    _CURRENT_CSP_PARTS: tuple[str, ...] = (
+        "default-src 'self'",
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://js.stripe.com",
+        "style-src 'self' 'unsafe-inline'",
+        "img-src 'self' data: https:",
+        "font-src 'self'",
+        "connect-src 'self' https://api.stripe.com",
+        "frame-src 'self' https://js.stripe.com https://*.stripe.com",
+        "frame-ancestors 'none'",
+        "form-action 'self'",
+        "base-uri 'self'",
+        "object-src 'none'",
+        "media-src 'self'",
+    )
+
+    _TARGET_CSP_PROFILES: frozenset[str] = frozenset(
+        {
+            "phase2-target",
+            "phase3-target",
+        }
+    )
 
     def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]):
         self.get_response = get_response
+
+    @classmethod
+    def _build_csp_parts(cls, request: HttpRequest) -> tuple[str, ...]:
+        """Build the server-selected CSP, falling back to current when unsafe."""
+        profile = str(getattr(settings, "CSP_PROFILE", "current"))
+
+        if profile == "current" or profile not in cls._TARGET_CSP_PROFILES:
+            return cls._CURRENT_CSP_PARTS
+
+        nonce = getattr(request, "csp_nonce", None)
+        if not isinstance(nonce, str) or not nonce:
+            return cls._CURRENT_CSP_PARTS
+
+        if profile == "phase2-target":
+            script_src = f"script-src 'self' 'nonce-{nonce}' 'unsafe-eval' https://js.stripe.com"
+        else:
+            script_src = f"script-src 'self' 'nonce-{nonce}' https://js.stripe.com"
+
+        target_parts = list(cls._CURRENT_CSP_PARTS)
+        target_parts[1] = script_src
+        target_parts.insert(2, "script-src-attr 'none'")
+        return tuple(target_parts)
 
     def __call__(self, request: HttpRequest) -> HttpResponse:
         response = self.get_response(request)
@@ -286,25 +333,18 @@ class SecurityHeadersMiddleware:
         if request.is_secure():
             response["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
 
-        # Content Security Policy — unsafe-inline until templates are migrated
-        # to nonce attributes (see #104 [M7]). CSPNonceMiddleware + context
-        # processor are deployed; nonce injection into CSP deferred until all
-        # inline <script>/<style> tags carry nonce="{{ csp_nonce }}".
-        csp_parts = [
-            "default-src 'self'",
-            "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://js.stripe.com",
-            "style-src 'self' 'unsafe-inline'",
-            "img-src 'self' data: https:",
-            "font-src 'self'",
-            "connect-src 'self' https://api.stripe.com",
-            "frame-src 'self' https://js.stripe.com https://*.stripe.com",
-            "frame-ancestors 'none'",
-            "form-action 'self'",
-            "base-uri 'self'",
-            "object-src 'none'",
-            "media-src 'self'",
-        ]
-        response["Content-Security-Policy"] = "; ".join(csp_parts)
+        # CSP rollout profiles (#104 [M7]) separate policy qualification from
+        # disposition. "current" preserves unsafe-inline until nonce migration
+        # is qualified; target profiles inject the per-request nonce and
+        # progressively remove unsafe-inline and unsafe-eval. CSP_REPORT_ONLY
+        # switches the header name without changing the policy content.
+        csp = "; ".join(self._build_csp_parts(request))
+        csp_header = (
+            "Content-Security-Policy-Report-Only"
+            if bool(getattr(settings, "CSP_REPORT_ONLY", False))
+            else "Content-Security-Policy"
+        )
+        response[csp_header] = csp
 
         # 🔒 SECURITY: Permissions Policy (formerly Feature Policy)
         permissions_policy_parts = [
