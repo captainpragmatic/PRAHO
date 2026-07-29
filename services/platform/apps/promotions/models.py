@@ -861,16 +861,35 @@ class CouponRedemption(models.Model):
         self.failure_reason = reason
         self.save(update_fields=["status", "failure_reason"])
 
-    def mark_reversed(self) -> None:
-        """Mark redemption as reversed (e.g., order cancelled)."""
-        if self.status != "applied":
-            return
+    def mark_reversed(self) -> bool:
+        """Mark redemption as reversed (e.g., order cancelled).
+
+        Returns True when THIS call performed the reversal, False when the row was
+        already reversed (by a concurrent caller or an earlier call).
+
+        #421: the status check is a compare-and-swap in the database, not an
+        in-memory read followed by a blind save. Previously two callers holding
+        separate instances of the same row both passed ``self.status == "applied"``
+        and both ran the decrements, so ``total_uses`` went 1 → -1. That is not a
+        silent drift: it violates the ``total_uses >= 0`` CHECK constraint and
+        raises IntegrityError, failing the whole remove request. Gating the
+        decrements on the UPDATE's rowcount makes exactly one caller win.
+        """
+        reversed_at = timezone.now()
+        # The filter's status='applied' is the transition guard; see the docstring.
+        applied_rows = CouponRedemption.objects.filter(pk=self.pk, status="applied")
+        updated = applied_rows.update(status="reversed", reversed_at=reversed_at)  # fsm-bypass: CAS guard above
+
+        if not updated:
+            # Lost the race (or already reversed). Sync the local instance so a caller
+            # holding a stale copy does not keep believing it is still "applied".
+            self.refresh_from_db(fields=["status", "reversed_at"])
+            return False
 
         self.status = "reversed"  # fsm-bypass: CouponRedemption uses CharField, not FSMField
-        self.reversed_at = timezone.now()
-        self.save(update_fields=["status", "reversed_at"])
+        self.reversed_at = reversed_at
 
-        # Decrement coupon usage statistics
+        # Decrement coupon usage statistics — reached only by the winning caller.
         Coupon.objects.filter(pk=self.coupon_id).update(
             total_uses=F("total_uses") - 1,
             total_discount_cents=F("total_discount_cents") - self.discount_cents,
@@ -881,6 +900,8 @@ class CouponRedemption(models.Model):
             PromotionCampaign.objects.filter(pk=self.coupon.campaign_id).update(
                 spent_cents=F("spent_cents") - self.discount_cents
             )
+
+        return True
 
 
 # ===============================================================================
