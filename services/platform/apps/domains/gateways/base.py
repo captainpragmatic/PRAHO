@@ -288,17 +288,46 @@ class BaseRegistrarGateway(ABC):
         registrar_domain_id: str,
         domain_name: str,
         years: int,
+        idempotency_token: str | None = None,
     ) -> Result[DomainRenewalResult, RegistrarAPIError]:
-        """Renew a domain, with circuit breaker and idempotency protection."""
+        """Renew a domain, with circuit breaker and idempotency protection.
+
+        ``idempotency_token`` identifies ONE renewal intent (#259). Without it the key
+        is ``{domain}:{years}``, which conflates distinct intents: a legitimate second
+        one-year renewal of the same domain inside the cache TTL replays the first
+        result instead of contacting the registrar, so the customer is billed for a
+        renewal that never happened. Callers that own a durable per-intent identifier —
+        e.g. a ``DomainOrderItem`` pk — should pass it.
+
+        Callers with no durable identifier keep the old ``{domain}:{years}`` behaviour.
+        That is deliberately unchanged rather than replaced with a random token: a fresh
+        token per call would remove the double-submit protection entirely, which is the
+        worse failure (a duplicate chargeable renewal at the registrar). Fixing those
+        paths needs a per-intent identifier they do not currently have — still #259.
+        """
         if guard := self._verified_adapter_guard():
             return guard
+        # Preserve the legacy tokenless key exactly so deploying this change cannot
+        # invalidate an in-flight renewal's one-hour replay protection. Tokened intents
+        # use an explicit namespace and a fixed-length fingerprint: a token such as
+        # ``"1"`` cannot collide with the tokenless one-year key, and arbitrary caller
+        # input cannot create an overlong or backend-invalid cache key.
+        token_fingerprint = (
+            hashlib.sha256(idempotency_token.encode("utf-8")).hexdigest()
+            if idempotency_token is not None
+            else None
+        )
+        intent = f"token:{token_fingerprint}" if token_fingerprint is not None else str(years)
         return self._execute_idempotent_operation(
-            idempotency_key=f"domain_renew:{self.gateway_name}:{domain_name}:{years}",
+            idempotency_key=f"domain_renew:{self.gateway_name}:{domain_name}:{intent}",
             fn=lambda: self._do_renew(registrar_domain_id, domain_name, years),
             operation=f"renew:{domain_name}",
             audit_event="domain_renewal",
             domain_name=domain_name,
-            audit_metadata={"years": years},
+            # Store only the fingerprint in audit metadata. Idempotency tokens are
+            # identifiers rather than credentials today, but future callers should not
+            # accidentally turn the audit trail into a raw-token disclosure surface.
+            audit_metadata={"years": years, "idempotency_token_fingerprint": token_fingerprint},
         )
 
     def _verified_adapter_guard(self) -> Err[RegistrarAPIError] | None:

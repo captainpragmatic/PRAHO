@@ -638,7 +638,9 @@ class DomainLifecycleService:
         return None
 
     @staticmethod
-    def process_domain_renewal(domain: Domain, years: int = 1) -> Result[str, str]:
+    def process_domain_renewal(
+        domain: Domain, years: int = 1, idempotency_token: str | None = None
+    ) -> Result[str, str]:
         """Process domain renewal by renewing at the registrar first.
 
         The registrar is the source of truth for the new expiry — the local row is
@@ -657,7 +659,9 @@ class DomainLifecycleService:
         if period_error is not None:
             return Err(period_error)
 
-        success, payload = DomainRegistrarGateway.renew_domain(domain.registrar, domain, years)
+        success, payload = DomainRegistrarGateway.renew_domain(
+            domain.registrar, domain, years, idempotency_token=idempotency_token
+        )
         if not success:
             logger.warning("Registrar did not confirm renewal of %s: %s", domain.name, payload.get("error"))
             return Err(
@@ -1137,7 +1141,12 @@ class DomainOrderService:
                     )
                     continue
 
-                renewal_result = DomainLifecycleService.process_domain_renewal(domain=item.domain, years=item.years)
+                # #259: the order item pk IS the renewal intent — durable, and exactly one
+                # per item, so a retried batch replays rather than re-charging, while two
+                # separate order items for the same domain+years stay distinct.
+                renewal_result = DomainLifecycleService.process_domain_renewal(
+                    domain=item.domain, years=item.years, idempotency_token=f"order_item:{item.pk}"
+                )
 
                 if renewal_result.is_ok():
                     processed_domains.append(item.domain)
@@ -1214,7 +1223,9 @@ class DomainRegistrarGateway:
         return False, {"error": str(result.unwrap_err()), "retriability": retriability_of(result).value}
 
     @staticmethod
-    def renew_domain(registrar: Registrar, domain: Domain, years: int) -> tuple[bool, dict[str, Any]]:
+    def renew_domain(
+        registrar: Registrar, domain: Domain, years: int, idempotency_token: str | None = None
+    ) -> tuple[bool, dict[str, Any]]:
         from .gateways import RegistrarGatewayFactory  # noqa: PLC0415
 
         try:
@@ -1223,7 +1234,9 @@ class DomainRegistrarGateway:
             logger.error("No gateway registered for %s — cannot renew %s", registrar.name, domain.name)
             return False, {"error": f"No gateway for registrar {registrar.name}"}
 
-        result = gateway.renew_domain(domain.registrar_domain_id, domain.name, years)
+        result = gateway.renew_domain(
+            domain.registrar_domain_id, domain.name, years, idempotency_token=idempotency_token
+        )
         if result.is_ok():
             renewal = result.unwrap()
             return True, {"new_expires_at": renewal.new_expires_at}
