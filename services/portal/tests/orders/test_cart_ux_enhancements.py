@@ -2,7 +2,7 @@
 Tests for ENH-1: Better-tier add-to-cart UX improvements.
 
 Covers:
-  ENH-1-A: add_to_cart view sets HX-Trigger: cartAdded header on success
+  ENH-1-A: add_to_cart relies on the server-rendered open-cart response
   ENH-1-B: add_to_cart view passes product_slug to cart_updated.html context
   ENH-1-C: mini_cart_content view accepts ?just_added=<slug> query param
   ENH-1-D: mini_cart_content marks the just-added item with data-just-added attr
@@ -10,7 +10,6 @@ Covers:
 No database access — all tests use SimpleTestCase + locmem cache.
 """
 
-import json
 from unittest.mock import MagicMock, patch
 
 from django.test import Client, SimpleTestCase, override_settings
@@ -55,13 +54,13 @@ def _auth_client_with_product_mocked(client: Client, slug: str = "shared-hosting
 
 
 # ---------------------------------------------------------------------------
-# ENH-1-A / ENH-1-B: HX-Trigger header and product_slug in add_to_cart response
+# ENH-1-A / ENH-1-B: server-rendered open state and product_slug in add response
 # ---------------------------------------------------------------------------
 
 
 @override_settings(**_CACHE_SETTINGS)
-class TestAddToCartHxTrigger(SimpleTestCase):
-    """ENH-1-A/B: Successful add_to_cart returns HX-Trigger: cartAdded and includes product_slug."""
+class TestAddToCartResponse(SimpleTestCase):
+    """ENH-1-A/B: Successful add_to_cart uses server-rendered state and includes product_slug."""
 
     def setUp(self) -> None:
         self.client = Client()
@@ -83,27 +82,20 @@ class TestAddToCartHxTrigger(SimpleTestCase):
                 HTTP_X_FORWARDED_FOR="127.0.0.1",
             )
 
-    def test_successful_add_sets_hx_trigger_header(self) -> None:
-        """ENH-1-A: Successful add_to_cart response includes HX-Trigger header with cartAdded event."""
+    def test_successful_add_does_not_set_obsolete_hx_trigger_header(self) -> None:
+        """ENH-1-A: Successful add_to_cart relies on the swapped-in widget state."""
         response = self._post_add_to_cart()
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn("HX-Trigger", response)
-        hx_trigger = response["HX-Trigger"]
-        self.assertIn("cartAdded", hx_trigger)
+        self.assertNotIn("HX-Trigger", response)
 
-    def test_hx_trigger_includes_product_slug(self) -> None:
-        """ENH-1-B: HX-Trigger payload includes the slug of the just-added product."""
-
+    def test_response_includes_product_slug_for_mini_cart_request(self) -> None:
+        """ENH-1-B: The mini-cart request includes the slug of the just-added product."""
         slug = "shared-hosting-basic"
         response = self._post_add_to_cart(slug=slug)
 
         self.assertEqual(response.status_code, 200)
-        hx_trigger_raw = response["HX-Trigger"]
-        # Must be valid JSON with cartAdded key containing slug
-        payload = json.loads(hx_trigger_raw)
-        self.assertIn("cartAdded", payload)
-        self.assertEqual(payload["cartAdded"]["slug"], slug)
+        self.assertIn(f"?just_added={slug}", response.content.decode())
 
     def test_error_response_does_not_set_hx_trigger(self) -> None:
         """ENH-1-A: Failed add_to_cart (e.g. missing product_slug) must NOT set HX-Trigger."""
@@ -201,10 +193,8 @@ class TestCartUpdatedToastViewCartLink(SimpleTestCase):
     the success notice was consolidated into showToast; the dropdown's cart link is the
     canonical affordance now).
 
-    The auto-open must be server-rendered state (``miniCartOpen: true``), NOT the
-    ``cartAdded``/``cart-added`` window event: HX-Trigger events are dispatched before
-    the outerHTML swap, so the only listener that could catch them sits on the widget
-    that the swap is about to replace — the swapped-in widget would initialise closed.
+    The auto-open must be server-rendered state (``miniCartOpen: true``), because an
+    event dispatched before the outerHTML swap could only affect the old widget.
     """
 
     def setUp(self) -> None:

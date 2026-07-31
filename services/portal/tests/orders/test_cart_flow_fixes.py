@@ -134,3 +134,16 @@ class TestCartFlowFixes(SimpleTestCase):
             '''hx-on::response-error="showToast('error', '{% trans "Something went wrong. Please try again." %}')"''',
             remove_button_lines[0],
         )
+
+    def test_dead_cart_event_wiring_removed(self) -> None:
+        portal_root = Path(__file__).resolve().parents[2]
+        template_sources = [
+            template_path.read_text()
+            for template_path in (portal_root / "templates" / "orders").rglob("*.html")
+        ]
+        views_source = (portal_root / "apps" / "orders" / "views.py").read_text()
+
+        self.assertEqual(sum(source.count("@cart-added") for source in template_sources), 0)
+        self.assertEqual(views_source.count("cartAdded"), 0)
+        self.assertEqual(sum(source.count("cart_total_quantity") for source in template_sources), 0)
+        self.assertEqual(views_source.count('"cart_total_quantity"'), 0)

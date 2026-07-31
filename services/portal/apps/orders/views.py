@@ -499,7 +499,6 @@ def product_catalog(request: HttpRequest) -> HttpResponse:
             "featured_only": featured_only,
             "product_type_options": product_type_options,
             "cart_count": cart.get_item_count(),
-            "cart_total_quantity": cart.get_total_quantity(),
             "order_steps": ORDER_STEPS,
             "current_step": 1,
         }
@@ -651,9 +650,7 @@ def add_to_cart(request: HttpRequest) -> HttpResponse:  # noqa: PLR0911
         # Return updated cart widget
         cart_items = cart.get_items()
         if cart_items:
-            # Item was successfully added — cart_updated.html renders the mini-cart open
-            # (server-rendered state; the cartAdded HX-Trigger below fires pre-swap and
-            # cannot open the swapped-in widget, it only informs page-level listeners)
+            # Item was successfully added — cart_updated.html renders the mini-cart open.
             just_added_slug = product_slug
             # Find the item by slug rather than using cart_items[-1], which is wrong when
             # add_item() updates an existing item in-place instead of appending.
@@ -664,13 +661,11 @@ def add_to_cart(request: HttpRequest) -> HttpResponse:  # noqa: PLR0911
                 "orders/partials/cart_updated.html",
                 {
                     "cart_count": cart.get_item_count(),
-                    "cart_total_quantity": cart.get_total_quantity(),
                     "success_message": _("Product added to cart successfully!"),
                     "product_name": product_name,
                     "just_added_slug": just_added_slug,
                 },
             )
-            response["HX-Trigger"] = json.dumps({"cartAdded": {"slug": just_added_slug}})
             return response
         else:
             # No item was added (likely due to pricing issues)
@@ -680,7 +675,6 @@ def add_to_cart(request: HttpRequest) -> HttpResponse:  # noqa: PLR0911
                 {
                     "error": _("Product is currently not available for purchase."),
                     "cart_count": cart.get_item_count(),
-                    "cart_total_quantity": cart.get_total_quantity(),
                 },
             )
 
@@ -689,7 +683,7 @@ def add_to_cart(request: HttpRequest) -> HttpResponse:  # noqa: PLR0911
         return _cart_error_response(
             request,
             "orders/partials/error_message.html",
-            {"error": str(e), "cart_count": 0, "cart_total_quantity": 0},
+            {"error": str(e), "cart_count": 0},
         )
     except Exception as e:
         logger.error(f"🔥 [Cart] Unexpected error adding to cart: {e}")
@@ -699,7 +693,6 @@ def add_to_cart(request: HttpRequest) -> HttpResponse:  # noqa: PLR0911
             {
                 "error": _("Error adding to cart. Please try again."),
                 "cart_count": 0,
-                "cart_total_quantity": 0,
             },
         )
 
@@ -804,7 +797,6 @@ def remove_from_cart(request: HttpRequest) -> HttpResponse:  # noqa: PLR0911
             "orders/partials/cart_updated.html",
             {
                 "cart_count": cart.get_item_count(),
-                "cart_total_quantity": cart.get_total_quantity(),
                 "success_message": _("Product removed from cart!"),
             },
         )
