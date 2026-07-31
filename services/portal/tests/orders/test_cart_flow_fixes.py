@@ -1,5 +1,6 @@
 """Regression tests for HTMX cart response/target alignment."""
 
+import re
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -17,6 +18,15 @@ _PRODUCT_DATA = {
     "slug": _PRODUCT_SLUG,
     "name": "Shared Hosting Basic",
     "product_type": "hosting",
+    "requires_domain": False,
+    "is_active": True,
+}
+_SECOND_PRODUCT_SLUG = "managed-vps"
+_SECOND_PRODUCT_DATA = {
+    "id": "prod-uuid-002",
+    "slug": _SECOND_PRODUCT_SLUG,
+    "name": "Managed VPS",
+    "product_type": "vps",
     "requires_domain": False,
     "is_active": True,
 }
@@ -42,15 +52,20 @@ class TestCartFlowFixes(SimpleTestCase):
         session["user_id"] = 7
         session.save()
 
-    def _populate_cart(self) -> None:
-        """Seed one real session-cart item while mocking only the platform API."""
+    def _populate_cart(self, *, include_second: bool = False) -> None:
+        """Seed real session-cart items while mocking only the platform API."""
         from apps.orders.services import GDPRCompliantCartSession  # noqa: PLC0415
+
+        products = [(_PRODUCT_SLUG, _PRODUCT_DATA)]
+        if include_second:
+            products.append((_SECOND_PRODUCT_SLUG, _SECOND_PRODUCT_DATA))
 
         session = self.client.session
         with patch("apps.orders.services.PlatformAPIClient") as mock_client_class:
-            mock_client_class.return_value.get.return_value = _PRODUCT_DATA
+            mock_client_class.return_value.get.side_effect = [product_data for _, product_data in products]
             cart = GDPRCompliantCartSession(session)
-            cart.add_item(product_slug=_PRODUCT_SLUG, quantity=1, billing_period="monthly")
+            for product_slug, _ in products:
+                cart.add_item(product_slug=product_slug, quantity=1, billing_period="monthly")
         session.save()
 
     @patch(
@@ -90,7 +105,25 @@ class TestCartFlowFixes(SimpleTestCase):
         self.assertEqual(response.status_code, 422)
         self.assertNotIn(b'id="cart-widget"', response.content)
 
-    def test_remove_from_cart_review_row_returns_empty_not_widget(self) -> None:
+    def test_remove_from_cart_review_rerenders_items_section(self) -> None:
+        self._populate_cart(include_second=True)
+
+        response = self.client.post(
+            reverse("orders:remove_from_cart"),
+            {
+                "product_slug": _PRODUCT_SLUG,
+                "billing_period": "monthly",
+            },
+            HTTP_HX_TARGET="cart-items",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b'id="cart-items"', response.content)
+        self.assertIn(_SECOND_PRODUCT_DATA["name"].encode(), response.content)
+        self.assertNotIn(_PRODUCT_DATA["name"].encode(), response.content)
+        self.assertNotIn(b'id="cart-widget"', response.content)
+
+    def test_remove_last_item_shows_empty_state(self) -> None:
         self._populate_cart()
 
         response = self.client.post(
@@ -99,12 +132,12 @@ class TestCartFlowFixes(SimpleTestCase):
                 "product_slug": _PRODUCT_SLUG,
                 "billing_period": "monthly",
             },
-            HTTP_HX_TARGET="cart-item-0",
+            HTTP_HX_TARGET="cart-items",
         )
 
         self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Your cart is empty")
         self.assertNotIn(b'id="cart-widget"', response.content)
-        self.assertEqual(response.content, b"")
 
     def test_remove_from_cart_minicart_still_returns_widget(self) -> None:
         self._populate_cart()
@@ -122,7 +155,9 @@ class TestCartFlowFixes(SimpleTestCase):
         self.assertIn(b'id="cart-widget"', response.content)
 
     def test_cart_review_remove_button_has_response_error_handler(self) -> None:
-        template_path = Path(__file__).resolve().parents[2] / "templates" / "orders" / "cart_review.html"
+        orders_templates = Path(__file__).resolve().parents[2] / "templates" / "orders"
+        partial_path = orders_templates / "partials" / "cart_items.html"
+        template_path = partial_path if partial_path.exists() else orders_templates / "cart_review.html"
         remove_button_lines = [
             line
             for line in template_path.read_text().splitlines()
@@ -134,6 +169,24 @@ class TestCartFlowFixes(SimpleTestCase):
             '''hx-on::response-error="showToast('error', '{% trans "Something went wrong. Please try again." %}')"''',
             remove_button_lines[0],
         )
+
+    def test_quantity_select_no_redundant_cartupdated_dispatch(self) -> None:
+        orders_templates = Path(__file__).resolve().parents[2] / "templates" / "orders"
+        partial_path = orders_templates / "partials" / "cart_items.html"
+        template_path = partial_path if partial_path.exists() else orders_templates / "cart_review.html"
+        template_source = template_path.read_text()
+
+        quantity_selects = re.findall(r'<select id="qty-.*?</select>', template_source, flags=re.DOTALL)
+        remove_buttons = re.findall(
+            r'<button hx-post="{% url \'orders:remove_from_cart\' %}".*?</button>',
+            template_source,
+            flags=re.DOTALL,
+        )
+
+        self.assertEqual(len(quantity_selects), 1)
+        self.assertEqual(quantity_selects[0].count("cartUpdated"), 0)
+        self.assertEqual(len(remove_buttons), 1)
+        self.assertEqual(remove_buttons[0].count("cartUpdated"), 1)
 
     def test_dead_cart_event_wiring_removed(self) -> None:
         portal_root = Path(__file__).resolve().parents[2]

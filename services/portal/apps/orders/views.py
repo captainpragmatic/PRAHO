@@ -788,9 +788,8 @@ def remove_from_cart(request: HttpRequest) -> HttpResponse:  # noqa: PLR0911
         OrderSecurityHardening.uniform_response_delay()
 
         hx_target = request.headers.get("HX-Target", "")
-        if hx_target.startswith("cart-item-"):
-            # Cart-review row: collapse the row; cartUpdated refreshes #cart-totals.
-            return HttpResponse("")
+        if hx_target == "cart-items":
+            return render(request, "orders/partials/cart_items.html", {"cart_items": cart.get_items()})
 
         return render(
             request,
