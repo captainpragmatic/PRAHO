@@ -404,7 +404,7 @@ test-e2e-csp:
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@curl -sf http://localhost:8701/login/ > /dev/null 2>&1 || (echo "❌ Portal service not running on :8701. Run 'make dev-e2e-csp CSP_PROFILE=$(CSP_PROFILE)' first." && exit 1)
 	@find tests/e2e/ -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
-	@EXPECTED_CSP_PROFILE="$(CSP_PROFILE)" DJANGO_SETTINGS_MODULE=config.settings.e2e PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/python -m pytest tests/e2e/portal/csp_violation_oracle_gate.py -v
+	@EXPECTED_CSP_PROFILE="$(CSP_PROFILE)" DJANGO_SETTINGS_MODULE=config.settings.e2e PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/python -m pytest tests/e2e/portal/csp_violation_oracle_gate.py tests/e2e/portal/csp_alpine_interactions_gate.py -v
 	@echo "✅ Strict-CSP violation oracle verified!"
 
 test-e2e-orm:
