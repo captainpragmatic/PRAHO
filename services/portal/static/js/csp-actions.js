@@ -9,6 +9,7 @@
  * Supported actions:
  *   navigate  — go to data-href (whole-row click targets, HTMX-swapped tables)
  *   dismiss   — hide the element matched by data-dismiss-target (notifications)
+ *   copy      — copy a literal value or an element's text to the clipboard
  */
 (function () {
   "use strict";
@@ -35,6 +36,33 @@
             node.style.display = "none";
           }
         }
+        break;
+      }
+      case "copy": {
+        var value = el.dataset.copyValue;
+        var copyTarget = el.dataset.copyTarget;
+        if (value === undefined && copyTarget) {
+          var copyNode = document.querySelector(copyTarget);
+          if (copyNode) {
+            value = copyNode.textContent.trim();
+          }
+        }
+        if (value === undefined || !navigator.clipboard) {
+          break;
+        }
+
+        navigator.clipboard.writeText(value).then(function () {
+          var feedback = el.dataset.copyFeedback;
+          if (feedback) {
+            var originalHtml = el.innerHTML;
+            el.textContent = feedback;
+            setTimeout(function () {
+              el.innerHTML = originalHtml;
+            }, 2000);
+          }
+        }).catch(function (err) {
+          console.error("Could not copy text: ", err);
+        });
         break;
       }
       default:

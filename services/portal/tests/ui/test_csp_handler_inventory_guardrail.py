@@ -37,7 +37,8 @@ PY_HANDLER_RE = re.compile(r'"on[a-z]+"\s*:')
 # --- Pinned baseline (lower DELIBERATELY as handlers are refactored away) ---
 # UNIT 2a migrations to the data-action delegated registry (was 35):
 #   -6 row-navigation ("navigate"), -2 error-notification dismiss ("dismiss").
-EXPECTED_PORTAL_HANDLERS = 27
+#   -3 copy-to-clipboard ("copy").
+EXPECTED_PORTAL_HANDLERS = 24
 EXPECTED_SHARED_HANDLERS = 12
 EXPECTED_PY_HANDLERS = 1
 EXPECTED_HX_ON = 11
