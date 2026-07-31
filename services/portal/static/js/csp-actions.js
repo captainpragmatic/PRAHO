@@ -10,6 +10,9 @@
  *   navigate  — go to data-href (whole-row click targets, HTMX-swapped tables)
  *   dismiss   — hide the element matched by data-dismiss-target (notifications)
  *   copy      — copy a literal value or an element's text to the clipboard
+ *   cookie-prefs — open the guarded global cookie-preferences dialog
+ *   modal-open   — show the modal matched by data-modal-target
+ *   modal-close  — hide the modal matched by data-modal-target
  */
 (function () {
   "use strict";
@@ -63,6 +66,28 @@
         }).catch(function (err) {
           console.error("Could not copy text: ", err);
         });
+        break;
+      }
+      case "cookie-prefs": {
+        if (window.showCookiePreferences) {
+          window.showCookiePreferences();
+        }
+        break;
+      }
+      case "modal-open": {
+        var openTarget = el.dataset.modalTarget;
+        var openNode = openTarget && document.querySelector(openTarget);
+        if (openNode) {
+          openNode.classList.remove("hidden");
+        }
+        break;
+      }
+      case "modal-close": {
+        var closeTarget = el.dataset.modalTarget;
+        var closeNode = closeTarget && document.querySelector(closeTarget);
+        if (closeNode) {
+          closeNode.classList.add("hidden");
+        }
         break;
       }
       default:
