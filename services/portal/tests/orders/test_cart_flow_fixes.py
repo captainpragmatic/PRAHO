@@ -4,8 +4,10 @@ import re
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+from django.template.loader import render_to_string
 from django.test import Client, SimpleTestCase, override_settings
 from django.urls import reverse
+from django.utils.translation import override
 
 _CACHE_SETTINGS = {
     "SESSION_ENGINE": "django.contrib.sessions.backends.cache",
@@ -104,6 +106,20 @@ class TestCartFlowFixes(SimpleTestCase):
 
         self.assertEqual(response.status_code, 422)
         self.assertNotIn(b'id="cart-widget"', response.content)
+
+    def test_error_message_labels_localized(self) -> None:
+        with override("en"):
+            english_output = render_to_string("orders/partials/error_message.html", {"error": "boom"})
+
+        self.assertIn("Error", english_output)
+        self.assertNotIn("Eroare", english_output)
+        self.assertNotIn("Închide notificarea", english_output)
+
+        with override("ro"):
+            romanian_output = render_to_string("orders/partials/error_message.html", {"error": "boom"})
+
+        self.assertIn("Eroare", romanian_output)
+        self.assertNotIn("Conversație", romanian_output)
 
     def test_remove_from_cart_review_rerenders_items_section(self) -> None:
         self._populate_cart(include_second=True)

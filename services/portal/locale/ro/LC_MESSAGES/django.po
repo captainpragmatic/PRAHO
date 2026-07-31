@@ -3611,7 +3611,7 @@ msgstr "Produs Indisponibil"
 
 #: templates/orders/partials/cart_error_notification.html:51
 msgid "Close notification"
-msgstr "Conversație"
+msgstr "Închide notificarea"
 
 #: templates/orders/partials/cart_totals.html:45
 msgid "Prices include VAT according to Romanian legislation"
@@ -3625,6 +3625,10 @@ msgstr "Continuă spre plată"
 #: templates/orders/partials/cart_totals.html:73
 msgid "Try again"
 msgstr "Încearcă din nou"
+
+#: templates/orders/partials/error_message.html:19
+msgid "Error"
+msgstr "Eroare"
 
 #: templates/orders/partials/error_message.html:19
 msgid "Eroare"
