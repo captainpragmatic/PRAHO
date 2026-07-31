@@ -35,7 +35,9 @@ HX_ON_RE = re.compile(r"hx-on:")
 PY_HANDLER_RE = re.compile(r'"on[a-z]+"\s*:')
 
 # --- Pinned baseline (lower DELIBERATELY as handlers are refactored away) ---
-EXPECTED_PORTAL_HANDLERS = 35
+# UNIT 2a: 6 row-navigation handlers migrated to the data-action="navigate"
+# delegated registry (invoices/services/tickets tables). Was 35.
+EXPECTED_PORTAL_HANDLERS = 29
 EXPECTED_SHARED_HANDLERS = 12
 EXPECTED_PY_HANDLERS = 1
 EXPECTED_HX_ON = 11
