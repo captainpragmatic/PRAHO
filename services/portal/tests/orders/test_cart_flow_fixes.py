@@ -1,5 +1,6 @@
 """Regression tests for HTMX cart response/target alignment."""
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from django.test import Client, SimpleTestCase, override_settings
@@ -88,3 +89,48 @@ class TestCartFlowFixes(SimpleTestCase):
 
         self.assertEqual(response.status_code, 422)
         self.assertNotIn(b'id="cart-widget"', response.content)
+
+    def test_remove_from_cart_review_row_returns_empty_not_widget(self) -> None:
+        self._populate_cart()
+
+        response = self.client.post(
+            reverse("orders:remove_from_cart"),
+            {
+                "product_slug": _PRODUCT_SLUG,
+                "billing_period": "monthly",
+            },
+            HTTP_HX_TARGET="cart-item-0",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn(b'id="cart-widget"', response.content)
+        self.assertEqual(response.content, b"")
+
+    def test_remove_from_cart_minicart_still_returns_widget(self) -> None:
+        self._populate_cart()
+
+        response = self.client.post(
+            reverse("orders:remove_from_cart"),
+            {
+                "product_slug": _PRODUCT_SLUG,
+                "billing_period": "monthly",
+            },
+            HTTP_HX_TARGET="cart-widget",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b'id="cart-widget"', response.content)
+
+    def test_cart_review_remove_button_has_response_error_handler(self) -> None:
+        template_path = Path(__file__).resolve().parents[2] / "templates" / "orders" / "cart_review.html"
+        remove_button_lines = [
+            line
+            for line in template_path.read_text().splitlines()
+            if "remove_from_cart" in line and "hx-post" in line
+        ]
+
+        self.assertEqual(len(remove_button_lines), 1)
+        self.assertIn(
+            '''hx-on::response-error="showToast('error', '{% trans "Something went wrong. Please try again." %}')"''',
+            remove_button_lines[0],
+        )

@@ -761,7 +761,7 @@ def update_cart_item(request: HttpRequest) -> HttpResponse:  # noqa: PLR0911
 
 @require_customer_authentication
 @require_http_methods(["POST"])
-def remove_from_cart(request: HttpRequest) -> HttpResponse:
+def remove_from_cart(request: HttpRequest) -> HttpResponse:  # noqa: PLR0911
     """
     HTMX endpoint to remove item from cart.
     """
@@ -793,6 +793,11 @@ def remove_from_cart(request: HttpRequest) -> HttpResponse:
 
         # 🔒 SECURITY: Apply uniform response delay
         OrderSecurityHardening.uniform_response_delay()
+
+        hx_target = request.headers.get("HX-Target", "")
+        if hx_target.startswith("cart-item-"):
+            # Cart-review row: collapse the row; cartUpdated refreshes #cart-totals.
+            return HttpResponse("")
 
         return render(
             request,
