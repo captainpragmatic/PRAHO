@@ -676,7 +676,7 @@ def add_to_cart(request: HttpRequest) -> HttpResponse:  # noqa: PLR0911
             # No item was added (likely due to pricing issues)
             return _cart_error_response(
                 request,
-                "orders/partials/cart_error_notification.html",
+                "orders/partials/error_message.html",
                 {
                     "error": _("Product is currently not available for purchase."),
                     "cart_count": cart.get_item_count(),
@@ -688,14 +688,14 @@ def add_to_cart(request: HttpRequest) -> HttpResponse:  # noqa: PLR0911
         logger.warning(f"⚠️ [Cart] Validation error: {e}")
         return _cart_error_response(
             request,
-            "orders/partials/cart_error_notification.html",
+            "orders/partials/error_message.html",
             {"error": str(e), "cart_count": 0, "cart_total_quantity": 0},
         )
     except Exception as e:
         logger.error(f"🔥 [Cart] Unexpected error adding to cart: {e}")
         return _cart_error_response(
             request,
-            "orders/partials/cart_error_notification.html",
+            "orders/partials/error_message.html",
             {
                 "error": _("Error adding to cart. Please try again."),
                 "cart_count": 0,
@@ -736,18 +736,18 @@ def update_cart_item(request: HttpRequest) -> HttpResponse:  # noqa: PLR0911
 
         cart = GDPRCompliantCartSession(request.session)
         cart.update_item_quantity(product_slug, billing_period, quantity)
+        customer_id, user_id = _get_customer_context(request)
+        calculation_result = CartCalculationService.calculate_cart_totals(
+            cart, str(customer_id or ""), int(user_id or 0)
+        )
 
         # 🔒 SECURITY: Apply uniform response delay
         OrderSecurityHardening.uniform_response_delay()
 
         return render(
             request,
-            "orders/partials/cart_item_updated.html",
-            {
-                "cart_count": cart.get_item_count(),
-                "cart_total_quantity": cart.get_total_quantity(),
-                "success_message": _("Quantity updated successfully!"),
-            },
+            "orders/partials/cart_totals.html",
+            {"calculation": calculation_result, "cart": cart, "warnings": cart.get_warnings()},
         )
 
     except ValidationError as e:
