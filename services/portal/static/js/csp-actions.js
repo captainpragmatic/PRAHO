@@ -13,6 +13,8 @@
  *   dismiss   — hide the element matched by data-dismiss-target (notifications)
  *   copy      — copy a literal value or an element's text to the clipboard
  *   load-usage — load usage data for the period in data-period
+ *   remove-file — remove the uploaded file at data-index
+ *   submit-form — submit the enclosing form
  *   cookie-prefs — open the guarded global cookie-preferences dialog
  *   modal-open   — show the modal matched by data-modal-target
  *   modal-close  — hide the modal matched by data-modal-target
@@ -74,6 +76,19 @@
       case "load-usage": {
         if (window.loadUsageData) {
           window.loadUsageData(el.dataset.period);
+        }
+        break;
+      }
+      case "remove-file": {
+        if (window.removeFile) {
+          window.removeFile(Number(el.dataset.index));
+        }
+        break;
+      }
+      case "submit-form": {
+        var submitForm = el.closest("form");
+        if (submitForm) {
+          submitForm.submit();
         }
         break;
       }

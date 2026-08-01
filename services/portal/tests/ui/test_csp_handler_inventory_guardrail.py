@@ -41,7 +41,8 @@ PY_HANDLER_RE = re.compile(r'"on[a-z]+"\s*:')
 #   -2 cookie-prefs ("cookie-prefs"), -3 invoice-refund modal ("modal-open"/"modal-close").
 #   -3 confirm-on-submit ("data-confirm").
 #   -3 usage-period ("load-usage").
-EXPECTED_PORTAL_HANDLERS = 13
+#   -1 remove-file, -1 submit-form.
+EXPECTED_PORTAL_HANDLERS = 11
 EXPECTED_SHARED_HANDLERS = 12
 EXPECTED_PY_HANDLERS = 1
 EXPECTED_HX_ON = 11

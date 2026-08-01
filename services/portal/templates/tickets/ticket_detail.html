@@ -115,7 +115,7 @@ document.addEventListener('DOMContentLoaded', function() {
             fileItem.className = 'flex items-center space-x-2 text-xs text-slate-400 bg-slate-700 px-2 py-1 rounded';
             fileItem.innerHTML = `
                 <span>${file.name} (${formatFileSize(file.size)})</span>
-                <button type="button" onclick="removeFile(${index})" class="text-slate-400 hover:text-red-400 ml-2">×</button>
+                <button type="button" data-action="remove-file" data-index="${index}" class="text-slate-400 hover:text-red-400 ml-2">×</button>
             `;
             currentFileList.appendChild(fileItem);
         });
