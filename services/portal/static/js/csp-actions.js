@@ -21,6 +21,9 @@
  *   print-codes — print MFA backup codes via the guarded global helper
  *   regenerate-codes — regenerate MFA backup codes via the guarded global helper
  *   reset-form — reset a form and optionally clear its character counter
+ *   toggle-customer-selector — toggle the guarded global customer selector
+ *   toggle-mobile-menu — toggle the guarded global mobile menu
+ *   switch-customer — switch customer via the guarded global helper
  */
 (function () {
   "use strict";
@@ -142,6 +145,14 @@
         }
         break;
       }
+      case "toggle-customer-selector": {
+        if (window.toggleCustomerSelector) { window.toggleCustomerSelector(); }
+        break;
+      }
+      case "toggle-mobile-menu": {
+        if (window.toggleMobileMenu) { window.toggleMobileMenu(); }
+        break;
+      }
       default:
         break;
     }
@@ -151,6 +162,13 @@
     var form = event.target.closest("form[data-confirm]");
     if (form && !window.confirm(form.dataset.confirm)) {
       event.preventDefault();
+    }
+  });
+
+  document.addEventListener("change", function (event) {
+    var el = event.target.closest('[data-action="switch-customer"]');
+    if (el && window.switchCustomer) {
+      window.switchCustomer(el.value);
     }
   });
 })();

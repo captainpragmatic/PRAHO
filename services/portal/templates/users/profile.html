@@ -172,7 +172,7 @@
           {{ user_memberships|length }} {% trans 'companies' %}
         </span>
         <div class="relative w-full sm:w-auto min-w-0 sm:min-w-48">
-          <select onchange="switchCustomer(this.value)" class="w-full bg-slate-700 border border-slate-600 text-white text-sm rounded-lg px-3 py-2 pr-10 appearance-none focus:outline-none focus:ring-2 focus:ring-blue-500 truncate">
+          <select data-action="switch-customer" class="w-full bg-slate-700 border border-slate-600 text-white text-sm rounded-lg px-3 py-2 pr-10 appearance-none focus:outline-none focus:ring-2 focus:ring-blue-500 truncate">
             {% for membership in user_memberships %}
             <option value="{{ membership.customer_id }}" {% if membership.customer_id|stringformat:'s' == selected_customer_id|stringformat:'s' %}selected{% endif %}>
               {{ membership.customer_name }} ({{ membership.role|title }})

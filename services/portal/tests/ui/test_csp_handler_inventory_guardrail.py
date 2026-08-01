@@ -43,7 +43,8 @@ PY_HANDLER_RE = re.compile(r'"on[a-z]+"\s*:')
 #   -3 usage-period ("load-usage").
 #   -1 remove-file, -1 submit-form.
 #   -1 print-codes, -1 regenerate-codes, -1 reset-form.
-EXPECTED_PORTAL_HANDLERS = 8
+#   -1 toggle-customer-selector, -1 toggle-mobile-menu, -1 switch-customer.
+EXPECTED_PORTAL_HANDLERS = 5
 EXPECTED_SHARED_HANDLERS = 12
 EXPECTED_PY_HANDLERS = 1
 EXPECTED_HX_ON = 11
