@@ -45,7 +45,8 @@ PY_HANDLER_RE = re.compile(r'"on[a-z]+"\s*:')
 #   -1 print-codes, -1 regenerate-codes, -1 reset-form.
 #   -1 toggle-customer-selector, -1 toggle-mobile-menu, -1 switch-customer.
 EXPECTED_PORTAL_HANDLERS = 5
-EXPECTED_SHARED_HANDLERS = 12
+# -1 badge-dismiss, -1 back (migrated to the shared ui-actions.js registry).
+EXPECTED_SHARED_HANDLERS = 10
 EXPECTED_PY_HANDLERS = 1
 EXPECTED_HX_ON = 11
 
