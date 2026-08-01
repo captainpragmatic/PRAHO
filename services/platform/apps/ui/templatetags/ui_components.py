@@ -251,7 +251,9 @@ def button(
             s = re.sub(r"alert\([^)]*\)", "", s, flags=re.IGNORECASE)
 
         # CSP: strip any inline on*= event handler (name+value) so attrs can never inject a native handler.
-        s = re.sub(r'''\bon[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)''', "", s, flags=re.IGNORECASE)
+        # The lookbehind requires the handler to start an attribute (start/space/quote) and NOT be the
+        # tail of a legit hyphenated/word attr (e.g. `data-onboarding` must survive intact).
+        s = re.sub(r'''(?<![\w-])on[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)''', "", s, flags=re.IGNORECASE)
 
         # Manual HTML escaping to return plain string, not SafeString
         s = s.replace("&", "&amp;")

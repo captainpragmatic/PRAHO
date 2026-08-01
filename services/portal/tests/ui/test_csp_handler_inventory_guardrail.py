@@ -29,13 +29,16 @@ PORTAL_APPS = REPO_ROOT / "services" / "portal" / "apps"
 PORTAL_STATIC_JS = REPO_ROOT / "services" / "portal" / "static" / "js"
 SHARED_STATIC_JS = REPO_ROOT / "shared" / "ui" / "static" / "js"
 
-# Inline DOM event handler attribute: whitespace + on<event>="  (onclick, onchange, ...).
-# "on" inside hx-on is preceded by "-", so this never double-counts HTMX features.
-ON_HANDLER_RE = re.compile(r'\son[a-z]+="')
+# Inline DOM event handler attribute: whitespace + on<event>= then a quote
+# (onclick, onChange, ...). Case-insensitive, BOTH quote styles, optional
+# whitespace around '=' — a single-quoted or camelCase handler is valid HTML the
+# browser executes and is blocked by `script-src-attr 'none'`, so the tripwire
+# must count it too. The leading `\s` keeps `hx-on`/`x-on` (preceded by "-") out.
+ON_HANDLER_RE = re.compile(r"""\son[a-z]+\s*=\s*['"]""", re.IGNORECASE)
 # HTMX inline eval feature: hx-on::<event> / hx-on:<event>
 HX_ON_RE = re.compile(r"hx-on:")
-# Python-generated handler in a widget attrs dict: "on<event>":
-PY_HANDLER_RE = re.compile(r'"on[a-z]+"\s*:')
+# Python-generated handler in a widget attrs dict: "on<event>": / 'onChange':
+PY_HANDLER_RE = re.compile(r"""["']on[a-z]+["']\s*:""", re.IGNORECASE)
 # Inline DOM event handlers that served component JS can inject at runtime — both
 # forms break under phase2-target's `script-src-attr 'none'` regardless of how
 # they reach the DOM, and the template scan above cannot see them:
@@ -172,6 +175,22 @@ class CSPHandlerInventoryGuardrailTests(SimpleTestCase):
         self.assertNotIn("x()", rendered)
         # Sanity: the button itself still renders (strip did not eat the element).
         self.assertIn("Go", rendered)
+
+    def test_button_attrs_sanitizer_preserves_data_on_prefixed_attr(self) -> None:
+        """The on*= sanitizer must NOT corrupt a legit hyphenated attr whose name
+        merely CONTAINS 'on' (e.g. data-onboarding) while still stripping a real
+        inline handler in the same attrs string — a `\\b`-anchored strip would
+        truncate `data-onboarding` to `data-`."""
+        rendered = Template(
+            "{% load ui_components %}"
+            """{% button "Go" attrs='data-onboarding="step1" onclick="x()"' %}"""
+        ).render(Context({}))
+        # The data-* attribute survives intact (name AND value).
+        self.assertIn("data-onboarding", rendered)
+        self.assertIn("step1", rendered)
+        # The real inline handler is still stripped.
+        self.assertNotIn("onclick", rendered)
+        self.assertNotIn("x()", rendered)
 
     def test_modal_close_buttons_use_delegated_data_action(self) -> None:
         """The shared modal must close via the delegated `close-modal` data-action
