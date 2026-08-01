@@ -172,7 +172,7 @@
     toast.setAttribute('role', 'alert');
 
     var dismissBtn = opts.dismissible
-      ? '<button onclick="this.closest(\'[role=alert]\').remove()"' +
+      ? '<button type="button" data-toast-dismiss' +
       ' class="ml-4 inline-flex rounded-md p-1.5 opacity-60 hover:opacity-100"' +
       ' aria-label="Close notification">' +
       '<svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">' +
@@ -191,6 +191,18 @@
       '</div>' +
       dismissBtn +
       '</div>';
+
+    // CSP-safe dismiss: bind the click programmatically instead of an inline
+    // onclick — phase2-target's `script-src-attr 'none'` blocks inline event
+    // handlers (whether from a template or injected via innerHTML).
+    if (opts.dismissible) {
+      var dismissEl = toast.querySelector('[data-toast-dismiss]');
+      if (dismissEl) {
+        dismissEl.addEventListener('click', function () {
+          toast.remove();
+        });
+      }
+    }
 
     container.appendChild(toast);
 

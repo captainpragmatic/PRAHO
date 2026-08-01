@@ -2,8 +2,9 @@
 
 The CSP-hardening rollout selects a policy PROFILE (content) and a DISPOSITION
 (enforced vs Report-Only) purely from server settings — never from request data.
-The default profile MUST reproduce today's live header byte-for-byte so the
-rollout never regresses the enforced policy.
+The enforced default is now ``phase2-target`` (nonce-based, no 'unsafe-inline',
+``script-src-attr 'none'``); ``current`` remains the byte-exact legacy policy the
+middleware also falls back to when no request nonce is available.
 """
 
 from __future__ import annotations
@@ -73,7 +74,7 @@ class CSPPolicyProfileTests(SimpleTestCase):
         CSP_PROFILE="current",
         CSP_REPORT_ONLY=False,
     )
-    def test_default_profile_emits_byte_exact_enforced_policy(self) -> None:
+    def test_current_profile_emits_byte_exact_policy(self) -> None:
         _request, response = self._request_with_nonce()
 
         self.assertEqual(
@@ -84,6 +85,28 @@ class CSPPolicyProfileTests(SimpleTestCase):
             "Content-Security-Policy-Report-Only",
             response,
         )
+
+    def test_settings_default_profile_is_phase2_target_enforced(self) -> None:
+        """GUARD: the shipped default (``base.py`` ``CSP_PROFILE``) must be the
+        enforced phase2-target policy. This test deliberately uses NO
+        ``override_settings`` so it reads the REAL default — it goes RED if the
+        enforce-flip is ever reverted to ``current``. Every other test here
+        pins its own profile via ``override_settings`` and so cannot catch a
+        default regression."""
+        request, response = self._request_with_nonce()
+
+        self.assertIn(
+            "Content-Security-Policy",
+            response,
+            "Default disposition must be enforced, not Report-Only.",
+        )
+        self.assertNotIn("Content-Security-Policy-Report-Only", response)
+
+        csp = response["Content-Security-Policy"]
+        script_src = self._directive(csp, "script-src")
+        self.assertNotIn("'unsafe-inline'", script_src)
+        self.assertIn(f"'nonce-{request.csp_nonce}'", script_src)
+        self.assertIn("script-src-attr 'none'", csp.split("; "))
 
     @override_settings(
         CSP_PROFILE="phase2-target",

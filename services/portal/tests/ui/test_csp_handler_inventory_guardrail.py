@@ -26,6 +26,8 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 PORTAL_TEMPLATES = REPO_ROOT / "services" / "portal" / "templates"
 SHARED_TEMPLATES = REPO_ROOT / "shared" / "ui" / "templates"
 PORTAL_APPS = REPO_ROOT / "services" / "portal" / "apps"
+PORTAL_STATIC_JS = REPO_ROOT / "services" / "portal" / "static" / "js"
+SHARED_STATIC_JS = REPO_ROOT / "shared" / "ui" / "static" / "js"
 
 # Inline DOM event handler attribute: whitespace + on<event>="  (onclick, onchange, ...).
 # "on" inside hx-on is preceded by "-", so this never double-counts HTMX features.
@@ -34,6 +36,11 @@ ON_HANDLER_RE = re.compile(r'\son[a-z]+="')
 HX_ON_RE = re.compile(r"hx-on:")
 # Python-generated handler in a widget attrs dict: "on<event>":
 PY_HANDLER_RE = re.compile(r'"on[a-z]+"\s*:')
+# Inline DOM event handler inside a JS-injected HTML string: on<event>=" / on<event>='
+# (optionally backslash-escaped quote). A native inline handler breaks under
+# phase2-target's `script-src-attr 'none'` REGARDLESS of whether it comes from a
+# template or from innerHTML — the template scan above cannot see the latter.
+JS_INLINE_HANDLER_RE = re.compile(r"""on[a-z]+=\\?['"]""")
 
 # --- Pinned baseline (lower DELIBERATELY as handlers are refactored away) ---
 # UNIT 2a migrations to the data-action delegated registry (was 35):
@@ -50,10 +57,10 @@ PY_HANDLER_RE = re.compile(r'"on[a-z]+"\s*:')
 #   shared ui-actions.js registry).
 #   -1 styleguide open-modal ("modal-open-by-id"): styleguide/index.html "Open
 #   Modal" trigger migrated to data-action -> csp-actions.js window.openModal.
-# Merge of master (#459) deleted cart_error_notification.html + cart_item_updated.html
-#   -> the 2 toggleMiniCart handlers are gone. Remaining 1 = the intentional e2e
-#   positive-control (templates/e2e/csp_violation_positive_control.html), which
-#   MUST stay inline; UNIT 2b's on*=->0 exit gate excludes that E2E-only route.
+# Merge of master (#459) removed the two mini-cart toggle handlers, so the one
+#   remaining portal handler is the intentional E2E positive-control template
+#   named csp_violation_positive_control dot html, which MUST stay inline. The
+#   UNIT 2b on-handler exit gate deliberately excludes that E2E-only route.
 EXPECTED_PORTAL_HANDLERS = 1
 # -1 badge-dismiss, -1 back (migrated to the shared ui-actions.js registry).
 # -3 modal close buttons (close-modal, shared ui-actions.js: backdrop/X/Cancel),
@@ -89,6 +96,21 @@ def _find_py_handlers(root: Path) -> tuple[int, list[str]]:
             total += len(hits)
             files.append(path.relative_to(REPO_ROOT).as_posix())
     return total, files
+
+
+def _find_js_inline_handlers(root: Path) -> list[str]:
+    """Served component JS injecting inline on*= handlers (e.g. via innerHTML).
+    Skips vendored *.min.js (htmx/alpine) — their `on…` internals are property
+    names, not injected HTML attributes."""
+    hits: list[str] = []
+    for path in sorted(root.rglob("*.js")):
+        if path.name.endswith(".min.js"):
+            continue
+        text = path.read_text(encoding="utf-8")
+        for match in JS_INLINE_HANDLER_RE.finditer(text):
+            line = text.count("\n", 0, match.start()) + 1
+            hits.append(f"{path.relative_to(REPO_ROOT).as_posix()}:{line}")
+    return hits
 
 
 class CSPHandlerInventoryGuardrailTests(SimpleTestCase):
@@ -166,4 +188,22 @@ class CSPHandlerInventoryGuardrailTests(SimpleTestCase):
             EXPECTED_HX_ON,
             f"hx-on eval-feature count is {count}, baseline {EXPECTED_HX_ON}. "
             f"These collapse to 2 global listeners in UNIT 3c.",
+        )
+
+    def test_served_js_injects_no_inline_event_handlers(self) -> None:
+        """Blind-spot closure. The template scans above miss handlers that
+        component JS injects at runtime via innerHTML — e.g. a toast dismiss
+        button built as an HTML string. Those break under phase2-target's
+        `script-src-attr 'none'` exactly like a template on*= handler (the
+        browser refuses the inline handler however it reached the DOM), so
+        served component JS must inject ZERO. Bind via addEventListener instead.
+        """
+        hits = _find_js_inline_handlers(PORTAL_STATIC_JS) + _find_js_inline_handlers(
+            SHARED_STATIC_JS
+        )
+        self.assertEqual(
+            hits,
+            [],
+            "Inline on*= handlers injected by served component JS — replace with "
+            f"addEventListener ('script-src-attr none' blocks these at runtime): {hits}",
         )
