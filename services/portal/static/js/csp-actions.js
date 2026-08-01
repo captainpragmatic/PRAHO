@@ -5,6 +5,8 @@
  * 'unsafe-inline'. A single document-level listener dispatches on the
  * data-action attribute, so it survives HTMX fragment swaps (no per-element
  * re-binding) and needs no nonce (loaded as an external 'self' script).
+ * Plain form submissions with data-confirm are gated by a delegated submit
+ * listener before the request is sent.
  *
  * Supported actions:
  *   navigate  — go to data-href (whole-row click targets, HTMX-swapped tables)
@@ -92,6 +94,13 @@
       }
       default:
         break;
+    }
+  });
+
+  document.addEventListener("submit", function (event) {
+    var form = event.target.closest("form[data-confirm]");
+    if (form && !window.confirm(form.dataset.confirm)) {
+      event.preventDefault();
     }
   });
 })();
