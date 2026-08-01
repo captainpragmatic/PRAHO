@@ -88,8 +88,8 @@ class TestCartRemoveNoDuplicatePost(SimpleTestCase):
     """L4: Remove button should dispatch cartUpdated only, not also inline htmx.ajax()."""
 
     def test_remove_button_has_no_inline_calculate_totals(self) -> None:
-        """cart_review.html remove button must not contain inline calculate_totals call."""
-        template_path = Path(__file__).resolve().parents[2] / "templates" / "orders" / "cart_review.html"
+        """Cart-items partial remove button must not contain inline calculate_totals call."""
+        template_path = Path(__file__).resolve().parents[2] / "templates" / "orders" / "partials" / "cart_items.html"
         content = template_path.read_text()
 
         # Find the remove button line
@@ -101,7 +101,7 @@ class TestCartRemoveNoDuplicatePost(SimpleTestCase):
                 self.assertNotIn("calculate_totals", line)
                 break
         else:
-            self.fail("Remove button not found in cart_review.html")
+            self.fail("Remove button not found in cart_items.html")
 
 
 # ---------------------------------------------------------------------------
