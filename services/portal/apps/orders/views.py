@@ -82,15 +82,15 @@ def _cart_error_response(
     template: str,
     context: dict[str, Any],
 ) -> HttpResponse:
-    """Return an HTMX-friendly error response with retarget headers.
+    """Return an HTMX-friendly error response with a target-independent toast.
 
     Uses HTTP 422 so HTMX's ``event.detail.successful`` is False,
-    preventing success toasts on error. HX-Retarget/HX-Reswap headers
-    instruct HTMX where to render the error fragment.
+    preventing success handlers from running. Because HTMX does not swap 4xx
+    response bodies, ``HX-Trigger: showToast`` surfaces errors on every page.
     """
     response = render(request, template, context, status=HTTP_UNPROCESSABLE_ENTITY)
-    response["HX-Retarget"] = "#cart-notifications"
-    response["HX-Reswap"] = "innerHTML"
+    message = str(context.get("error", "") or _("Something went wrong. Please try again."))
+    response["HX-Trigger"] = json.dumps({"showToast": {"variant": "error", "message": message}})
     return response
 
 

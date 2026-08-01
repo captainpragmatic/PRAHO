@@ -170,21 +170,52 @@ class TestCartFlowFixes(SimpleTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn(b'id="cart-widget"', response.content)
 
-    def test_cart_review_remove_button_has_response_error_handler(self) -> None:
+    def test_cart_review_controls_rely_on_server_driven_error_toast(self) -> None:
         orders_templates = Path(__file__).resolve().parents[2] / "templates" / "orders"
         partial_path = orders_templates / "partials" / "cart_items.html"
         template_path = partial_path if partial_path.exists() else orders_templates / "cart_review.html"
-        remove_button_lines = [
-            line
+        template_source = template_path.read_text()
+        quantity_selects = re.findall(r'<select id="qty-.*?</select>', template_source, flags=re.DOTALL)
+        remove_buttons = re.findall(
+            r'<button hx-post="{% url \'orders:remove_from_cart\' %}".*?</button>',
+            template_source,
+            flags=re.DOTALL,
+        )
+
+        self.assertEqual(len(quantity_selects), 1)
+        self.assertEqual(len(remove_buttons), 1)
+        self.assertNotIn("hx-on::response-error", quantity_selects[0])
+        self.assertNotIn("hx-on::response-error", remove_buttons[0])
+
+    def test_base_wires_showtoast_htmx_event_once(self) -> None:
+        portal_root = Path(__file__).resolve().parents[2]
+        base_source = (portal_root / "templates" / "base.html").read_text()
+
+        self.assertEqual(base_source.count("document.body.addEventListener('showToast'"), 1)
+        self.assertIn("window.showToast(d.variant || 'error', d.message || '');", base_source)
+
+    def test_remove_buttons_dispatch_cartupdated_only_after_success(self) -> None:
+        partials_path = Path(__file__).resolve().parents[2] / "templates" / "orders" / "partials"
+        template_paths = [partials_path / "cart_items.html", partials_path / "mini_cart_content.html"]
+        remove_button_sites = [
+            (template_path.name, line)
+            for template_path in template_paths
             for line in template_path.read_text().splitlines()
             if "remove_from_cart" in line and "hx-post" in line
         ]
 
-        self.assertEqual(len(remove_button_lines), 1)
-        self.assertIn(
-            '''hx-on::response-error="showToast('error', '{% trans "Something went wrong. Please try again." %}')"''',
-            remove_button_lines[0],
+        self.assertEqual(len(remove_button_sites), 2)
+        self.assertEqual(
+            {template_name for template_name, _line in remove_button_sites},
+            {"cart_items.html", "mini_cart_content.html"},
         )
+        guarded_dispatch = (
+            'hx-on::after-request="if(event.detail.successful){'
+            "document.body.dispatchEvent(new CustomEvent('cartUpdated'));}"
+            '"'
+        )
+        for template_name, remove_button in remove_button_sites:
+            self.assertIn(guarded_dispatch, remove_button, template_name)
 
     def test_quantity_select_no_redundant_cartupdated_dispatch(self) -> None:
         orders_templates = Path(__file__).resolve().parents[2] / "templates" / "orders"

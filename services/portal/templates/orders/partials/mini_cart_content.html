@@ -37,7 +37,7 @@
       </div>
 
       <!-- Remove Item Button -->
-      <button hx-post="{% url 'orders:remove_from_cart' %}" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}' hx-vals='{"product_slug": "{{ item.product_slug }}", "billing_period": "{{ item.billing_period }}"}' hx-target="#cart-widget" hx-swap="outerHTML" hx-on::after-request="document.body.dispatchEvent(new CustomEvent('cartUpdated'));" hx-confirm="{% trans 'Are you sure you want to remove this product from cart?' %}" class="ml-2 text-slate-400 hover:text-red-400 transition-colors p-1" aria-label="{% trans 'Remove from cart' %}">
+      <button hx-post="{% url 'orders:remove_from_cart' %}" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}' hx-vals='{"product_slug": "{{ item.product_slug }}", "billing_period": "{{ item.billing_period }}"}' hx-target="#cart-widget" hx-swap="outerHTML" hx-on::after-request="if(event.detail.successful){document.body.dispatchEvent(new CustomEvent('cartUpdated'));}" hx-confirm="{% trans 'Are you sure you want to remove this product from cart?' %}" class="ml-2 text-slate-400 hover:text-red-400 transition-colors p-1" aria-label="{% trans 'Remove from cart' %}">
         {% icon "x" size="sm" %}
       </button>
     </div>

@@ -3630,14 +3630,6 @@ msgstr "Încearcă din nou"
 msgid "Error"
 msgstr "Eroare"
 
-#: templates/orders/partials/error_message.html:19
-msgid "Eroare"
-msgstr "Eroare"
-
-#: templates/orders/partials/error_message.html:24
-msgid "Închide notificarea"
-msgstr "Închide notificarea"
-
 #: templates/orders/partials/mini_cart_content.html:10
 msgid "Your Cart"
 msgstr "Numele tău de familie"

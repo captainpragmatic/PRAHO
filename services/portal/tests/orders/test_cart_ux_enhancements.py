@@ -10,6 +10,7 @@ Covers:
 No database access — all tests use SimpleTestCase + locmem cache.
 """
 
+import json
 from unittest.mock import MagicMock, patch
 
 from django.test import Client, SimpleTestCase, override_settings
@@ -97,8 +98,8 @@ class TestAddToCartResponse(SimpleTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn(f"?just_added={slug}", response.content.decode())
 
-    def test_error_response_does_not_set_hx_trigger(self) -> None:
-        """ENH-1-A: Failed add_to_cart (e.g. missing product_slug) must NOT set HX-Trigger."""
+    def test_error_response_sets_toast_hx_trigger(self) -> None:
+        """Failed add_to_cart requests must surface their error via HX-Trigger."""
         with (
             patch("apps.orders.views.PlatformAPIClient") as mock_cls,
             patch("apps.orders.services.PlatformAPIClient") as svc_mock_cls,
@@ -114,7 +115,16 @@ class TestAddToCartResponse(SimpleTestCase):
                 HTTP_X_FORWARDED_FOR="127.0.0.1",
             )
 
-        self.assertNotIn("HX-Trigger", response)
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(
+            json.loads(response["HX-Trigger"]),
+            {
+                "showToast": {
+                    "variant": "error",
+                    "message": "Error adding to cart. Please try again.",
+                }
+            },
+        )
 
 
 # ---------------------------------------------------------------------------
