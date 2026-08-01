@@ -208,8 +208,8 @@
 </div>
 
 {# Auto-refresh removed: this fragment is loaded into #usage-data via HTMX, so an
-   inline <script> here carries the fragment request's nonce (≠ the document nonce)
-   and is refused under the enforced CSP. It was also already non-functional — it
-   targeted a non-existent #usage-charts and built a malformed URL. If periodic
-   refresh is wanted, add native `hx-trigger="every 300s"` to the #usage-data div
-   in service_usage.html (no inline script, CSP-clean). #}
+   inline script element here would carry the fragment request's nonce (not the
+   document nonce) and be refused under the enforced CSP. It was also already
+   non-functional — it targeted a non-existent #usage-charts and built a malformed
+   URL. If periodic refresh is wanted, add native hx-trigger polling to the
+   #usage-data div in service_usage.html (no inline script, CSP-clean). #}
