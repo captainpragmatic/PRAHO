@@ -177,11 +177,19 @@
 
 <script nonce="{{ csp_nonce }}">
 function loadUsageData(period) {
-    // Update active button
-    document.querySelectorAll('[onclick*="loadUsageData"]').forEach(btn => {
-        btn.className = btn.className.replace('bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200', 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200');
+    var ACTIVE = 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200';
+    var INACTIVE = 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200';
+    // Reset every period button, then highlight the selected one. The buttons use
+    // data-action="load-usage" data-period=... (delegated via the CSP registry),
+    // so select on those attributes — the old [onclick*=] selector and event.target
+    // both broke when the inline handlers were removed.
+    document.querySelectorAll('[data-action="load-usage"]').forEach(function (btn) {
+        btn.className = btn.className.replace(ACTIVE, INACTIVE);
     });
-    event.target.className = event.target.className.replace('bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200', 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200');
+    var selected = document.querySelector('[data-action="load-usage"][data-period="' + period + '"]');
+    if (selected) {
+        selected.className = selected.className.replace(INACTIVE, ACTIVE);
+    }
 
     // Load new data
     htmx.ajax('GET', '{% url "services:usage_data" service_id=service.id %}', {

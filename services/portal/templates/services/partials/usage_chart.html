@@ -207,14 +207,9 @@
   {% endif %}
 </div>
 
-<!-- Auto-refresh every 5 minutes -->
-<script nonce="{{ csp_nonce }}">
-setTimeout(function() {
-  // Auto-refresh usage data every 5 minutes
-  htmx.ajax('GET', window.location.pathname.replace('/services/', '/services/').replace('/', '/usage/'), {
-    values: {'period': '{{ period }}'},
-    target: '#usage-charts',
-    swap: 'innerHTML'
-  });
-}, 300000); // 5 minutes
-</script>
+{# Auto-refresh removed: this fragment is loaded into #usage-data via HTMX, so an
+   inline <script> here carries the fragment request's nonce (≠ the document nonce)
+   and is refused under the enforced CSP. It was also already non-functional — it
+   targeted a non-existent #usage-charts and built a malformed URL. If periodic
+   refresh is wanted, add native `hx-trigger="every 300s"` to the #usage-data div
+   in service_usage.html (no inline script, CSP-clean). #}

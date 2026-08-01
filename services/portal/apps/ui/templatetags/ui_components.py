@@ -222,7 +222,10 @@ def button(
         )
 
         if has_complex_payload:
-            # Remove auto-executing dangerous event handlers (but keep onclick as it requires user interaction)
+            # Strip the auto-executing handlers early (defense-in-depth). onclick is
+            # absent here only because it needs a click — but the CSP on*= pass below
+            # strips it (and every other on*=) unconditionally, so no inline handler
+            # of any kind survives.
             dangerous_events = r"\b(onload|onerror|onmouseover|onfocus|onblur)\s*="
             s = re.sub(dangerous_events, "", s, flags=re.IGNORECASE)
             # Remove javascript: URLs and code injection
