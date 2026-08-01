@@ -63,7 +63,9 @@ EXPECTED_PORTAL_HANDLERS = 1
 #   all migrated to the shared ui-actions.js registry -> shared surface now zero.
 EXPECTED_SHARED_HANDLERS = 0
 EXPECTED_PY_HANDLERS = 1
-EXPECTED_HX_ON = 11
+# Merge of master (#459) removed the 2 cart_items.html hx-on::response-error
+#   handlers (replaced by the target-independent HX-Trigger showToast): 11 -> 9.
+EXPECTED_HX_ON = 9
 
 # Canary: the Python-generated onchange a template-only scan would miss.
 CANARY_PY_HANDLER_FILE = "services/portal/apps/users/forms.py"
