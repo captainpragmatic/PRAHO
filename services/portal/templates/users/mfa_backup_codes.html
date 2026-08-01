@@ -53,7 +53,7 @@
             {% icon "clipboard" size="sm" css_class="text-white" %} {% trans 'Copy All Codes' %}
           </button>
 
-          <button type="button" onclick="printCodes()"
+          <button type="button" data-action="print-codes"
                   class="bg-gray-600 hover:bg-gray-700 text-white font-medium py-2 px-4 rounded-lg transition-colors">
             {% icon "document" size="sm" css_class="text-white" %} {% trans 'Print Codes' %}
           </button>
@@ -94,7 +94,7 @@
           </div>
         </div>
 
-        <button type="button" onclick="regenerateCodes()"
+        <button type="button" data-action="regenerate-codes"
                 class="bg-orange-600 hover:bg-orange-700 text-white font-medium py-2 px-4 rounded-lg transition-colors">
           {% icon "refresh" size="sm" css_class="text-white" %} {% trans 'Generate New Backup Codes' %}
         </button>

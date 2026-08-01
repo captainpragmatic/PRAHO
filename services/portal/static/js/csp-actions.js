@@ -18,6 +18,9 @@
  *   cookie-prefs — open the guarded global cookie-preferences dialog
  *   modal-open   — show the modal matched by data-modal-target
  *   modal-close  — hide the modal matched by data-modal-target
+ *   print-codes — print MFA backup codes via the guarded global helper
+ *   regenerate-codes — regenerate MFA backup codes via the guarded global helper
+ *   reset-form — reset a form and optionally clear its character counter
  */
 (function () {
   "use strict";
@@ -111,6 +114,31 @@
         var closeNode = closeTarget && document.querySelector(closeTarget);
         if (closeNode) {
           closeNode.classList.add("hidden");
+        }
+        break;
+      }
+      case "print-codes": {
+        if (window.printCodes) {
+          window.printCodes();
+        }
+        break;
+      }
+      case "regenerate-codes": {
+        if (window.regenerateCodes) {
+          window.regenerateCodes();
+        }
+        break;
+      }
+      case "reset-form": {
+        var resetTarget = el.dataset.resetTarget;
+        var resetForm = resetTarget ? document.querySelector(resetTarget) : el.closest("form");
+        if (resetForm) {
+          resetForm.reset();
+        }
+        var counterTarget = el.dataset.counterTarget;
+        var counterNode = counterTarget && document.querySelector(counterTarget);
+        if (counterNode) {
+          counterNode.textContent = "0";
         }
         break;
       }
