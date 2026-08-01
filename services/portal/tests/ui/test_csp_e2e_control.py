@@ -18,6 +18,7 @@ from django.test import RequestFactory, SimpleTestCase, override_settings
 from django.urls import Resolver404, resolve
 
 from apps.common.e2e_views import csp_violation_positive_control
+from apps.users.middleware import PortalAuthenticationMiddleware
 
 CONTROL_PATH = "/__e2e__/csp-violation/"
 CONTROL_TEMPLATE = "e2e/csp_violation_positive_control.html"
@@ -45,16 +46,12 @@ class CSPE2EPositiveControlSafetyTests(SimpleTestCase):
     def test_e2e_path_requires_auth_without_the_whitelist(self) -> None:
         # Production default: the path is NOT public, so the auth middleware
         # would redirect — its unreachability is defence-in-depth beyond the flag.
-        from apps.users.middleware import PortalAuthenticationMiddleware
-
         middleware = PortalAuthenticationMiddleware(lambda _request: None)
         self.assertFalse(middleware.is_public_url(CONTROL_PATH))
 
     @override_settings(PORTAL_EXTRA_PUBLIC_URLS=["/__e2e__/"])
     def test_e2e_path_is_public_only_when_whitelisted(self) -> None:
         # E2E runtime: the browser oracle must reach the page without a login.
-        from apps.users.middleware import PortalAuthenticationMiddleware
-
         middleware = PortalAuthenticationMiddleware(lambda _request: None)
         self.assertTrue(middleware.is_public_url(CONTROL_PATH))
 
