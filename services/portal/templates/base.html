@@ -33,6 +33,14 @@
     <!-- All styles now live in assets/css/input.css (built via Tailwind) -->
 </head>
 <body class="h-full bg-slate-900 text-slate-100 {% block body_class %}{% endblock %}">
+    <script nonce="{{ csp_nonce }}">
+      document.body.addEventListener('showToast', function (event) {
+        if (window.showToast) {
+          var d = event.detail || {};
+          window.showToast(d.variant || 'error', d.message || '');
+        }
+      });
+    </script>
     <div class="min-h-screen flex flex-col">
         <!-- Mobile Header & Navigation -->
         {% include 'components/mobile_header.html' %}

@@ -50,7 +50,11 @@ PY_HANDLER_RE = re.compile(r'"on[a-z]+"\s*:')
 #   shared ui-actions.js registry).
 #   -1 styleguide open-modal ("modal-open-by-id"): styleguide/index.html "Open
 #   Modal" trigger migrated to data-action -> csp-actions.js window.openModal.
-EXPECTED_PORTAL_HANDLERS = 3
+# Merge of master (#459) deleted cart_error_notification.html + cart_item_updated.html
+#   -> the 2 toggleMiniCart handlers are gone. Remaining 1 = the intentional e2e
+#   positive-control (templates/e2e/csp_violation_positive_control.html), which
+#   MUST stay inline; UNIT 2b's on*=->0 exit gate excludes that E2E-only route.
+EXPECTED_PORTAL_HANDLERS = 1
 # -1 badge-dismiss, -1 back (migrated to the shared ui-actions.js registry).
 # -3 modal close buttons (close-modal, shared ui-actions.js: backdrop/X/Cancel),
 # -1 modal primary_action inline handler (dead onclick clause -> data-action).
