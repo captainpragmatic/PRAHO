@@ -37,7 +37,7 @@
         {% endif %}
 
         {% if order.status == "completed" %}
-          {% trans "Refund Order" as bt3 %}{% button bt3 onclick="showRefundModal()" variant="success" %}
+          {% trans "Refund Order" as bt3 %}{% button bt3 data_action="invoke" data_invoke="showRefundModal" variant="success" %}
         {% endif %}
 
         {% if order.status != "cancelled" and order.status != "completed" %}
@@ -49,7 +49,7 @@
         {% endif %}
       {% elif not is_staff and order.status == "completed" %}
         <!-- Refund Request Button for Customers -->
-        {% trans "Request Refund" as bt4 %}{% button bt4 onclick="showOrderRefundRequestModal()" variant="primary" %}
+        {% trans "Request Refund" as bt4 %}{% button bt4 data_action="invoke" data_invoke="showOrderRefundRequestModal" variant="primary" %}
 
         {% if order.status != "cancelled" and order.status != "completed" %}
           {% trans "Change Status" as change_status_btn2 %}{% button change_status_btn2 variant="secondary" icon="refresh" button_id="changeStatusBtn" %}

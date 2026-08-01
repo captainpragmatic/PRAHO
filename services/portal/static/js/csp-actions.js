@@ -18,6 +18,7 @@
  *   cookie-prefs — open the guarded global cookie-preferences dialog
  *   modal-open   — show the modal matched by data-modal-target
  *   modal-close  — hide the modal matched by data-modal-target
+ *   modal-open-by-id — open the {% modal %}-shell modal whose DOM id is in data-modal-id via window.openModal (focus-trap + scroll-lock)
  *   print-codes — print MFA backup codes via the guarded global helper
  *   regenerate-codes — regenerate MFA backup codes via the guarded global helper
  *   reset-form — reset a form and optionally clear its character counter
@@ -117,6 +118,13 @@
         var closeNode = closeTarget && document.querySelector(closeTarget);
         if (closeNode) {
           closeNode.classList.add("hidden");
+        }
+        break;
+      }
+      case "modal-open-by-id": {
+        var openModalId = el.dataset.modalId;
+        if (openModalId && window.openModal) {
+          window.openModal(openModalId);
         }
         break;
       }

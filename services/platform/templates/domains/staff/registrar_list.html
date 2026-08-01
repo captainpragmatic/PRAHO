@@ -21,7 +21,7 @@
 
             <form method="post" action="{% url 'domains:registrar_sync_all' %}" class="inline">
                 {% csrf_token %}
-                {% trans "Sync All" as bt2 %}{% button bt2 variant="secondary" type="submit" attrs="onclick=\"return confirm('Sync all registrars now?')\"" %}
+                {% trans "Sync All" as bt2 %}{% button bt2 variant="secondary" type="submit" data_action="confirm-submit" data_confirm="Sync all registrars now?" %}
             </form>
         </div>
     </div>

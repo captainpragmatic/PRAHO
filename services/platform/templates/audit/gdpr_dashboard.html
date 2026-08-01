@@ -181,7 +181,7 @@
         <div class="p-6">
           <div class="text-center py-8">
             <p class="text-slate-400 mb-4">{% trans 'No data exports yet' %}</p>
-            {% trans "Export My Data" as bt13 %}{% button bt13 variant="primary" size="md" attrs="onclick=\"showModal('export-modal')\"" %}
+            {% trans "Export My Data" as bt13 %}{% button bt13 variant="primary" size="md" attrs="data-modal=export-modal" %}
           </div>
         </div>
       </div>
@@ -285,7 +285,7 @@
 
         <div class="mt-6 flex space-x-3">
           {% trans "Request Export" as bt14 %}{% button bt14 variant="primary" type="submit" %}
-          {% trans "Cancel" as bt15 %}{% button bt15 variant="secondary" type="button" attrs="onclick=\"closeModal()\"" %}
+          {% trans "Cancel" as bt15 %}{% button bt15 variant="secondary" type="button" data_action="invoke" data_invoke="closeModal" %}
         </div>
       </form>
     </div>
@@ -314,7 +314,7 @@
 
         <div class="mt-6 flex space-x-3">
           {% trans "Withdraw Consent" as bt16 %}{% button bt16 variant="warning" type="submit" %}
-          {% trans "Cancel" as bt17 %}{% button bt17 variant="secondary" type="button" attrs="onclick=\"closeModal()\"" %}
+          {% trans "Cancel" as bt17 %}{% button bt17 variant="secondary" type="button" data_action="invoke" data_invoke="closeModal" %}
         </div>
       </form>
     </div>
@@ -351,7 +351,7 @@
 
         <div class="mt-6 flex space-x-3">
           {% trans "Request Deletion" as bt18 %}{% button bt18 variant="danger" type="submit" %}
-          {% trans "Cancel" as bt19 %}{% button bt19 variant="secondary" type="button" attrs="onclick=\"closeModal()\"" %}
+          {% trans "Cancel" as bt19 %}{% button bt19 variant="secondary" type="button" data_action="invoke" data_invoke="closeModal" %}
         </div>
       </form>
     </div>
@@ -402,7 +402,7 @@
 
         <div class="mt-6 flex space-x-3">
           {% trans "Save Changes" as bt20 %}{% button bt20 variant="primary" type="submit" %}
-          {% trans "Cancel" as bt21 %}{% button bt21 variant="secondary" type="button" attrs="onclick=\"closeModal()\"" %}
+          {% trans "Cancel" as bt21 %}{% button bt21 variant="secondary" type="button" data_action="invoke" data_invoke="closeModal" %}
         </div>
       </form>
     </div>

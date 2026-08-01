@@ -19,6 +19,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from django.template import Context, Template
 from django.test import SimpleTestCase
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -44,9 +45,19 @@ PY_HANDLER_RE = re.compile(r'"on[a-z]+"\s*:')
 #   -1 remove-file, -1 submit-form.
 #   -1 print-codes, -1 regenerate-codes, -1 reset-form.
 #   -1 toggle-customer-selector, -1 toggle-mobile-menu, -1 switch-customer.
-EXPECTED_PORTAL_HANDLERS = 5
+# UNIT 2a button-component migration (was 5): -1 404.html "Go Back" button
+#   (bare onclick="history.back()" kwarg -> data-action="back", handled by the
+#   shared ui-actions.js registry).
+#   -1 styleguide open-modal ("modal-open-by-id"): styleguide/index.html "Open
+#   Modal" trigger migrated to data-action -> csp-actions.js window.openModal.
+EXPECTED_PORTAL_HANDLERS = 3
 # -1 badge-dismiss, -1 back (migrated to the shared ui-actions.js registry).
-EXPECTED_SHARED_HANDLERS = 10
+# -3 modal close buttons (close-modal, shared ui-actions.js: backdrop/X/Cancel),
+# -1 modal primary_action inline handler (dead onclick clause -> data-action).
+# -2 input.html (toggle-password, clear-input) + -4 list_page_filters.html
+#   (desktop+mobile tab buttons x (onclick switch-tab + onkeydown roving-focus)),
+#   all migrated to the shared ui-actions.js registry -> shared surface now zero.
+EXPECTED_SHARED_HANDLERS = 0
 EXPECTED_PY_HANDLERS = 1
 EXPECTED_HX_ON = 11
 
@@ -106,6 +117,39 @@ class CSPHandlerInventoryGuardrailTests(SimpleTestCase):
         )
         # A template-only regex would miss this; assert the scan still finds it.
         self.assertIn(CANARY_PY_HANDLER_FILE, files)
+
+    def test_button_attrs_onclick_is_stripped_not_escaped(self) -> None:
+        """The button tag must STRIP an on*= handler smuggled via attrs, not just
+        HTML-escape it. Escaping alone (onclick=&quot;x()&quot;) still leaves a
+        native handler name in the DOM; stripping removes the CSP vector entirely.
+        """
+        rendered = Template(
+            '{% load ui_components %}{% button "Go" attrs=\'onclick="x()"\' %}'
+        ).render(Context({}))
+        self.assertNotIn("onclick", rendered)
+        self.assertNotIn("x()", rendered)
+        # Sanity: the button itself still renders (strip did not eat the element).
+        self.assertIn("Go", rendered)
+
+    def test_modal_close_buttons_use_delegated_data_action(self) -> None:
+        """The shared modal must close via the delegated `close-modal` data-action
+        (dispatched by the shared ui-actions.js registry in BOTH services), not a
+        native inline onclick. The inventory count only proves the on*= handlers
+        were REMOVED; this proves the replacement was wired correctly — the same
+        `close-modal` string and `data-modal-id` the JS switch case reads.
+        """
+        rendered = Template(
+            '{% load ui_components %}{% modal "t" "Title" %}'
+        ).render(Context({}))
+        # Backdrop overlay + header X + footer Cancel all delegate to close-modal.
+        self.assertEqual(rendered.count('data-action="close-modal"'), 3)
+        # data-modal-id must equal the modal element id so window.closeModal(id)
+        # resolves getElementById(id) and restores focus/scroll for THAT modal.
+        self.assertIn('data-modal-id="modal-t"', rendered)
+        self.assertIn('id="modal-t"', rendered)
+        # No native inline handler survives the migration.
+        self.assertNotIn("onclick", rendered)
+        self.assertNotIn("closeModal(", rendered)
 
     def test_htmx_eval_feature_count_matches_baseline(self) -> None:
         count = _count_in_html(PORTAL_TEMPLATES, HX_ON_RE) + _count_in_html(

@@ -20,10 +20,10 @@
     <div class="mt-4 sm:mt-0 sm:ml-16 sm:flex-none space-x-3">
       <!-- Refund Button for Staff -->
       {% if user.is_staff_user and invoice.status == "paid" %}
-        {% trans "Refund Invoice" as bt1 %}{% button bt1 onclick="showInvoiceRefundModal()" variant="success" %}
+        {% trans "Refund Invoice" as bt1 %}{% button bt1 data_action="invoke" data_invoke="showInvoiceRefundModal" variant="success" %}
       {% elif not user.is_staff_user and invoice.status == "paid" %}
         <!-- Refund Request Button for Customers -->
-        {% trans "Request Refund" as bt2 %}{% button bt2 onclick="showInvoiceRefundRequestModal()" variant="primary" %}
+        {% trans "Request Refund" as bt2 %}{% button bt2 data_action="invoke" data_invoke="showInvoiceRefundRequestModal" variant="primary" %}
       {% endif %}
 
       <a href="{% url 'billing:invoice_list' %}"

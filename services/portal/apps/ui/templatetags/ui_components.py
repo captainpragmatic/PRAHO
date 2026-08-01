@@ -63,6 +63,9 @@ class ButtonConfig:
     disabled: bool = False
     class_: str = ""
     attrs: str = ""
+    data_action: str = ""
+    data_invoke: str = ""
+    data_confirm: str = ""
 
 
 @dataclass
@@ -228,6 +231,9 @@ def button(
             # Handle already encoded dangerous content
             s = re.sub(r"alert\([^)]*\)", "", s, flags=re.IGNORECASE)
 
+        # CSP: strip any inline on*= event handler (name+value) so attrs can never inject a native handler.
+        s = re.sub(r'''\bon[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)''', "", s, flags=re.IGNORECASE)
+
         # Manual HTML escaping to return plain string, not SafeString
         s = s.replace("&", "&amp;")
         s = s.replace("<", "&lt;")
@@ -263,6 +269,9 @@ def button(
         "disabled": config.disabled,
         "class": config.class_,
         "attrs": clean_attrs,
+        "data_action": config.data_action,
+        "data_invoke": config.data_invoke,
+        "data_confirm": config.data_confirm,
     }
 
 
