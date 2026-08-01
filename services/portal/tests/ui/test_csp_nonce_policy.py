@@ -114,6 +114,10 @@ class CSPFailSafeHeaderTests(SimpleTestCase):
     def test_failsafe_emits_unsafe_inline_current_policy(self) -> None:
         csp = self._csp_header()
         self.assertIn("'unsafe-inline'", csp)
+        # Prove this is the legacy 'current' policy, not a phase2 HYBRID that
+        # merely also kept 'unsafe-inline': the phase2-only discriminator
+        # `script-src-attr 'none'` must be absent from the fail-safe header.
+        self.assertNotIn("script-src-attr", csp)
 
     def test_failsafe_has_no_nonce_source(self) -> None:
         csp = self._csp_header()

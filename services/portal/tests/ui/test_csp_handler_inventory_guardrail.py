@@ -36,11 +36,19 @@ ON_HANDLER_RE = re.compile(r'\son[a-z]+="')
 HX_ON_RE = re.compile(r"hx-on:")
 # Python-generated handler in a widget attrs dict: "on<event>":
 PY_HANDLER_RE = re.compile(r'"on[a-z]+"\s*:')
-# Inline DOM event handler inside a JS-injected HTML string: on<event>=" / on<event>='
-# (optionally backslash-escaped quote). A native inline handler breaks under
-# phase2-target's `script-src-attr 'none'` REGARDLESS of whether it comes from a
-# template or from innerHTML — the template scan above cannot see the latter.
-JS_INLINE_HANDLER_RE = re.compile(r"""on[a-z]+=\\?['"]""")
+# Inline DOM event handlers that served component JS can inject at runtime — both
+# forms break under phase2-target's `script-src-attr 'none'` regardless of how
+# they reach the DOM, and the template scan above cannot see them:
+#   1. an HTML event-handler attribute inside an injected string: on<event>=" / ='
+#      (case-insensitive — HTML attr names are; optional whitespace around '=';
+#      optional one-backslash escaping). The negative lookbehind excludes benign
+#      JS PROPERTY assignments (`el.onclick = fn`) and identifiers preceded by a
+#      word char — only content attributes, not IDL properties, are CSP-blocked.
+#   2. setAttribute("on<event>", ...) — sets a content attribute, also blocked.
+JS_INLINE_HANDLER_RES = (
+    re.compile(r"""(?<![.\w])on[a-z]+\s*=\s*\\?['"]""", re.IGNORECASE),
+    re.compile(r"""\.setAttribute\(\s*['"]on[a-z]+['"]""", re.IGNORECASE),
+)
 
 # --- Pinned baseline (lower DELIBERATELY as handlers are refactored away) ---
 # UNIT 2a migrations to the data-action delegated registry (was 35):
@@ -98,19 +106,25 @@ def _find_py_handlers(root: Path) -> tuple[int, list[str]]:
     return total, files
 
 
+def _scan_js_text(text: str) -> bool:
+    """True if the JS source injects an inline event handler (either form)."""
+    return any(regex.search(text) for regex in JS_INLINE_HANDLER_RES)
+
+
 def _find_js_inline_handlers(root: Path) -> list[str]:
-    """Served component JS injecting inline on*= handlers (e.g. via innerHTML).
-    Skips vendored *.min.js (htmx/alpine) — their `on…` internals are property
-    names, not injected HTML attributes."""
+    """Served component JS injecting inline on*= handlers (via innerHTML or
+    setAttribute). Skips vendored *.min.js (htmx/alpine) — their `on…` internals
+    are IDL property names, not injected content attributes."""
     hits: list[str] = []
     for path in sorted(root.rglob("*.js")):
         if path.name.endswith(".min.js"):
             continue
         text = path.read_text(encoding="utf-8")
-        for match in JS_INLINE_HANDLER_RE.finditer(text):
-            line = text.count("\n", 0, match.start()) + 1
-            hits.append(f"{path.relative_to(REPO_ROOT).as_posix()}:{line}")
-    return hits
+        for regex in JS_INLINE_HANDLER_RES:
+            for match in regex.finditer(text):
+                line = text.count("\n", 0, match.start()) + 1
+                hits.append(f"{path.relative_to(REPO_ROOT).as_posix()}:{line}")
+    return sorted(set(hits))
 
 
 class CSPHandlerInventoryGuardrailTests(SimpleTestCase):
@@ -207,3 +221,31 @@ class CSPHandlerInventoryGuardrailTests(SimpleTestCase):
             "Inline on*= handlers injected by served component JS — replace with "
             f"addEventListener ('script-src-attr none' blocks these at runtime): {hits}",
         )
+
+    def test_js_scanner_catches_injection_forms(self) -> None:
+        """The scanner itself must catch the realistic regressions — not just the
+        exact byte pattern of the toast bug. Each of these injects a CSP-blocked
+        inline handler and MUST be flagged."""
+        positives = [
+            """el.innerHTML = '<button onclick="rm()">x</button>';""",
+            """el.innerHTML = "<button onClick='rm()'>x</button>";""",   # mixed case
+            """s = '<a onmouseover = "y()">z</a>';""",                    # whitespace
+            """el.innerHTML = '<button onclick=\\"rm()\\">x';""",         # escaped quote
+            """btn.setAttribute('onclick', 'rm()');""",                   # setAttribute
+            """btn.setAttribute("onLoad", handler);""",                   # setAttribute, case
+        ]
+        for src in positives:
+            self.assertTrue(_scan_js_text(src), f"scanner MISSED a real handler: {src!r}")
+
+    def test_js_scanner_ignores_benign_property_assignment(self) -> None:
+        """IDL property assignments and legit data-* attributes are NOT CSP-blocked
+        and must NOT trip the scanner (else the guardrail cries wolf)."""
+        negatives = [
+            "el.onclick = function () { rm(); };",
+            "button.onclick = handler;",
+            "el.onmouseover = null;",
+            "node.addEventListener('click', handler);",
+            """var s = '<button data-action="close">x</button>';""",
+        ]
+        for src in negatives:
+            self.assertFalse(_scan_js_text(src), f"scanner FALSE-POSITIVED: {src!r}")

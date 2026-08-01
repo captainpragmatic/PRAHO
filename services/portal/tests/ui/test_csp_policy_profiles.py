@@ -87,26 +87,42 @@ class CSPPolicyProfileTests(SimpleTestCase):
         )
 
     def test_settings_default_profile_is_phase2_target_enforced(self) -> None:
-        """GUARD: the shipped default (``base.py`` ``CSP_PROFILE``) must be the
-        enforced phase2-target policy. This test deliberately uses NO
-        ``override_settings`` so it reads the REAL default — it goes RED if the
-        enforce-flip is ever reverted to ``current``. Every other test here
-        pins its own profile via ``override_settings`` and so cannot catch a
-        default regression."""
-        request, response = self._request_with_nonce()
+        """GUARD: the SHIPPED default must be the enforced phase2-target policy.
+        Two layers, because each alone has a hole:
 
-        self.assertIn(
-            "Content-Security-Policy",
-            response,
-            "Default disposition must be enforced, not Report-Only.",
+        (1) ``DEFAULT_CSP_PROFILE`` is a SOURCE constant, so this assertion is
+            env-independent — a revert of the default to ``current`` fails here
+            even when ``CSP_PROFILE=phase2-target`` is exported in CI/shell.
+            (Asserting the effective ``settings.CSP_PROFILE`` alone would be
+            masked by such an override.)
+        (2) That default profile must actually PRODUCE the enforced phase2
+            header: nonce present, no 'unsafe-inline', ``script-src-attr 'none'``,
+            enforced disposition. Keyed off the constant so a revert trips this
+            arm too."""
+        self.assertEqual(
+            settings.DEFAULT_CSP_PROFILE,
+            "phase2-target",
+            "The shipped CSP default was reverted away from phase2-target.",
         )
-        self.assertNotIn("Content-Security-Policy-Report-Only", response)
 
-        csp = response["Content-Security-Policy"]
-        script_src = self._directive(csp, "script-src")
-        self.assertNotIn("'unsafe-inline'", script_src)
-        self.assertIn(f"'nonce-{request.csp_nonce}'", script_src)
-        self.assertIn("script-src-attr 'none'", csp.split("; "))
+        with override_settings(
+            CSP_PROFILE=settings.DEFAULT_CSP_PROFILE,
+            CSP_REPORT_ONLY=False,
+        ):
+            request, response = self._request_with_nonce()
+
+            self.assertIn(
+                "Content-Security-Policy",
+                response,
+                "Default disposition must be enforced, not Report-Only.",
+            )
+            self.assertNotIn("Content-Security-Policy-Report-Only", response)
+
+            csp = response["Content-Security-Policy"]
+            script_src = self._directive(csp, "script-src")
+            self.assertNotIn("'unsafe-inline'", script_src)
+            self.assertIn(f"'nonce-{request.csp_nonce}'", script_src)
+            self.assertIn("script-src-attr 'none'", csp.split("; "))
 
     @override_settings(
         CSP_PROFILE="phase2-target",
