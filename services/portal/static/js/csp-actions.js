@@ -12,6 +12,7 @@
  *   navigate  — go to data-href (whole-row click targets, HTMX-swapped tables)
  *   dismiss   — hide the element matched by data-dismiss-target (notifications)
  *   copy      — copy a literal value or an element's text to the clipboard
+ *   load-usage — load usage data for the period in data-period
  *   cookie-prefs — open the guarded global cookie-preferences dialog
  *   modal-open   — show the modal matched by data-modal-target
  *   modal-close  — hide the modal matched by data-modal-target
@@ -68,6 +69,12 @@
         }).catch(function (err) {
           console.error("Could not copy text: ", err);
         });
+        break;
+      }
+      case "load-usage": {
+        if (window.loadUsageData) {
+          window.loadUsageData(el.dataset.period);
+        }
         break;
       }
       case "cookie-prefs": {

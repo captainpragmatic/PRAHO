@@ -32,13 +32,13 @@
                     {% trans "Time Period" %}
                 </h2>
                 <div class="flex space-x-2">
-                    <button onclick="loadUsageData('24h')" class="px-3 py-2 text-sm rounded-md bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 hover:bg-blue-200 dark:hover:bg-blue-800">
+                    <button data-action="load-usage" data-period="24h" class="px-3 py-2 text-sm rounded-md bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 hover:bg-blue-200 dark:hover:bg-blue-800">
                         {% trans "24 Hours" %}
                     </button>
-                    <button onclick="loadUsageData('7d')" class="px-3 py-2 text-sm rounded-md bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600">
+                    <button data-action="load-usage" data-period="7d" class="px-3 py-2 text-sm rounded-md bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600">
                         {% trans "7 Days" %}
                     </button>
-                    <button onclick="loadUsageData('30d')" class="px-3 py-2 text-sm rounded-md bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600">
+                    <button data-action="load-usage" data-period="30d" class="px-3 py-2 text-sm rounded-md bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600">
                         {% trans "30 Days" %}
                     </button>
                 </div>
