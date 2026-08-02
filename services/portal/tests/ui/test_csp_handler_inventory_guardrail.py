@@ -6,10 +6,10 @@ surface. Any NEW handler added during — or after — the CSP migration changes
 count and fails here, forcing a conscious inventory update instead of a silent
 regression.
 
-This does NOT assert zero. The `== 0` assertion is the EXIT gate, flipped at the
-end of UNIT 2a (on*= -> 0) and UNIT 3c (hx-on -> 0). Until then this snapshot is
-the tripwire. When a phase legitimately removes handlers, lower the pinned
-baseline in the same commit.
+The zero baselines are reached EXIT gates: UNIT 2a eliminated production on*=
+handlers (with the portal E2E positive control pinned separately), and UNIT 3c
+eliminated hx-on eval features. Any remaining nonzero inventory is pinned
+deliberately.
 
 No database access (portal test isolation).
 """
@@ -81,12 +81,23 @@ EXPECTED_PORTAL_HANDLERS = 1
 #   all migrated to the shared ui-actions.js registry -> shared surface now zero.
 EXPECTED_SHARED_HANDLERS = 0
 EXPECTED_PY_HANDLERS = 1
-# Merge of master (#459) removed the 2 cart_items.html hx-on::response-error
-#   handlers (replaced by the target-independent HX-Trigger showToast): 11 -> 9.
-EXPECTED_HX_ON = 9
+# UNIT 3c exit gate reached: all 9 hx-on eval features were eliminated and
+#   replaced by the two delegated htmx listeners in csp-actions.js.
+EXPECTED_HX_ON = 0
 
 # Canary: the Python-generated onchange a template-only scan would miss.
 CANARY_PY_HANDLER_FILE = "services/portal/apps/users/forms.py"
+
+HTMX_DELEGATION_TEMPLATE_FILES = (
+    "tickets/partials/status_and_comments.html",
+    "orders/cart_review.html",
+    "orders/product_catalog.html",
+    "orders/partials/cart_updated.html",
+    "orders/product_detail.html",
+    "orders/partials/cart_items.html",
+    "orders/partials/mini_cart_content.html",
+    "billing/partials/header_action.html",
+)
 
 
 def _count_in_html(root: Path, pattern: re.Pattern[str]) -> int:
@@ -220,7 +231,25 @@ class CSPHandlerInventoryGuardrailTests(SimpleTestCase):
             count,
             EXPECTED_HX_ON,
             f"hx-on eval-feature count is {count}, baseline {EXPECTED_HX_ON}. "
-            f"These collapse to 2 global listeners in UNIT 3c.",
+            f"UNIT 3c replaced these with 2 delegated htmx listeners.",
+        )
+
+    def test_htmx_delegated_listener_wiring(self) -> None:
+        template_source = "\n".join(
+            (PORTAL_TEMPLATES / relative_path).read_text(encoding="utf-8")
+            for relative_path in HTMX_DELEGATION_TEMPLATE_FILES
+        )
+        self.assertEqual(template_source.count('data-htmx-after="cart-updated"'), 4)
+        self.assertEqual(template_source.count('data-htmx-after="reload"'), 1)
+        self.assertEqual(template_source.count('data-htmx-after="reset-reply"'), 1)
+        self.assertEqual(template_source.count("data-htmx-error-toast="), 3)
+
+        csp_actions = (PORTAL_STATIC_JS / "csp-actions.js").read_text(encoding="utf-8")
+        self.assertEqual(
+            csp_actions.count('document.addEventListener("htmx:afterRequest"'), 1
+        )
+        self.assertEqual(
+            csp_actions.count('document.addEventListener("htmx:responseError"'), 1
         )
 
     def test_served_js_injects_no_inline_event_handlers(self) -> None:

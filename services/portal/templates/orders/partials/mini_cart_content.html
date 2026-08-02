@@ -22,7 +22,7 @@
   <div class="px-4 py-3 space-y-3 max-h-64 overflow-y-auto">
     {% for item in cart_items %}
     <div class="flex items-center justify-between rounded-lg transition-colors duration-200{% if just_added_slug and item.product_slug == just_added_slug %} bg-green-900/30{% endif %}"
-         {% if just_added_slug and item.product_slug == just_added_slug %}data-just-added="true" x-data="{}" x-init="setTimeout(() => { $el.classList.remove('bg-green-900/30'); }, 2000)"{% endif %}>
+         {% if just_added_slug and item.product_slug == just_added_slug %}data-just-added="true" x-data="justAddedHighlight"{% endif %}>
       <div class="flex-1 min-w-0">
         <p class="text-sm font-medium text-white truncate">
           {{ item.product_name }}
@@ -37,7 +37,7 @@
       </div>
 
       <!-- Remove Item Button -->
-      <button hx-post="{% url 'orders:remove_from_cart' %}" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}' hx-vals='{"product_slug": "{{ item.product_slug }}", "billing_period": "{{ item.billing_period }}"}' hx-target="#cart-widget" hx-swap="outerHTML" hx-on::after-request="if(event.detail.successful){document.body.dispatchEvent(new CustomEvent('cartUpdated'));}" hx-confirm="{% trans 'Are you sure you want to remove this product from cart?' %}" class="ml-2 text-slate-400 hover:text-red-400 transition-colors p-1" aria-label="{% trans 'Remove from cart' %}">
+      <button hx-post="{% url 'orders:remove_from_cart' %}" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}' hx-vals='{"product_slug": "{{ item.product_slug }}", "billing_period": "{{ item.billing_period }}"}' hx-target="#cart-widget" hx-swap="outerHTML" data-htmx-after="cart-updated" hx-confirm="{% trans 'Are you sure you want to remove this product from cart?' %}" class="ml-2 text-slate-400 hover:text-red-400 transition-colors p-1" aria-label="{% trans 'Remove from cart' %}">
         {% icon "x" size="sm" %}
       </button>
     </div>

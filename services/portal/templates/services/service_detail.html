@@ -157,31 +157,31 @@
   </div>
 
   <!-- Main Content -->
-  <div class="space-y-8" x-data="{ activeTab: 'overview' }">
+  <div class="space-y-8" x-data="tabGroup">
       <!-- Navigation Tabs -->
       <div class="bg-slate-800 rounded-lg border border-slate-700">
         <div class="border-b border-slate-700 overflow-x-auto">
           <nav class="-mb-px flex min-w-max sm:min-w-0">
             <button @click="activeTab = 'overview'"
-                    :class="activeTab === 'overview' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400 hover:text-slate-300'"
+                    :class="tabClass('overview')"
                     class="whitespace-nowrap border-b-2 py-3 px-6 text-sm font-medium transition-colors">
               {% trans "Overview" %}
             </button>
             {% if service.status == 'active' %}
             <button @click="activeTab = 'usage'"
-                    :class="activeTab === 'usage' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400 hover:text-slate-300'"
+                    :class="tabClass('usage')"
                     class="whitespace-nowrap border-b-2 py-3 px-6 text-sm font-medium transition-colors">
               {% trans "Usage & Performance" %}
             </button>
             {% endif %}
             <button @click="activeTab = 'billing'"
-                    :class="activeTab === 'billing' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400 hover:text-slate-300'"
+                    :class="tabClass('billing')"
                     class="whitespace-nowrap border-b-2 py-3 px-6 text-sm font-medium transition-colors">
               {% trans "Billing" %}
             </button>
             {% if domains %}
             <button @click="activeTab = 'domains'"
-                    :class="activeTab === 'domains' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400 hover:text-slate-300'"
+                    :class="tabClass('domains')"
                     class="whitespace-nowrap border-b-2 py-3 px-6 text-sm font-medium transition-colors">
               {% trans "Domains" %}
             </button>
@@ -192,7 +192,7 @@
         <!-- Tab Content -->
         <div class="p-6">
           <!-- Overview Tab -->
-          <div x-show="activeTab === 'overview'" style="display: block;" x-transition>
+          <div x-show="isTab('overview')" style="display: block;" x-transition>
             <div class="space-y-6">
               <!-- Quick Service Status -->
               <div class="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6">
@@ -509,7 +509,7 @@
 
           <!-- Usage Tab -->
           {% if service.status == 'active' %}
-          <div x-show="activeTab === 'usage'" x-cloak x-transition>
+          <div x-show="isTab('usage')" x-cloak x-transition>
             <div class="space-y-6">
               <h3 class="text-lg font-semibold text-white">{% trans "Current Usage" %}</h3>
 
@@ -595,7 +595,7 @@
           {% endif %}
 
           <!-- Billing Tab -->
-          <div x-show="activeTab === 'billing'" x-cloak x-transition>
+          <div x-show="isTab('billing')" x-cloak x-transition>
             <div class="space-y-6">
               <!-- Billing Overview Cards -->
               <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
@@ -840,7 +840,7 @@
 
           <!-- Domains Tab -->
           {% if domains %}
-          <div x-show="activeTab === 'domains'" x-cloak>
+          <div x-show="isTab('domains')" x-cloak>
             <div class="space-y-6">
               <h3 class="text-lg font-semibold text-white">{% trans "Associated Domains" %}</h3>
 

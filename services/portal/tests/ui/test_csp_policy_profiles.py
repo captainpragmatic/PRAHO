@@ -2,9 +2,9 @@
 
 The CSP-hardening rollout selects a policy PROFILE (content) and a DISPOSITION
 (enforced vs Report-Only) purely from server settings — never from request data.
-The enforced default is now ``phase2-target`` (nonce-based, no 'unsafe-inline',
-``script-src-attr 'none'``); ``current`` remains the byte-exact legacy policy the
-middleware also falls back to when no request nonce is available.
+The enforced default is now ``phase3-target`` (nonce-based, no 'unsafe-inline',
+no 'unsafe-eval', ``script-src-attr 'none'``); ``current`` remains the byte-exact
+legacy policy the middleware also falls back to when no request nonce is available.
 """
 
 from __future__ import annotations
@@ -86,23 +86,24 @@ class CSPPolicyProfileTests(SimpleTestCase):
             response,
         )
 
-    def test_settings_default_profile_is_phase2_target_enforced(self) -> None:
-        """GUARD: the SHIPPED default must be the enforced phase2-target policy.
-        Two layers, because each alone has a hole:
+    def test_settings_default_profile_is_phase3_target_enforced(self) -> None:
+        """GUARD: the SHIPPED default must be the enforced phase3-target policy
+        (UNIT 3d — no 'unsafe-inline' AND no 'unsafe-eval'). Two layers, because
+        each alone has a hole:
 
         (1) ``DEFAULT_CSP_PROFILE`` is a SOURCE constant, so this assertion is
-            env-independent — a revert of the default to ``current`` fails here
-            even when ``CSP_PROFILE=phase2-target`` is exported in CI/shell.
-            (Asserting the effective ``settings.CSP_PROFILE`` alone would be
-            masked by such an override.)
-        (2) That default profile must actually PRODUCE the enforced phase2
-            header: nonce present, no 'unsafe-inline', ``script-src-attr 'none'``,
-            enforced disposition. Keyed off the constant so a revert trips this
-            arm too."""
+            env-independent — a revert of the default to ``current`` or
+            ``phase2-target`` fails here even when ``CSP_PROFILE`` is exported
+            in CI/shell. (Asserting the effective ``settings.CSP_PROFILE`` alone
+            would be masked by such an override.)
+        (2) That default profile must actually PRODUCE the enforced phase3
+            header: nonce present, no 'unsafe-inline', no 'unsafe-eval',
+            ``script-src-attr 'none'``, enforced disposition. Keyed off the
+            constant so a revert trips this arm too."""
         self.assertEqual(
             settings.DEFAULT_CSP_PROFILE,
-            "phase2-target",
-            "The shipped CSP default was reverted away from phase2-target.",
+            "phase3-target",
+            "The shipped CSP default was reverted away from phase3-target.",
         )
 
         with override_settings(
@@ -121,6 +122,7 @@ class CSPPolicyProfileTests(SimpleTestCase):
             csp = response["Content-Security-Policy"]
             script_src = self._directive(csp, "script-src")
             self.assertNotIn("'unsafe-inline'", script_src)
+            self.assertNotIn("'unsafe-eval'", script_src)
             self.assertIn(f"'nonce-{request.csp_nonce}'", script_src)
             self.assertIn("script-src-attr 'none'", csp.split("; "))
 

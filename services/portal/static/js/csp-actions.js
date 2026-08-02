@@ -179,4 +179,45 @@
       window.switchCustomer(el.value);
     }
   });
+
+  document.addEventListener("htmx:afterRequest", function (event) {
+    var el = event.detail && event.detail.elt;
+    if (!el || !el.hasAttribute("data-htmx-after")) {
+      return;
+    }
+
+    switch (el.getAttribute("data-htmx-after")) {
+      case "cart-updated": {
+        if (event.detail.successful) {
+          document.body.dispatchEvent(new CustomEvent("cartUpdated"));
+        }
+        break;
+      }
+      case "reload": {
+        if (event.detail.successful) {
+          window.location.reload();
+        }
+        break;
+      }
+      case "reset-reply": {
+        if (typeof el.reset === "function") {
+          el.reset();
+        }
+        if (window.updateReplyCount) {
+          window.updateReplyCount();
+        }
+        break;
+      }
+      default:
+        break;
+    }
+  });
+
+  document.addEventListener("htmx:responseError", function (event) {
+    var el = event.detail && event.detail.elt;
+    var errorToast = el && el.getAttribute("data-htmx-error-toast");
+    if (errorToast && window.showToast) {
+      window.showToast("error", errorToast);
+    }
+  });
 })();

@@ -82,7 +82,7 @@
           </div>
 
           <!-- Remove Button -->
-          <button hx-post="{% url 'orders:remove_from_cart' %}" hx-vals='{"product_slug": "{{ item.product_slug|escapejs }}", "billing_period": "{{ item.billing_period|escapejs }}"}' hx-target="#cart-items" hx-swap="outerHTML" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}' hx-on::after-request="if(event.detail.successful){document.body.dispatchEvent(new CustomEvent('cartUpdated'));}" hx-confirm="{% trans 'Are you sure you want to remove this product from cart?' %}" class="text-slate-400 hover:text-red-400 transition-colors p-2 rounded hover:bg-slate-700" aria-label="{% trans 'Remove from cart' %}">
+          <button hx-post="{% url 'orders:remove_from_cart' %}" hx-vals='{"product_slug": "{{ item.product_slug|escapejs }}", "billing_period": "{{ item.billing_period|escapejs }}"}' hx-target="#cart-items" hx-swap="outerHTML" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}' data-htmx-after="cart-updated" hx-confirm="{% trans 'Are you sure you want to remove this product from cart?' %}" class="text-slate-400 hover:text-red-400 transition-colors p-2 rounded hover:bg-slate-700" aria-label="{% trans 'Remove from cart' %}">
             <span>{% icon "x" size="sm" css_class="text-slate-400" %}</span>
             <span class="ml-1 text-sm hidden sm:inline">{% trans "Remove" %}</span>
           </button>

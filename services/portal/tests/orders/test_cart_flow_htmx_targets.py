@@ -195,7 +195,8 @@ class TestCartFlowFixes(SimpleTestCase):
         self.assertIn("window.showToast(d.variant || 'error', d.message || '');", base_source)
 
     def test_remove_buttons_dispatch_cartupdated_only_after_success(self) -> None:
-        partials_path = Path(__file__).resolve().parents[2] / "templates" / "orders" / "partials"
+        portal_root = Path(__file__).resolve().parents[2]
+        partials_path = portal_root / "templates" / "orders" / "partials"
         template_paths = [partials_path / "cart_items.html", partials_path / "mini_cart_content.html"]
         remove_button_sites = [
             (template_path.name, line)
@@ -209,13 +210,16 @@ class TestCartFlowFixes(SimpleTestCase):
             {template_name for template_name, _line in remove_button_sites},
             {"cart_items.html", "mini_cart_content.html"},
         )
-        guarded_dispatch = (
-            'hx-on::after-request="if(event.detail.successful){'
-            "document.body.dispatchEvent(new CustomEvent('cartUpdated'));}"
-            '"'
-        )
         for template_name, remove_button in remove_button_sites:
-            self.assertIn(guarded_dispatch, remove_button, template_name)
+            self.assertIn('data-htmx-after="cart-updated"', remove_button, template_name)
+
+        csp_actions = (portal_root / "static" / "js" / "csp-actions.js").read_text()
+        guarded_dispatch = (
+            'case "cart-updated": {\n'
+            "        if (event.detail.successful) {\n"
+            '          document.body.dispatchEvent(new CustomEvent("cartUpdated"));'
+        )
+        self.assertEqual(csp_actions.count(guarded_dispatch), 1)
 
     def test_quantity_select_no_redundant_cartupdated_dispatch(self) -> None:
         orders_templates = Path(__file__).resolve().parents[2] / "templates" / "orders"
@@ -231,9 +235,9 @@ class TestCartFlowFixes(SimpleTestCase):
         )
 
         self.assertEqual(len(quantity_selects), 1)
-        self.assertEqual(quantity_selects[0].count("cartUpdated"), 0)
+        self.assertEqual(quantity_selects[0].count('data-htmx-after="cart-updated"'), 0)
         self.assertEqual(len(remove_buttons), 1)
-        self.assertEqual(remove_buttons[0].count("cartUpdated"), 1)
+        self.assertEqual(remove_buttons[0].count('data-htmx-after="cart-updated"'), 1)
 
     def test_dead_cart_event_wiring_removed(self) -> None:
         portal_root = Path(__file__).resolve().parents[2]
