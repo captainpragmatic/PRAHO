@@ -826,7 +826,7 @@ pre-commit:
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@if ! command -v $(VENV_DIR)/bin/pre-commit >/dev/null 2>&1; then \
 		echo "❌ pre-commit not found. Installing..."; \
-		uv sync --group dev; \
+		uv sync --all-groups; \
 		$(VENV_DIR)/bin/pre-commit install || echo "⚠️ Pre-commit config not found"; \
 	fi
 	@$(VENV_DIR)/bin/pre-commit run --all-files || echo "⚠️ Pre-commit hooks skipped"
