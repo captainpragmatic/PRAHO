@@ -81,9 +81,13 @@ class RegistryInvokeAllowlistGuardTests(SimpleTestCase):
             confirm_submit_source,
         )
         self.assertIn('typeof window[gateName] !== "function"', confirm_submit_source)
-        self.assertIn(
-            'event.preventDefault();\n            console.warn("Blocked confirm-submit gate:", gateName);\n            break;',
+        # Whitespace-tolerant but order-preserving: the blocked branch must
+        # preventDefault, warn, and break adjacently, in that order.
+        self.assertRegex(
             confirm_submit_source,
+            r'event\.preventDefault\(\);\s*'
+            r'console\.warn\("Blocked confirm-submit gate:", gateName\);\s*'
+            r'break;',
         )
 
     def test_submit_form_uses_unclobberable_request_submit(self) -> None:
