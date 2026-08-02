@@ -691,13 +691,21 @@ def customer_detail_api(request: HttpRequest, customer: Customer) -> Response:
 @api_view(["POST"])
 @authentication_classes([])  # No DRF authentication - HMAC handled by @require_customer_authentication
 @permission_classes([AllowAny])  # HMAC auth via @require_customer_authentication below
-@throttle_classes([BurstAPIThrottle])
+@throttle_classes([PortalHMACRateThrottle, PortalHMACBurstThrottle])
 @require_customer_authentication
 def update_customer_billing_address(  # noqa: C901, PLR0912, PLR0915  # Complexity: multi-step business logic
     request: Request, customer: Customer
 ) -> Response:
     """
     🏠 Update customer billing address during checkout validation failures.
+
+    Throttling (#277): same fix as customer_users_create (#186). A per-view
+    ``@throttle_classes`` REPLACES DEFAULT_THROTTLE_CLASSES rather than adding to it,
+    so the previous ``[BurstAPIThrottle]`` both dropped the global per-portal HMAC
+    limits and keyed on client IP — BurstAPIThrottle extends UserRateThrottle and this
+    endpoint runs with ``authentication_classes([])``, so request.user is AnonymousUser
+    and a caller distributing requests across IPs bypassed the 120/min cap entirely.
+    Both throttles below key on the verified portal id (X-Portal-Id).
 
     This endpoint enables seamless inline editing of customer profile data
     when checkout validation fails, providing a smooth UX without navigation disruption.
