@@ -107,7 +107,7 @@
 
     {% if ticket.status != 'closed' %}
     <div class="border-t border-slate-700 px-6 py-4">
-        <form method="post" action="{% url 'tickets:reply' ticket_id=ticket.id %}" class="space-y-4" id="reply-form" hx-post="{% url 'tickets:reply' ticket_id=ticket.id %}" hx-target="#ticket-status-and-comments" hx-swap="innerHTML" hx-on::after-request="this.reset(); updateReplyCount();" enctype="multipart/form-data">
+        <form method="post" action="{% url 'tickets:reply' ticket_id=ticket.id %}" class="space-y-4" id="reply-form" hx-post="{% url 'tickets:reply' ticket_id=ticket.id %}" hx-target="#ticket-status-and-comments" hx-swap="innerHTML" data-htmx-after="reset-reply" enctype="multipart/form-data">
             {% csrf_token %}
             <div class="flex items-start space-x-3">
                 <!-- User Avatar -->

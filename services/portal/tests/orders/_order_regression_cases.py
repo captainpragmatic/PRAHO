@@ -85,7 +85,7 @@ class TestPlatformFallbackFailSafe(SimpleTestCase):
 
 
 class TestCartRemoveNoDuplicatePost(SimpleTestCase):
-    """L4: Remove button should dispatch cartUpdated only, not also inline htmx.ajax()."""
+    """L4: Remove button should delegate cartUpdated only, not also inline htmx.ajax()."""
 
     def test_remove_button_has_no_inline_calculate_totals(self) -> None:
         """Cart-items partial remove button must not contain inline calculate_totals call."""
@@ -95,8 +95,8 @@ class TestCartRemoveNoDuplicatePost(SimpleTestCase):
         # Find the remove button line
         for line in content.splitlines():
             if "remove_from_cart" in line and "hx-post" in line:
-                # Should have cartUpdated dispatch
-                self.assertIn("cartUpdated", line)
+                # Should delegate the cartUpdated dispatch to csp-actions.js.
+                self.assertIn('data-htmx-after="cart-updated"', line)
                 # Should NOT have inline calculate_totals (that's handled by the global listener)
                 self.assertNotIn("calculate_totals", line)
                 break

@@ -41,7 +41,7 @@
                  hx-trigger="load, cartUpdated from:body"
                  hx-target="this"
                  hx-swap="innerHTML"
-                 hx-on::response-error="showToast('error', '{% trans "Something went wrong. Please try again." %}')">
+                 data-htmx-error-toast="{% trans 'Something went wrong. Please try again.' %}">
               <!-- Loading content -->
               <div class="bg-slate-800 rounded-lg shadow-xl border border-slate-700 p-4">
                 <div class="animate-pulse">
@@ -192,7 +192,7 @@
           <form hx-post="{% url 'orders:add_to_cart' %}"
                 hx-target="#cart-widget"
                 hx-swap="outerHTML"
-                hx-on::after-request="if(event.detail.successful) { document.body.dispatchEvent(new CustomEvent('cartUpdated')); }"
+                data-htmx-after="cart-updated"
                 id="cart-form-{{ product.slug }}">
             {% csrf_token %}
 

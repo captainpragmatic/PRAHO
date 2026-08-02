@@ -35,7 +35,7 @@
       <div class="bg-slate-800 rounded-lg border border-slate-700 sticky top-8">
 
         <!-- Calculate Totals -->
-        <div id="cart-totals" hx-post="{% url 'orders:calculate_totals' %}" hx-trigger="load" hx-target="this" hx-swap="outerHTML" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}' hx-indicator="#cart-totals-spinner" hx-on::response-error="showToast('error', '{% trans "Something went wrong. Please try again." %}')">
+        <div id="cart-totals" hx-post="{% url 'orders:calculate_totals' %}" hx-trigger="load" hx-target="this" hx-swap="outerHTML" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}' hx-indicator="#cart-totals-spinner" data-htmx-error-toast="{% trans 'Something went wrong. Please try again.' %}">
 
           <!-- Loading State -->
           <div class="p-6">
