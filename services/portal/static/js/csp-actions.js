@@ -39,7 +39,16 @@
       case "navigate": {
         var href = el.dataset.href;
         if (href) {
-          window.location.href = href;
+          try {
+            var url = new URL(href, window.location.origin);
+            if (url.origin !== window.location.origin) {
+              console.warn("Blocked cross-origin navigation:", href);
+              break;
+            }
+            window.location.href = url.href;
+          } catch (err) {
+            console.warn("Blocked malformed navigation URL:", href, err);
+          }
         }
         break;
       }
@@ -69,10 +78,14 @@
         navigator.clipboard.writeText(value).then(function () {
           var feedback = el.dataset.copyFeedback;
           if (feedback) {
-            var originalHtml = el.innerHTML;
+            var originalContent = document.createDocumentFragment();
+            while (el.firstChild) {
+              originalContent.appendChild(el.firstChild);
+            }
             el.textContent = feedback;
             setTimeout(function () {
-              el.innerHTML = originalHtml;
+              el.textContent = "";
+              el.appendChild(originalContent);
             }, 2000);
           }
         }).catch(function (err) {
@@ -81,13 +94,13 @@
         break;
       }
       case "load-usage": {
-        if (window.loadUsageData) {
+        if (typeof window.loadUsageData === "function") {
           window.loadUsageData(el.dataset.period);
         }
         break;
       }
       case "remove-file": {
-        if (window.removeFile) {
+        if (typeof window.removeFile === "function") {
           window.removeFile(Number(el.dataset.index));
         }
         break;
@@ -95,12 +108,12 @@
       case "submit-form": {
         var submitForm = el.closest("form");
         if (submitForm) {
-          submitForm.submit();
+          HTMLFormElement.prototype.requestSubmit.call(submitForm);
         }
         break;
       }
       case "cookie-prefs": {
-        if (window.showCookiePreferences) {
+        if (typeof window.showCookiePreferences === "function") {
           window.showCookiePreferences();
         }
         break;
@@ -123,19 +136,19 @@
       }
       case "modal-open-by-id": {
         var openModalId = el.dataset.modalId;
-        if (openModalId && window.openModal) {
+        if (openModalId && typeof window.openModal === "function") {
           window.openModal(openModalId);
         }
         break;
       }
       case "print-codes": {
-        if (window.printCodes) {
+        if (typeof window.printCodes === "function") {
           window.printCodes();
         }
         break;
       }
       case "regenerate-codes": {
-        if (window.regenerateCodes) {
+        if (typeof window.regenerateCodes === "function") {
           window.regenerateCodes();
         }
         break;
@@ -154,11 +167,11 @@
         break;
       }
       case "toggle-customer-selector": {
-        if (window.toggleCustomerSelector) { window.toggleCustomerSelector(); }
+        if (typeof window.toggleCustomerSelector === "function") { window.toggleCustomerSelector(); }
         break;
       }
       case "toggle-mobile-menu": {
-        if (window.toggleMobileMenu) { window.toggleMobileMenu(); }
+        if (typeof window.toggleMobileMenu === "function") { window.toggleMobileMenu(); }
         break;
       }
       default:
@@ -175,7 +188,7 @@
 
   document.addEventListener("change", function (event) {
     var el = event.target.closest('[data-action="switch-customer"]');
-    if (el && window.switchCustomer) {
+    if (el && typeof window.switchCustomer === "function") {
       window.switchCustomer(el.value);
     }
   });
@@ -203,7 +216,7 @@
         if (typeof el.reset === "function") {
           el.reset();
         }
-        if (window.updateReplyCount) {
+        if (typeof window.updateReplyCount === "function") {
           window.updateReplyCount();
         }
         break;
@@ -216,7 +229,7 @@
   document.addEventListener("htmx:responseError", function (event) {
     var el = event.detail && event.detail.elt;
     var errorToast = el && el.getAttribute("data-htmx-error-toast");
-    if (errorToast && window.showToast) {
+    if (errorToast && typeof window.showToast === "function") {
       window.showToast("error", errorToast);
     }
   });

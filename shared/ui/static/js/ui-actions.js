@@ -17,6 +17,21 @@
 (function () {
   "use strict";
 
+  // The guard test pins this allow-list to literal data-invoke template usage.
+  var INVOKE_ALLOWLIST = Object.freeze({
+    checkWebAuthnSupport: true,
+    closeEventDetail: true,
+    closeModal: true,
+    confirmDisable: true,
+    confirmRegenerate: true,
+    exportCSV: true,
+    resetFilters: true,
+    showInvoiceRefundModal: true,
+    showInvoiceRefundRequestModal: true,
+    showOrderRefundRequestModal: true,
+    showRefundModal: true,
+  });
+
   document.addEventListener("click", function (event) {
     var el = event.target.closest("[data-action]");
     if (!el) {
@@ -39,17 +54,30 @@
         break;
       }
       case "invoke": {
-        var invokeFn = window[el.dataset.invoke];
-        if (typeof invokeFn === "function") {
-          invokeFn(el);
+        var invokeName = el.dataset.invoke;
+        if (
+          !Object.prototype.hasOwnProperty.call(INVOKE_ALLOWLIST, invokeName) ||
+          typeof window[invokeName] !== "function"
+        ) {
+          console.warn("Blocked invoke action:", invokeName);
+          break;
         }
+        window[invokeName](el);
         break;
       }
       case "confirm-submit": {
-        var gateFn = el.dataset.invoke ? window[el.dataset.invoke] : null;
+        var gateName = el.dataset.invoke;
         var proceed = true;
-        if (typeof gateFn === "function") {
-          proceed = gateFn(el) !== false;
+        if (gateName !== undefined) {
+          if (
+            !Object.prototype.hasOwnProperty.call(INVOKE_ALLOWLIST, gateName) ||
+            typeof window[gateName] !== "function"
+          ) {
+            event.preventDefault();
+            console.warn("Blocked confirm-submit gate:", gateName);
+            break;
+          }
+          proceed = window[gateName](el) !== false;
         } else if (el.dataset.confirm) {
           proceed = window.confirm(el.dataset.confirm);
         }
@@ -60,7 +88,7 @@
       }
       case "close-modal": {
         var modalId = el.dataset.modalId;
-        if (modalId && window.closeModal) {
+        if (modalId && typeof window.closeModal === "function") {
           window.closeModal(modalId);
         }
         break;
@@ -119,7 +147,7 @@
       t.classList.add('border-transparent', 'text-slate-400');
     }
     /* Activate clicked tab (both desktop and mobile instances share same data attrs) */
-    var allMatching = root.querySelectorAll('.list-filter-tab[data-tab-value="' + value + '"]');
+    var allMatching = root.querySelectorAll('.list-filter-tab[data-tab-value="' + CSS.escape(value) + '"]');
     for (var j = 0; j < allMatching.length; j++) {
       var m = allMatching[j];
       m.setAttribute('aria-selected', 'true');
