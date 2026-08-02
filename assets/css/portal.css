@@ -1,0 +1,31 @@
+/* ===============================================================================
+   PORTAL CSS ENTRY POINT 🌐
+   ===============================================================================
+   See platform.css for why the design system is defined in CSS rather than in a
+   tailwind.config.js: Tailwind v4's CLI has no --config flag and never read them.
+
+   Only referenced-but-unemitted tokens are restored here — see platform.css for
+   the reasoning on why the old config's overrides of Tailwind defaults are
+   deliberately not ported, and why dark mode stays on prefers-color-scheme.
+   =============================================================================== */
+
+@import "tailwindcss";
+@import "./input.css";
+
+@plugin "@tailwindcss/forms";
+@plugin "@tailwindcss/typography";
+
+@theme {
+  /* Customer-facing primary — 210 hue, a softer blue than Platform's 220. */
+  --color-primary-50: hsl(210 100% 97%);
+  --color-primary-100: hsl(210 100% 94%);
+  --color-primary-200: hsl(210 100% 87%);
+  --color-primary-300: hsl(210 100% 78%);
+  --color-primary-400: hsl(210 100% 67%);
+  --color-primary-500: hsl(210 100% 56%);
+  --color-primary-600: hsl(210 100% 45%);
+  --color-primary-700: hsl(210 100% 36%);
+  --color-primary-800: hsl(210 100% 28%);
+  --color-primary-900: hsl(210 100% 22%);
+  --color-primary-950: hsl(210 100% 14%);
+}
