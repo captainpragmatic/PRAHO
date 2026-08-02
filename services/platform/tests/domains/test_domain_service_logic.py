@@ -265,9 +265,10 @@ class DomainOrderRenewTransferProcessingTests(DomainFixtureMixin, TestCase):
 
     def test_process_reaches_renew_branch_for_linked_item(self) -> None:
         domain = self._owned_domain("renewme.ro")
-        DomainOrderService.create_domain_order_item(
+        success, item = DomainOrderService.create_domain_order_item(
             order=self.order, domain_name="renewme.ro", action="renew", years=1
         )
+        self.assertTrue(success, item)
 
         with patch.object(
             DomainLifecycleService, "process_domain_renewal", return_value=_Ok("renewed")
@@ -277,6 +278,7 @@ class DomainOrderRenewTransferProcessingTests(DomainFixtureMixin, TestCase):
         mock_renew.assert_called_once()
         _args, kwargs = mock_renew.call_args
         self.assertEqual(kwargs.get("domain"), domain)
+        self.assertEqual(kwargs.get("idempotency_token"), f"order_item:{item.pk}")
         self.assertIn(domain, processed)
 
     def test_process_logs_unlinked_renew_instead_of_silent_skip(self) -> None:
