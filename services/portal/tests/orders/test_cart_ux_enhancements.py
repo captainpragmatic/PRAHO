@@ -235,7 +235,9 @@ class TestCartUpdatedToastViewCartLink(SimpleTestCase):
         # rendered OPEN by the server and loads its content after the add.
         self.assertIn('id="mini-cart"', content)
         self.assertIn("mini-cart/", content)  # hx-get to mini_cart_content
-        self.assertIn('x-data="{ miniCartOpen: true }"', content)
+        # miniCart(true) = the server-rendered open state, via the miniCart Alpine.data
+        # component (the inline {miniCartOpen:true} moved to JS for the @alpinejs/csp build).
+        self.assertIn('x-data="miniCart(true)"', content)
 
 
 # ---------------------------------------------------------------------------
@@ -275,6 +277,11 @@ class TestCartToastConsolidation(SimpleTestCase):
         self.assertNotIn("fixed top-4 right-4", body)
 
     def test_success_routes_through_show_toast(self) -> None:
-        """Success is surfaced via the unified showToast('success', …) call."""
+        """Success is surfaced via the unified showToast() system: the cart_updated
+        partial wires the toastTrigger Alpine.data component (whose init() calls
+        showToast('success', …) with the data-toast-message) instead of a bespoke
+        inline box. The showToast call itself moved to alpine-components.js for the
+        @alpinejs/csp build, so assert the template wiring that routes to it."""
         body = self._post_add().content.decode()
-        self.assertIn("showToast('success'", body)
+        self.assertIn('x-data="toastTrigger"', body)
+        self.assertIn("data-toast-message=", body)

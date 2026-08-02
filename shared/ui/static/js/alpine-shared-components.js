@@ -40,4 +40,77 @@ document.addEventListener('alpine:init', function () {
       },
     };
   });
+
+  Alpine.data('navDropdown', function () {
+      return {
+          open: false,
+
+          toggle() {
+              this.open = !this.open;
+          },
+
+          get triggerClass() {
+              return { 'text-white bg-slate-700': this.open };
+          },
+
+          get chevronClass() {
+              return { 'rotate-180': this.open };
+          }
+      };
+  });
+
+  Alpine.data('dangerousActionModal', function () {
+      return {
+          show: false,
+          title: '',
+          message: '',
+          confirmText: '',
+          userInput: '',
+          action: null,
+
+          open(data) {
+              this.title = data.title || 'Confirm Action';
+              this.message = data.message || 'Are you sure?';
+              this.confirmText = data.confirmText || 'I understand';
+              this.userInput = '';
+              this.action = data.action;
+              this.show = true;
+          },
+
+          close() {
+              this.show = false;
+              this.userInput = '';
+              this.action = null;
+          },
+
+          confirm() {
+              if (this.userInput === this.confirmText && this.action) {
+                  this.action();
+                  this.close();
+              }
+          },
+
+          get isValid() {
+              return this.userInput === this.confirmText;
+          },
+
+          onConfirmRequest(event) {
+              this.open(event.detail);
+          },
+
+          submitIfValid() {
+              if (this.isValid) {
+                  this.confirm();
+              }
+          },
+
+          get isInvalid() {
+              return !this.isValid;
+          },
+
+          get confirmBtnClass() {
+              return this.isValid ? 'bg-red-600 hover:bg-red-700 focus:ring-red-500' : 'bg-slate-600 cursor-not-allowed';
+          }
+      };
+  });
 });

@@ -5,9 +5,9 @@
      mutation (add/remove), where the mini-cart should be showing. The open state
      must be server-rendered on the swapped-in widget. -->
 <div id="cart-widget" class="relative"
-     x-data="{ miniCartOpen: true }"
+     x-data="miniCart(true)"
      @click.outside="miniCartOpen = false">
-  <button @click="miniCartOpen = !miniCartOpen"
+  <button @click="toggle()"
           class="flex items-center space-x-2 bg-slate-700 hover:bg-slate-600 text-white px-4 py-2 rounded-lg transition-colors"
           aria-label="{% trans 'Shopping cart' %}">
     {% icon "orders" size="sm" %}
@@ -40,9 +40,10 @@
 <!-- Success notification (#102): route through the unified toast system
      (showToast → single #toast-container) rather than a bespoke inline Alpine box,
      so add-to-cart shows exactly one toast with consistent styling/position. The
-     x-init fires on the HTMX-swapped node (Alpine already drives #cart-widget above);
+     toastTrigger component's init() fires on the HTMX-swapped node (Alpine already
+     drives #cart-widget above);
      the mini-cart dropdown opens via the server-rendered miniCartOpen state above,
      which keeps the View Cart / Checkout links reachable after the add. -->
 {% if success_message %}
-<div x-init="window.showToast && window.showToast('success', '{{ success_message|escapejs }}{% if product_name %} ({{ product_name|escapejs }}){% endif %}')" x-cloak></div>
+<div x-data="toastTrigger" data-toast-message="{{ success_message }}{% if product_name %} ({{ product_name }}){% endif %}" x-cloak></div>
 {% endif %}
