@@ -3,7 +3,7 @@
 # ===============================================================================
 # Enhanced for Platform/Portal separation with scoped PYTHONPATH security
 
-.PHONY: help install check-env dev dev-e2e dev-e2e-bg dev-e2e-csp dev-platform dev-portal dev-all test test-fast test-file test-platform test-platform-fast test-ci test-ci-focused test-portal test-integration test-e2e test-with-e2e test-e2e-platform test-e2e-portal test-e2e-csp test-e2e-orm test-security test-cache show-test-deps install-frontend build-css watch-css check-css-tooling migrate check-migrations fixtures fixtures-light clean-cache clean-dist clean-db-and-logs clean-nuke lint lint-fix lint-platform lint-portal lint-security lint-health lint-credentials lint-audit lint-fsm lint-imports lint-test-layout check-types check-types-platform check-types-portal pre-commit infra-init infra-plan infra-dev infra-staging infra-prod infra-destroy-dev deploy-dev deploy-staging deploy-prod i18n-extract i18n-compile translate translate-platform translate-portal translate-ai translate-ai-platform translate-ai-portal translate-review translate-apply translate-diff translate-stats translate-stats-platform translate-stats-portal audit-a11y audit-a11y-strict audit-dark-mode audit-dark-mode-strict
+.PHONY: help install check-env check-venv-platform dev dev-e2e dev-e2e-bg dev-e2e-csp dev-platform dev-portal dev-all test test-fast test-file test-platform test-platform-fast test-ci test-ci-focused test-portal test-integration test-e2e test-with-e2e test-e2e-platform test-e2e-portal test-e2e-csp test-e2e-orm test-security test-cache show-test-deps install-frontend build-css watch-css check-css-tooling migrate check-migrations fixtures fixtures-light clean-cache clean-dist clean-db-and-logs clean-nuke lint lint-fix lint-platform lint-portal lint-security lint-health lint-credentials lint-audit lint-fsm lint-imports lint-test-layout check-types check-types-platform check-types-portal pre-commit infra-init infra-plan infra-dev infra-staging infra-prod infra-destroy-dev deploy-dev deploy-staging deploy-prod i18n-extract i18n-compile translate translate-platform translate-portal translate-ai translate-ai-platform translate-ai-portal translate-review translate-apply translate-diff translate-stats translate-stats-platform translate-stats-portal audit-a11y audit-a11y-strict audit-dark-mode audit-dark-mode-strict
 
 # ===============================================================================
 # SCOPED PYTHON ENVIRONMENTS 🔒
@@ -180,6 +180,34 @@ check-env:
 		exit 1; \
 	fi
 
+# Platform's INSTALLED_APPS imports third-party apps from the `platform` dependency
+# group. uv sync is declarative — any sync narrower than --all-groups (a bare
+# `uv sync`, or `uv sync --group dev`) prunes that group. Django then dies inside
+# django.setup() with an opaque ModuleNotFoundError before a single command runs,
+# and because dev-all uses -j2 the result is a half-up stack: portal serving :8701
+# while platform is dead on :8700. corsheaders is the first such import Django
+# reaches, so it doubles as the group's canary.
+#
+# Portal deliberately has no equivalent guard: its group holds only gunicorn (which
+# runserver never uses) plus duplicates of base [project].dependencies, so portal
+# starts fine on a pruned venv and gating it would be a false alarm.
+check-venv-platform:
+	@if [ ! -x "$(VENV_DIR)/bin/python" ]; then \
+		echo ""; \
+		echo "🚨 No virtualenv at $(VENV_DIR)/"; \
+		echo "   Run: make install"; \
+		echo ""; \
+		exit 1; \
+	fi
+	@if ! "$(VENV_DIR)/bin/python" -c "import corsheaders" >/dev/null 2>&1; then \
+		echo ""; \
+		echo "🚨 $(VENV_DIR)/ is missing the 'platform' dependency group!"; \
+		echo "   Something ran a sync narrower than --all-groups and pruned it."; \
+		echo "   Run: make install"; \
+		echo ""; \
+		exit 1; \
+	fi
+
 # ===============================================================================
 # DEVELOPMENT SERVERS 🚀
 # ===============================================================================
@@ -189,7 +217,7 @@ check-env:
 
 RUNSERVER_FLAGS := $(if $(NORELOAD),--noreload,)
 
-dev-platform: check-env
+dev-platform: check-env check-venv-platform
 	@echo "🏗️ [Platform] Starting admin platform service..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@echo "📍 PYTHONPATH: services/platform (scoped)"
@@ -216,7 +244,7 @@ dev-portal: check-env
 	@echo "🌐 Starting portal server on :8701$(if $(NORELOAD), (no-reload),)..."
 	@$(PYTHON_PORTAL_MANAGE) runserver 0.0.0.0:8701 $(RUNSERVER_FLAGS)
 
-dev-all: build-css
+dev-all: check-venv-platform build-css
 	@echo "🚀 [All Services] Starting platform + portal..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@$(MAKE) -j2 dev-platform dev-portal
