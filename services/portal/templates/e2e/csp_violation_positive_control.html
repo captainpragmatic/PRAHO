@@ -1,0 +1,16 @@
+{% load i18n %}<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>{% trans "CSP violation positive control" %}</title>
+  </head>
+  <body>
+    <h1>{% trans "CSP violation positive control" %}</h1>
+    <button
+      id="csp-positive-control"
+      type="button"
+      onclick="window.__cspPositiveControlExecuted = true">
+      {% trans "Trigger blocked inline handler" %}
+    </button>
+  </body>
+</html>

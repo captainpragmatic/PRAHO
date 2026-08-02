@@ -82,7 +82,7 @@
                         </form>
                         {% endif %}
                         {% if not addr.is_primary and not addr.is_billing %}
-                        <form method="post" action="{% url 'customers:address_delete' addr.id %}" onsubmit="return confirm('{% trans "Are you sure you want to delete this address?" %}')">
+                        <form method="post" action="{% url 'customers:address_delete' addr.id %}" data-confirm="{% trans "Are you sure you want to delete this address?" %}">
                             {% csrf_token %}
                             {% trans "Delete" as delete_btn %}
                             {% button delete_btn variant="danger" size="sm" type="submit" icon="trash" %}

@@ -114,7 +114,7 @@
             </div>
           </div>
 
-          {% include 'components/button.html' with text='Set Up Passkey' variant='success' class='block w-full' size='md' attrs='onclick="checkWebAuthnSupport()"' %}
+          {% include 'components/button.html' with text='Set Up Passkey' variant='success' class='block w-full' size='md' data_action='invoke' data_invoke='checkWebAuthnSupport' %}
         </div>
       </div>
     </div>

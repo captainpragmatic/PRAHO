@@ -46,7 +46,7 @@
     {# Dismissible close button #}
     {% if dismissible %}
         <button type="button" class="ml-1 p-0.5 rounded-full hover:bg-black/10 transition-colors"
-                onclick="this.parentElement.remove()"
+                data-action="badge-dismiss"
                 aria-label="{% trans 'Închide' %}">
             {% icon "x" size="xs" %}
         </button>

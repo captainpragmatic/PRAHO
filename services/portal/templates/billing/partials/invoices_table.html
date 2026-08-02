@@ -31,7 +31,7 @@
       </thead>
       <tbody class="bg-slate-800/30 divide-y divide-slate-700">
         {% for invoice in invoices %}
-        <tr class="hover:bg-slate-700/50 transition-colors cursor-pointer" onclick="{% if invoice.document_type == 'proforma' %}window.location.href='{% url 'billing:proforma_detail' invoice.number %}';{% else %}window.location.href='{% url 'billing:invoice_detail' invoice.number %}';{% endif %}">
+        <tr class="hover:bg-slate-700/50 transition-colors cursor-pointer" data-action="navigate" data-href="{% if invoice.document_type == 'proforma' %}{% url 'billing:proforma_detail' invoice.number %}{% else %}{% url 'billing:invoice_detail' invoice.number %}{% endif %}">
           <td class="px-6 py-4 whitespace-nowrap text-center">
             {% if invoice.document_type == 'proforma' %}
               {% trans "Proforma" as bt1 %}{% badge bt1 variant="primary" icon="document" css_class="w-24 justify-center" %}
@@ -95,7 +95,7 @@
 {# Mobile Card List #}
 <div class="md:hidden divide-y divide-slate-700">
   {% for invoice in invoices %}
-  <div class="min-h-[72px] flex flex-col justify-center p-4 hover:bg-slate-700 transition-colors cursor-pointer" onclick="{% if invoice.document_type == 'proforma' %}window.location.href='{% url 'billing:proforma_detail' invoice.number %}';{% else %}window.location.href='{% url 'billing:invoice_detail' invoice.number %}';{% endif %}">
+  <div class="min-h-[72px] flex flex-col justify-center p-4 hover:bg-slate-700 transition-colors cursor-pointer" data-action="navigate" data-href="{% if invoice.document_type == 'proforma' %}{% url 'billing:proforma_detail' invoice.number %}{% else %}{% url 'billing:invoice_detail' invoice.number %}{% endif %}">
     <div class="flex items-center justify-between mb-2">
       <div class="flex items-center space-x-2">
         {% if invoice.document_type == 'proforma' %}

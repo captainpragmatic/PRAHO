@@ -55,7 +55,7 @@
                                 </label>
                                 {% endif %}
                                 {% trans "Approve this remediation?" as confirm_approve %}
-                                {% trans "Approve" as approve_btn %}{% button approve_btn variant="success" type="submit" size="sm" attrs="onclick=\"return confirm('{{ confirm_approve|escapejs }}')\"" %}
+                                {% trans "Approve" as approve_btn %}{% button approve_btn variant="success" type="submit" size="sm" data_action="confirm-submit" data_confirm=confirm_approve %}
                             </form>
                             {% endif %}
                             {% if req.report.is_acceptable %}

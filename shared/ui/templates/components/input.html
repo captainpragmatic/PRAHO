@@ -52,11 +52,11 @@
     {% if icon_right %}
     <div class="absolute inset-y-0 right-0 pr-3 flex items-center">
       {% if icon_right == "password-toggle" %}
-      <button type="button" class="text-slate-400 hover:text-slate-300 focus:outline-none" onclick="togglePassword('{{ html_id|escapejs }}')">
+      <button type="button" class="text-slate-400 hover:text-slate-300 focus:outline-none" data-action="toggle-password" data-input-id="{{ html_id }}">
         {% icon "eye" size="sm" css_class="text-slate-400" %}
       </button>
       {% elif icon_right == "clear" %}
-      <button type="button" class="text-slate-400 hover:text-slate-300 focus:outline-none" onclick="document.getElementById('{{ html_id|escapejs }}').value = ''; document.getElementById('{{ html_id|escapejs }}').focus();">
+      <button type="button" class="text-slate-400 hover:text-slate-300 focus:outline-none" data-action="clear-input" data-input-id="{{ html_id }}">
         {% icon "x" size="sm" css_class="text-slate-400" %}
       </button>
       {% endif %}
@@ -76,14 +76,3 @@
   <p id="{{ html_id }}-help" class="text-xs text-slate-500 dark:text-slate-400">{{ help_text_below }}</p>
   {% endif %}
 </div>
-
-{# JavaScript for password toggle #}
-{% if icon_right == "password-toggle" %}
-<script nonce="{{ csp_nonce }}">
-  function togglePassword(inputId) {
-    const input = document.getElementById(inputId);
-    const type = input.getAttribute('type') === 'password' ? 'text' : 'password';
-    input.setAttribute('type', type);
-  }
-</script>
-{% endif %}

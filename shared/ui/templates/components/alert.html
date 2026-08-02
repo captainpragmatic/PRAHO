@@ -46,7 +46,7 @@ role="alert">
           <button type="button" class="text-sm font-medium underline hover:no-underline focus:outline-none focus:ring-2 focus:ring-offset-2"
             {% if action.hx_get %}hx-get="{{ action.hx_get }}"{% endif %}
             {% if action.hx_post %}hx-post="{{ action.hx_post }}"{% endif %}
-            {% if action.onclick %}onclick="{{ action.onclick }}"{% endif %}>
+            {% if action.data_action %}data-action="{{ action.data_action }}"{% if action.data_href %} data-href="{{ action.data_href }}"{% endif %}{% endif %}>
             {{ action.text }}
           </button>
           {% endfor %}

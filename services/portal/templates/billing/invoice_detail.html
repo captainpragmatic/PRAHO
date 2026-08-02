@@ -28,7 +28,7 @@
 
         <!-- Customer Refund Request Button -->
         {% if invoice.status == "paid" %}
-          <button onclick="showInvoiceRefundRequestModal()" class="inline-flex items-center justify-center rounded-md border border-transparent bg-blue-600 px-3 sm:px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700">
+          <button data-action="modal-open" data-modal-target="#invoiceRefundRequestModal" class="inline-flex items-center justify-center rounded-md border border-transparent bg-blue-600 px-3 sm:px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700">
             {% icon "receipt" size="sm" css_class="text-white" %} {% trans "Request Refund" %}
           </button>
         {% endif %}
@@ -273,7 +273,7 @@
 {% if invoice.status == "paid" %}
 <div id="invoiceRefundRequestModal" class="hidden fixed inset-0 z-50 overflow-y-auto">
   <div class="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
-    <div class="fixed inset-0 bg-slate-900 opacity-75" aria-hidden="true" onclick="hideInvoiceRefundRequestModal()"></div>
+    <div class="fixed inset-0 bg-slate-900 opacity-75" aria-hidden="true" data-action="modal-close" data-modal-target="#invoiceRefundRequestModal"></div>
 
     <div class="relative z-10 inline-block align-bottom bg-slate-800 rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
       <form id="invoiceRefundRequestForm" method="post">
@@ -332,7 +332,7 @@
         </div>
 
         <div class="px-6 py-4 bg-slate-900 flex justify-end space-x-3">
-          <button type="button" onclick="hideInvoiceRefundRequestModal()"
+          <button type="button" data-action="modal-close" data-modal-target="#invoiceRefundRequestModal"
                   class="px-4 py-2 text-sm font-medium text-slate-400 hover:text-white">
             {% trans "Cancel" %}
           </button>
@@ -347,14 +347,6 @@
 </div>
 
 <script nonce="{{ csp_nonce }}">
-function showInvoiceRefundRequestModal() {
-    document.getElementById('invoiceRefundRequestModal').classList.remove('hidden');
-}
-
-function hideInvoiceRefundRequestModal() {
-    document.getElementById('invoiceRefundRequestModal').classList.add('hidden');
-}
-
 // Handle invoice refund request form submission
 document.getElementById('invoiceRefundRequestForm').addEventListener('submit', function(e) {
     e.preventDefault();
@@ -398,7 +390,7 @@ document.getElementById('invoiceRefundRequestForm').addEventListener('submit', f
     .then(function(data) {
         if (data.success) {
             alert('{% trans "Refund request submitted successfully! Our billing team will review it shortly." %}');
-            hideInvoiceRefundRequestModal();
+            document.querySelector('#invoiceRefundRequestModal')?.classList.add('hidden');
             window.location.reload();
         } else {
             alert(data.error || '{% trans "Unable to process refund request. Please try again." %}');
