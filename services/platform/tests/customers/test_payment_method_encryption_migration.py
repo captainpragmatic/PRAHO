@@ -17,6 +17,7 @@ from apps.common.encryption import (
     encrypt_sensitive_data,
 )
 from apps.common.fields import _extract_embedded_aad
+from tests.helpers.migrations import restore_to_leaf
 
 TEST_KEY = "iuTrSBoKchmRt7RiySTHNuANNDmWe_xIqZWtMQaLMXs="
 MIGRATE_FROM = ("customers", "0018_remove_dormant_auto_payment_flag")
@@ -61,7 +62,10 @@ class PaymentMethodEncryptionMigrationTest(TransactionTestCase):
             )
 
     def tearDown(self) -> None:
-        MigrationExecutor(connection).migrate([MIGRATE_TO])
+        # Restore the CURRENT leaf, not MIGRATE_TO: that name was the leaf only when
+        # this test was written, and every migration added since would be left
+        # unapplied for each later test in the process (#445).
+        restore_to_leaf("customers")
         super().tearDown()
 
     def test_forward_and_reverse_preserve_data_and_bind_exact_context(self) -> None:

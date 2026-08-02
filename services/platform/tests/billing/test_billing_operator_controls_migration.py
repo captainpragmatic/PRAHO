@@ -9,6 +9,8 @@ from django.db.migrations.executor import MigrationExecutor
 from django.test import TransactionTestCase
 from django.utils import timezone
 
+from tests.helpers.migrations import restore_to_leaf
+
 MIGRATE_FROM = ("billing", "0042_vatvalidation_consultation_reference")
 MIGRATE_TO = ("billing", "0043_billing_operator_controls")
 
@@ -49,7 +51,10 @@ class PaymentFailureTimestampMigrationTest(TransactionTestCase):
         ).pk
 
     def tearDown(self) -> None:
-        MigrationExecutor(connection).migrate([MIGRATE_TO])
+        # Restore the CURRENT leaf, not MIGRATE_TO: that name was the leaf only when
+        # this test was written, and every migration added since would be left
+        # unapplied for each later test in the process (#445).
+        restore_to_leaf("billing")
         super().tearDown()
 
     def test_only_historical_failures_are_anchored_to_their_last_known_transition_time(self) -> None:
