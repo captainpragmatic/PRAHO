@@ -234,7 +234,7 @@ X_FRAME_OPTIONS = "DENY"
 # The shipped default is a NAMED CONSTANT (not an inline literal) so a guard test
 # can pin it independently of whether CSP_PROFILE is exported in the environment
 # — asserting the effective setting alone would be masked by a CI/shell override.
-DEFAULT_CSP_PROFILE = "phase2-target"
+DEFAULT_CSP_PROFILE = "phase3-target"
 CSP_PROFILE = os.environ.get("CSP_PROFILE", DEFAULT_CSP_PROFILE)
 CSP_REPORT_ONLY = os.environ.get("CSP_REPORT_ONLY", "false").lower() in ("1", "true", "yes")
 
