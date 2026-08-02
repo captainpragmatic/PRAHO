@@ -345,7 +345,7 @@
         </p>
         <div class="mt-4 p-4 rounded-lg bg-slate-700 border border-slate-600">
           <p class="text-xs text-slate-400 mb-2">Standard modal (HTML shell)</p>
-          <button type="button" onclick="if (window.openModal) { openModal('modal-styleguide-modal-1'); } else { var el = document.getElementById('modal-styleguide-modal-1'); if (el) { el.style.display = 'block'; } }" class="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded transition-colors">Open Modal</button>
+          <button type="button" data-action="modal-open-by-id" data-modal-id="modal-styleguide-modal-1" class="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded transition-colors">Open Modal</button>
           {% modal "styleguide-modal-1" "Modal Title" content="This is a sample modal body for styleguide verification." %}
         </div>
       </div>

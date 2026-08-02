@@ -30,7 +30,7 @@
       </thead>
       <tbody class="bg-slate-800/30 divide-y divide-slate-700">
         {% for service in services %}
-        <tr class="hover:bg-slate-700/50 transition-colors cursor-pointer" onclick="window.location.href='{% url 'services:detail' service_id=service.id %}';">
+        <tr class="hover:bg-slate-700/50 transition-colors cursor-pointer" data-action="navigate" data-href="{% url 'services:detail' service_id=service.id %}">
           <td class="px-6 py-4 whitespace-nowrap">
             <a href="{% url 'services:detail' service_id=service.id %}" class="block text-sm font-medium text-white hover:text-blue-300 transition-colors">{{ service.service_name }}</a>
             {% if service.domain %}
@@ -59,7 +59,7 @@
 {# Mobile Card List #}
 <div class="md:hidden divide-y divide-slate-700">
   {% for service in services %}
-  <div class="min-h-[72px] flex flex-col justify-center p-4 hover:bg-slate-700 transition-colors cursor-pointer" onclick="window.location.href='{% url 'services:detail' service_id=service.id %}';">
+  <div class="min-h-[72px] flex flex-col justify-center p-4 hover:bg-slate-700 transition-colors cursor-pointer" data-action="navigate" data-href="{% url 'services:detail' service_id=service.id %}">
     <div class="flex items-start justify-between mb-3">
       <div class="flex-1">
         <a href="{% url 'services:detail' service_id=service.id %}" class="text-sm font-medium text-white hover:text-blue-300 transition-colors">{{ service.service_name }}</a>

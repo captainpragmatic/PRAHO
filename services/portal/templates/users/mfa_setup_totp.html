@@ -107,7 +107,8 @@
               <p class="text-xs text-slate-400 mb-2">{% trans 'Secret Key:' %}</p>
               <div class="flex items-center justify-between bg-slate-900 px-3 py-2 rounded border">
                 <code id="secret-key" class="text-sm text-green-400 font-mono break-all">{{ secret }}</code>
-                <button type="button" onclick="copySecret()"
+                <button type="button" data-action="copy" data-copy-target="#secret-key"
+                        data-copy-feedback="{% trans 'Copied!' %}"
                         class="ml-2 text-slate-400 hover:text-white transition-colors"
                         title="{% trans 'Copy secret key' %}">
                   {% icon "clipboard" size="sm" %}
@@ -194,24 +195,4 @@
   </div>
 </div>
 
-<!-- Copy Secret Key JavaScript -->
-<script nonce="{{ csp_nonce }}">
-function copySecret() {
-  const secretElement = document.getElementById('secret-key');
-  const textToCopy = secretElement.textContent;
-
-  navigator.clipboard.writeText(textToCopy).then(function() {
-    // Visual feedback
-    const button = event.target;
-    const originalText = button.textContent;
-    button.textContent = 'Copied!';
-
-    setTimeout(() => {
-      button.textContent = originalText;
-    }, 2000);
-  }).catch(function(err) {
-    console.error('Could not copy text: ', err);
-  });
-}
-</script>
 {% endblock %}

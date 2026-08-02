@@ -44,7 +44,7 @@
           </div>
           {% endif %}
           <form hx-post="{% url 'orders:add_to_cart' %}" hx-target="#cart-widget" hx-swap="outerHTML"
-                hx-on::after-request="if(event.detail.successful){document.body.dispatchEvent(new CustomEvent('cartUpdated'));}"
+                data-htmx-after="cart-updated"
           >
             {% csrf_token %}
             <input type="hidden" name="product_slug" value="{{ product.slug }}">

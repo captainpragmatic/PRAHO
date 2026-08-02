@@ -24,13 +24,29 @@
     {% load static %}
     <link rel="stylesheet" href="{% static 'css/tailwind.min.css' %}">
     <script src="{% static 'js/htmx.min.js' %}"></script>
-    <script defer src="{% static 'js/alpine.min.js' %}"></script>
+    <script defer src="{% static 'js/alpine-shared-components.js' %}"></script>
+    <script defer src="{% static 'js/alpine-components.js' %}"></script>
+    {# @alpinejs/csp build (no new-Function evaluator) — the portal runs WITHOUT
+       'unsafe-eval'; expressions must stay within the CSP grammar and components
+       are registered via Alpine.data in the two alpine-*components.js files above.
+       Platform keeps the standard build (its CSP retains eval). #}
+    <script defer src="{% static 'js/alpine-csp.min.js' %}"></script>
     <script src="{% static 'js/components/modal.js' %}"></script>
+    <script src="{% static 'js/ui-actions.js' %}"></script>
     <script src="{% static 'js/components/toast.js' %}"></script>
+    <script src="{% static 'js/csp-actions.js' %}"></script>
 
     <!-- All styles now live in assets/css/input.css (built via Tailwind) -->
 </head>
 <body class="h-full bg-slate-900 text-slate-100 {% block body_class %}{% endblock %}">
+    <script nonce="{{ csp_nonce }}">
+      document.body.addEventListener('showToast', function (event) {
+        if (window.showToast) {
+          var d = event.detail || {};
+          window.showToast(d.variant || 'error', d.message || '');
+        }
+      });
+    </script>
     <div class="min-h-screen flex flex-col">
         <!-- Mobile Header & Navigation -->
         {% include 'components/mobile_header.html' %}
@@ -158,7 +174,13 @@
 
     <!-- Custom JS - Simplified like platform -->
     <script nonce="{{ csp_nonce }}">
-        // Global HTMX configuration
+        // Global HTMX configuration.
+        // allowEval=false (UNIT 3c): the portal CSP drops 'unsafe-eval', so HTMX's
+        // eval-backed attribute handlers and expression sugar are disabled at the
+        // config level too — templates use data-htmx-after / data-htmx-error-toast
+        // handled by the delegated listeners in csp-actions.js instead.
+        htmx.config.allowEval = false;
+
         document.body.addEventListener('htmx:afterRequest', function(evt) {
             const indicators = document.querySelectorAll('.htmx-indicator');
             indicators.forEach(el => el.style.display = 'none');

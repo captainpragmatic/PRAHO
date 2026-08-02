@@ -9,6 +9,8 @@ from django.db import connection
 from django.db.migrations.executor import MigrationExecutor
 from django.test import TransactionTestCase
 
+from tests.helpers.migrations import restore_to_leaf
+
 MIGRATE_FROM = ("billing", "0037_refund_gateway_id_unique")
 MIGRATION_UNDER_TEST = ("billing", "0038_fxrate_provenance_and_constraints")
 MIGRATE_TO = ("billing", "0039_invoice_tax_point_and_fx_snapshot")
@@ -36,7 +38,10 @@ class FXRateProvenanceMigrationTest(TransactionTestCase):
         ).pk
 
     def tearDown(self) -> None:
-        MigrationExecutor(connection).migrate([MIGRATE_TO])
+        # Restore the CURRENT leaf, not MIGRATE_TO: that name was the leaf only when
+        # this test was written, and every migration added since would be left
+        # unapplied for each later test in the process (#445).
+        restore_to_leaf("billing")
         super().tearDown()
 
     def test_existing_rate_keeps_value_without_invented_provenance(self) -> None:

@@ -1299,9 +1299,10 @@ class TestCheckoutReactiveSidebar(SimpleTestCase):
     # -- Alpine.js data binding -----------------------------------------------
 
     def test_grid_container_has_alpine_x_data_with_payment_method(self) -> None:
-        """The outer grid div must carry x-data='{paymentMethod: ...}'."""
+        """The outer grid div must carry the checkoutPayment Alpine.data component
+        (the inline paymentMethod object moved into JS for the @alpinejs/csp build)."""
         src = self._read_template()
-        self.assertIn('x-data="{ paymentMethod:', src)
+        self.assertIn('x-data="checkoutPayment"', src)
 
     def test_card_radio_has_change_handler(self) -> None:
         """Card radio must set paymentMethod to 'card' on change."""
@@ -1316,14 +1317,16 @@ class TestCheckoutReactiveSidebar(SimpleTestCase):
     # -- x-show toggles -------------------------------------------------------
 
     def test_card_sidebar_panel_has_x_show_card(self) -> None:
-        """Card Next Steps panel must be conditionally shown for card method."""
+        """Card Next Steps panel must be conditionally shown for card method
+        (via the checkoutPayment `isCard` getter — the inline `===` moved to JS)."""
         src = self._read_template()
-        self.assertIn("x-show=\"paymentMethod === 'card'\"", src)
+        self.assertIn('x-show="isCard"', src)
 
     def test_bank_transfer_sidebar_panel_has_x_show_bank_transfer(self) -> None:
-        """Bank Transfer Next Steps panel must be conditionally shown for bank_transfer."""
+        """Bank Transfer Next Steps panel must be conditionally shown for bank_transfer
+        (via the checkoutPayment `isBankTransfer` getter — the inline `===` moved to JS)."""
         src = self._read_template()
-        self.assertIn("x-show=\"paymentMethod === 'bank_transfer'\"", src)
+        self.assertIn('x-show="isBankTransfer"', src)
 
     # -- Stripe timeline i18n strings -----------------------------------------
 
@@ -1369,9 +1372,11 @@ class TestCheckoutReactiveSidebar(SimpleTestCase):
     # -- Default state --------------------------------------------------------
 
     def test_initial_payment_method_is_card(self) -> None:
-        """Alpine x-data must initialise paymentMethod to 'card' to match pre-checked radio."""
-        src = self._read_template()
-        self.assertIn("paymentMethod: 'card'", src)
+        """The card default moved into the checkoutPayment Alpine.data component (out of
+        the inline x-data for the CSP build); verify the default is preserved there so
+        the pre-checked 'card' radio still matches on load."""
+        registry = Path(__file__).parents[2] / "static" / "js" / "alpine-components.js"
+        self.assertIn("paymentMethod: 'card'", registry.read_text(encoding="utf-8"))
 
     # -- Both panels present --------------------------------------------------
 

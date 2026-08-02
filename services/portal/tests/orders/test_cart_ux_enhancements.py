@@ -2,7 +2,7 @@
 Tests for ENH-1: Better-tier add-to-cart UX improvements.
 
 Covers:
-  ENH-1-A: add_to_cart view sets HX-Trigger: cartAdded header on success
+  ENH-1-A: add_to_cart relies on the server-rendered open-cart response
   ENH-1-B: add_to_cart view passes product_slug to cart_updated.html context
   ENH-1-C: mini_cart_content view accepts ?just_added=<slug> query param
   ENH-1-D: mini_cart_content marks the just-added item with data-just-added attr
@@ -55,13 +55,13 @@ def _auth_client_with_product_mocked(client: Client, slug: str = "shared-hosting
 
 
 # ---------------------------------------------------------------------------
-# ENH-1-A / ENH-1-B: HX-Trigger header and product_slug in add_to_cart response
+# ENH-1-A / ENH-1-B: server-rendered open state and product_slug in add response
 # ---------------------------------------------------------------------------
 
 
 @override_settings(**_CACHE_SETTINGS)
-class TestAddToCartHxTrigger(SimpleTestCase):
-    """ENH-1-A/B: Successful add_to_cart returns HX-Trigger: cartAdded and includes product_slug."""
+class TestAddToCartResponse(SimpleTestCase):
+    """ENH-1-A/B: Successful add_to_cart uses server-rendered state and includes product_slug."""
 
     def setUp(self) -> None:
         self.client = Client()
@@ -83,30 +83,23 @@ class TestAddToCartHxTrigger(SimpleTestCase):
                 HTTP_X_FORWARDED_FOR="127.0.0.1",
             )
 
-    def test_successful_add_sets_hx_trigger_header(self) -> None:
-        """ENH-1-A: Successful add_to_cart response includes HX-Trigger header with cartAdded event."""
+    def test_successful_add_does_not_set_obsolete_hx_trigger_header(self) -> None:
+        """ENH-1-A: Successful add_to_cart relies on the swapped-in widget state."""
         response = self._post_add_to_cart()
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn("HX-Trigger", response)
-        hx_trigger = response["HX-Trigger"]
-        self.assertIn("cartAdded", hx_trigger)
+        self.assertNotIn("HX-Trigger", response)
 
-    def test_hx_trigger_includes_product_slug(self) -> None:
-        """ENH-1-B: HX-Trigger payload includes the slug of the just-added product."""
-
+    def test_response_includes_product_slug_for_mini_cart_request(self) -> None:
+        """ENH-1-B: The mini-cart request includes the slug of the just-added product."""
         slug = "shared-hosting-basic"
         response = self._post_add_to_cart(slug=slug)
 
         self.assertEqual(response.status_code, 200)
-        hx_trigger_raw = response["HX-Trigger"]
-        # Must be valid JSON with cartAdded key containing slug
-        payload = json.loads(hx_trigger_raw)
-        self.assertIn("cartAdded", payload)
-        self.assertEqual(payload["cartAdded"]["slug"], slug)
+        self.assertIn(f"?just_added={slug}", response.content.decode())
 
-    def test_error_response_does_not_set_hx_trigger(self) -> None:
-        """ENH-1-A: Failed add_to_cart (e.g. missing product_slug) must NOT set HX-Trigger."""
+    def test_error_response_sets_toast_hx_trigger(self) -> None:
+        """Failed add_to_cart requests must surface their error via HX-Trigger."""
         with (
             patch("apps.orders.views.PlatformAPIClient") as mock_cls,
             patch("apps.orders.services.PlatformAPIClient") as svc_mock_cls,
@@ -122,7 +115,16 @@ class TestAddToCartHxTrigger(SimpleTestCase):
                 HTTP_X_FORWARDED_FOR="127.0.0.1",
             )
 
-        self.assertNotIn("HX-Trigger", response)
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(
+            json.loads(response["HX-Trigger"]),
+            {
+                "showToast": {
+                    "variant": "error",
+                    "message": "Error adding to cart. Please try again.",
+                }
+            },
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -201,10 +203,8 @@ class TestCartUpdatedToastViewCartLink(SimpleTestCase):
     the success notice was consolidated into showToast; the dropdown's cart link is the
     canonical affordance now).
 
-    The auto-open must be server-rendered state (``miniCartOpen: true``), NOT the
-    ``cartAdded``/``cart-added`` window event: HX-Trigger events are dispatched before
-    the outerHTML swap, so the only listener that could catch them sits on the widget
-    that the swap is about to replace — the swapped-in widget would initialise closed.
+    The auto-open must be server-rendered state (``miniCartOpen: true``), because an
+    event dispatched before the outerHTML swap could only affect the old widget.
     """
 
     def setUp(self) -> None:
@@ -235,7 +235,9 @@ class TestCartUpdatedToastViewCartLink(SimpleTestCase):
         # rendered OPEN by the server and loads its content after the add.
         self.assertIn('id="mini-cart"', content)
         self.assertIn("mini-cart/", content)  # hx-get to mini_cart_content
-        self.assertIn('x-data="{ miniCartOpen: true }"', content)
+        # miniCart(true) = the server-rendered open state, via the miniCart Alpine.data
+        # component (the inline {miniCartOpen:true} moved to JS for the @alpinejs/csp build).
+        self.assertIn('x-data="miniCart(true)"', content)
 
 
 # ---------------------------------------------------------------------------
@@ -275,6 +277,11 @@ class TestCartToastConsolidation(SimpleTestCase):
         self.assertNotIn("fixed top-4 right-4", body)
 
     def test_success_routes_through_show_toast(self) -> None:
-        """Success is surfaced via the unified showToast('success', …) call."""
+        """Success is surfaced via the unified showToast() system: the cart_updated
+        partial wires the toastTrigger Alpine.data component (whose init() calls
+        showToast('success', …) with the data-toast-message) instead of a bespoke
+        inline box. The showToast call itself moved to alpine-components.js for the
+        @alpinejs/csp build, so assert the template wiring that routes to it."""
         body = self._post_add().content.decode()
-        self.assertIn("showToast('success'", body)
+        self.assertIn('x-data="toastTrigger"', body)
+        self.assertIn("data-toast-message=", body)

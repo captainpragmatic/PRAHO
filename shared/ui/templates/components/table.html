@@ -58,7 +58,7 @@
       <tr
         class="{% if row.css_class %}{{ row.css_class }}{% else %}hover:bg-slate-700/50 transition-colors{% endif %}"
         {% if row.hx_get %}hx-get="{{ row.hx_get }}" {% endif %} {% if row.hx_target %}hx-target="{{ row.hx_target }}"
-        {% endif %} {% if row.onclick %}onclick="{{ row.onclick }}" {% endif %}>
+        {% endif %} {% if row.data_action %}data-action="{{ row.data_action }}" {% if row.data_href %}data-href="{{ row.data_href }}" {% endif %}{% endif %}>
         {% for cell in row.cells %}
         <td
           class="{% if cell.class %}{{ cell.class }}{% else %}px-6 py-4 whitespace-nowrap text-sm text-slate-300{% endif %}">
@@ -84,7 +84,7 @@
               {% if action.hx_target %}hx-target="{{ action.hx_target }}" {% endif %}
               {% if action.hx_swap %}hx-swap="{{ action.hx_swap }}" {% endif %}
               {% if action.hx_confirm %}hx-confirm="{{ action.hx_confirm }}" {% endif %}
-              {% if action.onclick %}onclick="{{ action.onclick }}" {% endif %}
+              {% if action.data_action %}data-action="{{ action.data_action }}" {% if action.data_href %}data-href="{{ action.data_href }}" {% endif %}{% endif %}
               title="{{ action.title|default:action.label }}">
               {{ action.label }}
             </button>
@@ -121,7 +121,7 @@
               <button type="button"
                 class="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500"
                 {% if empty_action.hx_get %}hx-get="{{ empty_action.hx_get }}" {% endif %}
-                {% if empty_action.onclick %}onclick="{{ empty_action.onclick }}" {% endif %}>
+                {% if empty_action.data_action %}data-action="{{ empty_action.data_action }}" {% if empty_action.data_href %}data-href="{{ empty_action.data_href }}" {% endif %}{% endif %}>
                 {{ empty_action.label }}
               </button>
             </div>

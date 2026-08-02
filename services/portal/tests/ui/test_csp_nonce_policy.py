@@ -92,24 +92,34 @@ class CSPNoncePlumbingTests(SimpleTestCase):
         self.assertNotIn('nonce=""', rendered)
 
 
-class CSPHeaderStateTests(SimpleTestCase):
-    """Documents [M7] step 1 inertness: unsafe-inline present, no nonce-source.
+class CSPFailSafeHeaderTests(SimpleTestCase):
+    """The nonce-missing fail-safe. A request that reaches SecurityHeadersMiddleware
+    WITHOUT CSPNonceMiddleware having set ``request.csp_nonce`` must emit the
+    byte-exact ``current`` policy — never a half-enforced phase2 header carrying a
+    missing/empty nonce (which would silently break every inline script).
 
-    When step 3 injects 'nonce-{request.csp_nonce}' into the header, these
-    assertions must be updated in the same change — that is the point at
-    which the nonce attributes stop being inert.
+    Under the now-enforced phase2-target default this fail-safe is the ONLY path
+    that still ships ``current``, so it is pinned explicitly. (Production requests
+    DO carry a nonce — CSPNonceMiddleware runs ahead of SecurityHeadersMiddleware in
+    the real stack — and emit phase2-target; that default is guarded in
+    test_csp_policy_profiles.py.)
     """
 
     def _csp_header(self) -> str:
+        # No CSPNonceMiddleware wrapper -> request.csp_nonce is unset -> fail-safe.
         request = RequestFactory().get("/")
         response = SecurityHeadersMiddleware(_noop_view)(request)
         return response["Content-Security-Policy"]
 
-    def test_header_still_allows_unsafe_inline(self) -> None:
+    def test_failsafe_emits_unsafe_inline_current_policy(self) -> None:
         csp = self._csp_header()
         self.assertIn("'unsafe-inline'", csp)
+        # Prove this is the legacy 'current' policy, not a phase2 HYBRID that
+        # merely also kept 'unsafe-inline': the phase2-only discriminator
+        # `script-src-attr 'none'` must be absent from the fail-safe header.
+        self.assertNotIn("script-src-attr", csp)
 
-    def test_header_has_no_nonce_source_yet(self) -> None:
+    def test_failsafe_has_no_nonce_source(self) -> None:
         csp = self._csp_header()
         self.assertNotIn("'nonce-", csp)
 

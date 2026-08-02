@@ -317,7 +317,7 @@ def process_customer(customer: 'Customer') -> None:
 ```bash
 # Stubs are included in development dependencies
 # Ensure your environment is synced
-uv sync --group dev
+make install
 ```
 
 **3. Complex Django QuerySet Types**

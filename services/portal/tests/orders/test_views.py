@@ -3,6 +3,7 @@ Test suite for Order Views
 Tests authentication, cart operations, and order creation flows.
 """
 
+import json
 from unittest.mock import Mock, patch
 
 from django.contrib.messages.middleware import MessageMiddleware
@@ -316,7 +317,7 @@ class TestOrderViews(SimpleTestCase):
 
 @override_settings(SESSION_ENGINE='django.contrib.sessions.backends.cache')
 class TestCartErrorResponses(SimpleTestCase):
-    """Cart error responses must return 422 with HX-Retarget headers for HTMX."""
+    """Cart errors must return 422 with target-independent HTMX toast events."""
 
     def setUp(self):
         self.client = Client()
@@ -342,8 +343,8 @@ class TestCartErrorResponses(SimpleTestCase):
 
     @patch('apps.orders.views.OrderSecurityHardening')
     @patch('apps.orders.views.GDPRCompliantCartSession')
-    def test_add_to_cart_error_has_retarget_header(self, mock_cart_class, mock_sec):
-        """Error responses must include HX-Retarget header for HTMX processing."""
+    def test_add_to_cart_error_triggers_toast(self, mock_cart_class, mock_sec):
+        """Error responses must trigger a toast without page-specific swap headers."""
         mock_sec.fail_closed_on_cache_failure.return_value = None
         mock_sec.check_suspicious_patterns.return_value = None
         mock_sec.validate_request_size.return_value = None
@@ -353,8 +354,13 @@ class TestCartErrorResponses(SimpleTestCase):
         response = self.client.post('/order/cart/add/', {
             'product_slug': 'x', 'quantity': 1, 'billing_period': 'monthly',
         })
-        self.assertEqual(response["HX-Retarget"], "#cart-notifications")
-        self.assertEqual(response["HX-Reswap"], "innerHTML")
+        self.assertEqual(response.status_code, 422)
+        self.assertNotIn("HX-Retarget", response)
+        self.assertNotIn("HX-Reswap", response)
+        self.assertEqual(
+            json.loads(response["HX-Trigger"]),
+            {"showToast": {"variant": "error", "message": "['Bad input']"}},
+        )
 
 
 @override_settings(SESSION_ENGINE='django.contrib.sessions.backends.cache')

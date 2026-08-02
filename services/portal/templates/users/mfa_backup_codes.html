@@ -35,7 +35,7 @@
           {% for code in backup_codes %}
           <div class="bg-slate-700 p-4 rounded-lg border border-slate-600 flex items-center justify-between">
             <code class="text-green-400 font-mono text-lg">{{ code }}</code>
-            <button type="button" onclick="copyCode('{{ code|escapejs }}')"
+            <button type="button" data-action="copy" data-copy-value="{{ code }}"
                     class="ml-2 text-slate-400 hover:text-white transition-colors"
                     title="{% trans 'Copy code' %}">
               {% icon "clipboard" size="sm" %}
@@ -46,12 +46,14 @@
 
         <!-- Actions -->
         <div class="flex gap-4 mt-6">
-          <button type="button" onclick="copyAllCodes()"
+          <button type="button" data-action="copy"
+                  data-copy-value="{% for code in backup_codes %}{{ code }}{% if not forloop.last %}&#10;{% endif %}{% endfor %}"
+                  data-copy-feedback="{% trans 'All backup codes copied to clipboard!' %}"
                   class="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-lg transition-colors">
             {% icon "clipboard" size="sm" css_class="text-white" %} {% trans 'Copy All Codes' %}
           </button>
 
-          <button type="button" onclick="printCodes()"
+          <button type="button" data-action="print-codes"
                   class="bg-gray-600 hover:bg-gray-700 text-white font-medium py-2 px-4 rounded-lg transition-colors">
             {% icon "document" size="sm" css_class="text-white" %} {% trans 'Print Codes' %}
           </button>
@@ -92,7 +94,7 @@
           </div>
         </div>
 
-        <button type="button" onclick="regenerateCodes()"
+        <button type="button" data-action="regenerate-codes"
                 class="bg-orange-600 hover:bg-orange-700 text-white font-medium py-2 px-4 rounded-lg transition-colors">
           {% icon "refresh" size="sm" css_class="text-white" %} {% trans 'Generate New Backup Codes' %}
         </button>
@@ -133,28 +135,6 @@
 
 <!-- JavaScript for copying and printing -->
 <script nonce="{{ csp_nonce }}">
-function copyCode(code) {
-  navigator.clipboard.writeText(code).then(function() {
-    // Could add visual feedback here
-    console.log('Code copied:', code);
-  }).catch(function(err) {
-    console.error('Could not copy code: ', err);
-  });
-}
-
-function copyAllCodes() {
-  const codes = [{% for code in backup_codes %}'{{ code|escapejs }}'{% if not forloop.last %}, {% endif %}{% endfor %}];
-  const allCodes = codes.join('\n');
-
-  navigator.clipboard.writeText(allCodes).then(function() {
-    {# nosemgrep: template-translate-as-no-escape — developer-managed translation string, escaped at output #}
-    {% trans "All backup codes copied to clipboard!" as codes_copied_msg %}
-    alert('{{ codes_copied_msg|escapejs }}');
-  }).catch(function(err) {
-    console.error('Could not copy codes: ', err);
-  });
-}
-
 function printCodes() {
   const printWindow = window.open('', '_blank');
   const codes = [{% for code in backup_codes %}'{{ code|escapejs }}'{% if not forloop.last %}, {% endif %}{% endfor %}];

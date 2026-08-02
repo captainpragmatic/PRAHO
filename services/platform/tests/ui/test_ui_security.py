@@ -8,7 +8,6 @@ from pathlib import Path
 from django.contrib.auth import get_user_model
 from django.template import Context, Template
 from django.test import SimpleTestCase, TestCase, override_settings
-from django.utils.html import escape
 
 from apps.ui.templatetags.ui_components import button, icon
 
@@ -19,8 +18,13 @@ class ButtonComponentXSSTests(TestCase):
     """🔒 Tests for XSS prevention in button component"""
 
     def test_button_attrs_are_sanitized(self):
-        """Test that button attrs are properly escaped to prevent XSS"""
-        # Malicious attrs that should be escaped
+        """Button attrs are sanitized: on*= handlers are STRIPPED, other markup escaped.
+
+        CSP hardening: an inline handler smuggled through attrs must not survive as a
+        native DOM handler at all (stripping supersets the old quote-escaping). Any
+        remaining non-handler markup is still HTML-escaped.
+        """
+        # onclick handler must be removed entirely; the data-evil script must be escaped.
         malicious_attrs = 'onclick="alert(\'XSS\')" data-evil="<script>alert(\'XSS\')</script>"'
 
         context = button(
@@ -28,15 +32,12 @@ class ButtonComponentXSSTests(TestCase):
             attrs=malicious_attrs
         )
 
-        # The attrs should be escaped, not marked as safe
-        expected_escaped = escape(malicious_attrs)
-        self.assertEqual(context['attrs'], expected_escaped)
-
-        # Verify no raw HTML is present
+        # The on*= handler is stripped entirely — not merely quote-escaped.
+        self.assertNotIn('onclick', context['attrs'])
         self.assertNotIn('onclick="alert', context['attrs'])
         self.assertNotIn('<script>', context['attrs'])
 
-        # Verify proper escaping
+        # Non-handler markup that remains is HTML-escaped, not marked safe.
         self.assertIn('&lt;script&gt;', context['attrs'])
         self.assertIn('&#x27;XSS&#x27;', context['attrs'])
 

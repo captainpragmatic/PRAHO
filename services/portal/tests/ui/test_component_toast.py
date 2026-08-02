@@ -92,23 +92,21 @@ class ToastAlpineTests(SimpleTestCase):
 
 
 class ToastAutoDismissTests(SimpleTestCase):
-    """Tests auto-dismiss setTimeout generation."""
+    """Tests auto-dismiss duration is passed to the Alpine toast component."""
 
-    def test_auto_dismiss_emits_settimeout(self) -> None:
+    def test_auto_dismiss_passes_timeout_to_component(self) -> None:
         result = _render('{% toast "Test" auto_dismiss=3000 %}')
-        self.assertIn("3000", result)
-        self.assertIn("setTimeout", result)
+        self.assertIn('x-data="toast(3000)"', result)
 
     def test_zero_auto_dismiss_disables_timeout(self) -> None:
-        """When auto_dismiss=0, the setTimeout removal code is not emitted."""
+        """When auto_dismiss=0, the component receives the disabled value."""
         result = _render('{% toast "Test" auto_dismiss=0 %}')
-        # 0 means disabled: the conditional in toast.html skips the setTimeout
-        self.assertNotIn("setTimeout(() => { show = false", result)
+        self.assertIn('x-data="toast(0)"', result)
 
     def test_default_auto_dismiss_is_5000ms(self) -> None:
         """Default auto_dismiss is 5000ms (5 seconds)."""
         result = _render('{% toast "Test" %}')
-        self.assertIn("5000", result)
+        self.assertIn('x-data="toast(5000)"', result)
 
 
 # ===============================================================================
