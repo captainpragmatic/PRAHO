@@ -11,6 +11,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from decimal import Decimal
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, TypedDict
 
 from django.conf import settings
@@ -3183,8 +3184,18 @@ class AuditIntegrityService:
 
     HASH_VERSION = 2
     RESERVED_METADATA_KEYS: ClassVar[frozenset[str]] = frozenset(
-        {"integrity_hash", "integrity_hash_version", "integrity_key_id"}
+        {
+            "integrity_hash",
+            "integrity_hash_version",
+            "integrity_key_id",
+            # Written AFTER the MAC is computed, when a chain append fails (#313). It must be
+            # excluded from the covered payload or a failed append would flip the row to
+            # "MAC mismatch" — reporting a ledger problem as evidence tampering.
+            "chain_link_pending",
+        }
     )
+    # Chain-ledger schema version (#313), distinct from the per-row HASH_VERSION above.
+    CHAIN_VERSION = 1
 
     @classmethod
     def verify_audit_integrity(
@@ -3211,13 +3222,17 @@ class AuditIntegrityService:
 
                 if check_type == "hash_verification":
                     issues_found = cls._verify_hash_chain(events_list)
+                elif check_type == "chain_verification":
+                    issues_found = cls._verify_chain_ledger(period_start, period_end)
+                elif check_type == "anchor_verification":
+                    issues_found = cls._verify_chain_anchors()
                 elif check_type == "sequence_check":
                     issues_found = cls._check_sequence_gaps(events_list)
                 elif check_type == "gdpr_compliance":
                     issues_found = cls._check_gdpr_compliance(events_list)
 
-                # Generate hash chain for this check
-                hash_chain = cls._generate_hash_chain(events_list)
+                # Record the real chain-head MAC on the check row (replaces the dead v1 chain).
+                hash_chain = cls._current_chain_head_mac()
 
                 # Determine status
                 status = "healthy"
@@ -3368,9 +3383,675 @@ class AuditIntegrityService:
             "integrity_key_id": key_id,
         }
 
+    # ---------------------------------------------------------------------------
+    # #313 — hash-chain ledger crypto (distinct "audit-chain" key domain)
+    # ---------------------------------------------------------------------------
+
+    @classmethod
+    def _chain_keys(cls) -> list[tuple[str, bytes]]:
+        """Ordered chain-MAC keys as (key_id, key): current first, then previous.
+
+        Mirrors _integrity_keys but resolves the DISTINCT "audit-chain" derivation domain
+        (AUDIT_CHAIN_SECRET env when provisioned, else HKDF over SECRET_KEY). Keeping the
+        chain key independent of the per-row MAC key is deliberate domain separation.
+        """
+        from apps.common.key_derivation import (  # noqa: PLC0415  # Deferred: avoids app-load cycle
+            derive_key,
+            derive_key_with_material,
+        )
+
+        current = derive_key("audit-chain")
+        keys: list[tuple[str, bytes]] = [(hashlib.sha256(current).hexdigest()[:8], current)]
+        previous_material = os.environ.get("AUDIT_CHAIN_SECRET_PREVIOUS", "")
+        if previous_material:
+            previous = derive_key_with_material("audit-chain", previous_material)
+            previous_id = hashlib.sha256(previous).hexdigest()[:8]
+            if previous_id != keys[0][0]:
+                keys.append((previous_id, previous))
+        return keys
+
+    @classmethod
+    def _chain_payload(  # noqa: PLR0913  # Each arg is one committed field of the MAC preimage; bundling them into a dict would hide what the chain actually signs.
+        cls,
+        *,
+        sequence: int,
+        prev_chain_mac: str,
+        event_id: str,
+        event_v2_mac: str,
+        timestamp_iso: str,
+        action: str,
+        content_type_id: int | None,
+        object_id: str,
+        is_tombstone: bool,
+    ) -> str:
+        """Canonical preimage for a chain link.
+
+        Covers the event's STABLE identity plus its per-row v2 MAC as of append time. The
+        v2 MAC transitively covers all evidence (old/new values, metadata), so the chain
+        need not re-hash evidence and a later anonymization re-stamp never rewrites a past
+        link. A tombstone link (retention-deleted event) carries the stored identity with
+        an empty event_v2_mac and is_tombstone=True.
+        """
+        return cls._canonical_json(
+            {
+                "v": cls.CHAIN_VERSION,
+                "sequence": sequence,
+                "prev_chain_mac": prev_chain_mac,
+                "event_id": event_id,
+                "event_v2_mac": event_v2_mac,
+                "timestamp": timestamp_iso,
+                "action": action,
+                "content_type_id": content_type_id,
+                "object_id": object_id,
+                "is_tombstone": is_tombstone,
+            }
+        )
+
+    @classmethod
+    def _compute_chain_mac(cls, *, payload: str, key: bytes) -> str:
+        return hmac.new(key, payload.encode(), hashlib.sha256).hexdigest()
+
+    @classmethod
+    def append_chain_link(cls, event: AuditEvent) -> None:
+        """Append one hash-chain link for a freshly stamped audit event (#313).
+
+        Serializes on the single AuditChainHead row via SELECT ... FOR UPDATE so
+        concurrent appends get strictly increasing sequences and a correct prev-link.
+        A bare DB sequence could not bind link N's prev_chain_mac to link N-1's chain_mac.
+
+        Gated behind AUDIT_CHAIN_ENABLED and only runs once backfill_complete is set, so
+        live appends never interleave with the historical backfill over the head lock.
+        """
+        from apps.audit.models import AuditChainHead, AuditChainLink  # noqa: PLC0415  # avoid app-load cycle
+
+        event_v2_mac = ""
+        if isinstance(event.metadata, dict):
+            event_v2_mac = str(event.metadata.get("integrity_hash", ""))
+
+        with transaction.atomic():
+            head, _created = AuditChainHead.objects.select_for_update().get_or_create(pk=1)
+            if not head.backfill_complete:
+                # Historical rows are not yet sequenced; appending now would race the backfill.
+                return
+            sequence = head.last_sequence + 1
+            prev = head.last_chain_mac
+            key_id, key = cls._chain_keys()[0]
+            payload = cls._chain_payload(
+                sequence=sequence,
+                prev_chain_mac=prev,
+                event_id=str(event.id),
+                event_v2_mac=event_v2_mac,
+                timestamp_iso=event.timestamp.isoformat(),
+                action=event.action,
+                content_type_id=event.content_type_id,
+                object_id=event.object_id,
+                is_tombstone=False,
+            )
+            mac = cls._compute_chain_mac(payload=payload, key=key)
+            AuditChainLink.objects.create(
+                sequence=sequence,
+                event=event,
+                event_id_str=str(event.id),
+                event_timestamp=event.timestamp,
+                event_action=event.action,
+                event_content_type_id=event.content_type_id,
+                event_object_id=event.object_id,
+                event_v2_mac=event_v2_mac,
+                chain_mac=mac,
+                prev_chain_mac=prev,
+                key_id=key_id,
+                is_tombstone=False,
+            )
+            AuditChainHead.objects.filter(pk=1).update(last_sequence=sequence, last_chain_mac=mac)
+
+    @classmethod
+    def append_tombstone_links(cls, events: list[AuditEvent]) -> int:
+        """Append tombstone links recording a legitimate retention deletion (#313).
+
+        Called BEFORE the events are deleted, while their identity is still readable. Without
+        this, a retention delete is indistinguishable from an attacker's DELETE: the event row
+        is gone and its live link's FK is nulled by SET_NULL, leaving nothing that says the
+        removal was authorized. The tombstone is a NEW appended link (the original link is
+        never rewritten — the ledger is append-only), so the chain still covers the removal.
+
+        Returns the number of tombstones appended. Fail-open like the append hook: retention
+        must not be blocked by a ledger problem, but a failure is loud in the log.
+        """
+        from apps.audit.models import AuditChainHead, AuditChainLink  # noqa: PLC0415  # avoid app-load cycle
+
+        if not events or not getattr(settings, "AUDIT_CHAIN_ENABLED", False):
+            return 0
+
+        with transaction.atomic():
+            head, _created = AuditChainHead.objects.select_for_update().get_or_create(pk=1)
+            if not head.backfill_complete:
+                return 0
+
+            sequence = head.last_sequence
+            prev = head.last_chain_mac
+            key_id, key = cls._chain_keys()[0]
+            links = []
+            for event in events:
+                sequence += 1
+                payload = cls._chain_payload(
+                    sequence=sequence,
+                    prev_chain_mac=prev,
+                    event_id=str(event.id),
+                    # A tombstone commits to identity only; the evidence MAC dies with the row.
+                    event_v2_mac="",
+                    timestamp_iso=event.timestamp.isoformat(),
+                    action=event.action,
+                    content_type_id=event.content_type_id,
+                    object_id=event.object_id,
+                    is_tombstone=True,
+                )
+                mac = cls._compute_chain_mac(payload=payload, key=key)
+                links.append(
+                    AuditChainLink(
+                        sequence=sequence,
+                        # Deliberately NOT linked to the event: it is about to be deleted, and
+                        # the partial-unique constraint reserves the FK for the live link.
+                        event=None,
+                        event_id_str=str(event.id),
+                        event_timestamp=event.timestamp,
+                        event_action=event.action,
+                        event_content_type_id=event.content_type_id,
+                        event_object_id=event.object_id,
+                        event_v2_mac="",
+                        chain_mac=mac,
+                        prev_chain_mac=prev,
+                        key_id=key_id,
+                        is_tombstone=True,
+                    )
+                )
+                prev = mac
+
+            AuditChainLink.objects.bulk_create(links)
+            AuditChainHead.objects.filter(pk=1).update(last_sequence=sequence, last_chain_mac=prev)
+            return len(links)
+
+    # ---------------------------------------------------------------------------
+    # #313 — external anchor over the chain head
+    # ---------------------------------------------------------------------------
+
+    @classmethod
+    def _anchor_keys(cls) -> list[tuple[str, bytes]]:
+        """Ordered anchor-MAC keys as (key_id, key): current first, then previous.
+
+        Resolves the "audit-anchor" domain, kept separate from "audit-chain" so recovering
+        the chain key does not let an attacker mint anchors that match a rewritten chain.
+        """
+        from apps.common.key_derivation import (  # noqa: PLC0415  # Deferred: avoids app-load cycle
+            derive_key,
+            derive_key_with_material,
+        )
+
+        current = derive_key("audit-anchor")
+        keys: list[tuple[str, bytes]] = [(hashlib.sha256(current).hexdigest()[:8], current)]
+        previous_material = os.environ.get("AUDIT_ANCHOR_SECRET_PREVIOUS", "")
+        if previous_material:
+            previous = derive_key_with_material("audit-anchor", previous_material)
+            previous_id = hashlib.sha256(previous).hexdigest()[:8]
+            if previous_id != keys[0][0]:
+                keys.append((previous_id, previous))
+        return keys
+
+    @classmethod
+    def _anchor_payload(cls, *, sequence: int, head_chain_mac: str, link_count: int) -> str:
+        """Canonical preimage for an anchor.
+
+        link_count is committed alongside the head so a truncation that also rewrites the
+        head row cannot produce a chain matching any previously published anchor.
+        """
+        return cls._canonical_json(
+            {
+                "v": cls.CHAIN_VERSION,
+                "sequence": sequence,
+                "head_chain_mac": head_chain_mac,
+                "link_count": link_count,
+            }
+        )
+
+    @classmethod
+    def publish_chain_anchor(cls) -> Result[dict[str, Any], str]:
+        """Publish the current chain head to the configured external sink (#313).
+
+        Run on a schedule. Each anchor pins "the chain reached at least this far", which is
+        what makes tail truncation detectable — chaining alone cannot see it, because lopping
+        off the tail leaves the surviving links internally consistent.
+        """
+        from apps.audit.models import AuditChainAnchor, AuditChainHead, AuditChainLink  # noqa: PLC0415
+
+        head = AuditChainHead.objects.filter(pk=1).first()
+        if head is None or not head.last_chain_mac:
+            return Err("No chain head to anchor - run backfill_audit_chain first")
+
+        link_count = AuditChainLink.objects.count()
+        key_id, key = cls._anchor_keys()[0]
+        payload = cls._anchor_payload(
+            sequence=head.last_sequence, head_chain_mac=head.last_chain_mac, link_count=link_count
+        )
+        anchor_mac = hmac.new(key, payload.encode(), hashlib.sha256).hexdigest()
+
+        sink_name = getattr(settings, "AUDIT_ANCHOR_SINK", "logfile")
+        record = {
+            "v": cls.CHAIN_VERSION,
+            "sequence": head.last_sequence,
+            "head_chain_mac": head.last_chain_mac,
+            "link_count": link_count,
+            "anchor_mac": anchor_mac,
+            "key_id": key_id,
+            "anchored_at": timezone.now().isoformat(),
+        }
+
+        # Publish to the sink FIRST. The external record is the actual control; the local row
+        # is a convenience copy. Writing the local row on a sink failure would overstate the
+        # protection an operator has.
+        sink_result = cls._publish_to_anchor_sink(sink_name, record)
+        if sink_result.is_err():
+            return sink_result
+
+        AuditChainAnchor.objects.create(
+            sequence=head.last_sequence,
+            head_chain_mac=head.last_chain_mac,
+            link_count=link_count,
+            anchor_mac=anchor_mac,
+            key_id=key_id,
+            sink=sink_name,
+        )
+        logger.info(f"⚓ [Audit Anchor] Published chain anchor seq={head.last_sequence} to {sink_name}")
+        return Ok(record)
+
+    @classmethod
+    def _publish_to_anchor_sink(cls, sink_name: str, record: dict[str, Any]) -> Result[dict[str, Any], str]:
+        """Dispatch an anchor record to the named sink.
+
+        Sinks are deliberately dumb append-only writers. Adding an S3 Object Lock or external
+        timestamping sink means adding a branch here, nothing else.
+        """
+        if sink_name == "none":
+            # Explicit opt-out. Anchors still land in the local table, but there is NO external
+            # evidence — tail truncation is undetectable in this mode. Loud on purpose.
+            logger.warning("⚠️ [Audit Anchor] AUDIT_ANCHOR_SINK=none - anchors are not externally published")
+            return Ok(record)
+
+        if sink_name == "logfile":
+            path = getattr(settings, "AUDIT_ANCHOR_LOG_PATH", "")
+            if not path:
+                return Err("AUDIT_ANCHOR_LOG_PATH is not configured")
+            try:
+                anchor_path = Path(path)
+                anchor_path.parent.mkdir(parents=True, exist_ok=True)
+                # Append-only open, one JSON record per line, flushed before returning so a
+                # crash between here and the local row cannot lose the external evidence.
+                with anchor_path.open("a", encoding="utf-8") as handle:
+                    handle.write(json.dumps(record, sort_keys=True) + "\n")
+                    handle.flush()
+                    os.fsync(handle.fileno())
+            except OSError as e:
+                return Err(f"Anchor sink write failed: {e}")
+            return Ok(record)
+
+        return Err(f"Unknown anchor sink {sink_name!r}")
+
+    @classmethod
+    def read_anchor_sink_records(cls) -> Result[list[dict[str, Any]], str]:
+        """Read back published anchors from the external sink.
+
+        This is the copy that survives an attacker with database access, so it — not
+        AuditChainAnchor — is the authority for verification.
+        """
+        sink_name = getattr(settings, "AUDIT_ANCHOR_SINK", "logfile")
+        if sink_name == "none":
+            return Err("AUDIT_ANCHOR_SINK=none - no external anchors exist to verify against")
+
+        if sink_name == "logfile":
+            path = getattr(settings, "AUDIT_ANCHOR_LOG_PATH", "")
+            if not path:
+                return Err("AUDIT_ANCHOR_LOG_PATH is not configured")
+            anchor_path = Path(path)
+            if not anchor_path.exists():
+                return Err(f"Anchor sink {path} does not exist - anchors were never published or were removed")
+            try:
+                # Streamed line by line rather than read_text(): this file grows without bound
+                # on a long-running system, and verification must not need it all resident.
+                with anchor_path.open(encoding="utf-8") as handle:
+                    records = [json.loads(line) for line in handle if line.strip()]
+            except (OSError, ValueError) as e:
+                return Err(f"Anchor sink read failed: {e}")
+            return Ok(records)
+
+        return Err(f"Unknown anchor sink {sink_name!r}")
+
+    @classmethod
+    def _verify_chain_anchors(cls) -> list[dict[str, Any]]:
+        """Check the live chain against EXTERNALLY published anchors (#313).
+
+        For each anchor: the chain must still reach the anchored sequence, the link at that
+        sequence must still carry the anchored head MAC, and the anchor's own MAC must verify
+        under a known anchor key.
+
+        Reads the sink, never the local AuditChainAnchor table. An attacker who can truncate
+        the chain can equally delete local anchor rows, and a verifier that then found nothing
+        to check would report healthy — turning the whole control off exactly when it matters.
+        So this FAILS CLOSED: an unreadable sink is a critical finding, not a pass.
+
+        The local table is retained only as corroboration: an anchor recorded locally but
+        absent from the sink means the sink was tampered with after publication.
+        """
+        from apps.audit.models import AuditChainAnchor  # noqa: PLC0415  # avoid app-load cycle
+
+        sink_result = cls.read_anchor_sink_records()
+        if sink_result.is_err():
+            return [
+                {
+                    "type": "anchor_sink_unavailable",
+                    "severity": "critical",
+                    "description": (
+                        f"Cannot read external anchors: {sink_result.unwrap_err()}. "
+                        f"Tail truncation cannot be ruled out."
+                    ),
+                }
+            ]
+
+        sink_records = sink_result.unwrap()
+        if not sink_records:
+            # A readable but EMPTY sink is not a pass. With no anchor to compare against there
+            # is nothing pinning how far the chain must reach, so truncation cannot be ruled
+            # out — the same fail-open trap as an unreadable sink, just quieter.
+            return [
+                {
+                    "type": "anchor_sink_empty",
+                    "severity": "critical",
+                    "description": (
+                        "External anchor sink contains no anchor records. Tail truncation "
+                        "cannot be ruled out - run anchor_audit_chain."
+                    ),
+                }
+            ]
+
+        findings = cls.verify_anchor_records(sink_records)
+
+        # Corroborate against the local copy: anything anchored locally but missing from the
+        # sink means records were removed from the sink after they were written.
+        sink_sequences = {record.get("sequence") for record in sink_records}
+        findings.extend(
+            {
+                "type": "anchor_missing_from_sink",
+                "severity": "critical",
+                "description": (
+                    f"Anchor for sequence {sequence} was recorded locally but is absent from the "
+                    f"sink - published anchor records were removed"
+                ),
+            }
+            for sequence in AuditChainAnchor.objects.values_list("sequence", flat=True)
+            if sequence not in sink_sequences
+        )
+        return findings
+
+    @staticmethod
+    def _anchor_record_is_well_formed(anchor: Any) -> bool:
+        """Whether an untrusted anchor record carries every field, at the right type."""
+        if not isinstance(anchor, dict):
+            return False
+        # bool is a subclass of int, so it would otherwise pass as a sequence/count.
+        if not all(
+            isinstance(anchor.get(field), int) and not isinstance(anchor.get(field), bool)
+            for field in ("sequence", "link_count")
+        ):
+            return False
+        return all(isinstance(anchor.get(field), str) for field in ("head_chain_mac", "anchor_mac", "key_id"))
+
+    @classmethod
+    def verify_anchor_records(cls, anchors: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Verify the live chain against externally supplied anchor records (#313).
+
+        Takes anchors as plain dicts precisely so an operator can feed in lines read back from
+        the sink — the copy an in-database attacker could not reach.
+
+        Anchor records are UNTRUSTED input: anyone able to append to the sink can write a
+        record with missing or wrong-typed fields. A malformed record is reported as a critical
+        finding and skipped, never allowed to raise — an exception here would abort the whole
+        integrity check, which is a denial of verification an attacker could trigger at will.
+        """
+        from apps.audit.models import AuditChainLink  # noqa: PLC0415  # avoid app-load cycle
+
+        findings: list[dict[str, Any]] = []
+        keys_by_id = dict(cls._anchor_keys())
+
+        for index, anchor in enumerate(anchors):
+            if not cls._anchor_record_is_well_formed(anchor):
+                findings.append(
+                    {
+                        "type": "anchor_record_malformed",
+                        "severity": "critical",
+                        "description": (
+                            f"Anchor record at position {index} is malformed or has wrong field "
+                            f"types - it cannot be used to verify the chain"
+                        ),
+                    }
+                )
+                continue
+
+            sequence = anchor["sequence"]
+
+            key = keys_by_id.get(anchor.get("key_id", ""))
+            if key is None:
+                findings.append(
+                    {
+                        "type": "anchor_unknown_key_id",
+                        "severity": "critical",
+                        "description": f"Anchor at sequence {sequence} uses unrecognized key id {anchor.get('key_id')}",
+                    }
+                )
+            else:
+                payload = cls._anchor_payload(
+                    sequence=sequence,
+                    head_chain_mac=anchor["head_chain_mac"],
+                    link_count=anchor["link_count"],
+                )
+                expected = hmac.new(key, payload.encode(), hashlib.sha256).hexdigest()
+                if not hmac.compare_digest(expected, anchor["anchor_mac"]):
+                    findings.append(
+                        {
+                            "type": "anchor_mac_mismatch",
+                            "severity": "critical",
+                            "description": f"Anchor at sequence {sequence} does not verify - forged or altered anchor",
+                        }
+                    )
+                    # A forged anchor proves nothing about the chain; comparing against it would
+                    # produce misleading follow-on findings.
+                    continue
+
+            link = AuditChainLink.objects.filter(sequence=sequence).first()
+            if link is None:
+                findings.append(
+                    {
+                        "type": "chain_truncated_below_anchor",
+                        "severity": "critical",
+                        "description": (
+                            f"Chain no longer reaches anchored sequence {sequence} - "
+                            f"the ledger tail was truncated after it was anchored"
+                        ),
+                    }
+                )
+                continue
+
+            if not hmac.compare_digest(link.chain_mac, anchor["head_chain_mac"]):
+                findings.append(
+                    {
+                        "type": "anchor_head_mismatch",
+                        "severity": "critical",
+                        "description": (
+                            f"Link at anchored sequence {sequence} no longer carries the anchored "
+                            f"head MAC - the chain was rewritten after it was anchored"
+                        ),
+                    }
+                )
+
+            live_count = AuditChainLink.objects.filter(sequence__lte=sequence).count()
+            if live_count != anchor["link_count"]:
+                findings.append(
+                    {
+                        "type": "anchor_link_count_mismatch",
+                        "severity": "critical",
+                        "description": (
+                            f"Anchored {anchor['link_count']} links at or below sequence {sequence}, "
+                            f"but the ledger now holds {live_count} - links were removed"
+                        ),
+                    }
+                )
+
+        return findings
+
+    @classmethod
+    def _current_chain_head_mac(cls) -> str:
+        """The current chain-head MAC, for recording on an integrity-check row (#313).
+
+        Replaces the dead v1 _generate_hash_chain: that computed an unkeyed SHA-256 over
+        per-row v1 hashes that was written but never verified. The real chain head MAC is
+        a meaningful, verifiable value.
+        """
+        from apps.audit.models import AuditChainHead  # noqa: PLC0415  # avoid app-load cycle
+
+        head = AuditChainHead.objects.filter(pk=1).first()
+        return head.last_chain_mac if head else ""
+
+    @classmethod
+    def _verify_chain_ledger(cls, period_start: datetime, period_end: datetime) -> list[dict[str, Any]]:
+        """Walk the append-only chain ledger and detect insert/delete/reorder/tamper (#313).
+
+        Chain integrity is a total-order property, so the ledger is walked contiguously from
+        the genesis link — not windowed — regardless of the period passed for the enclosing
+        check row. Findings: sequence gaps, broken prev-linkage, chain-MAC mismatch, links
+        whose event row was deleted without a retention tombstone, events left marked
+        chain_link_pending by a failed append, and events in the window with no link at all.
+        """
+        from apps.audit.models import AuditChainLink  # noqa: PLC0415  # avoid app-load cycle
+
+        findings: list[dict[str, Any]] = []
+        keys_by_id = dict(cls._chain_keys())
+
+        prev_link: AuditChainLink | None = None
+        for link in AuditChainLink.objects.order_by("sequence").iterator():
+            expected_seq = 1 if prev_link is None else prev_link.sequence + 1
+            if link.sequence != expected_seq:
+                findings.append(
+                    {
+                        "type": "chain_sequence_gap",
+                        "severity": "critical",
+                        "description": f"Chain sequence gap: expected {expected_seq}, found {link.sequence}",
+                    }
+                )
+            expected_prev = "" if prev_link is None else prev_link.chain_mac
+            if link.prev_chain_mac != expected_prev:
+                findings.append(
+                    {
+                        "type": "chain_prev_link_broken",
+                        "severity": "critical",
+                        "description": f"Chain link {link.sequence} prev_chain_mac does not match prior link",
+                    }
+                )
+            key = keys_by_id.get(link.key_id)
+            if key is None:
+                findings.append(
+                    {
+                        "type": "chain_unknown_key_id",
+                        "severity": "critical",
+                        "description": f"Chain link {link.sequence} stamped with unrecognized key id {link.key_id}",
+                    }
+                )
+            else:
+                # Build the preimage from the STORED identity snapshot, never the live FK, so a
+                # retention-deleted (event=NULL) or anonymized event still verifies against what
+                # the link committed to at append time.
+                payload = cls._chain_payload(
+                    sequence=link.sequence,
+                    prev_chain_mac=link.prev_chain_mac,
+                    event_id=link.event_id_str,
+                    event_v2_mac=link.event_v2_mac,
+                    timestamp_iso=link.event_timestamp.isoformat(),
+                    action=link.event_action,
+                    content_type_id=link.event_content_type_id,
+                    object_id=link.event_object_id,
+                    is_tombstone=link.is_tombstone,
+                )
+                if not hmac.compare_digest(cls._compute_chain_mac(payload=payload, key=key), link.chain_mac):
+                    findings.append(
+                        {
+                            "type": "chain_mac_mismatch",
+                            "severity": "critical",
+                            "description": f"Chain link {link.sequence} MAC does not verify",
+                        }
+                    )
+            prev_link = link
+
+        # A non-tombstone link whose event row has vanished. SET_NULL means a raw
+        # DELETE FROM audit_events nulls the FK while the link itself still verifies from its
+        # snapshot — so without this check the ledger reports healthy after an attacker has
+        # erased the actual evidence. Authorized retention deletes append a tombstone for the
+        # same event_id_str, so the presence of one is what separates the two cases.
+        orphaned = AuditChainLink.objects.filter(event__isnull=True, is_tombstone=False)
+        tombstoned_ids = set(AuditChainLink.objects.filter(is_tombstone=True).values_list("event_id_str", flat=True))
+        findings.extend(
+            {
+                "type": "chain_link_event_deleted_without_tombstone",
+                "severity": "critical",
+                "description": (
+                    f"Chain link {link.sequence} references event {link.event_id_str}, which no "
+                    f"longer exists and has no retention tombstone - the event row was deleted"
+                ),
+            }
+            for link in orphaned.iterator()
+            if link.event_id_str not in tombstoned_ids
+        )
+
+        # Events whose chain append failed and left a pending marker. The append path is
+        # fail-open by design (an audit event without a link beats a lost financial
+        # transaction), but a failure an attacker can induce must not stay invisible: this is
+        # always critical, independent of AUDIT_CHAIN_REQUIRE, because the marker only ever
+        # appears when a live append actually broke.
+        findings.extend(
+            {
+                "type": "chain_link_pending",
+                "severity": "critical",
+                "description": (
+                    f"Audit event {event.id} is marked chain_link_pending - its chain append "
+                    f"failed and was never retried"
+                ),
+            }
+            for event in AuditEvent.objects.filter(metadata__chain_link_pending=True).iterator()
+        )
+
+        # Events in the window with no chain link (forged INSERT, or a failed/pending append).
+        #
+        # Severity is gated on AUDIT_CHAIN_REQUIRE rather than hardcoded: until the operator
+        # confirms the backfill ran to completion AND live appends have been on for the whole
+        # window, an unlinked event is an expected cutover artifact, not evidence of forgery.
+        # Reporting those as critical would train operators to ignore the finding — exactly
+        # the failure mode that made the pre-#304 control worthless.
+        missing_severity = "critical" if getattr(settings, "AUDIT_CHAIN_REQUIRE", False) else "info"
+        unlinked = AuditEvent.objects.filter(
+            timestamp__gte=period_start, timestamp__lt=period_end, chain_links__isnull=True
+        )
+        findings.extend(
+            {
+                "type": "chain_link_missing_for_event",
+                "severity": missing_severity,
+                "description": f"Audit event {event.id} has no chain link (forged insert or failed append)",
+            }
+            for event in unlinked.iterator()
+        )
+        return findings
+
     @classmethod
     def _verify_hash_chain(cls, events: list[AuditEvent]) -> list[dict[str, Any]]:
         """Verify per-event integrity MACs (v2, keyed).
+
+        NOTE (#313): despite the name this verifies PER-ROW MACs, not the chain — the real
+        cryptographic chain lives in the ledger and is checked by _verify_chain_ledger. The
+        rename to _verify_event_macs is deferred to its own change to avoid churning ~20 call
+        sites across the test suite in this PR.
 
         v2 rows carry an HMAC-SHA256 over the evidence payload; the stamped key id
         selects the key, and both the current and previous keys are accepted so key
@@ -3586,18 +4267,6 @@ class AuditIntegrityService:
         return hashlib.sha256(canonical_data.encode()).hexdigest()
 
     @classmethod
-    def _generate_hash_chain(cls, events: list[AuditEvent]) -> str:
-        """Generate a hash chain for a sequence of events."""
-        if not events:
-            return ""
-
-        # Create chain of hashes
-        chain_data = [cls._calculate_event_hash(event) for event in events]
-        chain_hash = hashlib.sha256("".join(chain_data).encode()).hexdigest()
-
-        return chain_hash
-
-    @classmethod
     def _should_have_activity(cls, prev_event: AuditEvent, current_event: AuditEvent) -> bool:
         """Determine if there should have been activity between events."""
         # Simple heuristic: if both events are from the same user in a short session
@@ -3782,6 +4451,16 @@ class AuditRetentionService:
 
         deleted_count = 0
         if deletable_ids:
+            # #313 — record the removal in the chain ledger BEFORE deleting, while the events
+            # are still readable. Fail-open: a ledger problem must not block a legally required
+            # retention deletion, but it is logged loudly (the verifier will then see a live
+            # link whose event vanished with no matching tombstone).
+            deletable = [event for event in events if event.id in set(deletable_ids)]
+            try:
+                AuditIntegrityService.append_tombstone_links(deletable)
+            except Exception as e:
+                logger.error(f"🔥 [Audit Chain] Failed to append retention tombstones: {e}")
+
             with audit_mutation_allowed("retention_delete"):
                 deleted_count = AuditEvent.objects.filter(id__in=deletable_ids).delete()[0]
 

@@ -20,13 +20,24 @@ _DOMAIN_ENV_VARS: dict[str, str] = {
     "siem-hash-chain": "SIEM_HASH_CHAIN_SECRET",
     "sensitive-data-hash": "SENSITIVE_DATA_HASH_KEY",
     "audit-integrity": "AUDIT_INTEGRITY_SECRET",
+    # Audit hash-chain ledger (#313). Deliberately a DISTINCT domain from audit-integrity:
+    # the per-row v2 MAC and the chain MAC must be computed under cryptographically
+    # independent keys so neither can be replayed as material for the other.
+    "audit-chain": "AUDIT_CHAIN_SECRET",
+    # External anchor over the chain head (#313). Again a DISTINCT domain: the anchor is the
+    # control that survives an attacker who owns the database, so it must not be forgeable by
+    # someone who has recovered the chain key. Provision AUDIT_ANCHOR_SECRET separately from
+    # AUDIT_CHAIN_SECRET — ideally readable only by whatever verifies anchors, not by the app.
+    "audit-anchor": "AUDIT_ANCHOR_SECRET",
 }
 
 VALID_DOMAINS: frozenset[str] = frozenset(_DOMAIN_ENV_VARS.keys())
 MIN_ENV_KEY_LENGTH = 32
 
 
-@functools.lru_cache(maxsize=8)
+# Sized off the registry so adding a domain can never silently start thrashing the cache
+# (every eviction costs a full HKDF re-derivation on a hot path).
+@functools.lru_cache(maxsize=len(_DOMAIN_ENV_VARS))
 def derive_key(domain: str) -> bytes:
     """Derive a 32-byte domain-specific key using HKDF-SHA256.
 
