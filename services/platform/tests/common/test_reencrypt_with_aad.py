@@ -228,3 +228,136 @@ class ReencryptWithAadCommandTest(TestCase):
         stored = self._read_raw(pm.id)
         assert isinstance(stored, str)
         self.assertTrue(stored.startswith("aes:v1:"))  # never migrated (real value untouched)
+
+
+OLD_KEY = TEST_KEY
+NEW_KEY = "1qJJ-NUI8b2icS59TkGTNII5z7GUdNZGadhdqdCSW1w="
+
+
+class ReencryptRekeyModeTest(TestCase):
+    """#270 item 2: --rekey re-encrypts v2 rows still on a superseded key.
+
+    Keyring fallback means such a row decrypts fine and is skipped as "already v2", so the
+    previous key can never be retired — the rotation silently never completes.
+    """
+
+    def setUp(self) -> None:
+        _clear_aesgcm_cache()
+        with override_settings(ENCRYPTION_KEY=OLD_KEY):
+            self.customer = Customer.objects.create(
+                name="Rekey Customer",
+                customer_type="company",
+                status="active",
+                primary_email="rekey@test.com",
+                primary_phone="+40712345684",
+            )
+
+    def _pm_encrypted_under_old_key(self) -> CustomerPaymentMethod:
+        """Create a v2 row whose ciphertext is bound to OLD_KEY only."""
+        with override_settings(ENCRYPTION_KEY=OLD_KEY):
+            _clear_aesgcm_cache()
+            pm = CustomerPaymentMethod.objects.create(
+                customer=self.customer, method_type="bank_transfer", display_name="PM", bank_details=None
+            )
+            aad = f"customer_payment_methods:bank_details:{pm.encryption_context_id}".encode()
+            wire = encrypt_sensitive_data(json.dumps(VALID), aad=aad)
+            assert wire.startswith(VERSIONED_V2_PREFIX)
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "UPDATE customer_payment_methods SET bank_details = %s WHERE id = %s",
+                    [json.dumps(wire), pm.id],
+                )
+        return pm
+
+    def _read_raw(self, pk: int) -> object:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT bank_details FROM customer_payment_methods WHERE id = %s", [pk])
+            raw = cursor.fetchone()[0]
+        return json.loads(raw) if isinstance(raw, str) else raw
+
+    def test_without_rekey_a_stale_key_row_is_skipped_as_healthy(self) -> None:
+        """The bug: the row reads fine via fallback, so nothing reports it needs work."""
+        pm = self._pm_encrypted_under_old_key()
+        before = self._read_raw(pm.id)
+        stdout = StringIO()
+
+        with override_settings(ENCRYPTION_KEYS=[NEW_KEY, OLD_KEY]):
+            _clear_aesgcm_cache()
+            call_command("reencrypt_with_aad", stdout=stdout)
+
+        self.assertEqual(self._read_raw(pm.id), before)  # untouched
+        self.assertIn("already v2", stdout.getvalue())
+
+    def test_without_rekey_the_output_warns_that_v2_rows_went_unchecked(self) -> None:
+        """A clean run must not imply the old key is safe to retire."""
+        self._pm_encrypted_under_old_key()
+        stdout = StringIO()
+
+        with override_settings(ENCRYPTION_KEYS=[NEW_KEY, OLD_KEY]):
+            _clear_aesgcm_cache()
+            call_command("reencrypt_with_aad", stdout=stdout)
+
+        self.assertIn("--rekey", stdout.getvalue())
+
+    def test_rekey_re_encrypts_a_stale_key_row_under_the_current_key(self) -> None:
+        pm = self._pm_encrypted_under_old_key()
+        before = self._read_raw(pm.id)
+        stdout = StringIO()
+
+        with override_settings(ENCRYPTION_KEYS=[NEW_KEY, OLD_KEY]):
+            _clear_aesgcm_cache()
+            call_command("reencrypt_with_aad", "--rekey", stdout=stdout)
+            after = self._read_raw(pm.id)
+
+        self.assertNotEqual(after, before)  # ciphertext changed
+        self.assertIn("1 rekeyed", stdout.getvalue())
+
+        # The whole point: it must now read under the NEW key ALONE, so OLD can be dropped.
+        with override_settings(ENCRYPTION_KEYS=[NEW_KEY]):
+            _clear_aesgcm_cache()
+            assert isinstance(after, str)
+            aad = f"customer_payment_methods:bank_details:{pm.encryption_context_id}".encode()
+            self.assertEqual(json.loads(decrypt_sensitive_data(after, aad=aad)), VALID)
+
+    def test_rekey_preserves_the_aad_binding(self) -> None:
+        """Re-encryption must not silently drop the row's AAD context."""
+        pm = self._pm_encrypted_under_old_key()
+
+        with override_settings(ENCRYPTION_KEYS=[NEW_KEY, OLD_KEY]):
+            _clear_aesgcm_cache()
+            call_command("reencrypt_with_aad", "--rekey", stdout=StringIO())
+            after = self._read_raw(pm.id)
+
+        assert isinstance(after, str)
+        self.assertEqual(
+            _extract_embedded_aad(after),
+            f"customer_payment_methods:bank_details:{pm.encryption_context_id}".encode(),
+        )
+
+    def test_rekey_is_a_noop_for_a_row_already_on_the_current_key(self) -> None:
+        """Idempotent: a second --rekey run must not churn ciphertext."""
+        pm = self._pm_encrypted_under_old_key()
+
+        with override_settings(ENCRYPTION_KEYS=[NEW_KEY, OLD_KEY]):
+            _clear_aesgcm_cache()
+            call_command("reencrypt_with_aad", "--rekey", stdout=StringIO())
+            after_first = self._read_raw(pm.id)
+
+            stdout = StringIO()
+            call_command("reencrypt_with_aad", "--rekey", stdout=stdout)
+            after_second = self._read_raw(pm.id)
+
+        self.assertEqual(after_first, after_second)
+        self.assertIn("0 rekeyed", stdout.getvalue())
+
+    def test_rekey_dry_run_writes_nothing(self) -> None:
+        pm = self._pm_encrypted_under_old_key()
+        before = self._read_raw(pm.id)
+        stdout = StringIO()
+
+        with override_settings(ENCRYPTION_KEYS=[NEW_KEY, OLD_KEY]):
+            _clear_aesgcm_cache()
+            call_command("reencrypt_with_aad", "--rekey", "--dry-run", stdout=stdout)
+
+        self.assertEqual(self._read_raw(pm.id), before)
+        self.assertIn("1 rekeyed", stdout.getvalue())
