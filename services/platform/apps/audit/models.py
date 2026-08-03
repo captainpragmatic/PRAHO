@@ -904,6 +904,54 @@ class AuditAlert(models.Model):
         return f"{self.get_severity_display()} {self.get_alert_type_display()}: {self.title}"
 
 
+class AuditEventReview(models.Model):
+    """Manual sign-off that a flagged AuditEvent has been looked at (#400).
+
+    A COMPANION row rather than reviewed_by/reviewed_at columns on AuditEvent, so the
+    evidence stays genuinely append-only. Marking an event reviewed is a routine,
+    user-driven action; storing it on AuditEvent would mean entering
+    ``audit_mutation_allowed()`` on every click, putting ordinary workflow alongside
+    GDPR erasure and retention deletion in the escape hatch and eroding the invariant
+    the guard exists to protect (ADR-0016 / ADR-0043).
+
+    It also keeps the tamper-evidence story honest: the v2 integrity MAC covers an
+    explicit field list on AuditEvent, so new columns there would be silently
+    un-MAC'd. Review state lives here, where being ordinary mutable data with its own
+    row is expected rather than ambiguous.
+
+    ``on_delete=PROTECT`` deliberately: a reviewed event must not be removable via a
+    cascade from this side. Retention deletion of the event itself is a separate,
+    sanctioned path.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+
+    audit_event = models.OneToOneField(
+        AuditEvent,
+        on_delete=models.PROTECT,
+        related_name="review",
+        verbose_name=_("Audit Event"),
+    )
+    reviewed_by = models.ForeignKey(
+        User,
+        on_delete=models.PROTECT,
+        related_name="audit_event_reviews",
+        verbose_name=_("Reviewed By"),
+    )
+    reviewed_at = models.DateTimeField(auto_now_add=True, db_index=True, verbose_name=_("Reviewed At"))
+    notes = models.TextField(blank=True, verbose_name=_("Notes"))
+
+    class Meta:
+        db_table = "audit_event_reviews"
+        verbose_name = _("Audit Event Review")
+        verbose_name_plural = _("Audit Event Reviews")
+        ordering: ClassVar[tuple[str, ...]] = ("-reviewed_at",)
+        indexes: ClassVar[tuple[models.Index, ...]] = (models.Index(fields=["reviewed_by", "-reviewed_at"]),)
+
+    def __str__(self) -> str:
+        return f"Review of {self.audit_event_id} by {self.reviewed_by_id}"
+
+
 class ComplianceLog(models.Model):
     """Log compliance-related activities for Romanian regulations."""
 
