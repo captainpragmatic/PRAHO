@@ -313,9 +313,7 @@ class BaseRegistrarGateway(ABC):
         # ``"1"`` cannot collide with the tokenless one-year key, and arbitrary caller
         # input cannot create an overlong or backend-invalid cache key.
         token_fingerprint = (
-            hashlib.sha256(idempotency_token.encode("utf-8")).hexdigest()
-            if idempotency_token is not None
-            else None
+            hashlib.sha256(idempotency_token.encode("utf-8")).hexdigest() if idempotency_token is not None else None
         )
         intent = f"token:{token_fingerprint}" if token_fingerprint is not None else str(years)
         return self._execute_idempotent_operation(
@@ -422,9 +420,9 @@ class BaseRegistrarGateway(ABC):
             return Err(RegistrarConflictError(domain_name, self.registrar.name))
 
         # Exception-safety: _retry(fn) can raise (e.g. _safe_json → RegistrarAPIError on
-        # an oversized body). Convert any escape to an Err so the claim-release path below
-        # always runs — otherwise the in-progress claim would strand the key for the full
-        # TTL and block every legitimate retry.
+        # an oversized body). Convert any escape to an Err (default retriability=UNKNOWN,
+        # the safe "don't know" state) so the classification below always runs on a real
+        # Result rather than letting an unclassified exception propagate uncaught.
         try:
             result = self._retry(fn, operation=operation)
         except RegistrarAPIError as exc:
@@ -444,20 +442,62 @@ class BaseRegistrarGateway(ABC):
             # the idempotency cache is plaintext (DatabaseCache/Redis). The immediate
             # caller still receives the full result (with the EPP) to store encrypted;
             # only the replay copy is redacted.
-            cache.set(idempotency_key, _redact_secrets(result.unwrap()), IDEMPOTENCY_TTL_SECONDS)
+            try:
+                cache.set(idempotency_key, _redact_secrets(result.unwrap()), IDEMPOTENCY_TTL_SECONDS)
+            except Exception:
+                # The registrar call already succeeded — a chargeable operation happened.
+                # Reporting this as a failure would be false, would skip the caller's local
+                # persistence of the result, and (worse) would risk a retry re-issuing the
+                # same paid operation. Swallow and log loudly instead: the in-progress
+                # sentinel written by cache.add() above is still in place (this exception
+                # means the REPLACE failed, not that the claim vanished), so a same-token
+                # retry within the TTL still hits the "concurrent claim" rejection path
+                # rather than calling the registrar again — degraded bookkeeping, not zero
+                # protection. Still worth paging on: replay protection here is uncertain
+                # until TTL expiry, not confirmed.
+                self.logger.error(
+                    "Idempotency cache write failed after %s succeeded via %s — replay "
+                    "protection is degraded until TTL expiry, investigate",
+                    operation,
+                    self.gateway_name,
+                    exc_info=True,
+                )
             self._record_success()
             self.logger.info("%s succeeded via %s", operation, self.gateway_name)
             self._audit_api_call(audit_event, domain_name, success=True, metadata=audit_metadata)
         else:
-            cache.delete(idempotency_key)  # release the claim so a legitimate retry can proceed
             error = result.unwrap_err()
             self._record_failure(error)
-            # Log/audit the machine-readable code, never the raw registrar body — it can
-            # echo registrant PII (CNP, address) supplied in the request (W4).
-            self.logger.error("%s failed with %s", operation, error.code.value)
-            self._audit_api_call(
-                audit_event, domain_name, success=False, error=error.code.value, metadata=audit_metadata
-            )
+            # A registrar-outcome-UNKNOWN failure (the Err default — see Retriability's
+            # docstring: "non-idempotent paths... treat UNKNOWN as do not retry") means the
+            # mutating call MAY have already applied even though we can't confirm it. Deleting
+            # the claim here would let an immediate retry re-issue the same chargeable
+            # operation. Leave the in-progress sentinel in place instead — a same-token retry
+            # within the TTL hits the "concurrent claim" rejection below rather than calling
+            # the registrar again, and the hold self-heals at TTL expiry. This is a mitigation
+            # window, not a resolution: the ambiguity itself is never resolved, so the risk
+            # reopens after TTL. Only RETRIABLE (never reached the registrar) and NOT_RETRIABLE
+            # (definite rejection) are provably safe to release immediately.
+            if retriability_of(result) == Retriability.UNKNOWN:
+                self.logger.warning(
+                    "%s outcome UNKNOWN via %s — idempotency claim retained (not deleted) so a "
+                    "retry is blocked until TTL expiry rather than risking a duplicate chargeable "
+                    "call: %s",
+                    operation,
+                    self.gateway_name,
+                    error.code.value,
+                )
+                self._audit_api_call(
+                    audit_event, domain_name, success=False, error=error.code.value, metadata=audit_metadata
+                )
+            else:
+                cache.delete(idempotency_key)  # provably safe to release — see comment above
+                # Log/audit the machine-readable code, never the raw registrar body — it can
+                # echo registrant PII (CNP, address) supplied in the request (W4).
+                self.logger.error("%s failed with %s", operation, error.code.value)
+                self._audit_api_call(
+                    audit_event, domain_name, success=False, error=error.code.value, metadata=audit_metadata
+                )
 
         return result
 
@@ -560,13 +600,39 @@ class BaseRegistrarGateway(ABC):
         )
 
         if result.is_ok():
-            cache.set(idempotency_key, _redact_secrets(result.unwrap()), IDEMPOTENCY_TTL_SECONDS)
+            try:
+                cache.set(idempotency_key, _redact_secrets(result.unwrap()), IDEMPOTENCY_TTL_SECONDS)
+            except Exception:
+                # See _execute_idempotent_operation's identical guard: the transfer already
+                # succeeded (chargeable), so this must not be reported as a failure. The
+                # in-progress sentinel from cache.add() above is still in place, so a
+                # same-domain retry within the TTL still hits the "concurrent claim"
+                # rejection below rather than posting a second transfer.
+                self.logger.error(
+                    "Idempotency cache write failed after transfer succeeded via %s — replay "
+                    "protection is degraded until TTL expiry, investigate",
+                    self.gateway_name,
+                    exc_info=True,
+                )
             self._record_success()
             self._audit_api_call("domain_transfer", domain_name, success=True)
         else:
-            cache.delete(idempotency_key)  # release the claim so a legitimate retry can proceed
             error = result.unwrap_err()
             self._record_failure(error)
+            # See _execute_idempotent_operation's identical branch: an UNKNOWN outcome may
+            # have already applied at the registrar, so releasing the claim here would let a
+            # retry post a duplicate, chargeable transfer. Only a provably safe outcome
+            # (RETRIABLE/NOT_RETRIABLE) releases the claim immediately.
+            if retriability_of(result) == Retriability.UNKNOWN:
+                self.logger.warning(
+                    "Transfer outcome UNKNOWN for %s via %s — idempotency claim retained until "
+                    "TTL expiry rather than risking a duplicate chargeable transfer: %s",
+                    domain_name,
+                    self.gateway_name,
+                    error.code.value,
+                )
+            else:
+                cache.delete(idempotency_key)  # provably safe to release — see comment above
             self._audit_api_call("domain_transfer", domain_name, success=False, error=error.code.value)
 
         return result
@@ -781,20 +847,34 @@ class BaseRegistrarGateway(ABC):
             return
 
         key = self._circuit_breaker_key()
-        # Atomic first-failure seed: add() only succeeds if the key is absent, so two
-        # concurrent first failures can't both reset the counter to 1 (W3). incr on an
-        # existing key preserves the TTL set here, so the window doesn't slide and the
-        # breaker auto-closes CIRCUIT_BREAKER_RESET_SECONDS after it first opened.
-        if cache.add(key, 1, CIRCUIT_BREAKER_RESET_SECONDS):
-            return
         try:
-            cache.incr(key)
-        except ValueError:
-            # The key expired between add() and incr() — reseed.
-            cache.set(key, 1, CIRCUIT_BREAKER_RESET_SECONDS)
+            # Atomic first-failure seed: add() only succeeds if the key is absent, so two
+            # concurrent first failures can't both reset the counter to 1 (W3). incr on an
+            # existing key preserves the TTL set here, so the window doesn't slide and the
+            # breaker auto-closes CIRCUIT_BREAKER_RESET_SECONDS after it first opened.
+            if cache.add(key, 1, CIRCUIT_BREAKER_RESET_SECONDS):
+                return
+            try:
+                cache.incr(key)
+            except ValueError:
+                # The key expired between add() and incr() — reseed.
+                cache.set(key, 1, CIRCUIT_BREAKER_RESET_SECONDS)
+        except Exception:
+            # A cache-backend outage here must not escape into the caller: this is
+            # bookkeeping for the NEXT call's circuit-breaker decision, not the current
+            # one's outcome. Letting it raise would abort whatever cleanup the caller
+            # still needs to run (releasing an idempotency claim, logging, auditing) —
+            # exactly the "bookkeeping failure crashes a call that already resolved"
+            # class this whole function's callers are being hardened against.
+            self.logger.warning("Circuit-breaker failure bookkeeping failed", exc_info=True)
 
     def _record_success(self) -> None:
-        cache.delete(self._circuit_breaker_key())
+        try:
+            cache.delete(self._circuit_breaker_key())
+        except Exception:
+            # See _record_failure's identical guard: this must never abort a caller
+            # that already has a successful result to return.
+            self.logger.warning("Circuit-breaker success bookkeeping failed", exc_info=True)
 
     # -- Retry with exponential backoff --------------------------------------
 

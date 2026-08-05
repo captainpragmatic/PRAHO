@@ -336,6 +336,41 @@ class DomainOrderRenewTransferProcessingTests(DomainFixtureMixin, TestCase):
 
         self.assertIn(domain, processed)
 
+    def test_renew_exception_does_not_abort_remaining_items(self) -> None:
+        """One failed renew item must not stop later valid renewals from processing.
+
+        DomainOrderItem's default Meta.ordering is -created_at (newest first), and
+        process_domain_order_items's queryset has no explicit .order_by() overriding
+        it — so the side_effect must be keyed by which domain is being renewed, not
+        by creation order, or this test silently proves the wrong thing.
+        """
+        first_domain = self._owned_domain("first.ro")
+        second_domain = self._owned_domain("second.ro")
+        DomainOrderService.create_domain_order_item(
+            order=self.order, domain_name=first_domain.name, action="renew", years=1
+        )
+        DomainOrderService.create_domain_order_item(
+            order=self.order, domain_name=second_domain.name, action="renew", years=1
+        )
+
+        def _renew_side_effect(*, domain: Domain, **_kwargs: object) -> object:
+            if domain.pk == first_domain.pk:
+                raise RuntimeError("registrar adapter crashed")
+            return _Ok("renewed")
+
+        with (
+            self.assertLogs("apps.domains.services", level="ERROR") as logs,
+            patch.object(
+                DomainLifecycleService, "process_domain_renewal", side_effect=_renew_side_effect
+            ) as mock_renew,
+        ):
+            processed = DomainOrderService.process_domain_order_items(self.order)
+
+        self.assertEqual(mock_renew.call_count, 2)
+        self.assertNotIn(first_domain, processed)
+        self.assertIn(second_domain, processed)
+        self.assertTrue(any("first.ro" in message and "crashed" in message for message in logs.output))
+
     def test_process_refuses_to_renew_another_customers_domain(self) -> None:
         """Ownership is re-checked at processing time, not only when the link is created.
 
