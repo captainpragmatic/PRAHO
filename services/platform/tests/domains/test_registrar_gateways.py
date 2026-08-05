@@ -554,8 +554,14 @@ class IdempotencyClaimTests(TestCase):
         mock_cache.add.return_value = True
 
         with patch.object(self.gateway, "_do_register") as mock_do:
+            # RegistrarAPIError (not RegistrarTransientError): _record_failure only
+            # trips the circuit breaker for RegistrarTransientError/RegistrarRateLimitError
+            # (systemic failures) — pairing a transient-error TYPE with a NOT_RETRIABLE
+            # tag would be internally contradictory and would exercise breaker bookkeeping
+            # this test isn't about, potentially masking a real breaker regression.
             mock_do.return_value = Err(
-                RegistrarTransientError("gandi", "boom"), retriability=Retriability.NOT_RETRIABLE
+                RegistrarAPIError("boom", code=RegistrarErrorCode.INVALID_REGISTRANT_DATA),
+                retriability=Retriability.NOT_RETRIABLE,
             )
             result = self.gateway.register_domain("example.com", 1, self.registrant)
 

@@ -1162,6 +1162,7 @@ class DomainOrderService:
                         "🔥 [Domain] Renewal of %s crashed unexpectedly (not a registrar rejection): %s",
                         item.domain_name,
                         exc,
+                        exc_info=True,
                     )
                     continue
 
