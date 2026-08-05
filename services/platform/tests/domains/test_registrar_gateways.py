@@ -539,11 +539,24 @@ class IdempotencyClaimTests(TestCase):
 
     @patch("apps.domains.gateways.base.cache")
     def test_claim_is_released_on_failure(self, mock_cache: MagicMock) -> None:
+        """A DEFINITE (NOT_RETRIABLE) rejection releases the claim immediately.
+
+        Previously this used a bare Err() (default retriability=UNKNOWN) to represent
+        "some failure happened", from when every failure released the claim
+        unconditionally. That became unsafe for genuinely ambiguous outcomes (a timed-out
+        POST may have already applied at the registrar) — see
+        test_idempotency_claim_retained_when_operation_raises_unexpectedly below, and
+        RenewalIdempotencyTokenTests.test_unknown_outcome_blocks_same_token_retry, for
+        that half. This test is narrowed to what it always meant to prove: a PROVEN
+        non-application still releases the claim right away.
+        """
         mock_cache.get.side_effect = [0, None]
         mock_cache.add.return_value = True
 
         with patch.object(self.gateway, "_do_register") as mock_do:
-            mock_do.return_value = Err(RegistrarTransientError("gandi", "boom"))
+            mock_do.return_value = Err(
+                RegistrarTransientError("gandi", "boom"), retriability=Retriability.NOT_RETRIABLE
+            )
             result = self.gateway.register_domain("example.com", 1, self.registrant)
 
         self.assertTrue(result.is_err())
@@ -818,9 +831,21 @@ class GatewayHardeningTests(TestCase):
 
     @patch("apps.domains.gateways.gandi.GandiGateway._do_register")
     @patch("apps.domains.gateways.base.cache")
-    def test_idempotency_claim_released_when_operation_raises(self, mock_cache: MagicMock, mock_do: MagicMock) -> None:
-        """An unexpected exception (e.g. oversized-response RegistrarAPIError) must still
-        release the in-progress claim so a later retry isn't permanently blocked."""
+    def test_idempotency_claim_retained_when_operation_raises_unexpectedly(
+        self, mock_cache: MagicMock, mock_do: MagicMock
+    ) -> None:
+        """An unexpected/unclassified exception (e.g. oversized-response RegistrarAPIError)
+        must RETAIN the in-progress claim, not release it.
+
+        This inverts what the test previously asserted ("must still release the claim so
+        a later retry isn't permanently blocked"). An unclassified exception's retriability
+        defaults to UNKNOWN — the registrar POST may already have applied even though we
+        caught an exception building/parsing the response. Releasing the claim here would
+        let an immediate retry double-charge exactly the class of failure it's least safe
+        to retry. The claim now self-heals at TTL expiry (IDEMPOTENCY_TTL_SECONDS) instead;
+        see test_claim_is_released_on_failure above for the definite-rejection case, which
+        still releases immediately.
+        """
         mock_cache.get.side_effect = [0, None]
         mock_cache.add.return_value = True
         mock_do.side_effect = RegistrarAPIError("boom", code=RegistrarErrorCode.INVALID_RESPONSE)
@@ -828,7 +853,7 @@ class GatewayHardeningTests(TestCase):
         result = self.gateway.register_domain("example.com", 1, self.registrant)
 
         self.assertTrue(result.is_err())
-        mock_cache.delete.assert_called_once()  # claim released
+        mock_cache.delete.assert_not_called()  # claim retained — outcome is ambiguous, not proven
 
     @patch("apps.domains.gateways.base.cache")
     def test_breaker_ignores_non_systemic_errors(self, mock_cache: MagicMock) -> None:

@@ -1144,9 +1144,26 @@ class DomainOrderService:
                 # #259: the order item pk IS the renewal intent — durable, and exactly one
                 # per item, so a retried batch replays rather than re-charging, while two
                 # separate order items for the same domain+years stay distinct.
-                renewal_result = DomainLifecycleService.process_domain_renewal(
-                    domain=item.domain, years=item.years, idempotency_token=f"order_item:{item.pk}"
-                )
+                #
+                # Wrapped: process_domain_renewal's own Result-returning paths never raise,
+                # but the registrar call sits behind several cache operations (gateways/base.py)
+                # that can — a backend outage on cache.get/add is not caught anywhere below
+                # this call. One item's infrastructure failure must not abort the rest of the
+                # order's valid renewals, matching the transfer/unhandled-action branches'
+                # log-and-continue behavior. The register branch above has the equivalent gap
+                # (create_domain_registration isn't wrapped either) — left alone here since it
+                # wasn't part of what this fix addresses; tracked as a follow-up.
+                try:
+                    renewal_result = DomainLifecycleService.process_domain_renewal(
+                        domain=item.domain, years=item.years, idempotency_token=f"order_item:{item.pk}"
+                    )
+                except Exception as exc:
+                    logger.error(
+                        "🔥 [Domain] Renewal of %s crashed unexpectedly (not a registrar rejection): %s",
+                        item.domain_name,
+                        exc,
+                    )
+                    continue
 
                 if renewal_result.is_ok():
                     processed_domains.append(item.domain)

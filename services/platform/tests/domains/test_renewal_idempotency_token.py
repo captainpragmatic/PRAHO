@@ -18,13 +18,14 @@ failure (a duplicate chargeable renewal at the registrar).
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from unittest.mock import patch
+from unittest.mock import ANY, patch
 
 from django.core.cache import cache
 from django.test import TestCase, override_settings
 
-from apps.common.types import Ok
-from apps.domains.gateways.base import DomainRenewalResult
+from apps.common.types import Err, Ok, Retriability
+from apps.domains.gateways.base import MAX_RETRIES, DomainRenewalResult
+from apps.domains.gateways.errors import RegistrarAPIError, RegistrarConflictError
 from apps.domains.gateways.gandi import GandiGateway
 from apps.domains.models import Registrar
 from config.settings.test import LOCMEM_TEST_CACHE
@@ -105,3 +106,75 @@ class RenewalIdempotencyTokenTests(TestCase):
             self.gateway.renew_domain("g-2", "two.ro", 1, idempotency_token="order_item:3")
 
         self.assertEqual(do_renew.call_count, 2)
+
+    def test_unknown_outcome_blocks_same_token_retry(self) -> None:
+        ambiguous = Err(RegistrarAPIError("registrar response lost"))
+
+        with patch.object(GandiGateway, "_do_renew", return_value=ambiguous) as do_renew:
+            first = self.gateway.renew_domain("g-1", "example.ro", 1, idempotency_token="order_item:8")
+            second = self.gateway.renew_domain("g-1", "example.ro", 1, idempotency_token="order_item:8")
+
+        self.assertTrue(first.is_err())
+        self.assertTrue(second.is_err())
+        self.assertIsInstance(second.unwrap_err(), RegistrarConflictError)
+        self.assertEqual(do_renew.call_count, 1, "an ambiguous result must retain the idempotency claim")
+
+    def test_not_retriable_outcome_releases_same_token_claim(self) -> None:
+        rejected = Err(
+            RegistrarAPIError("definite rejection"),
+            retriability=Retriability.NOT_RETRIABLE,
+        )
+
+        with patch.object(GandiGateway, "_do_renew", return_value=rejected) as do_renew:
+            first = self.gateway.renew_domain("g-1", "example.ro", 1, idempotency_token="order_item:9")
+            second = self.gateway.renew_domain("g-1", "example.ro", 1, idempotency_token="order_item:9")
+
+        self.assertTrue(first.is_err())
+        self.assertTrue(second.is_err())
+        self.assertNotIsInstance(second.unwrap_err(), RegistrarConflictError)
+        self.assertEqual(do_renew.call_count, 2, "a definite rejection must release the claim")
+
+    def test_retriable_outcome_releases_same_token_claim(self) -> None:
+        safely_retriable = Err(
+            RegistrarAPIError("request never reached registrar"),
+            retriability=Retriability.RETRIABLE,
+        )
+
+        with (
+            patch.object(GandiGateway, "_do_renew", return_value=safely_retriable) as do_renew,
+            patch("apps.domains.gateways.base.time.sleep"),
+        ):
+            first = self.gateway.renew_domain("g-1", "example.ro", 1, idempotency_token="order_item:10")
+            second = self.gateway.renew_domain("g-1", "example.ro", 1, idempotency_token="order_item:10")
+
+        self.assertTrue(first.is_err())
+        self.assertTrue(second.is_err())
+        self.assertNotIsInstance(second.unwrap_err(), RegistrarConflictError)
+        self.assertEqual(
+            do_renew.call_count,
+            2 * MAX_RETRIES,
+            "both outer calls must exhaust the registrar retry path",
+        )
+
+    def test_cache_write_failure_after_success_still_reports_success(self) -> None:
+        renewal = self._renewal()
+
+        with (
+            patch.object(GandiGateway, "_do_renew", return_value=Ok(renewal)),
+            patch("apps.domains.gateways.base.cache.set", side_effect=RuntimeError("cache unavailable")),
+            patch.object(GandiGateway, "_audit_api_call") as mock_audit,
+            self.assertLogs("apps.domains.gateways.gandi", level="ERROR") as logs,
+        ):
+            result = self.gateway.renew_domain(
+                "g-1", "example.ro", 1, idempotency_token="order_item:11"
+            )
+
+        # The registrar call genuinely succeeded — a real, paid renewal happened. Losing
+        # the cache write must not turn that into a reported failure.
+        self.assertTrue(result.is_ok())
+        self.assertEqual(result.unwrap(), renewal)
+        self.assertTrue(any("idempotency" in message.lower() for message in logs.output))
+        # Success bookkeeping (the audit trail for a chargeable operation) must still run —
+        # this is what pins the fix to "wrap only cache.set", not "wrap the whole success
+        # block", per ADR-0016. A too-broad try/except would silently drop this call.
+        mock_audit.assert_called_once_with("domain_renewal", "example.ro", success=True, metadata=ANY)

@@ -210,6 +210,42 @@ class TransferIdempotencyClaimTests(TestCase):
         # The chargeable registrar call must NOT be made when the claim is lost.
         mock_do.assert_not_called()
 
+    @patch("apps.domains.gateways.gandi.GandiGateway._do_initiate_transfer")
+    @patch("apps.domains.gateways.base.cache")
+    def test_unknown_outcome_retains_claim_instead_of_releasing_it(
+        self, mock_cache: MagicMock, mock_do: MagicMock
+    ) -> None:
+        """A registrar-outcome-UNKNOWN failure (e.g. a lost response) must NOT release the
+        claim — the transfer may have already applied. Mirrors
+        RenewalIdempotencyTokenTests.test_unknown_outcome_blocks_same_token_retry; this
+        gateway inlines its own claim/release protocol instead of routing through
+        _execute_idempotent_operation, so it needed the identical fix applied separately."""
+        mock_cache.get.side_effect = [0, None]
+        mock_cache.add.return_value = True
+        mock_do.return_value = Err(RegistrarAPIError("transfer response lost"))  # default UNKNOWN
+
+        result = self.gateway.initiate_transfer("example.com", "EPP")
+
+        self.assertTrue(result.is_err())
+        mock_cache.delete.assert_not_called()  # claim retained — outcome is ambiguous
+
+    @patch("apps.domains.gateways.gandi.GandiGateway._do_initiate_transfer")
+    @patch("apps.domains.gateways.base.cache")
+    def test_not_retriable_outcome_releases_claim(self, mock_cache: MagicMock, mock_do: MagicMock) -> None:
+        """A definite (NOT_RETRIABLE) rejection still releases the claim immediately —
+        the carve-out proving the UNKNOWN fix doesn't overcorrect into blocking every
+        failure."""
+        mock_cache.get.side_effect = [0, None]
+        mock_cache.add.return_value = True
+        mock_do.return_value = Err(
+            RegistrarAPIError("epp code rejected"), retriability=Retriability.NOT_RETRIABLE
+        )
+
+        result = self.gateway.initiate_transfer("example.com", "EPP")
+
+        self.assertTrue(result.is_err())
+        mock_cache.delete.assert_called_once()
+
 
 class BulkAvailabilityExceptionSafetyTests(TestCase):
     """check_availability_bulk must convert a raised registrar error into an Err,
