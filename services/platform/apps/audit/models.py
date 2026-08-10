@@ -919,22 +919,32 @@ class AuditEventReview(models.Model):
     un-MAC'd. Review state lives here, where being ordinary mutable data with its own
     row is expected rather than ambiguous.
 
-    ``on_delete=PROTECT`` deliberately: a reviewed event must not be removable via a
-    cascade from this side. Retention deletion of the event itself is a separate,
-    sanctioned path.
+    Deletion behaviour follows the direction the rows actually depend on. A review is
+    an annotation *about* an event: it has no meaning once the event is gone, and it is
+    not itself audit evidence. ``PROTECT`` on ``audit_event`` would invert that — the
+    annotation would veto the deletion of the thing it annotates, so the two sanctioned
+    removal paths (retention deletion, ``services.py``; GDPR erasure of a user's events)
+    would raise ``ProtectedError`` the moment any reviewed event fell in scope, and a
+    GDPR erasure request would become unfulfillable. ``CASCADE`` lets those paths
+    complete and takes the now-orphaned annotation with them.
+
+    ``reviewed_by`` is ``SET_NULL`` for the same reason: deleting a staff account must
+    not be blocked by, nor silently erase, the reviews they signed off. The review
+    survives with a null reviewer rather than vetoing the user deletion.
     """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
     audit_event = models.OneToOneField(
         AuditEvent,
-        on_delete=models.PROTECT,
+        on_delete=models.CASCADE,
         related_name="review",
         verbose_name=_("Audit Event"),
     )
     reviewed_by = models.ForeignKey(
         User,
-        on_delete=models.PROTECT,
+        on_delete=models.SET_NULL,
+        null=True,
         related_name="audit_event_reviews",
         verbose_name=_("Reviewed By"),
     )

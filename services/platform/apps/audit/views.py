@@ -1506,15 +1506,18 @@ def mark_event_reviewed(request: HttpRequest, event_id: uuid.UUID) -> HttpRespon
     review, created = AuditEventReview.objects.get_or_create(
         audit_event=event,
         defaults={
-            "reviewed_by": cast("User", request.user),
+            "reviewed_by": cast(User, request.user),
             "notes": request.POST.get("notes", "").strip(),
         },
     )
 
     if not created:
+        # reviewed_by is SET_NULL, so a review whose reviewer account was since deleted
+        # still names someone rather than raising AttributeError on None.
+        reviewer = review.reviewed_by.get_full_name() if review.reviewed_by else _("a deleted user")
         messages.info(
             request,
-            _("Already reviewed by %(reviewer)s.") % {"reviewer": review.reviewed_by.get_full_name()},
+            _("Already reviewed by %(reviewer)s.") % {"reviewer": reviewer},
         )
         return redirect("audit:review_queue")
 

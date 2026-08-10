@@ -12,7 +12,7 @@ from django.contrib.contenttypes.models import ContentType
 from django.test import Client, TestCase
 from django.urls import reverse
 
-from apps.audit.models import AuditEvent, AuditEventReview
+from apps.audit.models import AuditEvent, AuditEventReview, audit_mutation_allowed
 
 User = get_user_model()
 
@@ -171,6 +171,63 @@ class AuditReviewQueueTestCase(TestCase):
         logged = AuditEvent.objects.order_by("-timestamp").first()
         assert logged is not None
         self.assertEqual(logged.metadata.get("reviewed_audit_event_id"), str(self.flagged.id))
+
+
+class AuditEventReviewDeletionPathsTests(TestCase):
+    """A review must never veto the deletion of what it annotates.
+
+    ``audit_event`` was originally PROTECT, which inverts the dependency: the
+    annotation blocks removal of the event, so retention deletion and GDPR erasure
+    raise ProtectedError as soon as one reviewed event falls in scope — making a
+    GDPR erasure request unfulfillable. These pin the deletion direction.
+    """
+
+    def setUp(self) -> None:
+        self.staff_user = User.objects.create_user(
+            email="deletion-staff@example.com", password="testpass123", is_staff=True, staff_role="admin"
+        )
+        self.subject = User.objects.create_user(email="deletion-subject@example.com", password="testpass123")
+
+        ct = ContentType.objects.get_for_model(User)
+        self.event = AuditEvent.objects.create(
+            user=self.subject,
+            action="security_incident_detected",
+            category="security_event",
+            severity="critical",
+            requires_review=True,
+            content_type=ct,
+            object_id=str(self.subject.id),
+            description="REVIEWED-EVENT-IN-DELETION-SCOPE",
+            ip_address="10.0.0.9",
+        )
+        self.review = AuditEventReview.objects.create(
+            audit_event=self.event, reviewed_by=self.staff_user, notes="signed off"
+        )
+
+    def test_retention_delete_removes_a_reviewed_event(self) -> None:
+        """The retention path deletes AuditEvent rows directly by id."""
+        with audit_mutation_allowed("retention_delete"):
+            AuditEvent.objects.filter(id=self.event.id).delete()
+
+        self.assertFalse(AuditEvent.objects.filter(id=self.event.id).exists())
+        self.assertFalse(AuditEventReview.objects.filter(id=self.review.id).exists())
+
+    def test_gdpr_erasure_removes_a_reviewed_users_events(self) -> None:
+        """GDPRDataService._delete_user_data filters by user, then deletes the account."""
+        with audit_mutation_allowed("gdpr_erasure"):
+            AuditEvent.objects.filter(user=self.subject).delete()
+        self.subject.delete()
+
+        self.assertFalse(AuditEvent.objects.filter(id=self.event.id).exists())
+        self.assertFalse(AuditEventReview.objects.filter(id=self.review.id).exists())
+
+    def test_deleting_the_reviewer_keeps_the_review(self) -> None:
+        """reviewed_by is SET_NULL: a staff departure neither blocks nor erases sign-off."""
+        self.staff_user.delete()
+
+        self.review.refresh_from_db()
+        self.assertIsNone(self.review.reviewed_by)
+        self.assertEqual(self.review.notes, "signed off")
 
 
 class AuditManagementDashboardStatsRenderingTests(TestCase):

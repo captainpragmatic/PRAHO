@@ -92,7 +92,7 @@ AuditEventReview companion model, so AuditEvent stays append-only.
                                 <tr>
                                     <td class="px-4 py-3 text-sm text-slate-300 whitespace-nowrap">{{ event.timestamp|date:"Y-m-d H:i" }}</td>
                                     <td class="px-4 py-3 text-sm">
-                                        <span class="text-white">{{ event.action }}</span>
+                                        <span class="text-white">{{ event.get_action_display }}</span>
                                         {% if event.description %}
                                             <span class="block text-slate-400 text-xs mt-1">{{ event.description }}</span>
                                         {% endif %}
@@ -102,7 +102,7 @@ AuditEventReview companion model, so AuditEvent stays append-only.
                                     <td class="px-4 py-3 text-sm">
                                         {% if event.review %}
                                             <span class="text-green-400">
-                                                {% blocktrans with reviewer=event.review.reviewed_by.get_full_name when=event.review.reviewed_at|date:"Y-m-d H:i" %}Reviewed by {{ reviewer }} on {{ when }}{% endblocktrans %}
+                                                {% blocktrans with reviewer=event.review.reviewed_by.get_full_name|default:_("a deleted user") when=event.review.reviewed_at|date:"Y-m-d H:i" %}Reviewed by {{ reviewer }} on {{ when }}{% endblocktrans %}
                                             </span>
                                         {% else %}
                                             <form method="post" action="{% url 'audit:mark_event_reviewed' event.id %}" class="flex items-center gap-2">
