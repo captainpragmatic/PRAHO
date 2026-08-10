@@ -32,8 +32,26 @@ Usage:
 KEY ROTATION (#270): with ``ENCRYPTION_KEYS=[new, old]`` a v2 row still encrypted under
 ``old`` decrypts fine via keyring fallback and is skipped as "already v2" — so ``old`` can
 never be retired and the rotation silently never completes. ``--rekey`` re-encrypts exactly
-those rows under the current (first) key. Retire a previous key only after a ``--rekey`` run
-reports ``0 rekeyed``; a plain run does not inspect already-v2 rows at all and says so.
+those rows under the current (first) key. A plain run does not inspect already-v2 rows at
+all and says so.
+
+RETIRING A KEY: ``0 rekeyed`` is necessary but NOT sufficient. It describes the rows the
+scan visited, at the moment it visited them. Any process still running the previous
+configuration — mid rolling deploy, a stale worker, a paused-then-resumed job — has ``old``
+FIRST in its own keyring and encrypts new writes under it, including to rows this scan
+already passed. Retiring ``old`` on the strength of that run makes every such row
+permanently undecryptable, and unlike a failed decrypt at read time there is no recovery.
+
+So the order that is actually safe is:
+
+1. Deploy ``ENCRYPTION_KEYS=[new, old]`` to EVERY writer, and confirm the rollout is
+   complete — no old-configuration process remains, including workers and cron.
+2. Only then run ``--rekey`` (repeat until it reports ``0 rekeyed``).
+3. Retire ``old``.
+
+Step 1 is what makes step 2's answer stable: once no process can still write under ``old``,
+``0 rekeyed`` stays true after the scan ends. Skipping it inverts the dependency and the
+count becomes a snapshot of a moving target.
 """
 
 from __future__ import annotations
@@ -98,7 +116,8 @@ class Command(BaseCommand):
                 "Also re-encrypt already-v2 rows whose ciphertext decrypts only under a PREVIOUS "
                 "keyring key, so the old key can be retired. Without this, such rows read fine via "
                 "keyring fallback and are skipped as 'already v2' — leaving the old key permanently "
-                "un-droppable. Run with ENCRYPTION_KEYS=[new, old] and drop `old` once this reports 0."
+                "un-droppable. Deploy ENCRYPTION_KEYS=[new, old] to every writer FIRST; only then "
+                "does a '0 rekeyed' run mean no row is still on `old` (see the module docstring)."
             ),
         )
 
@@ -134,6 +153,18 @@ class Command(BaseCommand):
             self.stdout.write(
                 f"{prefix}Note: {totals['skipped_v2']} already-v2 row(s) were NOT checked against the "
                 "current key. Re-run with --rekey before retiring a previous ENCRYPTION_KEYS entry."
+            )
+
+        # A clean --rekey run is the moment an operator decides to retire the old key, so it
+        # is the moment to say what the count does NOT cover: rows written under the previous
+        # configuration after the scan passed them. Retiring on a snapshot of a moving target
+        # makes those rows permanently undecryptable.
+        if rekey and not dry_run and not totals["rekeyed"]:
+            self.stdout.write(
+                "Note: 0 rekeyed describes the rows this scan visited, when it visited them. "
+                "Before retiring a previous ENCRYPTION_KEYS entry, confirm no process is still "
+                "running the old configuration (rolling deploy, stale worker, paused job) — such "
+                "a process writes under the OLD key, including to rows already scanned."
             )
 
         # Unresolved rows may still be un-migrated — always fail so require_v2 is not enabled

@@ -13,6 +13,7 @@ from apps.common.encryption import (
     VERSIONED_V2_PREFIX,
     _clear_aesgcm_cache,
     decrypt_sensitive_data,
+    decrypts_under_current_key,
     encrypt_sensitive_data,
 )
 from apps.common.fields import _extract_embedded_aad
@@ -361,3 +362,83 @@ class ReencryptRekeyModeTest(TestCase):
 
         self.assertEqual(self._read_raw(pm.id), before)
         self.assertIn("1 rekeyed", stdout.getvalue())
+
+    def test_clean_rekey_run_warns_that_the_count_is_a_snapshot(self) -> None:
+        """'0 rekeyed' is the moment an operator retires the key — and is not sufficient.
+
+        A writer still on the previous configuration has the old key FIRST in its own
+        keyring and encrypts new writes under it, including to rows this scan already
+        passed. Retiring on that basis makes those rows permanently undecryptable, so
+        the caveat has to appear where the decision is made.
+        """
+        self._pm_encrypted_under_old_key()
+
+        with override_settings(ENCRYPTION_KEYS=[NEW_KEY, OLD_KEY]):
+            _clear_aesgcm_cache()
+            call_command("reencrypt_with_aad", "--rekey", stdout=StringIO())  # first run does the work
+
+            stdout = StringIO()
+            call_command("reencrypt_with_aad", "--rekey", stdout=stdout)
+
+        output = stdout.getvalue()
+        self.assertIn("0 rekeyed", output)
+        self.assertIn("old configuration", output)
+
+    def test_a_run_that_rekeyed_rows_does_not_print_the_retirement_caveat(self) -> None:
+        """The caveat is about retiring a key; a run with work left to do is not that moment."""
+        self._pm_encrypted_under_old_key()
+        stdout = StringIO()
+
+        with override_settings(ENCRYPTION_KEYS=[NEW_KEY, OLD_KEY]):
+            _clear_aesgcm_cache()
+            call_command("reencrypt_with_aad", "--rekey", stdout=stdout)
+
+        output = stdout.getvalue()
+        self.assertIn("1 rekeyed", output)
+        self.assertNotIn("old configuration", output)
+
+
+class DecryptsUnderCurrentKeyTest(TestCase):
+    """The helper --rekey uses to decide whether a row is on the current key.
+
+    It documents "never raises", and --rekey depends on that: an exception escaping
+    mid-sweep aborts the run partway rather than reporting rows as needing work.
+    """
+
+    def setUp(self) -> None:
+        _clear_aesgcm_cache()
+
+    def test_true_for_a_row_encrypted_under_the_current_key(self) -> None:
+        with override_settings(ENCRYPTION_KEYS=[NEW_KEY, OLD_KEY]):
+            _clear_aesgcm_cache()
+            wire = encrypt_sensitive_data(json.dumps(VALID))
+            self.assertTrue(decrypts_under_current_key(wire))
+
+    def test_false_for_a_row_encrypted_under_a_superseded_key(self) -> None:
+        """The whole point: readable via fallback, but still work for --rekey."""
+        with override_settings(ENCRYPTION_KEY=OLD_KEY):
+            _clear_aesgcm_cache()
+            wire = encrypt_sensitive_data(json.dumps(VALID))
+
+        with override_settings(ENCRYPTION_KEYS=[NEW_KEY, OLD_KEY]):
+            _clear_aesgcm_cache()
+            self.assertTrue(decrypt_sensitive_data(wire))  # reads fine via fallback
+            self.assertFalse(decrypts_under_current_key(wire))
+
+    def test_false_rather_than_raising_on_a_non_str_value(self) -> None:
+        """A JSON column can hand back a dict/int/None; .startswith() would raise."""
+        with override_settings(ENCRYPTION_KEYS=[NEW_KEY, OLD_KEY]):
+            _clear_aesgcm_cache()
+            for value in (None, 123, {"a": 1}, [], b"aes:v2:blob"):
+                # A JSON column can hand back a non-str; the helper must return False, not raise.
+                self.assertFalse(decrypts_under_current_key(value))  # type: ignore[arg-type]  # wrong types on purpose
+
+    def test_false_rather_than_raising_on_a_malformed_keyring(self) -> None:
+        """get_encryption_keys() raises ImproperlyConfigured; that must not abort a sweep."""
+        with override_settings(ENCRYPTION_KEYS=[NEW_KEY, OLD_KEY]):
+            _clear_aesgcm_cache()
+            wire = encrypt_sensitive_data(json.dumps(VALID))
+
+        with override_settings(ENCRYPTION_KEY="not-valid-base64!!", ENCRYPTION_KEYS=None):
+            _clear_aesgcm_cache()
+            self.assertFalse(decrypts_under_current_key(wire))

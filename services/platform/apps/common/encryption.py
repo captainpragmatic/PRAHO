@@ -291,18 +291,20 @@ def decrypts_under_current_key(encrypted_data: str, *, aad: bytes | None = None)
     old key, the old key can never be retired. ``reencrypt_with_aad --rekey`` uses this to
     find exactly those rows.
 
-    Returns False (never raises) when the value is undecryptable, malformed, or decrypts
-    only under a previous key — callers treat "not on the current key" as work to do, and
-    a genuinely corrupt row is reported separately by the caller's own read.
+    Returns False (never raises) when the value is undecryptable, malformed, of an
+    unexpected type, or decrypts only under a previous key — callers treat "not on the
+    current key" as work to do, and a genuinely corrupt row is reported separately by
+    the caller's own read. The keyring lookup is inside the guarded block too: a missing
+    or malformed keyring raises ImproperlyConfigured, and letting that escape would abort
+    a ``--rekey`` sweep midway rather than reporting rows as needing work.
     """
-    if not encrypted_data or not encrypted_data.startswith(ENCRYPTED_PREFIX):
-        return False
-
-    keys = get_encryption_keys()
-    if not keys:
+    if not isinstance(encrypted_data, str) or not encrypted_data.startswith(ENCRYPTED_PREFIX):
         return False
 
     try:
+        keys = get_encryption_keys()
+        if not keys:
+            return False
         parsed = _parse_ciphertext(encrypted_data, aad)
         aesgcm = _get_aesgcm(keys[0])
         aesgcm.decrypt(parsed["nonce"], parsed["ciphertext_and_tag"], parsed["aad"])
