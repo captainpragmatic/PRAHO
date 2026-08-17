@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+{% load static %}
+{% load i18n %}
+{% load ui_components %}
+
+{% block title %}{% trans "Audit Review Queue" %}{% endblock %}
+
+{% block content %}
+<!-- ===============================================================================
+AUDIT REVIEW QUEUE - PRAHO PLATFORM (#400)
+Staff workflow for events flagged requires_review. Review state lives in the
+AuditEventReview companion model, so AuditEvent stays append-only.
+=============================================================================== -->
+
+<div class="min-h-screen bg-slate-900">
+    <main class="px-6 py-6">
+        <!-- Header -->
+        <div class="bg-slate-800 border border-slate-700 rounded-lg p-6 mb-6">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h1 class="font-bold text-white">{% icon "clipboard" size="lg" %} {% trans "Flagged Event Review Queue" %}</h1>
+                    <p class="text-slate-400 mt-1">{% trans "Events automatically flagged as requiring manual review" %}</p>
+                </div>
+                <a href="{% url 'audit:management_dashboard' %}" class="text-sm text-blue-400 hover:text-blue-300">
+                    &larr; {% trans "Audit Management" %}
+                </a>
+            </div>
+        </div>
+
+        <!-- Statistics -->
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
+            <div class="bg-slate-800 border border-slate-700 rounded-lg p-6">
+                <p class="text-sm font-medium text-slate-400">{% trans "Total Flagged" %}</p>
+                <p class="text-2xl font-semibold text-white">{{ review_stats.total_flagged|default:0 }}</p>
+            </div>
+            <div class="bg-slate-800 border border-slate-700 rounded-lg p-6">
+                <p class="text-sm font-medium text-slate-400">{% trans "Awaiting Review" %}</p>
+                <p class="text-2xl font-semibold text-amber-400">{{ review_stats.unreviewed|default:0 }}</p>
+            </div>
+            <div class="bg-slate-800 border border-slate-700 rounded-lg p-6">
+                <p class="text-sm font-medium text-slate-400">{% trans "Reviewed" %}</p>
+                <p class="text-2xl font-semibold text-green-400">{{ review_stats.reviewed|default:0 }}</p>
+            </div>
+            <div class="bg-slate-800 border border-slate-700 rounded-lg p-6">
+                <p class="text-sm font-medium text-slate-400">{% trans "Reviewed by You" %}</p>
+                <p class="text-2xl font-semibold text-white">{{ review_stats.my_reviews|default:0 }}</p>
+            </div>
+        </div>
+
+        <!-- Filters -->
+        <div class="bg-slate-800 border border-slate-700 rounded-lg p-6 mb-6">
+            <form method="get" class="flex flex-wrap items-end gap-4">
+                <div>
+                    <label for="status" class="block text-sm font-medium text-slate-400 mb-1">{% trans "Status" %}</label>
+                    <select name="status" id="status" class="bg-slate-900 border border-slate-600 text-white rounded px-3 py-2">
+                        <option value="unreviewed" {% if status_filter == 'unreviewed' %}selected{% endif %}>{% trans "Awaiting review" %}</option>
+                        <option value="reviewed" {% if status_filter == 'reviewed' %}selected{% endif %}>{% trans "Reviewed" %}</option>
+                        <option value="all" {% if status_filter == 'all' %}selected{% endif %}>{% trans "All flagged" %}</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="severity" class="block text-sm font-medium text-slate-400 mb-1">{% trans "Severity" %}</label>
+                    <select name="severity" id="severity" class="bg-slate-900 border border-slate-600 text-white rounded px-3 py-2">
+                        <option value="">{% trans "All severities" %}</option>
+                        {% for value, label in severity_choices %}
+                            <option value="{{ value }}" {% if severity_filter == value %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white font-medium py-2 px-4 rounded-lg transition-colors">
+                    {% trans "Apply" %}
+                </button>
+            </form>
+        </div>
+
+        <!-- Queue -->
+        <div class="bg-slate-800 border border-slate-700 rounded-lg p-6">
+            {% if events %}
+                <div class="overflow-x-auto">
+                    <table class="min-w-full divide-y divide-slate-700">
+                        <thead>
+                            <tr>
+                                <th class="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase">{% trans "When" %}</th>
+                                <th class="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase">{% trans "Action" %}</th>
+                                <th class="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase">{% trans "Severity" %}</th>
+                                <th class="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase">{% trans "Actor" %}</th>
+                                <th class="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase">{% trans "Review" %}</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-700">
+                            {% for event in events %}
+                                <tr>
+                                    <td class="px-4 py-3 text-sm text-slate-300 whitespace-nowrap">{{ event.timestamp|date:"Y-m-d H:i" }}</td>
+                                    <td class="px-4 py-3 text-sm">
+                                        <span class="text-white">{{ event.get_action_display }}</span>
+                                        {% if event.description %}
+                                            <span class="block text-slate-400 text-xs mt-1">{{ event.description }}</span>
+                                        {% endif %}
+                                    </td>
+                                    <td class="px-4 py-3 text-sm text-slate-300">{{ event.get_severity_display }}</td>
+                                    <td class="px-4 py-3 text-sm text-slate-300">{{ event.user.email|default:"—" }}</td>
+                                    <td class="px-4 py-3 text-sm">
+                                        {% if event.review %}
+                                            <span class="text-green-400">
+                                                {% blocktrans with reviewer=event.review.reviewed_by.get_full_name|default:_("a deleted user") when=event.review.reviewed_at|date:"Y-m-d H:i" %}Reviewed by {{ reviewer }} on {{ when }}{% endblocktrans %}
+                                            </span>
+                                        {% else %}
+                                            <form method="post" action="{% url 'audit:mark_event_reviewed' event.id %}" class="flex items-center gap-2">
+                                                {% csrf_token %}
+                                                <input type="text" name="notes" maxlength="500"
+                                                       placeholder="{% trans 'Optional notes' %}"
+                                                       class="bg-slate-900 border border-slate-600 text-white text-sm rounded px-2 py-1">
+                                                <button type="submit" class="bg-green-600 hover:bg-green-500 text-white text-sm font-medium py-1 px-3 rounded transition-colors">
+                                                    {% trans "Mark reviewed" %}
+                                                </button>
+                                            </form>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+
+                {% if events.has_other_pages %}
+                    <div class="flex items-center justify-between mt-6">
+                        <p class="text-sm text-slate-400">
+                            {% blocktrans with num=events.number total=events.paginator.num_pages %}Page {{ num }} of {{ total }}{% endblocktrans %}
+                        </p>
+                        <div class="flex gap-2">
+                            {% if events.has_previous %}
+                                <a href="?page={{ events.previous_page_number }}&status={{ status_filter }}&severity={{ severity_filter|default:'' }}"
+                                   class="bg-slate-700 hover:bg-slate-600 text-white text-sm py-1 px-3 rounded">{% trans "Previous" %}</a>
+                            {% endif %}
+                            {% if events.has_next %}
+                                <a href="?page={{ events.next_page_number }}&status={{ status_filter }}&severity={{ severity_filter|default:'' }}"
+                                   class="bg-slate-700 hover:bg-slate-600 text-white text-sm py-1 px-3 rounded">{% trans "Next" %}</a>
+                            {% endif %}
+                        </div>
+                    </div>
+                {% endif %}
+            {% else %}
+                <p class="text-slate-400 text-center py-8">{% trans "No flagged events match these filters." %}</p>
+            {% endif %}
+        </div>
+    </main>
+</div>
+{% endblock %}

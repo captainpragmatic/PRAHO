@@ -36,6 +36,7 @@ from apps.common.types import Err, Ok
 from .models import (
     AuditAlert,
     AuditEvent,
+    AuditEventReview,
     AuditIntegrityCheck,
     AuditRetentionPolicy,
     AuditSearchQuery,
@@ -1420,6 +1421,121 @@ def update_alert_status(request: HttpRequest, alert_id: uuid.UUID) -> HttpRespon
         messages.error(request, _("Failed to update alert status."))
 
     return redirect("audit:alerts_dashboard")
+
+
+# ===============================================================================
+# FLAGGED-EVENT REVIEW QUEUE 🔍 (#400)
+# ===============================================================================
+
+
+@staff_required_strict
+def review_queue(request: HttpRequest) -> HttpResponse:
+    """Queue of events flagged requires_review, so the flag stops being write-only.
+
+    Review state lives in the AuditEventReview companion model, so an event is
+    "unreviewed" exactly when it has no related review row — no mutation of the
+    append-only AuditEvent is involved.
+    """
+
+    logger.info(
+        f"🔒 [Audit Review] Queue accessed by {getattr(request.user, 'email', 'anonymous')} "
+        f"from {get_safe_client_ip(request)}"
+    )
+
+    status_filter = request.GET.get("status", "unreviewed")
+    severity_filter = request.GET.get("severity")
+
+    queryset = AuditEvent.objects.filter(requires_review=True).select_related("user", "review__reviewed_by")
+
+    if status_filter == "unreviewed":
+        queryset = queryset.filter(review__isnull=True)
+    elif status_filter == "reviewed":
+        queryset = queryset.filter(review__isnull=False)
+    # "all" applies no additional filter.
+
+    if severity_filter:
+        queryset = queryset.filter(severity=severity_filter)
+
+    paginator = Paginator(queryset.order_by("-timestamp"), 25)
+    events_page = paginator.get_page(request.GET.get("page", 1))
+
+    flagged = AuditEvent.objects.filter(requires_review=True)
+    review_stats = {
+        "total_flagged": flagged.count(),
+        "unreviewed": flagged.filter(review__isnull=True).count(),
+        "reviewed": flagged.filter(review__isnull=False).count(),
+        "my_reviews": AuditEventReview.objects.filter(reviewed_by=request.user).count()
+        if request.user.is_authenticated
+        else 0,
+    }
+
+    context = {
+        "events": events_page,
+        "review_stats": review_stats,
+        "status_filter": status_filter,
+        "severity_filter": severity_filter,
+        "severity_choices": AuditEvent.SEVERITY_CHOICES,
+        "breadcrumb_items": [
+            {"text": _("Audit Management"), "url": "/audit/management/"},
+            {"text": _("Review Queue")},
+        ],
+    }
+
+    return render(request, "audit/review_queue.html", context)
+
+
+@staff_required_strict
+@require_POST
+@csrf_protect
+def mark_event_reviewed(request: HttpRequest, event_id: uuid.UUID) -> HttpResponse:
+    """Record that a staff member has reviewed a flagged event.
+
+    Creates a companion row; the AuditEvent itself is never written to, so the
+    immutability guard is not involved and needs no new escape-hatch reason.
+    """
+
+    event = get_object_or_404(AuditEvent, id=event_id)
+
+    if not event.requires_review:
+        messages.error(request, _("That event is not flagged for review."))
+        return redirect("audit:review_queue")
+
+    # get_or_create, not create: a double submit (or two reviewers racing on the same
+    # row) must not 500 on the OneToOne constraint, and the FIRST review stands rather
+    # than being silently overwritten by the second.
+    review, created = AuditEventReview.objects.get_or_create(
+        audit_event=event,
+        defaults={
+            "reviewed_by": cast(User, request.user),
+            "notes": request.POST.get("notes", "").strip(),
+        },
+    )
+
+    if not created:
+        # reviewed_by is SET_NULL, so a review whose reviewer account was since deleted
+        # still names someone rather than raising AttributeError on None.
+        reviewer = review.reviewed_by.get_full_name() if review.reviewed_by else _("a deleted user")
+        messages.info(
+            request,
+            _("Already reviewed by %(reviewer)s.") % {"reviewer": reviewer},
+        )
+        return redirect("audit:review_queue")
+
+    # The review is itself an auditable staff action on audit evidence. Uses the generic
+    # "update" action (as update_alert_status does for the analogous alert workflow)
+    # rather than a new ACTION_CHOICES entry, which would mean altering AuditEvent.action
+    # on a very large table for a label; the reviewed event id is in the metadata instead.
+    AuditService.log_simple_event(
+        event_type="update",
+        user=request.user,
+        content_object=review,
+        description=f"Flagged audit event {event.id} marked reviewed",
+        metadata={"reviewed_audit_event_id": str(event.id)},
+        ip_address=get_safe_client_ip(request),
+    )
+    messages.success(request, _("Event marked as reviewed."))
+
+    return redirect("audit:review_queue")
 
 
 @staff_required_strict
