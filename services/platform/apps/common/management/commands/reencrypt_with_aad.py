@@ -18,9 +18,11 @@ Design notes (why this reads raw SQL rather than the ORM):
     corrupt/tampered v2 blob is reported (never counted as healthy).
 
 OPERATIONAL NOTE — PostgreSQL: the raw read/CAS relies on Django's jsonb text loader and
-str→jsonb coercion. The automated suite exercises SQLite only. Before a production run,
-do a ``--dry-run`` and then a real run against a PostgreSQL copy of the data and confirm
-the reported counts, then run against production.
+str→jsonb coercion. This is now covered in CI by the PostgreSQL job — see
+``tests/integration/test_reencrypt_with_aad_postgres.py`` (the unit suite under
+``tests/common/`` still runs on SQLite, where the column is plain TEXT). A ``--dry-run``
+against a copy of the production data before the real run remains good practice, since
+CI cannot cover the actual row shapes in production.
 
 Usage:
     python manage.py reencrypt_with_aad                 # migrate all
