@@ -12,11 +12,19 @@ users before any view runs; the customer ticket UI lives in the portal
 service), so all assertions target the staff experience.
 """
 
+from pathlib import Path
+
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
 
 User = get_user_model()
+
+# Repo root: services/platform/tests/tickets/<this file> -> parents[4].
+# The tab keyboard JS now lives in the shared external registry (ui-actions.js),
+# not inline in the rendered page, so the keyboard-contract assertions below read
+# that file instead of the response body (ADR-0014: preserve the check, don't drop it).
+REPO_ROOT = Path(__file__).resolve().parents[4]
 
 
 class TicketListRenderingTests(TestCase):
@@ -60,7 +68,7 @@ class TicketListRenderingTests(TestCase):
         tab_count = content.count('role="tab" data-tab-value=')
         self.assertGreater(tab_count, 0)
         self.assertEqual(content.count('aria-controls="tickets-content"'), tab_count)
-        self.assertEqual(content.count('onkeydown="handleTabKeydown(event, this)"'), tab_count)
+        self.assertEqual(content.count('data-action="switch-tab"'), tab_count)
         self.assertIn('tabindex="0"', content)
         self.assertIn('tabindex="-1"', content)
         self.assertIn(
@@ -68,14 +76,19 @@ class TicketListRenderingTests(TestCase):
             content,
         )
 
-        self.assertIn("function handleTabKeydown(event, el)", content)
+        # The keyboard roving-focus contract moved to the shared external registry;
+        # assert it against the ui-actions.js file text, not the rendered response.
+        ui_actions = (
+            REPO_ROOT / "shared" / "ui" / "static" / "js" / "ui-actions.js"
+        ).read_text(encoding="utf-8")
+        self.assertIn("function handleTabKeydown(event, el)", ui_actions)
         for key in ("ArrowLeft", "ArrowRight", "Home", "End"):
-            self.assertIn(key, content)
-        self.assertIn("target.focus()", content)
-        self.assertIn("target.click()", content)
-        self.assertIn("if (t.dataset.tabBorder) { t.classList.remove(t.dataset.tabBorder); }", content)
-        self.assertIn("if (t.dataset.tabText) { t.classList.remove(t.dataset.tabText); }", content)
-        self.assertNotIn(".className.replace(", content)
+            self.assertIn(key, ui_actions)
+        self.assertIn("target.focus()", ui_actions)
+        self.assertIn("target.click()", ui_actions)
+        self.assertIn("if (t.dataset.tabBorder) { t.classList.remove(t.dataset.tabBorder); }", ui_actions)
+        self.assertIn("if (t.dataset.tabText) { t.classList.remove(t.dataset.tabText); }", ui_actions)
+        self.assertNotIn(".className.replace(", ui_actions)
 
     def test_unknown_status_filter_falls_back_to_all_tab(self) -> None:
         """?status= values outside the tab set clamp to the All tab.

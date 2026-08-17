@@ -3,7 +3,7 @@
 # ===============================================================================
 # Enhanced for Platform/Portal separation with scoped PYTHONPATH security
 
-.PHONY: help install check-env dev dev-e2e dev-e2e-bg dev-platform dev-portal dev-all test test-fast test-file test-platform test-platform-fast test-ci test-ci-focused test-portal test-integration test-e2e test-with-e2e test-e2e-platform test-e2e-portal test-e2e-orm test-security test-cache show-test-deps install-frontend build-css watch-css check-css-tooling migrate check-migrations fixtures fixtures-light clean-cache clean-dist clean-db-and-logs clean-nuke lint lint-fix lint-platform lint-portal lint-security lint-health lint-credentials lint-audit lint-fsm lint-imports lint-test-layout check-types check-types-platform check-types-portal pre-commit infra-init infra-plan infra-dev infra-staging infra-prod infra-destroy-dev deploy-dev deploy-staging deploy-prod i18n-extract i18n-compile translate translate-platform translate-portal translate-ai translate-ai-platform translate-ai-portal translate-review translate-apply translate-diff translate-stats translate-stats-platform translate-stats-portal audit-a11y audit-a11y-strict audit-dark-mode audit-dark-mode-strict
+.PHONY: help install check-env check-venv-platform dev dev-e2e dev-e2e-bg dev-e2e-csp dev-platform dev-portal dev-all test test-fast test-file test-platform test-platform-fast test-ci test-ci-focused test-portal test-integration test-e2e test-with-e2e test-e2e-platform test-e2e-portal test-e2e-csp test-e2e-orm test-security test-cache show-test-deps install-frontend build-css watch-css check-css-tooling migrate check-migrations fixtures fixtures-light clean-cache clean-dist clean-db-and-logs clean-nuke lint lint-fix lint-platform lint-portal lint-security lint-health lint-credentials lint-audit lint-fsm lint-imports lint-test-layout check-types check-types-platform check-types-portal pre-commit infra-init infra-plan infra-dev infra-staging infra-prod infra-destroy-dev deploy-dev deploy-staging deploy-prod i18n-extract i18n-compile translate translate-platform translate-portal translate-ai translate-ai-platform translate-ai-portal translate-review translate-apply translate-diff translate-stats translate-stats-platform translate-stats-portal audit-a11y audit-a11y-strict audit-dark-mode audit-dark-mode-strict
 
 # ===============================================================================
 # SCOPED PYTHON ENVIRONMENTS 🔒
@@ -19,9 +19,11 @@ export UV_PROJECT_ENVIRONMENT := $(VENV_DIR)
 PYTHON_PLATFORM = cd services/platform && PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/python
 PYTHON_PLATFORM_MANAGE = $(PYTHON_PLATFORM) manage.py
 
-# Portal-specific Python (NO PYTHONPATH - cannot import platform code)
-# DJANGO_SETTINGS_MODULE pinned to config.settings.dev — portal has no test.py settings
-PYTHON_PORTAL = cd services/portal && DJANGO_SETTINGS_MODULE=config.settings.dev $(PWD)/$(VENV_DIR)/bin/python
+# Portal-specific Python (NO PYTHONPATH - cannot import platform code).
+# Defaults to config.settings.dev; override PORTAL_DJANGO_SETTINGS_MODULE only
+# for an explicitly selected portal runtime, such as the CSP E2E gate.
+PORTAL_DJANGO_SETTINGS_MODULE ?= config.settings.dev
+PYTHON_PORTAL = cd services/portal && DJANGO_SETTINGS_MODULE="$(PORTAL_DJANGO_SETTINGS_MODULE)" $(PWD)/$(VENV_DIR)/bin/python
 PYTHON_PORTAL_MANAGE = $(PYTHON_PORTAL) manage.py
 
 # Shared Python for workspace-level tasks
@@ -38,6 +40,7 @@ help:
 	@echo "  make dev             - Run all services (platform + portal)"
 	@echo "  make dev-e2e         - Run all services with rate limiting disabled (foreground)"
 	@echo "  make dev-e2e-bg      - Same as dev-e2e but backgrounded (waits until ready, returns)"
+	@echo "  make dev-e2e-csp     - Run E2E services with an enforced strict portal CSP (CSP_PROFILE=phase2-target|phase3-target)"
 	@echo "  make dev-platform    - Run platform service only (:8700)"
 	@echo "  make dev-portal      - Run portal service only (:8701)"
 	@echo ""
@@ -56,6 +59,7 @@ help:
 	@echo "  make test-with-e2e     - Alias for make test-e2e"
 	@echo "  make test-e2e-platform - Platform staff E2E tests (:8700)"
 	@echo "  make test-e2e-portal   - Portal customer E2E tests (:8701)"
+	@echo "  make test-e2e-csp      - Verify the strict-CSP browser violation oracle (needs make dev-e2e-csp)"
 	@echo "  make test-e2e-orm      - ORM E2E tests (no server needed)"
 	@echo "  make test-security     - Validate service isolation"
 	@echo "  make show-test-deps    - Print the test dependency graph"
@@ -176,6 +180,34 @@ check-env:
 		exit 1; \
 	fi
 
+# Platform's INSTALLED_APPS imports third-party apps from the `platform` dependency
+# group. uv sync is declarative — any sync narrower than --all-groups (a bare
+# `uv sync`, or `uv sync --group dev`) prunes that group. Django then dies inside
+# django.setup() with an opaque ModuleNotFoundError before a single command runs,
+# and because dev-all uses -j2 the result is a half-up stack: portal serving :8701
+# while platform is dead on :8700. corsheaders is the first such import Django
+# reaches, so it doubles as the group's canary.
+#
+# Portal deliberately has no equivalent guard: its group holds only gunicorn (which
+# runserver never uses) plus duplicates of base [project].dependencies, so portal
+# starts fine on a pruned venv and gating it would be a false alarm.
+check-venv-platform:
+	@if [ ! -x "$(VENV_DIR)/bin/python" ]; then \
+		echo ""; \
+		echo "🚨 No virtualenv at $(VENV_DIR)/"; \
+		echo "   Run: make install"; \
+		echo ""; \
+		exit 1; \
+	fi
+	@if ! "$(VENV_DIR)/bin/python" -c "import corsheaders" >/dev/null 2>&1; then \
+		echo ""; \
+		echo "🚨 $(VENV_DIR)/ is missing the 'platform' dependency group!"; \
+		echo "   Something ran a sync narrower than --all-groups and pruned it."; \
+		echo "   Run: make install"; \
+		echo ""; \
+		exit 1; \
+	fi
+
 # ===============================================================================
 # DEVELOPMENT SERVERS 🚀
 # ===============================================================================
@@ -185,7 +217,7 @@ check-env:
 
 RUNSERVER_FLAGS := $(if $(NORELOAD),--noreload,)
 
-dev-platform: check-env
+dev-platform: check-env check-venv-platform
 	@echo "🏗️ [Platform] Starting admin platform service..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@echo "📍 PYTHONPATH: services/platform (scoped)"
@@ -212,7 +244,7 @@ dev-portal: check-env
 	@echo "🌐 Starting portal server on :8701$(if $(NORELOAD), (no-reload),)..."
 	@$(PYTHON_PORTAL_MANAGE) runserver 0.0.0.0:8701 $(RUNSERVER_FLAGS)
 
-dev-all: build-css
+dev-all: check-venv-platform build-css
 	@echo "🚀 [All Services] Starting platform + portal..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@$(MAKE) -j2 dev-platform dev-portal
@@ -224,6 +256,13 @@ dev-e2e: check-env
 	@echo "🎭 [E2E Dev] Starting services with rate limiting disabled (no auto-reload)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@RATE_LIMITING_ENABLED=false $(MAKE) NORELOAD=1 dev-all
+
+dev-e2e-csp: CSP_PROFILE ?= phase2-target
+dev-e2e-csp: check-env
+	@[ "$(CSP_PROFILE)" = "phase2-target" ] || [ "$(CSP_PROFILE)" = "phase3-target" ] || { echo "❌ CSP_PROFILE must be phase2-target or phase3-target; got '$(CSP_PROFILE)'"; exit 2; }
+	@echo "🔒 [CSP E2E] Starting services with enforced $(CSP_PROFILE) portal CSP..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@RATE_LIMITING_ENABLED=false CSP_PROFILE="$(CSP_PROFILE)" CSP_REPORT_ONLY=false $(MAKE) PORTAL_DJANGO_SETTINGS_MODULE=config.settings.e2e NORELOAD=1 dev-all
 
 dev-e2e-bg: check-env build-css
 	@echo "🎭 [E2E Background] Starting services in background (no auto-reload)..."
@@ -385,6 +424,16 @@ test-e2e-portal:
 	@find tests/e2e/ -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 	@DJANGO_SETTINGS_MODULE=config.settings.e2e PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/python -m pytest tests/e2e/portal/ -v
 	@echo "✅ Portal E2E tests completed!"
+
+test-e2e-csp: CSP_PROFILE ?= phase2-target
+test-e2e-csp:
+	@[ "$(CSP_PROFILE)" = "phase2-target" ] || [ "$(CSP_PROFILE)" = "phase3-target" ] || { echo "❌ CSP_PROFILE must be phase2-target or phase3-target; got '$(CSP_PROFILE)'"; exit 2; }
+	@echo "🔒 [CSP E2E] Verifying the $(CSP_PROFILE) browser violation oracle..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@curl -sf http://localhost:8701/login/ > /dev/null 2>&1 || (echo "❌ Portal service not running on :8701. Run 'make dev-e2e-csp CSP_PROFILE=$(CSP_PROFILE)' first." && exit 1)
+	@find tests/e2e/ -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+	@EXPECTED_CSP_PROFILE="$(CSP_PROFILE)" DJANGO_SETTINGS_MODULE=config.settings.e2e PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/python -m pytest tests/e2e/portal/csp_violation_oracle_gate.py tests/e2e/portal/csp_alpine_interactions_gate.py -v
+	@echo "✅ Strict-CSP violation oracle verified!"
 
 test-e2e-orm:
 	@echo "🎭 [E2E ORM] Running ORM-based E2E tests (no server needed)..."
@@ -805,7 +854,7 @@ pre-commit:
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@if ! command -v $(VENV_DIR)/bin/pre-commit >/dev/null 2>&1; then \
 		echo "❌ pre-commit not found. Installing..."; \
-		uv sync --group dev; \
+		uv sync --all-groups; \
 		$(VENV_DIR)/bin/pre-commit install || echo "⚠️ Pre-commit config not found"; \
 	fi
 	@$(VENV_DIR)/bin/pre-commit run --all-files || echo "⚠️ Pre-commit hooks skipped"
@@ -919,17 +968,17 @@ build-css: check-css-tooling
 	echo "🎨 Building Tailwind CSS assets for all services..."; \
 	echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"; \
 	echo "🏗️  Building Portal CSS..."; \
-	npx --no-install @tailwindcss/cli -c services/portal/tailwind.config.js -i assets/css/input.css -o services/portal/static/css/tailwind.min.css --minify 2>&1 | grep -v -E 'warning|all.*vars|Unexpected token|ring-inset|[│┆]|^$$' && \
+	npx --no-install @tailwindcss/cli -i assets/css/portal.css -o services/portal/static/css/tailwind.min.css --minify 2>&1 | grep -v -E 'warning|all.*vars|Unexpected token|ring-inset|[│┆]|^$$' && \
 	echo "🏗️  Building Platform CSS..." && \
-	npx --no-install @tailwindcss/cli -c services/platform/tailwind.config.js -i assets/css/input.css -o services/platform/static/css/tailwind.min.css --minify 2>&1 | grep -v -E 'warning|all.*vars|Unexpected token|ring-inset|[│┆]|^$$' && \
+	npx --no-install @tailwindcss/cli -i assets/css/platform.css -o services/platform/static/css/tailwind.min.css --minify 2>&1 | grep -v -E 'warning|all.*vars|Unexpected token|ring-inset|[│┆]|^$$' && \
 	echo "" >> services/portal/static/css/tailwind.min.css && \
 	echo "" >> services/platform/static/css/tailwind.min.css && \
 	echo "✅ CSS build complete!"
 
 watch-css: check-css-tooling
 	@echo "👀 Watching CSS changes for development..."
-	npx --no-install @tailwindcss/cli -c services/portal/tailwind.config.js -i assets/css/input.css -o services/portal/static/css/tailwind.min.css --watch &
-	npx --no-install @tailwindcss/cli -c services/platform/tailwind.config.js -i assets/css/input.css -o services/platform/static/css/tailwind.min.css --watch
+	npx --no-install @tailwindcss/cli -i assets/css/portal.css -o services/portal/static/css/tailwind.min.css --watch &
+	npx --no-install @tailwindcss/cli -i assets/css/platform.css -o services/platform/static/css/tailwind.min.css --watch
 
 # ===============================================================================
 # DOCKER SERVICES DEPLOYMENT 🐳

@@ -64,6 +64,9 @@ class ButtonConfig:
     class_: str = ""
     attrs: str = ""
     button_id: str = ""
+    data_action: str = ""
+    data_invoke: str = ""
+    data_confirm: str = ""
 
 
 @dataclass
@@ -238,7 +241,10 @@ def button(
         )
 
         if has_complex_payload:
-            # Remove auto-executing dangerous event handlers (but keep onclick as it requires user interaction)
+            # Strip the auto-executing handlers early (defense-in-depth). onclick is
+            # absent here only because it needs a click — but the CSP on*= pass below
+            # strips it (and every other on*=) unconditionally, so no inline handler
+            # of any kind survives.
             dangerous_events = r"\b(onload|onerror|onmouseover|onfocus|onblur)\s*="
             s = re.sub(dangerous_events, "", s, flags=re.IGNORECASE)
             # Remove javascript: URLs and code injection
@@ -246,6 +252,11 @@ def button(
             s = re.sub(r"\b(eval|alert|atob)\s*\([^)]*\)", "", s, flags=re.IGNORECASE)
             # Handle already encoded dangerous content
             s = re.sub(r"alert\([^)]*\)", "", s, flags=re.IGNORECASE)
+
+        # CSP: strip any inline on*= event handler (name+value) so attrs can never inject a native handler.
+        # The lookbehind requires the handler to start an attribute (start/space/quote) and NOT be the
+        # tail of a legit hyphenated/word attr (e.g. `data-onboarding` must survive intact).
+        s = re.sub(r'''(?<![\w-])on[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)''', "", s, flags=re.IGNORECASE)
 
         # Manual HTML escaping to return plain string, not SafeString
         s = s.replace("&", "&amp;")
@@ -283,6 +294,9 @@ def button(
         "class": config.class_,
         "attrs": clean_attrs,
         "button_id": config.button_id,
+        "data_action": config.data_action,
+        "data_invoke": config.data_invoke,
+        "data_confirm": config.data_confirm,
     }
 
 

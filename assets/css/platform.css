@@ -1,0 +1,40 @@
+/* ===============================================================================
+   PLATFORM CSS ENTRY POINT 🏗️
+   ===============================================================================
+   Tailwind v4 is CSS-first: its CLI has no --config flag, so tailwind.config.js
+   was never read (building with a nonexistent config path still exits 0). The
+   design system therefore lives here, not in JS.
+
+   Scope note: only tokens that templates REFERENCE but the build did not EMIT are
+   restored here. The old JS config also overrode Tailwind defaults (borderRadius,
+   fontSize line-heights, boxShadow, screens). Those overrides never reached a
+   browser, so the UI was built and reviewed against Tailwind's defaults —
+   porting them now would restyle the app rather than fix anything.
+
+   Dark mode is deliberately left at Tailwind's default (prefers-color-scheme).
+   The old config asked for darkMode:'class', but no `.dark` class is ever set on
+   <html>, so switching strategies would stop all 578 dark: utilities from
+   applying to anyone. Both apps are dark-first via base.html instead.
+   =============================================================================== */
+
+@import "tailwindcss";
+@import "./input.css";
+
+@plugin "@tailwindcss/forms";
+@plugin "@tailwindcss/typography";
+
+@theme {
+  /* Admin platform primary — 220 hue, deliberately distinct from Portal's 210.
+     Referenced by domain and settings templates; emitted no rules before. */
+  --color-primary-50: hsl(220 90% 97%);
+  --color-primary-100: hsl(220 90% 94%);
+  --color-primary-200: hsl(220 90% 87%);
+  --color-primary-300: hsl(220 90% 78%);
+  --color-primary-400: hsl(220 90% 67%);
+  --color-primary-500: hsl(220 90% 56%);
+  --color-primary-600: hsl(220 90% 45%);
+  --color-primary-700: hsl(220 90% 36%);
+  --color-primary-800: hsl(220 90% 28%);
+  --color-primary-900: hsl(220 90% 22%);
+  --color-primary-950: hsl(220 90% 14%);
+}

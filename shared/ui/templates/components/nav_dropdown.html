@@ -1,18 +1,18 @@
 {% load i18n ui_components %}
 
 {# Romanian hosting provider dropdown navigation component #}
-<div class="relative inline-block text-left" x-data="{ open: false }" @click.away="open = false">
+<div class="relative inline-block text-left" x-data="navDropdown" @click.away="open = false">
   <div>
-    <button type="button" @click="open = !open"
+    <button type="button" @click="toggle()"
       class="text-slate-300 hover:text-white px-3 py-2 rounded-md text-sm font-medium flex items-center transition-colors"
-      :class="{ 'text-white bg-slate-700': open }"
+      :class="triggerClass"
       aria-expanded="false"
       aria-haspopup="true">
       {% if icon %}
         {% icon icon size="sm" css_class="mr-2 opacity-70" %}
       {% endif %}
       {{ title }}
-      <span class="ml-1 transition-transform duration-200 inline-flex" :class="{ 'rotate-180': open }">
+      <span class="ml-1 transition-transform duration-200 inline-flex" :class="chevronClass">
         {% icon "chevron-down" size="sm" %}
       </span>
     </button>

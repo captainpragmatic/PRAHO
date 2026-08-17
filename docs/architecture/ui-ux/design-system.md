@@ -483,10 +483,9 @@ mobile_header, table_enhanced.
 | Design system spec | `docs/architecture/ui-ux/design-system.md` | Policy & token definitions |
 | Architecture decision | `docs/ADRs/ADR-0035-unified-design-system.md` | Structural decisions |
 | Implementation backlog | `docs/architecture/ui-ux/portal-ui-ux-backlog.md` | Prioritized task list |
-| CSS tokens | `assets/css/input.css` | Shared design token source |
-| Tailwind preset | `shared/tailwind.preset.js` | Shared Tailwind configuration |
-| Tailwind config (Portal) | `services/portal/tailwind.config.js` | Portal-specific theme extensions |
-| Tailwind config (Platform) | `services/platform/tailwind.config.js` | Platform-specific theme extensions |
+| CSS tokens | `assets/css/input.css` | Shared design token partial (imported, not built directly) |
+| Build entry (Portal) | `assets/css/portal.css` | `@theme` primary scale (210 hue) + forms/typography plugins |
+| Build entry (Platform) | `assets/css/platform.css` | `@theme` primary scale (220 hue) + forms/typography plugins |
 | Shared component templates | `shared/ui/templates/components/*.html` | Canonical HTML implementations |
 | Shared JS modules | `shared/ui/static/js/components/` | Canonical modal.js, toast.js |
 | Template tag API (Portal) | `services/portal/apps/ui/templatetags/ui_components.py` | Portal Python component API |
@@ -583,7 +582,7 @@ If a CSS or component change causes visual regression in production:
 4. Deploy. Fix forward in a new branch.
 
 ### Token/Tailwind Config Regression
-1. Revert `assets/css/input.css` + `services/portal/tailwind.config.js`.
+1. Revert `assets/css/input.css` + `assets/css/portal.css`.
 2. Rebuild CSS: `make build-css`.
 3. Spot-check auth pages + billing pages (highest-traffic).
 4. Deploy reverted build.

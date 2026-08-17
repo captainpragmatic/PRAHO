@@ -161,8 +161,14 @@ class PortalAuthenticationMiddleware:
         return cast(HttpResponse, self.get_response(request))
 
     def is_public_url(self, path: str) -> bool:
-        """Check if path requires authentication."""
-        return any(path.startswith(public_url) for public_url in self.PUBLIC_URLS)
+        """Check if path requires authentication.
+
+        PORTAL_EXTRA_PUBLIC_URLS lets a specific runtime (e.g. the CSP E2E
+        settings) whitelist additional prefixes without adding test-only paths
+        to the production PUBLIC_URLS list.
+        """
+        extra_public_urls = getattr(settings, "PORTAL_EXTRA_PUBLIC_URLS", ())
+        return any(path.startswith(public_url) for public_url in (*self.PUBLIC_URLS, *extra_public_urls))
 
     def redirect_to_login(self, request: HttpRequest) -> HttpResponse:
         """Redirect to login preserving the originally requested URL."""

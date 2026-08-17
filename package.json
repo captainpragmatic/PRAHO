@@ -8,8 +8,8 @@
     "test": "tests"
   },
   "scripts": {
-    "build-css": "tailwindcss -i input.css -o services/portal/assets/css/tailwind.min.css --minify && tailwindcss -i input.css -o services/platform/static/css/tailwind.min.css --minify",
-    "watch-css": "tailwindcss -i input.css -o services/portal/assets/css/tailwind.min.css --watch",
+    "build-css": "@tailwindcss/cli -i assets/css/portal.css -o services/portal/static/css/tailwind.min.css --minify && @tailwindcss/cli -i assets/css/platform.css -o services/platform/static/css/tailwind.min.css --minify",
+    "watch-css": "@tailwindcss/cli -i assets/css/portal.css -o services/portal/static/css/tailwind.min.css --watch",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {
@@ -25,7 +25,9 @@
   },
   "homepage": "https://github.com/captainpragmatic/PRAHO#readme",
   "devDependencies": {
-    "@tailwindcss/cli": "^4.2.2",
+    "@tailwindcss/cli": "^4.3.3",
+    "@tailwindcss/forms": "^0.5.11",
+    "@tailwindcss/typography": "^0.5.20",
     "tailwindcss": "^4.1.13"
   },
   "optionalDependencies": {

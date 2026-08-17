@@ -143,7 +143,7 @@
             <span class="text-xs text-slate-400">
                 {% trans "Event ID" %}: {{ event.id }}
             </span>
-            {% include 'components/button.html' with text='Close' variant='secondary' size='xs' attrs='onclick="closeEventDetail(this)"' %}
+            {% include 'components/button.html' with text='Close' variant='secondary' size='xs' data_action='invoke' data_invoke='closeEventDetail' %}
         </div>
     </div>
 

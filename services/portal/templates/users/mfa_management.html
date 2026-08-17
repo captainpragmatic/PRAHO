@@ -208,7 +208,7 @@
 
             <!-- Disable MFA -->
             <form method="post" action="{% url 'users:mfa_disable' %}"
-                  onsubmit="return confirm('{% trans 'Are you sure you want to disable two-factor authentication? This will make your account less secure.' %}')"
+                  data-confirm="{% trans 'Are you sure you want to disable two-factor authentication? This will make your account less secure.' %}"
                   class="flex flex-col items-center p-4 bg-red-900/30 hover:bg-red-900/50 rounded-lg border border-red-700 hover:border-red-500 transition-colors cursor-pointer">
               {% csrf_token %}
               <button type="submit" class="flex flex-col items-center w-full text-center bg-transparent border-none p-0 cursor-pointer">

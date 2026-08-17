@@ -13,8 +13,10 @@ shared/
 │   └── static/
 │       └── js/
 │           └── components/ # Shared JS modules (modal.js, toast.js)
-└── tailwind.preset.js      # Shared Tailwind CSS configuration preset
 ```
+
+> Tailwind theming lives in `assets/css/{platform,portal}.css` (CSS-first `@theme`),
+> not in a JS preset — Tailwind v4's CLI has no `--config` flag and never read one.
 
 ## How It Works
 

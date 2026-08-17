@@ -282,6 +282,37 @@ def _decrypt_with_keyring(nonce: bytes, ciphertext_and_tag: bytes, aad: bytes | 
     raise DecryptionError(f"Decryption failed with all {len(keys)} keys: {type(last_error).__name__}") from last_error
 
 
+def decrypts_under_current_key(encrypted_data: str, *, aad: bytes | None = None) -> bool:
+    """Whether ``encrypted_data`` decrypts under the CURRENT (first) keyring key (#270).
+
+    ``decrypt_sensitive_data`` tries every key and does not report which one worked, so a
+    row still encrypted under a superseded key reads back fine and looks healthy. That is
+    correct for serving traffic and wrong for rotation: without knowing the row is on an
+    old key, the old key can never be retired. ``reencrypt_with_aad --rekey`` uses this to
+    find exactly those rows.
+
+    Returns False (never raises) when the value is undecryptable, malformed, of an
+    unexpected type, or decrypts only under a previous key — callers treat "not on the
+    current key" as work to do, and a genuinely corrupt row is reported separately by
+    the caller's own read. The keyring lookup is inside the guarded block too: a missing
+    or malformed keyring raises ImproperlyConfigured, and letting that escape would abort
+    a ``--rekey`` sweep midway rather than reporting rows as needing work.
+    """
+    if not isinstance(encrypted_data, str) or not encrypted_data.startswith(ENCRYPTED_PREFIX):
+        return False
+
+    try:
+        keys = get_encryption_keys()
+        if not keys:
+            return False
+        parsed = _parse_ciphertext(encrypted_data, aad)
+        aesgcm = _get_aesgcm(keys[0])
+        aesgcm.decrypt(parsed["nonce"], parsed["ciphertext_and_tag"], parsed["aad"])
+    except Exception:
+        return False
+    return True
+
+
 # --- Settings-compat API (absorbed from SettingsEncryption) ---
 
 

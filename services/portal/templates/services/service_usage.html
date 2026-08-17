@@ -32,13 +32,13 @@
                     {% trans "Time Period" %}
                 </h2>
                 <div class="flex space-x-2">
-                    <button onclick="loadUsageData('24h')" class="px-3 py-2 text-sm rounded-md bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 hover:bg-blue-200 dark:hover:bg-blue-800">
+                    <button data-action="load-usage" data-period="24h" class="px-3 py-2 text-sm rounded-md bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 hover:bg-blue-200 dark:hover:bg-blue-800">
                         {% trans "24 Hours" %}
                     </button>
-                    <button onclick="loadUsageData('7d')" class="px-3 py-2 text-sm rounded-md bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600">
+                    <button data-action="load-usage" data-period="7d" class="px-3 py-2 text-sm rounded-md bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600">
                         {% trans "7 Days" %}
                     </button>
-                    <button onclick="loadUsageData('30d')" class="px-3 py-2 text-sm rounded-md bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600">
+                    <button data-action="load-usage" data-period="30d" class="px-3 py-2 text-sm rounded-md bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600">
                         {% trans "30 Days" %}
                     </button>
                 </div>
@@ -177,11 +177,19 @@
 
 <script nonce="{{ csp_nonce }}">
 function loadUsageData(period) {
-    // Update active button
-    document.querySelectorAll('[onclick*="loadUsageData"]').forEach(btn => {
-        btn.className = btn.className.replace('bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200', 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200');
+    var ACTIVE = 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200';
+    var INACTIVE = 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200';
+    // Reset every period button, then highlight the selected one. The buttons use
+    // data-action="load-usage" data-period=... (delegated via the CSP registry),
+    // so select on those attributes — the old [onclick*=] selector and event.target
+    // both broke when the inline handlers were removed.
+    document.querySelectorAll('[data-action="load-usage"]').forEach(function (btn) {
+        btn.className = btn.className.replace(ACTIVE, INACTIVE);
     });
-    event.target.className = event.target.className.replace('bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200', 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200');
+    var selected = document.querySelector('[data-action="load-usage"][data-period="' + period + '"]');
+    if (selected) {
+        selected.className = selected.className.replace(INACTIVE, ACTIVE);
+    }
 
     // Load new data
     htmx.ajax('GET', '{% url "services:usage_data" service_id=service.id %}', {

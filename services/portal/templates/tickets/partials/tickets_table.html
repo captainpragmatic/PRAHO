@@ -27,7 +27,7 @@
       </thead>
       <tbody class="bg-slate-800/30 divide-y divide-slate-700">
         {% for ticket in tickets %}
-        <tr class="hover:bg-slate-700/50 transition-colors cursor-pointer" onclick="window.location.href='{% url 'tickets:detail' ticket_id=ticket.id %}';">
+        <tr class="hover:bg-slate-700/50 transition-colors cursor-pointer" data-action="navigate" data-href="{% url 'tickets:detail' ticket_id=ticket.id %}">
           <td class="px-6 py-4 whitespace-nowrap">
             <div class="text-sm font-medium text-white font-mono">
               {% if ticket.ticket_number %}{{ ticket.ticket_number }}{% else %}#{{ ticket.id }}{% endif %}
@@ -62,7 +62,7 @@
 <!-- Mobile Card List (visible on mobile only) -->
 <div class="md:hidden divide-y divide-slate-700">
   {% for ticket in tickets %}
-  <div class="min-h-[72px] flex flex-col justify-center p-4 hover:bg-slate-700 transition-colors cursor-pointer" onclick="window.location.href='{% url 'tickets:detail' ticket_id=ticket.id %}';">
+  <div class="min-h-[72px] flex flex-col justify-center p-4 hover:bg-slate-700 transition-colors cursor-pointer" data-action="navigate" data-href="{% url 'tickets:detail' ticket_id=ticket.id %}">
     <div class="flex items-center justify-between mb-2">
       <div class="flex items-center space-x-2">
         <span class="text-white font-medium text-sm font-mono truncate">

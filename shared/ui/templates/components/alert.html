@@ -10,7 +10,7 @@
 {% else %}bg-slate-50 border-slate-200 text-slate-800 dark:bg-slate-950 dark:border-slate-800 dark:text-slate-200
 {% endif %}{% if css_class %} {{ css_class }}{% endif %}"
 {% if html_id %}id="{{ html_id }}"{% endif %}
-{% if dismissible %}x-data="{ show: true }" x-show="show" x-init="setTimeout(() => show = false, 5000)"{% endif %}
+{% if dismissible %}x-data="autoDismiss(5000)" x-show="show"{% endif %}
 role="alert">
 
   <div class="flex">
@@ -46,7 +46,7 @@ role="alert">
           <button type="button" class="text-sm font-medium underline hover:no-underline focus:outline-none focus:ring-2 focus:ring-offset-2"
             {% if action.hx_get %}hx-get="{{ action.hx_get }}"{% endif %}
             {% if action.hx_post %}hx-post="{{ action.hx_post }}"{% endif %}
-            {% if action.onclick %}onclick="{{ action.onclick }}"{% endif %}>
+            {% if action.data_action %}data-action="{{ action.data_action }}"{% if action.data_href %} data-href="{{ action.data_href }}"{% endif %}{% endif %}>
             {{ action.text }}
           </button>
           {% endfor %}
@@ -66,7 +66,7 @@ role="alert">
 {% elif variant == "info" %}text-blue-400 hover:bg-blue-100
 {% else %}text-slate-400 hover:bg-slate-100
 {% endif %}"
-              {% if dismissible %}@click="show = false"{% endif %}
+              {% if dismissible %}@click="dismiss()"{% endif %}
               aria-label="Close notification">
         {% icon "x" %}
       </button>

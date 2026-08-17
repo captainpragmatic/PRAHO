@@ -147,7 +147,7 @@
                  class="flex-1 flex justify-center py-3 px-4 border border-slate-600 text-sm font-medium rounded-lg text-slate-300 hover:bg-slate-700 hover:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-500 transition-colors">
                 ← {% trans 'Cancel' %}
               </a>
-              {% trans 'Disable MFA' as disable_mfa_btn %}{% button disable_mfa_btn variant="danger" type="submit" icon="lock" class_="flex-1" attrs="onclick=\"return confirmDisable()\"" %}
+              {% trans 'Disable MFA' as disable_mfa_btn %}{% button disable_mfa_btn variant="danger" type="submit" icon="lock" class_="flex-1" data_action="confirm-submit" data_invoke="confirmDisable" %}
             </div>
           </form>
         </div>

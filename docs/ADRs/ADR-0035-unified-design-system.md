@@ -16,6 +16,14 @@ Extract shared UI components into `shared/ui/` at the project root. Portal's com
 
 ### Architecture
 
+> **Amendment (2026-08-02):** the JS-config half of this ADR never took effect.
+> Tailwind v4's CLI has no `--config` flag, so `shared/tailwind.preset.js` and the
+> per-service `tailwind.config.js` files were never read — building with a
+> nonexistent config path exited 0, and deleting all four produced byte-identical
+> CSS. Theming now lives CSS-first in `assets/css/{platform,portal}.css` via
+> `@theme` and `@plugin`. The component/token decisions below still stand; only the
+> configuration mechanism changed.
+
 ```
 shared/
 ├── ui/

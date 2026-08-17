@@ -61,9 +61,10 @@ PRAHO/                          # 🚀 Romanian Hosting Provider PRAHO Platform
 │  ├─ ui/                      # Shared design system
 │  │  ├─ templates/components/ # 15 shared component templates (canonical)
 │  │  └─ static/js/components/ # Shared JS modules (modal, toast)
-│  └─ tailwind.preset.js       # Shared Tailwind CSS preset
 ├─ assets/                      # 🎨 Build inputs
-│  └─ css/input.css            # Shared Tailwind CSS source (design tokens)
+│  ├─ css/platform.css         # Platform entry point (@theme + plugins)
+│  ├─ css/portal.css           # Portal entry point (@theme + plugins)
+│  └─ css/input.css            # Shared design-token partial (imported by both)
 ├─ tests/                      # 🧪 Cross-service testing
 │  └─ integration/             # Integration tests for service communication
 └─ Makefile                    # ⚙️ Service management commands

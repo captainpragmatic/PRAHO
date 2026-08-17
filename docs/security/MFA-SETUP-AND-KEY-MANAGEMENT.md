@@ -36,7 +36,7 @@ python manage.py test tests.users.test_2fa_models tests.users.test_2fa_services
 
 1. **Install Dependencies**
    ```bash
-   uv sync --group platform
+   make install
    ```
 
 2. **Create .env File**

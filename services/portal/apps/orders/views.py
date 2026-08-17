@@ -82,15 +82,15 @@ def _cart_error_response(
     template: str,
     context: dict[str, Any],
 ) -> HttpResponse:
-    """Return an HTMX-friendly error response with retarget headers.
+    """Return an HTMX-friendly error response with a target-independent toast.
 
     Uses HTTP 422 so HTMX's ``event.detail.successful`` is False,
-    preventing success toasts on error. HX-Retarget/HX-Reswap headers
-    instruct HTMX where to render the error fragment.
+    preventing success handlers from running. Because HTMX does not swap 4xx
+    response bodies, ``HX-Trigger: showToast`` surfaces errors on every page.
     """
     response = render(request, template, context, status=HTTP_UNPROCESSABLE_ENTITY)
-    response["HX-Retarget"] = "#cart-notifications"
-    response["HX-Reswap"] = "innerHTML"
+    message = str(context.get("error", "") or _("Something went wrong. Please try again."))
+    response["HX-Trigger"] = json.dumps({"showToast": {"variant": "error", "message": message}})
     return response
 
 
@@ -499,7 +499,6 @@ def product_catalog(request: HttpRequest) -> HttpResponse:
             "featured_only": featured_only,
             "product_type_options": product_type_options,
             "cart_count": cart.get_item_count(),
-            "cart_total_quantity": cart.get_total_quantity(),
             "order_steps": ORDER_STEPS,
             "current_step": 1,
         }
@@ -651,9 +650,7 @@ def add_to_cart(request: HttpRequest) -> HttpResponse:  # noqa: PLR0911
         # Return updated cart widget
         cart_items = cart.get_items()
         if cart_items:
-            # Item was successfully added — cart_updated.html renders the mini-cart open
-            # (server-rendered state; the cartAdded HX-Trigger below fires pre-swap and
-            # cannot open the swapped-in widget, it only informs page-level listeners)
+            # Item was successfully added — cart_updated.html renders the mini-cart open.
             just_added_slug = product_slug
             # Find the item by slug rather than using cart_items[-1], which is wrong when
             # add_item() updates an existing item in-place instead of appending.
@@ -664,23 +661,20 @@ def add_to_cart(request: HttpRequest) -> HttpResponse:  # noqa: PLR0911
                 "orders/partials/cart_updated.html",
                 {
                     "cart_count": cart.get_item_count(),
-                    "cart_total_quantity": cart.get_total_quantity(),
                     "success_message": _("Product added to cart successfully!"),
                     "product_name": product_name,
                     "just_added_slug": just_added_slug,
                 },
             )
-            response["HX-Trigger"] = json.dumps({"cartAdded": {"slug": just_added_slug}})
             return response
         else:
             # No item was added (likely due to pricing issues)
             return _cart_error_response(
                 request,
-                "orders/partials/cart_error_notification.html",
+                "orders/partials/error_message.html",
                 {
                     "error": _("Product is currently not available for purchase."),
                     "cart_count": cart.get_item_count(),
-                    "cart_total_quantity": cart.get_total_quantity(),
                 },
             )
 
@@ -688,18 +682,17 @@ def add_to_cart(request: HttpRequest) -> HttpResponse:  # noqa: PLR0911
         logger.warning(f"⚠️ [Cart] Validation error: {e}")
         return _cart_error_response(
             request,
-            "orders/partials/cart_error_notification.html",
-            {"error": str(e), "cart_count": 0, "cart_total_quantity": 0},
+            "orders/partials/error_message.html",
+            {"error": str(e), "cart_count": 0},
         )
     except Exception as e:
         logger.error(f"🔥 [Cart] Unexpected error adding to cart: {e}")
         return _cart_error_response(
             request,
-            "orders/partials/cart_error_notification.html",
+            "orders/partials/error_message.html",
             {
                 "error": _("Error adding to cart. Please try again."),
                 "cart_count": 0,
-                "cart_total_quantity": 0,
             },
         )
 
@@ -736,18 +729,18 @@ def update_cart_item(request: HttpRequest) -> HttpResponse:  # noqa: PLR0911
 
         cart = GDPRCompliantCartSession(request.session)
         cart.update_item_quantity(product_slug, billing_period, quantity)
+        customer_id, user_id = _get_customer_context(request)
+        calculation_result = CartCalculationService.calculate_cart_totals(
+            cart, str(customer_id or ""), int(user_id or 0)
+        )
 
         # 🔒 SECURITY: Apply uniform response delay
         OrderSecurityHardening.uniform_response_delay()
 
         return render(
             request,
-            "orders/partials/cart_item_updated.html",
-            {
-                "cart_count": cart.get_item_count(),
-                "cart_total_quantity": cart.get_total_quantity(),
-                "success_message": _("Quantity updated successfully!"),
-            },
+            "orders/partials/cart_totals.html",
+            {"calculation": calculation_result, "cart": cart, "warnings": cart.get_warnings()},
         )
 
     except ValidationError as e:
@@ -761,7 +754,7 @@ def update_cart_item(request: HttpRequest) -> HttpResponse:  # noqa: PLR0911
 
 @require_customer_authentication
 @require_http_methods(["POST"])
-def remove_from_cart(request: HttpRequest) -> HttpResponse:
+def remove_from_cart(request: HttpRequest) -> HttpResponse:  # noqa: PLR0911
     """
     HTMX endpoint to remove item from cart.
     """
@@ -794,12 +787,15 @@ def remove_from_cart(request: HttpRequest) -> HttpResponse:
         # 🔒 SECURITY: Apply uniform response delay
         OrderSecurityHardening.uniform_response_delay()
 
+        hx_target = request.headers.get("HX-Target", "")
+        if hx_target == "cart-items":
+            return render(request, "orders/partials/cart_items.html", {"cart_items": cart.get_items()})
+
         return render(
             request,
             "orders/partials/cart_updated.html",
             {
                 "cart_count": cart.get_item_count(),
-                "cart_total_quantity": cart.get_total_quantity(),
                 "success_message": _("Product removed from cart!"),
             },
         )

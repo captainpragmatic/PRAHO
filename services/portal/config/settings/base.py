@@ -228,6 +228,21 @@ SECURE_CONTENT_TYPE_NOSNIFF = True
 SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"  # ✅ Added
 X_FRAME_OPTIONS = "DENY"
 
+# Content Security Policy rollout (#104 [M7]). Server-selected only — never
+# from a request header/param. Unknown/typo profile values are handled by
+# SecurityHeadersMiddleware as "current" (byte-identical to the live policy).
+# The shipped default is a NAMED CONSTANT (not an inline literal) so a guard test
+# can pin it independently of whether CSP_PROFILE is exported in the environment
+# — asserting the effective setting alone would be masked by a CI/shell override.
+DEFAULT_CSP_PROFILE = "phase3-target"
+CSP_PROFILE = os.environ.get("CSP_PROFILE", DEFAULT_CSP_PROFILE)
+CSP_REPORT_ONLY = os.environ.get("CSP_REPORT_ONLY", "false").lower() in ("1", "true", "yes")
+
+# Test-only URL surface (CSP violation positive-control). The E2E settings
+# module is the sole enabler; base/dev/staging/prod keep this False so the
+# route 404s even if config.e2e_urls is somehow loaded.
+E2E_TEST_ROUTES_ENABLED = False
+
 # HTTPS redirect in production
 SECURE_SSL_REDIRECT = not DEBUG
 

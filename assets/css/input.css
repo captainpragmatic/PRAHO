@@ -1,4 +1,7 @@
-@import "tailwindcss";
+/* Shared partial — NOT a build entry point.
+   `@import "tailwindcss"` lives in the per-service entries (platform.css,
+   portal.css) because each service layers its own @theme on top. Building this
+   file directly produces a stylesheet with no Tailwind utilities at all. */
 
 /* ===============================================================================
    DESIGN TOKENS 🎨

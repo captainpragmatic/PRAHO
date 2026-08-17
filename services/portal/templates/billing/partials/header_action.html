@@ -5,4 +5,4 @@
 {% button automatic_payments_label variant="info" size="sm" href=automatic_payments_url %}
 {% url 'billing:sync_invoices' as sync_url %}
 {% trans 'Sync' as sync_label %}
-{% button sync_label variant="secondary" size="sm" hx_post=sync_url hx_swap="none" attrs='hx-on::after-request="if(event.detail.successful) window.location.reload();"' %}
+{% button sync_label variant="secondary" size="sm" hx_post=sync_url hx_swap="none" attrs='data-htmx-after="reload"' %}

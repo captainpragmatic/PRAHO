@@ -122,7 +122,7 @@ class ServiceSearchStatusEmptyStateTests(TestCase):
         content = response.content.decode()
         tab_count = content.count('role="tab" data-tab-value=')
         self.assertEqual(content.count('aria-controls="services-content"'), tab_count)
-        self.assertEqual(content.count('onkeydown="handleTabKeydown(event, this)"'), tab_count)
+        self.assertEqual(content.count('data-action="switch-tab"'), tab_count)
         self.assertIn(
             'id="services-content" role="tabpanel" tabindex="0" aria-label="Filtered results"',
             content,

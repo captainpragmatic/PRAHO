@@ -463,7 +463,7 @@ class CompanyProfileEditTests(SimpleTestCase):
 
 
 # ---------------------------------------------------------------------------
-# F4: hx-confirm replaced with native onclick confirm
+# F4: destructive-action confirm gate (delegated data-confirm submit listener)
 # ---------------------------------------------------------------------------
 
 
@@ -472,7 +472,7 @@ class CompanyProfileEditTests(SimpleTestCase):
     CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
 )
 class TeamRemoveConfirmTests(SimpleTestCase):
-    """F4: Destructive remove button uses native JS confirm, not inert hx-confirm."""
+    """F4: Destructive remove uses a delegated data-confirm submit gate, not inline confirm or inert hx-confirm."""
 
     def _set_session(self, **overrides):
         session = self.client.session
@@ -481,8 +481,8 @@ class TeamRemoveConfirmTests(SimpleTestCase):
         session.save()
 
     @patch("apps.customers.views.api_client")
-    def test_remove_button_has_native_confirm(self, mock_api):
-        """Destructive action button uses native JS confirm, not inert hx-confirm."""
+    def test_remove_button_has_delegated_confirm(self, mock_api):
+        """Destructive remove uses a delegated data-confirm submit gate, not inline confirm or inert hx-confirm."""
         mock_api.get_customer_users.return_value = {
             "success": True,
             "users": [
@@ -511,8 +511,9 @@ class TeamRemoveConfirmTests(SimpleTestCase):
         self._set_session()
         response = self.client.get(reverse("customers:team"))
         content = response.content.decode()
-        self.assertIn("return confirm(", content)
+        self.assertIn("data-confirm=", content)
         self.assertNotIn("hx-confirm", content)
+        self.assertNotIn("return confirm(", content)
 
 
 @override_settings(
@@ -520,7 +521,7 @@ class TeamRemoveConfirmTests(SimpleTestCase):
     CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
 )
 class AddressDeleteConfirmTests(SimpleTestCase):
-    """F4: Destructive delete button uses native JS confirm, not inert hx-confirm."""
+    """F4: Destructive delete uses a delegated data-confirm submit gate, not inline confirm or inert hx-confirm."""
 
     def _set_session(self, **overrides):
         session = self.client.session
@@ -529,8 +530,8 @@ class AddressDeleteConfirmTests(SimpleTestCase):
         session.save()
 
     @patch("apps.customers.views.api_client")
-    def test_delete_button_has_native_confirm(self, mock_api):
-        """Destructive action button uses native JS confirm, not inert hx-confirm."""
+    def test_delete_button_has_delegated_confirm(self, mock_api):
+        """Destructive delete uses a delegated data-confirm submit gate, not inline confirm or inert hx-confirm."""
         mock_api.get_customer_addresses.return_value = {
             "success": True,
             "addresses": [
@@ -551,8 +552,9 @@ class AddressDeleteConfirmTests(SimpleTestCase):
         self._set_session()
         response = self.client.get(reverse("customers:addresses"))
         content = response.content.decode()
-        self.assertIn("return confirm(", content)
+        self.assertIn("data-confirm=", content)
         self.assertNotIn("hx-confirm", content)
+        self.assertNotIn("return confirm(", content)
 
 
 # ---------------------------------------------------------------------------
