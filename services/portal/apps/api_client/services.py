@@ -64,9 +64,9 @@ def _resolve_portal_signing_secret() -> str:
     An explicitly-empty ``PORTAL_HMAC_SECRET`` is a provisioning error and raises rather
     than silently degrading to the shared secret.
     """
-    per_portal = getattr(settings, "PORTAL_HMAC_SECRET", None)
+    per_portal: str | None = getattr(settings, "PORTAL_HMAC_SECRET", None)
     if per_portal is None:
-        return settings.PLATFORM_API_SECRET
+        return str(settings.PLATFORM_API_SECRET)
     if not per_portal:
         raise ImproperlyConfigured("PORTAL_HMAC_SECRET is set but empty; unset it to use PLATFORM_API_SECRET")
     return per_portal
