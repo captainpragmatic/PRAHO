@@ -170,31 +170,42 @@ def _extract_hmac_identity(request: Request) -> str:
 
 
 class _CustomTimeRateMixin:
-    """Support custom shorthand rates such as `50/10s`.
+    """Shorthand-rate parsing + the system-wide rate-limiting kill switch.
 
     #277: startup validation (``validate_throttle_rate_map``) accepts every format
     ``parse_rate_string`` accepts, but DRF's stock ``parse_rate`` keys the window on
     ``period[0]`` alone — so a multi-digit window like ``50/10s`` reads as ``'1'`` and
     raises KeyError at REQUEST time after passing deploy checks cleanly. Any throttle
     whose rate is env-overridable must therefore parse with this mixin, not DRF's.
+
+    The kill switch lives here too so it is honored by EVERY project throttle. It used
+    to sit only on ``_ConfigurableRateThrottle``, which the DRF-base throttles
+    (Customer/Burst/Standard/Auth) don't inherit — so ``RATE_LIMITING_ENABLED=False``
+    silently failed to disable them (unexpected 429s in dev/E2E). Since this mixin is
+    the one common ancestor of every project throttle, defining ``allow_request`` here
+    makes the switch universal. ``super().allow_request`` reaches the real throttle base
+    via cooperative MRO (the mixin is always followed by a DRF throttle class).
     """
 
     def parse_rate(self, rate: str) -> tuple[int, int]:
         return parse_rate_string(rate)
 
-
-class _ConfigurableRateThrottle(_CustomTimeRateMixin, SimpleRateThrottle):  # type: ignore[misc]  # dynamic DRF attributes
-    """Honor PRAHO's system-wide rate-limiting kill switch.
-
-    Inherits ``_CustomTimeRateMixin`` so shorthand-window parsing is the default for
-    every project throttle rather than something each subclass must remember to opt
-    into — see the mixin docstring for the startup/request-time asymmetry it closes.
-    """
-
     def allow_request(self, request: Request, view: Any) -> bool:
         if not getattr(settings, "RATE_LIMITING_ENABLED", True):
             return True
-        return bool(super().allow_request(request, view))
+        # super() resolves to the DRF throttle base at runtime via cooperative MRO — this
+        # mixin is always mixed in *before* a SimpleRateThrottle subclass. mypy can't see
+        # that from the standalone mixin, hence the ignore.
+        return bool(super().allow_request(request, view))  # type: ignore[misc]  # cooperative-MRO super
+
+
+class _ConfigurableRateThrottle(_CustomTimeRateMixin, SimpleRateThrottle):  # type: ignore[misc]  # dynamic DRF attributes
+    """Base for PRAHO's own scoped throttles.
+
+    Carries no behavior of its own now — shorthand parsing and the kill switch both
+    live on ``_CustomTimeRateMixin`` so every project throttle honors them, not just
+    this base's subclasses.
+    """
 
 
 class PortalHMACRateThrottle(_ConfigurableRateThrottle):

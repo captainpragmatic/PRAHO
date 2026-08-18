@@ -20,15 +20,23 @@ from apps.api.secure_auth import (
     require_portal_service_authentication,
 )
 from apps.audit.services import GDPRConsentService, GDPRExportService
+from apps.common.performance.rate_limiting import BurstRateThrottle, CustomerRateThrottle
 from apps.users.models import User
 
 logger = logging.getLogger(__name__)
+
+# Throttling note (#277): these HMAC service endpoints add CustomerRateThrottle +
+# BurstRateThrottle. Both return None for verified portal-service traffic (which sets
+# request._portal_authenticated), so legitimate signed calls are unaffected, but they
+# key ANONYMOUS traffic by safe client IP. DRF runs throttles before
+# @require_portal_service_authentication rejects an unsigned request, so without a
+# fallback the pre-auth path would be an unthrottled endpoint-layer surface.
 
 
 @api_view(["POST"])
 @authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])  # No DRF permissions - auth handled by @require_portal_service_authentication
-@throttle_classes([])  # No DRF throttling - service-to-service HMAC auth, not user-facing
+@throttle_classes([CustomerRateThrottle, BurstRateThrottle])  # #277: IP-limit unsigned traffic; None for signed
 @require_portal_service_authentication
 def cookie_consent_api(request: Request, request_data: dict[str, Any]) -> Response:
     """
@@ -65,7 +73,7 @@ def cookie_consent_api(request: Request, request_data: dict[str, Any]) -> Respon
 @api_view(["POST"])
 @authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])  # No DRF permissions - auth handled by @require_portal_service_authentication
-@throttle_classes([])  # No DRF throttling - service-to-service HMAC auth, not user-facing
+@throttle_classes([CustomerRateThrottle, BurstRateThrottle])  # #277: IP-limit unsigned traffic; None for signed
 @require_portal_service_authentication
 def consent_history_api(request: Request, request_data: dict[str, Any]) -> Response:
     """
@@ -96,7 +104,7 @@ def consent_history_api(request: Request, request_data: dict[str, Any]) -> Respo
 @api_view(["POST"])
 @authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])  # No DRF permissions - auth handled by @require_portal_service_authentication
-@throttle_classes([])  # No DRF throttling - service-to-service HMAC auth, not user-facing
+@throttle_classes([CustomerRateThrottle, BurstRateThrottle])  # #277: IP-limit unsigned traffic; None for signed
 @require_portal_service_authentication
 def data_export_api(request: Request, request_data: dict[str, Any]) -> Response:
     """
