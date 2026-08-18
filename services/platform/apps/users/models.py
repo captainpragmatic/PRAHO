@@ -636,6 +636,13 @@ class APIToken(models.Model):
         verbose_name_plural = _("API Tokens")
         indexes: ClassVar[list[models.Index]] = [
             models.Index(fields=["user", "created_at"]),
+            # #246: both expiry access patterns were unindexed. The daily purge
+            # (users/tasks.py — APIToken.objects.filter(expires_at__lte=now)) scanned the
+            # whole table; the per-user live-token count enforcing the cap
+            # (users/services.py — filter(user=...) + expires_at null-or-future) could use
+            # only the user prefix of the composite above, then filtered expiry in memory.
+            models.Index(fields=["expires_at"], name="apitoken_expires_at_idx"),
+            models.Index(fields=["user", "expires_at"], name="apitoken_user_expires_idx"),
         ]
 
     def __str__(self) -> str:
