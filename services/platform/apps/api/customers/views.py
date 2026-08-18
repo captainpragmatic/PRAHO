@@ -22,6 +22,8 @@ from apps.api.core.permissions import IsAuthenticatedAndAccessible
 from apps.api.core.throttling import AuthThrottle, BurstAPIThrottle
 from apps.api.secure_auth import public_api_endpoint, require_customer_authentication, require_portal_authentication
 from apps.common.performance.rate_limiting import (
+    BurstRateThrottle,
+    CustomerRateThrottle,
     PortalHMACBurstThrottle,
     PortalHMACCreateUserThrottle,
     PortalHMACRateThrottle,
@@ -691,7 +693,12 @@ def customer_detail_api(request: HttpRequest, customer: Customer) -> Response:
 @api_view(["POST"])
 @authentication_classes([])  # No DRF authentication - HMAC handled by @require_customer_authentication
 @permission_classes([AllowAny])  # HMAC auth via @require_customer_authentication below
-@throttle_classes([PortalHMACRateThrottle, PortalHMACBurstThrottle])
+# #277 follow-up: CustomerRateThrottle/BurstRateThrottle return None for verified portal
+# traffic (deferring to the PortalHMAC* limits) but key ANONYMOUS traffic by safe client
+# IP. DRF evaluates throttles before @require_customer_authentication rejects an unsigned
+# request, so without them the pre-auth path is unthrottled. This restores the full
+# DEFAULT_THROTTLE_CLASSES set for this endpoint.
+@throttle_classes([PortalHMACRateThrottle, PortalHMACBurstThrottle, CustomerRateThrottle, BurstRateThrottle])
 @require_customer_authentication
 def update_customer_billing_address(  # noqa: C901, PLR0912, PLR0915  # Complexity: multi-step business logic
     request: Request, customer: Customer
@@ -705,7 +712,10 @@ def update_customer_billing_address(  # noqa: C901, PLR0912, PLR0915  # Complexi
     limits and keyed on client IP — BurstAPIThrottle extends UserRateThrottle and this
     endpoint runs with ``authentication_classes([])``, so request.user is AnonymousUser
     and a caller distributing requests across IPs bypassed the 120/min cap entirely.
-    Both throttles below key on the verified portal id (X-Portal-Id).
+    The two PortalHMAC* throttles key signed traffic on the verified portal id
+    (X-Portal-Id); CustomerRateThrottle/BurstRateThrottle return None for that traffic
+    but key ANONYMOUS traffic by client IP, so the pre-auth path an unsigned caller
+    reaches before ``@require_customer_authentication`` stays limited.
 
     This endpoint enables seamless inline editing of customer profile data
     when checkout validation fails, providing a smooth UX without navigation disruption.
@@ -994,7 +1004,15 @@ def customer_users_add(request: HttpRequest, customer: Customer) -> Response:  #
 @api_view(["POST"])
 @authentication_classes([])
 @permission_classes([AllowAny])
-@throttle_classes([PortalHMACRateThrottle, PortalHMACBurstThrottle, PortalHMACCreateUserThrottle])
+@throttle_classes(
+    [
+        PortalHMACRateThrottle,
+        PortalHMACBurstThrottle,
+        PortalHMACCreateUserThrottle,
+        CustomerRateThrottle,
+        BurstRateThrottle,
+    ]
+)
 @require_customer_authentication
 def customer_users_create(request: HttpRequest, customer: Customer) -> Response:  # noqa: PLR0911
     """Create a new user and add them to the customer organization.
@@ -1004,8 +1022,11 @@ def customer_users_create(request: HttpRequest, customer: Customer) -> Response:
     create-user cap on top. The previous BurstAPIThrottle (api_burst, 120/min)
     was a regression here — it extends UserRateThrottle and this endpoint runs
     with authentication_classes([]), so it keyed on client IP and a caller
-    distributing requests across IPs could bypass it. All three throttles below
-    key on the verified portal id (X-Portal-Id)."""
+    distributing requests across IPs could bypass it. The first three throttles
+    key on the verified portal id (X-Portal-Id) and bound signed traffic;
+    CustomerRateThrottle/BurstRateThrottle return None for portal traffic but
+    key ANONYMOUS traffic by client IP, so the pre-auth path an unsigned caller
+    reaches before @require_customer_authentication is still limited (#277)."""
     data = _get_request_data(request)
     try:
         user_id = _extract_user_id(data)

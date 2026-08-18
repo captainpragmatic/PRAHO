@@ -5,18 +5,22 @@ from copy import deepcopy
 from unittest.mock import patch
 
 from django.conf import settings
+from django.contrib.auth.models import AnonymousUser
 from django.core.cache import cache
 from django.core.exceptions import ImproperlyConfigured
 from django.test import RequestFactory, SimpleTestCase, TestCase, override_settings
 from django.utils.module_loading import import_string
+from rest_framework.decorators import api_view, authentication_classes, throttle_classes
 from rest_framework.test import APIRequestFactory
 from rest_framework.throttling import AnonRateThrottle, ScopedRateThrottle, SimpleRateThrottle, UserRateThrottle
+from rest_framework.views import APIView
 from tests.api.test_api_auth_regressions import _has_public_marker
 
 from apps.api.core import throttling as core_throttling
 from apps.api.core.throttling import AuthThrottle, BurstAPIThrottle, StandardAPIThrottle
 from apps.api.customers import views as customers_views
 from apps.api.customers.views import customer_users_create, update_customer_billing_address
+from apps.api.gdpr import views as gdpr_views
 from apps.api.orders import views as orders_views
 from apps.api.orders.views import (
     OrderCalculateThrottle,
@@ -127,7 +131,7 @@ class ThrottleArchitectureGuardrailTests(SimpleTestCase):
         HMAC view with the wrong throttle fails here without anyone remembering to add it.
         """
         offenders: list[str] = []
-        for module in (customers_views, orders_views, users_views):
+        for module in (customers_views, orders_views, users_views, gdpr_views):
             for name, obj in vars(module).items():
                 view_cls = getattr(obj, "cls", None)
                 if view_cls is None or not hasattr(view_cls, "throttle_classes"):
@@ -168,8 +172,147 @@ class ThrottleArchitectureGuardrailTests(SimpleTestCase):
         self.assertIn(rate_limiting.PortalHMACBurstThrottle, throttle_classes)
         self.assertNotIn(BurstAPIThrottle, throttle_classes)
 
+    def test_hmac_function_views_throttle_unsigned_traffic_too(self) -> None:
+        """#277 follow-up: an ``authentication_classes([])`` HMAC view must ALSO limit unsigned traffic.
+
+        The PortalHMAC* throttles return ``None`` (no limit) for non-portal requests by
+        design — they only bucket verified portal callers. DRF evaluates throttles BEFORE
+        the view body, so ``@require_customer_authentication`` rejects an unsigned request
+        only after it passed throttling. A view carrying ONLY portal throttles therefore
+        leaves the pre-auth/rejection path unthrottled at this layer, which is exactly what
+        replacing the IP-keyed ``BurstAPIThrottle`` dropped. Every such view needs at least
+        one always-keyed throttle — CustomerRateThrottle/BurstRateThrottle key anonymous
+        traffic by safe client IP — matching DEFAULT_THROTTLE_CLASSES.
+
+        This is the positive-coverage complement to
+        ``test_hmac_function_views_never_use_ip_keyed_user_throttles``: that guard forbids
+        the WRONG throttle; this one requires a fallback to actually be present.
+        """
+        factory = APIRequestFactory()
+        unprotected: list[str] = []
+        for module in (customers_views, orders_views, users_views, gdpr_views):
+            for name, obj in vars(module).items():
+                view_cls = getattr(obj, "cls", None)
+                if view_cls is None or not hasattr(view_cls, "throttle_classes"):
+                    continue
+                if list(getattr(view_cls, "authentication_classes", [1])):
+                    continue  # DRF auth enabled → not an unsigned-reachable HMAC endpoint
+                if _has_public_marker(obj):
+                    continue  # genuinely public: no portal identity, IP keying is native
+                # Skip views that merely INHERIT the defaults, NOT ones that explicitly
+                # override throttling. config.settings.test sets DEFAULT_THROTTLE_CLASSES=[],
+                # so both show throttle_classes==[] — but DRF binds an inheriting view to the
+                # SAME APIView.throttle_classes object, while @throttle_classes([...]) (any
+                # list, including []) installs a distinct one. Comparing identity therefore
+                # keeps inherited-default views out (in production those defaults key unsigned
+                # traffic) while an explicit @throttle_classes([]) that suppresses the defaults
+                # — the dangerous config three GDPR views once had — is NOT skipped and is
+                # flagged below (an empty list keys nothing).
+                if view_cls.throttle_classes is APIView.throttle_classes:
+                    continue
+                req = factory.post(f"/{name}/", REMOTE_ADDR="198.51.100.10")
+                req.user = AnonymousUser()  # unsigned: no portal auth, no DRF user
+                keys_an_unsigned_request = any(
+                    throttle().get_cache_key(req, view=view_cls) is not None
+                    for throttle in view_cls.throttle_classes
+                )
+                if not keys_an_unsigned_request:
+                    unprotected.append(f"{module.__name__}.{name}")
+
+        self.assertEqual(
+            unprotected,
+            [],
+            "HMAC views (authentication_classes([])) must throttle UNSIGNED traffic too — "
+            "the PortalHMAC* throttles return None for non-portal requests, so add an "
+            f"always-keyed throttle (CustomerRateThrottle/BurstRateThrottle): {unprotected}",
+        )
+
+    def test_sweep_would_flag_an_explicit_empty_throttle_override(self) -> None:
+        """The strengthened skip must distinguish inherited defaults from an explicit
+        @throttle_classes([]). This builds the exact dangerous shape — an HMAC view that
+        explicitly suppresses the defaults — and asserts the sweep's own predicates would
+        flag it (not skip it), so a future regression of that shape can't pass silently.
+        """
+        @api_view(["POST"])
+        @authentication_classes([])
+        @throttle_classes([])  # explicit suppression — the dangerous config
+        def _explicit_empty_hmac_view(request: object) -> None:  # pragma: no cover - never called
+            return None
+
+        view_cls = _explicit_empty_hmac_view.cls
+        # The identity skip must NOT swallow it: an explicit [] is a distinct object.
+        self.assertIsNot(view_cls.throttle_classes, APIView.throttle_classes)
+        # And it keys nothing for unsigned traffic, so the sweep's offender branch fires.
+        factory = APIRequestFactory()
+        req = factory.post("/x/", REMOTE_ADDR="198.51.100.10")
+        req.user = AnonymousUser()
+        keys_unsigned = any(t().get_cache_key(req, view=view_cls) is not None for t in view_cls.throttle_classes)
+        self.assertFalse(keys_unsigned, "an explicit empty override throttles nothing — must be flagged")
+
+    def test_gdpr_service_endpoints_throttle_unsigned_traffic(self) -> None:
+        """#277 follow-up: the GDPR HMAC endpoints once used @throttle_classes([]) — an
+        explicit opt-out that suppressed the defaults, leaving the unsigned/rejection path
+        an unlimited endpoint-layer surface (data_export_api is sensitive). Pinned per-view
+        because the generic sweep skips empty throttle lists (a test-settings limitation).
+        """
+        factory = APIRequestFactory()
+        req = factory.post("/x/", REMOTE_ADDR="198.51.100.10")
+        req.user = AnonymousUser()
+        for view in (gdpr_views.cookie_consent_api, gdpr_views.consent_history_api, gdpr_views.data_export_api):
+            throttles = view.cls.throttle_classes
+            self.assertTrue(throttles, f"{view.__name__} must not disable throttling entirely")
+            self.assertTrue(
+                any(t().get_cache_key(req, view=view.cls) is not None for t in throttles),
+                f"{view.__name__} must throttle unsigned traffic (CustomerRateThrottle/BurstRateThrottle)",
+            )
+
+    def test_kill_switch_disables_all_project_throttles_including_drf_base_ones(self) -> None:
+        """RATE_LIMITING_ENABLED=False must bypass EVERY project throttle.
+
+        The kill switch used to live only on _ConfigurableRateThrottle, which the DRF-base
+        throttles (Customer/Burst/Standard/Auth) don't inherit — so disabling rate limiting
+        silently failed to disable them, causing unexpected 429s in dev/E2E. #277 moved the
+        switch onto _CustomTimeRateMixin, the one common ancestor of every project throttle.
+        This pins that: an unsigned request that WOULD be keyed (non-None cache key) must be
+        allowed when the switch is off.
+        """
+        factory = APIRequestFactory()
+        req = factory.post("/x/", REMOTE_ADDR="198.51.100.10")
+        req.user = AnonymousUser()
+        drf_base_throttles = [
+            rate_limiting.CustomerRateThrottle,
+            rate_limiting.BurstRateThrottle,
+            rate_limiting.StandardAPIThrottle,
+            rate_limiting.AuthThrottle,
+        ]
+        with override_settings(RATE_LIMITING_ENABLED=False, CACHES=LOCMEM_TEST_CACHE):
+            cache.clear()
+            for throttle_cls in drf_base_throttles:
+                throttle = throttle_cls()
+                # Precondition: this throttle WOULD key (and thus limit) the request when enabled.
+                self.assertIsNotNone(
+                    throttle.get_cache_key(req, view=None),
+                    f"{throttle_cls.__name__} should key an unsigned request (test premise)",
+                )
+                self.assertTrue(
+                    throttle.allow_request(req, view=None),
+                    f"{throttle_cls.__name__} must be bypassed when RATE_LIMITING_ENABLED=False",
+                )
+
     def test_billing_address_throttle_cannot_be_bypassed_by_rotating_ip(self) -> None:
-        """The behavioral half of the guard above: same portal, different IPs → same bucket."""
+        """Same portal, different IPs → same bucket — asserted through the VIEW's own throttles.
+
+        Resolving the portal throttle from ``update_customer_billing_address.cls`` rather
+        than instantiating ``PortalHMACRateThrottle`` directly is what binds this to the
+        view: if the view's binding regresses (e.g. back to an IP-keyed throttle), this
+        stops proving anything about a class the view no longer uses.
+        """
+        portal_throttles = [
+            t for t in update_customer_billing_address.cls.throttle_classes
+            if issubclass(t, rate_limiting.PortalHMACRateThrottle)
+        ]
+        self.assertTrue(portal_throttles, "billing-address view must carry a portal-keyed throttle")
+
         factory = RequestFactory()
         first = factory.post("/api/customers/billing-address/", REMOTE_ADDR="198.51.100.10")
         second = factory.post("/api/customers/billing-address/", REMOTE_ADDR="203.0.113.20")
@@ -177,11 +320,14 @@ class ThrottleArchitectureGuardrailTests(SimpleTestCase):
             req._portal_authenticated = True  # type: ignore[attr-defined]  # middleware contract
             req.META["HTTP_X_PORTAL_ID"] = "portal-stable"
 
-        throttle = rate_limiting.PortalHMACRateThrottle()
-        self.assertEqual(
-            throttle.get_cache_key(first, view=None),
-            throttle.get_cache_key(second, view=None),
-        )
+        throttle = portal_throttles[0]()
+        first_key = throttle.get_cache_key(first, view=update_customer_billing_address.cls)
+        second_key = throttle.get_cache_key(second, view=update_customer_billing_address.cls)
+        # Assert the throttle actually KEYS signed traffic before asserting IP-independence —
+        # otherwise a regression where it returned None for signed traffic would pass as
+        # None == None while silently throttling nothing.
+        self.assertIsNotNone(first_key, "portal throttle must key verified signed traffic")
+        self.assertEqual(first_key, second_key)
 
     def test_every_project_throttle_parses_its_configured_rate(self) -> None:
         """#277: the gap that let PortalHMACRateThrottle/CustomerRateThrottle rot.
