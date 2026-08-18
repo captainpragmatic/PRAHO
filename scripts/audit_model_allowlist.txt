@@ -18,6 +18,9 @@ audit.AuditEvent                # the audit trail itself
 audit.AuditAlert                # audit subsystem alert record
 audit.AuditEventReview          # manual review sign-off; the review action logs its own AuditEvent in the view, a signal would double-log
 audit.AuditIntegrityCheck       # audit chain integrity verification
+audit.AuditChainHead            # hash-chain cursor (#313) — auditing it would recurse on every append
+audit.AuditChainLink            # hash-chain ledger (#313) — IS the tamper-evidence, append-only by construction
+audit.AuditChainAnchor          # external-anchor record (#313) — local copy of published chain heads, append-only
 audit.FileIntegrityBaseline     # file-integrity baseline hashes (audit infrastructure)
 audit.AuditRetentionPolicy      # audit data retention configuration
 audit.AuditSearchQuery          # audit search log

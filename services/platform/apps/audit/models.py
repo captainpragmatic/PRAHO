@@ -15,6 +15,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.contenttypes.fields import GenericForeignKey
 from django.contrib.contenttypes.models import ContentType
 from django.db import models
+from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 User = get_user_model()
@@ -74,6 +75,30 @@ class AuditEventQuerySet(models.QuerySet["AuditEvent"]):
             raise AuditImmutabilityError(
                 f"AuditEvent is append-only; {operation} requires the audit_mutation_allowed() escape hatch"
             )
+
+
+class AuditLedgerImmutabilityError(Exception):
+    """Raised when the audit chain ledger (AuditChainLink) is mutated at all (#313)."""
+
+
+class AuditChainLinkQuerySet(models.QuerySet["AuditChainLink"]):
+    """QuerySet that blocks ALL mutation of chain links — no escape hatch.
+
+    Unlike AuditEvent (which is re-stamped/anonymized/retention-deleted via
+    audit_mutation_allowed), a chain link is never legitimately rewritten: any
+    UPDATE/DELETE against it is definitionally a chain-rewrite attack. Only INSERT
+    is legal. A retention delete of the underlying event is recorded as a NEW
+    tombstone link, not a mutation of an existing one.
+    """
+
+    def update(self, **kwargs: Any) -> int:
+        raise AuditLedgerImmutabilityError("AuditChainLink is append-only; update() is never permitted")
+
+    def bulk_update(self, objs: Iterable[AuditChainLink], fields: Iterable[str], batch_size: int | None = None) -> int:
+        raise AuditLedgerImmutabilityError("AuditChainLink is append-only; bulk_update() is never permitted")
+
+    def delete(self) -> tuple[int, dict[str, int]]:
+        raise AuditLedgerImmutabilityError("AuditChainLink is append-only; delete() is never permitted")
 
 
 # ===============================================================================
@@ -509,7 +534,15 @@ class AuditEvent(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
     # When and where
-    timestamp = models.DateTimeField(auto_now_add=True, db_index=True)
+    #
+    # default= rather than auto_now_add= (#313, point 4). auto_now_add populates the field
+    # inside _save_table, i.e. AFTER the pre_save signal, so a pre_save receiver would MAC
+    # over timestamp=None; the integrity stamp was therefore forced into post_save as a
+    # second write. With a plain default the value exists as soon as the instance does, so
+    # create and stamp collapse into a single INSERT. Behaviour is otherwise identical for
+    # callers that omit timestamp — and callers that PASS one are now honoured rather than
+    # silently overridden, which is what several tests already assumed.
+    timestamp = models.DateTimeField(default=timezone.now, db_index=True)
     ip_address = models.GenericIPAddressField(null=True, blank=True)
     user_agent = models.TextField(blank=True)
 
@@ -598,6 +631,150 @@ class AuditEvent(models.Model):
                 "AuditEvent is append-only; delete() requires the audit_mutation_allowed() escape hatch"
             )
         return super().delete(*args, **kwargs)
+
+
+class AuditChainHead(models.Model):
+    """Single-row cursor for the audit hash chain (#313).
+
+    Holds the last assigned sequence and last chain MAC. Appenders take
+    SELECT ... FOR UPDATE on this row (pk=1) so sequence assignment and prev-link
+    binding are strictly serialized. Unlike AuditChainLink this row is legitimately
+    mutable (it advances on every append), so it uses a plain manager with no guard.
+    """
+
+    id = models.PositiveSmallIntegerField(primary_key=True, default=1, editable=False)
+    last_sequence = models.BigIntegerField(default=0)
+    last_chain_mac = models.CharField(max_length=64, blank=True, default="")
+    backfill_complete = models.BooleanField(
+        default=False, help_text=_("Live appends stay gated until the historical backfill has run.")
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "audit_chain_head"
+
+    def __str__(self) -> str:
+        return f"AuditChainHead(seq={self.last_sequence}, backfilled={self.backfill_complete})"
+
+
+class AuditChainLink(models.Model):
+    """Append-only hash-chain ledger over audit events (#313).
+
+    One link per audit event (plus tombstone links for retention-deleted events),
+    ordered by a serially assigned `sequence` — the AuditEvent PK is a random UUID
+    and its timestamp is non-unique, so neither can order the chain. Never
+    anonymized and never retention-deleted; see AuditChainLinkQuerySet.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    sequence = models.BigIntegerField(unique=True, db_index=True)
+    # SET_NULL (like AuditEvent.user): a retention delete of the event detaches the FK via the
+    # deletion collector (base manager) without tripping the append-only guard. The link is NOT
+    # rewritten — the chain preimage is built entirely from the stable identity columns copied
+    # below at append time, so verification survives the event's deletion (a null event just
+    # means "this event was later retention-deleted"; event_id_str + the copies still verify).
+    event = models.ForeignKey(AuditEvent, on_delete=models.SET_NULL, null=True, blank=True, related_name="chain_links")
+    # Stable identity snapshot — the chain MAC is computed over THESE, never the live FK, so an
+    # anonymization re-stamp or a retention delete of the event cannot change what the link committed to.
+    event_id_str = models.CharField(max_length=36, db_index=True)
+    event_timestamp = models.DateTimeField()
+    event_action = models.CharField(max_length=50)
+    event_content_type_id = models.IntegerField(null=True, blank=True)
+    event_object_id = models.CharField(max_length=36, blank=True, default="")
+    event_v2_mac = models.CharField(max_length=64, blank=True, default="")
+    chain_mac = models.CharField(max_length=64)
+    prev_chain_mac = models.CharField(max_length=64, blank=True, default="")
+    key_id = models.CharField(max_length=8)
+    is_tombstone = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    objects: ClassVar[models.Manager[AuditChainLink]] = AuditChainLinkQuerySet.as_manager()
+
+    class Meta:
+        db_table = "audit_chain_links"
+        ordering: ClassVar[tuple[str, ...]] = ("sequence",)
+        constraints: ClassVar[tuple[models.BaseConstraint, ...]] = (
+            # One live (non-tombstone) link per event — idempotency backstop for the
+            # backfill and the append signal.
+            models.UniqueConstraint(
+                fields=["event"],
+                condition=models.Q(is_tombstone=False),
+                name="audit_chain_one_link_per_event",
+            ),
+        )
+
+    def __str__(self) -> str:
+        kind = "tombstone" if self.is_tombstone else "link"
+        return f"AuditChainLink(seq={self.sequence}, {kind}, event={self.event_id_str})"
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        if not self._state.adding:
+            raise AuditLedgerImmutabilityError("AuditChainLink is append-only; save() on an existing row is forbidden")
+        super().save(*args, **kwargs)
+
+    def delete(self, *args: Any, **kwargs: Any) -> tuple[int, dict[str, int]]:
+        raise AuditLedgerImmutabilityError("AuditChainLink is append-only; delete() is never permitted")
+
+
+class AuditChainAnchorQuerySet(models.QuerySet["AuditChainAnchor"]):
+    """Append-only, same doctrine as AuditChainLinkQuerySet — an anchor is never rewritten."""
+
+    def update(self, **kwargs: Any) -> int:
+        raise AuditLedgerImmutabilityError("AuditChainAnchor is append-only; update() is never permitted")
+
+    def bulk_update(
+        self, objs: Iterable[AuditChainAnchor], fields: Iterable[str], batch_size: int | None = None
+    ) -> int:
+        raise AuditLedgerImmutabilityError("AuditChainAnchor is append-only; bulk_update() is never permitted")
+
+    def delete(self) -> tuple[int, dict[str, int]]:
+        raise AuditLedgerImmutabilityError("AuditChainAnchor is append-only; delete() is never permitted")
+
+
+class AuditChainAnchor(models.Model):
+    """Local record of a chain head published to an external sink (#313).
+
+    Chaining detects insert/reorder/mid-chain deletion, but NOT tail truncation: lop off the
+    last N links and update the head row and the remaining chain walks clean. The fix must
+    live somewhere the database attacker does not control, so each anchor run publishes
+    (sequence, head MAC, link count) to an external sink under the SEPARATE "audit-anchor"
+    key domain.
+
+    THIS ROW IS NOT THE CONTROL — it is a local convenience copy, in the same database an
+    attacker would own, and they can delete it alongside the links. The evidence is what the
+    sink holds. Verification compares the sink's highest anchor against the live chain: a
+    chain that no longer reaches an anchored sequence has been truncated.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    sequence = models.BigIntegerField(db_index=True)
+    head_chain_mac = models.CharField(max_length=64)
+    link_count = models.BigIntegerField()
+    # MAC over the anchored tuple under the audit-anchor domain. What the sink records, and
+    # what makes a forged anchor line detectable by whoever holds the anchor key.
+    anchor_mac = models.CharField(max_length=64)
+    key_id = models.CharField(max_length=8)
+    sink = models.CharField(max_length=32)
+    anchored_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    objects: ClassVar[models.Manager[AuditChainAnchor]] = AuditChainAnchorQuerySet.as_manager()
+
+    class Meta:
+        db_table = "audit_chain_anchors"
+        ordering: ClassVar[tuple[str, ...]] = ("-sequence",)
+
+    def __str__(self) -> str:
+        return f"AuditChainAnchor(seq={self.sequence}, sink={self.sink})"
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        if not self._state.adding:
+            raise AuditLedgerImmutabilityError(
+                "AuditChainAnchor is append-only; save() on an existing row is forbidden"
+            )
+        super().save(*args, **kwargs)
+
+    def delete(self, *args: Any, **kwargs: Any) -> tuple[int, dict[str, int]]:
+        raise AuditLedgerImmutabilityError("AuditChainAnchor is append-only; delete() is never permitted")
 
 
 class DataExport(models.Model):

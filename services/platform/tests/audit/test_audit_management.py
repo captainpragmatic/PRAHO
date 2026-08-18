@@ -316,12 +316,16 @@ class AuditRetentionManagementTests(EnterpriseAuditManagementTestCase):
         super().setUp()
 
         # Create test retention policy
+        # action="anonymize": "archive" was removed from RETENTION_ACTION_CHOICES and now
+        # raises on apply. The stale value went unnoticed because AuditEvent.timestamp was
+        # auto_now_add, so the test's backdated event was silently stamped "now", fell outside
+        # the 30-day window, and the action branch was never reached (#313 point 4).
         self.retention_policy = AuditRetentionPolicy.objects.create(
             name="Test Authentication Policy",
             description="Retain authentication logs for 30 days",
             category="authentication",
             retention_days=30,
-            action="archive",
+            action="anonymize",
             is_active=True,
             created_by=self.admin_user,
         )
@@ -364,6 +368,12 @@ class AuditRetentionManagementTests(EnterpriseAuditManagementTestCase):
 
         results = result.unwrap()
         self.assertGreater(results["policies_applied"], 0)
+        # The aged event must actually be processed, not merely counted as a policy run.
+        # Before timestamp became a real default this asserted nothing: auto_now_add stamped
+        # the "old" event as now, so it never fell inside the retention window at all.
+        self.assertEqual(results["errors"], [])
+        self.assertGreater(results["events_processed"], 0)
+        self.assertGreater(results["events_anonymized"], 0)
 
     def test_retention_dashboard(self):
         """Test retention management dashboard."""

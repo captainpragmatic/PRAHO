@@ -18,7 +18,9 @@ from datetime import timedelta
 from unittest.mock import patch
 
 from django.contrib.contenttypes.models import ContentType
+from django.db import connection
 from django.test import TestCase, override_settings
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
 from apps.audit.models import AuditEvent, AuditIntegrityCheck, audit_mutation_allowed
@@ -365,3 +367,106 @@ class VerifyAuditIntegrityHonestyTestCase(TestCase):
         self.assertEqual(check.findings[0]["type"], "verification_error")
         # And it is really persisted, not just returned
         self.assertTrue(AuditIntegrityCheck.objects.filter(pk=check.pk, status="error").exists())
+
+
+class AtomicCreateAndStampTestCase(TestCase):
+    """#313 point 4: the stamp rides along on the INSERT instead of a second write.
+
+    Before this, creation was create-then-UPDATE-metadata. That left a window in which the
+    row existed with no marker: a verifier reading during it classified the row as legacy /
+    unverifiable, and a crash between the two writes left it that way permanently.
+    """
+
+    def setUp(self) -> None:
+        self.user = User.objects.create_user(email="atomic@example.com", password="testpass123")
+        self.content_type = ContentType.objects.get_for_model(User)
+
+    def _event(self, **overrides: object) -> AuditEvent:
+        fields: dict[str, object] = {
+            "user": self.user,
+            "action": "login_success",
+            "category": "authentication",
+            "severity": "low",
+            "content_type": self.content_type,
+            "object_id": str(self.user.id),
+            "description": "Atomically stamped event",
+            "ip_address": "192.168.1.1",
+        }
+        fields.update(overrides)
+        return AuditEvent.objects.create(**fields)
+
+    def test_creation_issues_a_single_insert_and_no_update(self) -> None:
+        """The whole point: one write, so no unstamped row is ever observable."""
+        with CaptureQueriesContext(connection) as captured:
+            self._event()
+
+        statements = [q["sql"].strip().upper() for q in captured.captured_queries]
+        self.assertEqual(len([s for s in statements if s.startswith("INSERT")]), 1)
+        self.assertEqual([s for s in statements if s.startswith("UPDATE")], [])
+
+    def test_row_is_stamped_and_verifying_as_soon_as_it_exists(self) -> None:
+        event = self._event()
+
+        event.refresh_from_db()
+        self.assertIn("integrity_hash", event.metadata)
+        self.assertEqual(event.metadata["integrity_hash_version"], AuditIntegrityService.HASH_VERSION)
+        self.assertEqual(AuditIntegrityService._verify_hash_chain([event]), [])
+
+    def test_stamp_is_present_on_the_in_memory_instance(self) -> None:
+        """Callers that keep the returned instance must see the same metadata as the DB row."""
+        event = self._event()
+
+        self.assertIn("integrity_hash", event.metadata)
+        stored = AuditEvent.objects.get(pk=event.pk)
+        self.assertEqual(event.metadata["integrity_hash"], stored.metadata["integrity_hash"])
+
+    def test_stamping_failure_still_writes_the_row_marked_critical(self) -> None:
+        """Fail-open on the event, fail-closed on the classification: a stamp failure must
+        not lose the audit event, but must not let it pass as a benign legacy row either."""
+        with patch.object(AuditIntegrityService, "integrity_stamp_marker", side_effect=RuntimeError("hsm down")):
+            event = self._event(description="stamp failed but event survives")
+
+        event.refresh_from_db()
+        self.assertNotIn("integrity_hash", event.metadata)
+        # The version marker alone is what makes the verifier call this critical rather than
+        # demoting it to an info-level "unverifiable legacy" finding.
+        self.assertEqual(event.metadata["integrity_hash_version"], AuditIntegrityService.HASH_VERSION)
+        findings = AuditIntegrityService._verify_hash_chain([event])
+        self.assertEqual(findings[0]["type"], "missing_integrity_hash")
+        self.assertEqual(findings[0]["severity"], "critical")
+
+    def test_explicit_timestamp_is_honoured(self) -> None:
+        """timestamp moved from auto_now_add to a plain default, which is what makes the
+        value available at pre_save. A caller-supplied timestamp is now respected rather
+        than silently overwritten — several tests already assumed this."""
+        backdated = timezone.now() - timedelta(days=30)
+
+        event = self._event(timestamp=backdated)
+
+        event.refresh_from_db()
+        self.assertAlmostEqual(event.timestamp, backdated, delta=timedelta(seconds=1))
+        # And the MAC covers the timestamp actually stored, so the row still verifies.
+        self.assertEqual(AuditIntegrityService._verify_hash_chain([event]), [])
+
+    def test_omitted_timestamp_still_defaults_to_now(self) -> None:
+        before = timezone.now()
+
+        event = self._event()
+
+        self.assertGreaterEqual(event.timestamp, before)
+        self.assertLessEqual(event.timestamp, timezone.now())
+
+    def test_update_does_not_restamp(self) -> None:
+        """Re-hashing on update would launder a tampered row."""
+        event = self._event()
+        original = event.metadata["integrity_hash"]
+
+        with audit_mutation_allowed("test"):
+            event.description = "changed after the fact"
+            event.save()
+
+        event.refresh_from_db()
+        self.assertEqual(event.metadata["integrity_hash"], original)
+        # The row now fails verification, which is exactly the intent.
+        findings = AuditIntegrityService._verify_hash_chain([event])
+        self.assertEqual(findings[0]["type"], "hash_mismatch")
