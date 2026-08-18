@@ -417,10 +417,13 @@ class VirtualminBackupService:
             s3_client = self._get_s3_client()
             bucket_name = self._get_backup_bucket()
 
-            # Build S3 prefix for filtering
+            # #431: the account filter is applied to metadata below, NOT to the S3 prefix.
+            # Archives and metadata are stored under virtualmin-backups/{backup_id}/, so a
+            # domain-scoped prefix ("virtualmin-backups/{domain}/") matched no key at all and
+            # an account-scoped list always returned zero backups — indistinguishable from
+            # "this account has no backups". Filtering on metadata["domain"] keeps the
+            # existing key layout intact, so archives already in S3 stay listable.
             prefix = "virtualmin-backups/"
-            if account:
-                prefix += f"{account.domain}/"
 
             # List objects from S3
             paginator = s3_client.get_paginator("list_objects_v2")
@@ -438,6 +441,9 @@ class VirtualminBackupService:
                             metadata = json.loads(metadata_obj["Body"].read())
 
                             # Apply filters
+                            if account and metadata.get("domain") != account.domain:
+                                continue
+
                             if backup_type and metadata.get("backup_type") != backup_type:
                                 continue
 
