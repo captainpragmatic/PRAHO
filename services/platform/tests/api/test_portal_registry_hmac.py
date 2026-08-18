@@ -42,7 +42,7 @@ urlpatterns = [path("api/_registry_probe/", _ok_view)]
 _PROBE = "/api/_registry_probe/"
 
 
-def _signed(portal_id: str, secret: str, nonce: str | None = None) -> dict[str, str]:
+def _signed(portal_id: str, secret: str, nonce: str | None = None) -> tuple[dict[str, str], bytes]:
     body = json.dumps({"timestamp": time.time()}).encode()
     return hmac_headers("POST", _PROBE, body, portal_id=portal_id, nonce=nonce, secret=secret), body
 
@@ -126,19 +126,33 @@ class PortalRegistryLegacyAndAuditTests(SimpleTestCase):
             self.assertEqual(self._post("portal-a", PORTAL_A_SECRET).status_code, 200)
 
     @override_settings(PORTAL_HMAC_MODE="audit", PORTAL_HMAC_CREDENTIALS=json.dumps({"portal-a": PORTAL_A_SECRET}))
-    def test_audit_accepts_legacy_fallback_and_warns(self):
-        # Unregistered id via the shared secret → accepted (no outage) AND a warning fires.
+    def test_audit_unregistered_id_via_shared_secret_warns_unregistered_variant(self):
+        # Unregistered id via the shared secret → accepted (no outage) AND the UNREGISTERED
+        # warning fires, naming the id the operator must add to the registry before enforce.
         with self.assertLogs("apps.common.middleware", level="WARNING") as logs:
             self.assertEqual(self._post("portal-unregistered", SHARED).status_code, 200)
-        self.assertTrue(any("portal-unregistered" in m for m in logs.output))
+        self.assertTrue(any("unregistered portal 'portal-unregistered'" in m for m in logs.output))
+        self.assertTrue(any("shared-secret fallback" in m for m in logs.output))
+
+    @override_settings(PORTAL_HMAC_MODE="audit", PORTAL_HMAC_CREDENTIALS=json.dumps({"portal-a": PORTAL_A_SECRET}))
+    def test_audit_registered_portal_via_shared_secret_warns_registered_variant(self):
+        # #277 Copilot :452 — a REGISTERED portal whose signature matches neither of its keyring
+        # secrets but DOES match the shared secret still authenticates in audit (no outage), but
+        # the warning must say REGISTERED/fix-the-registration, not "add it" (it is already added).
+        # portal-a's keyring is [PORTAL_A_SECRET]; SHARED is not in it, so the keyring lookup fails
+        # and the shared-secret fallback (not None keyring) is exercised.
+        with self.assertLogs("apps.common.middleware", level="WARNING") as logs:
+            self.assertEqual(self._post("portal-a", SHARED).status_code, 200)
+        self.assertTrue(any("registered portal 'portal-a'" in m for m in logs.output))
+        self.assertTrue(any("keyring is missing the signing secret" in m for m in logs.output))
 
     @override_settings(PORTAL_HMAC_MODE="audit", PORTAL_HMAC_CREDENTIALS=json.dumps({"portal-a": PORTAL_A_SECRET}))
     def test_audit_bad_under_both_is_401_without_fallback_warning(self):
         # A 401 logs a generic "Authentication failed" WARNING; what must NOT appear is the
-        # audit "accepted via legacy fallback" line — an unauthenticated caller can't forge it.
+        # audit "accepted via shared-secret fallback" line — an unauthenticated caller can't forge it.
         with self.assertLogs("apps.common.middleware", level="WARNING") as logs:
             self.assertEqual(self._post("portal-unregistered", "totally-wrong-secret-value-000000").status_code, 401)
-        self.assertFalse(any("legacy shared-secret fallback" in m for m in logs.output))
+        self.assertFalse(any("shared-secret fallback" in m for m in logs.output))
 
 
 class PortalHmacStartupValidationTests(SimpleTestCase):
@@ -174,3 +188,19 @@ class PortalHmacStartupValidationTests(SimpleTestCase):
     def test_bare_string_secret_is_normalized_to_a_keyring(self):
         portal_hmac._parse.cache_clear()
         self.assertEqual(portal_hmac.resolve_secrets("portal-a"), ("sekret-value-aaaaaaaaaaaaaaaaaaaa",))
+
+    @override_settings(PORTAL_HMAC_MODE="legacy", PORTAL_HMAC_CREDENTIALS="")
+    def test_legacy_with_empty_credentials_boots(self):
+        # #277 deploy P1: compose `${PORTAL_HMAC_CREDENTIALS:-}` interpolation sends an unset
+        # registry into the container as the EMPTY STRING (not absent). legacy/audit must treat
+        # "" as "no registry" and boot cleanly — a raise here crashes every platform container
+        # on the default rollout path. get_registry() short-circuits `if not raw` before _parse.
+        portal_hmac._parse.cache_clear()
+        portal_hmac.validate_at_startup()  # must NOT raise
+        self.assertEqual(portal_hmac.get_registry(), {})
+
+    @override_settings(PORTAL_HMAC_MODE="audit", PORTAL_HMAC_CREDENTIALS="")
+    def test_audit_with_empty_credentials_boots(self):
+        portal_hmac._parse.cache_clear()
+        portal_hmac.validate_at_startup()  # must NOT raise
+        self.assertEqual(portal_hmac.get_registry(), {})

@@ -257,9 +257,12 @@ PORTAL_ID = os.environ.get("PORTAL_ID", "portal-001")
 
 # Per-portal HMAC signing secret (#277). When set, this portal signs Platform requests with
 # its own secret (matched against PORTAL_HMAC_CREDENTIALS[PORTAL_ID] on the platform) instead
-# of the shared PLATFORM_API_SECRET. Absent → falls back to PLATFORM_API_SECRET (backward
-# compat); explicitly empty is a provisioning error (see api_client.services).
-PORTAL_HMAC_SECRET = os.environ.get("PORTAL_HMAC_SECRET")
+# of the shared PLATFORM_API_SECRET. Absent → falls back to PLATFORM_API_SECRET (backward compat).
+# `... or None`: under Docker/compose `${PORTAL_HMAC_SECRET:-}` interpolation, an unset var
+# reaches the container as the empty string — indistinguishable from truly unset — so both mean
+# "use the shared secret". The empty-is-a-provisioning-error guard in api_client.services still
+# fires for a directly-assigned Python setting (e.g. override_settings in tests).
+PORTAL_HMAC_SECRET = os.environ.get("PORTAL_HMAC_SECRET") or None
 
 # ===============================================================================
 # LOGGING CONFIGURATION

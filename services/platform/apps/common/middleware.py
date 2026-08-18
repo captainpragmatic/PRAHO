@@ -437,17 +437,30 @@ class PortalServiceHMACMiddleware:
             return ""
 
         if mode == "enforce":
-            return "Portal authentication not configured" if keyring is None else "HMAC signature verification failed"
+            # Distinct internal (log-only) messages; the external 401 is generic for both. An
+            # unregistered id is an "unknown portal", NOT a server-side "not configured" secret.
+            return "Unregistered portal id (enforce mode)" if keyring is None else "HMAC signature verification failed"
 
-        # audit: fall back to the shared secret; warn ONLY if the fallback actually
-        # authenticates, so an unauthenticated caller cannot flood "would reject" logs.
+        # audit: fall back to the shared secret so nothing breaks before enforcement; warn ONLY
+        # if the fallback actually authenticates, so an unauthenticated caller cannot flood
+        # "would reject" logs. The fallback runs whether the id is unregistered OR registered
+        # without the signing secret in its keyring — audit must never cause an outage — but the
+        # warning distinguishes the two so the operator knows which fix to apply before enforce.
         shared = getattr(settings, "PLATFORM_API_SECRET", None)
         if shared and sig_ok(shared):
-            logger.warning(
-                "⚠️ [HMAC Auth] portal %r authenticated via legacy shared-secret fallback (audit mode) — "
-                "register it in PORTAL_HMAC_CREDENTIALS before switching to enforce",
-                portal_id,
-            )
+            if keyring is None:
+                logger.warning(
+                    "⚠️ [HMAC Auth] unregistered portal %r authenticated via shared-secret fallback "
+                    "(audit mode) — add it to PORTAL_HMAC_CREDENTIALS before switching to enforce",
+                    portal_id,
+                )
+            else:
+                logger.warning(
+                    "⚠️ [HMAC Auth] registered portal %r authenticated via shared-secret fallback "
+                    "(audit mode) — its keyring is missing the signing secret; fix the registration "
+                    "before switching to enforce",
+                    portal_id,
+                )
             return ""
         return "HMAC signature verification failed"
 

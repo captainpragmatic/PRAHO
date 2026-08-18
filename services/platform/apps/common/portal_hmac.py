@@ -9,11 +9,13 @@ This module resolves the verifying secret(s) by portal id, under an explicit mod
 
 - ``legacy``  — verify against ``PLATFORM_API_SECRET`` for any well-formed portal id
                 (the historical behavior; the registry is ignored).
-- ``audit``   — try the registry keyring first; on a miss, fall back to the legacy secret
-                and, only if that fallback SUCCEEDS, log a warning naming the accepted-by-
-                fallback portal id. Surfaces unregistered-but-legitimate portals before
-                enforcement without an outage. A request that fails both is a plain 401 with
-                no warning (an unauthenticated caller cannot flood "would reject" logs).
+- ``audit``   — try the registry keyring first; if it does not verify (id unregistered, OR
+                registered but signing with a secret not in its keyring), fall back to the
+                shared secret and, only if that fallback SUCCEEDS, log a warning naming the
+                portal id. The two cases get distinct warnings so the operator knows whether
+                to ADD the id or FIX its registration before enforcing. Audit never causes an
+                outage; a request that fails both is a plain 401 with no warning (an
+                unauthenticated caller cannot flood "would reject" logs).
 - ``enforce`` — registry only. An unregistered portal id is rejected; the signature must
                 verify against one of that portal's own secrets. No shared-secret fallback.
 
@@ -83,7 +85,9 @@ def _parse(raw: str) -> dict[str, tuple[str, ...]]:
             )
         for secret in secrets:
             if not isinstance(secret, str) or not secret:
-                raise ImproperlyConfigured(f"PORTAL_HMAC_CREDENTIALS[{portal_id!r}] contains an empty/non-string secret")
+                raise ImproperlyConfigured(
+                    f"PORTAL_HMAC_CREDENTIALS[{portal_id!r}] contains an empty/non-string secret"
+                )
         registry[portal_id] = tuple(secrets)
     return registry
 

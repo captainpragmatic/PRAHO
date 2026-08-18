@@ -28,6 +28,9 @@ services:
       - DB_PASSWORD=${DB_PASSWORD:?DB_PASSWORD required}
       - DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY:?DJANGO_SECRET_KEY required}
       - HMAC_SECRET=${PLATFORM_API_SECRET:?PLATFORM_API_SECRET required}
+      # Per-portal HMAC registry (#277). Unset => legacy shared-secret behavior (safe default).
+      - PORTAL_HMAC_MODE=${PORTAL_HMAC_MODE:-legacy}
+      - PORTAL_HMAC_CREDENTIALS=${PORTAL_HMAC_CREDENTIALS:-}
       - PLATFORM_TO_PORTAL_WEBHOOK_SECRET=${PLATFORM_TO_PORTAL_WEBHOOK_SECRET:?PLATFORM_TO_PORTAL_WEBHOOK_SECRET required}
       - DJANGO_SETTINGS_MODULE=config.settings.prod
       - ALLOWED_HOSTS=${DOMAIN:-localhost},localhost,*.ondigitalocean.app
@@ -63,6 +66,8 @@ services:
       - DEBUG=0
       - PLATFORM_API_BASE_URL=${PLATFORM_API_BASE_URL:-http://platform:8700/api}
       - PLATFORM_API_SECRET=${PLATFORM_API_SECRET:?PLATFORM_API_SECRET required}
+      # Per-portal signing secret (#277). Unset/empty => sign with PLATFORM_API_SECRET.
+      - PORTAL_HMAC_SECRET=${PORTAL_HMAC_SECRET:-}
       - PLATFORM_API_ALLOW_INSECURE_HTTP=${PLATFORM_API_ALLOW_INSECURE_HTTP:-true}
       - PLATFORM_TO_PORTAL_WEBHOOK_SECRET=${PLATFORM_TO_PORTAL_WEBHOOK_SECRET:?PLATFORM_TO_PORTAL_WEBHOOK_SECRET required}
       - PORTAL_DOMAIN=${DOMAIN:-localhost}

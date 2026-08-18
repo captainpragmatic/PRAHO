@@ -14,13 +14,25 @@ The registry resolves the verifying secret **by portal id** and rejects unregist
 | Mode | Behavior |
 |---|---|
 | `legacy` (default) | Verify against `PLATFORM_API_SECRET` for any well-formed portal id. The registry is ignored. This is the historical behavior — deploying the code changes nothing until you opt in. |
-| `audit` | Try the registry keyring first; on a miss, fall back to the shared secret and, **only if that fallback succeeds**, log a warning naming the accepted portal id. Surfaces unregistered-but-legitimate portals without an outage. A request that fails both is a plain 401, no warning. |
+| `audit` | Try the registry keyring first; if it does not verify — id unregistered **or** registered but signing with a secret not in its keyring — fall back to the shared secret and, **only if that fallback succeeds**, log a warning naming the portal id. The two cases get distinct warnings (add the id vs. fix its registration). Audit never causes an outage; a request that fails both is a plain 401, no warning. |
 | `enforce` | Registry only. Unregistered portal id → rejected. The signature must verify against one of that portal's own secrets. No shared-secret fallback. Requires a non-empty registry (enforced at startup). |
 
 `PORTAL_HMAC_CREDENTIALS` is JSON: `{"portal-001": "<secret>"}` or, as a keyring for
 zero-downtime rotation, `{"portal-001": ["<new>", "<old>"]}` (verified against each; capped
 at 3). Malformed JSON / shape fails startup — it never silently degrades to an empty
 (vulnerability-restoring) registry.
+
+### Where these are set
+
+The supported Docker Compose files and the Ansible role forward `PORTAL_HMAC_MODE` /
+`PORTAL_HMAC_CREDENTIALS` (platform) and `PORTAL_HMAC_SECRET` (portal) from the host `.env`
+into the containers. Under compose `${VAR:-}` interpolation an **unset** variable reaches the
+container as the **empty string** — the two are indistinguishable — so on both services empty
+means "not set": the platform treats an empty registry as unset (legacy/audit unaffected;
+`enforce` still requires a non-empty registry), and the portal falls back to
+`PLATFORM_API_SECRET`. The "empty is a provisioning error" guard remains only for a
+directly-assigned Python setting (e.g. `override_settings` in tests). `PORTAL_HMAC_MODE`
+defaults to `legacy` when unset.
 
 ## Rollout — zero-downtime, no cross-service secret cutover
 
@@ -35,8 +47,10 @@ under the real portal id(s):
    of truth for `PORTAL_ID` (traffic logs alone miss a dormant portal). Set
    `PORTAL_HMAC_CREDENTIALS={"<portal-id>": ["<current PLATFORM_API_SECRET value>"]}` and
    `PORTAL_HMAC_MODE=audit`. Portal unchanged — still verifies. Watch for
-   `⚠️ [HMAC Auth] portal … via legacy shared-secret fallback` warnings; each names a portal
-   id you must add before enforcing.
+   `⚠️ [HMAC Auth] unregistered portal … via shared-secret fallback` warnings; each names a
+   portal id you must add before enforcing. A `registered portal … keyring is missing the
+   signing secret` warning instead means that id is registered with the wrong secret — fix its
+   registration, don't just wait for it to go quiet.
 3. **Enforce.** When audit is quiet across **every** platform instance, set
    `PORTAL_HMAC_MODE=enforce`. Unregistered `X-Portal-Id` is now rejected — the bucket-minting
    hole is closed, zero downtime, no new secret.
