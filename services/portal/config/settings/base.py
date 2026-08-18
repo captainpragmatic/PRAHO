@@ -255,6 +255,12 @@ SECURE_SSL_REDIRECT = not DEBUG
 # Portal service identification for HMAC authentication
 PORTAL_ID = os.environ.get("PORTAL_ID", "portal-001")
 
+# Per-portal HMAC signing secret (#277). When set, this portal signs Platform requests with
+# its own secret (matched against PORTAL_HMAC_CREDENTIALS[PORTAL_ID] on the platform) instead
+# of the shared PLATFORM_API_SECRET. Absent → falls back to PLATFORM_API_SECRET (backward
+# compat); explicitly empty is a provisioning error (see api_client.services).
+PORTAL_HMAC_SECRET = os.environ.get("PORTAL_HMAC_SECRET")
+
 # ===============================================================================
 # LOGGING CONFIGURATION
 # ===============================================================================

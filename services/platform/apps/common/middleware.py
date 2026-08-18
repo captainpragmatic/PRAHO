@@ -27,6 +27,7 @@ from django.shortcuts import redirect
 from django.utils import timezone
 from django.utils.translation import gettext as _
 
+from apps.common import portal_hmac
 from apps.common.constants import HMAC_NTP_SKEW_SECONDS, HMAC_TIMESTAMP_WINDOW_SECONDS, HTTP_CLIENT_ERROR_THRESHOLD
 from apps.common.logging import clear_request_id, set_request_id
 from apps.common.request_ip import get_safe_client_ip
@@ -413,17 +414,57 @@ class PortalServiceHMACMiddleware:
         retry_after = max(1, math.ceil(self._rl_window - elapsed))
         return True, retry_after
 
+    def _verify_signature_by_mode(self, portal_id: str, sig_ok: Callable[[str], bool]) -> str:
+        """Return "" if the signature authenticates portal_id under PORTAL_HMAC_MODE, else an error.
+
+        #277: resolves the verifying secret by portal_id from the credential registry rather
+        than the single shared PLATFORM_API_SECRET. `sig_ok(secret)` recomputes+compares the
+        HMAC for one candidate secret. Registry-miss and wrong-signature both surface as the
+        same generic external 401; the distinct internal messages are for logs only, and no
+        HMAC is ever computed against a None secret.
+        """
+        mode = portal_hmac.get_mode()
+        if mode == "legacy":
+            shared = getattr(settings, "PLATFORM_API_SECRET", None)
+            if not shared:
+                return "Portal authentication not configured"
+            return "" if sig_ok(shared) else "HMAC signature verification failed"
+
+        keyring = portal_hmac.resolve_secrets(portal_id)  # None => unregistered
+        # Evaluate EVERY secret (list comp, no short-circuit) so key position doesn't leak
+        # via timing; any() then just reads the pre-computed results.
+        if keyring and any([sig_ok(secret) for secret in keyring]):  # noqa: C419  # deliberate: no short-circuit
+            return ""
+
+        if mode == "enforce":
+            return "Portal authentication not configured" if keyring is None else "HMAC signature verification failed"
+
+        # audit: fall back to the shared secret; warn ONLY if the fallback actually
+        # authenticates, so an unauthenticated caller cannot flood "would reject" logs.
+        shared = getattr(settings, "PLATFORM_API_SECRET", None)
+        if shared and sig_ok(shared):
+            logger.warning(
+                "⚠️ [HMAC Auth] portal %r authenticated via legacy shared-secret fallback (audit mode) — "
+                "register it in PORTAL_HMAC_CREDENTIALS before switching to enforce",
+                portal_id,
+            )
+            return ""
+        return "HMAC signature verification failed"
+
     def _validate_hmac_signature(  # noqa: C901, PLR0912, PLR0915  # Complexity: multi-step business logic
         self, request: HttpRequest
-    ) -> tuple[bool, str]:  # Complexity: HMAC validation  # Complexity: multi-step business logic
+    ) -> tuple[bool, str, str]:  # Complexity: HMAC validation  # Complexity: multi-step business logic
         """
         Validate HMAC signature from portal service.
-        Returns (is_valid, error_message)
+        Returns (is_valid, verified_portal_id, error_message).
 
-        NOTE: High complexity is justified for security-critical HMAC validation.
-        Each branch addresses a specific attack vector (replay, tampering, etc.)
+        Order is security-load-bearing: cheap syntactic checks (incl. portal_id/nonce/
+        signature FORMAT) run first so junk never reaches a cache key; the nonce replay
+        slot is reserved LAST, only after the signature verifies, so a bad or unregistered
+        request can never burn a nonce (#277).
         """
         error_msg = ""
+        portal_id = ""
         try:
             # Extract HMAC headers
             portal_id = request.META.get("HTTP_X_PORTAL_ID", "")
@@ -437,12 +478,24 @@ class PortalServiceHMACMiddleware:
             if not all([portal_id, nonce, timestamp, body_hash, signature]):
                 error_msg = "Missing HMAC authentication headers"
 
-            # Validate nonce format (must be sufficient length to prevent collisions)
-            if not error_msg and (len(nonce) < HMAC_NONCE_MIN_LENGTH or len(nonce) > HMAC_NONCE_MAX_LENGTH):
+            # Validate portal_id FORMAT before it can reach any cache key (nonce/rate-limit
+            # keys embed it). fullmatch, not a $-anchored search, so a trailing newline can't slip in.
+            if not error_msg and not portal_hmac.PORTAL_ID_RE.fullmatch(portal_id):
+                error_msg = "Invalid portal id format"
+
+            # Validate nonce format: length AND charset (charset stops ':' injection into the key)
+            if not error_msg and (
+                len(nonce) < HMAC_NONCE_MIN_LENGTH
+                or len(nonce) > HMAC_NONCE_MAX_LENGTH
+                or not portal_hmac.NONCE_CHARSET_RE.fullmatch(nonce)
+            ):
                 error_msg = "Invalid nonce format"
 
+            # Signature must be exactly 64 lowercase hex chars before any HMAC comparison.
+            if not error_msg and not portal_hmac.SIGNATURE_RE.fullmatch(signature):
+                error_msg = "Invalid signature format"
+
             # Validate timestamp (5-minute window)
-            request_body = b""
             if not error_msg:
                 try:
                     # int(float()) accepts both "123" and "123.456" for rolling-deploy safety
@@ -453,14 +506,6 @@ class PortalServiceHMACMiddleware:
                         error_msg = "Request timestamp outside allowed window"
                 except ValueError:
                     error_msg = "Invalid timestamp format"
-
-            # Check for nonce replay using shared cache with TTL (scoped by portal)
-            if not error_msg:
-                nonce_key = f"hmac_nonce:{portal_id}:{nonce}"
-                # +30s buffer ensures nonces outlive their timestamp validity window
-                added = cache.add(nonce_key, True, timeout=HMAC_TIMESTAMP_WINDOW_SECONDS + 30)
-                if not added:
-                    error_msg = "Nonce already used (replay attack)"
 
             # Enforce body size limit before reading into memory (DoS prevention)
             if not error_msg:
@@ -476,14 +521,7 @@ class PortalServiceHMACMiddleware:
                 if body_hash != computed_body_hash:
                     error_msg = "Body hash mismatch"
 
-            # Get portal secret for this portal ID
-            expected_secret = None
-            if not error_msg:
-                expected_secret = getattr(settings, "PLATFORM_API_SECRET", None)
-                if not expected_secret:
-                    error_msg = "Portal authentication not configured"
-
-            # Build canonical string and verify signature
+            # Resolve the verifying secret(s) by portal_id and verify the signature (#277).
             if not error_msg:
                 method = request.method.upper() if request.method else ""
                 full_path = request.get_full_path()
@@ -507,22 +545,28 @@ class PortalServiceHMACMiddleware:
                     ]
                 )
 
-                expected_signature_new = hmac.new(
-                    expected_secret.encode(),  # type: ignore[union-attr]
-                    canonical_new.encode(),
-                    hashlib.sha256,
-                ).hexdigest()
-                if not hmac.compare_digest(signature, expected_signature_new):
-                    error_msg = "HMAC signature verification failed"
+                def _sig_ok(secret: str) -> bool:
+                    expected = hmac.new(secret.encode(), canonical_new.encode(), hashlib.sha256).hexdigest()
+                    return hmac.compare_digest(signature, expected)
+
+                error_msg = self._verify_signature_by_mode(portal_id, _sig_ok)
+
+            # Reserve the nonce replay slot LAST — only a fully authenticated request may burn
+            # a nonce, so a bad signature / unregistered portal cannot pollute the nonce cache.
+            if not error_msg:
+                nonce_key = f"hmac_nonce:{portal_id}:{nonce}"
+                # +30s buffer ensures nonces outlive their timestamp validity window
+                if not cache.add(nonce_key, True, timeout=HMAC_TIMESTAMP_WINDOW_SECONDS + 30):
+                    error_msg = "Nonce already used (replay attack)"
 
             if not error_msg:
-                return True, ""
+                return True, portal_id, ""
 
         except Exception as e:
             logger.error(f"🔥 [HMAC Auth] Signature validation error: {e}")
             error_msg = f"Signature validation error: {e!s}"
 
-        return False, error_msg
+        return False, "", error_msg
 
     # Portal-facing billing API endpoints that require HMAC authentication.
     # Staff UI pages under /billing/ (invoices, proformas, reports) are NOT listed
@@ -554,7 +598,7 @@ class PortalServiceHMACMiddleware:
 
             # Validate HMAC signature first so rate limiting uses the verified portal_id,
             # not an attacker-controlled header value.
-            is_valid, error_msg = self._validate_hmac_signature(request)
+            is_valid, verified_portal_id, error_msg = self._validate_hmac_signature(request)
 
             if not is_valid:
                 # Allow session-authenticated staff users to access specific API paths
@@ -585,8 +629,10 @@ class PortalServiceHMACMiddleware:
 
             # Mark as portal-authenticated after successful HMAC validation.
             # Identity comes from signed body in API layer; X-User-Id header is ignored.
+            # Use the portal_id RETURNED by validation (verified against its registered secret),
+            # not a re-read of the attacker-controllable header (#277).
             request._portal_authenticated = True
-            request._portal_id = request.META.get("HTTP_X_PORTAL_ID", "unknown")
+            request._portal_id = verified_portal_id or "unknown"
 
             # Post-auth rate limiting: keyed by the verified portal_id (not the raw header).
             if rate_limit_enabled:

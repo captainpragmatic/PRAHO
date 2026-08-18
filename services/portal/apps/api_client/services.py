@@ -34,6 +34,7 @@ from typing import Any, cast
 import requests
 from django.conf import settings
 from django.core.cache import cache
+from django.core.exceptions import ImproperlyConfigured
 
 from apps.common.outbound_http import OutboundSecurityError, portal_request
 from apps.common.retry_after import coerce_retry_after_seconds
@@ -53,6 +54,22 @@ _HMAC_NONCE_RE = re.compile(r"^[A-Za-z0-9_-]{8,256}$")
 _HMAC_PORTAL_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 # Int-only — platform validates with int(), floats would fail
 _HMAC_TIMESTAMP_RE = re.compile(r"^[0-9]+$")
+
+
+def _resolve_portal_signing_secret() -> str:
+    """Return the secret this portal signs Platform requests with (#277).
+
+    Prefers the per-portal ``PORTAL_HMAC_SECRET``; falls back to the shared
+    ``PLATFORM_API_SECRET`` only when the per-portal setting is ABSENT (backward-compat).
+    An explicitly-empty ``PORTAL_HMAC_SECRET`` is a provisioning error and raises rather
+    than silently degrading to the shared secret.
+    """
+    per_portal = getattr(settings, "PORTAL_HMAC_SECRET", None)
+    if per_portal is None:
+        return settings.PLATFORM_API_SECRET
+    if not per_portal:
+        raise ImproperlyConfigured("PORTAL_HMAC_SECRET is set but empty; unset it to use PLATFORM_API_SECRET")
+    return per_portal
 
 
 class PlatformAPIError(Exception):
@@ -90,7 +107,7 @@ class PlatformAPIClient:
     def __init__(self) -> None:
         self.base_url = settings.PLATFORM_API_BASE_URL
         self.portal_id = getattr(settings, "PORTAL_ID", "portal-001")
-        self.portal_secret = settings.PLATFORM_API_SECRET  # Will be portal-specific secret
+        self.portal_secret = _resolve_portal_signing_secret()
         self.timeout = settings.PLATFORM_API_TIMEOUT
         # Keep retries conservative by default; callers can opt in per request.
         self.retry_backoff_seconds = float(getattr(settings, "PLATFORM_API_RETRY_BACKOFF_SECONDS", 0.05))

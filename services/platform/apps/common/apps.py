@@ -27,6 +27,14 @@ class CommonConfig(AppConfig):
         _validate_internal_service_domains()
         _validate_throttle_rates_at_startup()
         _validate_encryption_keyring_at_startup()
+        _validate_portal_hmac_registry_at_startup()
+
+
+def _validate_portal_hmac_registry_at_startup() -> None:
+    """Fail the deploy on a malformed portal HMAC mode/registry (#277, ADR-0030)."""
+    from apps.common.portal_hmac import validate_at_startup  # avoid settings-time app import
+
+    validate_at_startup()
 
 
 def _validate_encryption_keyring_at_startup() -> None:
