@@ -10,11 +10,14 @@ from django.core.exceptions import ImproperlyConfigured
 from django.test import RequestFactory, SimpleTestCase, TestCase, override_settings
 from django.utils.module_loading import import_string
 from rest_framework.test import APIRequestFactory
-from rest_framework.throttling import AnonRateThrottle, ScopedRateThrottle, SimpleRateThrottle
+from rest_framework.throttling import AnonRateThrottle, ScopedRateThrottle, SimpleRateThrottle, UserRateThrottle
+from tests.api.test_api_auth_regressions import _has_public_marker
 
 from apps.api.core import throttling as core_throttling
 from apps.api.core.throttling import AuthThrottle, BurstAPIThrottle, StandardAPIThrottle
-from apps.api.customers.views import customer_users_create
+from apps.api.customers import views as customers_views
+from apps.api.customers.views import customer_users_create, update_customer_billing_address
+from apps.api.orders import views as orders_views
 from apps.api.orders.views import (
     OrderCalculateThrottle,
     OrderCreateThrottle,
@@ -113,6 +116,109 @@ class ThrottleArchitectureGuardrailTests(SimpleTestCase):
             self.assertIn(rate_limiting.PortalHMACRateThrottle, configured)
             self.assertIn(rate_limiting.PortalHMACBurstThrottle, configured)
             self.assertIn(endpoint_throttle, configured)
+
+    def test_hmac_function_views_never_use_ip_keyed_user_throttles(self) -> None:
+        """#277: generic sweep — no enumeration to keep in sync.
+
+        The #186 defect (an IP-keyed UserRateThrottle on an HMAC endpoint running
+        ``authentication_classes([])``, bypassable by rotating source IPs) survived on
+        update_customer_billing_address precisely because the guardrail above is a
+        hand-maintained list. This walks every registered @api_view instead, so a new
+        HMAC view with the wrong throttle fails here without anyone remembering to add it.
+        """
+        offenders: list[str] = []
+        for module in (customers_views, orders_views, users_views):
+            for name, obj in vars(module).items():
+                view_cls = getattr(obj, "cls", None)
+                if view_cls is None or not hasattr(view_cls, "throttle_classes"):
+                    continue
+                # Two conditions must BOTH hold for the #186/#277 defect:
+                #  1. DRF authentication is disabled → request.user is AnonymousUser, so a
+                #     User/Anon throttle silently degrades to IP keying.
+                #  2. The endpoint is NOT marked @public_api_endpoint. On a genuinely public
+                #     view (login, password reset, registration) IP keying is the CORRECT
+                #     choice — there is no portal identity to key on. Only HMAC endpoints,
+                #     which do have a verified portal id, are miskeyed by it.
+                if list(getattr(view_cls, "authentication_classes", [1])):
+                    continue
+                if _has_public_marker(obj):
+                    continue
+                offenders.extend(
+                    f"{module.__name__}.{name} -> {throttle.__name__}"
+                    for throttle in view_cls.throttle_classes
+                    if issubclass(throttle, UserRateThrottle | AnonRateThrottle)
+                )
+
+        self.assertEqual(
+            offenders,
+            [],
+            "HMAC views (authentication_classes([])) must use portal-keyed throttles, "
+            f"not IP-keyed User/Anon throttles: {offenders}",
+        )
+
+    def test_billing_address_view_uses_portal_scoped_throttles_not_burst(self) -> None:
+        """#277: same defect as #186's create-user fix, on a view the original sweep missed.
+
+        ``@throttle_classes`` REPLACES DEFAULT_THROTTLE_CLASSES, so the previous
+        ``[BurstAPIThrottle]`` both dropped the global per-portal limits and keyed on
+        client IP (UserRateThrottle + authentication_classes([]) → AnonymousUser → IP).
+        """
+        throttle_classes = update_customer_billing_address.cls.throttle_classes
+        self.assertIn(rate_limiting.PortalHMACRateThrottle, throttle_classes)
+        self.assertIn(rate_limiting.PortalHMACBurstThrottle, throttle_classes)
+        self.assertNotIn(BurstAPIThrottle, throttle_classes)
+
+    def test_billing_address_throttle_cannot_be_bypassed_by_rotating_ip(self) -> None:
+        """The behavioral half of the guard above: same portal, different IPs → same bucket."""
+        factory = RequestFactory()
+        first = factory.post("/api/customers/billing-address/", REMOTE_ADDR="198.51.100.10")
+        second = factory.post("/api/customers/billing-address/", REMOTE_ADDR="203.0.113.20")
+        for req in (first, second):
+            req._portal_authenticated = True  # type: ignore[attr-defined]  # middleware contract
+            req.META["HTTP_X_PORTAL_ID"] = "portal-stable"
+
+        throttle = rate_limiting.PortalHMACRateThrottle()
+        self.assertEqual(
+            throttle.get_cache_key(first, view=None),
+            throttle.get_cache_key(second, view=None),
+        )
+
+    def test_every_project_throttle_parses_its_configured_rate(self) -> None:
+        """#277: the gap that let PortalHMACRateThrottle/CustomerRateThrottle rot.
+
+        Startup validation uses the permissive parse_rate_string, but a throttle class
+        without _CustomTimeRateMixin falls through to DRF's parser, which reads the window
+        from ``period[0]`` only — so ``200/10s`` passes deploy checks and then raises
+        KeyError on the first live request. Asserting per-CLASS (not just on the shared
+        helper) is what makes that divergence visible.
+        """
+        shorthand = "200/10s"
+        checked: list[str] = []
+        for name, obj in vars(rate_limiting).items():
+            if not isinstance(obj, type) or not issubclass(obj, SimpleRateThrottle):
+                continue
+            # Only classes DEFINED here — DRF's own AnonRateThrottle/UserRateThrottle are in
+            # this namespace by import and are not ours to fix (we subclass them instead).
+            if obj.__module__ != rate_limiting.__name__:
+                continue
+            # Skip private bases (EndpointRateThrottle included: no .scope of its own, so
+            # DRF refuses to instantiate it — its concrete subclasses are covered elsewhere).
+            if name.startswith("_") or getattr(obj, "scope", None) is None:
+                continue
+            checked.append(name)
+            with self.subTest(throttle=name):
+                # Unbound call: __init__ resolves .rate from settings, which is irrelevant here
+                # — we are asserting the parser the class would USE, not its configured value.
+                self.assertEqual(
+                    obj.parse_rate(obj, shorthand),  # type: ignore[arg-type]  # unbound on purpose
+                    (200, 10),
+                    f"{name} cannot parse a shorthand window that startup validation accepts",
+                )
+
+        # Guard the guard: if a refactor renames/relocates these, the loop above must not
+        # silently shrink to zero and keep passing.
+        self.assertIn("PortalHMACRateThrottle", checked)
+        self.assertIn("CustomerRateThrottle", checked)
 
     def test_hmac_endpoint_throttle_cannot_be_bypassed_by_rotating_ip(self) -> None:
         factory = RequestFactory()
