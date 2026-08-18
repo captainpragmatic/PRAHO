@@ -9,12 +9,15 @@ Tests for:
 
 from __future__ import annotations
 
+import inspect
+import pathlib
 from unittest.mock import MagicMock, patch
 
 from django.http import HttpResponse
 from django.test import RequestFactory, SimpleTestCase, TestCase
 from rest_framework.test import APIRequestFactory
 
+from apps.api.orders import views as views_module
 from apps.api.orders.views import confirm_order
 from apps.billing.gateways.base import PaymentConfirmResult
 from apps.billing.models import Currency
@@ -125,6 +128,34 @@ class StripePaymentVerificationTest(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.data["success"])
         mock_gateway.confirm_payment.assert_called_once_with("pi_testVerifyOK1234567")
+
+    def test_confirm_never_reads_payment_status_from_the_request(self) -> None:
+        """#104 [H11] guardrail: the field must be structurally unread, not merely overridden.
+
+        test_confirm_rejects_non_succeeded_pi already proves the *behavior* — a forged
+        "succeeded" loses to Stripe's real status. This pins the stronger property the
+        fix established: confirm_order never consults request payment_status at all, so
+        no future refactor can reintroduce it as a shortcut (e.g. "trust it when Stripe
+        is unreachable"). Asserted on the source because a behavioral test cannot
+        distinguish "ignored" from "read but overridden".
+        """
+        # NOT inspect.getsource(confirm_order): @api_view replaces it with DRF's wrapper,
+        # so that would assert on 443 characters of framework code and pass unconditionally.
+        # Read the decorated function out of the module source instead.
+        module_source = pathlib.Path(inspect.getfile(views_module)).read_text(encoding="utf-8")
+        marker = "def confirm_order("
+        start = module_source.index(marker)
+        end = module_source.find("\ndef ", start + len(marker))
+        body = module_source[start : end if end != -1 else len(module_source)]
+        code = "\n".join(line.split("#")[0] for line in body.splitlines())
+
+        self.assertIn("payment_intent_id", code, "guard is reading the wrong function")
+        for accessor in ('"payment_status"', "'payment_status'"):
+            self.assertNotIn(
+                accessor,
+                code,
+                "confirm_order must not read payment_status from the request (#104 H11)",
+            )
 
     def test_confirm_rejects_non_succeeded_pi(self) -> None:
         """Stripe PI with status != succeeded rejects order confirmation."""
