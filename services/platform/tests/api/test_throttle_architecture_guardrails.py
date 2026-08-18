@@ -10,8 +10,10 @@ from django.core.cache import cache
 from django.core.exceptions import ImproperlyConfigured
 from django.test import RequestFactory, SimpleTestCase, TestCase, override_settings
 from django.utils.module_loading import import_string
+from rest_framework.decorators import api_view, authentication_classes, throttle_classes
 from rest_framework.test import APIRequestFactory
 from rest_framework.throttling import AnonRateThrottle, ScopedRateThrottle, SimpleRateThrottle, UserRateThrottle
+from rest_framework.views import APIView
 from tests.api.test_api_auth_regressions import _has_public_marker
 
 from apps.api.core import throttling as core_throttling
@@ -197,16 +199,16 @@ class ThrottleArchitectureGuardrailTests(SimpleTestCase):
                     continue  # DRF auth enabled → not an unsigned-reachable HMAC endpoint
                 if _has_public_marker(obj):
                     continue  # genuinely public: no portal identity, IP keying is native
-                # An empty throttle list is skipped ONLY because config.settings.test sets
-                # DEFAULT_THROTTLE_CLASSES=[], so a view that merely INHERITS the defaults is
-                # indistinguishable here from one that explicitly wrote @throttle_classes([]).
-                # In production the inherited defaults (Customer/BurstRateThrottle) key unsigned
-                # traffic, so inherited-default views are fine. The genuinely-dangerous case —
-                # an explicit @throttle_classes([]) suppressing the defaults, as three GDPR
-                # views once did — is covered by giving those views a real fallback (they are
-                # no longer empty and so ARE evaluated below); a future explicit-[] HMAC view is
-                # a known blind spot of this environment and is guarded per-view where it matters.
-                if not view_cls.throttle_classes:
+                # Skip views that merely INHERIT the defaults, NOT ones that explicitly
+                # override throttling. config.settings.test sets DEFAULT_THROTTLE_CLASSES=[],
+                # so both show throttle_classes==[] — but DRF binds an inheriting view to the
+                # SAME APIView.throttle_classes object, while @throttle_classes([...]) (any
+                # list, including []) installs a distinct one. Comparing identity therefore
+                # keeps inherited-default views out (in production those defaults key unsigned
+                # traffic) while an explicit @throttle_classes([]) that suppresses the defaults
+                # — the dangerous config three GDPR views once had — is NOT skipped and is
+                # flagged below (an empty list keys nothing).
+                if view_cls.throttle_classes is APIView.throttle_classes:
                     continue
                 req = factory.post(f"/{name}/", REMOTE_ADDR="198.51.100.10")
                 req.user = AnonymousUser()  # unsigned: no portal auth, no DRF user
@@ -224,6 +226,28 @@ class ThrottleArchitectureGuardrailTests(SimpleTestCase):
             "the PortalHMAC* throttles return None for non-portal requests, so add an "
             f"always-keyed throttle (CustomerRateThrottle/BurstRateThrottle): {unprotected}",
         )
+
+    def test_sweep_would_flag_an_explicit_empty_throttle_override(self) -> None:
+        """The strengthened skip must distinguish inherited defaults from an explicit
+        @throttle_classes([]). This builds the exact dangerous shape — an HMAC view that
+        explicitly suppresses the defaults — and asserts the sweep's own predicates would
+        flag it (not skip it), so a future regression of that shape can't pass silently.
+        """
+        @api_view(["POST"])
+        @authentication_classes([])
+        @throttle_classes([])  # explicit suppression — the dangerous config
+        def _explicit_empty_hmac_view(request: object) -> None:  # pragma: no cover - never called
+            return None
+
+        view_cls = _explicit_empty_hmac_view.cls
+        # The identity skip must NOT swallow it: an explicit [] is a distinct object.
+        self.assertIsNot(view_cls.throttle_classes, APIView.throttle_classes)
+        # And it keys nothing for unsigned traffic, so the sweep's offender branch fires.
+        factory = APIRequestFactory()
+        req = factory.post("/x/", REMOTE_ADDR="198.51.100.10")
+        req.user = AnonymousUser()
+        keys_unsigned = any(t().get_cache_key(req, view=view_cls) is not None for t in view_cls.throttle_classes)
+        self.assertFalse(keys_unsigned, "an explicit empty override throttles nothing — must be flagged")
 
     def test_gdpr_service_endpoints_throttle_unsigned_traffic(self) -> None:
         """#277 follow-up: the GDPR HMAC endpoints once used @throttle_classes([]) — an
