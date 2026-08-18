@@ -70,6 +70,9 @@ services:
       - DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY:?DJANGO_SECRET_KEY required}
       - DJANGO_SETTINGS_MODULE=config.settings.prod
       - HMAC_SECRET=${PLATFORM_API_SECRET:?PLATFORM_API_SECRET required}
+      # Per-portal HMAC registry (#277). Unset => legacy shared-secret behavior (safe default).
+      - PORTAL_HMAC_MODE=${PORTAL_HMAC_MODE:-legacy}
+      - PORTAL_HMAC_CREDENTIALS=${PORTAL_HMAC_CREDENTIALS:-}
       - PLATFORM_TO_PORTAL_WEBHOOK_SECRET=${PLATFORM_TO_PORTAL_WEBHOOK_SECRET:?PLATFORM_TO_PORTAL_WEBHOOK_SECRET required}
       - ALLOWED_HOSTS=${DOMAIN:-localhost},localhost,platform
       - CSRF_TRUSTED_ORIGINS=https://${DOMAIN:-localhost}

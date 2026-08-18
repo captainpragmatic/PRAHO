@@ -851,3 +851,16 @@ INTERNAL_SERVICE_ALLOWED_DOMAINS: list[str] = ["localhost"]
 # security vulnerability — _require_customer_auth_for_portal_api will raise
 # ImproperlyConfigured if this is True when neither TESTING nor DEBUG is True.
 PORTAL_HMAC_BYPASS: bool = False
+
+# Per-portal HMAC credential registry (#277). Resolves the Portal→Platform verifying
+# secret by X-Portal-Id instead of a single shared PLATFORM_API_SECRET, so a shared-secret
+# holder can no longer rotate X-Portal-Id to mint unlimited throttle/nonce buckets.
+#   PORTAL_HMAC_MODE: "legacy" (default; shared secret, registry ignored) | "audit" (registry
+#     first, legacy fallback + warning on a fallback-accepted request) | "enforce" (registry
+#     only, unregistered id rejected, no shared-secret fallback).
+#   PORTAL_HMAC_CREDENTIALS: raw JSON {"portal-001": "<secret>"} or {"portal-001": ["<new>",
+#     "<old>"]} (a keyring, so rotation is make-before-break). Parsed + validated at startup
+#     by apps.common.portal_hmac; malformed JSON fails fast rather than degrading to empty.
+# See apps/common/portal_hmac.py and docs/security/portal-hmac-registry.md for the rollout.
+PORTAL_HMAC_MODE: str = os.environ.get("PORTAL_HMAC_MODE", "legacy")
+PORTAL_HMAC_CREDENTIALS: str | None = os.environ.get("PORTAL_HMAC_CREDENTIALS")

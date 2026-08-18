@@ -55,6 +55,9 @@ services:
       - DB_USER=postgres
       - DB_PASSWORD=${DB_PASSWORD:-dev_password_change_in_prod}
       - HMAC_SECRET=${PLATFORM_API_SECRET:-dev-shared-secret-change-in-production}
+      # Per-portal HMAC registry (#277). Unset => legacy shared-secret behavior (safe default).
+      - PORTAL_HMAC_MODE=${PORTAL_HMAC_MODE:-legacy}
+      - PORTAL_HMAC_CREDENTIALS=${PORTAL_HMAC_CREDENTIALS:-}
       - PLATFORM_TO_PORTAL_WEBHOOK_SECRET=${PLATFORM_TO_PORTAL_WEBHOOK_SECRET:-test-webhook-secret-do-not-use-in-prod}
       - DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY:?DJANGO_SECRET_KEY required}
       - DJANGO_SETTINGS_MODULE=config.settings.dev
@@ -91,6 +94,8 @@ services:
       - DEBUG=1
       - PLATFORM_API_BASE_URL=http://platform:8700/api
       - PLATFORM_API_SECRET=${PLATFORM_API_SECRET:-dev-shared-secret-change-in-production}
+      # Per-portal signing secret (#277). Unset/empty => sign with PLATFORM_API_SECRET.
+      - PORTAL_HMAC_SECRET=${PORTAL_HMAC_SECRET:-}
       - PLATFORM_API_ALLOW_INSECURE_HTTP=true
       - DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY:?DJANGO_SECRET_KEY required}
       - DJANGO_SETTINGS_MODULE=config.settings.dev
