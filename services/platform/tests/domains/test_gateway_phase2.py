@@ -636,3 +636,85 @@ class LifecycleServicePhase2FailureContractTests(TestCase):
         self.assertEqual(DomainOperation.objects.count(), 0)
         self.domain.refresh_from_db()
         self.assertEqual(self.domain.nameservers, ["ns1.old.com"])
+
+
+# ===============================================================================
+# GANDI REQUEST PAYLOAD SHAPES (#265)
+# ===============================================================================
+
+
+@override_settings(REGISTRAR_ADAPTERS_VERIFIED=True)
+class GandiPayloadShapeTests(TestCase):
+    """Assert the exact request bodies sent to Gandi.
+
+    The pre-existing Phase 2 tests assert only the parsed RESULT, and all three payloads
+    below were wrong while those tests passed — a mocked 200 response says nothing about
+    whether the request Gandi received was well-formed. These pin the wire format against
+    https://api.gandi.net/docs/domains/ so a regression fails here rather than in
+    production (or, today, silently against a sandbox nobody has run yet).
+    """
+
+    def setUp(self) -> None:
+        self.registrar = _make_registrar("gandi")
+        self.gateway = GandiGateway(self.registrar)
+
+    @patch("apps.domains.gateways.gandi.GandiGateway._api_request")
+    @patch("apps.domains.gateways.base.cache")
+    def test_transfer_sends_authinfo_not_auth_info(self, mock_cache: MagicMock, mock_request: MagicMock) -> None:
+        """#265(1): Gandi's field is `authinfo`; `auth_info` was rejected outright."""
+        mock_cache.get.side_effect = [0, None]
+        mock_request.return_value = _mock_response(202, {"id": "t-1", "status": "pending"})
+
+        self.gateway.initiate_transfer("example.com", "EPP-CODE")
+
+        body = mock_request.call_args.kwargs["json"]
+        self.assertEqual(body["authinfo"], "EPP-CODE")
+        self.assertNotIn("auth_info", body)
+        self.assertEqual(body["fqdn"], "example.com")
+
+    @patch("apps.domains.gateways.gandi.GandiGateway._api_request")
+    @patch("apps.domains.gateways.base.cache")
+    def test_nameserver_update_wraps_the_list_in_an_object(
+        self, mock_cache: MagicMock, mock_request: MagicMock
+    ) -> None:
+        """#265(2): the endpoint takes {"nameservers": [...]}, not a bare array."""
+        mock_cache.get.return_value = 0
+        mock_request.return_value = _mock_response(200, {})
+        nameservers = ["ns1.new.com", "ns2.new.com"]
+
+        self.gateway.update_nameservers("example.com", nameservers)
+
+        body = mock_request.call_args.kwargs["json"]
+        self.assertEqual(body, {"nameservers": nameservers})
+        self.assertNotIsInstance(body, list)
+
+    @patch("apps.domains.gateways.gandi.GandiGateway._api_request")
+    @patch("apps.domains.gateways.base.cache")
+    def test_lock_patches_the_status_subresource(self, mock_cache: MagicMock, mock_request: MagicMock) -> None:
+        """#265(3): lock lives on /status, and must not touch autorenew."""
+        mock_cache.get.return_value = 0
+        mock_request.return_value = _mock_response(200, {})
+
+        self.gateway.set_lock("example.com", locked=True)
+
+        args = mock_request.call_args.args
+        body = mock_request.call_args.kwargs["json"]
+        self.assertEqual(args[0], "PATCH")
+        self.assertTrue(args[1].endswith("/domain/domains/example.com/status"))
+        self.assertEqual(body, {"clientTransferProhibited": True})
+
+    @patch("apps.domains.gateways.gandi.GandiGateway._api_request")
+    @patch("apps.domains.gateways.base.cache")
+    def test_unlock_clears_the_flag_without_touching_autorenew(
+        self, mock_cache: MagicMock, mock_request: MagicMock
+    ) -> None:
+        """The unlock path previously sent {"autorenew": None} — a different field entirely."""
+        mock_cache.get.return_value = 0
+        mock_request.return_value = _mock_response(200, {})
+
+        self.gateway.set_lock("example.com", locked=False)
+
+        body = mock_request.call_args.kwargs["json"]
+        self.assertEqual(body, {"clientTransferProhibited": False})
+        self.assertNotIn("autorenew", body)
+        self.assertNotIn("tags", body)
