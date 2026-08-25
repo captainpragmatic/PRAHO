@@ -1044,8 +1044,8 @@ class DomainOrderService:
         # created outside this method); process_domain_order_items re-checks ownership on the
         # linked domain before renewing.
         #
-        # TODO(#442): `.lower()` assumes Domain.name is stored lowercase, which is not enforced at
-        # the model/DB layer — a stored "Example.RO" would silently fail to link here.
+        # `.lower()` matches Domain.name's stored form: #442 made canonicalization structural —
+        # Domain.save() strips+lowercases on every write and migration 0006 fixed legacy rows.
         existing_domain: Domain | None = None
         if action == "renew":
             existing_domain = Domain.objects.filter(name=domain_name.lower(), customer=order.customer).first()

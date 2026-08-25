@@ -1,41 +1,53 @@
-"""Canonicalize existing Domain.name values to lowercase (#442).
+"""Canonicalize existing Domain.name values to stripped lowercase (#442).
 
-Domain.save() now lowercases on write, but rows created before that change may hold
-mixed-case names. An exact-match lookup (e.g. the renew-item link in
-create_domain_order_item) misses those rows silently, so they must be fixed in place
+Domain.save() now canonicalizes on write, but rows created before that change may hold
+mixed-case or whitespace-padded names. An exact-match lookup (e.g. the renew-item link
+in create_domain_order_item) misses those rows silently, so they must be fixed in place
 rather than left to be rewritten opportunistically.
 
-``name`` is ``unique=True``: if both ``Example.RO`` and ``example.ro`` somehow exist,
-lowercasing the former would collide. That is a genuine data conflict a migration must
-not paper over by dropping a row, so it fails loudly with the offending names instead.
+``name`` is ``unique=True``: if two rows canonicalize to the same target — a mixed-case
+row next to an existing lowercase twin, or two mixed-case variants of one name — the
+rewrite would collide. That is a genuine data conflict a migration must not paper over
+by dropping a row, so every collision shape is detected UP FRONT (before any row is
+rewritten) and the migration fails loudly with the offending names.
+
+The whole table is scanned in Python: domain tables are small, a one-time full scan is
+cheap, and it sidesteps per-backend SQL semantics of LOWER()/TRIM() entirely — the
+Python canonical (``strip().lower()``) is by construction the same one save() applies.
 """
 
 from __future__ import annotations
 
 from django.db import migrations
-from django.db.models.functions import Lower
 
 
 def canonicalize_names(apps, schema_editor):
     domain = apps.get_model("domains", "Domain")
 
-    mixed_case = domain.objects.exclude(name=Lower("name"))
-    if not mixed_case.exists():
+    to_fix = []  # (row, canonical) pairs needing a rewrite
+    targets: dict[str, list[str]] = {}  # canonical name -> every stored name mapping to it
+    for row in domain.objects.all().iterator():
+        canonical = row.name.strip().lower()
+        targets.setdefault(canonical, []).append(row.name)
+        if row.name != canonical:
+            to_fix.append((row, canonical))
+
+    if not to_fix:
         return
 
-    # Detect collisions before writing: a lowercase twin already occupying the target.
-    existing_lower = set(
-        domain.objects.filter(name__in=[d.name.lower() for d in mixed_case]).values_list("name", flat=True)
-    )
-    collisions = [d.name for d in mixed_case if d.name.lower() in existing_lower]
+    # Every collision shape at once: an existing-lowercase occupant plus a variant,
+    # or several non-canonical variants of the same name — refuse before ANY write,
+    # never midway through on a raw IntegrityError.
+    collisions = {canonical: names for canonical, names in targets.items() if len(names) > 1}
     if collisions:
+        detail = "; ".join(f"{canonical}: {sorted(names)}" for canonical, names in sorted(collisions.items()))
         raise RuntimeError(
-            "Cannot canonicalize Domain.name — these rows would collide with an existing "
-            f"lowercase row: {sorted(collisions)}. Resolve the duplicates manually, then re-run."
+            f"Cannot canonicalize Domain.name — multiple rows map to the same canonical name ({detail}). "
+            "Resolve the duplicates manually, then re-run."
         )
 
-    for row in mixed_case:
-        row.name = row.name.strip().lower()
+    for row, canonical in to_fix:
+        row.name = canonical
         row.save(update_fields=["name"])
 
 
