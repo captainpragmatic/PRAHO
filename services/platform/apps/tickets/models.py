@@ -363,8 +363,19 @@ class TicketComment(models.Model):
         return f"Comment pe {self.ticket.ticket_number} de {self.get_author_name()}"
 
     @staticmethod
+    def public_q(prefix: str = "") -> models.Q:
+        """THE customer-visibility predicate for comments, as a reusable Q (#278).
+
+        Every surface — web view filters, API serializer filters, prefetches, and the
+        list-count annotation (which needs a ``comments__`` relation prefix) — must build
+        its filter from this one definition, so a future policy change lands everywhere
+        at once instead of drifting across parallel inline copies.
+        """
+        return models.Q(**{f"{prefix}is_public": True})
+
+    @staticmethod
     def visible_to(comments: models.QuerySet[TicketComment], user: Any) -> models.QuerySet[TicketComment]:
-        """Canonical non-staff visibility predicate for ticket comments (#278).
+        """Canonical non-staff visibility filter for ticket comments (#278).
 
         ``is_public`` is the single source of truth. Previously the web views filtered on
         ``comment_type__in=("customer", "support")`` while the API filtered on ``is_public``
@@ -374,12 +385,13 @@ class TicketComment(models.Model):
         ``system`` comment (hidden by the web filter, shown by the API) or a ``support``
         comment with ``is_public=False`` (the reverse) would diverge between surfaces.
 
-        Route every non-staff comment query through here so a future producer cannot
+        Route every non-staff comment query through here (or ``public_q()`` where a bare
+        queryset filter or relation-prefixed Q is needed) so a future producer cannot
         reintroduce that split.
         """
         if getattr(user, "is_staff_user", False):
             return comments
-        return comments.filter(is_public=True)
+        return comments.filter(TicketComment.public_q())
 
     @property
     def is_visible_to_customer(self) -> bool:
@@ -430,6 +442,19 @@ class TicketAttachment(models.Model):
 
     def __str__(self) -> str:
         return f"{self.filename} - {self.ticket.ticket_number}"
+
+    @staticmethod
+    def customer_visible_q(prefix: str = "") -> models.Q:
+        """THE customer-visibility predicate for attachments, as a reusable Q (#278).
+
+        An attachment follows its parent comment: visible iff the comment is public.
+        ``comment`` is nullable — a ticket-level attachment (comment IS NULL) is
+        customer-visible, matching the web download endpoint's long-standing behavior.
+        A bare ``comment__is_public=True`` filter silently DROPS those rows (LEFT-join
+        three-valued logic), which made them invisible in counts/lists while both
+        download endpoints still served them — use this Q, never an inline filter.
+        """
+        return models.Q(**{f"{prefix}comment__isnull": True}) | models.Q(**{f"{prefix}comment__is_public": True})
 
     def get_file_size_display(self) -> str:
         """Human readable file size"""

@@ -37,8 +37,10 @@ def _annotate_visible_counts(queryset: "QuerySet[Ticket]") -> "QuerySet[Ticket]"
     bought nothing once the counts became visibility-aware.
     """
     return queryset.annotate(
-        visible_comments_count=Count("comments", filter=Q(comments__is_public=True), distinct=True),
-        visible_attachments_count=Count("attachments", filter=Q(attachments__comment__is_public=True), distinct=True),
+        visible_comments_count=Count("comments", filter=TicketComment.public_q("comments__"), distinct=True),
+        visible_attachments_count=Count(
+            "attachments", filter=TicketAttachment.customer_visible_q("attachments__"), distinct=True
+        ),
     )
 
 
@@ -226,10 +228,13 @@ def customer_ticket_detail_api(request: HttpRequest, customer: Customer, ticket_
             # Prefetch only public comments and their attachments for customer context
             public_comments = Prefetch(
                 "comments",
-                queryset=TicketComment.objects.filter(is_public=True).select_related("author").order_by("created_at"),
+                queryset=TicketComment.objects.filter(TicketComment.public_q())
+                .select_related("author")
+                .order_by("created_at"),
             )
             public_attachments = Prefetch(
-                "attachments", queryset=TicketAttachment.objects.filter(comment__is_public=True).order_by("uploaded_at")
+                "attachments",
+                queryset=TicketAttachment.objects.filter(TicketAttachment.customer_visible_q()).order_by("uploaded_at"),
             )
 
             ticket = (
@@ -340,10 +345,13 @@ def customer_ticket_create_api(request: HttpRequest, customer: Customer) -> Resp
         # Reload with the same prefetching to keep payload limited and efficient
         public_comments = Prefetch(
             "comments",
-            queryset=TicketComment.objects.filter(is_public=True).select_related("author").order_by("created_at"),
+            queryset=TicketComment.objects.filter(TicketComment.public_q())
+            .select_related("author")
+            .order_by("created_at"),
         )
         public_attachments = Prefetch(
-            "attachments", queryset=TicketAttachment.objects.filter(comment__is_public=True).order_by("uploaded_at")
+            "attachments",
+            queryset=TicketAttachment.objects.filter(TicketAttachment.customer_visible_q()).order_by("uploaded_at"),
         )
         ticket = (
             Ticket.objects.select_related("customer", "category", "assigned_to", "created_by", "related_service")
@@ -629,6 +637,7 @@ def support_categories_api(request: HttpRequest) -> Response:
 
 
 @api_view(["POST"])
+@authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])  # HMAC auth handled by secure_auth
 @require_customer_authentication
 def ticket_attachment_download_api(
@@ -655,11 +664,18 @@ def ticket_attachment_download_api(
     try:
         # Get attachment with access control for the authenticated customer
         try:
-            attachment = TicketAttachment.objects.select_related("ticket").get(
-                id=attachment_id,
-                ticket__id=ticket_id,
-                ticket__customer=customer,  # Ensure customer owns the ticket
-                is_safe=True,  # Only allow safe files
+            # #278: gate on the parent comment's visibility with the SAME predicate every
+            # list/count surface uses. Without it, sequential attachment ids let a customer
+            # download internal-note files on their own ticket that no API response lists.
+            attachment = (
+                TicketAttachment.objects.select_related("ticket")
+                .filter(TicketAttachment.customer_visible_q())
+                .get(
+                    id=attachment_id,
+                    ticket__id=ticket_id,
+                    ticket__customer=customer,  # Ensure customer owns the ticket
+                    is_safe=True,  # Only allow safe files
+                )
             )
         except TicketAttachment.DoesNotExist:
             raise Http404("Attachment not found or access denied") from None

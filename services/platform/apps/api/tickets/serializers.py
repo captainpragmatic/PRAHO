@@ -109,26 +109,26 @@ class TicketListSerializer(serializers.ModelSerializer):
         An unfiltered count told a customer how many internal notes staff had written on
         their ticket — the same count-disclosure already fixed on the web surface.
 
-        Prefers the queryset annotation (see _visible_count_annotations) so a list of N
-        tickets costs one query rather than N.
+        In customer context, prefers the queryset annotation (see _annotate_visible_counts)
+        so a list of N tickets costs one query rather than N. The annotation is consulted
+        ONLY in customer context — a staff caller reusing an annotated queryset must not
+        silently receive visibility-filtered counts.
         """
+        if not self.context.get("for_customer"):
+            return obj.comments.count()
         annotated = getattr(obj, "visible_comments_count", None)
         if annotated is not None:
             return int(annotated)
-        qs = obj.comments.all()
-        if self.context.get("for_customer"):
-            qs = qs.filter(is_public=True)
-        return qs.count()
+        return obj.comments.filter(TicketComment.public_q()).count()
 
     def get_attachments_count(self, obj: "Ticket") -> int:
         """Get number of attachments (attachments on non-public comments stay hidden)."""
+        if not self.context.get("for_customer"):
+            return obj.attachments.count()
         annotated = getattr(obj, "visible_attachments_count", None)
         if annotated is not None:
             return int(annotated)
-        qs = obj.attachments.all()
-        if self.context.get("for_customer"):
-            qs = qs.filter(comment__is_public=True)
-        return qs.count()
+        return obj.attachments.filter(TicketAttachment.customer_visible_q()).count()
 
 
 # ===============================================================================
@@ -325,17 +325,21 @@ class TicketDetailSerializer(serializers.ModelSerializer):
         return ""
 
     def get_comments(self, obj: "Ticket") -> list[dict[str, Any]]:
-        """Return comments, filtering out non-public ones for customer context."""
+        """Return comments, filtering out non-public ones for customer context (#278)."""
         qs = obj.comments.all()
         if self.context.get("for_customer"):
-            qs = qs.filter(is_public=True)
+            qs = qs.filter(TicketComment.public_q())
         return TicketCommentSerializer(qs, many=True).data
 
     def get_attachments(self, obj: "Ticket") -> list[dict[str, Any]]:
-        """Return attachments linked to public comments only for customer context."""
+        """Return customer-visible attachments only for customer context (#278).
+
+        Visibility follows the parent comment; ticket-level (comment IS NULL)
+        attachments are customer-visible — see TicketAttachment.customer_visible_q.
+        """
         qs = obj.attachments.all()
         if self.context.get("for_customer"):
-            qs = qs.filter(comment__is_public=True)
+            qs = qs.filter(TicketAttachment.customer_visible_q())
         return TicketAttachmentSerializer(qs, many=True).data
 
 
