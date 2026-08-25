@@ -27,7 +27,11 @@ from django.test import Client, RequestFactory, TestCase, override_settings
 from django.urls import reverse
 
 from apps.api.tickets.serializers import TicketDetailSerializer, TicketListSerializer
-from apps.api.tickets.views import _annotate_visible_counts, ticket_attachment_download_api
+from apps.api.tickets.views import (
+    _annotate_visible_counts,
+    customer_ticket_detail_api,
+    ticket_attachment_download_api,
+)
 from apps.customers.models import Customer
 from apps.tickets.models import Ticket, TicketAttachment, TicketComment
 from apps.users.models import CustomerMembership, User
@@ -194,3 +198,56 @@ class VisibleCountParityTests(AttachmentVisibilityBaseTest):
         data = TicketListSerializer(annotated).data  # no for_customer context
         self.assertEqual(data["comments_count"], 2)
         self.assertEqual(data["attachments_count"], 3)
+
+    def test_public_internal_comment_is_visible(self):
+        """The fourth divergent quadrant: comment_type='internal' with is_public=True.
+
+        is_public is THE predicate — a public comment is visible whatever its type.
+        Without this fixture, re-coupling the predicate to comment_type (e.g. adding
+        ~Q(comment_type='internal') "for safety") would ship green through every suite.
+        """
+        public_internal = TicketComment.objects.create(
+            ticket=self.ticket, content="PUBLIC-INTERNAL-QUADRANT", comment_type="internal", is_public=True
+        )
+        att = _attachment(self.ticket, public_internal, b"QUADRANT-BYTES")
+
+        visible = TicketComment.visible_to(
+            TicketComment.objects.filter(ticket=self.ticket), self.customer_user
+        ).values_list("content", flat=True)
+        self.assertIn("PUBLIC-INTERNAL-QUADRANT", visible)
+
+        data = TicketListSerializer(self.ticket, context={"for_customer": True}).data
+        self.assertEqual(data["comments_count"], 2)  # public support + public internal
+        self.assertEqual(data["attachments_count"], 3)  # + the quadrant attachment
+
+        detail = TicketDetailSerializer(self.ticket, context={"for_customer": True}).data
+        self.assertIn(att.pk, {a["id"] for a in detail["attachments"]})
+
+
+@override_settings(DISABLE_AUDIT_SIGNALS=True, MEDIA_ROOT=_MEDIA_ROOT)
+class ApiDetailEndpointPrefetchTests(AttachmentVisibilityBaseTest):
+    """Drive the REAL customer_ticket_detail_api endpoint, not a hand-built serializer.
+
+    The endpoint feeds the serializer through Prefetch querysets
+    (apps/api/tickets/views.py) — a prefetch regressing to a bare
+    ``comment__is_public=True`` filter would silently drop ticket-level attachments
+    from the live API while direct-serializer tests stay green, because
+    ``obj.attachments.all()`` on an un-prefetched instance re-queries the DB.
+    """
+
+    def test_detail_endpoint_payload_matches_visibility_rules(self):
+        request = RequestFactory().post(
+            f"/api/tickets/{self.ticket.pk}/",
+            data=json.dumps({"customer_id": self.customer.pk, "action": "get_ticket_detail"}),
+            content_type="application/json",
+        )
+        with patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)):
+            response = customer_ticket_detail_api(request, ticket_id=self.ticket.pk)
+
+        self.assertEqual(response.status_code, 200)
+        ticket_data = response.data["data"]["ticket"]
+        self.assertEqual({c["content"] for c in ticket_data["comments"]}, {"public reply"})
+        self.assertEqual(
+            {a["id"] for a in ticket_data["attachments"]},
+            {self.att_public.pk, self.att_ticket_level.pk},  # ticket-level included, hidden excluded
+        )
