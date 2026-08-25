@@ -13,6 +13,7 @@ from django.utils.translation import gettext_lazy as _
 from django_fsm import ConcurrentTransitionMixin, FSMField, transition
 
 from apps.common.encryption import decrypt_value, encrypt_sensitive_data
+from apps.domains.domain_names import canonicalize_domain_name
 
 from .domain_names import longest_matching_tld_suffix
 
@@ -293,6 +294,47 @@ class TLDRegistrarAssignment(models.Model):
 # ===============================================================================
 
 
+class DomainQuerySet(models.QuerySet["Domain"]):
+    """Canonicalize ``name`` on the bulk ORM write paths that never call save() (#442).
+
+    ``save()`` covers instance writes, but ``update()`` / ``bulk_create()`` /
+    ``bulk_update()`` bypass it — a data import using any of them could store
+    ``Example.RO`` beside ``example.ro`` and resurrect the exact-match-lookup bug the
+    canonicalization exists to kill. This queryset (installed as ``objects``, and thus
+    also behind related managers like ``customer.domains``) closes every ORM path.
+
+    ``Domain._base_manager`` intentionally stays a plain Manager: it is the escape
+    hatch the migration tests use to seed legacy-shaped rows. Raw SQL likewise
+    bypasses this layer — migration 0006 is the recovery for any such row.
+    """
+
+    def update(self, **kwargs: Any) -> int:
+        # Only a plain str is canonicalized here; an expression value (F()/Concat/...)
+        # passes through untouched — a deliberate, documented gap rather than a crash.
+        name = kwargs.get("name")
+        if isinstance(name, str):
+            kwargs["name"] = canonicalize_domain_name(name)
+        return super().update(**kwargs)
+
+    def bulk_create(self, objs: Any, *args: Any, **kwargs: Any) -> Any:
+        # Materialize FIRST: bulk_create accepts any iterable, and looping over a
+        # generator here would hand super() a spent iterator — zero rows, no error.
+        objs = list(objs)
+        for obj in objs:
+            if obj.name:
+                obj.name = canonicalize_domain_name(obj.name)
+        return super().bulk_create(objs, *args, **kwargs)
+
+    def bulk_update(self, objs: Any, fields: Any, *args: Any, **kwargs: Any) -> Any:
+        objs = list(objs)  # same spent-iterator hazard as bulk_create
+        fields = list(fields)
+        if "name" in fields:
+            for obj in objs:
+                if obj.name:
+                    obj.name = canonicalize_domain_name(obj.name)
+        return super().bulk_update(objs, fields, *args, **kwargs)
+
+
 class Domain(ConcurrentTransitionMixin, models.Model):
     """
     🌍 Complete domain lifecycle management
@@ -356,6 +398,9 @@ class Domain(ConcurrentTransitionMixin, models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    # Canonicalizes name on bulk write paths (#442); _base_manager stays plain.
+    objects = DomainQuerySet.as_manager()
+
     class Meta:
         db_table = "domains"
         verbose_name = _("🌍 Domain")
@@ -401,10 +446,26 @@ class Domain(ConcurrentTransitionMixin, models.Model):
 
         The service call sites already lowercase on the way in; doing it here makes the
         invariant structural rather than a convention every future writer (admin, data
-        import, direct ORM) has to remember. Migration 0006 canonicalizes existing rows.
+        import, direct ORM) has to remember. Migration 0006 canonicalizes existing rows;
+        DomainQuerySet covers the bulk paths that never call save().
+
+        When canonicalization actually changes the name and the caller passed
+        ``update_fields`` without ``name``, ``name`` is added — otherwise the in-memory
+        object and the database would silently diverge (memory canonical, row not),
+        and the exact-match lookups would keep missing the row while everything looks
+        fine in Python.
         """
         if self.name:
-            self.name = self.name.strip().lower()
+            canonical = canonicalize_domain_name(self.name)
+            if canonical != self.name:
+                self.name = canonical
+                update_fields = kwargs.get("update_fields")
+                # Append "name" only to a NON-EMPTY update_fields: an empty list is
+                # Django's documented "skip the write entirely" no-op and must stay one.
+                if update_fields:
+                    update_fields = list(update_fields)
+                    if "name" not in update_fields:
+                        kwargs["update_fields"] = [*update_fields, "name"]
         super().save(*args, **kwargs)
 
     @property

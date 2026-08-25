@@ -14,8 +14,8 @@ from __future__ import annotations
 
 import importlib
 
-from django.apps import apps as django_apps
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, connection, transaction
+from django.db.migrations.loader import MigrationLoader
 from django.test import TestCase
 
 from apps.billing.models import Currency
@@ -120,6 +120,79 @@ class DomainNameCanonicalizationTests(TestCase):
         assert found is not None
         self.assertEqual(found.id, domain.id)
 
+    def test_queryset_update_is_canonicalized(self) -> None:
+        """Bulk ORM writes bypass save() — the manager layer must canonicalize them.
+
+        Without it, a data import doing ``Domain.objects.filter(...).update(name=...)``
+        can resurrect a mixed-case row beside the canonical one, and the exact
+        lowercase renew/webhook lookups miss it again — the exact bug shape this PR
+        exists to make structurally impossible for every ORM writer.
+        """
+        domain = self._domain("bulkupd.ro")
+
+        Domain.objects.filter(pk=domain.pk).update(name="BulkUpd.RO")
+
+        domain.refresh_from_db()
+        self.assertEqual(domain.name, "bulkupd.ro")
+
+    def test_bulk_create_is_canonicalized(self) -> None:
+        created = Domain.objects.bulk_create(
+            [
+                Domain(
+                    name="  BulkCreate.RO ",
+                    tld=self.ro,
+                    registrar=self.registrar,
+                    customer=self.customer,
+                    status="active",
+                )
+            ]
+        )
+        stored = Domain.objects.get(pk=created[0].pk)
+        self.assertEqual(stored.name, "bulkcreate.ro")
+
+    def test_bulk_update_is_canonicalized(self) -> None:
+        domain = self._domain("bulkup2.ro")
+        domain.name = "BulkUp2.RO"
+        # bulk_update skips save(); the manager must canonicalize the instances.
+        Domain.objects.bulk_update([domain], ["name"])
+        domain.refresh_from_db()
+        self.assertEqual(domain.name, "bulkup2.ro")
+
+    def test_bulk_create_accepts_a_generator(self) -> None:
+        """The canonicalizing override must not exhaust an iterable before delegating.
+
+        Django's bulk_create accepts any iterable; an override that loops over a
+        generator and then hands the SAME (now spent) generator to super() silently
+        creates zero rows and returns [] — data loss dressed as success.
+        """
+        created = Domain.objects.bulk_create(
+            Domain(
+                name=name,
+                tld=self.ro,
+                registrar=self.registrar,
+                customer=self.customer,
+                status="active",
+            )
+            for name in ["GenOne.RO", "gentwo.ro"]
+        )
+        self.assertEqual(len(created), 2)
+        self.assertTrue(Domain.objects.filter(name="genone.ro").exists())
+        self.assertTrue(Domain.objects.filter(name="gentwo.ro").exists())
+
+    def test_save_with_empty_update_fields_stays_a_no_op(self) -> None:
+        """Django documents save(update_fields=[]) as 'skip the write entirely'.
+
+        Canonicalization must not turn that guaranteed no-op into an UPDATE by
+        appending "name" to an empty list.
+        """
+        domain = self._domain("noopfields.ro")
+        Domain._base_manager.filter(pk=domain.pk).update(name="NoopFields.RO")
+        stale = Domain.objects.get(pk=domain.pk)
+
+        stale.save(update_fields=[])  # documented no-op — nothing may be written
+
+        self.assertEqual(Domain._base_manager.get(pk=domain.pk).name, "NoopFields.RO")
+
     def test_renew_order_item_links_mixed_case_created_domain_end_to_end(self) -> None:
         """The full #442 → #435 chain: a mixed-case-created domain still gets its
         renew order item LINKED (not silently unlinked) through the real service.
@@ -139,6 +212,42 @@ class DomainNameCanonicalizationTests(TestCase):
         self.assertIsNotNone(item.domain)
         assert item.domain is not None
         self.assertEqual(item.domain.id, domain.id)
+
+    def test_renew_order_item_links_despite_padded_mixed_case_input(self) -> None:
+        """Input-side canonicalization: validation strips/lowers only a LOCAL copy,
+        so a renew request for "  RenewWS.RO  " used to pass validation and then
+        miss the stored row at the caller's ``.lower()``-only lookup — an unlinked
+        item and a silently skipped renewal, from the input side this time.
+        """
+        domain = self._domain("renewws.ro")
+
+        ok, item = DomainOrderService.create_domain_order_item(self.order, "  RenewWS.RO  ", "renew")
+
+        self.assertTrue(ok, f"service refused the renew item: {item!r}")
+        assert not isinstance(item, str)
+        self.assertIsNotNone(item.domain)
+        assert item.domain is not None
+        self.assertEqual(item.domain.id, domain.id)
+        self.assertEqual(item.domain_name, "renewws.ro")
+
+    def test_save_with_update_fields_persists_canonicalized_name(self) -> None:
+        """save(update_fields=[...]) must not diverge memory from database.
+
+        If a non-canonical row exists (raw SQL / legacy) and code calls
+        save(update_fields=["status"]), the override canonicalizes self.name in
+        memory — but without adding "name" to update_fields the DB keeps the old
+        value, and the exact-match lookups keep missing it while the in-memory
+        object looks fine.
+        """
+        domain = self._domain("updfields.ro")
+        Domain._base_manager.filter(pk=domain.pk).update(name="UpdFields.RO")
+        stale = Domain.objects.get(pk=domain.pk)
+        self.assertEqual(stale.name, "UpdFields.RO")  # non-canonical row, as raw SQL would leave it
+
+        stale.auto_renew = False
+        stale.save(update_fields=["auto_renew"])
+
+        self.assertEqual(Domain._base_manager.get(pk=domain.pk).name, "updfields.ro")
 
 
 class CanonicalizationMigrationTests(TestCase):
@@ -175,7 +284,14 @@ class CanonicalizationMigrationTests(TestCase):
         )
 
     def _legacy_domain(self, stored_name: str) -> Domain:
-        """Create a row whose stored name bypasses save()-canonicalization."""
+        """Create a row whose stored name bypasses ALL canonicalization layers.
+
+        ``_base_manager`` is the deliberate plain escape hatch: ``objects`` now
+        canonicalizes ``update()`` too, so only the base manager can reproduce what a
+        pre-#442 writer stored. The post-seed assertion guards these tests against
+        going vacuous — if seeding ever canonicalizes, the migration tests would
+        otherwise "pass" while testing nothing.
+        """
         domain = Domain.objects.create(
             name=f"placeholder-{stored_name.strip().lower()}",
             tld=self.ro,
@@ -183,13 +299,22 @@ class CanonicalizationMigrationTests(TestCase):
             customer=self.customer,
             status="active",
         )
-        Domain.objects.filter(pk=domain.pk).update(name=stored_name)
+        Domain._base_manager.filter(pk=domain.pk).update(name=stored_name)
         domain.refresh_from_db()
+        assert domain.name == stored_name, f"legacy seeding was canonicalized: {domain.name!r}"
         return domain
 
     def _run_migration(self) -> None:
+        """Invoke the migration function against the HISTORICAL model state.
+
+        The real executor hands RunPython a historical apps registry whose Domain has
+        NO custom save() — running these tests with the live registry would let live-
+        model canonicalization mask a migration that forgot to rewrite the rows.
+        """
         module = importlib.import_module("apps.domains.migrations.0006_canonicalize_domain_name")
-        module.canonicalize_names(django_apps, None)
+        loader = MigrationLoader(connection)
+        state = loader.project_state(("domains", "0005_tld_tld_min_registration_period_lte_max"))
+        module.canonicalize_names(state.apps, None)
 
     def test_mixed_case_row_is_canonicalized(self) -> None:
         row = self._legacy_domain("Example.RO")

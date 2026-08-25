@@ -28,7 +28,7 @@ from django.utils.translation import gettext_lazy as _
 from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 from apps.settings.services import SettingsService
 
-from .domain_names import longest_matching_tld_suffix
+from .domain_names import canonicalize_domain_name, longest_matching_tld_suffix
 from .models import TLD, Domain, DomainOperation, DomainOrderItem, Registrar
 
 if TYPE_CHECKING:
@@ -448,7 +448,7 @@ class DomainLifecycleService:
         if not is_valid:
             return error_msg
 
-        if Domain.objects.filter(name=domain_name.lower()).exists():
+        if Domain.objects.filter(name=canonicalize_domain_name(domain_name)).exists():
             return cast(str, _("Domain is already registered in the system"))
 
         return None
@@ -1002,6 +1002,12 @@ class DomainOrderService:
         if not is_valid:
             return False, error_msg
 
+        # Canonicalize ONCE, right after validation (#442): validate_domain_name strips
+        # and lowercases only its local copy, so a padded input like "  Example.RO  "
+        # validates fine and then misses the stored canonical row at the .lower()-only
+        # renew-link filter below — an unlinked item and a silently skipped renewal.
+        domain_name = canonicalize_domain_name(domain_name)
+
         # Get TLD and pricing
         tld_extension = DomainValidationService.extract_tld_from_domain(domain_name)
         tld = TLDService.get_tld_pricing(tld_extension)
@@ -1044,16 +1050,17 @@ class DomainOrderService:
         # created outside this method); process_domain_order_items re-checks ownership on the
         # linked domain before renewing.
         #
-        # `.lower()` matches Domain.name's stored form: #442 made canonicalization structural —
-        # Domain.save() strips+lowercases on every write and migration 0006 fixed legacy rows.
+        # domain_name was canonicalized (strip+lower) after validation above, matching
+        # Domain.name's stored form: #442 made canonicalization structural — save() and the
+        # bulk-path queryset canonicalize every write, migration 0006 fixed legacy rows.
         existing_domain: Domain | None = None
         if action == "renew":
-            existing_domain = Domain.objects.filter(name=domain_name.lower(), customer=order.customer).first()
+            existing_domain = Domain.objects.filter(name=domain_name, customer=order.customer).first()
 
         try:
             order_item = DomainOrderItem.objects.create(
                 order=order,
-                domain_name=domain_name.lower(),
+                domain_name=domain_name,
                 tld=tld,
                 action=action,
                 years=years,
