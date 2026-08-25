@@ -386,6 +386,27 @@ class Domain(ConcurrentTransitionMixin, models.Model):
     def __str__(self) -> str:
         return self.name
 
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        """Canonicalize the domain name before every write (#442).
+
+        DNS names are case-insensitive, but ``name`` is a plain CharField with
+        ``unique=True`` — so ``Example.RO`` and ``example.ro`` are two distinct rows to
+        the database, and an exact-match lookup for one silently misses the other.
+
+        That is not theoretical: ``create_domain_order_item`` links a renew item with
+        ``Domain.objects.filter(name=domain_name.lower(), ...)``. Against a stored
+        ``Example.RO`` the lookup finds nothing, the item is created unlinked, and the
+        renewal is skipped — the same silent-skip class of bug #430 set out to fix,
+        reached from the data side instead.
+
+        The service call sites already lowercase on the way in; doing it here makes the
+        invariant structural rather than a convention every future writer (admin, data
+        import, direct ORM) has to remember. Migration 0006 canonicalizes existing rows.
+        """
+        if self.name:
+            self.name = self.name.strip().lower()
+        super().save(*args, **kwargs)
+
     @property
     def days_until_expiry(self) -> int | None:
         """📅 Days until domain expires"""
