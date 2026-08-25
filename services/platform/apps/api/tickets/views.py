@@ -5,7 +5,7 @@
 import logging
 
 from django.db import transaction
-from django.db.models import Avg, Prefetch, Q
+from django.db.models import Avg, Count, Prefetch, Q, QuerySet
 from django.http import Http404, HttpRequest, HttpResponse
 from rest_framework import status
 from rest_framework.decorators import api_view, authentication_classes, permission_classes
@@ -26,6 +26,22 @@ from .serializers import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _annotate_visible_counts(queryset: QuerySet[Ticket]) -> QuerySet[Ticket]:
+    """Annotate customer-visible comment/attachment counts in one query (#278).
+
+    TicketListSerializer must not report counts that include non-public comments, but
+    filtering per row would be N+1 across a ticket list — and a filtered ``.count()``
+    ignores ``prefetch_related`` anyway, so the prefetch these call sites used to carry
+    bought nothing once the counts became visibility-aware.
+    """
+    return queryset.annotate(
+        visible_comments_count=Count("comments", filter=TicketComment.public_q("comments__"), distinct=True),
+        visible_attachments_count=Count(
+            "attachments", filter=TicketAttachment.customer_visible_q("attachments__"), distinct=True
+        ),
+    )
 
 
 # ===============================================================================
@@ -86,11 +102,13 @@ def customer_tickets_api(request: HttpRequest, customer: Customer) -> Response:
         # Get optional filters from HMAC-signed request body
         request_data = request.data if hasattr(request, "data") else {}
 
-        # Get base queryset for the authenticated customer
+        # Get base queryset for the authenticated customer. Kept UNANNOTATED here — the
+        # stats/pagination .count() calls below need only ticket rows; the visible-count
+        # annotations are added to the sliced queryset actually serialized, so the grouped
+        # double-relation join never burdens the counting queries.
         tickets_qs = (
             Ticket.objects.filter(customer=customer)
             .select_related("customer", "category", "assigned_to", "created_by", "related_service")
-            .prefetch_related("comments", "attachments")
             .order_by("-created_at")
         )
 
@@ -133,13 +151,14 @@ def customer_tickets_api(request: HttpRequest, customer: Customer) -> Response:
         page = max(page, 1)
 
         offset = (page - 1) * limit
-        paginated_tickets = tickets_qs[offset : offset + limit]
+        # Annotate visible counts only on the page being serialized (see comment above).
+        paginated_tickets = _annotate_visible_counts(tickets_qs)[offset : offset + limit]
 
         # Calculate pagination info
         total_pages = (total_tickets + limit - 1) // limit
 
         # Serialize tickets
-        serializer = TicketListSerializer(paginated_tickets, many=True)
+        serializer = TicketListSerializer(paginated_tickets, many=True, context={"for_customer": True})
 
         response_data = {
             "success": True,
@@ -213,10 +232,13 @@ def customer_ticket_detail_api(request: HttpRequest, customer: Customer, ticket_
             # Prefetch only public comments and their attachments for customer context
             public_comments = Prefetch(
                 "comments",
-                queryset=TicketComment.objects.filter(is_public=True).select_related("author").order_by("created_at"),
+                queryset=TicketComment.objects.filter(TicketComment.public_q())
+                .select_related("author")
+                .order_by("created_at"),
             )
             public_attachments = Prefetch(
-                "attachments", queryset=TicketAttachment.objects.filter(comment__is_public=True).order_by("uploaded_at")
+                "attachments",
+                queryset=TicketAttachment.objects.filter(TicketAttachment.customer_visible_q()).order_by("uploaded_at"),
             )
 
             ticket = (
@@ -327,10 +349,13 @@ def customer_ticket_create_api(request: HttpRequest, customer: Customer) -> Resp
         # Reload with the same prefetching to keep payload limited and efficient
         public_comments = Prefetch(
             "comments",
-            queryset=TicketComment.objects.filter(is_public=True).select_related("author").order_by("created_at"),
+            queryset=TicketComment.objects.filter(TicketComment.public_q())
+            .select_related("author")
+            .order_by("created_at"),
         )
         public_attachments = Prefetch(
-            "attachments", queryset=TicketAttachment.objects.filter(comment__is_public=True).order_by("uploaded_at")
+            "attachments",
+            queryset=TicketAttachment.objects.filter(TicketAttachment.customer_visible_q()).order_by("uploaded_at"),
         )
         ticket = (
             Ticket.objects.select_related("customer", "category", "assigned_to", "created_by", "related_service")
@@ -537,13 +562,11 @@ def customer_tickets_summary_api(request: HttpRequest, customer: Customer) -> Re
         satisfaction_rating = satisfaction_result["avg_rating"] or 0.0
 
         # Get recent tickets (last 5)
-        recent_tickets = (
-            tickets_qs.select_related("category", "assigned_to")
-            .prefetch_related("comments", "attachments")
-            .order_by("-created_at")[:5]
-        )
+        recent_tickets = _annotate_visible_counts(tickets_qs.select_related("category", "assigned_to")).order_by(
+            "-created_at"
+        )[:5]
 
-        recent_serializer = TicketListSerializer(recent_tickets, many=True)
+        recent_serializer = TicketListSerializer(recent_tickets, many=True, context={"for_customer": True})
 
         # Prepare summary data
         summary_data = {
@@ -618,6 +641,7 @@ def support_categories_api(request: HttpRequest) -> Response:
 
 
 @api_view(["POST"])
+@authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])  # HMAC auth handled by secure_auth
 @require_customer_authentication
 def ticket_attachment_download_api(
@@ -644,11 +668,18 @@ def ticket_attachment_download_api(
     try:
         # Get attachment with access control for the authenticated customer
         try:
-            attachment = TicketAttachment.objects.select_related("ticket").get(
-                id=attachment_id,
-                ticket__id=ticket_id,
-                ticket__customer=customer,  # Ensure customer owns the ticket
-                is_safe=True,  # Only allow safe files
+            # #278: gate on the parent comment's visibility with the SAME predicate every
+            # list/count surface uses. Without it, sequential attachment ids let a customer
+            # download internal-note files on their own ticket that no API response lists.
+            attachment = (
+                TicketAttachment.objects.select_related("ticket")
+                .filter(TicketAttachment.customer_visible_q())
+                .get(
+                    id=attachment_id,
+                    ticket__id=ticket_id,
+                    ticket__customer=customer,  # Ensure customer owns the ticket
+                    is_safe=True,  # Only allow safe files
+                )
             )
         except TicketAttachment.DoesNotExist:
             raise Http404("Attachment not found or access denied") from None

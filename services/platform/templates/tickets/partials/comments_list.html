@@ -3,15 +3,18 @@
 
 {# HTMX Partial Template for Ticket Comments #}
 {% for comment in comments %}
-    {# Only show internal comments to staff - following same pattern as billing templates #}
-    {% if comment.comment_type == 'internal' and user.is_staff_user %}
+    {# Visibility gate is is_public (#278), matching the view filter and the API.
+       Gating on comment_type here was a THIRD predicate, broader than both: it would
+       render a non-public support/system comment to a customer. comment_type below is
+       still used for STYLING, which is what it is actually for. #}
+    {% if not comment.is_visible_to_customer and user.is_staff_user %}
         <div class="bg-amber-900/50 border-2 border-amber-600 rounded-xl p-6 mb-8 shadow-2xl ring-1 ring-amber-500/50">
-    {% elif comment.comment_type != 'internal' %}
+    {% elif comment.is_visible_to_customer %}
         <div class="mb-8{% if not forloop.last %} border-b border-slate-700 pb-8{% endif %}">
     {% endif %}
 
     {# Render comment content only if it should be visible #}
-    {% if comment.comment_type != 'internal' or user.is_staff_user %}
+    {% if comment.is_visible_to_customer or user.is_staff_user %}
         <div class="flex items-start space-x-3 sm:space-x-4">
             <!-- Avatar -->
             <div class="flex-shrink-0">

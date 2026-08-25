@@ -2297,13 +2297,18 @@ class Command(BaseCommand):
                     reply_action="reply",
                     time_spent=Decimal("0.50"),
                 )
+                # #278: is_public is DERIVED from comment_type, never hardcoded alongside a
+                # round-robin type. Pairing `comment_type=_cycle(...)` with `is_public=True`
+                # generated internal/system comments flagged public — the exact disagreement
+                # between the two fields that #278 unifies, seeded into every demo database.
+                cycled_type = _cycle(comment_types, idx)
                 TicketComment.objects.create(
                     ticket=ticket,
                     content="Mulțumesc, funcționează acum.",
-                    comment_type=_cycle(comment_types, idx),  # Round-robin variety
+                    comment_type=cycled_type,  # Round-robin variety
                     author_name=customer_name,
                     author_email=customer_email,
-                    is_public=True,
+                    is_public=cycled_type not in ("internal", "system"),
                     reply_action=_cycle(reply_actions, idx),
                 )
                 TicketComment.objects.create(

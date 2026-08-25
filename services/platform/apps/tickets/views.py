@@ -214,13 +214,8 @@ def ticket_detail(request: HttpRequest, pk: int) -> HttpResponse:
         messages.error(request, _("❌ You do not have permission to access this ticket."))
         return redirect("tickets:list")
 
-    # Filter comments based on user permissions
-    if user.is_staff_user:
-        # Staff can see all comments including internal notes
-        comments = ticket.comments.all().order_by("created_at")
-    else:
-        # Customers can only see customer and support comments (never internal)
-        comments = ticket.comments.filter(comment_type__in=["customer", "support"]).order_by("created_at")
+    # Visibility is is_public, via the one shared predicate (#278). Staff see everything.
+    comments = TicketComment.visible_to(ticket.comments.all(), user).order_by("created_at")
 
     context = {
         "ticket": ticket,
@@ -559,10 +554,7 @@ def _handle_ticket_reply_post(request: HttpRequest, ticket: Ticket) -> HttpRespo
         # ticket_detail()/ticket_comments_htmx(). The template gate alone is not
         # sufficient — without this, internal-note content reaches the rendering
         # context for non-staff users on the reply HTMX swap.
-        if user.is_staff_user:
-            comments = ticket.comments.all().order_by("created_at")
-        else:
-            comments = ticket.comments.filter(comment_type__in=["customer", "support"]).order_by("created_at")
+        comments = TicketComment.visible_to(ticket.comments.all(), user).order_by("created_at")
         can_edit = ticket.status != "closed" or user.is_staff_user
         return render(
             request,
@@ -607,13 +599,8 @@ def ticket_comments_htmx(request: HttpRequest, pk: int) -> HttpResponse:
     if ticket.customer.id not in accessible_customer_ids:
         return HttpResponse('<div class="text-red-500">Access denied</div>')
 
-    # Filter comments based on user permissions
-    if user.is_staff_user:
-        # Staff can see all comments including internal notes
-        comments = ticket.comments.all().order_by("created_at")
-    else:
-        # Customers can only see customer and support comments (never internal)
-        comments = ticket.comments.filter(comment_type__in=["customer", "support"]).order_by("created_at")
+    # Visibility is is_public, via the one shared predicate (#278). Staff see everything.
+    comments = TicketComment.visible_to(ticket.comments.all(), user).order_by("created_at")
 
     return render(
         request,
@@ -710,14 +697,13 @@ def download_attachment(request: HttpRequest, attachment_id: int) -> HttpRespons
     if hasattr(attachment, "is_safe") and not attachment.is_safe:
         raise PermissionDenied("Access to this attachment is blocked for security reasons.")
 
-    # Check internal attachment access (only staff can access internal attachments)
-    if (
-        attachment.comment
-        and hasattr(attachment.comment, "comment_type")
-        and attachment.comment.comment_type == "internal"
-        and not user.is_staff_user
-    ):
-        raise PermissionDenied("Access denied to internal attachments.")
+    # Attachment visibility follows its parent comment's — the same rule as
+    # TicketAttachment.customer_visible_q(), which every API list/count/download surface
+    # uses (#278): visible iff ticket-level (no parent comment) or the parent comment is
+    # public. Gating on comment_type == "internal" here let a non-public support/system
+    # comment's attachment through even though the comment itself was hidden everywhere.
+    if attachment.comment and not attachment.comment.is_visible_to_customer and not user.is_staff_user:
+        raise PermissionDenied("Access denied to non-public attachments.")
 
     # Check if file exists
     if not attachment.file or not attachment.file.name:

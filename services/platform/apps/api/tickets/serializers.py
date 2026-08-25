@@ -103,12 +103,32 @@ class TicketListSerializer(serializers.ModelSerializer):
         return ""
 
     def get_comments_count(self, obj: "Ticket") -> int:
-        """Get number of comments/replies"""
-        return obj.comments.count()
+        """Get number of comments/replies.
+
+        #278: honors the same ``for_customer`` context as TicketDetailSerializer.get_comments.
+        An unfiltered count told a customer how many internal notes staff had written on
+        their ticket — the same count-disclosure already fixed on the web surface.
+
+        In customer context, prefers the queryset annotation (see _annotate_visible_counts)
+        so a list of N tickets costs one query rather than N. The annotation is consulted
+        ONLY in customer context — a staff caller reusing an annotated queryset must not
+        silently receive visibility-filtered counts.
+        """
+        if not self.context.get("for_customer"):
+            return obj.comments.count()
+        annotated = getattr(obj, "visible_comments_count", None)
+        if annotated is not None:
+            return int(annotated)
+        return obj.comments.filter(TicketComment.public_q()).count()
 
     def get_attachments_count(self, obj: "Ticket") -> int:
-        """Get number of attachments"""
-        return obj.attachments.count()
+        """Get number of attachments (attachments on non-public comments stay hidden)."""
+        if not self.context.get("for_customer"):
+            return obj.attachments.count()
+        annotated = getattr(obj, "visible_attachments_count", None)
+        if annotated is not None:
+            return int(annotated)
+        return obj.attachments.filter(TicketAttachment.customer_visible_q()).count()
 
 
 # ===============================================================================
@@ -167,7 +187,13 @@ class TicketCommentSerializer(serializers.ModelSerializer):
         return bool(author and getattr(author, "is_staff_user", False))
 
     def get_attachments(self, obj: "TicketComment") -> list[dict[str, Any]]:
-        """Get attachments for this comment"""
+        """Get attachments for this comment.
+
+        CALLER CONTRACT (#278): deliberately unfiltered — an attachment on a comment is
+        exactly as visible as the comment itself, so visibility gating happens on the
+        COMMENT queryset feeding this serializer (TicketComment.public_q / visible_to).
+        Never serialize a comment here that the requester is not allowed to see.
+        """
         qs = obj.attachments.all()
         return TicketAttachmentSerializer(qs, many=True).data
 
@@ -305,17 +331,21 @@ class TicketDetailSerializer(serializers.ModelSerializer):
         return ""
 
     def get_comments(self, obj: "Ticket") -> list[dict[str, Any]]:
-        """Return comments, filtering out non-public ones for customer context."""
+        """Return comments, filtering out non-public ones for customer context (#278)."""
         qs = obj.comments.all()
         if self.context.get("for_customer"):
-            qs = qs.filter(is_public=True)
+            qs = qs.filter(TicketComment.public_q())
         return TicketCommentSerializer(qs, many=True).data
 
     def get_attachments(self, obj: "Ticket") -> list[dict[str, Any]]:
-        """Return attachments linked to public comments only for customer context."""
+        """Return customer-visible attachments only for customer context (#278).
+
+        Visibility follows the parent comment; ticket-level (comment IS NULL)
+        attachments are customer-visible — see TicketAttachment.customer_visible_q.
+        """
         qs = obj.attachments.all()
         if self.context.get("for_customer"):
-            qs = qs.filter(comment__is_public=True)
+            qs = qs.filter(TicketAttachment.customer_visible_q())
         return TicketAttachmentSerializer(qs, many=True).data
 
 
