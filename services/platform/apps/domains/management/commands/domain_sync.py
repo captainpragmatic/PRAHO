@@ -14,6 +14,7 @@ from typing import Any
 
 from django.core.management.base import BaseCommand, CommandParser
 
+from apps.domains.domain_names import canonicalize_domain_name
 from apps.domains.models import Domain
 from apps.domains.services import DomainLifecycleService
 
@@ -73,7 +74,7 @@ class Command(BaseCommand):
 
         if domain_name:
             # Narrow the existing queryset — must NOT drop the status='active' filter.
-            qs = qs.filter(name=domain_name.lower())
+            qs = qs.filter(name=canonicalize_domain_name(domain_name))
 
         if registrar_name:
             qs = qs.filter(registrar__name=registrar_name)

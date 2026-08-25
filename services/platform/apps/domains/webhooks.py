@@ -22,6 +22,7 @@ from apps.audit.services import AuditContext, DomainsAuditService
 from apps.common.request_ip import get_safe_client_ip
 from apps.common.validators import log_security_event
 
+from .domain_names import canonicalize_domain_name
 from .models import Domain, Registrar
 from .services import DomainRegistrarGateway
 
@@ -151,7 +152,7 @@ class RegistrarWebhookView(View):
 
         # Find domain in our system
         try:
-            domain = Domain.objects.get(name=domain_name.lower(), registrar=registrar)
+            domain = Domain.objects.get(name=canonicalize_domain_name(domain_name), registrar=registrar)
         except Domain.DoesNotExist:
             logger.warning(f"⚠️ [Webhook] Domain {domain_name} not found for {registrar.name}")
             return False, f"Domain {domain_name} not found in system"

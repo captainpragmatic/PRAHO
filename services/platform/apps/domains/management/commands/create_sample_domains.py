@@ -13,7 +13,7 @@ from django.utils import timezone
 from apps.billing.models import Currency
 from apps.common.encryption import encrypt_sensitive_data
 from apps.customers.models import Customer
-from apps.domains.domain_names import longest_matching_tld_suffix
+from apps.domains.domain_names import canonicalize_domain_name, longest_matching_tld_suffix
 from apps.domains.models import TLD, Domain, DomainOrderItem, Registrar, TLDRegistrarAssignment
 from apps.orders.models import Order
 
@@ -337,9 +337,11 @@ class Command(BaseCommand):
                 days=365 * random.randint(1, 3)  # noqa: S311  # Safe: non-cryptographic usage
             )  # Safe: sample data generation, not security  # Safe: non-cryptographic usage
 
-            # Create domain
+            # Create domain. The lookup arm of get_or_create bypasses save(), so the
+            # name must be canonicalized here too (#442) — a mixed-case lookup against
+            # an existing canonical row would IntegrityError instead of matching it.
             domain, created = Domain.objects.get_or_create(
-                name=domain_name,
+                name=canonicalize_domain_name(domain_name),
                 defaults={
                     "tld": tld,
                     "registrar": registrar,
