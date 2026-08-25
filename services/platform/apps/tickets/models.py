@@ -445,7 +445,7 @@ class TicketAttachment(models.Model):
 
     @staticmethod
     def customer_visible_q(prefix: str = "") -> models.Q:
-        """THE customer-visibility predicate for attachments, as a reusable Q (#278).
+        """THE comment-visibility predicate for attachments, as a reusable Q (#278).
 
         An attachment follows its parent comment: visible iff the comment is public.
         ``comment`` is nullable — a ticket-level attachment (comment IS NULL) is
@@ -453,6 +453,10 @@ class TicketAttachment(models.Model):
         A bare ``comment__is_public=True`` filter silently DROPS those rows (LEFT-join
         three-valued logic), which made them invisible in counts/lists while both
         download endpoints still served them — use this Q, never an inline filter.
+
+        Scope note: this expresses COMMENT visibility only. ``is_safe`` (malware
+        quarantine) is a separate, download-only gate enforced by both download
+        endpoints — a quarantined attachment may still appear in counts/lists.
         """
         return models.Q(**{f"{prefix}comment__isnull": True}) | models.Q(**{f"{prefix}comment__is_public": True})
 

@@ -36,8 +36,6 @@ from apps.customers.models import Customer
 from apps.tickets.models import Ticket, TicketAttachment, TicketComment
 from apps.users.models import CustomerMembership, User
 
-_MEDIA_ROOT = tempfile.mkdtemp(prefix="praho-attach-vis-")
-
 
 def _attachment(ticket: Ticket, comment: TicketComment | None, marker: bytes) -> TicketAttachment:
     return TicketAttachment.objects.create(
@@ -51,14 +49,23 @@ def _attachment(ticket: Ticket, comment: TicketComment | None, marker: bytes) ->
     )
 
 
-@override_settings(DISABLE_AUDIT_SIGNALS=True, MEDIA_ROOT=_MEDIA_ROOT)
+@override_settings(DISABLE_AUDIT_SIGNALS=True)
 class AttachmentVisibilityBaseTest(TestCase):
-    """Shared fixture: one ticket with public / non-public / comment-less attachments."""
+    """Shared fixture: one ticket with public / non-public / comment-less attachments.
+
+    MEDIA_ROOT is a PER-CLASS tempdir, never module-level: under Linux's fork start
+    method, ``manage.py test --parallel`` workers inherit the parent's imported module,
+    so a module-level ``mkdtemp`` is one shared directory across every concurrently
+    running class — and the first ``tearDownClass`` rmtree deletes the files out from
+    under the others (masked on macOS, whose spawn workers re-import per process).
+    """
 
     @classmethod
-    def tearDownClass(cls):
-        super().tearDownClass()
-        shutil.rmtree(_MEDIA_ROOT, ignore_errors=True)
+    def setUpClass(cls):
+        super().setUpClass()
+        cls._media_root = tempfile.mkdtemp(prefix="praho-attach-vis-")
+        cls.enterClassContext(override_settings(MEDIA_ROOT=cls._media_root))
+        cls.addClassCleanup(shutil.rmtree, cls._media_root, ignore_errors=True)
 
     def setUp(self):
         self.customer_user = User.objects.create_user(email="cust-attvis@example.com", password="testpass123")
@@ -224,7 +231,6 @@ class VisibleCountParityTests(AttachmentVisibilityBaseTest):
         self.assertIn(att.pk, {a["id"] for a in detail["attachments"]})
 
 
-@override_settings(DISABLE_AUDIT_SIGNALS=True, MEDIA_ROOT=_MEDIA_ROOT)
 class ApiDetailEndpointPrefetchTests(AttachmentVisibilityBaseTest):
     """Drive the REAL customer_ticket_detail_api endpoint, not a hand-built serializer.
 

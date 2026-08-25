@@ -187,7 +187,13 @@ class TicketCommentSerializer(serializers.ModelSerializer):
         return bool(author and getattr(author, "is_staff_user", False))
 
     def get_attachments(self, obj: "TicketComment") -> list[dict[str, Any]]:
-        """Get attachments for this comment"""
+        """Get attachments for this comment.
+
+        CALLER CONTRACT (#278): deliberately unfiltered — an attachment on a comment is
+        exactly as visible as the comment itself, so visibility gating happens on the
+        COMMENT queryset feeding this serializer (TicketComment.public_q / visible_to).
+        Never serialize a comment here that the requester is not allowed to see.
+        """
         qs = obj.attachments.all()
         return TicketAttachmentSerializer(qs, many=True).data
 
