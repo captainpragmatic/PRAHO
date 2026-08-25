@@ -697,12 +697,13 @@ def download_attachment(request: HttpRequest, attachment_id: int) -> HttpRespons
     if hasattr(attachment, "is_safe") and not attachment.is_safe:
         raise PermissionDenied("Access to this attachment is blocked for security reasons.")
 
-    # Attachment visibility follows its parent comment's, on the same is_public predicate
-    # the API prefetch already uses (comment__is_public=True) — #278. Gating on
-    # comment_type == "internal" here let a non-public support/system comment's attachment
-    # through even though the comment itself was hidden on every surface.
+    # Attachment visibility follows its parent comment's — the same rule as
+    # TicketAttachment.customer_visible_q(), which every API list/count/download surface
+    # uses (#278): visible iff ticket-level (no parent comment) or the parent comment is
+    # public. Gating on comment_type == "internal" here let a non-public support/system
+    # comment's attachment through even though the comment itself was hidden everywhere.
     if attachment.comment and not attachment.comment.is_visible_to_customer and not user.is_staff_user:
-        raise PermissionDenied("Access denied to internal attachments.")
+        raise PermissionDenied("Access denied to non-public attachments.")
 
     # Check if file exists
     if not attachment.file or not attachment.file.name:

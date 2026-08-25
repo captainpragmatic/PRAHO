@@ -28,7 +28,7 @@ from .serializers import (
 logger = logging.getLogger(__name__)
 
 
-def _annotate_visible_counts(queryset: "QuerySet[Ticket]") -> "QuerySet[Ticket]":
+def _annotate_visible_counts(queryset: QuerySet[Ticket]) -> QuerySet[Ticket]:
     """Annotate customer-visible comment/attachment counts in one query (#278).
 
     TicketListSerializer must not report counts that include non-public comments, but
@@ -102,12 +102,15 @@ def customer_tickets_api(request: HttpRequest, customer: Customer) -> Response:
         # Get optional filters from HMAC-signed request body
         request_data = request.data if hasattr(request, "data") else {}
 
-        # Get base queryset for the authenticated customer
-        tickets_qs = _annotate_visible_counts(
-            Ticket.objects.filter(customer=customer).select_related(
-                "customer", "category", "assigned_to", "created_by", "related_service"
-            )
-        ).order_by("-created_at")
+        # Get base queryset for the authenticated customer. Kept UNANNOTATED here — the
+        # stats/pagination .count() calls below need only ticket rows; the visible-count
+        # annotations are added to the sliced queryset actually serialized, so the grouped
+        # double-relation join never burdens the counting queries.
+        tickets_qs = (
+            Ticket.objects.filter(customer=customer)
+            .select_related("customer", "category", "assigned_to", "created_by", "related_service")
+            .order_by("-created_at")
+        )
 
         # Apply filters from request body
         status_filter = request_data.get("status", "").strip()
@@ -148,7 +151,8 @@ def customer_tickets_api(request: HttpRequest, customer: Customer) -> Response:
         page = max(page, 1)
 
         offset = (page - 1) * limit
-        paginated_tickets = tickets_qs[offset : offset + limit]
+        # Annotate visible counts only on the page being serialized (see comment above).
+        paginated_tickets = _annotate_visible_counts(tickets_qs)[offset : offset + limit]
 
         # Calculate pagination info
         total_pages = (total_tickets + limit - 1) // limit
