@@ -722,8 +722,10 @@ class TestAuditIntegrityService(TestCase):
         result = AuditIntegrityService.verify_audit_integrity(self.now - timedelta(hours=4), self.now, "sequence_check")
         self.assertTrue(result.is_ok())
 
-    def test_generate_hash_chain_empty(self):
-        result = AuditIntegrityService._generate_hash_chain([])
+    def test_current_chain_head_mac_is_empty_before_any_append(self):
+        """#313 replaced _generate_hash_chain (an unkeyed digest that was written but never
+        verified) with the real ledger head MAC. With no chain head row yet, it reads empty."""
+        result = AuditIntegrityService._current_chain_head_mac()
         self.assertEqual(result, "")
 
     def test_should_have_activity_false(self):
