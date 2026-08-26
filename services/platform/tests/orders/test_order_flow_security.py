@@ -9,12 +9,15 @@ Tests for:
 
 from __future__ import annotations
 
+import inspect
+import pathlib
 from unittest.mock import MagicMock, patch
 
 from django.http import HttpResponse
 from django.test import RequestFactory, SimpleTestCase, TestCase
 from rest_framework.test import APIRequestFactory
 
+from apps.api.orders import views as views_module
 from apps.api.orders.views import confirm_order
 from apps.billing.gateways.base import PaymentConfirmResult
 from apps.billing.models import Currency
@@ -125,6 +128,33 @@ class StripePaymentVerificationTest(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.data["success"])
         mock_gateway.confirm_payment.assert_called_once_with("pi_testVerifyOK1234567")
+
+    def test_confirm_never_reads_payment_status_from_the_request(self) -> None:
+        """#104 [H11] guardrail: the field must be structurally unread, not merely overridden.
+
+        test_confirm_rejects_non_succeeded_pi already proves the *behavior* — a forged
+        "succeeded" loses to Stripe's real status. This pins the stronger property the
+        fix established: no code in this module consults request payment_status at all,
+        so no future refactor can reintroduce it as a shortcut (e.g. "trust it when
+        Stripe is unreachable"). Asserted on the source because a behavioral test
+        cannot distinguish "ignored" from "read but overridden".
+
+        MODULE scope on purpose, not a slice of confirm_order: function-slicing goes
+        vacuous the moment the payment read is extracted into a module-level helper
+        (this module's established refactor pattern), and inspect.getsource on the
+        view is defeated by @api_view wrapping. Quoted-form matching skips prose
+        mentions in comments/docstrings naturally — any legitimate future need for
+        the quoted literal in this module must consciously rewrite this guard.
+        """
+        module_source = pathlib.Path(inspect.getfile(views_module)).read_text(encoding="utf-8")
+
+        self.assertIn("payment_intent_id", module_source, "guard is reading the wrong module")
+        for accessor in ('"payment_status"', "'payment_status'"):
+            self.assertNotIn(
+                accessor,
+                module_source,
+                "orders API views must not read payment_status from a request (#104 H11)",
+            )
 
     def test_confirm_rejects_non_succeeded_pi(self) -> None:
         """Stripe PI with status != succeeded rejects order confirmation."""
