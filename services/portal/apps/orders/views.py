@@ -1324,11 +1324,14 @@ def confirm_payment(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911, PLR
             # Step 2: If payment succeeded, update order status
             if payment_status == "succeeded":
                 # Update order to confirmed status via API
+                # #104 [H11]: deliberately does NOT send payment_status. The platform
+                # re-retrieves the PaymentIntent from Stripe and derives the status
+                # itself; sending our copy would look like a trusted input to the next
+                # reader of this call site, which is exactly the confusion H11 was about.
                 order_update_result = api_client.post(
                     f"orders/{order_id}/confirm/",
                     {
                         "payment_intent_id": payment_intent_id,
-                        "payment_status": payment_status,
                         "customer_id": customer_id,
                     },
                     user_id=int(user_id),
