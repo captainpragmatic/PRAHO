@@ -42,11 +42,23 @@ class APITokenExpiryIndexTests(TestCase):
         self.assertNotIn(("user", "expires_at"), index_fields)
 
     def _plan(self, queryset) -> str:
-        """Return the query plan text for a queryset."""
+        """Return the query plan text for a queryset, deterministically.
+
+        On cost-based planners (PostgreSQL) a tiny test table gets a Seq Scan even
+        when a perfectly usable index exists — so a raw EXPLAIN assertion would be
+        stats-dependent in both directions. ``SET LOCAL enable_seqscan = off``
+        (transaction-local; every TestCase test runs in one) turns the EXPLAIN into
+        an "is an index USABLE for this shape" probe: if no index can serve the
+        query, the plan still shows Seq Scan. SQLite's EXPLAIN QUERY PLAN is not
+        cost-sensitive this way and needs no forcing.
+        """
         sql, params = queryset.query.sql_with_params()
-        prefix = "EXPLAIN QUERY PLAN " if connection.vendor == "sqlite" else "EXPLAIN "
         with connection.cursor() as cursor:
-            cursor.execute(prefix + sql, params)
+            if connection.vendor == "sqlite":
+                cursor.execute("EXPLAIN QUERY PLAN " + sql, params)
+            else:
+                cursor.execute("SET LOCAL enable_seqscan = off")
+                cursor.execute("EXPLAIN " + sql, params)
             return " ".join(str(cell) for row in cursor.fetchall() for cell in row)
 
     def test_purge_query_uses_the_expiry_index_not_a_table_scan(self) -> None:
@@ -74,4 +86,15 @@ class APITokenExpiryIndexTests(TestCase):
         plan = self._plan(queryset)
         if connection.vendor == "sqlite":
             self.assertNotIn("SCAN users_api_tokens", plan, f"cap check fell back to a table scan: {plan}")
-        self.assertIn("user_id", plan, f"cap check is not resolving through a user index: {plan}")
+            self.assertIn("user_id", plan, f"cap check is not resolving through a user index: {plan}")
+        else:
+            # A Seq Scan plan still prints user_id in its Filter line, so a bare
+            # "user_id in plan" check would pass vacuously — reject the scan itself
+            # and require an index node (seqscan is disabled in _plan, so this is
+            # deterministic, not stats-dependent).
+            self.assertNotIn("Seq Scan", plan, f"cap check fell back to a sequential scan: {plan}")
+            self.assertRegex(
+                plan,
+                r"Index (Only )?Scan|Bitmap (Heap|Index) Scan",
+                f"cap check is not resolving through an index: {plan}",
+            )
