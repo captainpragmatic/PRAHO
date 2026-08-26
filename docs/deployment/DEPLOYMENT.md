@@ -47,23 +47,43 @@ The `--dry-run` output lists every record that cannot be remediated by a normal 
 **1. Servers with no linked node deployment.** The SSH path needs a `NodeDeployment` for the node IP and the host-key trust anchor, so servers registered through the admin form rather than a deployment cannot be pinned automatically. Either link a deployment, or read the digest on the node itself and supply it explicitly:
 
 ```bash
-# ON THE NODE, over an already-trusted session (console or verified SSH):
-openssl s_client -connect 127.0.0.1:10000 </dev/null 2>/dev/null \
-  | openssl x509 -noout -fingerprint -sha256
+# ON THE NODE, over an already-trusted session (console or verified SSH).
+# `-servername` matters: PRAHO's request sends SNI, so a vhost-based setup can otherwise
+# serve you a DIFFERENT certificate than the one PRAHO will validate. Use the node's real
+# api_port if it is not the default 10000. The `cut` strips OpenSSL's "sha256 Fingerprint="
+# label — the command takes the bare digest.
+openssl s_client -connect 127.0.0.1:10000 -servername <node-fqdn> </dev/null 2>/dev/null \
+  | openssl x509 -noout -fingerprint -sha256 \
+  | cut -d= -f2
 
 # On the Platform host, with the value from above:
 python manage.py pin_virtualmin_certificates \
   --server-id <virtualmin-server-uuid> --fingerprint <sha256>
 ```
 
-The digest is accepted with or without colons and in either case. It is *not* read over the network by PRAHO — you are vouching for it, which is why it must come from the node itself rather than from an `openssl s_client` run against the node from elsewhere.
+The digest is accepted with or without colons, in either case, and with an optional `sha256:` prefix. It is *not* read over the network by PRAHO — you are vouching for it, which is why it must come from the node itself rather than from an `openssl s_client` run against the node from elsewhere.
 
-**2. Servers still using plain HTTP (`use_ssl=false`).** No pin makes these reachable; the HTTPS guard rejects them first. Enable HTTPS on the node, then either turn on CA verification or pin as above. The command refuses `--fingerprint` for these rows rather than let a pin imply the record is remediated.
+Replacing an existing pin is refused unless you add `--force`, so a mis-pasted UUID cannot silently retarget a healthy node's trust anchor. Every manual pin is recorded as a `virtualmin_cert_pin_set_manually` security event including the previous digest, which is what you need to recover from a wrong one.
+
+**2. Servers still using plain HTTP (`use_ssl=false`).** No pin makes these reachable — the HTTPS guard rejects them before pinning is even considered — and `--fingerprint` refuses them rather than let a pin imply the record is remediated. Migrating one is a node-side change *and* a database-side change; doing only the first leaves the row unreachable:
+
+1. **On the node**, enable SSL for Webmin/Virtualmin so the API listens on HTTPS
+   (Webmin → Webmin Configuration → SSL Encryption), and confirm it answers:
+   `openssl s_client -connect 127.0.0.1:10000 -servername <node-fqdn> </dev/null`
+2. **In PRAHO**, open the server (Infrastructure → Virtualmin servers → the row → Edit) and
+   tick **Use SSL**, adjusting the port if it changed. The form *requires* HTTPS, so a save
+   that succeeds is itself the confirmation that the record is no longer plain-HTTP.
+3. **Then pin**, if the node uses a self-signed certificate: re-run
+   `pin_virtualmin_certificates` (it becomes a candidate once `use_ssl=true`), or use the
+   `--fingerprint` path above when it has no linked deployment. A node with a CA-issued
+   certificate needs no pin — leave `ssl_verify` on.
+4. **Verify** the row is no longer listed by `pin_virtualmin_certificates --dry-run`, and
+   that a provisioning action against the node succeeds.
 
 To size the work before deploying:
 
 ```sql
-SELECT count(*) FROM virtualmin_servers
+SELECT count(*) FROM provisioning_virtualmin_servers
 WHERE use_ssl = false
    OR (ssl_verify = false AND ssl_cert_fingerprint = '');
 ```

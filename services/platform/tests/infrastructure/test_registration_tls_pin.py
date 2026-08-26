@@ -178,7 +178,12 @@ class VirtualminPinBackfillGapTests(TestCase):
         self.assertIn("operator-supplied digest", stdout.getvalue())
 
     def test_operator_fingerprint_accepts_colon_separated_openssl_output(self) -> None:
-        """openssl prints AA:BB:...; operators should not have to reformat it by hand."""
+        """The digest half of openssl's output (AA:BB:...) needs no hand-reformatting.
+
+        openssl actually prints `sha256 Fingerprint=AA:BB:...`; the runbook pipes it through
+        `cut -d= -f2`, so what reaches the command is this colon-separated tail. The label
+        form is rejected — covered by test_operator_fingerprint_rejects_the_openssl_label.
+        """
         server = self._server("colon-node")
         digest = ":".join(["ab"] * 32).upper()
 
@@ -279,3 +284,144 @@ class VirtualminPinBackfillGapTests(TestCase):
                 "ab" * 32,
                 stdout=StringIO(),
             )
+
+
+class VirtualminPinHardeningTests(VirtualminPinBackfillGapTests):
+    """Review findings on the remediation path itself.
+
+    The theme is that a remediation command an operator reaches for mid-incident must not
+    have failure modes that read as success, and must not let one mis-paste retarget a
+    healthy node's trust anchor.
+    """
+
+    _DIGEST = "a" * 64
+    _OTHER_DIGEST = "b" * 64
+
+    def test_openssl_label_is_rejected_rather_than_silently_mangled(self) -> None:
+        """`sha256 Fingerprint=AA:BB:...` must fail loudly, not normalize to something wrong.
+
+        The runbook pipes openssl through `cut -d= -f2` for this reason. If the label form
+        were ever silently accepted it would produce a pin that can never match.
+        """
+        server = self._server("labelled")
+        with self.assertRaises(CommandError):
+            call_command(
+                "pin_virtualmin_certificates",
+                "--server-id", str(server.id),
+                "--fingerprint", f"sha256 Fingerprint={':'.join(['aa'] * 32)}",
+            )
+        server.refresh_from_db()
+        self.assertEqual(server.ssl_cert_fingerprint, "")
+
+    def test_malformed_server_id_is_a_clean_error_in_the_backfill_path(self) -> None:
+        """Dropping the (wrong) type=int made a typo'd id reach the ORM as a traceback."""
+        with self.assertRaises(CommandError):
+            call_command("pin_virtualmin_certificates", "--server-id", "not-a-uuid")
+
+    def test_targeted_run_matching_no_candidate_fails_instead_of_reporting_success(self) -> None:
+        """A wrong id previously printed a green 'Pinned 0' and exited 0.
+
+        Indistinguishable from 'remediated' — the worst possible output for a command an
+        operator runs to confirm a node is fixed.
+        """
+        server = self._server("already-pinned")
+        server.ssl_cert_fingerprint = self._DIGEST
+        server.save(update_fields=["ssl_cert_fingerprint"])
+
+        with self.assertRaises(CommandError) as ctx:
+            call_command("pin_virtualmin_certificates", "--server-id", str(server.id))
+        self.assertIn("already pinned", str(ctx.exception))
+
+    def test_existing_pin_is_not_replaced_without_force(self) -> None:
+        """One mis-pasted UUID must not silently retarget a healthy node's trust anchor.
+
+        The fleet run cannot heal it either: its candidate filter requires an EMPTY pin, so
+        recovery needs a targeted re-pin with the correct digest.
+        """
+        server = self._server("healthy")
+        server.ssl_cert_fingerprint = self._DIGEST
+        server.save(update_fields=["ssl_cert_fingerprint"])
+
+        with self.assertRaises(CommandError) as ctx:
+            call_command(
+                "pin_virtualmin_certificates",
+                "--server-id", str(server.id), "--fingerprint", self._OTHER_DIGEST,
+            )
+
+        self.assertIn("--force", str(ctx.exception))
+        server.refresh_from_db()
+        self.assertEqual(server.ssl_cert_fingerprint, self._DIGEST)
+
+    def test_force_replaces_the_pin_and_audits_the_previous_value(self) -> None:
+        """Rotation is allowed explicitly, and must leave the old digest recoverable.
+
+        VirtualminServer is allowlisted out of signal-based audit, so without this event a
+        wrong pin would be unrecoverable — nothing would record what it used to be.
+        """
+        server = self._server("rotating")
+        server.ssl_cert_fingerprint = self._DIGEST
+        server.save(update_fields=["ssl_cert_fingerprint"])
+
+        with patch(
+            "apps.infrastructure.management.commands.pin_virtualmin_certificates.log_security_event"
+        ) as audit:
+            call_command(
+                "pin_virtualmin_certificates",
+                "--server-id", str(server.id), "--fingerprint", self._OTHER_DIGEST, "--force",
+                stdout=StringIO(),
+            )
+
+        server.refresh_from_db()
+        self.assertEqual(server.ssl_cert_fingerprint, self._OTHER_DIGEST)
+        self.assertTrue(audit.called)
+        event_type, details = audit.call_args[0][0], audit.call_args[0][1]
+        self.assertEqual(event_type, "virtualmin_cert_pin_set_manually")
+        self.assertEqual(details["old_fingerprint"], self._DIGEST)
+        self.assertEqual(details["new_fingerprint"], self._OTHER_DIGEST)
+
+    def test_first_pin_is_audited_too(self) -> None:
+        server = self._server("first-pin")
+        with patch(
+            "apps.infrastructure.management.commands.pin_virtualmin_certificates.log_security_event"
+        ) as audit:
+            call_command(
+                "pin_virtualmin_certificates",
+                "--server-id", str(server.id), "--fingerprint", self._DIGEST,
+                stdout=StringIO(),
+            )
+        self.assertTrue(audit.called)
+        self.assertEqual(audit.call_args[0][1]["replaced_existing"], False)
+
+    def test_decommissioned_http_rows_are_not_reported_as_outstanding_work(self) -> None:
+        """A disabled node is not remediation work; listing it forever trains operators to skim."""
+        live = self._server("live-http", use_ssl=False)
+        self._server("dead-http", use_ssl=False, status="disabled")
+        stdout, stderr = StringIO(), StringIO()
+
+        call_command("pin_virtualmin_certificates", "--dry-run", stdout=stdout, stderr=stderr)
+
+        report = stderr.getvalue()
+        self.assertIn(str(live.id), report)
+        self.assertNotIn("dead-http", report)
+
+    def test_a_manual_pin_actually_reaches_the_tls_policy(self) -> None:
+        """The remediation claim is 'the gateway can talk to the node again', not 'a column changed'.
+
+        Every other test here asserts on the field. That would still pass if the config
+        stopped defaulting cert_fingerprint from the row, at which point remediation would
+        silently stop working — so follow the value through to the object the request uses.
+        """
+        from apps.provisioning.virtualmin_gateway import VirtualminConfig  # noqa: PLC0415
+
+        server = self._server("end-to-end")
+        call_command(
+            "pin_virtualmin_certificates",
+            "--server-id", str(server.id), "--fingerprint", self._DIGEST,
+            stdout=StringIO(),
+        )
+        server.refresh_from_db()
+
+        config = VirtualminConfig(server=server)
+
+        self.assertEqual(config.cert_fingerprint, self._DIGEST)
+        self.assertFalse(config.verify_ssl)
