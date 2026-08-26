@@ -1,33 +1,28 @@
-"""#246: the two APIToken expiry access patterns must actually be indexed.
+"""#246: the APIToken expiry access patterns, tested at their PRODUCTION query shapes.
 
-Both queries the issue cites were unindexed — only ``(user, created_at)`` existed:
+Two candidate patterns were unindexed — only ``(user, created_at)`` existed:
 
 * the daily purge, ``APIToken.objects.filter(expires_at__lte=now)`` (users/tasks.py),
-  scanned the whole table;
-* the per-user live-token count enforcing the cap (users/services.py) could use only the
-  ``user`` prefix of that composite, then filtered expiry in memory.
+  scanned the whole table — the genuinely unbounded query; ``apitoken_expires_at_idx``
+  now serves it, asserted on the actual plan below;
+* the per-user live-token cap check (users/services.py) runs
+  ``filter(user=...).filter(Q(expires_at__isnull=True) | Q(expires_at__gt=now))`` —
+  and EXPLAIN shows a ``(user, expires_at)`` composite is NOT used for that shape:
+  the OR arm defeats range use of the second column and the planner picks the plain
+  user FK index. Since per-user rows are bounded by the token cap itself, the
+  composite was dropped as pure write amplification. The tests below pin BOTH halves
+  of that decision: the production shape must not full-scan, and the composite must
+  stay absent (re-adding it without re-validating the plan is the regression).
 
-Declaring an index is not the same as the planner choosing it, so these assert on the
-query plan as well as on ``Meta.indexes``. An index test that only checks the
-declaration passes just as happily when the query is shaped so it can never be used.
-
-Caveat worth knowing before trusting these: the test database is built from the current
-models (``--nomigrations``), so reverting the model does NOT reproduce the pre-#246
-schema — the plan assertions still pass against a stashed model file. They were instead
-verified by dropping each index against a real test database and re-planning the same
-query:
-
-    without apitoken_expires_at_idx:  SCAN users_api_tokens
-    with    apitoken_expires_at_idx:  SEARCH users_api_tokens USING INDEX
-                                      apitoken_expires_at_idx (expires_at<?)
-
-Doing that drop inline as part of the test proved unreliable (under ``TestCase`` the DDL
-does not change the plan SQLite reports), so it is recorded here rather than asserted.
+Declaring an index is not the same as the planner choosing it — an index test that
+only checks the declaration passes just as happily when the query is shaped so the
+index can never be used. Hence the plan assertions, run at the real query shapes.
 """
 
 from __future__ import annotations
 
 from django.db import connection
+from django.db.models import Q
 from django.test import TestCase
 from django.utils import timezone
 
@@ -35,13 +30,16 @@ from apps.users.models import APIToken, User
 
 
 class APITokenExpiryIndexTests(TestCase):
-    def test_expiry_indexes_are_declared(self) -> None:
+    def test_expiry_index_declarations_match_the_decision(self) -> None:
         index_fields = [tuple(idx.fields) for idx in APIToken._meta.indexes]
 
         self.assertIn(("expires_at",), index_fields)
-        self.assertIn(("user", "expires_at"), index_fields)
         # The pre-existing index must survive — it serves the token-listing view.
         self.assertIn(("user", "created_at"), index_fields)
+        # Deliberately ABSENT: EXPLAIN showed the cap check's null-OR-future shape
+        # never uses it (see module docstring). Re-adding it must be a conscious,
+        # plan-validated decision, not a drive-by "more indexes are better".
+        self.assertNotIn(("user", "expires_at"), index_fields)
 
     def _plan(self, queryset) -> str:
         """Return the query plan text for a queryset."""
@@ -51,23 +49,29 @@ class APITokenExpiryIndexTests(TestCase):
             cursor.execute(prefix + sql, params)
             return " ".join(str(cell) for row in cursor.fetchall() for cell in row)
 
-    def test_purge_query_uses_an_index_not_a_table_scan(self) -> None:
+    def test_purge_query_uses_the_expiry_index_not_a_table_scan(self) -> None:
         """users/tasks.py: APIToken.objects.filter(expires_at__lte=now).delete()"""
         queryset = APIToken.objects.filter(expires_at__lte=timezone.now())
 
-        self.assertIn(
-            "apitoken_expires_at_idx",
-            self._plan(queryset),
-            "purge query is not using the expiry index",
-        )
+        plan = self._plan(queryset)
+        self.assertIn("apitoken_expires_at_idx", plan, "purge query is not using the expiry index")
 
-    def test_per_user_live_token_count_uses_the_composite_index(self) -> None:
-        """users/services.py: the cap check, filter(user=…) + expiry null-or-future."""
+    def test_cap_check_production_shape_does_not_full_scan(self) -> None:
+        """users/services.py:116 — the cap check at its REAL null-or-future shape.
+
+        Asserting a simplified ``expires_at__gt``-only shape here would be classic
+        test-vs-production divergence: the simple shape planned through a composite
+        index while the real OR query ignored it — which is exactly how the dropped
+        ``(user, expires_at)`` index shipped unused in the first draft. The real
+        shape must resolve through a user index (bounded by the token cap), never a
+        table scan.
+        """
         user = User.objects.create_user(email="idx@example.test", password="testpass123")
-        queryset = APIToken.objects.filter(user=user, expires_at__gt=timezone.now())
-
-        self.assertIn(
-            "apitoken_user_expires_idx",
-            self._plan(queryset),
-            "per-user live-token count is not using the (user, expires_at) index",
+        queryset = APIToken.objects.filter(user=user).filter(
+            Q(expires_at__isnull=True) | Q(expires_at__gt=timezone.now())
         )
+
+        plan = self._plan(queryset)
+        if connection.vendor == "sqlite":
+            self.assertNotIn("SCAN users_api_tokens", plan, f"cap check fell back to a table scan: {plan}")
+        self.assertIn("user_id", plan, f"cap check is not resolving through a user index: {plan}")

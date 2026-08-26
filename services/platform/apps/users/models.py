@@ -636,13 +636,18 @@ class APIToken(models.Model):
         verbose_name_plural = _("API Tokens")
         indexes: ClassVar[list[models.Index]] = [
             models.Index(fields=["user", "created_at"]),
-            # #246: both expiry access patterns were unindexed. The daily purge
-            # (users/tasks.py — APIToken.objects.filter(expires_at__lte=now)) scanned the
-            # whole table; the per-user live-token count enforcing the cap
-            # (users/services.py — filter(user=...) + expires_at null-or-future) could use
-            # only the user prefix of the composite above, then filtered expiry in memory.
+            # #246: the daily purge (users/tasks.py — filter(expires_at__lte=now))
+            # scanned the whole table; this index turns it into a range scan and is the
+            # unbounded query that actually needed serving.
+            #
+            # Deliberately NO (user, expires_at) composite: the other #246 candidate,
+            # the per-user live-token cap check (users/services.py — filter(user=...) +
+            # a null-OR-future disjunction), empirically does NOT use one — the OR arm
+            # defeats range use of the second column and the planner picks the plain
+            # user FK index (verified via EXPLAIN QUERY PLAN; the plan test pins this).
+            # Its cost is bounded by the token cap itself (a handful of rows per user),
+            # so a composite would be pure write amplification.
             models.Index(fields=["expires_at"], name="apitoken_expires_at_idx"),
-            models.Index(fields=["user", "expires_at"], name="apitoken_user_expires_idx"),
         ]
 
     def __str__(self) -> str:
