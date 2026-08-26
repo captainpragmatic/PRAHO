@@ -640,13 +640,20 @@ class APIToken(models.Model):
             # scanned the whole table; this index turns it into a range scan and is the
             # unbounded query that actually needed serving.
             #
-            # Deliberately NO (user, expires_at) composite: the other #246 candidate,
-            # the per-user live-token cap check (users/services.py — filter(user=...) +
-            # a null-OR-future disjunction), empirically does NOT use one — the OR arm
-            # defeats range use of the second column and the planner picks the plain
-            # user FK index (verified via EXPLAIN QUERY PLAN; the plan test pins this).
-            # Its cost is bounded by the token cap itself (a handful of rows per user),
-            # so a composite would be pure write amplification.
+            # Deliberately NO (user, expires_at) composite for the other #246 candidate
+            # (the per-user cap check, users/services.py — filter(user=...) + a
+            # null-OR-future disjunction). Two independent EXPLAIN experiments:
+            # - PG16 @ 20k rows: identical plan and cost with or without it (the OR arm
+            #   stays out of the Index Cond; the user-prefix seek is all it provides).
+            # - PG16 @ 200k rows: the COUNT can go Index-Only on the composite vs a
+            #   plain user-index seek + heap filter without it.
+            # The benefit is real at scale but marginal and contingent (index-only
+            # needs a fresh visibility map; the heap filter touches per-user rows =
+            # live cap + expired-but-unpurged accumulation, small under a functioning
+            # purge — the (expires_at) index above is what keeps the purge working).
+            # Kept simple now; if production EXPLAIN ever shows the cap check or the
+            # staff token listing hurting, re-add it CONCURRENTLY with that evidence.
+            # The plan tests pin this decision at the real query statements.
             models.Index(fields=["expires_at"], name="apitoken_expires_at_idx"),
         ]
 
