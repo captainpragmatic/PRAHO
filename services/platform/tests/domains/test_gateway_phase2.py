@@ -44,11 +44,25 @@ def _make_registrar(name: str = "gandi", **kwargs: Any) -> Registrar:
     return Registrar(name=name, **defaults)
 
 
-def _mock_response(status_code: int, json_data: dict | None = None, text: str = "") -> MagicMock:
+def _cache_get_stub(key: str, default: object = None) -> object:
+    """cache.get() stub keyed by NAME, not call order.
+
+    The circuit breaker expects an int (`cb:...:failures`); everything else here is an
+    idempotency claim that must read as absent. A positional side_effect list couples the
+    test to the exact number of cache.get calls inside the base gateway and raises
+    StopIteration the moment one is added.
+    """
+    return 0 if str(key).startswith("cb:") else default
+
+def _mock_response(
+    status_code: int, json_data: dict | None = None, text: str = "", headers: dict | None = None
+) -> MagicMock:
     resp = MagicMock()
     resp.status_code = status_code
     resp.text = text or json.dumps(json_data or {})
-    resp.headers = {}
+    # Gandi's 202 bodies carry only {"message": ...}; the operation handle is in Location,
+    # so a fixture that cannot set headers can never notice the header matters.
+    resp.headers = headers or {}
     if json_data is not None:
         resp.json.return_value = json_data
     else:
@@ -140,7 +154,7 @@ class GandiTransferTests(TestCase):
     @patch("apps.domains.gateways.gandi.GandiGateway._api_request")
     @patch("apps.domains.gateways.base.cache")
     def test_successful_transfer(self, mock_cache: MagicMock, mock_request: MagicMock) -> None:
-        mock_cache.get.side_effect = [0, None]
+        mock_cache.get.side_effect = _cache_get_stub
         mock_request.return_value = _mock_response(
             202,
             {
@@ -159,7 +173,7 @@ class GandiTransferTests(TestCase):
     @patch("apps.domains.gateways.gandi.GandiGateway._api_request")
     @patch("apps.domains.gateways.base.cache")
     def test_transfer_auth_failure(self, mock_cache: MagicMock, mock_request: MagicMock) -> None:
-        mock_cache.get.side_effect = [0, None]
+        mock_cache.get.side_effect = _cache_get_stub
         mock_request.return_value = _mock_response(401, {"message": "Bad auth"})
 
         result = self.gateway.initiate_transfer("example.com", "BAD-EPP")
@@ -182,7 +196,7 @@ class TransferIdempotencyClaimTests(TestCase):
         self, mock_cache: MagicMock, mock_do: MagicMock
     ) -> None:
         # circuit breaker closed (0), idempotency slot free (None), claim wins.
-        mock_cache.get.side_effect = [0, None]
+        mock_cache.get.side_effect = _cache_get_stub
         mock_cache.add.return_value = True
         mock_do.return_value = Ok(DomainTransferResult(transfer_id="t-1", status="pending"))
 
@@ -220,7 +234,7 @@ class TransferIdempotencyClaimTests(TestCase):
         RenewalIdempotencyTokenTests.test_unknown_outcome_blocks_same_token_retry; this
         gateway inlines its own claim/release protocol instead of routing through
         _execute_idempotent_operation, so it needed the identical fix applied separately."""
-        mock_cache.get.side_effect = [0, None]
+        mock_cache.get.side_effect = _cache_get_stub
         mock_cache.add.return_value = True
         mock_do.return_value = Err(RegistrarAPIError("transfer response lost"))  # default UNKNOWN
 
@@ -235,7 +249,7 @@ class TransferIdempotencyClaimTests(TestCase):
         """A definite (NOT_RETRIABLE) rejection still releases the claim immediately —
         the carve-out proving the UNKNOWN fix doesn't overcorrect into blocking every
         failure."""
-        mock_cache.get.side_effect = [0, None]
+        mock_cache.get.side_effect = _cache_get_stub
         mock_cache.add.return_value = True
         mock_do.return_value = Err(
             RegistrarAPIError("epp code rejected"), retriability=Retriability.NOT_RETRIABLE
@@ -288,7 +302,7 @@ class GandiDomainInfoTests(TestCase):
                 "dates": {"registry_ends_at": "2028-01-01T00:00:00Z"},
                 "nameservers": ["ns1.gandi.net", "ns2.gandi.net"],
                 "whois_privacy": True,
-                "auth_info": "EPP-CODE",
+                "authinfo": "EPP-CODE",  # Gandi's documented field name
             },
         )
 
@@ -357,7 +371,7 @@ class ROTLDTransferTests(TestCase):
     @patch("apps.domains.gateways.rotld.ROTLDGateway._api_request")
     @patch("apps.domains.gateways.base.cache")
     def test_successful_transfer(self, mock_cache: MagicMock, mock_request: MagicMock) -> None:
-        mock_cache.get.side_effect = [0, None]
+        mock_cache.get.side_effect = _cache_get_stub
         mock_request.return_value = _mock_response(
             201,
             {
@@ -636,3 +650,133 @@ class LifecycleServicePhase2FailureContractTests(TestCase):
         self.assertEqual(DomainOperation.objects.count(), 0)
         self.domain.refresh_from_db()
         self.assertEqual(self.domain.nameservers, ["ns1.old.com"])
+
+
+# ===============================================================================
+# GANDI REQUEST PAYLOAD SHAPES (#265)
+# ===============================================================================
+
+
+@override_settings(REGISTRAR_ADAPTERS_VERIFIED=True)
+class GandiPayloadShapeTests(TestCase):
+    """Assert the exact request bodies sent to Gandi.
+
+    The pre-existing Phase 2 tests assert only the parsed RESULT, and all three payloads
+    below were wrong while those tests passed — a mocked 200 response says nothing about
+    whether the request Gandi received was well-formed. These pin the wire format against
+    https://api.gandi.net/docs/domains/ so a regression fails here rather than in
+    production (or, today, silently against a sandbox nobody has run yet).
+    """
+
+    def setUp(self) -> None:
+        self.registrar = _make_registrar("gandi")
+        self.gateway = GandiGateway(self.registrar)
+
+    @patch("apps.domains.gateways.gandi.GandiGateway._api_request")
+    @patch("apps.domains.gateways.base.cache")
+    def test_transfer_sends_authinfo_not_auth_info(self, mock_cache: MagicMock, mock_request: MagicMock) -> None:
+        """#265(1): Gandi's field is `authinfo`; `auth_info` was rejected outright."""
+        mock_cache.get.side_effect = _cache_get_stub
+        # The DOCUMENTED 202: body is {"message": ...} only, handle in Location. The
+        # previous fixture invented id/status, which is exactly how a response shape Gandi
+        # never emits stays pinned in the suite.
+        mock_request.return_value = _mock_response(
+            202,
+            {"message": "Your transfer request has been accepted"},
+            headers={"Location": "https://api.gandi.net/v5/domain/transferin/example.com"},
+        )
+
+        result = self.gateway.initiate_transfer("example.com", "EPP-CODE")
+
+        body = mock_request.call_args.kwargs["json"]
+        self.assertEqual(body["authinfo"], "EPP-CODE")
+        self.assertNotIn("auth_info", body)
+        self.assertEqual(body["fqdn"], "example.com")
+        self.assertTrue(mock_request.call_args.args[1].endswith("/domain/transferin"))
+        # A real 202 must still yield a usable operation handle rather than "".
+        self.assertTrue(result.is_ok(), result)
+        self.assertTrue(result.unwrap().transfer_id, "202 must produce a handle, not an empty id")
+
+    @patch("apps.domains.gateways.gandi.GandiGateway._api_request")
+    @patch("apps.domains.gateways.base.cache")
+    def test_transfer_sends_sharing_id_in_the_query_string(
+        self, mock_cache: MagicMock, mock_request: MagicMock
+    ) -> None:
+        """#265: sharing_id is a query param AND the reseller billing identifier.
+
+        In the body it is ignored, so a reseller's chargeable transfer bills the PAT's
+        default organization instead of the customer's sharing org. _do_register already
+        got this right; transfer-in contradicted it.
+        """
+        mock_cache.get.side_effect = _cache_get_stub
+        mock_request.return_value = _mock_response(202, {"message": "accepted"})
+        self.gateway.registrar.api_username = "reseller-org-id"
+
+        self.gateway.initiate_transfer("example.com", "EPP-CODE")
+
+        self.assertEqual(mock_request.call_args.kwargs["params"], {"sharing_id": "reseller-org-id"})
+        self.assertNotIn("sharing_id", mock_request.call_args.kwargs["json"])
+
+    @patch("apps.domains.gateways.gandi.GandiGateway._api_request")
+    @patch("apps.domains.gateways.base.cache")
+    def test_transfer_rejects_the_dry_run_validation_response(
+        self, mock_cache: MagicMock, mock_request: MagicMock
+    ) -> None:
+        """A 200 on transferin is the Dry-Run validation response, not a started transfer.
+
+        Its body can be {"status": "error", "errors": [...]}; accepting it reported a
+        failed validation as a submitted transfer.
+        """
+        mock_cache.get.side_effect = _cache_get_stub
+        mock_request.return_value = _mock_response(200, {"status": "error", "errors": ["bad authinfo"]})
+
+        result = self.gateway.initiate_transfer("example.com", "EPP-CODE")
+
+        self.assertTrue(result.is_err(), "a validation response must not read as success")
+
+    @patch("apps.domains.gateways.gandi.GandiGateway._api_request")
+    @patch("apps.domains.gateways.base.cache")
+    def test_nameserver_update_wraps_the_list_in_an_object(
+        self, mock_cache: MagicMock, mock_request: MagicMock
+    ) -> None:
+        """#265(2): the endpoint takes {"nameservers": [...]}, not a bare array."""
+        mock_cache.get.return_value = 0
+        mock_request.return_value = _mock_response(200, {})
+        nameservers = ["ns1.new.com", "ns2.new.com"]
+
+        self.gateway.update_nameservers("example.com", nameservers)
+
+        body = mock_request.call_args.kwargs["json"]
+        self.assertEqual(body, {"nameservers": nameservers})
+        self.assertNotIsInstance(body, list)
+
+    @patch("apps.domains.gateways.gandi.GandiGateway._api_request")
+    @patch("apps.domains.gateways.base.cache")
+    def test_lock_patches_the_status_subresource(self, mock_cache: MagicMock, mock_request: MagicMock) -> None:
+        """#265(3): lock lives on /status, and must not touch autorenew."""
+        mock_cache.get.return_value = 0
+        mock_request.return_value = _mock_response(200, {})
+
+        self.gateway.set_lock("example.com", locked=True)
+
+        args = mock_request.call_args.args
+        body = mock_request.call_args.kwargs["json"]
+        self.assertEqual(args[0], "PATCH")
+        self.assertTrue(args[1].endswith("/domain/domains/example.com/status"))
+        self.assertEqual(body, {"clientTransferProhibited": True})
+
+    @patch("apps.domains.gateways.gandi.GandiGateway._api_request")
+    @patch("apps.domains.gateways.base.cache")
+    def test_unlock_clears_the_flag_without_touching_autorenew(
+        self, mock_cache: MagicMock, mock_request: MagicMock
+    ) -> None:
+        """The unlock path previously sent {"autorenew": None} — a different field entirely."""
+        mock_cache.get.return_value = 0
+        mock_request.return_value = _mock_response(200, {})
+
+        self.gateway.set_lock("example.com", locked=False)
+
+        body = mock_request.call_args.kwargs["json"]
+        self.assertEqual(body, {"clientTransferProhibited": False})
+        self.assertNotIn("autorenew", body)
+        self.assertNotIn("tags", body)
