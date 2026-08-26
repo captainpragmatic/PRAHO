@@ -308,6 +308,38 @@ def run_retention_policies() -> dict[str, Any]:
     return {"error": result.error}
 
 
+def publish_chain_anchor() -> dict[str, Any]:
+    """Publish the audit chain head to the external sink (#313).
+
+    Scheduled rather than manual because the anchor cadence IS the truncation-detection
+    window: anything appended after the last successful anchor can still be lopped off
+    undetectably. An unscheduled anchor also fails the other way -- once
+    AUDIT_CHAIN_ENABLED is on, `--type all` starts running anchor_verification, and with
+    no anchor ever published that check fails closed as critical every single day, which
+    is how operators learn to ignore the alert.
+    """
+    from apps.audit.services import AuditIntegrityService  # noqa: PLC0415  # Deferred: avoids circular import
+
+    results: dict[str, Any] = {"task": "publish_chain_anchor", "timestamp": timezone.now().isoformat()}
+    if not getattr(settings, "AUDIT_CHAIN_ENABLED", False):
+        results["status"] = "skipped"
+        results["reason"] = "AUDIT_CHAIN_ENABLED is off"
+        return results
+
+    result = AuditIntegrityService.publish_chain_anchor()
+    if result.is_err():
+        results["status"] = "error"
+        results["error"] = result.unwrap_err()
+        logger.error(f"🔥 [Audit Chain] Anchor publication failed: {results['error']}")
+        return results
+
+    record = result.unwrap()
+    results["status"] = "success"
+    results["sequence"] = record.get("sequence")
+    results["published"] = record.get("published", True)
+    return results
+
+
 def setup_audit_scheduled_tasks() -> dict[str, str]:
     """Register the audit module's schedules (M6: the single scheduling vehicle).
 
@@ -350,6 +382,17 @@ def setup_audit_scheduled_tasks() -> dict[str, str]:
             "repeats": -1,
         },
     }
+
+    # Gated on the same flag as the ledger itself: scheduling it before the backfill has run
+    # would publish anchors over an incomplete chain. The task no-ops if the flag is off, so
+    # a stale schedule is harmless, but keeping it out of `desired` until cutover means the
+    # entry appears exactly when it starts being meaningful.
+    if getattr(settings, "AUDIT_CHAIN_ENABLED", False):
+        desired["audit-chain-anchor-hourly"] = {
+            "func": "apps.audit.tasks.publish_chain_anchor",
+            "schedule_type": Schedule.HOURLY,
+            "repeats": -1,
+        }
 
     results: dict[str, str] = {}
     for name, defaults in desired.items():
