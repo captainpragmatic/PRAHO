@@ -919,3 +919,161 @@ class CouponRedemptionReveralTests(TestCase):
 
         self.campaign.refresh_from_db()
         self.assertEqual(self.campaign.spent_cents, 0)
+
+    def test_concurrent_reversal_decrements_counters_exactly_once(self):
+        """#421: two removals racing the same redemption must not double-decrement.
+
+        mark_reversed() guarded on an in-memory ``self.status`` read and then wrote
+        blindly, so two callers holding separate instances of the SAME row both passed
+        the guard and both issued ``-1`` / ``-discount_cents``. Fetching the row twice
+        reproduces that interleaving deterministically on any backend (select_for_update
+        is a no-op on SQLite, so a thread-based test would prove nothing here).
+        """
+        result = CouponService.apply_coupon(
+            code="REVERSAL",
+            order=self.order,
+            customer=self.customer,
+        )
+        self.assertTrue(result.success)
+
+        self.coupon.refresh_from_db()
+        self.campaign.refresh_from_db()
+        self.assertEqual(self.coupon.total_uses, 1)
+        self.assertEqual(self.coupon.total_discount_cents, 2000)
+        self.assertEqual(self.campaign.spent_cents, 2000)
+
+        # Two independent instances of the same row — the shape of two concurrent
+        # remove_coupon() calls that both read status='applied' before either wrote.
+        first = CouponRedemption.objects.get(id=result.redemption_id)
+        second = CouponRedemption.objects.get(id=result.redemption_id)
+
+        first.mark_reversed()
+        second.mark_reversed()
+
+        self.coupon.refresh_from_db()
+        self.campaign.refresh_from_db()
+        self.assertEqual(self.coupon.total_uses, 0, "total_uses decremented twice")
+        self.assertEqual(self.coupon.total_discount_cents, 0, "total_discount_cents decremented twice")
+        self.assertEqual(self.campaign.spent_cents, 0, "campaign spend decremented twice")
+
+    def test_counters_never_go_negative_on_repeated_reversal(self):
+        """The observable damage: counters driven below zero are not recoverable."""
+        result = CouponService.apply_coupon(
+            code="REVERSAL",
+            order=self.order,
+            customer=self.customer,
+        )
+        self.assertTrue(result.success)
+
+        for _ in range(3):
+            CouponRedemption.objects.get(id=result.redemption_id).mark_reversed()
+
+        self.coupon.refresh_from_db()
+        self.campaign.refresh_from_db()
+        self.assertGreaterEqual(self.coupon.total_uses, 0)
+        self.assertGreaterEqual(self.coupon.total_discount_cents, 0)
+        self.assertGreaterEqual(self.campaign.spent_cents, 0)
+
+    def test_reversal_is_idempotent_and_reports_whether_it_acted(self):
+        """mark_reversed() must tell the caller whether THIS call did the reversal."""
+        result = CouponService.apply_coupon(
+            code="REVERSAL",
+            order=self.order,
+            customer=self.customer,
+        )
+        redemption = CouponRedemption.objects.get(id=result.redemption_id)
+
+        self.assertTrue(redemption.mark_reversed(), "first reversal should report success")
+        self.assertFalse(
+            CouponRedemption.objects.get(id=result.redemption_id).mark_reversed(),
+            "second reversal should report that it did nothing",
+        )
+
+    def test_stale_instance_reversal_refreshes_local_state(self):
+        """A caller holding a stale instance must not be left thinking it is 'applied'."""
+        result = CouponService.apply_coupon(
+            code="REVERSAL",
+            order=self.order,
+            customer=self.customer,
+        )
+        stale = CouponRedemption.objects.get(id=result.redemption_id)
+        CouponRedemption.objects.get(id=result.redemption_id).mark_reversed()
+
+        self.assertFalse(stale.mark_reversed())
+        self.assertEqual(stale.status, "reversed")
+        self.assertIsNotNone(stale.reversed_at)
+        # The three assertions above all pass against the OLD implementation too — it set
+        # both attributes in memory before saving. What actually distinguishes the CAS is
+        # that the LOSER performed no work: the counters moved exactly once, and only one
+        # reversal was recorded.
+        coupon = Coupon.objects.get(code="REVERSAL")
+        self.assertEqual(coupon.total_uses, 0)
+        self.assertEqual(coupon.total_discount_cents, 0)
+
+    def test_remove_coupon_does_not_subtract_a_discount_it_did_not_reverse(self) -> None:
+        """The service-level half of the fix, which nothing else covers.
+
+        Every other test here calls mark_reversed() on model instances directly, so
+        reverting `if redemption.mark_reversed():` to the old unconditional subtraction
+        leaves the whole suite green while the customer-visible bug ships: the discount
+        deducted twice, dropping the order total below what was actually discounted.
+
+        The redemption queryset already filters status="applied", so a row reversed
+        BEFORE the query never reaches the loop — the guard exists for the row reversed
+        after materialization. That window is what this test drives, using the coupon
+        lock as the seam, since it sits between materialization and the loop.
+        """
+        result = CouponService.apply_coupon(code="REVERSAL", order=self.order, customer=self.customer)
+        self.order.refresh_from_db()
+        self.assertGreater(self.order.discount_cents, 0, "fixture must actually discount the order")
+
+        original_select_for_update = Coupon.objects.select_for_update
+
+        def reverse_then_lock(*args: object, **kwargs: object) -> object:
+            # A concurrent caller wins the CAS after this call materialized its queryset.
+            CouponRedemption.objects.get(id=result.redemption_id).mark_reversed()
+            return original_select_for_update(*args, **kwargs)
+
+        with patch.object(Coupon.objects, "select_for_update", side_effect=reverse_then_lock):
+            CouponService.remove_coupon(order=self.order, redemption_id=result.redemption_id)
+
+        self.order.refresh_from_db()
+        # The winner owns the subtraction. This call must leave the figure alone rather
+        # than deducting the same discount a second time.
+        self.assertEqual(self.order.discount_cents, 2000)
+        coupon = Coupon.objects.get(code="REVERSAL")
+        self.assertEqual(coupon.total_uses, 0, "counters must move exactly once")
+        self.assertEqual(coupon.total_discount_cents, 0)
+
+    def test_successful_reversal_is_audited(self) -> None:
+        """The CAS uses QuerySet.update(), which fires neither pre_save nor post_save.
+
+        The receiver that emitted coupon_redemption_reversed therefore stopped running.
+        That is worse than a plain gap: mark_applied() still uses save(), so the trail
+        would show every application with no matching reversal, and anyone reconciling
+        discounts from it would conclude the discount is still live on the order.
+        """
+        from apps.audit.models import AuditEvent  # noqa: PLC0415
+
+        result = CouponService.apply_coupon(code="REVERSAL", order=self.order, customer=self.customer)
+        redemption = CouponRedemption.objects.get(id=result.redemption_id)
+
+        self.assertTrue(redemption.mark_reversed())
+
+        events = AuditEvent.objects.filter(action="coupon_redemption_reversed")
+        self.assertEqual(events.count(), 1, "a reversal must leave exactly one audit event")
+        event = events.get()
+        self.assertEqual(event.old_values.get("status"), "applied")
+        self.assertEqual(event.new_values.get("status"), "reversed")
+
+    def test_a_lost_reversal_race_records_no_second_audit_event(self) -> None:
+        """The loser changed nothing, so it must not claim it did."""
+        from apps.audit.models import AuditEvent  # noqa: PLC0415
+
+        result = CouponService.apply_coupon(code="REVERSAL", order=self.order, customer=self.customer)
+        stale = CouponRedemption.objects.get(id=result.redemption_id)
+        CouponRedemption.objects.get(id=result.redemption_id).mark_reversed()
+
+        self.assertFalse(stale.mark_reversed())
+
+        self.assertEqual(AuditEvent.objects.filter(action="coupon_redemption_reversed").count(), 1)
