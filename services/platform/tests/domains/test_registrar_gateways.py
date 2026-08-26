@@ -162,7 +162,9 @@ class GandiGatewayRegisterTests(TestCase):
             {
                 "id": "gandi-dom-123",
                 "expires_at": "2027-04-06T00:00:00Z",
-                "auth_info": "EPP-SECRET",
+                # authinfo is Gandi's documented field; the fixture previously pinned the
+                # misspelling, which is what let the read-side bug survive (#265).
+                "authinfo": "EPP-SECRET",
             },
         )
 
@@ -618,7 +620,7 @@ class GandiInvalidResponseTests(TestCase):
     ) -> None:
         mock_cache.get.side_effect = [0, None]
         # 202 success but NO expires_at → must not fabricate a date.
-        mock_request.return_value = _mock_response(202, {"id": "g-1", "auth_info": "EPP"})
+        mock_request.return_value = _mock_response(202, {"id": "g-1", "authinfo": "EPP"})
 
         result = self.gateway.register_domain("example.com", 1, {})
 

@@ -6,7 +6,7 @@ Auth: Personal Access Token via Authorization header.
 Rate limit: 30 requests / 2 seconds (negotiable for resellers).
 
 PROVISIONAL — NOT SANDBOX-VERIFIED. The success-response parsing here (expecting
-id/expires_at/auth_info in the register/renew body) was written from documentation
+id/expires_at/authinfo in the register/renew body) was written from documentation
 and has not been validated against the live Gandi API, which documents a 202
 "accepted" body (message + Location) that likely requires polling the returned
 operation/domain resource for the confirmed state and expiry. Chargeable
@@ -128,7 +128,10 @@ class GandiGateway(BaseRegistrarGateway):
                     registrar_domain_id=data.get("id", domain_name),
                     expires_at=expires_at,
                     nameservers=nameservers or self.registrar.default_nameservers or [],
-                    epp_code=data.get("auth_info", ""),
+                    # authinfo, not auth_info — the identical misspelling this change
+                    # fixed on the write side. Gandi's domain-details response documents a
+                    # top-level `authinfo`, so the EPP credential read back was always "".
+                    epp_code=data.get("authinfo", ""),
                 )
             )
 
@@ -241,26 +244,39 @@ class GandiGateway(BaseRegistrarGateway):
         url = f"{GANDI_API_BASE}/domain/transferin"
         body: dict[str, Any] = {"fqdn": domain_name, "authinfo": epp_code}
 
+        # Query string, not body — the same rule _do_register already follows above. Gandi
+        # documents sharing_id as a query param AND as the reseller billing identifier, so
+        # in the body it is at best ignored: the chargeable transfer then bills the PAT's
+        # default organization instead of the customer's sharing org.
+        params = {}
         sharing_id = self._get_sharing_id()
         if sharing_id:
-            body["sharing_id"] = sharing_id
+            params["sharing_id"] = sharing_id
 
         try:
-            response = self._api_request("POST", url, json=body, headers=self._auth_headers())
+            response = self._api_request("POST", url, json=body, params=params, headers=self._auth_headers())
         except requests.RequestException as exc:
             # Transfer POST may have reached the registrar — not provably unapplied (UNKNOWN default).
             return Err(RegistrarTransientError(self.registrar.name, f"Network error during transfer: {exc}"))
 
-        if response.status_code in (HTTP_OK, HTTP_ACCEPTED):
-            data = response.json()
+        # 202 ONLY: a 200 here is the documented Dry-Run *validation* response, whose body
+        # can be {"status": "error", "errors": [...]} — accepting it would report a failed
+        # validation as a started transfer.
+        if response.status_code == HTTP_ACCEPTED:
+            data = self._safe_json(response)  # size-capped, like every sibling parse
+            # The 202 body is documented as {"message": ...} only; the Location header is
+            # the sole operation handle. Reading id/status/expected_completion from it
+            # yields ""/"pending"/None on every real response, and services.py stores that
+            # empty string as the registrar operation id.
+            transfer_id = data.get("id") or response.headers.get("Location", "")
             return Ok(
                 DomainTransferResult(
-                    transfer_id=data.get("id", ""),
+                    transfer_id=transfer_id,
                     status=data.get("status", "pending"),
                     expected_completion=_parse_gandi_date(data.get("expected_completion", "")),
                 )
             )
-        return self._handle_error_response(response, f"transfer {domain_name}")
+        return self._handle_error_response(response, f"transfer {domain_name}", domain_name=domain_name)
 
     def _do_get_domain_info(self, domain_name: str) -> Result[DomainInfoResult, RegistrarAPIError]:
         url = f"{GANDI_API_BASE}/domain/domains/{domain_name}"
@@ -287,10 +303,13 @@ class GandiGateway(BaseRegistrarGateway):
                     if isinstance(data.get("status"), list)
                     else False,
                     whois_privacy=data.get("whois_privacy", False),
-                    epp_code=data.get("auth_info", ""),
+                    # authinfo, not auth_info — the identical misspelling this change
+                    # fixed on the write side. Gandi's domain-details response documents a
+                    # top-level `authinfo`, so the EPP credential read back was always "".
+                    epp_code=data.get("authinfo", ""),
                 )
             )
-        return self._handle_error_response(response, f"info {domain_name}")
+        return self._handle_error_response(response, f"info {domain_name}", domain_name=domain_name)
 
     def _do_update_nameservers(
         self, domain_name: str, nameservers: list[str]
@@ -308,7 +327,7 @@ class GandiGateway(BaseRegistrarGateway):
 
         if response.status_code in (HTTP_OK, HTTP_ACCEPTED):
             return Ok(NameserverUpdateResult(nameservers=nameservers))
-        return self._handle_error_response(response, f"update nameservers for {domain_name}")
+        return self._handle_error_response(response, f"update nameservers for {domain_name}", domain_name=domain_name)
 
     def _do_set_lock(self, domain_name: str, locked: bool) -> Result[DomainLockResult, RegistrarAPIError]:
         # #265: transfer lock lives on the /status sub-resource, not the domain resource.
