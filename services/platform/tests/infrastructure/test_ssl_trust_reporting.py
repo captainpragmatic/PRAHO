@@ -7,7 +7,10 @@ self-signed panel certificate and nothing said so.
 
 These tests stand up a **real TLS server with real certificates** and drive the real
 handshake. #436 says explicitly that "a mocked probe does not prove trust-chain
-behavior" — so nothing here is mocked except the port number.
+behavior" — so the certificates, the sockets and the verification are all real. Two
+things are patched, neither of them the behaviour under test: the port constant, and a
+thin wrapper around ssl.create_default_context that loads the generated test CA into the
+verified context (otherwise no locally-issued certificate could ever be trusted).
 """
 
 from __future__ import annotations
@@ -186,7 +189,8 @@ class SSLTrustReportingTests(SimpleTestCase):
         self.assertTrue(result.passed)  # #436: reporting only, still not gating
         self.assertFalse(result.details["trusted"])
         self.assertIn("NOT CA-trusted", result.message)
-        self.assertIsNotNone(result.details["trust_error"])
+        self.assertTrue(result.details["trust_evaluated"], "a self-signed chain IS a verdict")
+        self.assertIn("self-signed", result.details["trust_error"])
 
     def test_trusted_certificate_with_matching_name_is_reported_trusted(self) -> None:
         ca_pem, _, ca_cert, ca_key = _make_cert("Test CA")
@@ -197,8 +201,14 @@ class SSLTrustReportingTests(SimpleTestCase):
 
         self.assertTrue(result.passed)
         self.assertTrue(result.details["trusted"])
+        # assertIn("CA-trusted") would also pass on "NOT CA-trusted" — assert the absence
+        # of the negation, which is the thing that actually distinguishes the two messages.
+        self.assertNotIn("NOT CA-trusted", result.message)
         self.assertIn("CA-trusted", result.message)
         self.assertIsNone(result.details["trust_error"])
+        self.assertTrue(result.details["trust_evaluated"])
+        self.assertIsNotNone(result.details["not_after"])
+        self.assertRegex(result.details["cert_sha256"], r"^[0-9a-f]{64}$")
 
     def test_trusted_ca_but_wrong_hostname_is_reported_untrusted(self) -> None:
         """A CA-signed cert for the WRONG host must not count as trusted."""
@@ -210,6 +220,11 @@ class SSLTrustReportingTests(SimpleTestCase):
 
         self.assertFalse(result.details["trusted"])
         self.assertIn("NOT CA-trusted", result.message)
+        self.assertTrue(result.details["trust_evaluated"], "a name mismatch IS a verdict")
+        # The check's stated value is that an operator can tell the failure modes apart
+        # WITHOUT re-probing. Asserting only trusted=False leaves that claim unprotected:
+        # every reason could collapse to one generic string and the suite would stay green.
+        self.assertIn("Hostname mismatch", result.details["trust_error"])
 
     def test_expired_certificate_is_reported_untrusted(self) -> None:
         ca_pem, _, ca_cert, ca_key = _make_cert("Test CA")
@@ -221,6 +236,8 @@ class SSLTrustReportingTests(SimpleTestCase):
             result = self._check(port, self._deployment("node.example.test"), ca_pem=ca_pem)
 
         self.assertFalse(result.details["trusted"])
+        self.assertTrue(result.details["trust_evaluated"])
+        self.assertIn("expired", result.details["trust_error"])
 
     def test_untrusted_certificate_does_not_fail_the_check(self) -> None:
         """#436 explicitly defers gating to a staging drill — nothing may flip red yet."""
@@ -251,3 +268,59 @@ class SSLTrustReportingTests(SimpleTestCase):
         result = self._check(port, self._deployment())
 
         self.assertFalse(result.passed)
+
+
+class SSLTrustIndeterminateTests(SSLTrustReportingTests):
+    """A failed PROBE must not be reported as a failed CERTIFICATE.
+
+    The two passes are separate TCP connections. A Webmin restart, a reset, a rate limit
+    or a timeout between them used to land in the same bucket as a real verification
+    failure and render as "the certificate is NOT CA-trusted: [Errno 32] Broken pipe".
+    That is a false accusation against a certificate nobody actually examined — and for a
+    check whose entire purpose is to be read, crying wolf is the way it stops being read.
+    """
+
+    def test_transport_failure_on_the_verified_pass_is_not_a_certificate_verdict(self) -> None:
+        cert_pem, key_pem, _, _ = _make_cert("node.example.test")
+
+        with _tls_server(cert_pem, key_pem) as port:
+            deployment = self._deployment()
+            real_create_connection = socket.create_connection
+            calls = {"n": 0}
+
+            def flaky_connect(*args: Any, **kwargs: Any) -> socket.socket:
+                # Pass 1 (liveness) succeeds; pass 2 (the verdict) never connects.
+                calls["n"] += 1
+                if calls["n"] >= 2:
+                    raise ConnectionResetError(104, "Connection reset by peer")
+                return real_create_connection(*args, **kwargs)
+
+            with patch.object(socket, "create_connection", side_effect=flaky_connect):
+                result = self._check(port, deployment)
+
+        self.assertTrue(result.passed)
+        self.assertFalse(result.details["trusted"])
+        # The load-bearing assertion: we did not reach a verdict, and must not imply one.
+        self.assertFalse(result.details["trust_evaluated"])
+        self.assertIn("could NOT be evaluated", result.message)
+        self.assertNotIn("NOT CA-trusted", result.message)
+
+    def test_timeout_on_the_verified_pass_is_also_indeterminate(self) -> None:
+        """TimeoutError subclasses OSError, so it never reached the caller's own handler."""
+        cert_pem, key_pem, _, _ = _make_cert("node.example.test")
+
+        with _tls_server(cert_pem, key_pem) as port:
+            real_create_connection = socket.create_connection
+            calls = {"n": 0}
+
+            def slow_second(*args: Any, **kwargs: Any) -> socket.socket:
+                calls["n"] += 1
+                if calls["n"] >= 2:
+                    raise TimeoutError("timed out")
+                return real_create_connection(*args, **kwargs)
+
+            with patch.object(socket, "create_connection", side_effect=slow_second):
+                result = self._check(port, self._deployment())
+
+        self.assertFalse(result.details["trust_evaluated"])
+        self.assertIn("could NOT be evaluated", result.message)
