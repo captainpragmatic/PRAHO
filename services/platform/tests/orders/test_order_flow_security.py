@@ -134,27 +134,26 @@ class StripePaymentVerificationTest(TestCase):
 
         test_confirm_rejects_non_succeeded_pi already proves the *behavior* — a forged
         "succeeded" loses to Stripe's real status. This pins the stronger property the
-        fix established: confirm_order never consults request payment_status at all, so
-        no future refactor can reintroduce it as a shortcut (e.g. "trust it when Stripe
-        is unreachable"). Asserted on the source because a behavioral test cannot
-        distinguish "ignored" from "read but overridden".
-        """
-        # NOT inspect.getsource(confirm_order): @api_view replaces it with DRF's wrapper,
-        # so that would assert on 443 characters of framework code and pass unconditionally.
-        # Read the decorated function out of the module source instead.
-        module_source = pathlib.Path(inspect.getfile(views_module)).read_text(encoding="utf-8")
-        marker = "def confirm_order("
-        start = module_source.index(marker)
-        end = module_source.find("\ndef ", start + len(marker))
-        body = module_source[start : end if end != -1 else len(module_source)]
-        code = "\n".join(line.split("#")[0] for line in body.splitlines())
+        fix established: no code in this module consults request payment_status at all,
+        so no future refactor can reintroduce it as a shortcut (e.g. "trust it when
+        Stripe is unreachable"). Asserted on the source because a behavioral test
+        cannot distinguish "ignored" from "read but overridden".
 
-        self.assertIn("payment_intent_id", code, "guard is reading the wrong function")
+        MODULE scope on purpose, not a slice of confirm_order: function-slicing goes
+        vacuous the moment the payment read is extracted into a module-level helper
+        (this module's established refactor pattern), and inspect.getsource on the
+        view is defeated by @api_view wrapping. Quoted-form matching skips prose
+        mentions in comments/docstrings naturally — any legitimate future need for
+        the quoted literal in this module must consciously rewrite this guard.
+        """
+        module_source = pathlib.Path(inspect.getfile(views_module)).read_text(encoding="utf-8")
+
+        self.assertIn("payment_intent_id", module_source, "guard is reading the wrong module")
         for accessor in ('"payment_status"', "'payment_status'"):
             self.assertNotIn(
                 accessor,
-                code,
-                "confirm_order must not read payment_status from the request (#104 H11)",
+                module_source,
+                "orders API views must not read payment_status from a request (#104 H11)",
             )
 
     def test_confirm_rejects_non_succeeded_pi(self) -> None:

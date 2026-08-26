@@ -98,6 +98,49 @@ class ConfirmPaymentUserIdValidationTests(SimpleTestCase):
             call_kwargs = mock_api.post_billing.call_args
             self.assertIsInstance(call_kwargs[1]["user_id"], int)
 
+    @patch("apps.orders.views.PlatformAPIClient")
+    def test_confirm_payload_excludes_payment_status(self, mock_api_class: object) -> None:
+        """#104 [H11]: the confirm POST body must not carry payment_status.
+
+        The platform deliberately never reads it (it re-retrieves the PaymentIntent
+        from Stripe), so sending our copy made the field look like a trusted input.
+        This is the behavioral discriminator for the removal — asserted on the actual
+        payload the API client receives, so re-adding the field fails HERE even
+        though the platform would keep ignoring it.
+        """
+        self._set_session(active_customer_id=123, customer_id=123, user_id=456)
+        mock_api = mock_api_class.return_value
+        mock_api.post_billing.return_value = {"success": True, "status": "succeeded"}
+        mock_api.post.return_value = {"success": True}
+
+        self.client.post(
+            "/order/confirm-payment/",
+            data=json.dumps({
+                "payment_intent_id": "pi_testNoStatus123456789",
+                "order_id": "550e8400-e29b-41d4-a716-446655440000",
+                "gateway": "stripe",
+            }),
+            content_type="application/json",
+        )
+
+        self.assertTrue(mock_api.post.called, "confirm call should have been made")
+        confirm_path, confirm_payload = mock_api.post.call_args[0][0], mock_api.post.call_args[0][1]
+        self.assertIn("/confirm/", confirm_path)
+        self.assertIn("payment_intent_id", confirm_payload)  # anchor: right call inspected
+        self.assertNotIn("payment_status", confirm_payload)
+
+    def test_confirm_payment_source_never_sends_payment_status(self) -> None:
+        """Source-level second layer for the same H11 property (see test above).
+
+        confirm_payment is a plain Django view, so inspect.getsource works here —
+        unlike the platform's DRF @api_view-wrapped receiver. Quoted-form matching
+        skips the bare-identifier local variable that legitimately drives the
+        portal's own success branch.
+        """
+        source = inspect.getsource(confirm_payment)
+        self.assertNotIn('"payment_status"', source)
+        self.assertNotIn("'payment_status'", source)
+
     def test_view_level_user_id_guard_exists(self) -> None:
         """Defense-in-depth: confirm_payment validates user_id before int() cast."""
         source = inspect.getsource(confirm_payment)
