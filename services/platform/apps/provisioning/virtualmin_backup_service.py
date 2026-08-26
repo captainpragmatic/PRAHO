@@ -421,8 +421,11 @@ class VirtualminBackupService:
             # Archives and metadata are stored under virtualmin-backups/{backup_id}/, so a
             # domain-scoped prefix ("virtualmin-backups/{domain}/") matched no key at all and
             # an account-scoped list always returned zero backups — indistinguishable from
-            # "this account has no backups". Filtering on metadata["domain"] keeps the
-            # existing key layout intact, so archives already in S3 stay listable.
+            # "this account has no backups". Keeping the existing key layout means archives
+            # already in S3 stay listable; the cost is O(all retained metadata) GETs per
+            # account-scoped list (acceptable while buckets are small; a by-service metadata
+            # index under virtualmin-backups/by-service/{service_id}/ is the structural fix
+            # if that ever hurts).
             prefix = "virtualmin-backups/"
 
             # List objects from S3
@@ -440,9 +443,18 @@ class VirtualminBackupService:
                             metadata_obj = s3_client.get_object(Bucket=bucket_name, Key=obj["Key"])
                             metadata = json.loads(metadata_obj["Body"].read())
 
-                            # Apply filters
-                            if account and metadata.get("domain") != account.domain:
-                                continue
+                            # Apply filters. Account identity is the STABLE service id, never
+                            # the domain: a primary-domain rename would hide the account's own
+                            # earlier backups, and a domain released by customer A and later
+                            # registered by customer B must not surface A's archives in B's
+                            # list (the restore view trusts this list — a domain match would
+                            # let A's archive be restored into B's account). Metadata without
+                            # a service id is unattributable and fails closed. str() both
+                            # sides: JSON round-trips UUIDs as strings.
+                            if account:
+                                metadata_sid = metadata.get("praho_service_id")
+                                if metadata_sid is None or str(metadata_sid) != str(account.service_id):
+                                    continue
 
                             if backup_type and metadata.get("backup_type") != backup_type:
                                 continue
@@ -562,7 +574,11 @@ class VirtualminBackupService:
             "server_hostname": self.server.hostname,
             "backup_type": backup_type,
             "created_at": timezone.now().isoformat(),
-            "praho_service_id": account.service.id,
+            # str() for JSON type-stability: the account filter in list_backups compares
+            # str()-normalized ids, so the stored form survives pk-type changes and JSON
+            # round-trips. (Service.pk is a BigAutoField today; do NOT source this from
+            # account.praho_service_id — that UUIDField holds an int-coerced UUID.)
+            "praho_service_id": str(account.service_id),
             "include_email": config.include_email,
             "include_databases": config.include_databases,
             "include_files": config.include_files,
@@ -697,10 +713,15 @@ class VirtualminBackupService:
             vm_config = VirtualminConfig(server=self.server)
             gateway = VirtualminGateway(vm_config)
 
-            # Use Virtualmin's incremental backup with reference to last backup
+            # Use Virtualmin's incremental backup with reference to last backup.
+            # SECURITY (OWASP A05:2021): random token in the temp path, matching the
+            # full/config siblings — backup_id is derivable (domain + timestamp), and
+            # this path only became reachable once account-scoped listing worked (#431),
+            # so it never got the token its siblings carry.
+            random_token = secrets.token_hex(8)
             backup_params = {
                 "domain": account.domain,
-                "dest": f"{tempfile.gettempdir()}/virtualmin_incr_{backup_id}.tar.gz",
+                "dest": f"{tempfile.gettempdir()}/virtualmin_incr_{backup_id}_{random_token}.tar.gz",
                 "incremental": True,
                 "all-features": True,
                 "newformat": True,
