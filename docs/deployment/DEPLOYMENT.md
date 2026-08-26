@@ -40,7 +40,33 @@ python manage.py pin_virtualmin_certificates --dry-run
 python manage.py pin_virtualmin_certificates
 ```
 
-The command fails closed for records without a linked deployment or without verified SSH host-key trust. Resolve those records and rerun the command; do not obtain their initial certificate pin over an unverified network connection.
+The command fails closed for records without a linked deployment or without verified SSH host-key trust. Do not obtain their initial certificate pin over an unverified network connection.
+
+The `--dry-run` output lists every record that cannot be remediated by a normal run, in two classes:
+
+**1. Servers with no linked node deployment.** The SSH path needs a `NodeDeployment` for the node IP and the host-key trust anchor, so servers registered through the admin form rather than a deployment cannot be pinned automatically. Either link a deployment, or read the digest on the node itself and supply it explicitly:
+
+```bash
+# ON THE NODE, over an already-trusted session (console or verified SSH):
+openssl s_client -connect 127.0.0.1:10000 </dev/null 2>/dev/null \
+  | openssl x509 -noout -fingerprint -sha256
+
+# On the Platform host, with the value from above:
+python manage.py pin_virtualmin_certificates \
+  --server-id <virtualmin-server-uuid> --fingerprint <sha256>
+```
+
+The digest is accepted with or without colons and in either case. It is *not* read over the network by PRAHO — you are vouching for it, which is why it must come from the node itself rather than from an `openssl s_client` run against the node from elsewhere.
+
+**2. Servers still using plain HTTP (`use_ssl=false`).** No pin makes these reachable; the HTTPS guard rejects them first. Enable HTTPS on the node, then either turn on CA verification or pin as above. The command refuses `--fingerprint` for these rows rather than let a pin imply the record is remediated.
+
+To size the work before deploying:
+
+```sql
+SELECT count(*) FROM virtualmin_servers
+WHERE use_ssl = false
+   OR (ssl_verify = false AND ssl_cert_fingerprint = '');
+```
 
 ---
 
