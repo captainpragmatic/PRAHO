@@ -3626,7 +3626,12 @@ class AuditIntegrityService:
         if head is None or not head.last_chain_mac:
             return Err("No chain head to anchor - run backfill_audit_chain first")
 
-        link_count = AuditChainLink.objects.count()
+        # Bounded by the head we just read, NOT a bare count(): reading them as two unlocked
+        # queries let an append land in between and sign (sequence=N, head_mac=N, count=N+1).
+        # Verification then counts links <= N, gets N, and reports anchor_link_count_mismatch
+        # forever against a legitimately signed anchor. Deriving the count from the sequence
+        # makes the tuple self-consistent by construction, with no lock.
+        link_count = AuditChainLink.objects.filter(sequence__lte=head.last_sequence).count()
         key_id, key = cls._anchor_keys()[0]
         payload = cls._anchor_payload(
             sequence=head.last_sequence, head_chain_mac=head.last_chain_mac, link_count=link_count
@@ -3698,6 +3703,11 @@ class AuditIntegrityService:
     def read_anchor_sink_records(cls) -> Result[list[dict[str, Any]], str]:
         """Read back published anchors from the external sink.
 
+        Returns the parsed records as a list: the file is read incrementally, but every
+        record IS retained, so memory scales with anchor count. At hourly cadence that is
+        fine for years; if it stops being fine, verify only anchors above a watermark
+        rather than making this lazy, since callers corroborate against the local table.
+
         This is the copy that survives an attacker with database access, so it — not
         AuditChainAnchor — is the authority for verification.
         """
@@ -3713,11 +3723,22 @@ class AuditIntegrityService:
             if not anchor_path.exists():
                 return Err(f"Anchor sink {path} does not exist - anchors were never published or were removed")
             try:
-                # Streamed line by line rather than read_text(): this file grows without bound
-                # on a long-running system, and verification must not need it all resident.
+                # Read line by line and tolerate bad lines INDIVIDUALLY. The sibling
+                # verify_anchor_records is already per-record tolerant for exactly this
+                # reason: an exception there would be a denial of verification an attacker
+                # could trigger at will. So one junk line, or a torn write during log
+                # rotation, must not blind the reader to every other anchor in the file.
+                # Unparseable lines are surfaced as malformed records, never dropped.
+                records = []
                 with anchor_path.open(encoding="utf-8") as handle:
-                    records = [json.loads(line) for line in handle if line.strip()]
-            except (OSError, ValueError) as e:
+                    for line in handle:
+                        if not line.strip():
+                            continue
+                        try:
+                            records.append(json.loads(line))
+                        except ValueError:
+                            records.append({"malformed_line": True})
+            except OSError as e:
                 return Err(f"Anchor sink read failed: {e}")
             return Ok(records)
 
@@ -3774,7 +3795,11 @@ class AuditIntegrityService:
 
         # Corroborate against the local copy: anything anchored locally but missing from the
         # sink means records were removed from the sink after they were written.
-        sink_sequences = {record.get("sequence") for record in sink_records}
+        # Only records that could actually be used to verify count as present. A malformed
+        # line that merely carries the right sequence would otherwise suppress the
+        # missing-anchor finding for it — precisely what an attacker overwriting the sink
+        # would produce.
+        sink_sequences = {record["sequence"] for record in sink_records if cls._anchor_record_is_well_formed(record)}
         findings.extend(
             {
                 "type": "anchor_missing_from_sink",
@@ -3844,6 +3869,11 @@ class AuditIntegrityService:
                         "description": f"Anchor at sequence {sequence} uses unrecognized key id {anchor.get('key_id')}",
                     }
                 )
+                # Same reasoning as the mac-mismatch branch below: an anchor we cannot
+                # authenticate proves nothing about the ledger, so comparing the live chain
+                # against it would mint critical truncation findings from attacker-supplied
+                # input (and cost two unbounded ledger queries per junk line).
+                continue
             else:
                 payload = cls._anchor_payload(
                     sequence=sequence,
@@ -3925,9 +3955,17 @@ class AuditIntegrityService:
         the genesis link — not windowed — regardless of the period passed for the enclosing
         check row. Findings: sequence gaps, broken prev-linkage, chain-MAC mismatch, links
         whose event row was deleted without a retention tombstone, events left marked
-        chain_link_pending by a failed append, and events in the window with no link at all.
+        chain_link_pending by a failed append, events with no link at all, and a head that
+        disagrees with the ledger.
+
+        The walk deliberately does NOT compare a live event against the MAC its link
+        committed to. Review proposed it (it would make live-row tampering detectable with
+        no time window), but retention anonymization legitimately rewrites an event and
+        re-stamps its MAC, so the comparison would report every anonymized row as tampered.
+        Live-row tampering is the per-row hash_verification check's job; that check being
+        windowed is pre-existing master behavior, tracked separately.
         """
-        from apps.audit.models import AuditChainLink  # noqa: PLC0415  # avoid app-load cycle
+        from apps.audit.models import AuditChainHead, AuditChainLink  # noqa: PLC0415  # avoid app-load cycle
 
         findings: list[dict[str, Any]] = []
         keys_by_id = dict(cls._chain_keys())
@@ -3991,6 +4029,37 @@ class AuditIntegrityService:
         # snapshot — so without this check the ledger reports healthy after an attacker has
         # erased the actual evidence. Authorized retention deletes append a tombstone for the
         # same event_id_str, so the presence of one is what separates the two cases.
+        # The head must agree with the ledger it summarizes. Deleting the tail leaves the
+        # surviving links internally consistent — the walk above is clean by construction —
+        # so without this the database can openly contradict itself and still verify. The
+        # head is attacker-writable, so this is a free in-database tell, not a substitute
+        # for the external anchor; it closes the window between the last anchor and now,
+        # which is exactly the residual the runbook tells operators to shrink.
+        head = AuditChainHead.objects.filter(pk=1).first()
+        if head is not None and head.last_sequence:
+            if prev_link is None:
+                findings.append(
+                    {
+                        "type": "chain_head_ahead_of_ledger",
+                        "severity": "critical",
+                        "description": (
+                            f"Chain head records sequence {head.last_sequence} but the ledger is "
+                            f"empty - every link was removed"
+                        ),
+                    }
+                )
+            elif head.last_sequence != prev_link.sequence or head.last_chain_mac != prev_link.chain_mac:
+                findings.append(
+                    {
+                        "type": "chain_head_ahead_of_ledger",
+                        "severity": "critical",
+                        "description": (
+                            f"Chain head records sequence {head.last_sequence} but the ledger ends at "
+                            f"{prev_link.sequence} - the ledger tail was truncated"
+                        ),
+                    }
+                )
+
         orphaned = AuditChainLink.objects.filter(event__isnull=True, is_tombstone=False)
         tombstoned_ids = set(AuditChainLink.objects.filter(is_tombstone=True).values_list("event_id_str", flat=True))
         findings.extend(
@@ -4030,10 +4099,17 @@ class AuditIntegrityService:
         # window, an unlinked event is an expected cutover artifact, not evidence of forgery.
         # Reporting those as critical would train operators to ignore the finding — exactly
         # the failure mode that made the pre-#304 control worthless.
-        missing_severity = "critical" if getattr(settings, "AUDIT_CHAIN_REQUIRE", False) else "info"
-        unlinked = AuditEvent.objects.filter(
-            timestamp__gte=period_start, timestamp__lt=period_end, chain_links__isnull=True
-        )
+        # Scope is deliberately tied to the same flag as severity. Once the operator asserts
+        # every event is chained, the sweep must be GLOBAL: windowing it by timestamp keyed
+        # detection to a field the attacker writes, so a forged INSERT backdated outside the
+        # scheduled period (the job runs 24h; the runbook suggests 7d) was permanently
+        # invisible. Before that assertion, unlinked events are an expected cutover artifact
+        # and the window keeps the informational noise proportionate.
+        chain_required = getattr(settings, "AUDIT_CHAIN_REQUIRE", False)
+        missing_severity = "critical" if chain_required else "info"
+        unlinked = AuditEvent.objects.filter(chain_links__isnull=True)
+        if not chain_required:
+            unlinked = unlinked.filter(timestamp__gte=period_start, timestamp__lt=period_end)
         findings.extend(
             {
                 "type": "chain_link_missing_for_event",
@@ -4455,7 +4531,12 @@ class AuditRetentionService:
             # are still readable. Fail-open: a ledger problem must not block a legally required
             # retention deletion, but it is logged loudly (the verifier will then see a live
             # link whose event vanished with no matching tombstone).
-            deletable = [event for event in events if event.id in set(deletable_ids)]
+            # set() hoisted: rebuilding it per event made this quadratic over an unbounded
+            # list inside an open transaction (~40s at 20k rows, hours at retention scale)
+            # — and it sits ABOVE the AUDIT_CHAIN_ENABLED gate, so it ran even with the
+            # ledger off, which falsified "deploying changes nothing".
+            deletable_id_set = set(deletable_ids)
+            deletable = [event for event in events if event.id in deletable_id_set]
             try:
                 AuditIntegrityService.append_tombstone_links(deletable)
             except Exception as e:

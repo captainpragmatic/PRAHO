@@ -830,3 +830,132 @@ class AnchorFailClosedTests(AuditChainLedgerTestCase):
         self.assertTrue(result.is_ok())
         self.assertEqual(len(result.unwrap()), 5)
         self.assertEqual(AuditIntegrityService._verify_chain_anchors(), [])
+
+
+class ChainReviewHardeningTests(AuditChainLedgerTestCase):
+    """Gaps found reviewing #313 before merge — each one an evasion the ledger allowed.
+
+    The theme is that a windowed verifier plus snapshot-only chain checks left a
+    database attacker a backdating escape hatch: mutate or forge an event, put its
+    timestamp outside whatever window the scheduled check happens to use, and every
+    control stayed clean without needing any key.
+    """
+
+    def test_backdated_forged_insert_is_detected_when_the_chain_is_required(self) -> None:
+        """An unlinked event must be found by sequence coverage, not by falling in a window.
+
+        With AUDIT_CHAIN_REQUIRE on, the operator has asserted every event is chained —
+        so the unlinked sweep has to be global. Windowing it let a forged INSERT dated
+        outside the scheduled period sit in the table indefinitely.
+        """
+        self._event(description="genuine")
+        forged_id = "22222222-2222-4222-8222-222222222222"
+        old = (timezone.now() - timezone.timedelta(days=400)).isoformat(sep=" ")
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO audit_events
+                    (id, action, category, severity, description, object_id, metadata,
+                     old_values, new_values, timestamp, is_sensitive, requires_review,
+                     user_agent, request_id, session_key, actor_type, content_type_id)
+                VALUES (%s, 'login_success', 'authentication', 'low', 'backdated forgery', '',
+                        '{}', '{}', '{}', %s, 0, 0, '', '', '', 'system', %s)
+                """,
+                [forged_id, old, self.content_type.id],
+            )
+
+        with override_settings(AUDIT_CHAIN_REQUIRE=True):
+            findings = self._verify()
+
+        critical = {f["type"] for f in findings if f["severity"] == "critical"}
+        self.assertIn("chain_link_missing_for_event", critical)
+
+    def test_tail_truncation_is_reported_by_the_verifier(self) -> None:
+        """The head pointing past the highest surviving link IS a finding, not just a fact.
+
+        The previous test asserted the head/tail divergence and stopped there — it passed
+        against a verifier that contained no head-vs-tail check at all, so it certified a
+        detection property the code did not have.
+        """
+        self._event()
+        self._event()
+        last_link = AuditChainLink.objects.order_by("-sequence").first()
+        assert last_link is not None
+        with connection.cursor() as cursor:
+            cursor.execute("DELETE FROM audit_chain_links WHERE sequence = %s", [last_link.sequence])
+
+        self.assertIn("chain_head_ahead_of_ledger", self._finding_types(self._verify()))
+
+
+class ChainAnchorHardeningTests(ChainAnchorTests):
+    """Anchor-side review findings: false evidence, false alarms, and a signing race."""
+
+    def test_anchor_link_count_is_bounded_by_the_anchored_sequence(self) -> None:
+        """Publication must sign a self-consistent tuple.
+
+        head and the link count were read in two unlocked queries, so an append landing
+        between them signed (sequence=N, head_mac=N, link_count=N+1). Verification counts
+        links at or below N, gets N, and reports anchor_link_count_mismatch forever — on a
+        legitimately signed anchor. Counting only links <= the anchored sequence makes the
+        tuple self-consistent without needing a lock. Simulated here by a link that landed
+        past the head, which is exactly what the racing append looks like.
+        """
+        self._event()
+        head = AuditChainHead.objects.get(pk=1)
+        tail = AuditChainLink.objects.order_by("-sequence").first()
+        assert tail is not None
+        AuditChainLink.objects.create(
+            sequence=tail.sequence + 1,
+            prev_chain_mac=tail.chain_mac,
+            chain_mac="f" * 64,
+            event_id_str=str(tail.event_id_str),
+            event_v2_mac=tail.event_v2_mac,
+            event_timestamp=tail.event_timestamp,
+            event_action=tail.event_action,
+            event_content_type_id=tail.event_content_type_id,
+            event_object_id=tail.event_object_id,
+            is_tombstone=tail.is_tombstone,
+            key_id=tail.key_id,
+        )
+
+        result = AuditIntegrityService.publish_chain_anchor()
+
+        self.assertTrue(result.is_ok(), result)
+        record = result.unwrap()
+        self.assertEqual(record["sequence"], head.last_sequence)
+        self.assertEqual(
+            record["link_count"],
+            AuditChainLink.objects.filter(sequence__lte=head.last_sequence).count(),
+        )
+        self.assertEqual(AuditIntegrityService._verify_chain_anchors(), [])
+
+    def test_unknown_key_id_anchor_produces_no_chain_findings(self) -> None:
+        """An anchor we cannot authenticate proves nothing — it must not drive chain findings.
+
+        The mac-mismatch branch already stopped there; the unknown-key branch fell through to
+        the live comparison, so anyone able to append to the sink could manufacture
+        chain_truncated_below_anchor / anchor_head_mismatch out of unauthenticated input.
+        """
+        self._event()
+        AuditIntegrityService.publish_chain_anchor()
+        forged = json.loads(self.anchor_path.read_text(encoding="utf-8").splitlines()[0])
+        forged["key_id"] = "deadbeef"
+        forged["sequence"] = forged["sequence"] + 500
+
+        findings = AuditIntegrityService.verify_anchor_records([forged])
+
+        types = {f["type"] for f in findings}
+        self.assertEqual(types, {"anchor_unknown_key_id"})
+
+    def test_malformed_sink_record_does_not_mask_a_missing_anchor(self) -> None:
+        """A malformed line must not count as the sink still holding that sequence."""
+        self._event()
+        AuditIntegrityService.publish_chain_anchor()
+        anchored = json.loads(self.anchor_path.read_text(encoding="utf-8").splitlines()[0])
+        # Attacker replaces the real record with junk that keeps only the sequence field.
+        self.anchor_path.write_text(json.dumps({"sequence": anchored["sequence"]}) + "\n", encoding="utf-8")
+
+        types = {f["type"] for f in AuditIntegrityService._verify_chain_anchors()}
+
+        self.assertIn("anchor_record_malformed", types)
+        self.assertIn("anchor_missing_from_sink", types)

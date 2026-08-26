@@ -10,7 +10,7 @@ and it must run to completion before live appends turn on so the two never inter
 over the chain-head lock.
 
 Ordering: events are sequenced by (timestamp ASC, id ASC). `timestamp` is non-unique
-(auto_now_add), so `id` (the unique uuid4) is the deterministic tiebreaker — a resumed
+(default=timezone.now, and callers may supply it), so `id` (the unique uuid4) is the deterministic tiebreaker — a resumed
 run continues the exact same chain. Idempotent: an event that already has a link is
 skipped (the partial-unique constraint is the backstop).
 """
