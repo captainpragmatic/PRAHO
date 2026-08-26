@@ -695,7 +695,17 @@ class CouponService:
         # Materialize once: the queryset is iterated twice below (lock ids, then reverse),
         # and re-querying after taking the lock would drop rows a concurrent remove just
         # reversed, changing which redemptions this call reports on.
-        pending = list(redemptions)
+        # select_related: mark_reversed() reaches self.coupon.campaign, which would other-
+        # wise cost two extra queries per redemption on the remove-all path.
+        #
+        # Sorted by (campaign, coupon): the coupon locks below are sorted, but campaign rows
+        # are only ever touched through this loop, in whatever order it runs. Default
+        # ordering is -created_at, so two concurrent multi-coupon removals spanning the same
+        # two campaigns could take those row locks in opposite order and deadlock.
+        pending = sorted(
+            redemptions.select_related("coupon__campaign"),
+            key=lambda r: (str(r.coupon.campaign_id or ""), str(r.coupon_id)),
+        )
 
         # #421: lock the coupon rows before reversing, mirroring apply_coupon's
         # select_for_update at the top of this class. Without it, two concurrent removes

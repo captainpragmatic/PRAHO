@@ -1002,3 +1002,78 @@ class CouponRedemptionReveralTests(TestCase):
         self.assertFalse(stale.mark_reversed())
         self.assertEqual(stale.status, "reversed")
         self.assertIsNotNone(stale.reversed_at)
+        # The three assertions above all pass against the OLD implementation too — it set
+        # both attributes in memory before saving. What actually distinguishes the CAS is
+        # that the LOSER performed no work: the counters moved exactly once, and only one
+        # reversal was recorded.
+        coupon = Coupon.objects.get(code="REVERSAL")
+        self.assertEqual(coupon.total_uses, 0)
+        self.assertEqual(coupon.total_discount_cents, 0)
+
+    def test_remove_coupon_does_not_subtract_a_discount_it_did_not_reverse(self) -> None:
+        """The service-level half of the fix, which nothing else covers.
+
+        Every other test here calls mark_reversed() on model instances directly, so
+        reverting `if redemption.mark_reversed():` to the old unconditional subtraction
+        leaves the whole suite green while the customer-visible bug ships: the discount
+        deducted twice, dropping the order total below what was actually discounted.
+
+        The redemption queryset already filters status="applied", so a row reversed
+        BEFORE the query never reaches the loop — the guard exists for the row reversed
+        after materialization. That window is what this test drives, using the coupon
+        lock as the seam, since it sits between materialization and the loop.
+        """
+        result = CouponService.apply_coupon(code="REVERSAL", order=self.order, customer=self.customer)
+        self.order.refresh_from_db()
+        self.assertGreater(self.order.discount_cents, 0, "fixture must actually discount the order")
+
+        original_select_for_update = Coupon.objects.select_for_update
+
+        def reverse_then_lock(*args: object, **kwargs: object) -> object:
+            # A concurrent caller wins the CAS after this call materialized its queryset.
+            CouponRedemption.objects.get(id=result.redemption_id).mark_reversed()
+            return original_select_for_update(*args, **kwargs)
+
+        with patch.object(Coupon.objects, "select_for_update", side_effect=reverse_then_lock):
+            CouponService.remove_coupon(order=self.order, redemption_id=result.redemption_id)
+
+        self.order.refresh_from_db()
+        # The winner owns the subtraction. This call must leave the figure alone rather
+        # than deducting the same discount a second time.
+        self.assertEqual(self.order.discount_cents, 2000)
+        coupon = Coupon.objects.get(code="REVERSAL")
+        self.assertEqual(coupon.total_uses, 0, "counters must move exactly once")
+        self.assertEqual(coupon.total_discount_cents, 0)
+
+    def test_successful_reversal_is_audited(self) -> None:
+        """The CAS uses QuerySet.update(), which fires neither pre_save nor post_save.
+
+        The receiver that emitted coupon_redemption_reversed therefore stopped running.
+        That is worse than a plain gap: mark_applied() still uses save(), so the trail
+        would show every application with no matching reversal, and anyone reconciling
+        discounts from it would conclude the discount is still live on the order.
+        """
+        from apps.audit.models import AuditEvent  # noqa: PLC0415
+
+        result = CouponService.apply_coupon(code="REVERSAL", order=self.order, customer=self.customer)
+        redemption = CouponRedemption.objects.get(id=result.redemption_id)
+
+        self.assertTrue(redemption.mark_reversed())
+
+        events = AuditEvent.objects.filter(action="coupon_redemption_reversed")
+        self.assertEqual(events.count(), 1, "a reversal must leave exactly one audit event")
+        event = events.get()
+        self.assertEqual(event.old_values.get("status"), "applied")
+        self.assertEqual(event.new_values.get("status"), "reversed")
+
+    def test_a_lost_reversal_race_records_no_second_audit_event(self) -> None:
+        """The loser changed nothing, so it must not claim it did."""
+        from apps.audit.models import AuditEvent  # noqa: PLC0415
+
+        result = CouponService.apply_coupon(code="REVERSAL", order=self.order, customer=self.customer)
+        stale = CouponRedemption.objects.get(id=result.redemption_id)
+        CouponRedemption.objects.get(id=result.redemption_id).mark_reversed()
+
+        self.assertFalse(stale.mark_reversed())
+
+        self.assertEqual(AuditEvent.objects.filter(action="coupon_redemption_reversed").count(), 1)

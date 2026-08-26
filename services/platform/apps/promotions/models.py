@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, TypedDict
 
 from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
-from django.db import models
+from django.db import models, transaction
 from django.db.models import F, Q
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
@@ -861,19 +861,31 @@ class CouponRedemption(models.Model):
         self.failure_reason = reason
         self.save(update_fields=["status", "failure_reason"])
 
+    @transaction.atomic
     def mark_reversed(self) -> bool:
         """Mark redemption as reversed (e.g., order cancelled).
 
         Returns True when THIS call performed the reversal, False when the row was
         already reversed (by a concurrent caller or an earlier call).
 
-        #421: the status check is a compare-and-swap in the database, not an
-        in-memory read followed by a blind save. Previously two callers holding
-        separate instances of the same row both passed ``self.status == "applied"``
-        and both ran the decrements, so ``total_uses`` went 1 → -1. That is not a
-        silent drift: it violates the ``total_uses >= 0`` CHECK constraint and
-        raises IntegrityError, failing the whole remove request. Gating the
-        decrements on the UPDATE's rowcount makes exactly one caller win.
+        The status check is a compare-and-swap in the database, not an in-memory read
+        followed by a blind save. Previously two callers holding separate instances of
+        the same row both passed ``self.status == "applied"`` and both ran the
+        decrements, taking ``total_uses`` to 1 → -1 — which trips the ``total_uses >= 0``
+        CHECK constraint and raises IntegrityError rather than drifting silently. Gating
+        the decrements on the UPDATE's rowcount makes exactly one caller win.
+
+        Reachability, so nobody later concludes the order lock is redundant: the sole
+        production caller (``CouponService.remove_coupon``) already locks the Order row
+        before reading redemptions, so on PostgreSQL two concurrent removes serialize
+        there and the loser reads an empty queryset. The race is reachable on SQLite dev
+        (``select_for_update`` is a silent no-op) and for any future caller that does not
+        hold the order lock — which is why this method now guards itself.
+
+        ``@transaction.atomic`` for the same reason: CAS plus two counter decrements is a
+        three-statement sequence that was atomic only by grace of its one caller. A crash
+        between them would leave the row reversed with counters never decremented, and
+        the CAS makes that unrecoverable — every retry returns False.
         """
         reversed_at = timezone.now()
         # The filter's status='applied' is the transition guard; see the docstring.
@@ -900,6 +912,25 @@ class CouponRedemption(models.Model):
             PromotionCampaign.objects.filter(pk=self.coupon.campaign_id).update(
                 spent_cents=F("spent_cents") - self.discount_cents
             )
+
+        # QuerySet.update() fires neither pre_save nor post_save, so the receiver that
+        # emitted coupon_redemption_reversed stopped running. Losing it is worse than a
+        # plain audit gap: mark_applied() still uses save(), so the trail would record
+        # every application with no matching reversal, and anyone reconciling discounts
+        # from it would conclude the discount is still live on the order. Emitted here,
+        # inside this method's transaction, so the event and the state commit together.
+        from apps.promotions.signals import create_audit_event  # noqa: PLC0415  # avoids an import cycle
+
+        create_audit_event(
+            action="coupon_redemption_reversed",
+            instance=self,
+            category="business_operation",
+            severity="medium",
+            old_values={"status": "applied"},
+            new_values={"status": "reversed", "discount_cents": self.discount_cents},
+            description=f"Coupon '{self.coupon.code}' redemption reversed on order {self.order.order_number}",
+            is_sensitive=True,
+        )
 
         return True
 
