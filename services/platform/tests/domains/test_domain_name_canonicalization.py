@@ -1,13 +1,9 @@
-"""Domain.name is stored lowercase, structurally (#442).
+"""Domain.name is stored in one structural canonical form (#442, #473).
 
 DNS names are case-insensitive, but ``Domain.name`` is a plain CharField with
-``unique=True`` — so ``Example.RO`` and ``example.ro`` are two distinct rows to the
-database, and any exact-match lookup for one silently misses the other.
-
-That is the failure mode #430 was about, reached from the data side: the renew-item
-link in ``create_domain_order_item`` looks up ``name=domain_name.lower()``, so a stored
-mixed-case row never links, the item is created unlinked, and the renewal is skipped
-with no error.
+``unique=True``. ASCII input is stripped and lowercased, while internationalized
+U-labels are additionally folded to their IDNA UTS-46 A-label so equivalent Unicode
+and punycode spellings cannot become distinct rows or miss exact-match lookups.
 """
 
 from __future__ import annotations
@@ -20,6 +16,7 @@ from django.test import TestCase
 
 from apps.billing.models import Currency
 from apps.customers.models import Customer, CustomerTaxProfile
+from apps.domains.domain_names import canonicalize_domain_name
 from apps.domains.models import TLD, Domain, Registrar, TLDRegistrarAssignment
 from apps.domains.services import DomainOrderService
 from apps.orders.models import Order
@@ -76,6 +73,31 @@ class DomainNameCanonicalizationTests(TestCase):
             customer=self.customer,
             status="active",
         )
+
+    def test_canonicalize_u_label_to_idna_a_label(self) -> None:
+        self.assertEqual(canonicalize_domain_name("münchen.de"), "xn--mnchen-3ya.de")
+
+    def test_canonicalize_invalid_unicode_falls_back_without_raising(self) -> None:
+        self.assertEqual(canonicalize_domain_name("  \u0080.COM  "), "\u0080.com")
+
+    def test_canonicalize_ascii_behavior_is_unchanged(self) -> None:
+        self.assertEqual(canonicalize_domain_name("  XN--MNCHEN-3YA.DE  "), "xn--mnchen-3ya.de")
+        self.assertEqual(canonicalize_domain_name("  Example.RO  "), "example.ro")
+
+    def test_u_label_and_a_label_saves_share_one_canonical_row(self) -> None:
+        cases = (
+            ("münchen.de", "xn--mnchen-3ya.de", "xn--mnchen-3ya.de"),
+            ("xn--zrich-kva.de", "zürich.de", "xn--zrich-kva.de"),
+        )
+
+        for first_name, second_name, canonical in cases:
+            with self.subTest(first_name=first_name, second_name=second_name):
+                domain = self._domain(first_name)
+
+                self.assertEqual(domain.name, canonical)
+                self.assertEqual(Domain.objects.get(name=canonical).pk, domain.pk)
+                with self.assertRaises(IntegrityError), transaction.atomic():
+                    self._domain(second_name)
 
     def test_mixed_case_name_is_stored_lowercase(self) -> None:
         domain = self._domain("Example.RO")
@@ -149,6 +171,22 @@ class DomainNameCanonicalizationTests(TestCase):
         )
         stored = Domain.objects.get(pk=created[0].pk)
         self.assertEqual(stored.name, "bulkcreate.ro")
+
+    def test_bulk_create_folds_u_label_to_idna_a_label(self) -> None:
+        created = Domain.objects.bulk_create(
+            [
+                Domain(
+                    name="bücher.ro",
+                    tld=self.ro,
+                    registrar=self.registrar,
+                    customer=self.customer,
+                    status="active",
+                )
+            ]
+        )
+
+        stored = Domain.objects.get(pk=created[0].pk)
+        self.assertEqual(stored.name, "xn--bcher-kva.ro")
 
     def test_bulk_update_is_canonicalized(self) -> None:
         domain = self._domain("bulkup2.ro")
@@ -251,11 +289,11 @@ class DomainNameCanonicalizationTests(TestCase):
 
 
 class CanonicalizationMigrationTests(TestCase):
-    """The 0006 data migration must fail LOUDLY on every collision shape and must
-    canonicalize every non-canonical row — including whitespace-only variants.
+    """The canonicalization migrations must fail loudly on every collision shape
+    and rewrite every legacy row covered by their respective canonical forms.
 
-    Rows are seeded via queryset ``update()`` to bypass the new ``save()``
-    canonicalization, reproducing what pre-#442 writers could actually store.
+    Rows are seeded via queryset ``update()`` to bypass the current ``save()``
+    canonicalization, reproducing what older writers could actually store.
     """
 
     def setUp(self) -> None:
@@ -316,6 +354,12 @@ class CanonicalizationMigrationTests(TestCase):
         state = loader.project_state(("domains", "0005_tld_tld_min_registration_period_lte_max"))
         module.canonicalize_names(state.apps, None)
 
+    def _run_idn_migration(self) -> None:
+        module = importlib.import_module("apps.domains.migrations.0007_canonicalize_idn_domain_names")
+        loader = MigrationLoader(connection)
+        state = loader.project_state(("domains", "0006_canonicalize_domain_name"))
+        module.canonicalize_names(state.apps, None)
+
     def test_mixed_case_row_is_canonicalized(self) -> None:
         row = self._legacy_domain("Example.RO")
         self._run_migration()
@@ -349,3 +393,32 @@ class CanonicalizationMigrationTests(TestCase):
         self._legacy_domain("PAIR.ro")
         with self.assertRaisesMessage(RuntimeError, "pair.ro"):
             self._run_migration()
+
+    def test_idn_row_is_canonicalized_to_a_label(self) -> None:
+        row = self._legacy_domain("MÜNCHEN.RO")
+
+        self._run_idn_migration()
+
+        row.refresh_from_db()
+        self.assertEqual(row.name, "xn--mnchen-3ya.ro")
+
+    def test_existing_a_label_twin_fails_before_rewriting_u_label(self) -> None:
+        a_label = self._legacy_domain("xn--mnchen-3ya.ro")
+        u_label = Domain.objects.create(
+            name="idn-collision-placeholder.ro",
+            tld=self.ro,
+            registrar=self.registrar,
+            customer=self.customer,
+            status="active",
+        )
+        Domain._base_manager.filter(pk=u_label.pk).update(name="münchen.ro")
+        u_label.refresh_from_db()
+        self.assertEqual(u_label.name, "münchen.ro")
+
+        with self.assertRaisesMessage(RuntimeError, "xn--mnchen-3ya.ro"):
+            self._run_idn_migration()
+
+        a_label.refresh_from_db()
+        u_label.refresh_from_db()
+        self.assertEqual(a_label.name, "xn--mnchen-3ya.ro")
+        self.assertEqual(u_label.name, "münchen.ro")

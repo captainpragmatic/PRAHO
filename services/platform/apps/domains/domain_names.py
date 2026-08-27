@@ -4,19 +4,33 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
+import idna
+
 _MIN_DOMAIN_LABELS = 2
 
 
 def canonicalize_domain_name(name: str) -> str:
-    """THE canonical stored/compared form of a domain name (#442): stripped lowercase.
+    """THE canonical stored/compared form of a domain name (#442, #473).
 
-    DNS names are case-insensitive but ``Domain.name`` is an exact-match unique
-    column, so every writer (``Domain.save``, the bulk-path queryset) and every
-    exact-match reader (renew-link, webhooks, sync commands) must fold through this
-    one function — a writer that strips while a reader doesn't is how mixed
-    conventions silently miss rows.
+    Stripped, lowercased, and — for internationalized names — folded through IDNA
+    UTS-46 to the ASCII A-label, so a Unicode U-label and its punycode form can
+    never become two distinct rows. ``Domain.name`` is an exact-match unique
+    column: every writer (``Domain.save``, the bulk-path queryset) and every
+    exact-match reader (renew-link, webhooks, sync commands) must fold through
+    this one function.
+
+    Never raises: it runs inside ``Domain.save()`` and the bulk write paths, so
+    Unicode that UTS-46 rejects falls back to the stripped, lowercased form —
+    the pre-#473 behavior for inputs that bypass service-boundary validation.
     """
-    return name.strip().lower()
+    folded = name.strip().lower()
+    if folded.isascii():
+        return folded
+
+    try:
+        return idna.encode(folded, uts46=True).decode("ascii")
+    except UnicodeError:
+        return folded
 
 
 def longest_matching_tld_suffix(domain_name: str, configured_extensions: Iterable[str]) -> str:
