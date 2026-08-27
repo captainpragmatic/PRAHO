@@ -8,9 +8,53 @@ from typing import Any
 from django_q.models import Schedule
 from django_q.tasks import schedule
 
-from apps.domains.services import DomainNotificationService
+from apps.domains.services import (
+    DomainNotificationService,
+    DomainOrderService,
+    DomainReconciliationService,
+    DomainReconciliationSummary,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def process_order_domain_items(order_id: str) -> dict[str, Any]:
+    """Process a paid order's domain items (register/renew) off the request path.
+
+    Enqueued by the orders service (transaction.on_commit) when an order enters
+    provisioning: the registrar call is network I/O and must never run inside
+    the order transaction. Per-item failure isolation lives in
+    DomainOrderService.process_domain_order_items.
+    """
+    from apps.orders.models import Order  # noqa: PLC0415  # Deferred: avoids circular import
+
+    try:
+        order = Order.objects.get(pk=order_id)
+    except Order.DoesNotExist:
+        logger.warning("⚠️ [Domains] Order %s no longer exists — skipping domain item processing", order_id)
+        return {"success": False, "processed": 0, "error": "order not found"}
+
+    processed = DomainOrderService.process_domain_order_items(order)
+    # success must reflect the PAID intent, not merely "nothing crashed": the
+    # per-item boundary swallows failures, so the Django-Q2 task result is the
+    # durable signal that register/renew items remain unfulfilled.
+    items_total = order.domain_items.filter(action__in=("register", "renew")).count()
+    success = len(processed) >= items_total
+    if success:
+        logger.info("✅ [Domains] Processed %d domain item(s) for order %s", len(processed), order_id)
+    else:
+        logger.error(
+            "🔥 [Domains] Order %s: %d of %d domain item(s) remain unprocessed",
+            order_id,
+            items_total - len(processed),
+            items_total,
+        )
+    return {
+        "success": success,
+        "processed": len(processed),
+        "items_total": items_total,
+        "domains": [domain.name for domain in processed],
+    }
 
 
 def process_domain_renewal_notices() -> dict[str, Any]:
@@ -53,16 +97,37 @@ def process_domain_renewal_notices() -> dict[str, Any]:
     }
 
 
-def setup_domain_scheduled_tasks() -> dict[str, str]:
-    """Register the daily domain renewal-notice worker idempotently."""
-    schedule_name = "domains-renewal-notices"
-    if Schedule.objects.filter(name=schedule_name).exists():
-        return {"renewal_notices": "already_exists"}
+def reconcile_pending_domain_operations() -> DomainReconciliationSummary:
+    """Run one durable domain reconciliation batch (#258)."""
+    return DomainReconciliationService.reconcile()
 
-    schedule(
-        "apps.domains.tasks.process_domain_renewal_notices",
-        schedule_type=Schedule.DAILY,
-        name=schedule_name,
-        cluster="praho-cluster",
-    )
-    return {"renewal_notices": "created"}
+
+def setup_domain_scheduled_tasks() -> dict[str, str]:
+    """Register both domain workers independently and idempotently."""
+    results: dict[str, str] = {}
+
+    renewal_schedule_name = "domains-renewal-notices"
+    if Schedule.objects.filter(name=renewal_schedule_name).exists():
+        results["renewal_notices"] = "already_exists"
+    else:
+        schedule(
+            "apps.domains.tasks.process_domain_renewal_notices",
+            schedule_type=Schedule.DAILY,
+            name=renewal_schedule_name,
+            cluster="praho-cluster",
+        )
+        results["renewal_notices"] = "created"
+
+    reconciliation_schedule_name = "domains-reconcile-pending"
+    if Schedule.objects.filter(name=reconciliation_schedule_name).exists():
+        results["reconcile_pending"] = "already_exists"
+    else:
+        schedule(
+            "apps.domains.tasks.reconcile_pending_domain_operations",
+            schedule_type=Schedule.HOURLY,
+            name=reconciliation_schedule_name,
+            cluster="praho-cluster",
+        )
+        results["reconcile_pending"] = "created"
+
+    return results

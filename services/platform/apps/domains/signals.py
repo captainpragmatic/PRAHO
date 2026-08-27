@@ -118,15 +118,18 @@ def store_original_domain_values(sender: type[Domain], instance: Domain, **kwarg
         if instance.pk:
             try:
                 original = Domain.objects.get(pk=instance.pk)
+                # Native types, NOT str() — the post_save comparison builds new_values
+                # with real booleans, and "True" != True made EVERY update emit
+                # spurious lock/privacy security events.
                 instance._original_domain_values = {
                     "name": original.name,
                     "status": original.status,
                     "registrar": original.registrar.name if original.registrar else None,
                     "tld": original.tld.extension if original.tld else None,
                     "expires_at": original.expires_at.isoformat() if original.expires_at else None,
-                    "auto_renew": str(original.auto_renew),
-                    "whois_privacy": str(original.whois_privacy),
-                    "is_locked": str(original.locked),
+                    "auto_renew": original.auto_renew,
+                    "whois_privacy": original.whois_privacy,
+                    "is_locked": original.locked,
                 }
             except Domain.DoesNotExist:
                 instance._original_domain_values = {}
@@ -229,12 +232,15 @@ def store_original_tld_values(sender: type[TLD], instance: TLD, **kwargs: Any) -
         if instance.pk:
             try:
                 original = TLD.objects.get(pk=instance.pk)
+                # Native types, NOT str() — the post_save pricing comparison uses real
+                # ints, so "1000" != 1000 flagged every update as a pricing change and
+                # the change calculator then crashed on int - str.
                 instance._original_tld_values = {
                     "extension": original.extension,
-                    "registration_price_cents": str(original.registration_price_cents),
-                    "renewal_price_cents": str(original.renewal_price_cents),
-                    "transfer_price_cents": str(original.transfer_price_cents),
-                    "is_active": str(original.is_active),
+                    "registration_price_cents": original.registration_price_cents,
+                    "renewal_price_cents": original.renewal_price_cents,
+                    "transfer_price_cents": original.transfer_price_cents,
+                    "is_active": original.is_active,
                 }
             except TLD.DoesNotExist:
                 instance._original_tld_values = {}
@@ -482,15 +488,16 @@ def _handle_domain_status_change(domain: Domain, old_status: str, new_status: st
             },
         )
 
-        # Handle specific status transitions
+        # Handle specific status transitions. NOTE: only statuses that exist in the
+        # Domain FSM (pending/active/expired/suspended/transfer_in/transfer_out/
+        # cancelled) can appear here — a branch keyed on an invented status is
+        # unreachable by construction.
         if new_status == "active" and old_status in ["pending", "suspended"]:
             _handle_domain_activation(domain)
         elif new_status == "expired" and old_status == "active":
             _handle_domain_expiration(domain)
         elif new_status == "suspended" and old_status == "active":
             _handle_domain_suspension(domain)
-        elif new_status == "transferred" and old_status in ["active", "pending_transfer"]:
-            _handle_domain_transfer_completion(domain)
 
     except Exception as e:
         logger.exception(f"🔥 [Domain Signal] Status change handling failed: {e}")
@@ -764,15 +771,6 @@ def _handle_domain_suspension(domain: Domain) -> None:
         logger.exception(f"🔥 [Domain] Suspension handling failed: {e}")
 
 
-def _handle_domain_transfer_completion(domain: Domain) -> None:
-    """Handle domain transfer completion"""
-    try:
-        logger.info(f"🔄 [Domain] Transfer completed for {domain.name}")
-
-    except Exception as e:
-        logger.exception(f"🔥 [Domain] Transfer completion failed: {e}")
-
-
 # ===============================================================================
 # SCHEDULING AND TASK FUNCTIONS
 # ===============================================================================
@@ -954,25 +952,6 @@ def sync_domain_to_virtualmin(domain: Domain) -> None:
 
     except Exception as e:
         logger.error(f"🔥 [CrossApp] Failed to sync domain {domain.name} to Virtualmin: {e}")
-
-
-# Enhanced domain creation handler to include Virtualmin sync
-def _handle_new_domain_registration_with_virtualmin_sync(domain: Domain) -> None:
-    """
-    Handle new domain registration with Virtualmin synchronization.
-
-    Extends the existing domain registration handler to include control panel sync.
-    """
-    try:
-        # Call existing domain registration logic
-        _handle_new_domain_registration(domain)
-
-        # Add Virtualmin synchronization
-        if domain.status == "active":
-            sync_domain_to_virtualmin(domain)
-
-    except Exception as e:
-        logger.error(f"🔥 [CrossApp] Enhanced domain registration handling failed for {domain.name}: {e}")
 
 
 def _handle_domain_status_change_with_virtualmin_sync(domain: Domain, old_status: str, new_status: str) -> None:

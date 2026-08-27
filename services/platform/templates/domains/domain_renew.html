@@ -108,6 +108,7 @@
                 {# nosemgrep: django-no-csrf-token — csrf_token present on adjacent line #}
                 <form method="post" id="renewal-form">
                     {% csrf_token %}
+                    <input type="hidden" name="renewal_token" value="{{ renewal_token }}">
 
                     <!-- Renewal Period Selection -->
                     <div class="space-y-4">

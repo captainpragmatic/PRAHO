@@ -5,14 +5,12 @@ API docs: https://api.gandi.net/docs/domains/
 Auth: Personal Access Token via Authorization header.
 Rate limit: 30 requests / 2 seconds (negotiable for resellers).
 
-PROVISIONAL — NOT SANDBOX-VERIFIED. The success-response parsing here (expecting
-id/expires_at/authinfo in the register/renew body) was written from documentation
-and has not been validated against the live Gandi API, which documents a 202
-"accepted" body (message + Location) that likely requires polling the returned
-operation/domain resource for the confirmed state and expiry. Chargeable
-register/renew calls are gated behind settings.REGISTRAR_ADAPTERS_VERIFIED (default
-off) so this cannot run against real credentials until an operator validates it and
-reworks the 202 handling. Tracked as a follow-up.
+PROVISIONAL — NOT SANDBOX-VERIFIED. Documented 202 acceptance responses are
+represented as accepted-but-unconfirmed results carrying the Location operation
+handle; inline completed-resource responses remain supported for compatibility.
+Live sandbox validation is still outstanding. Chargeable register/renew calls are
+gated behind settings.REGISTRAR_ADAPTERS_VERIFIED (default off) until an operator
+validates the adapter against real credentials.
 """
 
 from __future__ import annotations
@@ -115,23 +113,30 @@ class GandiGateway(BaseRegistrarGateway):
         if response.status_code == HTTP_ACCEPTED:
             data = self._safe_json(response)
             expires_at = _parse_gandi_date(data.get("expires_at", ""))
-            if expires_at is None:
-                return Err(
-                    RegistrarAPIError(
-                        f"Gandi registration response missing/invalid expires_at for {domain_name}",
-                        code=RegistrarErrorCode.INVALID_RESPONSE,
-                        registrar_name=self.registrar.name,
+            if expires_at is not None:
+                return Ok(
+                    DomainRegistrationResult(
+                        registrar_domain_id=data.get("id", domain_name),
+                        expires_at=expires_at,
+                        nameservers=nameservers or self.registrar.default_nameservers or [],
+                        # authinfo, not auth_info — the identical misspelling this change
+                        # fixed on the write side. Gandi's domain-details response documents a
+                        # top-level `authinfo`, so the EPP credential read back was always "".
+                        epp_code=data.get("authinfo", ""),
                     )
                 )
+            # The DOCUMENTED 202: body is {"message": ...} only, the operation handle is
+            # in Location. This is acceptance, not completion (#257) — returning it as a
+            # pending result replaces the old INVALID_RESPONSE error that would have
+            # failed every real registration.
             return Ok(
                 DomainRegistrationResult(
-                    registrar_domain_id=data.get("id", domain_name),
-                    expires_at=expires_at,
+                    registrar_domain_id=data.get("id", ""),
+                    expires_at=None,
                     nameservers=nameservers or self.registrar.default_nameservers or [],
-                    # authinfo, not auth_info — the identical misspelling this change
-                    # fixed on the write side. Gandi's domain-details response documents a
-                    # top-level `authinfo`, so the EPP credential read back was always "".
                     epp_code=data.get("authinfo", ""),
+                    pending=True,
+                    operation_handle=response.headers.get("Location", ""),
                 )
             )
 
@@ -147,8 +152,21 @@ class GandiGateway(BaseRegistrarGateway):
 
         body = {"duration": years}
 
+        # Reseller billing attribution, same rule as _do_register: sharing_id is a query
+        # param; without it the chargeable renewal bills the PAT's default organization.
+        params = {}
+        sharing_id = self._get_sharing_id()
+        if sharing_id:
+            params["sharing_id"] = sharing_id
+
         try:
-            response = self._api_request("POST", url, json=body, headers=self._auth_headers())
+            response = self._api_request(
+                "POST",
+                url,
+                json=body,
+                params=params,
+                headers=self._auth_headers(),
+            )
         except requests.RequestException as exc:
             return Err(
                 # Renewal is not idempotent (a second renewal double-charges/double-extends)
@@ -159,15 +177,25 @@ class GandiGateway(BaseRegistrarGateway):
         if response.status_code in (HTTP_OK, HTTP_ACCEPTED):
             data = self._safe_json(response)
             new_expires_at = _parse_gandi_date(data.get("expires_at", ""))
-            if new_expires_at is None:
-                return Err(
-                    RegistrarAPIError(
-                        f"Gandi renewal response missing/invalid expires_at for {domain_name}",
-                        code=RegistrarErrorCode.INVALID_RESPONSE,
-                        registrar_name=self.registrar.name,
+            if new_expires_at is not None:
+                return Ok(DomainRenewalResult(new_expires_at=new_expires_at))
+            if response.status_code == HTTP_ACCEPTED:
+                # Documented acceptance: {"message": ...} + Location. Pending, not failed.
+                return Ok(
+                    DomainRenewalResult(
+                        new_expires_at=None,
+                        pending=True,
+                        operation_handle=response.headers.get("Location", ""),
                     )
                 )
-            return Ok(DomainRenewalResult(new_expires_at=new_expires_at))
+            # A 200 is a completed-resource contract; without an expiry it is malformed.
+            return Err(
+                RegistrarAPIError(
+                    f"Gandi renewal response missing/invalid expires_at for {domain_name}",
+                    code=RegistrarErrorCode.INVALID_RESPONSE,
+                    registrar_name=self.registrar.name,
+                )
+            )
 
         return self._handle_error_response(response, f"renew {domain_name}", domain_name=domain_name)
 
@@ -177,6 +205,11 @@ class GandiGateway(BaseRegistrarGateway):
     ) -> Result[DomainAvailabilityResult, RegistrarAPIError]:
         url = f"{GANDI_API_BASE}/domain/check"
         params = {"name": domain_name}
+        # Reseller pricing: without sharing_id the check quotes the PAT's default
+        # organization's prices, not the reseller's.
+        sharing_id = self._get_sharing_id()
+        if sharing_id:
+            params["sharing_id"] = sharing_id
 
         try:
             response = self._api_request("GET", url, params=params, headers=self._auth_headers())
@@ -229,20 +262,19 @@ class GandiGateway(BaseRegistrarGateway):
 
     # -- Phase 2 operations --------------------------------------------------
 
-    def _do_initiate_transfer(self, domain_name: str, epp_code: str) -> Result[DomainTransferResult, RegistrarAPIError]:
-        # #265: the auth code field is `authinfo`, not `auth_info` — Gandi rejects the
-        # latter, so real inbound transfers never started. See
-        # https://api.gandi.net/docs/domains/ (POST /v5/domain/transferin).
-        #
-        # NOTE: Gandi also requires an `owner` contact object on transfer-in. It is not
-        # sent here because the gateway's initiate_transfer(domain_name, epp_code)
-        # signature carries no registrant data — threading it through means changing the
-        # base interface, both adapters, and DomainService.initiate_transfer (which does
-        # have the Customer). Tracked as the remaining half of #265; transfer-in stays
-        # unusable until then, but it now fails on a missing contact rather than on a
-        # field name, which is the error a sandbox run needs to surface.
+    def _do_initiate_transfer(
+        self,
+        domain_name: str,
+        epp_code: str,
+        registrant_data: dict[str, Any] | None = None,
+    ) -> Result[DomainTransferResult, RegistrarAPIError]:
+        # #265: Gandi requires `authinfo` and an owner contact on transfer-in. The
+        # service supplies validated registrant data; direct callers that omit it keep
+        # today's registrar-side missing-contact rejection rather than fabricating one.
         url = f"{GANDI_API_BASE}/domain/transferin"
         body: dict[str, Any] = {"fqdn": domain_name, "authinfo": epp_code}
+        if registrant_data is not None:
+            body["owner"] = self._map_registrant_to_gandi(registrant_data)
 
         # Query string, not body — the same rule _do_register already follows above. Gandi
         # documents sharing_id as a query param AND as the reseller billing identifier, so
@@ -325,8 +357,18 @@ class GandiGateway(BaseRegistrarGateway):
             # Nameserver update is a mutation — may have applied; UNKNOWN default.
             return Err(RegistrarTransientError(self.registrar.name, f"Network error: {exc}"))
 
-        if response.status_code in (HTTP_OK, HTTP_ACCEPTED):
+        if response.status_code == HTTP_OK:
             return Ok(NameserverUpdateResult(nameservers=nameservers))
+        if response.status_code == HTTP_ACCEPTED:
+            # Acceptance, not completion — the caller must not record the new
+            # nameservers locally until the registrar confirms (#257).
+            return Ok(
+                NameserverUpdateResult(
+                    nameservers=nameservers,
+                    pending=True,
+                    operation_handle=response.headers.get("Location", ""),
+                )
+            )
         return self._handle_error_response(response, f"update nameservers for {domain_name}", domain_name=domain_name)
 
     def _do_set_lock(self, domain_name: str, locked: bool) -> Result[DomainLockResult, RegistrarAPIError]:
@@ -344,8 +386,17 @@ class GandiGateway(BaseRegistrarGateway):
             # Lock toggle is a mutation — may have applied; UNKNOWN default.
             return Err(RegistrarTransientError(self.registrar.name, f"Network error: {exc}"))
 
-        if response.status_code in (HTTP_OK, HTTP_ACCEPTED):
+        if response.status_code == HTTP_OK:
             return Ok(DomainLockResult(locked=locked))
+        if response.status_code == HTTP_ACCEPTED:
+            # Acceptance, not completion — local lock state must wait for confirmation (#257).
+            return Ok(
+                DomainLockResult(
+                    locked=locked,
+                    pending=True,
+                    operation_handle=response.headers.get("Location", ""),
+                )
+            )
         return self._handle_error_response(response, f"{'lock' if locked else 'unlock'} {domain_name}")
 
     # -- Helpers -------------------------------------------------------------
@@ -369,9 +420,9 @@ class GandiGateway(BaseRegistrarGateway):
 def _parse_gandi_date(date_str: str) -> datetime | None:
     """Parse ISO 8601 date from Gandi API response.
 
-    Returns None on missing/unparseable input — callers must treat that as an
-    INVALID_RESPONSE rather than fabricating a date (a registration must never
-    record a wrong/already-past expiry).
+    Returns None on missing/unparseable input. Callers distinguish a malformed
+    completed-resource response from a documented 202 acceptance that is still
+    awaiting registrar confirmation — neither may fabricate a date.
     """
     if not date_str:
         return None

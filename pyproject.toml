@@ -75,6 +75,7 @@ dependencies = [
     "djangorestframework>=3.16.0",
     # HTTP client
     "requests>=2.31.0",
+    "idna>=3.7",  # imported directly for UTS-46 domain-name canonicalization (#473), not just via requests
     # Date/Time handling
     "python-dateutil>=2.8.0",
     "pytz>=2023.3",

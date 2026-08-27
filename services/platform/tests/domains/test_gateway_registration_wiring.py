@@ -17,7 +17,7 @@ from django.test import TestCase, override_settings
 
 from apps.customers.models import Customer, CustomerAddress, CustomerTaxProfile
 from apps.domains.gateways import RegistrarGatewayFactory
-from apps.domains.models import TLD, Domain, Registrar, TLDRegistrarAssignment
+from apps.domains.models import TLD, Domain, DomainOperation, Registrar, TLDRegistrarAssignment
 from apps.domains.services import DomainLifecycleService
 
 
@@ -117,6 +117,43 @@ class DomainRegistrationGatewayWiringTests(TestCase):
         self.assertNotEqual(domain.epp_code, "EPP-SECRET")
         self.assertEqual(domain.get_decrypted_epp_code(), "EPP-SECRET")
 
+    def test_pending_registration_records_submitted_operation_and_keeps_domain_pending(self) -> None:
+        operation_url = "https://api.gandi.net/v5/domain/domains/example.com/operations/42"
+        gateway_payload = {
+            "registrar_domain_id": "",
+            "expires_at": None,
+            "nameservers": [],
+            "epp_code": "",
+            "pending": True,
+            "operation_handle": operation_url,
+        }
+
+        with patch(
+            "apps.domains.services.DomainRegistrarGateway.register_domain",
+            return_value=(True, gateway_payload),
+        ):
+            result = DomainLifecycleService.create_domain_registration(
+                customer=self.customer,
+                domain_name="example.com",
+                years=2,
+            )
+
+        self.assertTrue(result.is_err(), result)
+        self.assertIn("awaiting confirmation", str(result.unwrap_err()))
+        self.assertIn("do not resubmit", str(result.unwrap_err()))
+
+        domain = Domain.objects.get(name="example.com")
+        self.assertEqual(domain.status, "pending")
+        self.assertEqual(domain.registrar_domain_id, "")
+        self.assertIsNone(domain.expires_at)
+
+        op = DomainOperation.objects.get(domain=domain, operation_type="register")
+        self.assertEqual(op.state, "submitted")
+        self.assertEqual(op.registrar_operation_id, operation_url)
+        self.assertEqual(op.parameters, {"years": 2})
+        self.assertIsNotNone(op.submitted_at)
+        self.assertIsNone(op.completed_at)
+
     def test_definite_rejection_returns_err_and_deletes_row(self) -> None:
         """A definite registrar rejection (conflict/auth/validation) must return Err
         AND remove the pending row, so the customer can cleanly re-register the name
@@ -192,6 +229,97 @@ class RenewalGatewayWiringTests(TestCase):
         self.domain.refresh_from_db()
         # Uses the registrar-returned expiry, NOT local 365*years date math.
         self.assertEqual(self.domain.expires_at, registrar_expiry)
+
+    def test_pending_renewal_records_operation_without_changing_expiry(self) -> None:
+        original_expiry = self.domain.expires_at
+        self.domain.renewal_notices_sent = 30
+        self.domain.save(update_fields=["renewal_notices_sent", "updated_at"])
+        operation_url = "https://api.gandi.net/v5/domain/domains/renew.com/renew/operations/42"
+
+        with patch(
+            "apps.domains.services.DomainRegistrarGateway.renew_domain",
+            return_value=(
+                True,
+                {
+                    "new_expires_at": None,
+                    "pending": True,
+                    "operation_handle": operation_url,
+                },
+            ),
+        ):
+            result = DomainLifecycleService.process_domain_renewal(self.domain, years=2)
+
+        self.assertTrue(result.is_ok(), result)
+        self.assertIn("awaiting confirmation", result.unwrap())
+
+        self.domain.refresh_from_db()
+        self.assertEqual(self.domain.expires_at, original_expiry)
+        self.assertEqual(self.domain.renewal_notices_sent, 30)
+
+        op = DomainOperation.objects.get(domain=self.domain, operation_type="renew")
+        self.assertEqual(op.state, "submitted")
+        self.assertEqual(op.registrar_operation_id, operation_url)
+        self.assertEqual(
+            op.parameters,
+            {
+                "years": 2,
+                "prev_expires_at": original_expiry.isoformat(),
+            },
+        )
+        self.assertIsNotNone(op.submitted_at)
+        self.assertIsNone(op.completed_at)
+
+    def test_unknown_renewal_failure_records_a_reconcilable_operation(self) -> None:
+        """An UNKNOWN outcome means the registrar MAY have applied the renewal —
+        without a durable operation the reconciler can never confirm it and the
+        customer's charge is invisible until a webhook or manual sync."""
+        original_expiry = self.domain.expires_at
+
+        with patch(
+            "apps.domains.services.DomainRegistrarGateway.renew_domain",
+            return_value=(False, {"error": "network dropped mid-response", "retriability": "unknown"}),
+        ):
+            result = DomainLifecycleService.process_domain_renewal(self.domain, years=1)
+
+        self.assertTrue(result.is_err(), result)
+        self.domain.refresh_from_db()
+        self.assertEqual(self.domain.expires_at, original_expiry)
+
+        op = DomainOperation.objects.get(domain=self.domain, operation_type="renew")
+        self.assertEqual(op.state, "submitted")
+        self.assertEqual(op.parameters["prev_expires_at"], original_expiry.isoformat())
+
+    def test_pending_renewal_bookkeeping_failure_leaves_an_audit_trace(self) -> None:
+        """If saving the renewal's DomainOperation fails, nothing durable points at
+        the accepted renewal (unlike registrations, whose pending Domain row the
+        reconciler scans) — the audit trail must record it for manual follow-up."""
+        operation_url = "https://api.gandi.net/v5/domain/domains/renew.com/renew/operations/43"
+
+        with (
+            patch(
+                "apps.domains.services.DomainRegistrarGateway.renew_domain",
+                return_value=(
+                    True,
+                    {"new_expires_at": None, "pending": True, "operation_handle": operation_url},
+                ),
+            ),
+            patch(
+                "apps.domains.models.DomainOperation.save",
+                side_effect=RuntimeError("db write failed"),
+            ),
+            patch("apps.audit.services.AuditService.log_simple_event") as audit_log,
+        ):
+            result = DomainLifecycleService.process_domain_renewal(self.domain, years=1)
+
+        self.assertTrue(result.is_ok(), result)
+        untracked_calls = [
+            call
+            for call in audit_log.call_args_list
+            if call.args and call.args[0] == "domain_renewal_accepted_untracked"
+        ]
+        self.assertEqual(len(untracked_calls), 1)
+        self.assertEqual(untracked_calls[0].kwargs["metadata"]["domain_name"], self.domain.name)
+        self.assertEqual(untracked_calls[0].kwargs["metadata"]["operation_handle"], operation_url)
 
     def test_renewal_failure_returns_err_and_does_not_extend(self) -> None:
         original_expiry = self.domain.expires_at

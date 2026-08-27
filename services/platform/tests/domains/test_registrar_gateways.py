@@ -24,6 +24,7 @@ from apps.domains.gateways.base import (
     MAX_RESPONSE_SIZE_BYTES,
     DomainAvailabilityResult,
     DomainRegistrationResult,
+    DomainRenewalResult,
 )
 from apps.domains.gateways.errors import (
     RegistrarAPIError,
@@ -55,12 +56,17 @@ def _make_registrar(name: str = "gandi", **kwargs: Any) -> Registrar:
     return Registrar(name=name, **defaults)
 
 
-def _mock_response(status_code: int, json_data: dict | None = None, text: str = "") -> MagicMock:
+def _mock_response(
+    status_code: int,
+    json_data: dict | None = None,
+    text: str = "",
+    headers: dict | None = None,
+) -> MagicMock:
     """Create a mock requests.Response."""
     resp = MagicMock()
     resp.status_code = status_code
     resp.text = text or json.dumps(json_data or {})
-    resp.headers = {}
+    resp.headers = headers or {}
     if json_data is not None:
         resp.json.return_value = json_data
     else:
@@ -173,7 +179,10 @@ class GandiGatewayRegisterTests(TestCase):
         self.assertTrue(result.is_ok())
         reg = result.unwrap()
         self.assertEqual(reg.registrar_domain_id, "gandi-dom-123")
+        self.assertEqual(reg.expires_at, datetime(2027, 4, 6, tzinfo=UTC))
         self.assertEqual(reg.epp_code, "EPP-SECRET")
+        self.assertFalse(reg.pending)
+        self.assertEqual(reg.operation_handle, "")
 
     @patch("apps.domains.gateways.gandi.GandiGateway._api_request")
     @patch("apps.domains.gateways.base.cache")
@@ -226,6 +235,80 @@ class GandiGatewayRegisterTests(TestCase):
         self.assertIsInstance(result.unwrap_err(), RegistrarRateLimitError)
 
 
+@override_settings(REGISTRAR_ADAPTERS_VERIFIED=True)
+class GandiGatewayRenewTests(TestCase):
+    """Gandi domain renewal."""
+
+    def setUp(self) -> None:
+        self.registrar = _make_registrar("gandi")
+        self.gateway = GandiGateway(self.registrar)
+
+    @patch("apps.domains.gateways.gandi.GandiGateway._api_request")
+    @patch("apps.domains.gateways.base.cache")
+    def test_renewal_sends_sharing_id_when_configured(
+        self, mock_cache: MagicMock, mock_request: MagicMock
+    ) -> None:
+        mock_cache.get.side_effect = [0, None]
+        mock_cache.add.return_value = True
+        self.registrar.api_username = "reseller-org-id"
+        mock_request.return_value = _mock_response(200, {"expires_at": "2028-01-01T00:00:00Z"})
+
+        result = self.gateway.renew_domain("REG-1", "example.com", 1)
+
+        self.assertTrue(result.is_ok(), result)
+        self.assertEqual(mock_request.call_args.kwargs["params"], {"sharing_id": "reseller-org-id"})
+
+    @patch("apps.domains.gateways.gandi.GandiGateway._api_request")
+    @patch("apps.domains.gateways.base.cache")
+    def test_renewal_omits_sharing_id_when_not_configured(
+        self, mock_cache: MagicMock, mock_request: MagicMock
+    ) -> None:
+        mock_cache.get.side_effect = [0, None]
+        mock_cache.add.return_value = True
+        mock_request.return_value = _mock_response(200, {"expires_at": "2028-01-01T00:00:00Z"})
+
+        result = self.gateway.renew_domain("REG-1", "example.com", 1)
+
+        self.assertTrue(result.is_ok(), result)
+        self.assertEqual(mock_request.call_args.kwargs["params"], {})
+
+    @patch("apps.domains.gateways.gandi.GandiGateway._api_request")
+    @patch("apps.domains.gateways.base.cache")
+    def test_accepted_renewal_without_expiry_is_pending(
+        self, mock_cache: MagicMock, mock_request: MagicMock
+    ) -> None:
+        mock_cache.get.side_effect = [0, None]
+        mock_cache.add.return_value = True
+        operation_url = "https://api.gandi.net/v5/domain/domains/example.com/renew/operations/42"
+        mock_request.return_value = _mock_response(
+            202,
+            {"message": "Renewal accepted"},
+            headers={"Location": operation_url},
+        )
+
+        result = self.gateway.renew_domain("REG-1", "example.com", 1)
+
+        self.assertTrue(result.is_ok(), result)
+        renewal = result.unwrap()
+        self.assertIsNone(renewal.new_expires_at)
+        self.assertTrue(renewal.pending)
+        self.assertEqual(renewal.operation_handle, operation_url)
+
+    @patch("apps.domains.gateways.gandi.GandiGateway._api_request")
+    @patch("apps.domains.gateways.base.cache")
+    def test_completed_renewal_without_expiry_is_invalid_response(
+        self, mock_cache: MagicMock, mock_request: MagicMock
+    ) -> None:
+        mock_cache.get.side_effect = [0, None]
+        mock_cache.add.return_value = True
+        mock_request.return_value = _mock_response(200, {"message": "Renewed"})
+
+        result = self.gateway.renew_domain("REG-1", "example.com", 1)
+
+        self.assertTrue(result.is_err(), result)
+        self.assertEqual(result.unwrap_err().code, RegistrarErrorCode.INVALID_RESPONSE)
+
+
 class GandiGatewayAvailabilityTests(TestCase):
     """Gandi domain availability check."""
 
@@ -273,6 +356,23 @@ class GandiGatewayAvailabilityTests(TestCase):
 
         self.assertTrue(result.is_ok())
         self.assertFalse(result.unwrap().available)
+
+    @patch("apps.domains.gateways.gandi.GandiGateway._api_request")
+    @patch("apps.domains.gateways.base.cache")
+    def test_availability_sends_sharing_id_when_configured(
+        self, mock_cache: MagicMock, mock_request: MagicMock
+    ) -> None:
+        mock_cache.get.return_value = 0
+        self.registrar.api_username = "reseller-org-id"
+        mock_request.return_value = _mock_response(200, {"products": []})
+
+        result = self.gateway.check_availability("example.com")
+
+        self.assertTrue(result.is_ok(), result)
+        self.assertEqual(
+            mock_request.call_args.kwargs["params"],
+            {"name": "example.com", "sharing_id": "reseller-org-id"},
+        )
 
 
 # ===============================================================================
@@ -485,6 +585,33 @@ class DomainRegistrarGatewayFacadeTests(TestCase):
 
         self.assertTrue(success)
         self.assertEqual(data["registrar_domain_id"], "test-123")
+        self.assertFalse(data["pending"])
+        self.assertEqual(data["operation_handle"], "")
+
+    def test_renew_exposes_pending_operation_metadata(self) -> None:
+        from apps.domains.services import DomainRegistrarGateway  # noqa: PLC0415
+
+        registrar = _make_registrar("gandi")
+        domain = MagicMock(registrar_domain_id="REG-1", name="test.com")
+        operation_url = "https://api.gandi.net/v5/domain/domains/test.com/renew/operations/42"
+
+        with patch("apps.domains.gateways.RegistrarGatewayFactory.create_gateway") as mock_factory:
+            mock_gw = MagicMock()
+            mock_gw.renew_domain.return_value = Ok(
+                DomainRenewalResult(
+                    new_expires_at=None,
+                    pending=True,
+                    operation_handle=operation_url,
+                )
+            )
+            mock_factory.return_value = mock_gw
+
+            success, data = DomainRegistrarGateway.renew_domain(registrar, domain, 1)
+
+        self.assertTrue(success)
+        self.assertIsNone(data["new_expires_at"])
+        self.assertTrue(data["pending"])
+        self.assertEqual(data["operation_handle"], operation_url)
 
     def test_unknown_registrar_returns_failure(self) -> None:
         from apps.domains.services import DomainRegistrarGateway  # noqa: PLC0415
@@ -607,7 +734,7 @@ class CircuitBreakerRecoveryTests(TestCase):
 
 @override_settings(REGISTRAR_ADAPTERS_VERIFIED=True)
 class GandiInvalidResponseTests(TestCase):
-    """Missing/invalid expiry and malformed price are handled gracefully."""
+    """Accepted registrations and malformed availability prices are handled gracefully."""
 
     def setUp(self) -> None:
         self.registrar = _make_registrar("gandi")
@@ -615,17 +742,26 @@ class GandiInvalidResponseTests(TestCase):
 
     @patch("apps.domains.gateways.gandi.GandiGateway._api_request")
     @patch("apps.domains.gateways.base.cache")
-    def test_registration_missing_expires_at_is_invalid_response(
+    def test_registration_without_inline_expiry_is_pending(
         self, mock_cache: MagicMock, mock_request: MagicMock
     ) -> None:
         mock_cache.get.side_effect = [0, None]
-        # 202 success but NO expires_at → must not fabricate a date.
-        mock_request.return_value = _mock_response(202, {"id": "g-1", "authinfo": "EPP"})
+        mock_cache.add.return_value = True
+        operation_url = "https://api.gandi.net/v5/domain/domains/example.com/operations/42"
+        mock_request.return_value = _mock_response(
+            202,
+            {"message": "Registration accepted"},
+            headers={"Location": operation_url},
+        )
 
         result = self.gateway.register_domain("example.com", 1, {})
 
-        self.assertTrue(result.is_err())
-        self.assertEqual(result.unwrap_err().code, RegistrarErrorCode.INVALID_RESPONSE)
+        self.assertTrue(result.is_ok(), result)
+        registration = result.unwrap()
+        self.assertEqual(registration.registrar_domain_id, "")
+        self.assertIsNone(registration.expires_at)
+        self.assertTrue(registration.pending)
+        self.assertEqual(registration.operation_handle, operation_url)
 
     @patch("apps.domains.gateways.gandi.GandiGateway._api_request")
     @patch("apps.domains.gateways.base.cache")
