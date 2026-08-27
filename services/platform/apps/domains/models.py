@@ -127,8 +127,9 @@ class TLD(models.Model):
             return (self.profit_margin_cents / self.registrar_cost_cents) * 100
         return 0
 
-    # Signal-related attributes for change tracking
-    _original_tld_values: dict[str, str | None] | None = None
+    # Signal-related attributes for change tracking (native value types — see
+    # store_original_tld_values: str()-wrapped prices broke the pricing-change math)
+    _original_tld_values: dict[str, Any] | None = None
 
 
 # ===============================================================================
@@ -566,8 +567,9 @@ class Domain(ConcurrentTransitionMixin, models.Model):
                     raise ValidationError(_(f"TLD '.{domain_tld}' is not supported"))
                 self.tld = configured_tlds[domain_tld]
 
-    # Signal-related attributes for change tracking
-    _original_domain_values: dict[str, str | None] | None = None
+    # Signal-related attributes for change tracking (native value types — see
+    # store_original_domain_values: str()-wrapped values made every comparison unequal)
+    _original_domain_values: dict[str, Any] | None = None
 
 
 # ===============================================================================
