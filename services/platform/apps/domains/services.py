@@ -1097,113 +1097,108 @@ class DomainOrderService:
         )
 
         for item in domain_items:
-            if item.action == "register":
-                result = DomainLifecycleService.create_domain_registration(
-                    customer=order.customer,
-                    domain_name=item.domain_name,
-                    years=item.years,
-                    whois_privacy=item.whois_privacy,
-                    auto_renew=item.auto_renew,
-                )
-
-                if result.is_ok():
-                    domain = result.unwrap()
-                    item.domain = domain
-                    item.save(update_fields=["domain"])
-                    processed_domains.append(domain)
-                    logger.info("✅ [Domain] Processed registration: %s", item.domain_name)
-                else:
-                    logger.error(
-                        "🔥 [Domain] Failed to process registration %s: %s",
-                        item.domain_name,
-                        result.unwrap_err(),
+            # #465/#259: lifecycle methods normally return Result, but registrar/cache
+            # infrastructure can still raise. One boundary per item prevents any action
+            # type from aborting the order's remaining valid items.
+            try:
+                if item.action == "register":
+                    result = DomainLifecycleService.create_domain_registration(
+                        customer=order.customer,
+                        domain_name=item.domain_name,
+                        years=item.years,
+                        whois_privacy=item.whois_privacy,
+                        auto_renew=item.auto_renew,
                     )
 
-            elif item.action == "renew":
-                # #430: create_domain_order_item links the Domain only when the ordering customer
-                # already owns it, so an unlinked renew is the expected shape for a domain this
-                # customer does not own (or that did not exist at order time) — not necessarily a
-                # data defect. Either way it cannot be renewed here, so log it rather than
-                # silently skipping.
-                if item.domain is None:
-                    logger.error(
-                        "🔥 [Domain] Renew item %s has no linked domain (not owned by this customer "
-                        "at order time, or created outside create_domain_order_item) — skipping",
-                        item.domain_name,
-                    )
-                    continue
+                    if result.is_ok():
+                        domain = result.unwrap()
+                        item.domain = domain
+                        item.save(update_fields=["domain"])
+                        processed_domains.append(domain)
+                        logger.info("✅ [Domain] Processed registration: %s", item.domain_name)
+                    else:
+                        logger.error(
+                            "🔥 [Domain] Failed to process registration %s: %s",
+                            item.domain_name,
+                            result.unwrap_err(),
+                        )
 
-                # Ownership is re-checked HERE, not just at link time: DomainOrderItem rows can be
-                # created outside create_domain_order_item (admin, imports, direct ORM), so the
-                # link-step `customer=` filter is not a boundary this path can rely on. Without
-                # this, a row pointing at another customer's domain would renew it on their behalf.
+                elif item.action == "renew":
+                    # #430: create_domain_order_item links the Domain only when the ordering customer
+                    # already owns it, so an unlinked renew is the expected shape for a domain this
+                    # customer does not own (or that did not exist at order time) — not necessarily a
+                    # data defect. Either way it cannot be renewed here, so log it rather than
+                    # silently skipping.
+                    if item.domain is None:
+                        logger.error(
+                            "🔥 [Domain] Renew item %s has no linked domain (not owned by this customer "
+                            "at order time, or created outside create_domain_order_item) — skipping",
+                            item.domain_name,
+                        )
+                        continue
 
-                if item.domain.customer_id != order.customer_id:
-                    logger.error(
-                        "🔥 [Domain] Renew item %s links domain owned by customer %s but the order "
-                        "belongs to customer %s — refusing to renew",
-                        item.domain_name,
-                        item.domain.customer_id,
-                        order.customer_id,
-                    )
-                    continue
+                    # Ownership is re-checked HERE, not just at link time: DomainOrderItem rows can be
+                    # created outside create_domain_order_item (admin, imports, direct ORM), so the
+                    # link-step `customer=` filter is not a boundary this path can rely on. Without
+                    # this, a row pointing at another customer's domain would renew it on their behalf.
 
-                # #259: the order item pk IS the renewal intent — durable, and exactly one
-                # per item, so a retried batch replays rather than re-charging, while two
-                # separate order items for the same domain+years stay distinct.
-                #
-                # Wrapped: process_domain_renewal's own Result-returning paths never raise,
-                # but the registrar call sits behind several cache operations (gateways/base.py)
-                # that can — a backend outage on cache.get/add is not caught anywhere below
-                # this call. One item's infrastructure failure must not abort the rest of the
-                # order's valid renewals, matching the transfer/unhandled-action branches'
-                # log-and-continue behavior. The register branch above has the equivalent gap
-                # (create_domain_registration isn't wrapped either) — left alone here since it
-                # wasn't part of what this fix addresses; tracked as a follow-up.
-                try:
+                    if item.domain.customer_id != order.customer_id:
+                        logger.error(
+                            "🔥 [Domain] Renew item %s links domain owned by customer %s but the order "
+                            "belongs to customer %s — refusing to renew",
+                            item.domain_name,
+                            item.domain.customer_id,
+                            order.customer_id,
+                        )
+                        continue
+
+                    # #259: the order item pk IS the renewal intent — durable, and exactly one
+                    # per item, so a retried batch replays rather than re-charging, while two
+                    # separate order items for the same domain+years stay distinct.
                     renewal_result = DomainLifecycleService.process_domain_renewal(
                         domain=item.domain, years=item.years, idempotency_token=f"order_item:{item.pk}"
                     )
-                except Exception as exc:
-                    logger.error(
-                        "🔥 [Domain] Renewal of %s crashed unexpectedly (not a registrar rejection): %s",
-                        item.domain_name,
-                        exc,
-                        exc_info=True,
-                    )
-                    continue
 
-                if renewal_result.is_ok():
-                    processed_domains.append(item.domain)
-                    logger.info("✅ [Domain] Processed renewal: %s", item.domain_name)
+                    if renewal_result.is_ok():
+                        processed_domains.append(item.domain)
+                        logger.info("✅ [Domain] Processed renewal: %s", item.domain_name)
+                    else:
+                        logger.error(
+                            "🔥 [Domain] Failed to process renewal %s: %s",
+                            item.domain_name,
+                            renewal_result.unwrap_err(),
+                        )
+
+                elif item.action == "transfer":
+                    # #430: inbound transfer creates a new Domain via initiate_transfer, which needs a
+                    # resolved registrar — there is no registrar on the order item yet, so this path is
+                    # intentionally NOT auto-processed here. Log explicitly instead of dropping it
+                    # silently; wiring registrar selection for transfers is tracked separately.
+                    logger.warning(
+                        "⚠️ [Domain] Transfer item %s is not auto-processed (registrar selection for "
+                        "order-driven transfers is not wired yet) — handle via initiate_transfer",
+                        item.domain_name,
+                    )
+
                 else:
+                    # #430: any unhandled action must be VISIBLE, not silently dropped. This logs and
+                    # continues rather than raising: one malformed item must not abort processing of
+                    # the order's remaining (valid) items. Per-item outcomes are not yet returned to
+                    # the caller — tracked as a before-wiring follow-up.
                     logger.error(
-                        "🔥 [Domain] Failed to process renewal %s: %s",
+                        "🔥 [Domain] Unhandled domain order item action %r for %s — item not processed",
+                        item.action,
                         item.domain_name,
-                        renewal_result.unwrap_err(),
                     )
 
-            elif item.action == "transfer":
-                # #430: inbound transfer creates a new Domain via initiate_transfer, which needs a
-                # resolved registrar — there is no registrar on the order item yet, so this path is
-                # intentionally NOT auto-processed here. Log explicitly instead of dropping it
-                # silently; wiring registrar selection for transfers is tracked separately.
-                logger.warning(
-                    "⚠️ [Domain] Transfer item %s is not auto-processed (registrar selection for "
-                    "order-driven transfers is not wired yet) — handle via initiate_transfer",
-                    item.domain_name,
-                )
-
-            else:
-                # #430: any unhandled action must be VISIBLE, not silently dropped. This logs and
-                # continues rather than raising: one malformed item must not abort processing of
-                # the order's remaining (valid) items. Per-item outcomes are not yet returned to
-                # the caller — tracked as a before-wiring follow-up.
+            except Exception:
                 logger.error(
-                    "🔥 [Domain] Unhandled domain order item action %r for %s — item not processed",
+                    "🔥 [Domain] Processing %s item %s crashed unexpectedly — continuing with remaining items",
                     item.action,
                     item.domain_name,
+                    exc_info=True,
                 )
+                continue
 
         return processed_domains
 

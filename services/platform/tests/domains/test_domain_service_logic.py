@@ -371,6 +371,52 @@ class DomainOrderRenewTransferProcessingTests(DomainFixtureMixin, TestCase):
         self.assertIn(second_domain, processed)
         self.assertTrue(any("first.ro" in message and "crashed" in message for message in logs.output))
 
+    def test_register_exception_does_not_abort_remaining_items(self) -> None:
+        valid_domain = self._owned_domain("valid-after-register.ro")
+        renew_created, renew_item = DomainOrderService.create_domain_order_item(
+            order=self.order,
+            domain_name=valid_domain.name,
+            action="renew",
+            years=1,
+        )
+        register_created, register_item = DomainOrderService.create_domain_order_item(
+            order=self.order,
+            domain_name="crash-register.ro",
+            action="register",
+            years=1,
+        )
+        self.assertTrue(renew_created, renew_item)
+        self.assertTrue(register_created, register_item)
+        self.assertEqual(
+            list(DomainOrderItem.objects.filter(order=self.order).values_list("action", flat=True)),
+            ["register", "renew"],
+        )
+
+        with (
+            self.assertLogs("apps.domains.services", level="ERROR") as logs,
+            patch.object(
+                DomainLifecycleService,
+                "create_domain_registration",
+                side_effect=RuntimeError("registration cache crashed"),
+            ) as mock_register,
+            patch.object(
+                DomainLifecycleService,
+                "process_domain_renewal",
+                return_value=_Ok("renewed"),
+            ) as mock_renew,
+        ):
+            processed = DomainOrderService.process_domain_order_items(self.order)
+
+        mock_register.assert_called_once()
+        mock_renew.assert_called_once()
+        self.assertIn(valid_domain, processed)
+        self.assertTrue(
+            any(
+                "register" in message and "crash-register.ro" in message and "crashed" in message
+                for message in logs.output
+            )
+        )
+
     def test_process_refuses_to_renew_another_customers_domain(self) -> None:
         """Ownership is re-checked at processing time, not only when the link is created.
 
