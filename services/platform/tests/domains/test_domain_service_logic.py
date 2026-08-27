@@ -417,6 +417,37 @@ class DomainOrderRenewTransferProcessingTests(DomainFixtureMixin, TestCase):
             )
         )
 
+    def test_pending_accepted_registration_links_the_pending_domain_to_the_item(self) -> None:
+        """A 202-accepted registration returns Err but leaves a pending Domain row —
+        the purchased item must link it so provenance survives reconciliation."""
+        success, item = DomainOrderService.create_domain_order_item(
+            order=self.order, domain_name="pending-link.ro", action="register", years=1
+        )
+        self.assertTrue(success, item)
+
+        pending_payload = {
+            "registrar_domain_id": "",
+            "expires_at": None,
+            "nameservers": [],
+            "epp_code": "",
+            "pending": True,
+            "operation_handle": "https://api.example.test/operations/42",
+        }
+        with (
+            self.assertLogs("apps.domains.services", level="ERROR"),
+            patch(
+                "apps.domains.services.DomainRegistrarGateway.register_domain",
+                return_value=(True, pending_payload),
+            ),
+        ):
+            processed = DomainOrderService.process_domain_order_items(self.order)
+
+        self.assertEqual(processed, [])
+        item.refresh_from_db()
+        self.assertIsNotNone(item.domain)
+        self.assertEqual(item.domain.name, "pending-link.ro")
+        self.assertEqual(item.domain.status, "pending")
+
     def test_process_refuses_to_renew_another_customers_domain(self) -> None:
         """Ownership is re-checked at processing time, not only when the link is created.
 

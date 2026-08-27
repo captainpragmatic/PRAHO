@@ -53,6 +53,17 @@ class RenewalIdempotencyTokenTests(TestCase):
         # error instead of exercising the cache.
         return DomainRenewalResult(new_expires_at=datetime(2027, 1, 1, tzinfo=UTC))
 
+    def test_idempotency_claim_outlives_queue_redelivery(self) -> None:
+        """A Django-Q2 task that dies after the registrar call is redelivered after
+        Q_CLUSTER['retry'] seconds. If the idempotency claim expires first, the
+        redelivered task re-issues the same chargeable operation — the claim TTL
+        must therefore exceed the redelivery window."""
+        from django.conf import settings  # noqa: PLC0415
+
+        from apps.domains.gateways.base import IDEMPOTENCY_TTL_SECONDS  # noqa: PLC0415
+
+        self.assertGreater(IDEMPOTENCY_TTL_SECONDS, settings.Q_CLUSTER["retry"])
+
     def test_same_domain_and_years_without_a_token_still_collapses(self) -> None:
         """Documents the unchanged fallback — this is the behaviour #259 describes.
 

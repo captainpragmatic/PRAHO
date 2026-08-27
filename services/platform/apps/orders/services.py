@@ -60,6 +60,38 @@ def _order_item_billing_period(item: Any) -> str:
     return period
 
 
+def _enqueue_domain_item_processing(order: Order) -> None:
+    """Enqueue registrar-side processing of the order's domain items on commit.
+
+    BOTH provisioning entry points must call this — the staff/manual
+    update_order_status transition AND the automatic confirm_order payment path
+    (which calls start_provisioning() directly and never passes through
+    update_order_status). Registrar HTTP is network I/O and never runs inside
+    the order transaction. The callback logs loudly on enqueue failure: the
+    transaction has already committed, so a silent exception here would strand
+    paid domain items with no queue record.
+    """
+    if not order.domain_items.exists():
+        return
+
+    domain_order_id = str(order.pk)
+
+    def _enqueue() -> None:
+        try:
+            from django_q.tasks import async_task  # noqa: PLC0415  # Deferred
+
+            async_task("apps.domains.tasks.process_order_domain_items", domain_order_id)
+        except Exception:
+            logger.error(
+                "🔥 [Orders] Failed to enqueue domain item processing for order %s — "
+                "paid domain items will not be processed until manually re-triggered",
+                domain_order_id,
+                exc_info=True,
+            )
+
+    transaction.on_commit(_enqueue)
+
+
 # ===============================================================================
 # ORDER SERVICE PARAMETER OBJECTS
 # ===============================================================================
@@ -608,16 +640,7 @@ class OrderService:
                         f"Cannot transition to provisioning: recurring enrollment failed: {enrollment.unwrap_err()}"
                     )
 
-                # Domain items (register/renew) provision off-transaction: the registrar
-                # call is network I/O, so enqueue a Django-Q2 task once the transition
-                # commits. Skipped entirely for orders without domain items.
-                if order.domain_items.exists():
-                    from django_q.tasks import async_task  # noqa: PLC0415  # Deferred
-
-                    domain_order_id = str(order.pk)
-                    transaction.on_commit(
-                        lambda: async_task("apps.domains.tasks.process_order_domain_items", domain_order_id)
-                    )
+                _enqueue_domain_item_processing(order)
 
             # Phase B: Create proforma when order transitions to awaiting_payment.
             # Per F3: MUST be inside the same transaction, NOT in on_commit callback.
@@ -1082,6 +1105,9 @@ class OrderPaymentConfirmationService:
                 if enrollment.is_err():
                     transaction.set_rollback(True)
                     return Err(f"Cannot confirm order: recurring enrollment failed: {enrollment.unwrap_err()}")
+                # The automatic payment path is the NORMAL customer flow — it must
+                # enqueue domain item processing exactly like update_order_status.
+                _enqueue_domain_item_processing(order)
                 OrderService._create_status_history(
                     order, "paid", "provisioning", "Auto-provisioning (below review threshold)", None
                 )

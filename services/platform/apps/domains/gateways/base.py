@@ -41,7 +41,11 @@ logger = logging.getLogger(__name__)
 # Circuit breaker defaults
 CIRCUIT_BREAKER_THRESHOLD = 5  # failures before tripping
 CIRCUIT_BREAKER_RESET_SECONDS = 300  # 5 minutes
-IDEMPOTENCY_TTL_SECONDS = 3600  # 1 hour
+# One idempotency claim must OUTLIVE Django-Q2's redelivery window (Q_CLUSTER
+# "retry" = 4h): a worker that dies after the registrar call gets its task
+# redelivered, and an expired claim would let the replay re-issue the same
+# chargeable operation. A guardrail test pins TTL > Q_CLUSTER["retry"].
+IDEMPOTENCY_TTL_SECONDS = 6 * 3600
 # Sentinel stored under the idempotency key while a registrar call is in flight, so a
 # second concurrent request for the same domain is rejected instead of issuing a
 # duplicate (and chargeable) registration. Replaced with the real result on success.

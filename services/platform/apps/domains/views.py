@@ -28,6 +28,7 @@ from apps.users.models import User
 from .forms import RegistrarForm, TLDForm
 from .models import TLD, Domain, DomainOrderItem, Registrar
 from .services import (
+    REGISTRATION_PENDING_MESSAGE,
     DomainLifecycleService,
     DomainRegistrarGateway,
     DomainRepository,
@@ -402,6 +403,10 @@ def domain_register(  # Complexity: multi-step workflow  # noqa: PLR0912  # Comp
                         messages.success(request, _(f"✅ Domain {domain_name} registered successfully!"))
                         domain = result.unwrap()
                         return redirect("domains:detail", domain_id=domain.id)
+                    elif str(result.unwrap_err()) == str(REGISTRATION_PENDING_MESSAGE):
+                        # Accepted, not failed: the registrar took the (chargeable)
+                        # request and the reconciliation worker will activate it.
+                        messages.info(request, f"⏳ {result.unwrap_err()}")
                     else:
                         messages.error(request, _(f"❌ Registration failed: {result.unwrap_err()}"))
 
@@ -536,8 +541,13 @@ def domain_renew(request: HttpRequest, domain_id: str) -> HttpResponse:
             parsed_renewal_token = uuid.UUID(raw_renewal_token or "")
         except (ValueError, TypeError, AttributeError):
             idempotency_token = None
+            preserved_renewal_token = None
         else:
             idempotency_token = f"staff_renew:{parsed_renewal_token}"
+            # A re-rendered form after a failure is the SAME intent being retried —
+            # keep its token, or an ambiguous registrar outcome (claim held under
+            # this token) could be resubmitted under a fresh token and charge twice.
+            preserved_renewal_token = str(parsed_renewal_token)
 
         if years is None:
             messages.error(request, _("❌ Please select a valid renewal period"))
@@ -574,7 +584,9 @@ def domain_renew(request: HttpRequest, domain_id: str) -> HttpResponse:
         "domain": domain,
         "renewal_costs": renewal_costs,
         "days_until_expiry": domain.days_until_expiry,
-        "renewal_token": str(uuid.uuid4()),
+        "renewal_token": (
+            preserved_renewal_token if request.method == "POST" and preserved_renewal_token else str(uuid.uuid4())
+        ),
     }
 
     return render(request, "domains/domain_renew.html", context)

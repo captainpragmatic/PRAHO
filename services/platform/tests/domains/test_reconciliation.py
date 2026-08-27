@@ -466,6 +466,127 @@ class DomainReconciliationTests(TestCase):
         self.assertTrue(mismatched_domain.locked)
         self.assertEqual(mismatched_operation.state, "submitted")
 
+    def test_one_expiry_advance_completes_only_one_renewal_intent(self) -> None:
+        """Two pending renewals sharing one prev-expiry snapshot must not BOTH be
+        completed by a single registrar extension — only the oldest is proven;
+        the second stays submitted (and fails visibly at 72h if never proven)."""
+        previous_expiry = self.now + timedelta(days=60)
+        domain = self._domain("double-intent.example", active=True, expires_at=previous_expiry)
+        first_op = self._submitted_operation(
+            domain,
+            "renew",
+            {"years": 1, "prev_expires_at": previous_expiry.isoformat()},
+            age=timedelta(hours=3),
+        )
+        second_op = self._submitted_operation(
+            domain,
+            "renew",
+            {"years": 1, "prev_expires_at": previous_expiry.isoformat()},
+            age=timedelta(hours=2),
+        )
+        new_expiry = previous_expiry + timedelta(days=365)
+        gateway = StubGateway({domain.name: Ok(self._info(domain.name, expires_at=new_expiry))})
+
+        result = self._run(gateway)
+
+        first_op.refresh_from_db()
+        second_op.refresh_from_db()
+        self.assertEqual(result["completed"], 1)
+        self.assertEqual(first_op.state, "completed")
+        self.assertEqual(second_op.state, "submitted")
+
+    def test_accepted_registration_is_not_deleted_on_not_found(self) -> None:
+        """A submitted register op WITH an operation handle proves the registrar
+        ACCEPTED the request — a slow async registration absent from the info
+        endpoint past 24h must not be deleted out from under a paid customer."""
+        domain = self._domain("accepted-slow.example")
+        self._age_domain(domain, timedelta(hours=30))
+        operation = self._submitted_operation(domain, "register", {"years": 1})
+        gateway = StubGateway(
+            {domain.name: Err(RegistrarNotFoundError(domain.name, self.registrar.name))}
+        )
+
+        result = self._run(gateway)
+
+        self.assertTrue(Domain.objects.filter(pk=domain.pk).exists())
+        operation.refresh_from_db()
+        self.assertEqual(operation.state, "submitted")
+        self.assertEqual(result["removed"], 0)
+        self.assertEqual(result["awaiting"], 1)
+
+    def test_webhook_activated_domain_completes_its_stranded_register_operation(self) -> None:
+        """A registration webhook activates the Domain without touching the
+        submitted operation — the reconciler must complete it, or it stays
+        submitted forever (invisible to the pending-domain phase)."""
+        domain = self._domain("webhook-won.example", active=True, expires_at=self.now + timedelta(days=365))
+        operation = self._submitted_operation(domain, "register", {"years": 1})
+        gateway = StubGateway(
+            {domain.name: Ok(self._info(domain.name, expires_at=domain.expires_at))}
+        )
+
+        result = self._run(gateway)
+
+        operation.refresh_from_db()
+        self.assertEqual(operation.state, "completed")
+        self.assertEqual(result["completed"], 1)
+
+    def test_skip_class_rows_do_not_starve_newer_pending_rows(self) -> None:
+        """Rows whose registrar has no gateway must not consume the batch cap —
+        otherwise 50 misconfigured rows starve every newer pending registration
+        on every hourly run, forever."""
+        bad_registrar = Registrar.objects.create(
+            name="no-gateway-registrar",
+            display_name="No Gateway",
+            website_url="https://none.example.test",
+            api_endpoint="https://api.none.example.test",
+        )
+        for index in range(RECONCILE_BATCH_LIMIT):
+            domain = Domain.objects.create(
+                name=f"stuck-{index:03d}.example",
+                tld=self.tld,
+                registrar=bad_registrar,
+                customer=self.customer,
+            )
+            self._age_domain(domain, timedelta(hours=10))
+        fresh = self._domain("fresh-behind-the-wall.example")
+        self._age_domain(fresh, timedelta(hours=1))
+        expiry = self.now + timedelta(days=365)
+        stub = StubGateway({fresh.name: Ok(self._info(fresh.name, expires_at=expiry))})
+
+        def _factory(registrar: Registrar) -> StubGateway:
+            if registrar.pk == bad_registrar.pk:
+                raise ValueError(f"No gateway registered for registrar: {registrar.name}")
+            return stub
+
+        with (
+            patch("apps.domains.services.timezone.now", return_value=self.now),
+            patch(
+                "apps.domains.gateways.RegistrarGatewayFactory.create_gateway",
+                side_effect=_factory,
+            ),
+        ):
+            result = DomainReconciliationService.reconcile()
+
+        fresh.refresh_from_db()
+        self.assertEqual(fresh.status, "active")
+        self.assertEqual(result["activated"], 1)
+
+    def test_renewal_without_recorded_prev_expiry_is_not_completed(self) -> None:
+        """prev_expires_at is the reconciliation PROOF — a renew op missing it
+        (manual/ORM-created) must not be completed on any non-null expiry."""
+        expiry = self.now + timedelta(days=60)
+        domain = self._domain("no-proof.example", active=True, expires_at=expiry)
+        operation = self._submitted_operation(domain, "renew", {"years": 1})
+        gateway = StubGateway({domain.name: Ok(self._info(domain.name, expires_at=expiry))})
+
+        result = self._run(gateway)
+
+        domain.refresh_from_db()
+        operation.refresh_from_db()
+        self.assertEqual(result["completed"], 0)
+        self.assertEqual(operation.state, "submitted")
+        self.assertEqual(domain.expires_at, expiry)
+
     def test_operation_older_than_72h_fails_without_changing_domain(self) -> None:
         previous_expiry = self.now + timedelta(days=30)
         domain = self._domain(

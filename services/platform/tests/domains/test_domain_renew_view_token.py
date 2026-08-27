@@ -163,7 +163,11 @@ class DomainRenewViewTokenTests(TestCase):
             rendered_messages,
         )
 
-    def test_validation_failure_rerenders_with_fresh_token(self) -> None:
+    def test_rerender_preserves_the_submitted_token(self) -> None:
+        """A re-rendered form is the SAME intent being corrected — issuing a fresh
+        token there is the double-charge vector: an ambiguous registrar outcome
+        holds the claim under token A, and a fresh token B on the error page would
+        let an immediate resubmit issue a second chargeable renewal."""
         submitted_token = str(uuid.uuid4())
 
         with patch("apps.domains.views.DomainLifecycleService.process_domain_renewal") as mock_renew:
@@ -174,6 +178,34 @@ class DomainRenewViewTokenTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         mock_renew.assert_not_called()
+        self.assertEqual(response.context["renewal_token"], submitted_token)
+
+    def test_registrar_failure_rerender_preserves_the_submitted_token(self) -> None:
+        from apps.common.types import Err  # noqa: PLC0415
+
+        submitted_token = str(uuid.uuid4())
+
+        with patch(
+            "apps.domains.views.DomainLifecycleService.process_domain_renewal",
+            return_value=Err("registrar did not confirm"),
+        ):
+            response = self.client.post(
+                self.renew_url,
+                {"years": "1", "renewal_token": submitted_token},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["renewal_token"], submitted_token)
+
+    def test_garbage_token_rerender_issues_a_fresh_token(self) -> None:
+        with patch("apps.domains.views.DomainLifecycleService.process_domain_renewal") as mock_renew:
+            response = self.client.post(
+                self.renew_url,
+                {"years": "not-a-number", "renewal_token": "not-a-uuid"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        mock_renew.assert_not_called()
         replacement_token = response.context["renewal_token"]
-        self.assertNotEqual(replacement_token, submitted_token)
+        self.assertNotEqual(replacement_token, "not-a-uuid")
         self.assertEqual(str(uuid.UUID(replacement_token)), replacement_token)

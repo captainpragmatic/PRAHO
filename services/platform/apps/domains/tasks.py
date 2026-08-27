@@ -35,8 +35,26 @@ def process_order_domain_items(order_id: str) -> dict[str, Any]:
         return {"success": False, "processed": 0, "error": "order not found"}
 
     processed = DomainOrderService.process_domain_order_items(order)
-    logger.info("✅ [Domains] Processed %d domain item(s) for order %s", len(processed), order_id)
-    return {"success": True, "processed": len(processed), "domains": [domain.name for domain in processed]}
+    # success must reflect the PAID intent, not merely "nothing crashed": the
+    # per-item boundary swallows failures, so the Django-Q2 task result is the
+    # durable signal that register/renew items remain unfulfilled.
+    items_total = order.domain_items.filter(action__in=("register", "renew")).count()
+    success = len(processed) >= items_total
+    if success:
+        logger.info("✅ [Domains] Processed %d domain item(s) for order %s", len(processed), order_id)
+    else:
+        logger.error(
+            "🔥 [Domains] Order %s: %d of %d domain item(s) remain unprocessed",
+            order_id,
+            items_total - len(processed),
+            items_total,
+        )
+    return {
+        "success": success,
+        "processed": len(processed),
+        "items_total": items_total,
+        "domains": [domain.name for domain in processed],
+    }
 
 
 def process_domain_renewal_notices() -> dict[str, Any]:

@@ -45,6 +45,21 @@ class OrderDomainProcessingTaskTests(DomainFixtureMixin, TestCase):
         self.assertEqual(result["processed"], 1)
         self.assertEqual(result["domains"], ["task-owned.ro"])
 
+    def test_task_reports_failure_when_paid_items_remain_unprocessed(self) -> None:
+        """A registrar outage that rejects every item must NOT record a successful
+        task — Django-Q2's success flag is the only durable signal that paid items
+        remain unfulfilled."""
+        DomainOrderService.create_domain_order_item(
+            order=self.order, domain_name="unfulfilled.ro", action="register", years=1
+        )
+
+        with patch.object(DomainOrderService, "process_domain_order_items", return_value=[]):
+            result = domain_tasks.process_order_domain_items(str(self.order.pk))
+
+        self.assertFalse(result["success"])
+        self.assertEqual(result["processed"], 0)
+        self.assertEqual(result["items_total"], 1)
+
     def test_task_handles_missing_order_without_raising(self) -> None:
         with patch.object(DomainOrderService, "process_domain_order_items") as mock_process:
             result = domain_tasks.process_order_domain_items(str(uuid.uuid4()))
@@ -105,3 +120,48 @@ class OrderProvisioningEnqueuesDomainProcessingTests(DomainFixtureMixin, TestCas
 
         self.assertTrue(result.is_ok(), result)
         mock_async.assert_not_called()
+
+
+class AutomaticPaymentConfirmationEnqueuesDomainProcessingTests(DomainFixtureMixin, TestCase):
+    """The AUTOMATIC payment path (confirm_order auto-advance, used by payment
+    signals/tasks) bypasses update_order_status entirely — it must enqueue domain
+    processing too, or the normal customer flow never registers anything."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        type(self.order).objects.filter(pk=self.order.pk).update(status="awaiting_payment")
+        self.order.refresh_from_db()
+
+    def test_auto_advance_confirmation_enqueues_domain_processing(self) -> None:
+        from apps.orders.services import OrderPaymentConfirmationService  # noqa: PLC0415
+
+        Domain.objects.create(
+            name="auto-confirm.ro",
+            tld=self.ro,
+            registrar=self.ro_registrar,
+            customer=self.customer,
+            status="active",
+        )
+        created, item = DomainOrderService.create_domain_order_item(
+            order=self.order, domain_name="auto-confirm.ro", action="renew", years=1
+        )
+        self.assertTrue(created, item)
+
+        with (
+            patch("django_q.tasks.async_task") as mock_async,
+            patch.object(
+                OrderServiceCreationService,
+                "update_service_status_on_payment",
+                return_value=Ok([]),
+            ),
+            self.captureOnCommitCallbacks(execute=True),
+        ):
+            result = OrderPaymentConfirmationService.confirm_order(self.order)
+
+        self.assertTrue(result.is_ok(), result)
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, "provisioning")
+        mock_async.assert_called_once_with(
+            "apps.domains.tasks.process_order_domain_items",
+            str(self.order.pk),
+        )
