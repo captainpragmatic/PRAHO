@@ -203,8 +203,14 @@ class ROTLDGateway(BaseRegistrarGateway):
 
     # -- Phase 2 operations --------------------------------------------------
 
-    def _do_initiate_transfer(self, domain_name: str, epp_code: str) -> Result[DomainTransferResult, RegistrarAPIError]:
+    def _do_initiate_transfer(
+        self,
+        domain_name: str,
+        epp_code: str,
+        registrant_data: dict[str, Any] | None = None,
+    ) -> Result[DomainTransferResult, RegistrarAPIError]:
         url = f"{self._api_base}/domain/transfer"
+        # ROTLD's documented transfer body is domain + authcode; registrant_data is not sent.
         body = {"domain": domain_name, "authcode": epp_code}
 
         try:

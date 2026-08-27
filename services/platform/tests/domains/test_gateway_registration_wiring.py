@@ -17,7 +17,7 @@ from django.test import TestCase, override_settings
 
 from apps.customers.models import Customer, CustomerAddress, CustomerTaxProfile
 from apps.domains.gateways import RegistrarGatewayFactory
-from apps.domains.models import TLD, Domain, Registrar, TLDRegistrarAssignment
+from apps.domains.models import TLD, Domain, DomainOperation, Registrar, TLDRegistrarAssignment
 from apps.domains.services import DomainLifecycleService
 
 
@@ -117,6 +117,43 @@ class DomainRegistrationGatewayWiringTests(TestCase):
         self.assertNotEqual(domain.epp_code, "EPP-SECRET")
         self.assertEqual(domain.get_decrypted_epp_code(), "EPP-SECRET")
 
+    def test_pending_registration_records_submitted_operation_and_keeps_domain_pending(self) -> None:
+        operation_url = "https://api.gandi.net/v5/domain/domains/example.com/operations/42"
+        gateway_payload = {
+            "registrar_domain_id": "",
+            "expires_at": None,
+            "nameservers": [],
+            "epp_code": "",
+            "pending": True,
+            "operation_handle": operation_url,
+        }
+
+        with patch(
+            "apps.domains.services.DomainRegistrarGateway.register_domain",
+            return_value=(True, gateway_payload),
+        ):
+            result = DomainLifecycleService.create_domain_registration(
+                customer=self.customer,
+                domain_name="example.com",
+                years=2,
+            )
+
+        self.assertTrue(result.is_err(), result)
+        self.assertIn("awaiting confirmation", str(result.unwrap_err()))
+        self.assertIn("do not resubmit", str(result.unwrap_err()))
+
+        domain = Domain.objects.get(name="example.com")
+        self.assertEqual(domain.status, "pending")
+        self.assertEqual(domain.registrar_domain_id, "")
+        self.assertIsNone(domain.expires_at)
+
+        op = DomainOperation.objects.get(domain=domain, operation_type="register")
+        self.assertEqual(op.state, "submitted")
+        self.assertEqual(op.registrar_operation_id, operation_url)
+        self.assertEqual(op.parameters, {"years": 2})
+        self.assertIsNotNone(op.submitted_at)
+        self.assertIsNone(op.completed_at)
+
     def test_definite_rejection_returns_err_and_deletes_row(self) -> None:
         """A definite registrar rejection (conflict/auth/validation) must return Err
         AND remove the pending row, so the customer can cleanly re-register the name
@@ -192,6 +229,45 @@ class RenewalGatewayWiringTests(TestCase):
         self.domain.refresh_from_db()
         # Uses the registrar-returned expiry, NOT local 365*years date math.
         self.assertEqual(self.domain.expires_at, registrar_expiry)
+
+    def test_pending_renewal_records_operation_without_changing_expiry(self) -> None:
+        original_expiry = self.domain.expires_at
+        self.domain.renewal_notices_sent = 30
+        self.domain.save(update_fields=["renewal_notices_sent", "updated_at"])
+        operation_url = "https://api.gandi.net/v5/domain/domains/renew.com/renew/operations/42"
+
+        with patch(
+            "apps.domains.services.DomainRegistrarGateway.renew_domain",
+            return_value=(
+                True,
+                {
+                    "new_expires_at": None,
+                    "pending": True,
+                    "operation_handle": operation_url,
+                },
+            ),
+        ):
+            result = DomainLifecycleService.process_domain_renewal(self.domain, years=2)
+
+        self.assertTrue(result.is_ok(), result)
+        self.assertIn("awaiting confirmation", result.unwrap())
+
+        self.domain.refresh_from_db()
+        self.assertEqual(self.domain.expires_at, original_expiry)
+        self.assertEqual(self.domain.renewal_notices_sent, 30)
+
+        op = DomainOperation.objects.get(domain=self.domain, operation_type="renew")
+        self.assertEqual(op.state, "submitted")
+        self.assertEqual(op.registrar_operation_id, operation_url)
+        self.assertEqual(
+            op.parameters,
+            {
+                "years": 2,
+                "prev_expires_at": original_expiry.isoformat(),
+            },
+        )
+        self.assertIsNotNone(op.submitted_at)
+        self.assertIsNone(op.completed_at)
 
     def test_renewal_failure_returns_err_and_does_not_extend(self) -> None:
         original_expiry = self.domain.expires_at

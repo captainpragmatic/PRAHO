@@ -479,12 +479,13 @@ class DomainLifecycleService:
            later retry/worker can re-submit — the gateway is idempotent per domain.
 
         Returns Ok(domain) ONLY when the registrar confirms and the domain is
-        active. On a definite rejection the pending row is removed and Err is
-        returned so the caller can cleanly retry. On an UNKNOWN outcome (network
-        error / 5xx — the registrar may already hold the registration) the row is
-        kept pending and Err is returned so the caller never reports success and
-        never orphans a possibly-real registration. Durable reconciliation of
-        pending rows is tracked separately (issue #237).
+        active. An explicit accepted-but-unconfirmed response keeps the domain
+        pending, records a submitted operation, and returns an awaiting-confirmation
+        Err that tells the caller not to resubmit. On a definite rejection the
+        pending row is removed and Err is returned so the caller can cleanly retry.
+        On an UNKNOWN outcome (network error / 5xx — the registrar may already hold
+        the registration) the row is kept pending and Err is returned so the caller
+        never reports success and never orphans a possibly-real registration.
         """
         try:
             with transaction.atomic():
@@ -508,6 +509,13 @@ class DomainLifecycleService:
         if outcome == "confirmed":
             domain.refresh_from_db()
             return Ok(domain)
+        if outcome == "pending_accepted":
+            return Err(
+                cast(
+                    str,
+                    _("Registration accepted by the registrar and awaiting confirmation — do not resubmit."),
+                )
+            )
         if outcome == "pending_unknown":
             return Err(
                 cast(
@@ -526,13 +534,15 @@ class DomainLifecycleService:
         """Submit a pending domain to its registrar and resolve its final state.
 
         Returns one of:
-        - ("confirmed", "")      registrar confirmed; the domain is now active.
-        - ("rejected", message)  definite failure (conflict/auth/validation); the
-                                 pending row is DELETED so a retry isn't deadlocked
-                                 by the uniqueness precondition.
-        - ("pending_unknown", message)  network/5xx (UNKNOWN) or a post-confirm
-                                 persistence failure; the row is KEPT pending
-                                 because the registrar may hold the registration.
+        - ("confirmed", "")       registrar confirmed; the domain is now active.
+        - ("pending_accepted", "") registrar accepted but has not confirmed; the
+                                  domain and a submitted operation stay pending.
+        - ("rejected", message)   definite failure (conflict/auth/validation); the
+                                  pending row is DELETED so a retry isn't deadlocked
+                                  by the uniqueness precondition.
+        - ("pending_unknown", message) network/5xx (UNKNOWN) or a post-confirm
+                                  persistence failure; the row is KEPT pending
+                                  because the registrar may hold the registration.
         Never raises.
         """
         success, payload = DomainRegistrarGateway.register_domain(
@@ -550,6 +560,33 @@ class DomainLifecycleService:
             logger.warning("Registrar rejected %s (row removed for clean retry): %s", domain.name, error)
             domain.delete()
             return "rejected", error
+
+        if payload.get("pending"):
+            # Accepted, not completed (#257): record the submitted operation so the
+            # reconciliation worker can converge it, keep the Domain row pending. A
+            # bookkeeping failure must not flip the outcome — the registrar HAS
+            # accepted, and the reconciler finds the domain via its pending status
+            # regardless of whether the operation row exists.
+            try:
+                with transaction.atomic():
+                    op = DomainOperation(
+                        domain=domain,
+                        registrar=config.registrar,
+                        operation_type="register",
+                        parameters={"years": config.years},
+                    )
+                    op.mark_submitted(
+                        registrar_operation_id=payload.get("operation_handle", ""),
+                    )
+                    op.save()
+            except Exception as e:
+                logger.error(
+                    "🔥 [Domain] Failed to record accepted registration operation for %s: %s",
+                    domain.name,
+                    e,
+                    exc_info=True,
+                )
+            return "pending_accepted", ""
 
         try:
             with transaction.atomic():
@@ -638,7 +675,7 @@ class DomainLifecycleService:
         return None
 
     @staticmethod
-    def process_domain_renewal(
+    def process_domain_renewal(  # noqa: PLR0911  # multi-outcome lifecycle: precondition/policy/pending/confirmed exits
         domain: Domain, years: int = 1, idempotency_token: str | None = None
     ) -> Result[str, str]:
         """Process domain renewal by renewing at the registrar first.
@@ -669,6 +706,36 @@ class DomainLifecycleService:
                     error=payload.get("error", "unknown error")
                 )
             )
+
+        if payload.get("pending"):
+            # Accepted, not completed (#257): the registrar has taken the chargeable
+            # renewal but not confirmed the new expiry. Record the submitted operation
+            # (with the pre-renewal expiry so the reconciler can prove the extension)
+            # and leave expires_at untouched — a bookkeeping failure logs loudly but
+            # must not turn an accepted renewal into a reported failure.
+            try:
+                with transaction.atomic():
+                    op = DomainOperation(
+                        domain=domain,
+                        registrar=domain.registrar,
+                        operation_type="renew",
+                        parameters={
+                            "years": years,
+                            "prev_expires_at": cast(datetime, domain.expires_at).isoformat(),
+                        },
+                    )
+                    op.mark_submitted(
+                        registrar_operation_id=payload.get("operation_handle", ""),
+                    )
+                    op.save()
+            except Exception as e:
+                logger.error(
+                    "🔥 [Domain] Failed to record accepted renewal operation for %s: %s",
+                    domain.name,
+                    e,
+                    exc_info=True,
+                )
+            return Ok(cast(str, _("Renewal accepted by the registrar and awaiting confirmation.")))
 
         new_expiration = payload.get("new_expires_at")
         if not new_expiration:
@@ -704,7 +771,7 @@ class DomainLifecycleService:
     # -- Phase 2: Transfer, nameservers, lock --------------------------------
 
     @staticmethod
-    def initiate_transfer(
+    def initiate_transfer(  # noqa: PLR0911  # multi-outcome lifecycle: gateway/registrant/TLD/retriability exits
         domain_name: str, epp_code: str, customer: Customer, registrar: Registrar
     ) -> Result[DomainOperation, str]:
         """Initiate inbound domain transfer (two-phase: DB record + registrar submit)."""
@@ -714,6 +781,14 @@ class DomainLifecycleService:
             gateway = RegistrarGatewayFactory.create_gateway(registrar)
         except ValueError:
             return Err(f"No gateway for registrar {registrar.name}")
+
+        # Gandi requires an owner contact on transfer-in; validate registrant data
+        # BEFORE creating any row so incomplete customer data fails with an
+        # actionable message instead of a registrar rejection.
+        registrant_result = DomainLifecycleService._build_registrant_data(customer)
+        if registrant_result.is_err():
+            return Err(registrant_result.unwrap_err())
+        registrant_data = registrant_result.unwrap()
 
         # Phase 1: create Domain + DomainOperation records
         try:
@@ -746,7 +821,11 @@ class DomainLifecycleService:
         # Phase 2: submit to registrar (outside the transaction above). Use the stored
         # (lowercased) domain.name so the gateway idempotency key matches on any retry —
         # passing the raw domain_name would key "Example.com" separately from "example.com".
-        result = gateway.initiate_transfer(domain.name, epp_code)
+        result = gateway.initiate_transfer(
+            domain.name,
+            epp_code,
+            registrant_data=registrant_data,
+        )
         if result.is_ok():
             transfer = result.unwrap()
             op.mark_submitted(registrar_operation_id=transfer.transfer_id)
@@ -789,6 +868,21 @@ class DomainLifecycleService:
 
         result = gateway.update_nameservers(domain.name, nameservers)
         if result.is_ok():
+            update = result.unwrap()
+            if update.pending:
+                # Accepted, not completed (#257): leave domain.nameservers untouched
+                # until the reconciler confirms the registrar applied the change.
+                op.mark_submitted(registrar_operation_id=update.operation_handle)
+                op.save(
+                    update_fields=[
+                        "state",
+                        "registrar_operation_id",
+                        "submitted_at",
+                        "updated_at",
+                    ]
+                )
+                return Ok(op)
+
             domain.nameservers = nameservers
             domain.save(update_fields=["nameservers", "updated_at"])
             op.mark_completed()
@@ -819,6 +913,22 @@ class DomainLifecycleService:
 
         result = gateway.set_lock(domain.name, locked)
         if result.is_ok():
+            lock_result = result.unwrap()
+            if lock_result.pending:
+                # Accepted, not completed (#257): local lock state waits for confirmation.
+                op.mark_submitted(
+                    registrar_operation_id=lock_result.operation_handle,
+                )
+                op.save(
+                    update_fields=[
+                        "state",
+                        "registrar_operation_id",
+                        "submitted_at",
+                        "updated_at",
+                    ]
+                )
+                return Ok(op)
+
             domain.locked = locked
             domain.save(update_fields=["locked", "updated_at"])
             op.mark_completed()
@@ -1236,6 +1346,8 @@ class DomainRegistrarGateway:
                 "expires_at": reg.expires_at,
                 "nameservers": reg.nameservers,
                 "epp_code": reg.epp_code,
+                "pending": reg.pending,
+                "operation_handle": reg.operation_handle,
             }
         # Carry the retriability so the lifecycle can tell a definite rejection
         # (safe to delete the pending row) from an UNKNOWN outcome (may have
@@ -1259,7 +1371,11 @@ class DomainRegistrarGateway:
         )
         if result.is_ok():
             renewal = result.unwrap()
-            return True, {"new_expires_at": renewal.new_expires_at}
+            return True, {
+                "new_expires_at": renewal.new_expires_at,
+                "pending": renewal.pending,
+                "operation_handle": renewal.operation_handle,
+            }
         return False, {"error": str(result.unwrap_err())}
 
     @staticmethod

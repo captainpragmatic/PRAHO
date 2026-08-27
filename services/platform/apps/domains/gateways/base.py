@@ -89,19 +89,31 @@ HTTP_SERVER_ERROR = 500
 
 @dataclass(frozen=True)
 class DomainRegistrationResult:
-    """Successful domain registration response from a registrar."""
+    """Domain registration response from a registrar.
+
+    ``pending=True`` means the registrar accepted the request but has not confirmed
+    completion; ``expires_at`` may then be None and ``registrar_domain_id`` empty.
+    """
 
     registrar_domain_id: str
-    expires_at: datetime
+    expires_at: datetime | None
     nameservers: list[str]
     epp_code: str = ""
+    pending: bool = False
+    operation_handle: str = ""
 
 
 @dataclass(frozen=True)
 class DomainRenewalResult:
-    """Successful domain renewal response from a registrar."""
+    """Domain renewal response from a registrar.
 
-    new_expires_at: datetime
+    ``pending=True`` means the registrar accepted the request but has not confirmed
+    completion; ``new_expires_at`` may then be None.
+    """
+
+    new_expires_at: datetime | None
+    pending: bool = False
+    operation_handle: str = ""
 
 
 @dataclass(frozen=True)
@@ -146,6 +158,8 @@ class NameserverUpdateResult:
     """Result from a nameserver update operation."""
 
     nameservers: list[str]
+    pending: bool = False
+    operation_handle: str = ""
 
 
 @dataclass(frozen=True)
@@ -153,6 +167,8 @@ class DomainLockResult:
     """Result from a lock/unlock operation."""
 
     locked: bool
+    pending: bool = False
+    operation_handle: str = ""
 
 
 # ===============================================================================
@@ -219,6 +235,7 @@ class BaseRegistrarGateway(ABC):
         self,
         domain_name: str,
         epp_code: str,
+        registrant_data: dict[str, Any] | None = None,
     ) -> Result[DomainTransferResult, RegistrarAPIError]:
         """Registrar-specific transfer initiation. Override to enable."""
         raise NotImplementedError(f"{self.gateway_name} does not support transfers")
@@ -562,6 +579,7 @@ class BaseRegistrarGateway(ABC):
         self,
         domain_name: str,
         epp_code: str,
+        registrant_data: dict[str, Any] | None = None,
     ) -> Result[DomainTransferResult, RegistrarAPIError]:
         """Initiate domain transfer with circuit breaker and atomic idempotency.
 
@@ -594,7 +612,7 @@ class BaseRegistrarGateway(ABC):
             return Err(RegistrarConflictError(domain_name, self.registrar.name))
 
         result = self._run_phase2_op(
-            lambda: self._do_initiate_transfer(domain_name, epp_code),
+            lambda: self._do_initiate_transfer(domain_name, epp_code, registrant_data),
             operation=f"transfer:{domain_name}",
             unsupported=f"{self.gateway_name} does not support transfers",
         )

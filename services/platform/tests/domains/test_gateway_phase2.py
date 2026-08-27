@@ -15,12 +15,14 @@ from django.test import TestCase, override_settings
 from django_fsm import TransitionNotAllowed
 
 from apps.common.types import Err, Ok, Retriability
-from apps.customers.models import Customer
+from apps.customers.models import Customer, CustomerAddress, CustomerTaxProfile
 from apps.domains.gateways.base import (
     _IDEMPOTENCY_IN_PROGRESS,
     DomainAvailabilityResult,
     DomainInfoResult,
+    DomainLockResult,
     DomainTransferResult,
+    NameserverUpdateResult,
 )
 from apps.domains.gateways.errors import RegistrarAPIError, RegistrarErrorCode, RegistrarTransientError
 from apps.domains.gateways.gandi import GandiGateway
@@ -155,19 +157,18 @@ class GandiTransferTests(TestCase):
     @patch("apps.domains.gateways.base.cache")
     def test_successful_transfer(self, mock_cache: MagicMock, mock_request: MagicMock) -> None:
         mock_cache.get.side_effect = _cache_get_stub
+        operation_url = "https://api.gandi.net/v5/domain/transferin/example.com"
         mock_request.return_value = _mock_response(
             202,
-            {
-                "id": "transfer-123",
-                "status": "pending",
-            },
+            {"message": "Transfer accepted"},
+            headers={"Location": operation_url},
         )
 
         result = self.gateway.initiate_transfer("example.com", "EPP-CODE")
 
         self.assertTrue(result.is_ok())
         transfer = result.unwrap()
-        self.assertEqual(transfer.transfer_id, "transfer-123")
+        self.assertEqual(transfer.transfer_id, operation_url)
         self.assertEqual(transfer.status, "pending")
 
     @patch("apps.domains.gateways.gandi.GandiGateway._api_request")
@@ -333,6 +334,7 @@ class GandiNameserverTests(TestCase):
 
         self.assertTrue(result.is_ok())
         self.assertEqual(result.unwrap().nameservers, ["ns1.new.com", "ns2.new.com"])
+        self.assertFalse(result.unwrap().pending)
 
 
 @override_settings(REGISTRAR_ADAPTERS_VERIFIED=True)
@@ -353,6 +355,7 @@ class GandiLockTests(TestCase):
 
         self.assertTrue(result.is_ok())
         self.assertTrue(result.unwrap().locked)
+        self.assertFalse(result.unwrap().pending)
 
 
 # ===============================================================================
@@ -550,9 +553,23 @@ class LifecycleServicePhase2FailureContractTests(TestCase):
             registration_price_cents=1200, renewal_price_cents=1200, transfer_price_cents=1200,
         )
         self.customer = Customer.objects.create(
-            name="Test Customer", primary_email="test@example.com",
-            company_name="Test Co", customer_type="individual",
+            name="Test Customer",
+            primary_email="test@example.com",
+            primary_phone="+40712345678",
+            company_name="Test Co",
+            customer_type="individual",
         )
+        CustomerAddress.objects.create(
+            customer=self.customer,
+            address_line1="Str. Test 1",
+            city="Bucuresti",
+            county="Bucuresti",
+            postal_code="010101",
+            country="România",
+            is_primary=True,
+            is_current=True,
+        )
+        CustomerTaxProfile.objects.create(customer=self.customer, cnp="1900101123456")
         self.domain = Domain.objects.create(
             name="active.com", tld=self.tld, registrar=self.registrar, customer=self.customer,
             status="active", nameservers=["ns1.old.com"], locked=False,
@@ -586,14 +603,18 @@ class LifecycleServicePhase2FailureContractTests(TestCase):
         self.assertTrue(result.is_err(), result)
         self.assertFalse(self.Domain.objects.filter(name="transfer2.com").exists())
 
-    def test_transfer_passes_lowercased_domain_to_gateway(self) -> None:
-        """The DB row stores domain.name lowercased; the gateway call must use the SAME
-        casing, or the gateway idempotency key (keyed on the passed name) won't match a
-        retry and a duplicate chargeable transfer can slip through (Copilot finding)."""
-        captured: dict[str, str] = {}
+    def test_transfer_passes_lowercased_domain_and_registrant_data_to_gateway(self) -> None:
+        """The gateway receives the canonical domain and validated owner contact."""
+        captured: dict[str, Any] = {}
 
-        def _capture(name: str, epp: str) -> Ok[DomainTransferResult]:
+        def _capture(
+            name: str,
+            epp: str,
+            registrant_data: dict[str, Any] | None = None,
+        ) -> Ok[DomainTransferResult]:
             captured["name"] = name
+            captured["epp"] = epp
+            captured["registrant_data"] = registrant_data
             return Ok(DomainTransferResult(transfer_id="t-1", status="pending"))
 
         gw = MagicMock()
@@ -603,6 +624,11 @@ class LifecycleServicePhase2FailureContractTests(TestCase):
 
         self.assertTrue(result.is_ok(), result)
         self.assertEqual(captured["name"], "example.com")
+        self.assertEqual(captured["epp"], "EPP")
+        registrant_data = captured["registrant_data"]
+        self.assertIsNotNone(registrant_data)
+        self.assertEqual(registrant_data["email"], "test@example.com")
+        self.assertEqual(registrant_data["cnp"], "1900101123456")
 
     def test_transfer_unknown_keeps_pending_row(self) -> None:
         with self._mock_gateway(initiate_transfer=self._err(RegistrarErrorCode.NETWORK_ERROR, Retriability.UNKNOWN)):
@@ -611,6 +637,30 @@ class LifecycleServicePhase2FailureContractTests(TestCase):
         self.assertTrue(result.is_err(), result)
         # UNKNOWN — the transfer may have started; keep the row for reconciliation.
         self.assertTrue(self.Domain.objects.filter(name="transfer3.com").exists())
+
+    def test_transfer_missing_registrant_data_fails_before_creating_domain(self) -> None:
+        incomplete_customer = Customer.objects.create(
+            name="Missing Contact",
+            primary_email="missing@example.com",
+            customer_type="individual",
+        )
+        gateway = MagicMock()
+
+        with patch(
+            "apps.domains.gateways.RegistrarGatewayFactory.create_gateway",
+            return_value=gateway,
+        ):
+            result = DomainLifecycleService.initiate_transfer(
+                "missing.com",
+                "EPP",
+                incomplete_customer,
+                self.registrar,
+            )
+
+        self.assertTrue(result.is_err(), result)
+        self.assertIn("missing required registrant data", str(result.unwrap_err()))
+        self.assertFalse(Domain.objects.filter(name="missing.com").exists())
+        gateway.initiate_transfer.assert_not_called()
 
     def test_update_nameservers_failure_returns_err(self) -> None:
         with self._mock_gateway(update_nameservers=self._err(RegistrarErrorCode.INTERNAL_ERROR, Retriability.UNKNOWN)):
@@ -625,6 +675,50 @@ class LifecycleServicePhase2FailureContractTests(TestCase):
             result = DomainLifecycleService.set_domain_lock(self.domain, locked=True)
 
         self.assertTrue(result.is_err(), result)
+        self.domain.refresh_from_db()
+        self.assertFalse(self.domain.locked)
+
+    def test_pending_nameserver_update_submits_operation_without_local_change(self) -> None:
+        operation_url = "https://api.gandi.net/v5/domain/domains/active.com/nameservers/operations/42"
+        gateway_result = Ok(
+            NameserverUpdateResult(
+                nameservers=["ns1.new.com"],
+                pending=True,
+                operation_handle=operation_url,
+            )
+        )
+
+        with self._mock_gateway(update_nameservers=gateway_result):
+            result = DomainLifecycleService.update_nameservers(self.domain, ["ns1.new.com"])
+
+        self.assertTrue(result.is_ok(), result)
+        op = result.unwrap()
+        op.refresh_from_db()
+        self.assertEqual(op.state, "submitted")
+        self.assertEqual(op.registrar_operation_id, operation_url)
+        self.assertIsNone(op.completed_at)
+        self.domain.refresh_from_db()
+        self.assertEqual(self.domain.nameservers, ["ns1.old.com"])
+
+    def test_pending_lock_update_submits_operation_without_local_change(self) -> None:
+        operation_url = "https://api.gandi.net/v5/domain/domains/active.com/status/operations/42"
+        gateway_result = Ok(
+            DomainLockResult(
+                locked=True,
+                pending=True,
+                operation_handle=operation_url,
+            )
+        )
+
+        with self._mock_gateway(set_lock=gateway_result):
+            result = DomainLifecycleService.set_domain_lock(self.domain, locked=True)
+
+        self.assertTrue(result.is_ok(), result)
+        op = result.unwrap()
+        op.refresh_from_db()
+        self.assertEqual(op.state, "submitted")
+        self.assertEqual(op.registrar_operation_id, operation_url)
+        self.assertIsNone(op.completed_at)
         self.domain.refresh_from_db()
         self.assertFalse(self.domain.locked)
 
@@ -671,6 +765,17 @@ class GandiPayloadShapeTests(TestCase):
     def setUp(self) -> None:
         self.registrar = _make_registrar("gandi")
         self.gateway = GandiGateway(self.registrar)
+        self.registrant = {
+            "first_name": "Ion",
+            "last_name": "Popescu",
+            "email": "ion@example.com",
+            "phone": "+40721000000",
+            "address": "Str. Exemplu 1",
+            "city": "Bucuresti",
+            "postal_code": "010101",
+            "country_code": "RO",
+            "entity_type": "individual",
+        }
 
     @patch("apps.domains.gateways.gandi.GandiGateway._api_request")
     @patch("apps.domains.gateways.base.cache")
@@ -686,16 +791,40 @@ class GandiPayloadShapeTests(TestCase):
             headers={"Location": "https://api.gandi.net/v5/domain/transferin/example.com"},
         )
 
-        result = self.gateway.initiate_transfer("example.com", "EPP-CODE")
+        result = self.gateway.initiate_transfer(
+            "example.com",
+            "EPP-CODE",
+            registrant_data=self.registrant,
+        )
 
         body = mock_request.call_args.kwargs["json"]
         self.assertEqual(body["authinfo"], "EPP-CODE")
         self.assertNotIn("auth_info", body)
         self.assertEqual(body["fqdn"], "example.com")
-        self.assertTrue(mock_request.call_args.args[1].endswith("/domain/transferin"))
-        # A real 202 must still yield a usable operation handle rather than "".
+        self.assertEqual(
+            body["owner"],
+            {
+                "given": "Ion",
+                "family": "Popescu",
+                "email": "ion@example.com",
+                "phone": "+40721000000",
+                "streetaddr": "Str. Exemplu 1",
+                "city": "Bucuresti",
+                "zip": "010101",
+                "country": "RO",
+                "type": "individual",
+                "orgname": "",
+            },
+        )
+        self.assertEqual(
+            mock_request.call_args.args[1],
+            "https://api.gandi.net/v5/domain/transferin",
+        )
         self.assertTrue(result.is_ok(), result)
-        self.assertTrue(result.unwrap().transfer_id, "202 must produce a handle, not an empty id")
+        self.assertEqual(
+            result.unwrap().transfer_id,
+            "https://api.gandi.net/v5/domain/transferin/example.com",
+        )
 
     @patch("apps.domains.gateways.gandi.GandiGateway._api_request")
     @patch("apps.domains.gateways.base.cache")
@@ -716,6 +845,7 @@ class GandiPayloadShapeTests(TestCase):
 
         self.assertEqual(mock_request.call_args.kwargs["params"], {"sharing_id": "reseller-org-id"})
         self.assertNotIn("sharing_id", mock_request.call_args.kwargs["json"])
+        self.assertNotIn("owner", mock_request.call_args.kwargs["json"])
 
     @patch("apps.domains.gateways.gandi.GandiGateway._api_request")
     @patch("apps.domains.gateways.base.cache")
@@ -741,29 +871,56 @@ class GandiPayloadShapeTests(TestCase):
     ) -> None:
         """#265(2): the endpoint takes {"nameservers": [...]}, not a bare array."""
         mock_cache.get.return_value = 0
-        mock_request.return_value = _mock_response(200, {})
+        operation_url = "https://api.gandi.net/v5/domain/domains/example.com/nameservers/operations/42"
+        mock_request.return_value = _mock_response(
+            202,
+            {"message": "Nameserver update accepted"},
+            headers={"Location": operation_url},
+        )
         nameservers = ["ns1.new.com", "ns2.new.com"]
 
-        self.gateway.update_nameservers("example.com", nameservers)
+        result = self.gateway.update_nameservers("example.com", nameservers)
 
         body = mock_request.call_args.kwargs["json"]
         self.assertEqual(body, {"nameservers": nameservers})
         self.assertNotIsInstance(body, list)
+        self.assertEqual(
+            mock_request.call_args.args[1],
+            "https://api.gandi.net/v5/domain/domains/example.com/nameservers",
+        )
+        self.assertTrue(result.is_ok(), result)
+        update = result.unwrap()
+        self.assertEqual(update.nameservers, nameservers)
+        self.assertTrue(update.pending)
+        self.assertEqual(update.operation_handle, operation_url)
 
     @patch("apps.domains.gateways.gandi.GandiGateway._api_request")
     @patch("apps.domains.gateways.base.cache")
     def test_lock_patches_the_status_subresource(self, mock_cache: MagicMock, mock_request: MagicMock) -> None:
         """#265(3): lock lives on /status, and must not touch autorenew."""
         mock_cache.get.return_value = 0
-        mock_request.return_value = _mock_response(200, {})
+        operation_url = "https://api.gandi.net/v5/domain/domains/example.com/status/operations/42"
+        mock_request.return_value = _mock_response(
+            202,
+            {"message": "Lock update accepted"},
+            headers={"Location": operation_url},
+        )
 
-        self.gateway.set_lock("example.com", locked=True)
+        result = self.gateway.set_lock("example.com", locked=True)
 
         args = mock_request.call_args.args
         body = mock_request.call_args.kwargs["json"]
         self.assertEqual(args[0], "PATCH")
-        self.assertTrue(args[1].endswith("/domain/domains/example.com/status"))
+        self.assertEqual(
+            args[1],
+            "https://api.gandi.net/v5/domain/domains/example.com/status",
+        )
         self.assertEqual(body, {"clientTransferProhibited": True})
+        self.assertTrue(result.is_ok(), result)
+        lock_result = result.unwrap()
+        self.assertTrue(lock_result.locked)
+        self.assertTrue(lock_result.pending)
+        self.assertEqual(lock_result.operation_handle, operation_url)
 
     @patch("apps.domains.gateways.gandi.GandiGateway._api_request")
     @patch("apps.domains.gateways.base.cache")
@@ -772,11 +929,25 @@ class GandiPayloadShapeTests(TestCase):
     ) -> None:
         """The unlock path previously sent {"autorenew": None} — a different field entirely."""
         mock_cache.get.return_value = 0
-        mock_request.return_value = _mock_response(200, {})
+        operation_url = "https://api.gandi.net/v5/domain/domains/example.com/status/operations/43"
+        mock_request.return_value = _mock_response(
+            202,
+            {"message": "Unlock accepted"},
+            headers={"Location": operation_url},
+        )
 
-        self.gateway.set_lock("example.com", locked=False)
+        result = self.gateway.set_lock("example.com", locked=False)
 
         body = mock_request.call_args.kwargs["json"]
         self.assertEqual(body, {"clientTransferProhibited": False})
         self.assertNotIn("autorenew", body)
         self.assertNotIn("tags", body)
+        self.assertEqual(
+            mock_request.call_args.args[1],
+            "https://api.gandi.net/v5/domain/domains/example.com/status",
+        )
+        self.assertTrue(result.is_ok(), result)
+        lock_result = result.unwrap()
+        self.assertFalse(lock_result.locked)
+        self.assertTrue(lock_result.pending)
+        self.assertEqual(lock_result.operation_handle, operation_url)

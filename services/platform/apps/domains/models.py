@@ -587,6 +587,8 @@ class DomainOperation(ConcurrentTransitionMixin, models.Model):
     """
 
     OPERATION_TYPE_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
+        ("register", _("Registration")),
+        ("renew", _("Renewal")),
         ("transfer_in", _("Transfer In")),
         ("transfer_out", _("Transfer Out")),
         ("nameserver_update", _("Nameserver Update")),
