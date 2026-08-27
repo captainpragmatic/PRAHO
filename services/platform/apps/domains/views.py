@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import logging
+import uuid
 from typing import Any, cast
 
 from dateutil.relativedelta import relativedelta
@@ -526,10 +527,26 @@ def domain_renew(request: HttpRequest, domain_id: str) -> HttpResponse:
     # Handle renewal request
     if request.method == "POST":
         years = _parse_requested_years(request.POST.get("years"))
+        # #259: one form render = one renewal intent. The hidden UUID makes a
+        # double-submit of the same form replay at the gateway while a freshly
+        # rendered form is a distinct intent. A missing/garbled token falls back
+        # to the legacy tokenless key, which still collapses double-submits.
+        raw_renewal_token = request.POST.get("renewal_token")
+        try:
+            parsed_renewal_token = uuid.UUID(raw_renewal_token or "")
+        except (ValueError, TypeError, AttributeError):
+            idempotency_token = None
+        else:
+            idempotency_token = f"staff_renew:{parsed_renewal_token}"
+
         if years is None:
             messages.error(request, _("❌ Please select a valid renewal period"))
         else:
-            renewal_result = DomainLifecycleService.process_domain_renewal(domain=domain, years=years)
+            renewal_result = DomainLifecycleService.process_domain_renewal(
+                domain=domain,
+                years=years,
+                idempotency_token=idempotency_token,
+            )
 
             if renewal_result.is_ok():
                 messages.success(request, _(f"✅ Domain renewed for {years} year(s)!"))
@@ -554,6 +571,7 @@ def domain_renew(request: HttpRequest, domain_id: str) -> HttpResponse:
         "domain": domain,
         "renewal_costs": renewal_costs,
         "days_until_expiry": domain.days_until_expiry,
+        "renewal_token": str(uuid.uuid4()),
     }
 
     return render(request, "domains/domain_renew.html", context)
