@@ -8,7 +8,12 @@ from typing import Any
 from django_q.models import Schedule
 from django_q.tasks import schedule
 
-from apps.domains.services import DomainNotificationService, DomainOrderService
+from apps.domains.services import (
+    DomainNotificationService,
+    DomainOrderService,
+    DomainReconciliationService,
+    DomainReconciliationSummary,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -74,16 +79,37 @@ def process_domain_renewal_notices() -> dict[str, Any]:
     }
 
 
-def setup_domain_scheduled_tasks() -> dict[str, str]:
-    """Register the daily domain renewal-notice worker idempotently."""
-    schedule_name = "domains-renewal-notices"
-    if Schedule.objects.filter(name=schedule_name).exists():
-        return {"renewal_notices": "already_exists"}
+def reconcile_pending_domain_operations() -> DomainReconciliationSummary:
+    """Run one durable domain reconciliation batch (#258)."""
+    return DomainReconciliationService.reconcile()
 
-    schedule(
-        "apps.domains.tasks.process_domain_renewal_notices",
-        schedule_type=Schedule.DAILY,
-        name=schedule_name,
-        cluster="praho-cluster",
-    )
-    return {"renewal_notices": "created"}
+
+def setup_domain_scheduled_tasks() -> dict[str, str]:
+    """Register both domain workers independently and idempotently."""
+    results: dict[str, str] = {}
+
+    renewal_schedule_name = "domains-renewal-notices"
+    if Schedule.objects.filter(name=renewal_schedule_name).exists():
+        results["renewal_notices"] = "already_exists"
+    else:
+        schedule(
+            "apps.domains.tasks.process_domain_renewal_notices",
+            schedule_type=Schedule.DAILY,
+            name=renewal_schedule_name,
+            cluster="praho-cluster",
+        )
+        results["renewal_notices"] = "created"
+
+    reconciliation_schedule_name = "domains-reconcile-pending"
+    if Schedule.objects.filter(name=reconciliation_schedule_name).exists():
+        results["reconcile_pending"] = "already_exists"
+    else:
+        schedule(
+            "apps.domains.tasks.reconcile_pending_domain_operations",
+            schedule_type=Schedule.HOURLY,
+            name=reconciliation_schedule_name,
+            cluster="praho-cluster",
+        )
+        results["reconcile_pending"] = "created"
+
+    return results

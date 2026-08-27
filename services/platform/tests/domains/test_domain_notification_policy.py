@@ -188,6 +188,18 @@ class DomainRenewalNoticeTaskTests(TestCase):
         first = setup_domain_scheduled_tasks()
         second = setup_domain_scheduled_tasks()
 
-        self.assertEqual(first, {"renewal_notices": "created"})
-        self.assertEqual(second, {"renewal_notices": "already_exists"})
+        self.assertEqual(
+            first,
+            {
+                "renewal_notices": "created",
+                "reconcile_pending": "created",
+            },
+        )
+        self.assertEqual(
+            second,
+            {
+                "renewal_notices": "already_exists",
+                "reconcile_pending": "already_exists",
+            },
+        )
         self.assertEqual(Schedule.objects.filter(name="domains-renewal-notices").count(), 1)
