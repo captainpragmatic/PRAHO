@@ -494,7 +494,7 @@ class DomainLifecycleService:
         try:
             with transaction.atomic():
                 domain = Domain.objects.create(
-                    name=config.domain_name.lower(),
+                    name=canonicalize_domain_name(config.domain_name),
                     tld=config.tld,
                     registrar=config.registrar,
                     customer=config.customer,
@@ -803,7 +803,7 @@ class DomainLifecycleService:
                     return Err(cast(str, _(f"TLD '.{tld_ext}' is not supported")))
 
                 domain = Domain.objects.create(
-                    name=domain_name.lower(),
+                    name=canonicalize_domain_name(domain_name),
                     tld=tld,
                     registrar=registrar,
                     customer=customer,

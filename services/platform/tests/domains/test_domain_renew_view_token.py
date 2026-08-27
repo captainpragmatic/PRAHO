@@ -139,6 +139,30 @@ class DomainRenewViewTokenTests(TestCase):
             ]
         )
 
+    def test_pending_renewal_surfaces_the_awaiting_confirmation_message(self) -> None:
+        """A registrar-accepted (pending) renewal must not be reported as completed."""
+        accepted_message = "Renewal accepted by the registrar and awaiting confirmation."
+
+        with patch(
+            "apps.domains.views.DomainLifecycleService.process_domain_renewal",
+            return_value=Ok(accepted_message),
+        ):
+            response = self.client.post(
+                self.renew_url,
+                {"years": "1", "renewal_token": str(uuid.uuid4())},
+                follow=True,
+            )
+
+        rendered_messages = [str(message) for message in response.context["messages"]]
+        self.assertTrue(
+            any(accepted_message in message for message in rendered_messages),
+            rendered_messages,
+        )
+        self.assertFalse(
+            any("renewed for" in message for message in rendered_messages),
+            rendered_messages,
+        )
+
     def test_validation_failure_rerenders_with_fresh_token(self) -> None:
         submitted_token = str(uuid.uuid4())
 

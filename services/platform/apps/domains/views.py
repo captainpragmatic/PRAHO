@@ -549,7 +549,10 @@ def domain_renew(request: HttpRequest, domain_id: str) -> HttpResponse:
             )
 
             if renewal_result.is_ok():
-                messages.success(request, _(f"✅ Domain renewed for {years} year(s)!"))
+                # Surface the service's own outcome message: a Gandi 202 renewal is
+                # ACCEPTED, not completed — claiming "renewed!" there would be a lie
+                # the reconciliation worker has not yet made true.
+                messages.success(request, f"✅ {renewal_result.unwrap()}")
                 return redirect("domains:detail", domain_id=domain_id)
             else:
                 messages.error(request, _(f"❌ Renewal failed: {renewal_result.unwrap_err()}"))
