@@ -8,9 +8,30 @@ from typing import Any
 from django_q.models import Schedule
 from django_q.tasks import schedule
 
-from apps.domains.services import DomainNotificationService
+from apps.domains.services import DomainNotificationService, DomainOrderService
 
 logger = logging.getLogger(__name__)
+
+
+def process_order_domain_items(order_id: str) -> dict[str, Any]:
+    """Process a paid order's domain items (register/renew) off the request path.
+
+    Enqueued by the orders service (transaction.on_commit) when an order enters
+    provisioning: the registrar call is network I/O and must never run inside
+    the order transaction. Per-item failure isolation lives in
+    DomainOrderService.process_domain_order_items.
+    """
+    from apps.orders.models import Order  # noqa: PLC0415  # Deferred: avoids circular import
+
+    try:
+        order = Order.objects.get(pk=order_id)
+    except Order.DoesNotExist:
+        logger.warning("⚠️ [Domains] Order %s no longer exists — skipping domain item processing", order_id)
+        return {"success": False, "processed": 0, "error": "order not found"}
+
+    processed = DomainOrderService.process_domain_order_items(order)
+    logger.info("✅ [Domains] Processed %d domain item(s) for order %s", len(processed), order_id)
+    return {"success": True, "processed": len(processed), "domains": [domain.name for domain in processed]}
 
 
 def process_domain_renewal_notices() -> dict[str, Any]:

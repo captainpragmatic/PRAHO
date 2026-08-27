@@ -608,6 +608,17 @@ class OrderService:
                         f"Cannot transition to provisioning: recurring enrollment failed: {enrollment.unwrap_err()}"
                     )
 
+                # Domain items (register/renew) provision off-transaction: the registrar
+                # call is network I/O, so enqueue a Django-Q2 task once the transition
+                # commits. Skipped entirely for orders without domain items.
+                if order.domain_items.exists():
+                    from django_q.tasks import async_task  # noqa: PLC0415  # Deferred
+
+                    domain_order_id = str(order.pk)
+                    transaction.on_commit(
+                        lambda: async_task("apps.domains.tasks.process_order_domain_items", domain_order_id)
+                    )
+
             # Phase B: Create proforma when order transitions to awaiting_payment.
             # Per F3: MUST be inside the same transaction, NOT in on_commit callback.
             # Proforma creation is sync DB-only (~20ms). PDF/email is async (on_commit).
