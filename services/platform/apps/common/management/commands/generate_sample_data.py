@@ -40,6 +40,7 @@ from apps.integrations.models import WebhookEvent
 from apps.notifications.models import EmailPreference
 from apps.orders.models import Order, OrderItem, OrderStatusHistory
 from apps.products.models import Product, ProductPrice
+from apps.promotions.models import CouponRedemption, GiftCardTransaction
 from apps.provisioning.models import Server, Service, ServicePlan
 from apps.tickets.models import SupportCategory, Ticket, TicketComment, TicketWorklog
 from apps.users.models import CustomerMembership
@@ -582,6 +583,9 @@ class Command(BaseCommand):
         Domain.objects.filter(**example_filter).delete()
         EmailPreference.objects.filter(**example_filter).delete()
         WebhookEvent.objects.filter(source__in=["stripe", "paypal", "virtualmin", "efactura"]).delete()
+        # Promotion ledger rows PROTECT their orders — delete them first.
+        CouponRedemption.objects.filter(order__customer__primary_email__contains="example.").delete()
+        GiftCardTransaction.objects.filter(order__customer__primary_email__contains="example.").delete()
 
         # Original models
         Order.objects.filter(**example_filter).delete()
@@ -806,6 +810,9 @@ class Command(BaseCommand):
         Domain.objects.filter(customer=customer).delete()
         EmailPreference.objects.filter(customer=customer).delete()
         Service.objects.filter(customer=customer).delete()
+        # Promotion ledger rows PROTECT their orders — delete them first.
+        CouponRedemption.objects.filter(order__customer=customer).delete()
+        GiftCardTransaction.objects.filter(order__customer=customer).delete()
         Order.objects.filter(customer=customer).delete()
         Invoice.objects.filter(customer=customer).delete()
         ProformaInvoice.objects.filter(customer=customer).delete()

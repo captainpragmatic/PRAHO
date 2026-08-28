@@ -745,9 +745,13 @@ class CouponRedemption(models.Model):
         related_name="redemptions",
         help_text=_("The coupon that was redeemed"),
     )
+    # Redemption rows are financial evidence: coupon.total_uses and the charged
+    # campaign's spent_cents are derived from them. CASCADE discarded that evidence
+    # without decrementing either counter; PROTECT matches coupon above and
+    # Refund.order = RESTRICT.
     order = models.ForeignKey(
         "orders.Order",
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name="coupon_redemptions",
         help_text=_("The order this redemption applies to"),
     )
@@ -1466,9 +1470,12 @@ class GiftCardTransaction(models.Model):
     balance_after_cents = models.BigIntegerField(help_text=_("Balance after transaction"))
 
     # Related objects
+    # release_for_order() needs these ledger rows to restore the card balance;
+    # SET_NULL silently orphaned them, so order deletion must be protected.
+    # null stays True: activation rows legitimately carry no order.
     order = models.ForeignKey(
         "orders.Order",
-        on_delete=models.SET_NULL,
+        on_delete=models.PROTECT,
         null=True,
         blank=True,
         related_name="gift_card_transactions",
