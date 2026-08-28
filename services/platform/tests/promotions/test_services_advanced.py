@@ -920,6 +920,24 @@ class CouponRedemptionReveralTests(TestCase):
         self.campaign.refresh_from_db()
         self.assertEqual(self.campaign.spent_cents, 0)
 
+    def test_apply_coupon_is_rejected_on_terminal_orders(self):
+        """#485 review: nothing gated apply_coupon on order status, so a coupon
+        could be applied to an already-cancelled order — charging spent_cents and
+        creating an applied redemption that no cancellation hook ever reverses.
+        The gate runs under the order lock, closing the concurrent-apply race too."""
+        from tests.helpers.fsm_helpers import force_status  # noqa: PLC0415
+
+        for terminal_status in ("cancelled", "completed", "failed"):
+            with self.subTest(status=terminal_status):
+                force_status(self.order, terminal_status)
+
+                result = CouponService.apply_coupon(code="REVERSAL", order=self.order, customer=self.customer)
+
+                self.assertFalse(result.success, result)
+                self.campaign.refresh_from_db()
+                self.assertEqual(self.campaign.spent_cents, 0)
+                self.assertFalse(CouponRedemption.objects.filter(order=self.order).exists())
+
     def test_reversal_decrements_the_charged_campaign_not_the_current_one(self):
         """#481: Coupon.campaign is admin-editable. A redemption applied while the
         coupon belonged to campaign A must reverse against A even after the coupon

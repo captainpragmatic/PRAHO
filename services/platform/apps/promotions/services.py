@@ -206,6 +206,18 @@ class CouponService:
         if cached_items is None:
             cached_items = list(order.items.select_related("product").all())
 
+        # A terminal order can never accept a coupon (#485 review): apply_coupon
+        # runs this validation AFTER taking the order lock, so a concurrent apply
+        # that wakes once cancellation has committed sees the cancelled status and
+        # is rejected here — otherwise it would charge spent_cents and create an
+        # applied redemption that no cancellation hook ever reverses.
+        if order.status in ("cancelled", "completed", "failed"):
+            return ValidationResult(
+                is_valid=False,
+                error_message="This order can no longer accept coupons",
+                error_code="ORDER_NOT_ELIGIBLE",
+            )
+
         # Basic validity check
         can_use, reason = coupon.can_be_used()
         if not can_use:

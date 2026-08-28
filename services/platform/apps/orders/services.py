@@ -122,16 +122,28 @@ def _release_coupons_for_cancelled_order(order: Order) -> None:
         try:
             from apps.audit.services import AuditService  # noqa: PLC0415
 
-            AuditService.log_simple_event(
-                "coupon_reversal_failed_on_cancellation",
-                content_object=order,
-                description=(
-                    f"Coupon reversal failed while cancelling order {order.order_number} — "
-                    "redemption may remain consumed"
-                ),
-                metadata={"order_id": str(order.id), "order_number": order.order_number},
-                actor_type="system",
-            )
+            # Own savepoint (#485 review): a DB error inside this write would
+            # otherwise mark the OUTER cancel transaction broken, and the later
+            # status-history insert would raise TransactionManagementError —
+            # rolling back the cancellation this helper promises never to block.
+            # severity/requires_review ride the metadata override channel so the
+            # event lands in the audit review queue, not just the error log.
+            with transaction.atomic():
+                AuditService.log_simple_event(
+                    "coupon_reversal_failed_on_cancellation",
+                    content_object=order,
+                    description=(
+                        f"Coupon reversal failed while cancelling order {order.order_number} — "
+                        "redemption may remain consumed"
+                    ),
+                    metadata={
+                        "order_id": str(order.id),
+                        "order_number": order.order_number,
+                        "severity": "high",
+                        "requires_review": True,
+                    },
+                    actor_type="system",
+                )
         except Exception:
             logger.error(
                 "🔥 [Orders] Audit fallback for failed coupon reversal on %s also failed",

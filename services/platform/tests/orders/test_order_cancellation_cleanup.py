@@ -178,6 +178,35 @@ class CouponReversalOnCancelTest(TestCase):
         self.assertEqual(order.status, "cancelled")
         self.assertTrue(any("Coupon reversal failed" in message for message in logs.output), logs.output)
 
+    def test_poisoned_audit_fallback_does_not_roll_back_cancellation(self):
+        """#485 review: a real DB error in the fallback audit write marks the
+        outer transaction broken — without its own savepoint, the later
+        status-history insert raises TransactionManagementError and the whole
+        cancellation rolls back, contradicting the never-blocks contract.
+        Simulated faithfully with set_rollback + raise (a plain mock raise never
+        touches the connection and would prove nothing)."""
+        from django.db import IntegrityError, transaction  # noqa: PLC0415
+
+        order = self._order_with_applied_coupon("awaiting_payment")
+
+        def _poison(*_args: object, **_kwargs: object) -> None:
+            transaction.set_rollback(True)
+            raise IntegrityError("audit write failed")
+
+        with (
+            self.assertLogs("apps.orders.services", level="ERROR"),
+            patch(
+                "apps.promotions.services.CouponService.remove_coupon",
+                side_effect=RuntimeError("promotions exploded"),
+            ),
+            patch("apps.audit.services.AuditService.log_simple_event", side_effect=_poison),
+        ):
+            result = OrderService.update_order_status(order, StatusChangeData(new_status="cancelled"))
+
+        self.assertTrue(result.is_ok(), result)
+        order.refresh_from_db()
+        self.assertEqual(order.status, "cancelled")
+
     def test_cancellation_without_redemptions_is_a_noop(self):
         order = Order.objects.create(
             customer=self.customer,
