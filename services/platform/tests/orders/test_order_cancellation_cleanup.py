@@ -21,6 +21,8 @@ from apps.customers.models import Customer
 from apps.orders.models import Order, OrderItem
 from apps.orders.services import OrderService, StatusChangeData
 from apps.products.models import Product
+from apps.promotions.models import CouponRedemption, GiftCard, GiftCardTransaction
+from apps.promotions.services import CouponService, GiftCardService
 from tests.helpers.fsm_helpers import force_status
 
 
@@ -225,6 +227,186 @@ class CouponReversalOnCancelTest(TestCase):
         self.assertTrue(result.is_ok(), result)
         order.refresh_from_db()
         self.assertEqual(order.status, "cancelled")
+
+
+class GiftCardReversalOnCancelTest(TestCase):
+    """Every cancellation releases gift-card value independently of coupon cleanup."""
+
+    def setUp(self) -> None:
+        self.currency, _ = Currency.objects.get_or_create(
+            code="RON",
+            defaults={"name": "Romanian Leu", "symbol": "lei", "decimals": 2},
+        )
+        self.customer = Customer.objects.create(
+            name="Promotion Cancel SRL",
+            customer_type="company",
+            status="active",
+            primary_email="promotion-cancel@test.ro",
+        )
+        self.product = Product.objects.create(
+            name="Promotion Cancel Hosting",
+            slug="promotion-cancel-hosting",
+            product_type="shared_hosting",
+            is_active=True,
+        )
+
+        from apps.promotions.models import Coupon, PromotionCampaign  # noqa: PLC0415
+
+        self.campaign = PromotionCampaign.objects.create(
+            name="Combined Cancellation Campaign",
+            slug="combined-cancellation-campaign",
+            campaign_type="seasonal",
+            start_date=timezone.now() - timedelta(days=1),
+            budget_cents=100000,
+            spent_cents=0,
+            status="active",
+            is_active=True,
+        )
+        self.coupon = Coupon.objects.create(
+            code="COMBINED-CANCEL",
+            name="Combined Cancellation Coupon",
+            discount_type="percent",
+            discount_percent=Decimal("20.00"),
+            usage_limit_type="unlimited",
+            status="active",
+            is_active=True,
+            valid_from=timezone.now(),
+            campaign=self.campaign,
+        )
+        self.card = GiftCard.objects.create(
+            code="CANCEL-GIFT-CARD",
+            initial_value_cents=10000,
+            current_balance_cents=10000,
+            currency=self.currency,
+            status="active",
+            is_active=True,
+        )
+
+    def _create_order(self) -> Order:
+        order = Order.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            customer_email=self.customer.primary_email,
+            customer_name=self.customer.name,
+            subtotal_cents=10000,
+            tax_cents=0,
+            total_cents=10000,
+            billing_address={},
+        )
+        OrderItem.objects.create(
+            order=order,
+            product=self.product,
+            product_name=self.product.name,
+            product_type=self.product.product_type,
+            quantity=1,
+            unit_price_cents=10000,
+            setup_cents=0,
+            tax_cents=0,
+            line_total_cents=10000,
+            config={"billing_period": "monthly"},
+        )
+        return order
+
+    def _redeem_card(self, order: Order, amount_cents: int) -> None:
+        result = GiftCardService.redeem_gift_card(
+            code=self.card.code,
+            order=order,
+            amount_cents=amount_cents,
+            customer=self.customer,
+        )
+        self.assertTrue(result.success, result.error_message)
+
+    def _apply_coupon(self, order: Order) -> str:
+        result = CouponService.apply_coupon(
+            code=self.coupon.code,
+            order=order,
+            customer=self.customer,
+        )
+        self.assertTrue(result.success, result.error_message)
+        self.assertIsNotNone(result.redemption_id)
+        return str(result.redemption_id)
+
+    def test_cancellation_restores_redeemed_gift_card(self) -> None:
+        order = self._create_order()
+        self._redeem_card(order, 4000)
+        force_status(order, "awaiting_payment")
+
+        result = OrderService.update_order_status(order, StatusChangeData(new_status="cancelled"))
+
+        self.assertTrue(result.is_ok(), result)
+        order.refresh_from_db()
+        self.card.refresh_from_db()
+        self.assertEqual(order.status, "cancelled")
+        self.assertEqual(order.discount_cents, 0)
+        self.assertEqual(self.card.current_balance_cents, 10000)
+        refund = GiftCardTransaction.objects.get(
+            gift_card=self.card,
+            order=order,
+            transaction_type="refund",
+        )
+        self.assertEqual(refund.amount_cents, 4000)
+        self.assertEqual(refund.balance_after_cents, 10000)
+
+    def test_cancellation_releases_coupon_and_gift_card(self) -> None:
+        order = self._create_order()
+        self._redeem_card(order, 3000)
+        redemption_id = self._apply_coupon(order)
+        force_status(order, "awaiting_payment")
+        order.refresh_from_db()
+        self.assertEqual(order.discount_cents, 5000)
+
+        result = OrderService.update_order_status(order, StatusChangeData(new_status="cancelled"))
+
+        self.assertTrue(result.is_ok(), result)
+        order.refresh_from_db()
+        self.card.refresh_from_db()
+        redemption = CouponRedemption.objects.get(pk=redemption_id)
+        self.assertEqual(order.status, "cancelled")
+        self.assertEqual(order.discount_cents, 0)
+        self.assertEqual(redemption.status, "reversed")
+        self.assertEqual(self.card.current_balance_cents, 10000)
+        self.assertEqual(
+            GiftCardTransaction.objects.filter(
+                gift_card=self.card,
+                order=order,
+                transaction_type="refund",
+                amount_cents=3000,
+            ).count(),
+            1,
+        )
+
+    def test_coupon_reversal_failure_does_not_skip_gift_card_release(self) -> None:
+        order = self._create_order()
+        self._redeem_card(order, 3000)
+        redemption_id = self._apply_coupon(order)
+        force_status(order, "awaiting_payment")
+
+        with (
+            self.assertLogs("apps.orders.services", level="ERROR"),
+            patch(
+                "apps.promotions.services.CouponService.remove_coupon",
+                side_effect=RuntimeError("coupon reversal exploded"),
+            ),
+        ):
+            result = OrderService.update_order_status(order, StatusChangeData(new_status="cancelled"))
+
+        self.assertTrue(result.is_ok(), result)
+        order.refresh_from_db()
+        self.card.refresh_from_db()
+        redemption = CouponRedemption.objects.get(pk=redemption_id)
+        self.assertEqual(order.status, "cancelled")
+        self.assertEqual(self.card.current_balance_cents, 10000)
+        self.assertEqual(redemption.status, "applied")
+        self.assertEqual(order.discount_cents, 2000)
+        self.assertEqual(
+            GiftCardTransaction.objects.filter(
+                gift_card=self.card,
+                order=order,
+                transaction_type="refund",
+                amount_cents=3000,
+            ).count(),
+            1,
+        )
 
 
 class ServiceDeletionOnCancelTest(TestCase):

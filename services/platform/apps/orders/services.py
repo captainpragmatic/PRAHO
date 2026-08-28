@@ -92,30 +92,23 @@ def _enqueue_domain_item_processing(order: Order) -> None:
     transaction.on_commit(_enqueue)
 
 
-def _release_coupons_for_cancelled_order(order: Order) -> None:
-    """Release coupon usage + campaign budget for a cancelled order (#482).
+def _release_promotions_for_cancelled_order(order: Order) -> None:
+    """Release coupon usage and gift-card value for a cancelled order (#482 + follow-up).
 
     Runs INSIDE the cancel transaction (called from update_order_status) —
     deliberately not the post-commit signal chain, whose blanket except would
-    reduce a failed money-reversal to a log line. remove_coupon is its own
-    atomic block (savepoint), so a promotions crash is contained here: the
-    cancel proceeds, the coupon stays conservatively consumed, and the failure
-    is loud (error log + audit event for manual follow-up).
+    reduce a failed money-reversal to a log line. Each promotion service is its
+    own atomic block (savepoint) and each failure is contained INDEPENDENTLY:
+    a coupon crash must not skip the gift-card release, and neither may block
+    the cancellation — the value stays conservatively consumed, with an error
+    log and a review-queued audit event for manual follow-up.
     """
-    try:
-        from apps.promotions.services import CouponService  # noqa: PLC0415  # Deferred
 
-        reversed_count = CouponService.remove_coupon(order)
-        if reversed_count:
-            logger.info(
-                "✅ [Orders] Reversed %d coupon redemption(s) on cancellation of %s",
-                reversed_count,
-                order.order_number,
-            )
-    except Exception:
+    def _handle_reversal_failure(audit_action: str, promotion_name: str) -> None:
         logger.error(
-            "🔥 [Orders] Coupon reversal failed for cancelled order %s — "
-            "redemption may remain consumed, review manually",
+            "🔥 [Orders] %s reversal failed for cancelled order %s — "
+            "promotion value may remain consumed, review manually",
+            promotion_name,
             order.order_number,
             exc_info=True,
         )
@@ -130,11 +123,11 @@ def _release_coupons_for_cancelled_order(order: Order) -> None:
             # event lands in the audit review queue, not just the error log.
             with transaction.atomic():
                 AuditService.log_simple_event(
-                    "coupon_reversal_failed_on_cancellation",
+                    audit_action,
                     content_object=order,
                     description=(
-                        f"Coupon reversal failed while cancelling order {order.order_number} — "
-                        "redemption may remain consumed"
+                        f"{promotion_name} reversal failed while cancelling order "
+                        f"{order.order_number} — promotion value may remain consumed"
                     ),
                     metadata={
                         "order_id": str(order.id),
@@ -146,10 +139,37 @@ def _release_coupons_for_cancelled_order(order: Order) -> None:
                 )
         except Exception:
             logger.error(
-                "🔥 [Orders] Audit fallback for failed coupon reversal on %s also failed",
+                "🔥 [Orders] Audit fallback for failed %s reversal on %s also failed",
+                promotion_name.lower(),
                 order.order_number,
                 exc_info=True,
             )
+
+    try:
+        from apps.promotions.services import CouponService  # noqa: PLC0415  # Deferred
+
+        reversed_count = CouponService.remove_coupon(order)
+        if reversed_count:
+            logger.info(
+                "✅ [Orders] Reversed %d coupon redemption(s) on cancellation of %s",
+                reversed_count,
+                order.order_number,
+            )
+    except Exception:
+        _handle_reversal_failure("coupon_reversal_failed_on_cancellation", "Coupon")
+
+    try:
+        from apps.promotions.services import GiftCardService  # noqa: PLC0415  # Deferred
+
+        restored_cents = GiftCardService.release_for_order(order)
+        if restored_cents:
+            logger.info(
+                "✅ [Orders] Restored %d gift-card cents on cancellation of %s",
+                restored_cents,
+                order.order_number,
+            )
+    except Exception:
+        _handle_reversal_failure("gift_card_reversal_failed_on_cancellation", "Gift card")
 
 
 # ===============================================================================
@@ -696,7 +716,7 @@ class OrderService:
                 # Keyed on the TARGET status so both cancel() and reject_review()
                 # FSM edges are covered — all five production cancellation paths
                 # funnel through this method.
-                _release_coupons_for_cancelled_order(order)
+                _release_promotions_for_cancelled_order(order)
 
             if status_data.new_status == "provisioning":
                 enrollment = OrderServiceCreationService.update_service_status_on_payment(order)
