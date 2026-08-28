@@ -381,26 +381,24 @@ class RemoveCouponView(View):
                 status=404,
             )
 
-        success = CouponService.remove_coupon(
+        removed_count = CouponService.remove_coupon(
             order=order,
             redemption_id=redemption_id,
         )
 
-        if success:
-            return JsonResponse(
-                {
-                    "success": True,
-                    "new_total_cents": order.total_cents,
-                    "new_total_display": f"{order.total_cents / 100:.2f}",
-                }
-            )
-        else:
-            return JsonResponse(
-                {
-                    "success": False,
-                    "error": "Failed to remove coupon",
-                }
-            )
+        # Removal is idempotent: remove_coupon returning at all means the desired
+        # end-state holds (no applied redemption matches the selector). A zero
+        # count is a replay — a retry after a lost response, or a concurrent
+        # cancellation/removal that won the race — and must still be success;
+        # real failures raise (#485 review).
+        return JsonResponse(
+            {
+                "success": True,
+                "removed": removed_count,
+                "new_total_cents": order.total_cents,
+                "new_total_display": f"{order.total_cents / 100:.2f}",
+            }
+        )
 
 
 class AvailableCouponsView(View):
