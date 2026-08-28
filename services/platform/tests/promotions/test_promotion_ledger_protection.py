@@ -10,6 +10,7 @@ from django.test import TestCase
 from django.utils import timezone
 
 from apps.billing.models import Currency
+from apps.common.management.commands.generate_sample_data import _recount_promotion_aggregates
 from apps.customers.models import Customer
 from apps.orders.models import Order, OrderItem
 from apps.products.models import Product
@@ -36,7 +37,7 @@ class PromotionLedgerProtectionTest(TestCase):
             name="Promotion Ledger Protection SRL",
             customer_type="company",
             status="active",
-            primary_email="promotion-ledger-protection@test.ro",
+            primary_email="promotion-ledger-protection@example.com",
         )
         self.product = Product.objects.create(
             name="Promotion Ledger Hosting",
@@ -118,6 +119,63 @@ class PromotionLedgerProtectionTest(TestCase):
             order=self.order,
             transaction_type="redemption",
         )
+
+    def test_activation_transaction_is_orderless_and_loads_full_balance(self) -> None:
+        """Pins that null=True on GiftCardTransaction.order is load-bearing: a
+        future accidental null=False breaks activation here, not in production."""
+        pending_card = GiftCard.objects.create(
+            code="LEDGER-PROTECT-PENDING-CARD",
+            initial_value_cents=5000,
+            current_balance_cents=0,
+            currency=self.currency,
+            status="pending",
+            is_active=True,
+        )
+
+        self.assertTrue(GiftCardService.activate_gift_card(pending_card))
+
+        activation = GiftCardTransaction.objects.get(
+            gift_card=pending_card,
+            transaction_type="activation",
+        )
+        pending_card.refresh_from_db()
+        self.assertIsNone(activation.order_id)
+        self.assertEqual(pending_card.status, "active")
+        self.assertEqual(pending_card.current_balance_cents, pending_card.initial_value_cents)
+
+    def test_sample_cleanup_recounts_affected_promotion_aggregates(self) -> None:
+        """The DEBUG sample purge deletes ledger rows bluntly — the recount must
+        repair coupon/campaign/card aggregates from the surviving ledger so dev
+        financial state stays truthful across regenerations."""
+        self._apply_coupon()
+        self._redeem_gift_card()
+
+        redemptions = CouponRedemption.objects.filter(
+            order__customer__primary_email__contains="example."
+        )
+        gift_card_transactions = GiftCardTransaction.objects.filter(
+            order__customer__primary_email__contains="example."
+        )
+        coupon_ids = set(redemptions.values_list("coupon_id", flat=True))
+        campaign_ids = set(
+            redemptions.exclude(charged_campaign_id__isnull=True).values_list(
+                "charged_campaign_id",
+                flat=True,
+            )
+        )
+        gift_card_ids = set(gift_card_transactions.values_list("gift_card_id", flat=True))
+
+        redemptions.delete()
+        gift_card_transactions.delete()
+        _recount_promotion_aggregates(coupon_ids, campaign_ids, gift_card_ids)
+
+        self.coupon.refresh_from_db()
+        self.campaign.refresh_from_db()
+        self.card.refresh_from_db()
+        self.assertEqual(self.coupon.total_uses, 0)
+        self.assertEqual(self.coupon.total_discount_cents, 0)
+        self.assertEqual(self.campaign.spent_cents, 0)
+        self.assertEqual(self.card.current_balance_cents, self.card.initial_value_cents)
 
     def test_applied_coupon_redemption_protects_order_and_preserves_counters(self) -> None:
         redemption = self._apply_coupon()

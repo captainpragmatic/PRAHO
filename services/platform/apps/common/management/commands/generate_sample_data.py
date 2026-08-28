@@ -10,12 +10,24 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
+from uuid import UUID
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ObjectDoesNotExist
 from django.core.management.base import BaseCommand, CommandError, CommandParser
 from django.db import transaction
+from django.db.models import (
+    BigIntegerField,
+    Count,
+    F,
+    OuterRef,
+    PositiveIntegerField,
+    Subquery,
+    Sum,
+    Value,
+)
+from django.db.models.functions import Coalesce, Greatest
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from faker import Faker
@@ -40,7 +52,13 @@ from apps.integrations.models import WebhookEvent
 from apps.notifications.models import EmailPreference
 from apps.orders.models import Order, OrderItem, OrderStatusHistory
 from apps.products.models import Product, ProductPrice
-from apps.promotions.models import CouponRedemption, GiftCardTransaction
+from apps.promotions.models import (
+    Coupon,
+    CouponRedemption,
+    GiftCard,
+    GiftCardTransaction,
+    PromotionCampaign,
+)
 from apps.provisioning.models import Server, Service, ServicePlan
 from apps.tickets.models import SupportCategory, Ticket, TicketComment, TicketWorklog
 from apps.users.models import CustomerMembership
@@ -100,6 +118,102 @@ def _cycle(items: list[Any], index: int) -> Any:
     if not items:
         raise ValueError("_cycle() requires a non-empty list")
     return items[index % len(items)]
+
+
+def _purge_promotion_ledger(redemptions: Any, gift_card_transactions: Any) -> None:
+    """Delete promotion ledger rows (they PROTECT their orders) and recount parents.
+
+    Shared by both cleanup sites: collect the affected parent ids BEFORE the
+    delete, purge, then repair the denormalized aggregates from the surviving
+    ledger so dev financial state stays truthful across regenerations.
+    """
+    coupon_ids = set(redemptions.values_list("coupon_id", flat=True))
+    campaign_ids = set(
+        redemptions.exclude(charged_campaign_id__isnull=True).values_list(
+            "charged_campaign_id",
+            flat=True,
+        )
+    )
+    gift_card_ids = set(gift_card_transactions.values_list("gift_card_id", flat=True))
+    redemptions.delete()
+    gift_card_transactions.delete()
+    _recount_promotion_aggregates(coupon_ids, campaign_ids, gift_card_ids)
+
+
+def _recount_promotion_aggregates(
+    coupon_ids: set[UUID],
+    campaign_ids: set[UUID],
+    gift_card_ids: set[UUID],
+) -> None:
+    """Rebuild denormalized promotion totals for parents touched by a sample purge.
+
+    Sample cleanup intentionally removes ledger history. The production
+    reverse/release escape hatch cannot model that purge (release also requires
+    cancelled orders), so the SURVIVING ledger is the authoritative idempotent
+    source. QuerySet.update() repairs each affected parent set in bulk without
+    invoking business signals — DEBUG tooling only.
+    """
+    applied_coupon_totals = (
+        CouponRedemption.objects.filter(coupon_id=OuterRef("pk"), status="applied")
+        .order_by()
+        .values("coupon_id")
+        .annotate(
+            use_count=Count("pk"),
+            discount_total=Sum("discount_cents"),
+        )
+    )
+    Coupon.objects.filter(pk__in=coupon_ids).update(
+        total_uses=Coalesce(
+            Subquery(applied_coupon_totals.values("use_count")[:1]),
+            Value(0),
+            output_field=PositiveIntegerField(),
+        ),
+        total_discount_cents=Coalesce(
+            Subquery(applied_coupon_totals.values("discount_total")[:1]),
+            Value(0, output_field=BigIntegerField()),
+            output_field=BigIntegerField(),
+        ),
+    )
+
+    applied_campaign_totals = (
+        CouponRedemption.objects.filter(
+            charged_campaign_id=OuterRef("pk"),
+            status="applied",
+        )
+        .order_by()
+        .values("charged_campaign_id")
+        .annotate(discount_total=Sum("discount_cents"))
+    )
+    PromotionCampaign.objects.filter(pk__in=campaign_ids).update(
+        spent_cents=Coalesce(
+            Subquery(applied_campaign_totals.values("discount_total")[:1]),
+            Value(0, output_field=BigIntegerField()),
+            output_field=BigIntegerField(),
+        )
+    )
+
+    # Balance reconstruction: activation rows carry the initial load itself, so
+    # counting them would double it — initial + sum(non-activation amounts)
+    # matches redeem (negative), refund (positive), and signed adjustments.
+    gift_card_transaction_totals = (
+        GiftCardTransaction.objects.filter(gift_card_id=OuterRef("pk"))
+        .exclude(transaction_type="activation")
+        .order_by()
+        .values("gift_card_id")
+        .annotate(balance_delta=Sum("amount_cents"))
+    )
+    GiftCard.objects.filter(pk__in=gift_card_ids).update(
+        current_balance_cents=Greatest(
+            Value(0, output_field=BigIntegerField()),
+            F("initial_value_cents")
+            + Coalesce(
+                Subquery(gift_card_transaction_totals.values("balance_delta")[:1]),
+                Value(0, output_field=BigIntegerField()),
+                output_field=BigIntegerField(),
+            ),
+            output_field=BigIntegerField(),
+        )
+    )
 
 
 class Command(BaseCommand):
@@ -583,9 +697,10 @@ class Command(BaseCommand):
         Domain.objects.filter(**example_filter).delete()
         EmailPreference.objects.filter(**example_filter).delete()
         WebhookEvent.objects.filter(source__in=["stripe", "paypal", "virtualmin", "efactura"]).delete()
-        # Promotion ledger rows PROTECT their orders — delete them first.
-        CouponRedemption.objects.filter(order__customer__primary_email__contains="example.").delete()
-        GiftCardTransaction.objects.filter(order__customer__primary_email__contains="example.").delete()
+        _purge_promotion_ledger(
+            CouponRedemption.objects.filter(order__customer__primary_email__contains="example."),
+            GiftCardTransaction.objects.filter(order__customer__primary_email__contains="example."),
+        )
 
         # Original models
         Order.objects.filter(**example_filter).delete()
@@ -810,9 +925,10 @@ class Command(BaseCommand):
         Domain.objects.filter(customer=customer).delete()
         EmailPreference.objects.filter(customer=customer).delete()
         Service.objects.filter(customer=customer).delete()
-        # Promotion ledger rows PROTECT their orders — delete them first.
-        CouponRedemption.objects.filter(order__customer=customer).delete()
-        GiftCardTransaction.objects.filter(order__customer=customer).delete()
+        _purge_promotion_ledger(
+            CouponRedemption.objects.filter(order__customer=customer),
+            GiftCardTransaction.objects.filter(order__customer=customer),
+        )
         Order.objects.filter(customer=customer).delete()
         Invoice.objects.filter(customer=customer).delete()
         ProformaInvoice.objects.filter(customer=customer).delete()
