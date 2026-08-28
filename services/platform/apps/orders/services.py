@@ -92,6 +92,54 @@ def _enqueue_domain_item_processing(order: Order) -> None:
     transaction.on_commit(_enqueue)
 
 
+def _release_coupons_for_cancelled_order(order: Order) -> None:
+    """Release coupon usage + campaign budget for a cancelled order (#482).
+
+    Runs INSIDE the cancel transaction (called from update_order_status) —
+    deliberately not the post-commit signal chain, whose blanket except would
+    reduce a failed money-reversal to a log line. remove_coupon is its own
+    atomic block (savepoint), so a promotions crash is contained here: the
+    cancel proceeds, the coupon stays conservatively consumed, and the failure
+    is loud (error log + audit event for manual follow-up).
+    """
+    try:
+        from apps.promotions.services import CouponService  # noqa: PLC0415  # Deferred
+
+        reversed_count = CouponService.remove_coupon(order)
+        if reversed_count:
+            logger.info(
+                "✅ [Orders] Reversed %d coupon redemption(s) on cancellation of %s",
+                reversed_count,
+                order.order_number,
+            )
+    except Exception:
+        logger.error(
+            "🔥 [Orders] Coupon reversal failed for cancelled order %s — "
+            "redemption may remain consumed, review manually",
+            order.order_number,
+            exc_info=True,
+        )
+        try:
+            from apps.audit.services import AuditService  # noqa: PLC0415
+
+            AuditService.log_simple_event(
+                "coupon_reversal_failed_on_cancellation",
+                content_object=order,
+                description=(
+                    f"Coupon reversal failed while cancelling order {order.order_number} — "
+                    "redemption may remain consumed"
+                ),
+                metadata={"order_id": str(order.id), "order_number": order.order_number},
+                actor_type="system",
+            )
+        except Exception:
+            logger.error(
+                "🔥 [Orders] Audit fallback for failed coupon reversal on %s also failed",
+                order.order_number,
+                exc_info=True,
+            )
+
+
 # ===============================================================================
 # ORDER SERVICE PARAMETER OBJECTS
 # ===============================================================================
@@ -631,6 +679,12 @@ class OrderService:
                 return Err(f"Concurrent modification on order {order.order_number} — please retry")
             except TransitionNotAllowed:
                 return Err(f"Invalid status transition from {old_status} to {status_data.new_status}")
+
+            if status_data.new_status == "cancelled":
+                # Keyed on the TARGET status so both cancel() and reject_review()
+                # FSM edges are covered — all five production cancellation paths
+                # funnel through this method.
+                _release_coupons_for_cancelled_order(order)
 
             if status_data.new_status == "provisioning":
                 enrollment = OrderServiceCreationService.update_service_status_on_payment(order)

@@ -24,6 +24,180 @@ from apps.products.models import Product
 from tests.helpers.fsm_helpers import force_status
 
 
+class CouponReversalOnCancelTest(TestCase):
+    """#482: every cancellation path must release the coupon (usage + campaign budget).
+
+    Before this fix nothing called the reversal on cancellation, so a cancelled
+    order left its redemption status="applied" forever — a single-use coupon was
+    permanently consumed by an order that was never paid, and the campaign budget
+    stayed charged for a discount never given.
+    """
+
+    def setUp(self):
+        from apps.promotions.models import Coupon, PromotionCampaign  # noqa: PLC0415
+
+        self.currency, _ = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei", "decimals": 2})
+        self.customer = Customer.objects.create(
+            name="Coupon Cancel SRL",
+            customer_type="company",
+            status="active",
+            primary_email="coupon-cancel@test.ro",
+        )
+        self.product = Product.objects.create(
+            name="Coupon Hosting",
+            slug="coupon-hosting",
+            product_type="shared_hosting",
+            is_active=True,
+        )
+        self.campaign = PromotionCampaign.objects.create(
+            name="Cancel Campaign",
+            slug="cancel-campaign",
+            campaign_type="seasonal",
+            start_date=timezone.now() - timedelta(days=1),
+            budget_cents=100000,
+            spent_cents=0,
+            status="active",
+            is_active=True,
+        )
+        self.coupon = Coupon.objects.create(
+            code="CANCELME",
+            name="Cancel Test",
+            discount_type="percent",
+            discount_percent=Decimal("20.00"),
+            usage_limit_type="single_use",
+            status="active",
+            is_active=True,
+            valid_from=timezone.now(),
+            campaign=self.campaign,
+        )
+
+    def _order_with_applied_coupon(self, target_status="awaiting_payment"):
+        from apps.promotions.services import CouponService  # noqa: PLC0415
+
+        order = Order.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            customer_email=self.customer.primary_email,
+            customer_name=self.customer.name,
+            subtotal_cents=10000,
+            tax_cents=2100,
+            total_cents=12100,
+            billing_address={},
+        )
+        OrderItem.objects.create(
+            order=order,
+            product=self.product,
+            product_name="Coupon Hosting",
+            product_type="shared_hosting",
+            billing_period="monthly",
+            quantity=1,
+            unit_price_cents=10000,
+            setup_cents=0,
+            line_total_cents=10000,
+        )
+        result = CouponService.apply_coupon(code="CANCELME", order=order, customer=self.customer)
+        assert result.success, result
+        force_status(order, target_status)
+        self._redemption_id = result.redemption_id
+        return order
+
+    def _assert_released(self, order):
+        from apps.promotions.models import CouponRedemption  # noqa: PLC0415
+
+        redemption = CouponRedemption.objects.get(pk=self._redemption_id)
+        self.assertEqual(redemption.status, "reversed")
+        self.coupon.refresh_from_db()
+        self.assertEqual(self.coupon.total_uses, 0)
+        self.campaign.refresh_from_db()
+        self.assertEqual(self.campaign.spent_cents, 0)
+        order.refresh_from_db()
+        self.assertEqual(order.discount_cents, 0)
+
+    def test_cancellation_reverses_applied_coupon_redemption(self):
+        order = self._order_with_applied_coupon("awaiting_payment")
+
+        result = OrderService.update_order_status(order, StatusChangeData(new_status="cancelled"))
+
+        self.assertTrue(result.is_ok(), result)
+        self._assert_released(order)
+
+    def test_paid_order_cancellation_also_reverses(self):
+        """The 'All cancellations' decision: even a paid order that is cancelled
+        releases the coupon."""
+        order = self._order_with_applied_coupon("paid")
+
+        result = OrderService.update_order_status(order, StatusChangeData(new_status="cancelled"))
+
+        self.assertTrue(result.is_ok(), result)
+        self._assert_released(order)
+
+    def test_reject_review_cancellation_reverses(self):
+        """in_review → cancelled goes through reject_review(), not cancel() — the
+        hook must key on the TARGET status to cover both FSM edges."""
+        order = self._order_with_applied_coupon("in_review")
+
+        result = OrderService.update_order_status(order, StatusChangeData(new_status="cancelled"))
+
+        self.assertTrue(result.is_ok(), result)
+        self._assert_released(order)
+
+    def test_timeout_cancellation_reverses_end_to_end(self):
+        """The exact path issue #482 names: an awaiting-payment order times out,
+        the expiry task cancels it, and the single-use coupon must come back."""
+        from apps.orders.tasks import process_pending_orders  # noqa: PLC0415
+
+        order = self._order_with_applied_coupon("awaiting_payment")
+        Order.objects.filter(pk=order.pk).update(
+            payment_method="card", created_at=timezone.now() - timedelta(hours=25)
+        )
+        order.refresh_from_db()
+
+        with self.captureOnCommitCallbacks(execute=True):
+            process_pending_orders()
+
+        order.refresh_from_db()
+        self.assertEqual(order.status, "cancelled")
+        self._assert_released(order)
+
+    def test_reversal_failure_does_not_block_cancellation(self):
+        """A promotions crash must not stop order cancellation — the failure
+        direction leaves the coupon consumed (conservative) and is LOUD."""
+        order = self._order_with_applied_coupon("awaiting_payment")
+
+        with (
+            self.assertLogs("apps.orders.services", level="ERROR") as logs,
+            patch(
+                "apps.promotions.services.CouponService.remove_coupon",
+                side_effect=RuntimeError("promotions exploded"),
+            ),
+        ):
+            result = OrderService.update_order_status(order, StatusChangeData(new_status="cancelled"))
+
+        self.assertTrue(result.is_ok(), result)
+        order.refresh_from_db()
+        self.assertEqual(order.status, "cancelled")
+        self.assertTrue(any("Coupon reversal failed" in message for message in logs.output), logs.output)
+
+    def test_cancellation_without_redemptions_is_a_noop(self):
+        order = Order.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            customer_email=self.customer.primary_email,
+            customer_name=self.customer.name,
+            subtotal_cents=10000,
+            tax_cents=2100,
+            total_cents=12100,
+            billing_address={},
+        )
+        force_status(order, "awaiting_payment")
+
+        result = OrderService.update_order_status(order, StatusChangeData(new_status="cancelled"))
+
+        self.assertTrue(result.is_ok(), result)
+        order.refresh_from_db()
+        self.assertEqual(order.status, "cancelled")
+
+
 class ServiceDeletionOnCancelTest(TestCase):
     """Test service cleanup when orders are cancelled."""
 
