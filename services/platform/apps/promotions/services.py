@@ -1191,6 +1191,13 @@ class GiftCardService:
         """
         _lock_order_for_discount_update(order)
 
+        # This release is cancellation cleanup; live orders must retain their
+        # redemptions — an accidental call on a live order would credit the card,
+        # strip the discount, and poison a later real cancellation with a
+        # net-zero ledger.
+        if order.status != "cancelled":
+            return 0
+
         gift_card_ids = sorted(
             set(GiftCardTransaction.objects.filter(order=order).order_by().values_list("gift_card_id", flat=True)),
             key=str,
@@ -1217,30 +1224,54 @@ class GiftCardService:
                     filter=models.Q(transaction_type="refund"),
                 ),
             )
-            outstanding = -int(ledger_totals["redemption_total"] or 0) - int(ledger_totals["refund_total"] or 0)
+            # Transaction signs are a convention, not a database constraint:
+            # malformed rows must never let a restore exceed this order's
+            # redeemed total (a legacy negative "refund" would otherwise inflate
+            # the outstanding amount).
+            redeemed = max(0, -int(ledger_totals["redemption_total"] or 0))
+            refunded = max(0, int(ledger_totals["refund_total"] or 0))
+            outstanding = redeemed - refunded
             if outstanding <= 0:
                 continue
+
+            # Attribute the refund to THIS order's redeemer — redeemed_by pins
+            # the card's first-ever redeemer, which cross-contaminates the
+            # ledger when a transferable card serves multiple customers.
+            order_redemption = (
+                GiftCardTransaction.objects.filter(
+                    gift_card=gift_card,
+                    order=order,
+                    transaction_type="redemption",
+                    customer__isnull=False,
+                )
+                .select_related("customer")
+                .order_by("-created_at")
+                .first()
+            )
 
             gift_card.current_balance_cents += outstanding
             # Status recompute only from consumption states: an expired/cancelled/
             # pending card keeps its status — the balance is still restored (the
             # ledger is truth; whether it is spendable stays a validity question).
             if gift_card.status in ("depleted", "partially_used"):
-                if gift_card.current_balance_cents == gift_card.initial_value_cents:
+                # A balance at or ABOVE the initial value is fully restored —
+                # an admin may have lowered initial_value_cents after issuance.
+                if gift_card.current_balance_cents >= gift_card.initial_value_cents:
                     gift_card.status = "active"  # fsm-bypass: GiftCard uses CharField, not FSMField
                 else:
                     gift_card.status = "partially_used"  # fsm-bypass: GiftCard uses CharField, not FSMField
             gift_card.save(update_fields=["current_balance_cents", "status", "updated_at"])
 
-            # Positive amount: the line-418 aggregation nets redemption+refund
-            # rows per order, so the sign convention is load-bearing there.
+            # Positive amount: the per-order redemption+refund aggregation nets
+            # these rows, so the sign convention is load-bearing there and on a
+            # replay of this method.
             GiftCardTransaction.objects.create(
                 gift_card=gift_card,
                 transaction_type="refund",
                 amount_cents=outstanding,
                 balance_after_cents=gift_card.current_balance_cents,
                 order=order,
-                customer=gift_card.redeemed_by or order.customer,
+                customer=order_redemption.customer if order_redemption else order.customer,
                 description=f"Refunded on cancellation of order {order.order_number}",
             )
             total_restored += outstanding

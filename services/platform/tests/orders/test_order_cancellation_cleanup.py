@@ -408,6 +408,45 @@ class GiftCardReversalOnCancelTest(TestCase):
             1,
         )
 
+    def test_gift_card_reversal_failure_does_not_skip_coupon_release(self) -> None:
+        order = self._create_order()
+        self._redeem_card(order, 3000)
+        redemption_id = self._apply_coupon(order)
+        force_status(order, "awaiting_payment")
+
+        with (
+            patch(
+                "apps.promotions.services.GiftCardService.release_for_order",
+                side_effect=RuntimeError("gift-card reversal exploded"),
+            ),
+            patch("apps.audit.services.AuditService.log_simple_event") as audit_log,
+        ):
+            result = OrderService.update_order_status(order, StatusChangeData(new_status="cancelled"))
+
+        self.assertTrue(result.is_ok(), result)
+        order.refresh_from_db()
+        self.card.refresh_from_db()
+        redemption = CouponRedemption.objects.get(pk=redemption_id)
+        self.assertEqual(order.status, "cancelled")
+        self.assertEqual(redemption.status, "reversed")
+        self.assertEqual(self.card.current_balance_cents, 7000)
+        self.assertEqual(order.discount_cents, 3000)
+        self.assertFalse(
+            GiftCardTransaction.objects.filter(
+                gift_card=self.card,
+                order=order,
+                transaction_type="refund",
+            ).exists()
+        )
+        # log_simple_event is called positionally by the failure helper and by
+        # keyword (event_type=...) from the promotions audit signals — extract
+        # the action tolerantly from both call shapes.
+        recorded_actions = [
+            call.args[0] if call.args else call.kwargs.get("event_type")
+            for call in audit_log.call_args_list
+        ]
+        self.assertIn("gift_card_reversal_failed_on_cancellation", recorded_actions)
+
 
 class ServiceDeletionOnCancelTest(TestCase):
     """Test service cleanup when orders are cancelled."""

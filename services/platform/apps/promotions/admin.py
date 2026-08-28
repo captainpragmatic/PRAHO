@@ -371,6 +371,21 @@ class GiftCardAdmin(admin.ModelAdmin):
         (_("Metadata"), {"fields": ("created_at", "updated_at"), "classes": ("collapse",)}),
     )
 
+    def save_model(self, request: Any, obj: Any, form: Any, change: Any) -> None:
+        if not change:
+            super().save_model(request, obj, form, change)
+            return
+
+        # Admin change forms hold a stale model snapshot; a full save would
+        # clobber current_balance_cents updated concurrently by the row-locked
+        # gift-card services (redeem/release) — the refund ledger row would
+        # stay committed while the restored balance evaporates. Persist only
+        # the fields the admin actually changed.
+        editable_field_names = {field.name for field in obj._meta.concrete_fields if field.editable}
+        changed_fields = [field_name for field_name in form.changed_data if field_name in editable_field_names]
+        if changed_fields:
+            obj.save(update_fields=changed_fields)
+
     def initial_value_display(self, obj: Any) -> str:
         return f"{obj.initial_value_cents / 100:.2f}"
 

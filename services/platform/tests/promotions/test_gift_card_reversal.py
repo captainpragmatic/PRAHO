@@ -1,11 +1,15 @@
 """Regression tests for releasing gift-card value from cancelled orders."""
 
+from unittest.mock import MagicMock
+
+from django.contrib import admin
 from django.test import TestCase
 
 from apps.billing.models import Currency
 from apps.customers.models import Customer
 from apps.orders.models import Order, OrderItem
 from apps.products.models import Product
+from apps.promotions.admin import GiftCardAdmin
 from apps.promotions.models import GiftCard, GiftCardTransaction
 from apps.promotions.services import GiftCardService
 from tests.helpers.fsm_helpers import force_status
@@ -86,6 +90,7 @@ class GiftCardReversalTest(TestCase):
         self.order.refresh_from_db()
         self.assertEqual(self.card.status, "depleted")
         self.assertEqual(self.order.discount_cents, 4000)
+        force_status(self.order, "cancelled")
 
         restored = GiftCardService.release_for_order(self.order)
 
@@ -114,6 +119,7 @@ class GiftCardReversalTest(TestCase):
 
     def test_release_replay_is_a_noop(self) -> None:
         self._redeem(self.card, self.order, 5000)
+        force_status(self.order, "cancelled")
 
         first_restored = GiftCardService.release_for_order(self.order)
         self.card.refresh_from_db()
@@ -153,6 +159,7 @@ class GiftCardReversalTest(TestCase):
         self.order.discount_cents = 3000
         self.order.save(update_fields=["discount_cents"])
         self.order.calculate_totals()
+        force_status(self.order, "cancelled")
 
         restored = GiftCardService.release_for_order(self.order)
 
@@ -173,6 +180,7 @@ class GiftCardReversalTest(TestCase):
         second_card = self._create_card("REVERSAL-CARD-TWO", initial_value_cents=7000)
         self._redeem(self.card, self.order, 3000)
         self._redeem(second_card, self.order, 2000)
+        force_status(self.order, "cancelled")
 
         restored = GiftCardService.release_for_order(self.order)
 
@@ -201,6 +209,7 @@ class GiftCardReversalTest(TestCase):
         self._redeem(self.card, self.order, 5000)
         self.card.status = "expired"
         self.card.save(update_fields=["status", "updated_at"])
+        force_status(self.order, "cancelled")
 
         restored = GiftCardService.release_for_order(self.order)
 
@@ -213,6 +222,7 @@ class GiftCardReversalTest(TestCase):
         self._redeem(self.card, self.order, 10000)
         self.card.refresh_from_db()
         self.assertEqual(self.card.status, "depleted")
+        force_status(self.order, "cancelled")
 
         restored = GiftCardService.release_for_order(self.order)
 
@@ -220,6 +230,117 @@ class GiftCardReversalTest(TestCase):
         self.card.refresh_from_db()
         self.assertEqual(self.card.current_balance_cents, self.card.initial_value_cents)
         self.assertEqual(self.card.status, "active")
+
+    def test_malformed_negative_refund_cannot_inflate_restoration(self) -> None:
+        self._redeem(self.card, self.order, 5000)
+        self.card.refresh_from_db()
+        GiftCardTransaction.objects.create(
+            gift_card=self.card,
+            transaction_type="refund",
+            amount_cents=-2000,
+            balance_after_cents=self.card.current_balance_cents,
+            order=self.order,
+            customer=self.customer,
+            description="Malformed legacy refund",
+        )
+        force_status(self.order, "cancelled")
+
+        restored = GiftCardService.release_for_order(self.order)
+
+        self.assertEqual(restored, 5000)
+        self.card.refresh_from_db()
+        self.assertEqual(self.card.current_balance_cents, 10000)
+        self.assertEqual(
+            GiftCardTransaction.objects.filter(
+                gift_card=self.card,
+                order=self.order,
+                transaction_type="refund",
+                amount_cents=5000,
+            ).count(),
+            1,
+        )
+
+    def test_release_attributes_refund_to_this_orders_redeemer(self) -> None:
+        order_customer = Customer.objects.create(
+            name="Second Gift Card Customer SRL",
+            customer_type="company",
+            status="active",
+            primary_email="second-gift-card-customer@test.ro",
+        )
+        self.order.customer = order_customer
+        self.order.customer_email = order_customer.primary_email
+        self.order.customer_name = order_customer.name
+        self.order.save(update_fields=["customer", "customer_email", "customer_name"])
+        self.card.redeemed_by = self.customer
+        self.card.save(update_fields=["redeemed_by", "updated_at"])
+
+        result = GiftCardService.redeem_gift_card(
+            code=self.card.code,
+            order=self.order,
+            amount_cents=5000,
+            customer=order_customer,
+        )
+        self.assertTrue(result.success, result.error_message)
+        force_status(self.order, "cancelled")
+
+        restored = GiftCardService.release_for_order(self.order)
+
+        self.assertEqual(restored, 5000)
+        refund = GiftCardTransaction.objects.get(
+            gift_card=self.card,
+            order=self.order,
+            transaction_type="refund",
+        )
+        self.assertEqual(refund.customer, order_customer)
+
+    def test_release_on_live_order_is_a_noop(self) -> None:
+        self._redeem(self.card, self.order, 5000)
+
+        restored = GiftCardService.release_for_order(self.order)
+
+        self.assertEqual(restored, 0)
+        self.card.refresh_from_db()
+        self.order.refresh_from_db()
+        self.assertEqual(self.card.current_balance_cents, 5000)
+        self.assertEqual(self.order.discount_cents, 5000)
+        self.assertFalse(
+            GiftCardTransaction.objects.filter(
+                gift_card=self.card,
+                order=self.order,
+                transaction_type="refund",
+            ).exists()
+        )
+
+    def test_full_restore_returns_card_to_active_after_initial_value_is_lowered(self) -> None:
+        self._redeem(self.card, self.order, 10000)
+        GiftCard.objects.filter(pk=self.card.pk).update(initial_value_cents=8000)
+        force_status(self.order, "cancelled")
+
+        restored = GiftCardService.release_for_order(self.order)
+
+        self.assertEqual(restored, 10000)
+        self.card.refresh_from_db()
+        self.assertEqual(self.card.current_balance_cents, 10000)
+        self.assertEqual(self.card.initial_value_cents, 8000)
+        self.assertEqual(self.card.status, "active")
+
+    def test_admin_change_does_not_overwrite_concurrent_balance_update(self) -> None:
+        stale_card = GiftCard.objects.get(pk=self.card.pk)
+        GiftCard.objects.filter(pk=self.card.pk).update(current_balance_cents=7000)
+        stale_card.status = "cancelled"
+        form = MagicMock()
+        form.changed_data = ["status"]
+
+        GiftCardAdmin(GiftCard, admin.site).save_model(
+            request=MagicMock(),
+            obj=stale_card,
+            form=form,
+            change=True,
+        )
+
+        stale_card.refresh_from_db()
+        self.assertEqual(stale_card.status, "cancelled")
+        self.assertEqual(stale_card.current_balance_cents, 7000)
 
     def test_redeem_gift_card_is_rejected_on_cancelled_order(self) -> None:
         force_status(self.order, "cancelled")
