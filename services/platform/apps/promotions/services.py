@@ -666,10 +666,15 @@ class CouponService:
         order: Order,
         coupon: Coupon | None = None,
         redemption_id: str | None = None,
-    ) -> bool:
+    ) -> int:
         """
         Remove a coupon from an order.
         Can specify either coupon or redemption_id.
+
+        Returns the number of redemptions THIS call actually reversed (0 when
+        nothing was applied or a concurrent caller won every race) — callers
+        like order cancellation need to know whether work happened, and the
+        previous unconditional ``True`` could not tell them.
         """
         _lock_order_for_discount_update(order)
 
@@ -695,16 +700,18 @@ class CouponService:
         # Materialize once: the queryset is iterated twice below (lock ids, then reverse),
         # and re-querying after taking the lock would drop rows a concurrent remove just
         # reversed, changing which redemptions this call reports on.
-        # select_related: mark_reversed() reaches self.coupon.campaign, which would other-
-        # wise cost two extra queries per redemption on the remove-all path.
+        # select_related("coupon"): mark_reversed()'s audit event reads self.coupon.code,
+        # which would otherwise cost an extra query per redemption on the remove-all path.
         #
-        # Sorted by (campaign, coupon): the coupon locks below are sorted, but campaign rows
-        # are only ever touched through this loop, in whatever order it runs. Default
-        # ordering is -created_at, so two concurrent multi-coupon removals spanning the same
-        # two campaigns could take those row locks in opposite order and deadlock.
+        # Sorted by (charged campaign, coupon): the coupon locks below are sorted, but
+        # campaign rows are only ever touched through this loop, in whatever order it
+        # runs. Default ordering is -created_at, so two concurrent multi-coupon removals
+        # spanning the same two campaigns could take those row locks in opposite order
+        # and deadlock. The key follows charged_campaign_id (#481) because that is the
+        # row mark_reversed() actually decrements now.
         pending = sorted(
-            redemptions.select_related("coupon__campaign"),
-            key=lambda r: (str(r.coupon.campaign_id or ""), str(r.coupon_id)),
+            redemptions.select_related("coupon"),
+            key=lambda r: (str(r.charged_campaign_id or ""), str(r.coupon_id)),
         )
 
         # #421: lock the coupon rows before reversing, mirroring apply_coupon's
@@ -719,16 +726,18 @@ class CouponService:
             # concurrent multi-coupon removal on the same order.
             list(Coupon.objects.select_for_update(of=("self",)).filter(pk__in=coupon_ids).order_by("pk"))
 
+        reversed_count = 0
         for redemption in pending:
             # Only adjust the order when THIS call actually performed the reversal —
             # otherwise a lost race would subtract the discount a second time.
             if redemption.mark_reversed():
                 order.discount_cents = max(0, order.discount_cents - redemption.discount_cents)
+                reversed_count += 1
 
         order.save(update_fields=["discount_cents"])
         order.calculate_totals()
 
-        return True
+        return reversed_count
 
     @classmethod
     def get_available_coupons_for_order(

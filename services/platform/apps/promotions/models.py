@@ -770,6 +770,20 @@ class CouponRedemption(models.Model):
     )
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
 
+    # Snapshot of the campaign whose budget was ACTUALLY charged at application time
+    # (#481). Coupon.campaign is admin-editable, so reversing via the coupon's
+    # CURRENT campaign could decrement a campaign that was never charged. A plain
+    # UUID rather than an FK: Coupon.campaign is SET_NULL, and an FK snapshot with
+    # the same on_delete would destroy the reversal target on campaign deletion,
+    # while PROTECT would newly block deleting campaigns. With a bare UUID, a
+    # reversal against a deleted campaign is a safe no-op filter.
+    charged_campaign_id = models.UUIDField(
+        null=True,
+        blank=True,
+        editable=False,
+        help_text=_("Campaign whose budget was charged when this redemption was applied"),
+    )
+
     # Discount calculation snapshot
     discount_type = models.CharField(max_length=20, help_text=_("Discount type at time of redemption"))
     discount_value = models.DecimalField(
@@ -838,10 +852,14 @@ class CouponRedemption(models.Model):
         self.status = "applied"  # fsm-bypass: CouponRedemption uses CharField, not FSMField
         self.discount_cents = discount_cents
         self.applied_at = timezone.now()
+        # Snapshot which campaign is being charged (#481) in the same statement group
+        # as the charge itself — the reversal decrements THIS, never the coupon's
+        # then-current campaign.
+        self.charged_campaign_id = self.coupon.campaign_id
         # order_total_cents documents the total *after* discount. apply_coupon reassigns it
         # on the instance once the order is recalculated, so it must be persisted here;
         # omitting it left the pre-discount total (set at row creation) in the database (#233).
-        self.save(update_fields=["status", "discount_cents", "applied_at", "order_total_cents"])
+        self.save(update_fields=["status", "discount_cents", "applied_at", "order_total_cents", "charged_campaign_id"])
 
         # Update coupon usage statistics
         Coupon.objects.filter(pk=self.coupon_id).update(
@@ -850,8 +868,8 @@ class CouponRedemption(models.Model):
         )
 
         # Update campaign spending if applicable
-        if self.coupon.campaign:
-            PromotionCampaign.objects.filter(pk=self.coupon.campaign_id).update(
+        if self.charged_campaign_id:
+            PromotionCampaign.objects.filter(pk=self.charged_campaign_id).update(
                 spent_cents=F("spent_cents") + discount_cents
             )
 
@@ -907,9 +925,13 @@ class CouponRedemption(models.Model):
             total_discount_cents=F("total_discount_cents") - self.discount_cents,
         )
 
-        # Update campaign spending if applicable
-        if self.coupon.campaign:
-            PromotionCampaign.objects.filter(pk=self.coupon.campaign_id).update(
+        # Restore the campaign that was ACTUALLY charged (#481) — never the coupon's
+        # current campaign, which the admin may have reassigned since application.
+        # A NULL snapshot (pre-0003 row never backfilled, or a coupon that had no
+        # campaign at application time) provably charged nothing, so nothing is
+        # decremented; a deleted campaign makes this a safe no-op filter.
+        if self.charged_campaign_id:
+            PromotionCampaign.objects.filter(pk=self.charged_campaign_id).update(
                 spent_cents=F("spent_cents") - self.discount_cents
             )
 
