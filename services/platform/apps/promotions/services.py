@@ -36,6 +36,102 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def release_promotions_for_order(order: Order, *, trigger: str) -> None:
+    """Release coupon usage and gift-card value after a terminal order event.
+
+    Runs inside the caller's transaction. Each promotion service has its own
+    savepoint and failure boundary: a coupon failure must not skip gift-card
+    release, and neither failure may block cancellation or refund settlement.
+    Promotion value remains conservatively consumed when a branch fails, with
+    a loud log and review-queued audit event for manual follow-up.
+    """
+    if trigger not in ("cancellation", "full_refund"):
+        raise ValueError(f"Unsupported promotion release trigger: {trigger!r}")
+
+    if trigger == "cancellation":
+        # This release is cancellation cleanup; live orders must retain their
+        # redemptions — an accidental call on a live order would credit value,
+        # strip the discount, and poison a later legitimate release.
+        if order.status != "cancelled":
+            return
+        coupon_failure_action = "coupon_reversal_failed_on_cancellation"
+        gift_card_failure_action = "gift_card_reversal_failed_on_cancellation"
+        release_context = "cancellation"
+        # Message templates render byte-identical output to the pre-composite
+        # cancellation implementation — existing log assertions depend on it.
+        failure_log = (
+            "🔥 [Orders] %s reversal failed for cancelled order %s — "
+            "promotion value may remain consumed, review manually"
+        )
+        failure_description_middle = "reversal failed while cancelling order"
+        fallback_log = "🔥 [Orders] Audit fallback for failed %s reversal on %s also failed"
+    else:
+        # Draft orders cannot have settled payments. awaiting_payment remains
+        # legitimate when payment settlement precedes deferred status advancement.
+        if order.status == "draft":
+            return
+        coupon_failure_action = "coupon_reversal_failed_on_refund"
+        gift_card_failure_action = "gift_card_reversal_failed_on_refund"
+        release_context = "full refund"
+        failure_log = (
+            "🔥 [Orders] %s reversal failed on full refund of order %s — "
+            "promotion value may remain consumed, review manually"
+        )
+        failure_description_middle = "reversal failed on full refund of order"
+        fallback_log = "🔥 [Orders] Audit fallback for failed %s reversal on full refund of %s also failed"
+
+    def _handle_reversal_failure(audit_action: str, promotion_name: str) -> None:
+        logger.error(failure_log, promotion_name, order.order_number, exc_info=True)
+        description = (
+            f"{promotion_name} {failure_description_middle} {order.order_number} — promotion value may remain consumed"
+        )
+
+        try:
+            from apps.audit.services import AuditService  # noqa: PLC0415
+
+            # Own savepoint: a failed audit write must not mark the caller's
+            # settlement/cancellation transaction as broken.
+            with transaction.atomic():
+                AuditService.log_simple_event(
+                    audit_action,
+                    content_object=order,
+                    description=description,
+                    metadata={
+                        "order_id": str(order.id),
+                        "order_number": order.order_number,
+                        "severity": "high",
+                        "requires_review": True,
+                    },
+                    actor_type="system",
+                )
+        except Exception:
+            logger.error(fallback_log, promotion_name.lower(), order.order_number, exc_info=True)
+
+    try:
+        reversed_count = CouponService.remove_coupon(order)
+        if reversed_count:
+            logger.info(
+                "✅ [Orders] Reversed %d coupon redemption(s) on %s of %s",
+                reversed_count,
+                release_context,
+                order.order_number,
+            )
+    except Exception:
+        _handle_reversal_failure(coupon_failure_action, "Coupon")
+
+    try:
+        restored_cents = GiftCardService.release_for_order(order, trigger=trigger)
+        if restored_cents:
+            logger.info(
+                "✅ [Orders] Restored %d gift-card cents on %s of %s",
+                restored_cents,
+                release_context,
+                order.order_number,
+            )
+    except Exception:
+        _handle_reversal_failure(gift_card_failure_action, "Gift card")
+
+
 # ===============================================================================
 # Constants
 # ===============================================================================
@@ -1178,7 +1274,7 @@ class GiftCardService:
 
     @classmethod
     @transaction.atomic
-    def release_for_order(cls, order: Order) -> int:
+    def release_for_order(cls, order: Order, *, trigger: str = "cancellation") -> int:
         """Restore the outstanding gift-card value redeemed on an order.
 
         Ledger-driven and replay-safe: per card, the outstanding amount is the
@@ -1186,17 +1282,26 @@ class GiftCardService:
         (positive amounts), so a replay — or a prior manual partial refund —
         nets to at most what the order actually still holds. Returns the total
         cents restored (0 = idempotent no-op). Lock order matches
-        redeem_gift_card (order first, then cards) so cancellation and a
-        concurrent redeem serialize without deadlock.
+        redeem_gift_card (order first, then cards) so cancellation/full-refund
+        release and a concurrent redeem serialize without deadlock.
         """
+        if trigger not in ("cancellation", "full_refund"):
+            raise ValueError(f"Unsupported gift-card release trigger: {trigger!r}")
+
         _lock_order_for_discount_update(order)
 
-        # This release is cancellation cleanup; live orders must retain their
-        # redemptions — an accidental call on a live order would credit the card,
-        # strip the discount, and poison a later real cancellation with a
-        # net-zero ledger.
-        if order.status != "cancelled":
-            return 0
+        if trigger == "cancellation":
+            # This release is cancellation cleanup; live orders must retain their
+            # redemptions — an accidental call on a live order would credit the card,
+            # strip the discount, and poison a later real cancellation with a
+            # net-zero ledger.
+            if order.status != "cancelled":
+                return 0
+            release_context = "cancellation"
+        else:
+            if order.status == "draft":
+                return 0
+            release_context = "full refund"
 
         gift_card_ids = sorted(
             set(GiftCardTransaction.objects.filter(order=order).order_by().values_list("gift_card_id", flat=True)),
@@ -1272,7 +1377,7 @@ class GiftCardService:
                 balance_after_cents=gift_card.current_balance_cents,
                 order=order,
                 customer=order_redemption.customer if order_redemption else order.customer,
-                description=f"Refunded on cancellation of order {order.order_number}",
+                description=f"Refunded on {release_context} of order {order.order_number}",
             )
             total_restored += outstanding
 
@@ -1284,8 +1389,9 @@ class GiftCardService:
         order.calculate_totals()
 
         logger.info(
-            "✅ [GiftCard] Restored %d cents on cancellation of order %s",
+            "✅ [GiftCard] Restored %d cents on %s of order %s",
             total_restored,
+            release_context,
             order.order_number,
         )
         return total_restored

@@ -488,6 +488,12 @@ class AuditEvent(models.Model):
         ("coupon_redemption_reversed", "Coupon Redemption Reversed"),
         ("coupon_reversal_failed_on_cancellation", "Coupon Reversal Failed on Cancellation"),
         ("gift_card_reversal_failed_on_cancellation", "Gift Card Reversal Failed on Cancellation"),
+        ("coupon_reversal_failed_on_refund", "Coupon Reversal Failed on Refund"),
+        ("gift_card_reversal_failed_on_refund", "Gift Card Reversal Failed on Refund"),
+        (
+            "promotion_release_blocked_anomalous_payments",
+            "Promotion Release Blocked by Anomalous Payments",
+        ),
         ("coupon_validation_failed", "Coupon Validation Failed"),
         # Promotion rules
         ("promotion_rule_created", "Promotion Rule Created"),
