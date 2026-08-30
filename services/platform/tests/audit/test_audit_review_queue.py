@@ -7,10 +7,14 @@ companion-model design: reviewing must NOT mutate the append-only AuditEvent.
 
 from __future__ import annotations
 
+import re
+from datetime import timedelta
+
 from django.contrib.auth import get_user_model
 from django.contrib.contenttypes.models import ContentType
 from django.test import Client, TestCase
 from django.urls import reverse
+from django.utils import timezone
 
 from apps.audit.models import AuditEvent, AuditEventReview, audit_mutation_allowed
 
@@ -141,6 +145,9 @@ class AuditReviewQueueTestCase(TestCase):
 
         self.client.post(reverse("audit:mark_event_reviewed", args=[self.flagged.id]), {})
 
+        # The review must actually have happened — without this, a view gutted
+        # to a no-op passes trivially (an untouched event is always unmutated).
+        self.assertTrue(AuditEventReview.objects.filter(audit_event=self.flagged).exists())
         after = AuditEvent.objects.get(pk=self.flagged.pk)
         self.assertEqual((after.action, after.description, after.requires_review, after.timestamp), before_stamp)
 
@@ -244,31 +251,91 @@ class AuditManagementDashboardStatsRenderingTests(TestCase):
             email="dash-staff@example.com", password="testpass123", is_staff=True, staff_role="admin"
         )
         ct = ContentType.objects.get_for_model(User)
-        for i in range(3):
-            AuditEvent.objects.create(
-                user=self.staff_user,
-                action="security_incident_detected",
-                category="security_event",
-                severity="critical",
-                requires_review=True,
-                content_type=ct,
-                object_id=str(self.staff_user.id),
-                description=f"dash event {i}",
-                ip_address="10.0.0.3",
-            )
+
+        def _event(**overrides: object) -> AuditEvent:
+            defaults: dict[str, object] = {
+                "user": self.staff_user,
+                "action": "security_incident_detected",
+                "category": "security_event",
+                "severity": "critical",
+                "requires_review": True,
+                "content_type": ct,
+                "object_id": str(self.staff_user.id),
+                "ip_address": "10.0.0.3",
+            }
+            defaults.update(overrides)
+            return AuditEvent.objects.create(**defaults)
+
+        # Distinct per-card counts (#467): identical seeds let a template that
+        # binds the wrong stat to a card — or swaps two cards — pass unnoticed.
+        self.flagged_events = [_event(description=f"dash event {i}") for i in range(3)]
+        # Splits total_events from critical_events and review_required.
+        _event(description="benign low event", severity="low", requires_review=False)
+        # Outside the 7-day window: splits total_events from today_events and
+        # exercises the card's window semantics.
+        _event(
+            description="stale flagged event",
+            severity="high",
+            timestamp=timezone.now() - timedelta(days=8),
+        )
+        # Flagged but already reviewed: the Awaiting Review card must exclude
+        # it (it also splits critical_events from review_required).
+        reviewed_event = _event(description="already reviewed event")
+        AuditEventReview.objects.create(audit_event=reviewed_event, reviewed_by=self.staff_user)
+
         self.client = Client()
         self.client.login(email="dash-staff@example.com", password="testpass123")
+
+    @staticmethod
+    def _expected_stats() -> dict[str, int]:
+        """The card semantics the dashboard promises, computed independently."""
+        week_start = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=7)
+        today_start = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        return {
+            "Total Events": AuditEvent.objects.count(),
+            "Events Today": AuditEvent.objects.filter(timestamp__gte=today_start).count(),
+            "Critical Events (7d)": AuditEvent.objects.filter(severity="critical", timestamp__gte=week_start).count(),
+            "Awaiting Review (7d)": AuditEvent.objects.filter(
+                requires_review=True, timestamp__gte=week_start, review__isnull=True
+            ).count(),
+        }
+
+    def _card_count(self, content: str, label: str) -> int:
+        """Return the count rendered inside the card whose label is ``label``.
+
+        Label-anchored on purpose: a bare number-in-markup assertion proves the
+        number appears SOMEWHERE on the page, so equal counts or swapped card
+        bindings both slip through.
+        """
+        match = re.search(
+            re.escape(label) + r'</p>\s*<p class="text-2xl font-semibold text-white">(\d+)</p>',
+            content,
+        )
+        self.assertIsNotNone(match, f"card {label!r} not found in rendered dashboard")
+        assert match is not None
+        return int(match.group(1))
 
     def test_stat_cards_render_real_counts_not_zero(self) -> None:
         response = self.client.get(reverse("audit:management_dashboard"))
         content = response.content.decode()
 
-        stats = response.context["audit_stats"]
-        self.assertGreater(stats["total_events"], 0)
+        expected = self._expected_stats()
+        # The seeds guarantee pairwise-distinct counts — the precondition for
+        # the label-anchored assertions below to discriminate at all.
+        self.assertEqual(len(set(expected.values())), 4, expected)
+        for label, count in expected.items():
+            self.assertEqual(self._card_count(content, label), count, f"card {label!r}")
 
-        # The rendered page must show the computed totals.
-        self.assertIn(f'<p class="text-2xl font-semibold text-white">{stats["total_events"]}</p>', content)
-        self.assertIn(f'<p class="text-2xl font-semibold text-white">{stats["review_required"]}</p>', content)
+    def test_completing_a_review_decreases_the_awaiting_review_card(self) -> None:
+        """#467: the card is a workload indicator — reviews must move it."""
+        before = self.client.get(reverse("audit:management_dashboard"))
+        before_count = self._card_count(before.content.decode(), "Awaiting Review (7d)")
+
+        self.client.post(reverse("audit:mark_event_reviewed", args=[self.flagged_events[0].id]), {})
+
+        after = self.client.get(reverse("audit:management_dashboard"))
+        self.assertEqual(after.context["audit_stats"]["review_required"], before_count - 1)
+        self.assertEqual(self._card_count(after.content.decode(), "Awaiting Review (7d)"), before_count - 1)
 
     def test_dashboard_links_to_review_queue(self) -> None:
         response = self.client.get(reverse("audit:management_dashboard"))
