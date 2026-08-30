@@ -1586,11 +1586,17 @@ class RefundService:
                     )
                 invoice_changed = invoice_projection.unwrap()
 
-            release_triggered = (
-                invoice_changed and invoice_target == "refunded"
-                if invoice is not None
-                else payment_changed and payment_target == "refunded"
-            )
+            payment_became_refunded = payment_changed and payment_target == "refunded"
+            if invoice is not None:
+                # A guard-blocked release must retry when the retained sibling
+                # later settles: that projection changes only the PAYMENT (the
+                # invoice already sits at "refunded"), so an invoice-flip-only
+                # trigger would skip the release forever. Re-evaluating on
+                # either flip is safe — the retained-payment guard still gates
+                # it and the release primitives net to zero on replay.
+                release_triggered = invoice_target == "refunded" and (invoice_changed or payment_became_refunded)
+            else:
+                release_triggered = payment_became_refunded
             if release_triggered:
                 RefundService._release_promotions_for_full_settlement(payment, invoice, payment_scope)
 

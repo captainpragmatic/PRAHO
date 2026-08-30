@@ -911,3 +911,60 @@ class PromotionReleaseOnRefundTest(TestCase):
         metadata = blocked_calls[0].kwargs["metadata"]
         self.assertEqual(metadata["sibling_payment_ids"], [str(disputed_payment.pk)])
         self.assertTrue(metadata["requires_review"])
+
+    def test_release_retries_when_retained_sibling_later_settles(self) -> None:
+        """20. A guard-blocked release fires once every retained payment settles.
+
+        The invoice flips to "refunded" on the first projection and never
+        changes again — the sibling's later settlement changes only the
+        PAYMENT, so an invoice-flip-only trigger would skip the release
+        forever despite all payments ultimately being refunded.
+        """
+        order = self._make_order()
+        redemption = self._apply_coupon(order)
+        force_status(order, "paid")
+        order.refresh_from_db()
+        invoice = self._make_invoice(total_cents=order.total_cents)
+        order.invoice = invoice
+        order.save(update_fields=["invoice", "updated_at"])
+        refunded_payment = self._make_payment(
+            amount_cents=invoice.total_cents,
+            invoice=invoice,
+        )
+        sibling = self._make_payment(
+            amount_cents=5_000,
+            invoice=invoice,
+        )
+        self._completed_refund(
+            refunded_payment,
+            amount_cents=invoice.total_cents,
+            reference="REF-RETRY-FIRST",
+            invoice=invoice,
+        )
+
+        blocked = RefundService._project_settled_refunds(refunded_payment, invoice)
+
+        self.assertTrue(blocked.is_ok(), blocked.unwrap_err() if blocked.is_err() else "")
+        invoice.refresh_from_db()
+        redemption.refresh_from_db()
+        self.assertEqual(invoice.status, "refunded")
+        self.assertEqual(redemption.status, "applied")
+
+        self._completed_refund(
+            sibling,
+            amount_cents=sibling.amount_cents,
+            reference="REF-RETRY-SIBLING",
+            invoice=invoice,
+        )
+
+        retried = RefundService._project_settled_refunds(sibling, invoice)
+
+        self.assertTrue(retried.is_ok(), retried.unwrap_err() if retried.is_err() else "")
+        sibling.refresh_from_db()
+        redemption.refresh_from_db()
+        self.coupon.refresh_from_db()
+        self.campaign.refresh_from_db()
+        self.assertEqual(sibling.status, "refunded")
+        self.assertEqual(redemption.status, "reversed")
+        self.assertEqual(self.coupon.total_uses, 0)
+        self.assertEqual(self.campaign.spent_cents, 0)
