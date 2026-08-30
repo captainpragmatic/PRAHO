@@ -289,8 +289,10 @@ class AuditManagementDashboardStatsRenderingTests(TestCase):
     @staticmethod
     def _expected_stats() -> dict[str, int]:
         """The card semantics the dashboard promises, computed independently."""
-        week_start = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=7)
+        # One clock read, like the view: two now() calls straddling midnight
+        # would anchor the windows to different days and flake.
         today_start = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        week_start = today_start - timedelta(days=7)
         return {
             "Total Events": AuditEvent.objects.count(),
             "Events Today": AuditEvent.objects.filter(timestamp__gte=today_start).count(),
@@ -308,7 +310,7 @@ class AuditManagementDashboardStatsRenderingTests(TestCase):
         bindings both slip through.
         """
         match = re.search(
-            re.escape(label) + r'</p>\s*<p class="text-2xl font-semibold text-white">(\d+)</p>',
+            re.escape(label) + r'</p>\s*<p class="[^"]*\btext-2xl\b[^"]*">(\d+)</p>',
             content,
         )
         self.assertIsNotNone(match, f"card {label!r} not found in rendered dashboard")
