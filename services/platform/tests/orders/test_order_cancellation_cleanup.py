@@ -167,7 +167,7 @@ class CouponReversalOnCancelTest(TestCase):
         order = self._order_with_applied_coupon("awaiting_payment")
 
         with (
-            self.assertLogs("apps.orders.services", level="ERROR") as logs,
+            self.assertLogs("apps.promotions.services", level="ERROR") as logs,
             patch(
                 "apps.promotions.services.CouponService.remove_coupon",
                 side_effect=RuntimeError("promotions exploded"),
@@ -179,6 +179,35 @@ class CouponReversalOnCancelTest(TestCase):
         order.refresh_from_db()
         self.assertEqual(order.status, "cancelled")
         self.assertTrue(any("Coupon reversal failed" in message for message in logs.output), logs.output)
+
+    def test_composite_release_failure_does_not_block_cancellation(self):
+        """The delegator contains failures outside the composite's branch guards."""
+        order = self._order_with_applied_coupon("awaiting_payment")
+
+        with (
+            self.assertLogs("apps.orders.services", level="ERROR") as logs,
+            patch(
+                "apps.promotions.services.release_promotions_for_order",
+                side_effect=RuntimeError("promotion release preamble exploded"),
+            ),
+        ):
+            result = OrderService.update_order_status(order, StatusChangeData(new_status="cancelled"))
+
+        self.assertTrue(result.is_ok(), result)
+        order.refresh_from_db()
+        redemption = CouponRedemption.objects.get(pk=self._redemption_id)
+        self.coupon.refresh_from_db()
+        self.assertEqual(order.status, "cancelled")
+        self.assertEqual(redemption.status, "applied")
+        self.assertEqual(self.coupon.total_uses, 1)
+        self.assertTrue(
+            any(
+                "Promotion release failed" in message
+                and "promotion value may remain consumed" in message
+                for message in logs.output
+            ),
+            logs.output,
+        )
 
     def test_poisoned_audit_fallback_does_not_roll_back_cancellation(self):
         """#485 review: a real DB error in the fallback audit write marks the
@@ -196,7 +225,7 @@ class CouponReversalOnCancelTest(TestCase):
             raise IntegrityError("audit write failed")
 
         with (
-            self.assertLogs("apps.orders.services", level="ERROR"),
+            self.assertLogs("apps.promotions.services", level="ERROR"),
             patch(
                 "apps.promotions.services.CouponService.remove_coupon",
                 side_effect=RuntimeError("promotions exploded"),
@@ -382,7 +411,7 @@ class GiftCardReversalOnCancelTest(TestCase):
         force_status(order, "awaiting_payment")
 
         with (
-            self.assertLogs("apps.orders.services", level="ERROR"),
+            self.assertLogs("apps.promotions.services", level="ERROR"),
             patch(
                 "apps.promotions.services.CouponService.remove_coupon",
                 side_effect=RuntimeError("coupon reversal exploded"),

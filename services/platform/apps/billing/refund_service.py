@@ -1404,6 +1404,134 @@ class RefundService:
         return scope
 
     @staticmethod
+    def _audit_promotion_release_block(
+        payment: Payment,
+        invoice: Invoice | None,
+        reason: str,
+        sibling_payment_ids: list[str] | None = None,
+    ) -> None:
+        """Record a blocked/failed promotion release loudly, in its own savepoint."""
+        sibling_ids = sibling_payment_ids or []
+        logger.error(
+            "🔥 [Refund] Promotion release blocked for payment %s (invoice=%s, reason=%s, siblings=%s)",
+            payment.pk,
+            invoice.pk if invoice is not None else None,
+            reason,
+            sibling_ids,
+        )
+        try:
+            from apps.audit.services import AuditService  # noqa: PLC0415
+
+            with transaction.atomic():
+                AuditService.log_simple_event(
+                    "promotion_release_blocked_anomalous_payments",
+                    content_object=invoice or payment,
+                    description=(f"Promotion release blocked after full refund settlement projection: {reason}"),
+                    metadata={
+                        "payment_id": str(payment.pk),
+                        "invoice_id": str(invoice.pk) if invoice is not None else None,
+                        "sibling_payment_ids": sibling_ids,
+                        "reason": reason,
+                        "severity": "high",
+                        "requires_review": True,
+                    },
+                    actor_type="system",
+                )
+        except Exception:
+            logger.error(
+                "🔥 [Refund] Audit fallback for blocked promotion release on payment %s also failed",
+                payment.pk,
+                exc_info=True,
+            )
+
+    @staticmethod
+    def _release_promotions_for_full_settlement(payment: Payment, invoice: Invoice | None, payment_scope: Q) -> None:
+        """Release coupon/gift-card value for the orders a full refund settled.
+
+        Runs in-transaction, deliberately not on_commit: a lost post-commit
+        callback would be replay-gated forever by the projection's Ok(False)
+        change detection, while an in-transaction release is crash-atomic with
+        settlement. No production path leaves "refunded"; a future reversal
+        workflow must design promotion-reclaim provenance before reusing this.
+        Never raises — settlement remains authoritative on any failure here.
+        """
+        try:
+            # The savepoint ensures an unexpected resolution failure cannot
+            # poison the surrounding refund-settlement transaction.
+            with transaction.atomic():
+                candidate_order_ids = set(
+                    Refund.objects.filter(
+                        payment_scope,
+                        status="completed",
+                        order_id__isnull=False,
+                    )
+                    .order_by()
+                    .values_list("order_id", flat=True)
+                    .distinct()
+                )
+                if invoice is not None:
+                    candidate_order_ids.update(invoice.orders.order_by().values_list("pk", flat=True))
+
+                if not candidate_order_ids:
+                    RefundService._audit_promotion_release_block(payment, invoice, "no_candidate_orders")
+                    return
+
+                # Lock every order in one pk-sorted query before any coupon/card lock.
+                # A residual cross-coupon cycle between concurrent multi-order refunds is
+                # left to the DB deadlock detector; it is retriable and replay re-converges.
+                locked_orders = list(
+                    Order.objects.select_for_update(of=("self",)).filter(pk__in=candidate_order_ids).order_by("pk")
+                )
+                if not locked_orders:
+                    RefundService._audit_promotion_release_block(payment, invoice, "no_candidate_orders")
+                    return
+
+                order_ids = [str(order.pk) for order in locked_orders]
+                invoice_ids = [order.invoice_id for order in locked_orders if order.invoice_id is not None]
+                proforma_ids = [order.proforma_id for order in locked_orders if order.proforma_id is not None]
+                retained_payment_scope = (
+                    Q(invoice_id__in=invoice_ids) | Q(proforma_id__in=proforma_ids) | Q(meta__order_id__in=order_ids)
+                )
+                if invoice is not None:
+                    retained_payment_scope |= Q(invoice=invoice)
+
+                # Disputed payments represent unresolved money and must block
+                # promotion release conservatively. Do not exclude the trigger
+                # payment: a fully refunded payment cannot match these statuses,
+                # while an overpayment can remain partially refunded and must
+                # itself block the release.
+                sibling_ids = list(
+                    Payment.objects.filter(
+                        retained_payment_scope,
+                        status__in=("succeeded", "partially_refunded", "disputed"),
+                    )
+                    .order_by("pk")
+                    .values_list("pk", flat=True)
+                )
+
+                if sibling_ids:
+                    RefundService._audit_promotion_release_block(
+                        payment,
+                        invoice,
+                        "retained_sibling_payments",
+                        [str(sibling_id) for sibling_id in sibling_ids],
+                    )
+                    return
+
+                from apps.promotions.services import release_promotions_for_order  # noqa: PLC0415
+
+                for order in locked_orders:
+                    release_promotions_for_order(order, trigger="full_refund")
+        except Exception:
+            logger.error(
+                "🔥 [Refund] Unexpected promotion-release resolution failure "
+                "for payment %s — settlement remains authoritative",
+                payment.pk,
+                exc_info=True,
+            )
+            RefundService._audit_promotion_release_block(payment, invoice, "release_resolution_failed")
+
+    @staticmethod
     def _project_settled_refunds(payment: Payment, invoice: Invoice | None) -> Result[dict[str, bool], str]:
         """Project completed refund totals onto coarse Payment and Invoice states."""
         try:
@@ -1433,29 +1561,39 @@ class RefundService:
                 )
             payment_changed = payment_projection.unwrap()
 
-            if invoice is None:
-                return Ok({"payment": payment_changed, "invoice": False})
-            invoice.refresh_from_db()
-            settled_invoice = int(
-                Refund.objects.filter(
-                    Q(invoice=invoice) | Q(payment__invoice=invoice),
-                    status="completed",
-                ).aggregate(total=Sum("amount_cents", default=0))["total"]
-            )
-            invoice_target = (
-                "paid"
-                if settled_invoice == 0
-                else "refunded"
-                if settled_invoice >= invoice.total_cents
-                else "partially_refunded"
-            )
-            invoice_projection = RefundService._apply_invoice_refund_projection(invoice, invoice_target)
-            if invoice_projection.is_err():
-                return Err(
-                    invoice_projection.unwrap_err(),
-                    retriability=retriability_of(invoice_projection),
+            invoice_changed = False
+            invoice_target: str | None = None
+            if invoice is not None:
+                invoice.refresh_from_db()
+                settled_invoice = int(
+                    Refund.objects.filter(
+                        Q(invoice=invoice) | Q(payment__invoice=invoice),
+                        status="completed",
+                    ).aggregate(total=Sum("amount_cents", default=0))["total"]
                 )
-            invoice_changed = invoice_projection.unwrap()
+                invoice_target = (
+                    "paid"
+                    if settled_invoice == 0
+                    else "refunded"
+                    if settled_invoice >= invoice.total_cents
+                    else "partially_refunded"
+                )
+                invoice_projection = RefundService._apply_invoice_refund_projection(invoice, invoice_target)
+                if invoice_projection.is_err():
+                    return Err(
+                        invoice_projection.unwrap_err(),
+                        retriability=retriability_of(invoice_projection),
+                    )
+                invoice_changed = invoice_projection.unwrap()
+
+            release_triggered = (
+                invoice_changed and invoice_target == "refunded"
+                if invoice is not None
+                else payment_changed and payment_target == "refunded"
+            )
+            if release_triggered:
+                RefundService._release_promotions_for_full_settlement(payment, invoice, payment_scope)
+
             return Ok({"payment": payment_changed, "invoice": invoice_changed})
         except (OperationalError, InterfaceError):
             logger.exception(
