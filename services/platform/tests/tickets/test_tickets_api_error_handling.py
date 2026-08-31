@@ -4,13 +4,22 @@ import json
 import logging
 import shutil
 import tempfile
+from contextlib import ExitStack
 from unittest.mock import patch
 
 from django.core.files.base import ContentFile
 from django.http import HttpResponse as DjangoHttpResponse
 from django.test import RequestFactory, TestCase, override_settings
 
-from apps.api.tickets.views import customer_tickets_api, ticket_attachment_download_api
+from apps.api.tickets.views import (
+    customer_ticket_create_api,
+    customer_ticket_detail_api,
+    customer_ticket_reply_api,
+    customer_tickets_api,
+    customer_tickets_summary_api,
+    support_categories_api,
+    ticket_attachment_download_api,
+)
 from apps.customers.models import Customer
 from apps.tickets.models import Ticket, TicketAttachment
 from apps.users.models import CustomerMembership, User
@@ -149,6 +158,117 @@ class TicketsAPIErrorHandlingTests(TestCase):
         error_records = [record for record in captured.records if record.levelno == logging.ERROR]
         self.assertEqual(len(error_records), 1)
         self.assertIsNotNone(error_records[0].exc_info)
+
+    def test_remaining_outer_handlers_return_generic_500_with_traceback_logs(self) -> None:
+        factory = RequestFactory()
+        cases = (
+            (
+                "customer_ticket_detail_api",
+                customer_ticket_detail_api,
+                factory.post(
+                    f"/api/tickets/{self.ticket.pk}/",
+                    data=json.dumps({"customer_id": self.customer.pk, "action": "get_ticket_detail"}),
+                    content_type="application/json",
+                ),
+                {"ticket_id": self.ticket.pk},
+                "apps.api.tickets.views.TicketDetailSerializer",
+                {"success": False, "error": "Unable to fetch ticket details"},
+                True,
+            ),
+            (
+                "customer_ticket_create_api",
+                customer_ticket_create_api,
+                factory.post(
+                    "/api/tickets/create/",
+                    data=json.dumps({"customer_id": self.customer.pk, "action": "create_ticket"}),
+                    content_type="application/json",
+                ),
+                {},
+                "apps.api.tickets.views.TicketCreateSerializer",
+                {"success": False, "error": "Unable to create ticket"},
+                True,
+            ),
+            (
+                "customer_ticket_reply_api",
+                customer_ticket_reply_api,
+                factory.post(
+                    f"/api/tickets/{self.ticket.pk}/reply/",
+                    data=json.dumps(
+                        {
+                            "customer_id": self.customer.pk,
+                            "action": "reply_to_ticket",
+                            "content": "Test reply",
+                        }
+                    ),
+                    content_type="application/json",
+                ),
+                {"ticket_id": self.ticket.pk},
+                "apps.api.tickets.views._create_customer_ticket_reply",
+                {"success": False, "error": "Unable to add reply"},
+                True,
+            ),
+            (
+                "customer_tickets_summary_api",
+                customer_tickets_summary_api,
+                factory.post(
+                    "/api/tickets/summary/",
+                    data=json.dumps({"customer_id": self.customer.pk, "action": "get_tickets_summary"}),
+                    content_type="application/json",
+                ),
+                {},
+                "apps.api.tickets.views._annotate_visible_counts",
+                {"success": False, "error": "Unable to fetch tickets summary"},
+                True,
+            ),
+            (
+                "support_categories_api",
+                support_categories_api,
+                factory.get("/api/tickets/categories/"),
+                {},
+                "apps.api.tickets.views.SupportCategorySerializer",
+                {"success": False, "error": "Unable to fetch support categories"},
+                False,
+            ),
+        )
+
+        covered_endpoints: set[str] = set()
+        for endpoint_name, view, request, view_kwargs, failure_seam, expected_body, requires_auth in cases:
+            with self.subTest(endpoint=endpoint_name):
+                covered_endpoints.add(endpoint_name)
+                with ExitStack() as stack:
+                    if requires_auth:
+                        stack.enter_context(
+                            patch(
+                                "apps.api.secure_auth.get_authenticated_customer",
+                                return_value=(self.customer, None),
+                            )
+                        )
+                    stack.enter_context(
+                        patch(failure_seam, side_effect=RuntimeError(f"{endpoint_name} exploded"))
+                    )
+                    captured = stack.enter_context(
+                        self.assertLogs("apps.api.tickets.views", level=logging.ERROR)
+                    )
+                    response = view(request, **view_kwargs)
+
+                self.assertEqual(response.status_code, 500)
+                self.assertEqual(response.data, expected_body)
+
+                error_records = [record for record in captured.records if record.levelno == logging.ERROR]
+                self.assertEqual(len(error_records), 1)
+                self.assertIsNotNone(error_records[0].exc_info)
+
+        self.assertEqual(len(covered_endpoints), 5)
+        self.assertEqual(
+            covered_endpoints,
+            {
+                "customer_ticket_detail_api",
+                "customer_ticket_create_api",
+                "customer_ticket_reply_api",
+                "customer_tickets_summary_api",
+                "support_categories_api",
+            },
+        )
 
     def test_missing_attachment_row_returns_404(self) -> None:
         response = self._download(self.missing_attachment.pk + 1_000_000)

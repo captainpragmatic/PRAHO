@@ -32,11 +32,14 @@ class DownloadAttachmentViewTests(SimpleTestCase):
     def test_platform_500_remains_generic_portal_500(self, mock_binary_request: MagicMock) -> None:
         mock_binary_request.side_effect = PlatformAPIError("Platform internal detail", status_code=500)
 
-        with self.assertLogs("apps.api_client.views", level="ERROR"):
+        with self.assertLogs("apps.api_client.views", level="ERROR") as captured:
             response = download_attachment(self._request(), ticket_id=11, attachment_id=22)
 
         self.assertEqual(response.status_code, 500)
         self.assertEqual(response.content, b"Download failed")
+        self.assertEqual(len(captured.records), 1)
+        self.assertEqual(captured.records[0].levelname, "ERROR")
+        self.assertIsNotNone(captured.records[0].exc_info)
 
     @patch("apps.api_client.views.platform_api._make_binary_request_with_headers")
     def test_unexpected_error_returns_500_with_traceback_log(self, mock_binary_request: MagicMock) -> None:
