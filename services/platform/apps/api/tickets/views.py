@@ -179,8 +179,8 @@ def customer_tickets_api(request: HttpRequest, customer: Customer) -> Response:
         logger.info(f"✅ [API] Customer tickets list: customer={customer.company_name}, count={len(serializer.data)}")
         return Response(response_data)
 
-    except Exception as e:
-        logger.error(f"🔥 [API] Customer tickets list error: {e}")
+    except Exception:
+        logger.exception("🔥 [API] Customer tickets list error")
         return Response(
             {"success": False, "error": "Unable to fetch tickets"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
@@ -273,8 +273,8 @@ def customer_ticket_detail_api(request: HttpRequest, customer: Customer, ticket_
         logger.info(f"✅ [API] Customer ticket detail: {ticket_id}, customer={customer.company_name}")
         return Response(response_data)
 
-    except Exception as e:
-        logger.error(f"🔥 [API] Customer ticket detail error for {ticket_id}: {e}")
+    except Exception:
+        logger.exception(f"🔥 [API] Customer ticket detail error for {ticket_id}")
         return Response(
             {"success": False, "error": "Unable to fetch ticket details"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
@@ -379,8 +379,8 @@ def customer_ticket_create_api(request: HttpRequest, customer: Customer) -> Resp
         logger.info(f"✅ [API] Customer ticket created: #{ticket.ticket_number}, customer={customer.company_name}")
         return Response(response_data, status=status.HTTP_201_CREATED)
 
-    except Exception as e:
-        logger.error(f"🔥 [API] Customer ticket creation error: {e}")
+    except Exception:
+        logger.exception("🔥 [API] Customer ticket creation error")
         return Response(
             {"success": False, "error": "Unable to create ticket"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
@@ -476,8 +476,8 @@ def customer_ticket_reply_api(request: HttpRequest, customer: Customer, ticket_i
             logger.info(f"✅ [API] Customer ticket reply: #{ticket_id}, customer={customer.company_name}")
         return response
 
-    except Exception as e:
-        logger.error(f"🔥 [API] Customer ticket reply error for {ticket_id}: {e}")
+    except Exception:
+        logger.exception(f"🔥 [API] Customer ticket reply error for {ticket_id}")
         return Response(
             {"success": False, "error": "Unable to add reply"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
@@ -585,8 +585,8 @@ def customer_tickets_summary_api(request: HttpRequest, customer: Customer) -> Re
         logger.info(f"✅ [API] Customer tickets summary: customer={customer.company_name}")
         return Response(response_data)
 
-    except Exception as e:
-        logger.error(f"🔥 [API] Customer tickets summary error: {e}")
+    except Exception:
+        logger.exception("🔥 [API] Customer tickets summary error")
         return Response(
             {"success": False, "error": "Unable to fetch tickets summary"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
@@ -627,8 +627,8 @@ def support_categories_api(request: HttpRequest) -> Response:
         logger.info(f"✅ [API] Support categories list: count={len(serializer.data)}")
         return Response(response_data)
 
-    except Exception as e:
-        logger.error(f"🔥 [API] Support categories error: {e}")
+    except Exception:
+        logger.exception("🔥 [API] Support categories error")
         return Response(
             {"success": False, "error": "Unable to fetch support categories"},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -689,9 +689,16 @@ def ticket_attachment_download_api(
             raise Http404("File not available")
 
         # Prepare response with file content
-        response = HttpResponse(
-            attachment.file.read(), content_type=attachment.content_type or "application/octet-stream"
-        )
+        try:
+            file_content = attachment.file.read()
+        except OSError:
+            logger.warning(
+                f"⚠️ [API] Ticket attachment {attachment_id} file missing from storage "
+                f"(ticket={attachment.ticket.ticket_number})"
+            )
+            raise Http404("File could not be read") from None
+
+        response = HttpResponse(file_content, content_type=attachment.content_type or "application/octet-stream")
 
         # Set download headers
         response["Content-Disposition"] = f'attachment; filename="{attachment.filename}"'
@@ -704,6 +711,6 @@ def ticket_attachment_download_api(
 
     except Http404:
         raise
-    except Exception as e:
-        logger.error(f"🔥 [API] Ticket attachment download error: {e}")
+    except Exception:
+        logger.exception("🔥 [API] Ticket attachment download error")
         return HttpResponse("Unable to download attachment", status=500)
