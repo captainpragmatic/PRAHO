@@ -560,7 +560,14 @@ def audit_management_dashboard(request: HttpRequest) -> HttpResponse:
         "week_events": AuditEvent.objects.filter(timestamp__gte=week_start).count(),
         "critical_events": AuditEvent.objects.filter(severity="critical", timestamp__gte=week_start).count(),
         "sensitive_events": AuditEvent.objects.filter(is_sensitive=True, timestamp__gte=today_start).count(),
-        "review_required": AuditEvent.objects.filter(requires_review=True, timestamp__gte=week_start).count(),
+        # review__isnull keeps this an "Awaiting Review" workload indicator:
+        # without it the card counts already-reviewed events and never
+        # decreases (#467). Mirrors the unreviewed split used by review_queue's
+        # review_stats (which has no time window; the 7-day window is this
+        # card's own semantics).
+        "review_required": AuditEvent.objects.filter(
+            requires_review=True, timestamp__gte=week_start, review__isnull=True
+        ).count(),
     }
 
     # Active alerts
