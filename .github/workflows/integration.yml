@@ -156,7 +156,11 @@ jobs:
         PYTHONPATH=$(pwd) ${{ env.UV_PROJECT_ENVIRONMENT }}/bin/python manage.py createcachetable
 
     - name: API token concurrency tests (PostgreSQL)
-      timeout-minutes: 3
+      # The tests run in ~3s, but the runner builds a fresh test database
+      # first (full migration stack), which alone can exceed 3 minutes on a
+      # slow runner — that flake has struck twice (tests passed, then the
+      # step timed out during teardown). 8 minutes gives setup headroom.
+      timeout-minutes: 8
       env:
         DJANGO_SETTINGS_MODULE: config.settings.ci
       run: |
