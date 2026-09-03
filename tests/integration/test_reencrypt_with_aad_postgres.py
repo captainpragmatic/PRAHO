@@ -245,7 +245,8 @@ class ReencryptRekeyPostgresTest(TestCase):
             self.assertTrue(stored.startswith(VERSIONED_V2_PREFIX))
             self.assertNotEqual(stored, before)
             self.assertEqual(_extract_embedded_aad(stored), aad)
-            self.assertIn("1 rekeyed", stdout.getvalue())
+            # Delimiter-bounded: a bare "1 rekeyed" would also match "11 rekeyed".
+            self.assertIn(", 1 rekeyed,", stdout.getvalue())
 
             # The check #455's direct-decrypt proof skipped: the row must read
             # back through the ORM (from_db_value), which a str→jsonb coercion
@@ -271,5 +272,5 @@ class ReencryptRekeyPostgresTest(TestCase):
 
             # Idempotence on jsonb: the second pass must recognize the row as
             # current-key v2 when read back out of jsonb, and rewrite nothing.
-            self.assertIn("0 rekeyed", second.getvalue())
+            self.assertIn(", 0 rekeyed,", second.getvalue())
             self.assertEqual(self._read_raw(pm.id), after_first)
