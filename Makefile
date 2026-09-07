@@ -3,7 +3,7 @@
 # ===============================================================================
 # Enhanced for Platform/Portal separation with scoped PYTHONPATH security
 
-.PHONY: help install check-env check-venv-platform dev dev-e2e dev-e2e-bg dev-e2e-csp dev-platform dev-portal dev-all test test-fast test-file test-platform test-platform-fast test-ci test-ci-focused test-portal test-integration test-e2e test-with-e2e test-e2e-platform test-e2e-portal test-e2e-csp test-e2e-orm test-security test-cache show-test-deps install-frontend build-css watch-css check-css-tooling migrate check-migrations fixtures fixtures-light clean-cache clean-dist clean-db-and-logs clean-nuke lint lint-fix lint-platform lint-portal lint-security lint-health lint-credentials lint-audit lint-fsm lint-imports lint-test-layout check-types check-types-platform check-types-portal pre-commit infra-init infra-plan infra-dev infra-staging infra-prod infra-destroy-dev deploy-dev deploy-staging deploy-prod i18n-extract i18n-compile translate translate-platform translate-portal translate-ai translate-ai-platform translate-ai-portal translate-review translate-apply translate-diff translate-stats translate-stats-platform translate-stats-portal audit-a11y audit-a11y-strict audit-dark-mode audit-dark-mode-strict
+.PHONY: help install check-env check-venv-platform dev dev-e2e dev-e2e-bg dev-e2e-csp dev-platform dev-portal dev-all test test-fast test-file test-platform test-platform-fast test-ci test-ci-focused test-portal test-integration test-e2e test-with-e2e test-e2e-platform test-e2e-portal test-e2e-file test-e2e-csp test-e2e-orm test-security test-cache show-test-deps install-frontend build-css watch-css check-css-tooling migrate check-migrations fixtures fixtures-light clean-cache clean-dist clean-db-and-logs clean-nuke lint lint-fix lint-platform lint-portal lint-security lint-health lint-credentials lint-audit lint-fsm lint-imports lint-test-layout check-types check-types-platform check-types-portal pre-commit infra-init infra-plan infra-dev infra-staging infra-prod infra-destroy-dev deploy-dev deploy-staging deploy-prod i18n-extract i18n-compile translate translate-platform translate-portal translate-ai translate-ai-platform translate-ai-portal translate-review translate-apply translate-diff translate-stats translate-stats-platform translate-stats-portal audit-a11y audit-a11y-strict audit-dark-mode audit-dark-mode-strict
 
 # ===============================================================================
 # SCOPED PYTHON ENVIRONMENTS 🔒
@@ -424,6 +424,19 @@ test-e2e-portal:
 	@find tests/e2e/ -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 	@DJANGO_SETTINGS_MODULE=config.settings.e2e PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/python -m pytest tests/e2e/portal/ -v
 	@echo "✅ Portal E2E tests completed!"
+
+test-e2e-file:
+	@echo "🎭 [E2E] Running $(FILE)..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+ifndef FILE
+	$(error FILE is required. Usage: make test-e2e-file FILE=tests/e2e/platform/test_x.py[::TestClass::test_name])
+endif
+	@echo "⚠️  Requires services running with rate limiting disabled (make dev-e2e)"
+	@curl -sf http://localhost:8700/auth/login/ > /dev/null 2>&1 || (echo "❌ Platform service not running on :8700. Run 'make dev-e2e' first." && exit 1)
+	@curl -sf http://localhost:8701/login/ > /dev/null 2>&1 || (echo "❌ Portal service not running on :8701. Run 'make dev-e2e' first." && exit 1)
+	@find tests/e2e/ -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+	@DJANGO_SETTINGS_MODULE=config.settings.e2e PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/python -m pytest $(FILE) -v
+	@echo "✅ E2E file completed!"
 
 test-e2e-csp: CSP_PROFILE ?= phase2-target
 test-e2e-csp:

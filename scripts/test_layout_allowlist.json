@@ -1,5 +1,9 @@
 {
   "allowed_duplicate_names": [
+    "test_click_activates_tab_and_syncs_both_tablists",
+    "test_first_render_labels_the_panel",
+    "test_hover_styling_follows_selection",
+    "test_keyboard_navigation_roves_activates_and_wraps",
     "test_ticket_mobile_responsiveness"
   ],
   "allowed_duplicate_name_patterns": [

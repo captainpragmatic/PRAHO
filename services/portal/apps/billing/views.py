@@ -64,20 +64,20 @@ INVOICE_DOC_TYPE_TABS = [
     {
         "value": "all",
         "label": gettext_lazy("All Documents"),
-        "border_class": "border-blue-500",
-        "text_class": "text-blue-400",
+        "border_class": "aria-selected:border-blue-500",
+        "text_class": "aria-selected:text-blue-400",
     },
     {
         "value": "invoice",
         "label": gettext_lazy("Invoices"),
-        "border_class": "border-green-500",
-        "text_class": "text-green-400",
+        "border_class": "aria-selected:border-green-500",
+        "text_class": "aria-selected:text-green-400",
     },
     {
         "value": "proforma",
         "label": gettext_lazy("Proformas"),
-        "border_class": "border-purple-500",
-        "text_class": "text-purple-400",
+        "border_class": "aria-selected:border-purple-500",
+        "text_class": "aria-selected:text-purple-400",
     },
 ]
 
