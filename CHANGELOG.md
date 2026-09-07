@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Filter tab styling now follows selection** — activating a filter tab left it with the inactive hover colors (hovering visually reverted the active accent) and a deactivated initially-active tab never regained its hover affordance; tab styling now derives from the `aria-selected` state via CSS, and the results panel is labelled by its active tab from first render (#368).
 - **Ticket API error transparency** — missing or unreadable attachment files now return 404 instead of an opaque 500, and API errors are logged with full tracebacks (#471).
 - **The audit dashboard's "Awaiting Review (7d)" card now decreases as reviews complete** — it counted every flagged event in the window including already-reviewed ones, so completing reviews never moved the number and the card was useless as a workload indicator; it now counts only unreviewed flagged events, matching the review queue's own statistics (#467).
 - **Fully refunded orders release consumed promotion value** — when settled refunds reach the full payment or invoice amount, applied coupons are reversed and redeemed gift-card value is restored exactly once; partial refunds and anomalous duplicate-payment cases retain the promotion value for review.

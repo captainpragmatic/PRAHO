@@ -23,25 +23,35 @@ from .services import PlatformAPIError, TicketCreateRequest, TicketFilters, tick
 # Tab configuration for ticket status filtering.
 # Labels are lazy: module-level gettext would freeze them to the import-time locale.
 TICKET_STATUS_TABS = [
-    {"value": "", "label": gettext_lazy("All"), "border_class": "border-blue-500", "text_class": "text-blue-400"},
-    {"value": "open", "label": gettext_lazy("Open"), "border_class": "border-blue-500", "text_class": "text-blue-400"},
+    {
+        "value": "",
+        "label": gettext_lazy("All"),
+        "border_class": "aria-selected:border-blue-500",
+        "text_class": "aria-selected:text-blue-400",
+    },
+    {
+        "value": "open",
+        "label": gettext_lazy("Open"),
+        "border_class": "aria-selected:border-blue-500",
+        "text_class": "aria-selected:text-blue-400",
+    },
     {
         "value": "in_progress",
         "label": gettext_lazy("In Progress"),
-        "border_class": "border-purple-500",
-        "text_class": "text-purple-400",
+        "border_class": "aria-selected:border-purple-500",
+        "text_class": "aria-selected:text-purple-400",
     },
     {
         "value": "waiting_on_customer",
         "label": gettext_lazy("Waiting on You"),
-        "border_class": "border-yellow-500",
-        "text_class": "text-yellow-400",
+        "border_class": "aria-selected:border-yellow-500",
+        "text_class": "aria-selected:text-yellow-400",
     },
     {
         "value": "closed",
         "label": gettext_lazy("Closed"),
-        "border_class": "border-red-500",
-        "text_class": "text-red-400",
+        "border_class": "aria-selected:border-red-500",
+        "text_class": "aria-selected:text-red-400",
     },
 ]
 

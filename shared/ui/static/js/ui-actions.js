@@ -127,34 +127,28 @@
 
   function switchTab(el) {
     var root = el.closest('.list-filters-sync');
-    var borderClass = el.dataset.tabBorder;
-    var textClass = el.dataset.tabText;
     var value = el.dataset.tabValue || '';
     var activeInput = root.querySelector('#list-filter-active-tab');
     if (activeInput) {
       activeInput.value = value;
     }
-    /* Reset all sibling tabs */
+    /* Reset all sibling tabs. Styling follows aria-selected via CSS (#368):
+       accents are aria-selected:-variant utilities and hover affordance is
+       not-aria-selected:-gated, so toggling the ARIA state IS the styling
+       change — no classList juggling, which previously left activated tabs
+       with inactive hover colors and deactivated tabs hover-dead. */
     var tabs = root.querySelectorAll('.list-filter-tab');
     for (var i = 0; i < tabs.length; i++) {
       var t = tabs[i];
       t.setAttribute('aria-selected', 'false');
       t.setAttribute('tabindex', '-1');
-      /* Remove any active border/text color classes, restore inactive.
-         Guards: classList.remove('') throws for a tab without styling data. */
-      if (t.dataset.tabBorder) { t.classList.remove(t.dataset.tabBorder); }
-      if (t.dataset.tabText) { t.classList.remove(t.dataset.tabText); }
-      t.classList.add('border-transparent', 'text-slate-400');
     }
-    /* Activate clicked tab (both desktop and mobile instances share same data attrs) */
+    /* Activate clicked tab (both desktop and mobile instances share same value) */
     var allMatching = root.querySelectorAll('.list-filter-tab[data-tab-value="' + CSS.escape(value) + '"]');
     for (var j = 0; j < allMatching.length; j++) {
       var m = allMatching[j];
       m.setAttribute('aria-selected', 'true');
       m.setAttribute('tabindex', '0');
-      m.classList.remove('border-transparent', 'text-slate-400');
-      if (borderClass) { m.classList.add(borderClass); }
-      if (textClass) { m.classList.add(textClass); }
     }
     var panel = document.getElementById(el.getAttribute('aria-controls'));
     if (panel) {

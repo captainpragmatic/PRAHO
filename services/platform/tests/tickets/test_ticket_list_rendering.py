@@ -18,6 +18,8 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
 
+from apps.tickets.views import TICKET_STATUS_TABS
+
 User = get_user_model()
 
 # Repo root: services/platform/tests/tickets/<this file> -> parents[4].
@@ -86,9 +88,16 @@ class TicketListRenderingTests(TestCase):
             self.assertIn(key, ui_actions)
         self.assertIn("target.focus()", ui_actions)
         self.assertIn("target.click()", ui_actions)
-        self.assertIn("if (t.dataset.tabBorder) { t.classList.remove(t.dataset.tabBorder); }", ui_actions)
-        self.assertIn("if (t.dataset.tabText) { t.classList.remove(t.dataset.tabText); }", ui_actions)
+        # #368: tab styling derives from aria-selected via CSS variants — the
+        # JS must not juggle styling classes (that asymmetry caused the
+        # hover-affordance bug) and the accents must be aria-selected:-gated.
+        self.assertNotIn("dataset.tabBorder", ui_actions)
+        self.assertNotIn("dataset.tabText", ui_actions)
+        self.assertNotIn("classList.add", ui_actions.split("function switchTab")[1].split("function ")[0])
         self.assertNotIn(".className.replace(", ui_actions)
+        for tab in TICKET_STATUS_TABS:
+            self.assertTrue(tab["border_class"].startswith("aria-selected:"), tab)
+            self.assertTrue(tab["text_class"].startswith("aria-selected:"), tab)
 
     def test_unknown_status_filter_falls_back_to_all_tab(self) -> None:
         """?status= values outside the tab set clamp to the All tab.
