@@ -152,7 +152,14 @@
     }
     var panel = document.getElementById(el.getAttribute('aria-controls'));
     if (panel) {
-      panel.setAttribute('aria-labelledby', el.id);
+      /* Reference BOTH tablists' instances of the active tab: the hidden
+         breakpoint's tab is outside the accessibility tree, so a single id
+         would leave the panel unlabelled on the other breakpoint. */
+      var labelIds = [];
+      for (var k = 0; k < allMatching.length; k++) {
+        if (allMatching[k].id) { labelIds.push(allMatching[k].id); }
+      }
+      panel.setAttribute('aria-labelledby', labelIds.join(' ') || el.id);
     }
   }
 

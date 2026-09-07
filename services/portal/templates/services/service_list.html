@@ -19,7 +19,7 @@
     {% include "components/list_page_skeleton.html" with skeleton_id="services-skeleton" skeleton_cols=5 skeleton_rows=6 %}
 
     {# Content (swapped by HTMX) #}
-    <div id="services-content" role="tabpanel" tabindex="0" aria-label="{% trans 'Filtered results' %}" aria-labelledby="services-content-desktop-tab-{% for t in filter_tabs %}{% if t.value == status_filter %}{{ forloop.counter0 }}{% endif %}{% endfor %}">
+    <div id="services-content" role="tabpanel" tabindex="0" aria-label="{% trans 'Filtered results' %}" aria-labelledby="{% for t in filter_tabs %}{% if t.value == status_filter %}services-content-desktop-tab-{{ forloop.counter0 }} services-content-mobile-tab-{{ forloop.counter0 }}{% endif %}{% endfor %}">
       {% include 'services/partials/services_table.html' %}
     </div>
   </div>

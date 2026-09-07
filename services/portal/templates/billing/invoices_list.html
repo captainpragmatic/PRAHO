@@ -19,7 +19,7 @@
     {% include "components/list_page_skeleton.html" with skeleton_id="invoices-skeleton" skeleton_cols=5 skeleton_rows=6 %}
 
     {# Content (swapped by HTMX) #}
-    <div id="invoices-content" role="tabpanel" tabindex="0" aria-label="{% trans 'Filtered results' %}" aria-labelledby="invoices-content-desktop-tab-{% for t in filter_tabs %}{% if t.value == doc_type %}{{ forloop.counter0 }}{% endif %}{% endfor %}">
+    <div id="invoices-content" role="tabpanel" tabindex="0" aria-label="{% trans 'Filtered results' %}" aria-labelledby="{% for t in filter_tabs %}{% if t.value == doc_type %}invoices-content-desktop-tab-{{ forloop.counter0 }} invoices-content-mobile-tab-{{ forloop.counter0 }}{% endif %}{% endfor %}">
       {% include 'billing/partials/invoices_table.html' %}
     </div>
   </div>

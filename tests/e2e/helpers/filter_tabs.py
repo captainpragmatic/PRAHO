@@ -67,16 +67,24 @@ def assert_panel_integrity(page: Page, content_id: str) -> None:
 
 
 def assert_panel_labelled_by_active_tab(page: Page, content_id: str) -> None:
-    """aria-labelledby must reference the active tab of the desktop tablist."""
+    """aria-labelledby must reference the active tab in BOTH tablists.
+
+    The attribute is a space-separated id list by ARIA semantics — and it must
+    be here, because the hidden breakpoint's tab is outside the accessibility
+    tree, so a single id would leave the panel unlabelled on one breakpoint.
+    """
     panel = page.locator(f"#{content_id}")
     labelledby = panel.get_attribute("aria-labelledby")
     assert labelledby, f"#{content_id} has no aria-labelledby"
-    referenced = page.locator(f"#{labelledby}")
-    assert referenced.count() == 1, (
-        f"#{content_id} aria-labelledby={labelledby!r} references "
-        f"{referenced.count()} elements"
-    )
-    assert referenced.get_attribute("aria-selected") == "true"
+    ids = labelledby.split()
+    assert len(ids) == 2, f"#{content_id} aria-labelledby={labelledby!r} — expected two ids"
+    for ref_id in ids:
+        referenced = page.locator(f"#{ref_id}")
+        assert referenced.count() == 1, (
+            f"#{content_id} aria-labelledby id {ref_id!r} references "
+            f"{referenced.count()} elements"
+        )
+        assert referenced.get_attribute("aria-selected") == "true"
 
 
 def text_color(locator: Locator) -> str:

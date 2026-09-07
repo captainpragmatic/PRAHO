@@ -93,6 +93,7 @@ class TicketListRenderingTests(TestCase):
         # hover-affordance bug) and the accents must be aria-selected:-gated.
         self.assertNotIn("dataset.tabBorder", ui_actions)
         self.assertNotIn("dataset.tabText", ui_actions)
+        self.assertIn("function switchTab", ui_actions)
         self.assertNotIn("classList.add", ui_actions.split("function switchTab")[1].split("function ")[0])
         self.assertNotIn(".className.replace(", ui_actions)
         for tab in TICKET_STATUS_TABS:
