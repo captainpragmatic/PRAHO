@@ -155,7 +155,6 @@ class VirtualminBackupForm(forms.Form):
 
     BACKUP_TYPE_CHOICES: ClassVar[list[tuple[str, Any]]] = [
         ("full", _("Full Backup - Complete domain backup with all data")),
-        ("incremental", _("Incremental Backup - Changes since last full backup")),
         ("config_only", _("Configuration Only - Settings and structure only")),
     ]
 

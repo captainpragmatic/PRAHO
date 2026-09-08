@@ -17,12 +17,15 @@ import hashlib
 import json
 import logging
 import os
-import secrets
+import re
+import shutil
 import tarfile
 import tempfile
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any, TypedDict, cast
 
 from django.core.cache import cache
@@ -35,7 +38,12 @@ from apps.common.security_decorators import (
 from apps.common.types import Err, Ok, Result
 from apps.settings.services import SettingsService
 
-from .virtualmin_gateway import VirtualminConfig, VirtualminGateway
+from .virtualmin_gateway import (
+    VirtualminConfig,
+    VirtualminGateway,
+    explicit_rejection,
+    has_explicit_success,
+)
 from .virtualmin_models import VirtualminAccount, VirtualminServer
 
 try:
@@ -109,6 +117,10 @@ BACKUP_COMPRESSION_LEVEL = 6  # Balance between speed and compression (structura
 _DEFAULT_MAX_BACKUP_SIZE_GB = 50  # Maximum backup size in GB (configurable via SettingsService)
 BACKUP_CHUNK_SIZE = 8 * 1024 * 1024  # 8MB chunks for S3 upload (structural)
 S3_MULTIPART_THRESHOLD = 100 * 1024 * 1024  # 100MB threshold for multipart (structural)
+
+# Archive staging path ON THE REMOTE VIRTUALMIN NODE (sent as an API
+# parameter), never a controller-local tempfile.
+_REMOTE_ARCHIVE_DIR = "/tmp"  # noqa: S108  # Remote node path, not a local tempfile
 
 # Cache keys for backup status
 BACKUP_STATUS_CACHE_PREFIX = "virtualmin_backup_status_"
@@ -245,6 +257,26 @@ class VirtualminBackupService:
         logger.info(f"Restore completed successfully: {params['restore_id']}")
         return Ok(restore_summary)
 
+    def _call_checked(
+        self, gateway: VirtualminGateway, program: str, params: dict[str, Any], timeout_seconds: int
+    ) -> Result[dict[str, Any], str]:
+        """Gateway call with the explicit-success discipline (no dead ok-branches)."""
+        result = gateway.call(program, params, timeout_seconds=timeout_seconds)
+        if result.is_err():
+            return Err(f"{program} failed: {result.unwrap_err()}")
+        response = result.unwrap()
+        if not response.success:
+            rejection = explicit_rejection(response.raw_response)
+            if rejection is None:
+                return Err(f"{program} ambiguous: response could not be interpreted")
+            return Err(f"{program} rejected: {rejection}")
+        if not has_explicit_success(response):
+            return Err(f"{program} lacked an explicit synchronous success response")
+        return Ok(response.data)
+
+    def _backup_command_timeout(self) -> int:
+        return SettingsService.get_integer_setting("provisioning.migration_backup_timeout_seconds", 1800)
+
     def _execute_backup_by_type(
         self, config: BackupConfig, account: VirtualminAccount, backup_id: str, backup_metadata: dict[str, Any]
     ) -> Result[Any, str]:
@@ -252,11 +284,13 @@ class VirtualminBackupService:
         backup_type = config.backup_type
         if backup_type == "full":
             return self._execute_full_backup(account, backup_id, backup_metadata, config)
-        elif backup_type == "incremental":
-            return self._execute_incremental_backup(account, backup_id, backup_metadata, config)
         elif backup_type == "config_only":
             return self._execute_config_backup(account, backup_id, backup_metadata)
         else:
+            # Incremental backups were removed in #431 v1: the previous code
+            # never passed the chosen base into the command and silently fell
+            # back to full, stranding archives. Honest refusal until a real
+            # incremental contract exists.
             return Err(f"Unsupported backup type: {backup_type}")
 
     def _backup_workflow_chain(  # noqa: PLR0911  # Complexity: cohesive workflow
@@ -278,29 +312,43 @@ class VirtualminBackupService:
             self._update_backup_progress(backup_id, "failed", 100)
             return Err(backup_result.unwrap_err())
 
-        # #326: persist the ACTUAL dest returned by the backup step (previously discarded, so
-        # metadata['backup_path'] was never set and verify/upload reconstructed a wrong, token-less
-        # local path). The archive is written by the remote Virtualmin backup-domain API, so it lives
-        # on the Virtualmin host — mark that explicitly so verify/upload don't pretend it is local.
+        # The archive is written by the remote Virtualmin backup-domain API; it
+        # lives on the node until the fetch playbook pulls it into the spool
+        # (and deletes the remote temp copy after a validated transfer).
         backup_metadata["backup_path"] = backup_result.unwrap()
         backup_metadata["backup_location"] = "remote"
         backup_metadata["backup_host"] = self.server.hostname
 
-        # Verify backup integrity
-        self._update_backup_progress(backup_id, "verifying", 85)
-        verification_result = self._verify_backup_integrity(backup_id, backup_metadata)
-        if verification_result.is_err():
-            return Err(verification_result.unwrap_err())
+        # Transport: remote node -> controller spool (checksum-evidenced).
+        self._update_backup_progress(backup_id, "fetching", 70)
+        fetch_result = self._fetch_archive_to_spool(backup_metadata)
+        if fetch_result.is_err():
+            self._update_backup_progress(backup_id, "failed", 100)
+            return Err(fetch_result.unwrap_err())
 
-        # Stage boundary: no publication after a takeover rotated our token.
-        if not self._owns_execution():
-            return Err("Backup execution superseded; archive not published")
+        try:
+            # Verify backup integrity (local spool file vs the remote checksum).
+            self._update_backup_progress(backup_id, "verifying", 85)
+            verification_result = self._verify_backup_integrity(backup_id, backup_metadata)
+            if verification_result.is_err():
+                return Err(verification_result.unwrap_err())
 
-        # Upload to S3 with encryption
-        self._update_backup_progress(backup_id, "uploading", 90)
-        upload_result = self._upload_backup_to_s3(backup_id, backup_metadata)
-        if upload_result.is_err():
-            return upload_result
+            # Stage boundary: no publication after a takeover rotated our token.
+            if not self._owns_execution():
+                return Err("Backup execution superseded; archive not published")
+
+            # Finalize the manifest BEFORE publishing: a metadata object in S3
+            # must never claim in_progress or omit its checksum.
+            backup_metadata["status"] = "completed"
+            backup_metadata["completed_at"] = timezone.now().isoformat()
+
+            # Upload to S3 with encryption (archive first, metadata LAST).
+            self._update_backup_progress(backup_id, "uploading", 90)
+            upload_result = self._upload_backup_to_s3(backup_id, backup_metadata)
+            if upload_result.is_err():
+                return upload_result
+        finally:
+            self._release_spool_artifacts(backup_metadata)
 
         # Finalize backup
         self._update_backup_progress(backup_id, "completed", 100)
@@ -597,10 +645,15 @@ class VirtualminBackupService:
         return self._backup_bucket  # type: ignore[unreachable]
 
     def _generate_backup_id(self, account: VirtualminAccount) -> str:
-        """Generate unique backup identifier."""
+        """Stable-ish identity for S3 keys; uuid suffix kills same-second collisions."""
         timestamp = timezone.now().strftime("%Y%m%d_%H%M%S")
         domain_hash = hashlib.sha256(account.domain.encode()).hexdigest()[:8]
-        return f"{account.domain}_{timestamp}_{domain_hash}"
+        return f"{account.domain}_{timestamp}_{domain_hash}_{uuid.uuid4().hex[:12]}"
+
+    @staticmethod
+    def _generate_archive_name() -> str:
+        """UUID-only remote/spool filename: no tenant strings in remote paths."""
+        return f"virtualmin_backup_{uuid.uuid4().hex}.tar.gz"
 
     def _generate_restore_id(self, account: VirtualminAccount, backup_id: str) -> str:
         """Generate unique restore identifier."""
@@ -628,6 +681,8 @@ class VirtualminBackupService:
             "include_ssl": config.include_ssl,
             "version": "1.0",
             "status": "in_progress",
+            "archive_name": self._generate_archive_name(),
+            "disk_usage_mb": account.current_disk_usage_mb or 0,
         }
 
     def _update_backup_progress(self, backup_id: str, status: str, progress: int) -> None:
@@ -654,8 +709,84 @@ class VirtualminBackupService:
             CACHE_TIMEOUT,
         )
 
+    def _spool_dir(self) -> Path:
+        return Path(
+            str(SettingsService.get_setting("provisioning.migration_spool_dir", "/var/lib/praho/migration-spool"))
+        )
+
+    def _fetch_archive_to_spool(  # noqa: PLR0911  # Distinct transport refusals
+        self, metadata: dict[str, Any]
+    ) -> Result[None, str]:
+        """Pull the remote archive into the controller spool and delete the remote copy."""
+        from apps.infrastructure.ansible_service import AnsibleService  # noqa: PLC0415  # Circular
+
+        from .spool import (  # noqa: PLC0415
+            acquire_spool_reservation,
+            estimated_transfer_bytes,
+            release_spool_reservation,
+        )
+
+        deployment = getattr(self.server, "node_deployment", None)
+        if deployment is None:
+            return Err(
+                f"Server {self.server.hostname} is manually registered (no managed node_deployment); "
+                "archive transport is unavailable"
+            )
+        archive_name = str(metadata["archive_name"])
+        spool = self._spool_dir()
+        spool.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if spool.is_symlink() or spool.stat().st_mode & 0o077:
+            return Err("Transfer spool must be a private directory")
+        transfer_timeout = SettingsService.get_integer_setting("provisioning.migration_transfer_timeout_seconds", 3600)
+        expected = estimated_transfer_bytes(int(metadata.get("disk_usage_mb") or 0))
+        owner = f"job:{self._progress_key}" if getattr(self, "_progress_key", None) else f"backup:{archive_name}"
+        reservation = acquire_spool_reservation(spool, archive_name, expected, owner, transfer_timeout + 300)
+        if reservation.is_err():
+            return Err(reservation.unwrap_err())
+        try:
+            variables: dict[str, Any] = {
+                "archive_name": archive_name,
+                "spool_dir": str(spool),
+                "spool_free_bytes": shutil.disk_usage(spool).free,
+            }
+            result = AnsibleService().run_playbook(
+                deployment, "virtualmin_backup_fetch.yml", variables, timeout_seconds=transfer_timeout
+            )
+            if result.is_err() or not result.unwrap().success:
+                detail = result.unwrap_err() if result.is_err() else "playbook reported failure or timed out"
+                return Err(f"Backup archive fetch failed: {detail}")
+            checksums = set(re.findall(r"BACKUP_SHA256=([0-9a-f]{64})(?![0-9a-f])", result.unwrap().stdout))
+            if len(checksums) != 1:
+                return Err("Backup fetch did not return exactly one SHA-256")
+            metadata["checksum_sha256_remote"] = checksums.pop()
+            metadata["backup_path"] = str(spool / archive_name)
+            metadata["backup_location"] = "spool"
+            return Ok(None)
+        except Exception as error:
+            return Err(f"Backup archive fetch failed: {error}")
+        finally:
+            release_spool_reservation(archive_name)
+
+    def _release_spool_artifacts(self, metadata: dict[str, Any]) -> None:
+        """Remove the spool file on determinate exits; never mask the outcome."""
+        if metadata.get("backup_location") != "spool":
+            return
+        try:
+            path = Path(str(metadata.get("backup_path", "")))
+            if path.exists():
+                path.unlink()
+        except OSError as error:
+            logger.warning("⚠️ [Backup] Spool cleanup failed: %s", error)
+
     def _validate_backup_preconditions(self, account: VirtualminAccount) -> Result[None, str]:
         """Validate that backup can proceed safely."""
+        # Transport capability gate BEFORE any remote archive is created:
+        # a manually-registered server has no Ansible path off the node.
+        if getattr(self.server, "node_deployment", None) is None:
+            return Err(
+                f"Server {self.server.hostname} is manually registered (no managed node_deployment); "
+                "archive transport is unavailable"
+            )
         # Check server connectivity
         config = VirtualminConfig(server=self.server)
         gateway = VirtualminGateway(config)
@@ -701,73 +832,12 @@ class VirtualminBackupService:
             vm_config = VirtualminConfig(server=self.server)
             gateway = VirtualminGateway(vm_config)
 
-            # Use Virtualmin's backup-domain command
-            # SECURITY: Add random token to prevent predictable temp file paths (OWASP A05:2021)
-            random_token = secrets.token_hex(8)
-            backup_params = {
+            dest = f"{_REMOTE_ARCHIVE_DIR}/{metadata['archive_name']}"
+            backup_params: dict[str, Any] = {
                 "domain": account.domain,
-                "dest": f"{tempfile.gettempdir()}/virtualmin_backup_{backup_id}_{random_token}.tar.gz",
+                "dest": dest,
                 "all-features": True,
                 "all-virtualservers": False,
-                "newformat": True,
-            }
-
-            # Add feature-specific flags
-            if not config.include_email:
-                backup_params["skip-features"] = "mail"
-            if not config.include_databases:
-                skip_features = str(backup_params.get("skip-features", ""))
-                backup_params["skip-features"] = skip_features + ",mysql"
-            if not config.include_files:
-                skip_features = str(backup_params.get("skip-features", ""))
-                backup_params["skip-features"] = skip_features + ",dir"
-            if not config.include_ssl:
-                skip_features = str(backup_params.get("skip-features", ""))
-                backup_params["skip-features"] = skip_features + ",ssl"
-
-            # Execute backup
-            self._update_backup_progress(backup_id, "backing_up", 30)
-            backup_result = gateway.call_api("backup-domain", backup_params)
-
-            if backup_result.get("status") != "ok":
-                return Err(backup_result.get("error", "Full backup failed"))
-
-            return Ok(str(backup_params["dest"]))
-
-        except Exception as e:
-            logger.error(f"Full backup execution failed: {e}")
-            return Err(f"Full backup failed: {e!s}")
-
-    def _execute_incremental_backup(
-        self, account: VirtualminAccount, backup_id: str, metadata: dict[str, Any], config: BackupConfig
-    ) -> Result[str, str]:
-        """Execute incremental backup (differential from last full backup)."""
-        # Find last full backup
-        last_backup_result = self._find_last_full_backup(account)
-        if last_backup_result.is_err():
-            # Fall back to full backup if no previous backup found
-            logger.info(f"No previous full backup found for {account.domain}, performing full backup")
-            return self._execute_full_backup(account, backup_id, metadata, config)
-
-        last_backup = last_backup_result.unwrap()
-        metadata["incremental_base"] = last_backup["backup_id"]
-        metadata["incremental_from"] = last_backup.get("created_at")
-
-        try:
-            vm_config = VirtualminConfig(server=self.server)
-            gateway = VirtualminGateway(vm_config)
-
-            # Use Virtualmin's incremental backup with reference to last backup.
-            # SECURITY (OWASP A05:2021): random token in the temp path, matching the
-            # full/config siblings — backup_id is derivable (domain + timestamp), and
-            # this path only became reachable once account-scoped listing worked (#431),
-            # so it never got the token its siblings carry.
-            random_token = secrets.token_hex(8)
-            backup_params = {
-                "domain": account.domain,
-                "dest": f"{tempfile.gettempdir()}/virtualmin_incr_{backup_id}_{random_token}.tar.gz",
-                "incremental": True,
-                "all-features": True,
                 "newformat": True,
             }
 
@@ -784,20 +854,17 @@ class VirtualminBackupService:
                 skip_features = str(backup_params.get("skip-features", ""))
                 backup_params["skip-features"] = skip_features + ",ssl" if skip_features else "ssl"
 
-            self._update_backup_progress(backup_id, "backing_up_incremental", 40)
-            backup_result = gateway.call_api("backup-domain", backup_params)
+            # Execute backup
+            self._update_backup_progress(backup_id, "backing_up", 30)
+            backup_result = self._call_checked(gateway, "backup-domain", backup_params, self._backup_command_timeout())
+            if backup_result.is_err():
+                return Err(backup_result.unwrap_err())
 
-            if backup_result.get("status") != "ok":
-                # Fall back to full backup on incremental failure
-                logger.warning(f"Incremental backup failed for {account.domain}, falling back to full backup")
-                return self._execute_full_backup(account, backup_id, metadata, config)
-
-            logger.info(f"Incremental backup completed for {account.domain} based on {last_backup['backup_id']}")
-            return Ok(str(backup_params["dest"]))
+            return Ok(dest)
 
         except Exception as e:
-            logger.warning(f"Incremental backup failed for {account.domain}: {e}, falling back to full backup")
-            return self._execute_full_backup(account, backup_id, metadata, config)
+            logger.error(f"Full backup execution failed: {e}")
+            return Err(f"Full backup failed: {e!s}")
 
     def _execute_config_backup(
         self, account: VirtualminAccount, backup_id: str, metadata: dict[str, Any]
@@ -807,51 +874,41 @@ class VirtualminBackupService:
             vm_config = VirtualminConfig(server=self.server)
             gateway = VirtualminGateway(vm_config)
 
-            # Backup only configuration, no user data
-            # SECURITY: Add random token to prevent predictable temp file paths (OWASP A05:2021)
-            random_token = secrets.token_hex(8)
-            backup_params = {
+            dest = f"{_REMOTE_ARCHIVE_DIR}/{metadata['archive_name']}"
+            backup_params: dict[str, Any] = {
                 "domain": account.domain,
-                "dest": f"{tempfile.gettempdir()}/virtualmin_config_{backup_id}_{random_token}.tar.gz",
+                "dest": dest,
                 "only-features": "virtualmin,dir",  # Config and basic structure only
                 "newformat": True,
             }
 
             self._update_backup_progress(backup_id, "backing_up_config", 50)
-            backup_result = gateway.call_api("backup-domain", backup_params)
+            backup_result = self._call_checked(gateway, "backup-domain", backup_params, self._backup_command_timeout())
+            if backup_result.is_err():
+                return Err(backup_result.unwrap_err())
 
-            if backup_result.get("status") != "ok":
-                return Err(backup_result.get("error", "Config backup failed"))
-
-            return Ok(str(backup_params["dest"]))
+            return Ok(dest)
 
         except Exception as e:
             logger.error(f"Config backup execution failed: {e}")
             return Err(f"Config backup failed: {e!s}")
 
-    def _verify_backup_integrity(  # noqa: PLR0911, C901  # Complexity: multi-step business logic
+    def _verify_backup_integrity(  # noqa: PLR0911, PLR0912, C901  # Complexity: multi-step business logic
         self, backup_id: str, metadata: dict[str, Any]
     ) -> Result[None, str]:  # Complexity: Virtualmin workflow  # Complexity: multi-step business logic
         """Verify backup file integrity and completeness."""
 
         try:
-            # #326: the archive is created by the remote Virtualmin backup-domain API and lives on
-            # the Virtualmin host, not the PRAHO platform filesystem. Verifying it locally is
-            # impossible until a remote->local (or direct-to-S3) transfer exists. Fail HONESTLY
-            # instead of a misleading local "file not found", and surface that the remote archive
-            # is stranded (remote cleanup + transport is tracked as a separate follow-up).
-            if metadata.get("backup_location") == "remote":
-                remote_path = metadata.get("backup_path", "<unknown>")
+            # Defense-in-depth: a still-remote archive means the fetch step was
+            # skipped — never pretend a controller-local file exists.
+            if metadata.get("backup_location") != "spool":
                 host = metadata.get("backup_host", self.server.hostname)
                 return Err(
-                    f"Backup archive is on the remote Virtualmin host {host} ({remote_path}); "
-                    "remote retrieval/transfer is not implemented (#326), so the backup cannot be "
-                    "verified or uploaded. The remote temp archive is left in place and must be "
-                    "cleaned up until the transfer mechanism lands."
+                    f"Backup archive has not been fetched into the spool (location="
+                    f"{metadata.get('backup_location', 'unknown')}, host={host}); refusing to verify"
                 )
 
-            # Get backup file path from metadata or construct it
-            backup_path = metadata.get("backup_path") or f"{tempfile.gettempdir()}/virtualmin_backup_{backup_id}.tar.gz"
+            backup_path = str(metadata["backup_path"])
 
             # 1. File existence check
             if not os.path.exists(backup_path):
@@ -869,7 +926,23 @@ class VirtualminBackupService:
             if file_size > max_size_bytes:
                 return Err(f"Backup file exceeds size limit: {file_size} bytes > {max_size_bytes} bytes")
 
-            # 3. Archive structure verification
+            # 3. Transfer-evidence check FIRST: the spool bytes must match the
+            # checksum observed on the node before any structural parsing.
+            file_hash = hashlib.sha256()
+            with open(backup_path, "rb") as f:
+                for chunk in iter(lambda: f.read(BACKUP_CHUNK_SIZE), b""):
+                    file_hash.update(chunk)
+
+            checksum = file_hash.hexdigest()
+            expected_remote = metadata.get("checksum_sha256_remote")
+            if expected_remote and checksum != expected_remote:
+                return Err(
+                    f"Backup archive checksum mismatch: spool={checksum} remote={expected_remote}; "
+                    "transfer corruption suspected"
+                )
+            metadata["checksum_sha256"] = checksum
+
+            # 4. Archive structure verification
             try:
                 with tarfile.open(backup_path, "r:gz") as tar:
                     members = tar.getnames()
@@ -881,15 +954,6 @@ class VirtualminBackupService:
                     metadata["file_size_bytes"] = file_size
             except tarfile.TarError as e:
                 return Err(f"Invalid backup archive: {e}")
-
-            # 4. Checksum calculation
-            file_hash = hashlib.sha256()
-            with open(backup_path, "rb") as f:
-                for chunk in iter(lambda: f.read(BACKUP_CHUNK_SIZE), b""):
-                    file_hash.update(chunk)
-
-            checksum = file_hash.hexdigest()
-            metadata["checksum_sha256"] = checksum
 
             # 5. Feature completeness check
             expected_features = []
@@ -919,17 +983,14 @@ class VirtualminBackupService:
             s3_client = self._get_s3_client()
             bucket_name = self._get_backup_bucket()
 
-            # #326: defense-in-depth — a remote archive cannot be uploaded from the platform host.
-            # (The workflow already fails at verification, but never claim an upload for a remote
-            # archive even if called directly.)
-            if metadata.get("backup_location") == "remote":
+            # Defense-in-depth: only a fetched spool archive may be published.
+            if metadata.get("backup_location") != "spool":
                 return Err(
-                    f"Cannot upload backup {backup_id}: archive is on the remote Virtualmin host and "
-                    "remote transfer is not implemented (#326)"
+                    f"Cannot upload backup {backup_id}: archive is not in the controller spool "
+                    f"(location={metadata.get('backup_location', 'unknown')})"
                 )
 
-            # Determine the archive path up front.
-            backup_path = metadata.get("backup_path") or f"{tempfile.gettempdir()}/virtualmin_backup_{backup_id}.tar.gz"
+            backup_path = str(metadata["backup_path"])
 
             if not os.path.exists(backup_path):
                 return Err(f"Backup file not found for upload: {backup_path}")

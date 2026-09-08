@@ -23,9 +23,7 @@ class Command(BaseCommand):
         # Backup command
         backup_parser = subparsers.add_parser("backup", help="Create domain backup")
         backup_parser.add_argument("domain", help="Domain name to backup")
-        backup_parser.add_argument(
-            "--type", choices=["full", "incremental", "config_only"], default="full", help="Backup type"
-        )
+        backup_parser.add_argument("--type", choices=["full", "config_only"], default="full", help="Backup type")
         backup_parser.add_argument("--no-email", action="store_true", help="Exclude email data")
         backup_parser.add_argument("--no-databases", action="store_true", help="Exclude databases")
         backup_parser.add_argument("--no-files", action="store_true", help="Exclude web files")

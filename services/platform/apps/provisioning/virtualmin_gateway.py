@@ -542,6 +542,34 @@ class VirtualminQuotaExceededError(VirtualminAPIError):
     """Server quota exceeded - try different server"""
 
 
+def explicit_rejection(raw: str) -> str | None:
+    """Extract explicit remote rejection evidence, or None when ambiguous.
+
+    Mutating callers request json=1, so a genuine Virtualmin rejection is a
+    parseable JSON envelope carrying its own failure markers. Anything else —
+    empty body, truncated JSON, proxy HTML, unrecognized text — is parser
+    guesswork and must be treated as an unknown outcome.
+    """
+    text = (raw or "").strip()
+    if not text.startswith("{"):
+        return None
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    status = str(data.get("status", "")).strip().lower()
+    if status in {"error", "failed", "failure"} or data.get("success") is False or data.get("error"):
+        return str(data.get("error") or data.get("message") or status or "rejected")
+    return None
+
+
+def has_explicit_success(response: VirtualminResponse) -> bool:
+    """A mutating command succeeded only with an explicit synchronous marker."""
+    return response.data.get("status") == "success" or response.data.get("success") is True
+
+
 class VirtualminResponseParser:
     """
     Handles Virtualmin's varied response formats: JSON/XML/text

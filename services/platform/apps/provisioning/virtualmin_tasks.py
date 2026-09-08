@@ -960,6 +960,32 @@ def run_virtualmin_restore(job_id: str) -> dict[str, Any]:
     return _run_backup_restore_job(job_id, "restore_domain")
 
 
+_SPOOL_ORPHAN_MAX_AGE_HOURS = 48
+
+
+def _sweep_spool_orphans(counts: dict[str, int]) -> None:
+    """Remove crash-orphaned spool archives of both name families."""
+    import re as _re  # noqa: PLC0415
+    import time  # noqa: PLC0415
+    from pathlib import Path  # noqa: PLC0415
+
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    spool = Path(str(SettingsService.get_setting("provisioning.migration_spool_dir", "/var/lib/praho/migration-spool")))
+    if not spool.is_dir():
+        return
+    pattern = _re.compile(r"^(migration_[0-9a-f-]{36}|virtualmin_backup_[0-9a-f]{32})\.tar\.gz$")
+    cutoff = time.time() - _SPOOL_ORPHAN_MAX_AGE_HOURS * 3600
+    for path in spool.iterdir():
+        try:
+            if pattern.match(path.name) and path.is_file() and path.stat().st_mtime < cutoff:
+                path.unlink()
+                counts["spool_orphans_removed"] += 1
+                logger.warning("⚠️ [VirtualminTask] Removed orphaned spool archive %s", path.name)
+        except OSError:
+            logger.exception("🔥 [VirtualminTask] Spool orphan sweep failed for %s", path)
+
+
 def _reclaim_backup_restore_jobs(counts: dict[str, int]) -> None:
     """Two-clock recovery: dispatch window for pending, own deadline for running."""
     from .virtualmin_migration_models import SpoolReservation  # noqa: PLC0415
@@ -1020,6 +1046,7 @@ def reclaim_stalled_virtualmin_operations() -> dict[str, int]:
         "drains_reviewed": 0,
         "jobs_dispatch_lost": 0,
         "jobs_taken_over": 0,
+        "spool_orphans_removed": 0,
     }
     stalled_migrations = list(
         # needs_review is non-terminal but policy "stop": requeueing it would churn.
@@ -1060,6 +1087,7 @@ def reclaim_stalled_virtualmin_operations() -> dict[str, int]:
         finally:
             NodeDrain.objects.filter(pk=drain.pk, status__in=("pending", "running")).update(updated_at=timezone.now())
     _reclaim_backup_restore_jobs(counts)
+    _sweep_spool_orphans(counts)
     return counts
 
 

@@ -1,0 +1,58 @@
+---
+- name: Fetch one Virtualmin backup archive and clean the remote temp copy
+  hosts: all
+  gather_facts: false
+  become: false
+  tasks:
+    - name: Validate single-host backup inputs
+      ansible.builtin.assert:
+        that:
+          - ansible_play_hosts_all | length == 1
+          - archive_name is match('^virtualmin_backup_[0-9a-f]{32}\.tar\.gz$')
+          - spool_dir is match('^/')
+          - spool_free_bytes | int > 0
+
+    - name: Inspect remote archive
+      ansible.builtin.stat:
+        path: "/tmp/{{ archive_name }}"
+        checksum_algorithm: sha256
+        follow: false
+      register: backup_archive
+
+    - name: Check archive and local spool budget
+      ansible.builtin.assert:
+        that:
+          - backup_archive.stat.exists
+          - backup_archive.stat.isreg | default(false)
+          - not (backup_archive.stat.islnk | default(false))
+          - backup_archive.stat.size | default(0) | int > 0
+          - backup_archive.stat.size | int <= spool_free_bytes | int
+          - backup_archive.stat.checksum is match('^[0-9a-f]{64}$')
+        fail_msg: "Backup archive is absent, unsafe, empty, or exceeds the spool budget"
+
+    # Generated inventory connects as root. Do not enable become here:
+    # fetch with become invokes slurp and doubles archive memory consumption.
+    - name: Fetch archive directly to the private controller spool
+      become: false
+      ansible.builtin.fetch:
+        src: "/tmp/{{ archive_name }}"
+        dest: "{{ spool_dir }}/{{ archive_name }}"
+        flat: yes
+        fail_on_missing: true
+        validate_checksum: true
+
+    # Unlike migration (which retains the source copy by design), backups must
+    # not strand multi-GB temp archives on the node: delete only AFTER the
+    # checksum-validated fetch above succeeded.
+    - name: Remove the remote temporary archive
+      ansible.builtin.file:
+        path: "/tmp/{{ archive_name }}"
+        state: absent
+
+    - name: Register backup checksum evidence
+      ansible.builtin.set_fact:
+        backup_sha256: "{{ backup_archive.stat.checksum }}"
+
+    - name: Emit structured backup checksum
+      ansible.builtin.debug:
+        msg: "BACKUP_SHA256={{ backup_sha256 }}"

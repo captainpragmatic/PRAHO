@@ -1,11 +1,10 @@
-"""#326: the backup pipeline must be honest about the remote archive location.
+"""#431: the backup pipeline transports archives honestly.
 
-_execute_full_backup writes the archive on the REMOTE Virtualmin host (the dest is
-passed to the backup-domain API), but the returned dest was discarded and verify/upload
-did local os.path.exists on a reconstructed token-less path — every backup failed with a
-misleading "Backup file not found" and nothing reached S3. These tests pin the honest
-behaviour: the real dest is recorded and marked remote, and verify/upload fail with an
-explicit remote-not-implemented error rather than a local file-not-found.
+The archive is written on the REMOTE node by backup-domain, fetched into the
+controller spool by the transport playbook (which deletes the remote temp copy
+after a validated transfer), verified against the remote checksum, and only
+then published to S3 — with the manifest finalized BEFORE publication. These
+tests pin the transport contract and the fail-closed guards around it.
 """
 
 from __future__ import annotations
@@ -16,7 +15,7 @@ from unittest.mock import MagicMock, patch
 from django.test import TestCase
 
 from apps.billing.models import Currency
-from apps.common.types import Ok
+from apps.common.types import Err, Ok
 from apps.customers.models import Customer
 from apps.provisioning.models import Service, ServicePlan
 from apps.provisioning.virtualmin_backup_service import BackupConfig, VirtualminBackupService
@@ -59,47 +58,73 @@ class BackupRemoteHonestyTests(TestCase):
         )
         self.svc = VirtualminBackupService(self.server)
 
-    def test_verify_fails_honestly_for_remote_archive(self) -> None:
-        """A remote-located archive must fail with an explicit remote error, not 'file not found'."""
+    def test_verify_refuses_unfetched_archive(self) -> None:
+        """Verification requires a fetched spool archive; remote-only is refused."""
         metadata = {
             "backup_location": "remote",
-            "backup_path": "/srv/vm/virtualmin_backup_x.tar.gz",
+            "backup_path": "/tmp/virtualmin_backup_x.tar.gz",  # noqa: S108  # Remote node path
             "backup_host": "bk.example.com",
         }
         result = self.svc._verify_backup_integrity("bk-1", metadata)
         self.assertTrue(result.is_err())
         msg = result.unwrap_err().lower()
-        self.assertIn("remote", msg)
+        self.assertIn("spool", msg)
         self.assertNotIn("not found", msg)
 
-    def test_upload_refuses_remote_archive(self) -> None:
-        """Upload must refuse a remote archive rather than reconstruct a local path."""
+    def test_upload_refuses_unfetched_archive(self) -> None:
+        """Publication must refuse anything not fetched into the spool."""
         with patch.object(self.svc, "_get_s3_client", return_value=MagicMock()), patch.object(
             self.svc, "_get_backup_bucket", return_value="bucket"
         ):
             result = self.svc._upload_backup_to_s3(
-                "bk-1", {"backup_location": "remote", "backup_path": "/srv/vm/x.tar.gz"}
+                "bk-1", {"backup_location": "remote", "backup_path": "/tmp/x.tar.gz"}  # noqa: S108  # Remote node path
             )
         self.assertTrue(result.is_err())
-        self.assertIn("remote transfer is not implemented", result.unwrap_err())
+        self.assertIn("spool", result.unwrap_err())
 
-    def test_workflow_records_real_dest_and_marks_remote(self) -> None:
-        """The dest returned by the backup step is stored in metadata and marked remote."""
+    def test_workflow_fetches_then_verifies_then_publishes(self) -> None:
+        """The chain stamps the remote dest, fetches to spool, and publishes a finalized manifest."""
         metadata: dict = {}
-        remote_dest = "/srv/vm/virtualmin_backup_bk-1_abcd.tar.gz"
+        remote_dest = "/tmp/virtualmin_backup_abcd.tar.gz"  # noqa: S108  # Remote node path
+
+        def fake_fetch(md: dict) -> Ok[None]:
+            md["backup_location"] = "spool"
+            md["backup_path"] = "/spool/virtualmin_backup_abcd.tar.gz"
+            md["checksum_sha256_remote"] = "a" * 64
+            return Ok(None)
 
         with (
             patch.object(self.svc, "_validate_backup_preconditions", return_value=Ok(None)),
             patch.object(self.svc, "_execute_backup_by_type", return_value=Ok(remote_dest)),
+            patch.object(self.svc, "_fetch_archive_to_spool", side_effect=fake_fetch) as fetch,
+            patch.object(self.svc, "_verify_backup_integrity", return_value=Ok(None)),
+            patch.object(self.svc, "_upload_backup_to_s3", return_value=Ok({"s3_key": "k"})) as upload,
+            patch.object(self.svc, "_release_spool_artifacts") as cleanup,
             patch.object(self.svc, "_update_backup_progress"),
         ):
-            # Verification will now fail honestly (remote), which is the point — but metadata
-            # must first be stamped with the real dest and remote markers.
             result = self.svc._backup_workflow_chain(self.account, "bk-1", metadata, BackupConfig())
 
-        self.assertEqual(metadata["backup_path"], remote_dest)
-        self.assertEqual(metadata["backup_location"], "remote")
+        self.assertTrue(result.is_ok(), result)
+        fetch.assert_called_once()
+        upload.assert_called_once()
+        cleanup.assert_called_once()
+        # The manifest was finalized BEFORE publication.
+        self.assertEqual(metadata["status"], "completed")
+        self.assertIn("completed_at", metadata)
         self.assertEqual(metadata["backup_host"], self.server.hostname)
-        # The workflow surfaces the honest remote failure rather than a false success.
+
+    def test_fetch_failure_stops_the_chain(self) -> None:
+        """A failed transport must fail the backup with no publication."""
+        with (
+            patch.object(self.svc, "_validate_backup_preconditions", return_value=Ok(None)),
+            patch.object(self.svc, "_execute_backup_by_type", return_value=Ok("/tmp/x.tar.gz")),  # noqa: S108
+            patch.object(
+                self.svc, "_fetch_archive_to_spool", return_value=Err("Backup archive fetch failed: timeout")
+            ),
+            patch.object(self.svc, "_upload_backup_to_s3") as upload,
+            patch.object(self.svc, "_update_backup_progress"),
+        ):
+            result = self.svc._backup_workflow_chain(self.account, "bk-1", {}, BackupConfig())
         self.assertTrue(result.is_err())
-        self.assertIn("remote", result.unwrap_err().lower())
+        self.assertIn("fetch failed", result.unwrap_err())
+        upload.assert_not_called()
