@@ -277,6 +277,7 @@ class SecureUserRegistrationService:
         """Type definition for user registration data"""
 
         email: EmailAddress
+        password: str  # Required: set on the new account so the user can authenticate
         first_name: str
         last_name: str
         phone: PhoneNumber | None

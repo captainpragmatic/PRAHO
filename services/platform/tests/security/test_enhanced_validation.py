@@ -500,7 +500,8 @@ class TestSecureUserRegistrationService(TestCase):
             'email': 'test@example.com',
             'first_name': '<script>alert("xss")</script>',
             'last_name': 'User',
-            'phone': '+40721234567'
+            'phone': '+40721234567',
+            'password': 'CorrectHorse12!',  # valid: proves the XSS rejection, not an incidental missing-key error
         }
 
         customer_data = {
@@ -523,6 +524,7 @@ class TestSecureUserRegistrationService(TestCase):
             'email': 'admin@example.com',
             'first_name': 'Admin',
             'last_name': 'User',
+            'password': 'CorrectHorse12!',  # valid: proves the escalation rejection, not an incidental missing-key error
             'is_staff': True,        # Should be blocked
             'is_superuser': True,    # Should be blocked
             'staff_role': 'admin'    # Should be blocked
