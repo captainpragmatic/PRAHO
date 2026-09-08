@@ -121,8 +121,13 @@ INTERNAL_IPS = [
     "localhost",
 ]
 
+# API requests lose toolbar history/stats: middleware collects stats before rejecting non-HTML injection.
+# Excluding them removes per-request stack-trace capture overhead from every HMAC API call
+# and de-instruments the keep-alive amplification path.
 DEBUG_TOOLBAR_CONFIG = {
-    "SHOW_TOOLBAR_CALLBACK": lambda request: DEBUG,
+    "SHOW_TOOLBAR_CALLBACK": lambda request: (
+        DEBUG and request.META.get("REMOTE_ADDR") in INTERNAL_IPS and not request.path.startswith("/api/")
+    ),
     "SHOW_COLLAPSED": True,
     "IS_RUNNING_TESTS": False,  # Fix for debug toolbar test issue
 }
