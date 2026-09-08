@@ -35,10 +35,13 @@ from .virtualmin_forms import (
     VirtualminAccountForm,
     VirtualminBackupForm,
     VirtualminBulkActionForm,
+    VirtualminMigrationForm,
     VirtualminRestoreForm,
     VirtualminServerForm,
 )
 from .virtualmin_gateway import VirtualminConfig, VirtualminGateway
+from .virtualmin_migration_models import account_has_active_migration
+from .virtualmin_migration_service import VirtualminMigrationService, list_migration_domains
 from .virtualmin_models import VirtualminAccount, VirtualminProvisioningJob, VirtualminServer
 from .virtualmin_service import (
     VirtualminBackupManagementService,
@@ -435,6 +438,8 @@ def virtualmin_account_detail(request: HttpRequest, account_id: str) -> HttpResp
         VirtualminAccount.objects.select_related("server", "service", "service__customer"), id=account_id
     )
 
+    migration = account.migrations.first()
+
     # Get recent provisioning jobs for this account
     recent_jobs = VirtualminProvisioningJob.objects.filter(account=account).order_by("-created_at")[:10]
 
@@ -467,6 +472,8 @@ def virtualmin_account_detail(request: HttpRequest, account_id: str) -> HttpResp
         },
         "can_backup": account.is_active,
         "can_restore": len(recent_backups) > 0,
+        "migration": migration,
+        "migrate_url": reverse("provisioning:virtualmin_account_migrate", args=[account.pk]),
         "backup_url": reverse("provisioning:virtualmin_account_backup", args=[account.id]),
         "restore_url": reverse("provisioning:virtualmin_account_restore", args=[account.id]),
         "suspend_url": reverse("provisioning:virtualmin_account_suspend", args=[account.id]),
@@ -475,12 +482,43 @@ def virtualmin_account_detail(request: HttpRequest, account_id: str) -> HttpResp
         "toggle_protection_url": reverse("provisioning:virtualmin_account_toggle_protection", args=[account.id]),
     }
 
-    return render(request, "provisioning/virtualmin/account_detail.html", context)
+    response = render(request, "provisioning/virtualmin/account_detail.html", context)
+    if migration is not None and migration.status == "completed" and not migration.routing_note_shown:
+        account.migrations.filter(pk=migration.pk, status="completed").update(routing_note_shown=True)
+    return response
 
 
 # ===============================================================================
 # BACKUP AND RESTORE OPERATIONS
 # ===============================================================================
+
+
+@login_required
+@user_passes_test(is_staff_or_superuser)
+@audit_service_call("virtualmin_migrate_form")
+def virtualmin_account_migrate(request: HttpRequest, account_id: str) -> HttpResponse:
+    """Render a migration form or validate and enqueue one manual migration."""
+    account = get_object_or_404(VirtualminAccount.objects.select_related("server"), pk=account_id)
+    form = VirtualminMigrationForm(request.POST if request.method == "POST" else None, account=account)
+    if request.method == "POST" and form.is_valid():
+        result = VirtualminMigrationService().start_migration(
+            account, form.cleaned_data["target_server"], initiated_by=cast(User, request.user)
+        )
+        if result.is_ok():
+            messages.success(request, _("Migration queued. Follow its status before changing routing/DNS."))
+            return redirect("provisioning:virtualmin_account_detail", account_id=account.pk)
+        form.add_error(None, result.unwrap_err())
+    return render(
+        request,
+        "provisioning/virtualmin/migrate_form.html",
+        {
+            "page_title": _("Migrate Virtualmin account"),
+            "account": account,
+            "form": form,
+            "form_action": reverse("provisioning:virtualmin_account_migrate", args=[account.pk]),
+            "cancel_url": reverse("provisioning:virtualmin_account_detail", args=[account.pk]),
+        },
+    )
 
 
 @login_required
@@ -1761,7 +1799,7 @@ def virtualmin_accounts_sync(  # noqa: C901, PLR0912, PLR0915  # Complexity: mul
             gateway = provisioning_service._get_gateway(server)
 
             # List domains from this server
-            domains_result = gateway.list_domains(name_only=False)
+            domains_result = list_migration_domains(gateway)
 
             if domains_result.is_err():
                 error_msg = f"Failed to get domains from {server.name}: {domains_result.unwrap_err()}"
@@ -1775,6 +1813,8 @@ def virtualmin_accounts_sync(  # noqa: C901, PLR0912, PLR0915  # Complexity: mul
             # Group domains by username (actual Virtualmin accounts)
             accounts_by_username = {}
             for domain_data in domains:
+                if domain_data.get("enabled") is not True:
+                    continue
                 domain_name = domain_data.get("domain", "").strip()
                 username = domain_data.get("username", "").strip()
 
@@ -1795,6 +1835,12 @@ def virtualmin_accounts_sync(  # noqa: C901, PLR0912, PLR0915  # Complexity: mul
                 try:
                     # Check if account already exists in PRAHO
                     account = VirtualminAccount.objects.get(virtualmin_username=username)
+                    if account_has_active_migration(account):
+                        logger.info("✅ [AccountSync] Migration lock: account=%s", account.pk)
+                        continue
+                    if account.server_id != server.pk and account.server.status == "active":
+                        logger.info("✅ [AccountSync] Preserving active owner: account=%s", account.pk)
+                        continue
                     # Update existing account
                     account.domain = account_data["primary_domain"]
                     account.domains = account_data["domains"]

@@ -36,6 +36,11 @@ urlpatterns = [
         name="virtualmin_account_delete",
     ),
     path(
+        "accounts/<uuid:account_id>/migrate/",
+        virtualmin_views.virtualmin_account_migrate,
+        name="virtualmin_account_migrate",
+    ),
+    path(
         "accounts/<uuid:account_id>/backup/",
         virtualmin_views.virtualmin_account_backup,
         name="virtualmin_account_backup",

@@ -6,6 +6,8 @@
 
 {% block content %}
 <div class="space-y-6">
+  <a href="{{ migrate_url }}" class="text-blue-400">{% trans "Migrate account" %}</a>
+  {% include "provisioning/virtualmin/migration_status.html" %}
     <!-- =============================================================================== -->
     <!-- PAGE HEADER WITH ACTIONS -->
     <!-- =============================================================================== -->

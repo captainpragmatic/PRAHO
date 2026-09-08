@@ -857,6 +857,37 @@ def _handle_critical_provisioning_error(
     return _handle_critical_provisioning_error_secure(error, domain, service_id, correlation_id, safe_log_ctx)
 
 
+def enqueue_virtualmin_migration(migration_id: str, timeout_seconds: int) -> str:
+    return async_task(
+        "apps.provisioning.virtualmin_tasks.run_virtualmin_migration",
+        migration_id,
+        timeout=timeout_seconds,
+    )
+
+
+def run_virtualmin_migration(migration_id: str) -> dict[str, Any]:
+    from uuid import UUID  # noqa: PLC0415
+
+    from .virtualmin_migration_service import VirtualminMigrationService  # noqa: PLC0415
+
+    try:
+        result = VirtualminMigrationService().run(UUID(migration_id))
+    except (TypeError, ValueError) as error:
+        return {"success": False, "error": str(error)}
+    if result.is_err():
+        return {"success": False, "error": result.unwrap_err()}
+    return {"success": True, **result.unwrap()}
+
+
+def _migration_locked(account: VirtualminAccount) -> bool:
+    from .virtualmin_migration_models import account_has_active_migration  # noqa: PLC0415
+
+    locked = account_has_active_migration(account)
+    if locked:
+        logger.info("✅ [VirtualminTask] Migration lock: account=%s", account.pk)
+    return locked
+
+
 def reconcile_virtualmin_service_state(  # noqa: PLR0911  # Convergence matrix: one exit per state pair
     service_id: str,
 ) -> dict[str, Any]:
@@ -879,6 +910,8 @@ def reconcile_virtualmin_service_state(  # noqa: PLR0911  # Convergence matrix: 
         return {"success": False, "error": f"Service {service_id} not found"}
 
     account = VirtualminAccount.objects.filter(service=service).select_related("server").first()
+    if account is not None and _migration_locked(account):
+        return {"success": True, "action": "migration_locked"}
 
     if service.status == "active":
         if account is None:
@@ -1017,6 +1050,9 @@ def suspend_virtualmin_account(account_id: str, reason: str = "") -> dict[str, A
         # Create provisioning service
         provisioning_service = VirtualminProvisioningService(account.server)
 
+        if _migration_locked(account):
+            return {"success": True, "action": "migration_locked"}
+
         # Execute suspension
         result = provisioning_service.suspend_account(account, reason)
 
@@ -1065,6 +1101,9 @@ def unsuspend_virtualmin_account(account_id: str) -> dict[str, Any]:
         # Create provisioning service
         provisioning_service = VirtualminProvisioningService(account.server)
 
+        if _migration_locked(account):
+            return {"success": True, "action": "migration_locked"}
+
         # Execute unsuspension
         result = provisioning_service.unsuspend_account(account)
 
@@ -1109,6 +1148,9 @@ def delete_virtualmin_account(account_id: str) -> dict[str, Any]:
             error_msg = f"Account {account_id} not found"
             logger.error(f"❌ [VirtualminTask] {error_msg}")
             return {"success": False, "error": error_msg}
+
+        if _migration_locked(account):
+            return {"success": True, "action": "migration_locked"}
 
         # Note: Protection check is handled in the service layer
         domain = account.domain  # Store for logging after deletion
@@ -1377,11 +1419,16 @@ def process_failed_virtualmin_jobs() -> dict[str, Any]:
                     continue
 
                 try:
+                    dispatch_timeout = TASK_TIME_LIMIT
+                    if job.operation == "migrate_domain":
+                        from .virtualmin_migration_service import migration_task_timeout  # noqa: PLC0415
+
+                        dispatch_timeout = migration_task_timeout()
                     task_id = async_task(
                         "apps.provisioning.virtualmin_tasks.retry_virtualmin_job",
                         str(job.id),
                         now.isoformat(),  # claim nonce: only this claim's task may run the job
-                        timeout=TASK_TIME_LIMIT,
+                        timeout=dispatch_timeout,
                     )
                     VirtualminProvisioningJob.record_dispatch(job.pk, task_id)
                 except Exception as enqueue_error:

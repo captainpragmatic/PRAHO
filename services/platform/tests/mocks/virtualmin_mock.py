@@ -485,6 +485,7 @@ class MockVirtualminGateway:
                 "bandwidth_usage": f"{d.bandwidth_usage_mb} MB",
                 "bandwidth_quota": f"{d.bandwidth_quota_mb} MB",
                 "enabled": d.enabled,
+                "features": " ".join(d.features),
             }
             for d in self._domains.values()
         ]

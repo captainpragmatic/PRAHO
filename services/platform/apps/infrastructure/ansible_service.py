@@ -86,6 +86,8 @@ class AnsibleService:
             "virtualmin_harden.yml",
             "virtualmin_backup.yml",
             "blesta.yml",
+            "virtualmin_migrate_fetch.yml",
+            "virtualmin_migrate_push.yml",
             "blesta_harden.yml",
             "blesta_backup.yml",
         }
@@ -154,6 +156,7 @@ class AnsibleService:
         deployment: NodeDeployment,
         playbook: str,
         extra_vars: dict[str, Any] | None = None,
+        timeout_seconds: int | None = None,
     ) -> Result[AnsibleResult, str]:
         """
         Run a single Ansible playbook.
@@ -166,6 +169,10 @@ class AnsibleService:
         Returns:
             Result with AnsibleResult or error
         """
+        effective_timeout = self.timeout if timeout_seconds is None else timeout_seconds
+        if effective_timeout <= 0:
+            return Err("Playbook timeout must be positive")
+
         if not deployment.ipv4_address:
             return Err("Deployment has no IP address")
 
@@ -251,7 +258,7 @@ class AnsibleService:
                 cwd=ANSIBLE_BASE_PATH,
                 capture_output=True,
                 text=True,
-                timeout=self.timeout,
+                timeout=effective_timeout,
                 check=False,
                 env=ansible_env,
             )
@@ -287,13 +294,13 @@ class AnsibleService:
             )
 
         except subprocess.TimeoutExpired:
-            logger.error(f"🚨 [Ansible] Playbook {playbook} timed out after {self.timeout}s")
+            logger.error(f"🚨 [Ansible] Playbook {playbook} timed out after {effective_timeout}s")
             return Ok(
                 AnsibleResult(
                     success=False,
                     playbook=playbook,
                     stdout="",
-                    stderr=f"Playbook timed out after {self.timeout} seconds",
+                    stderr=f"Playbook timed out after {effective_timeout} seconds",
                     return_code=-1,
                 )
             )

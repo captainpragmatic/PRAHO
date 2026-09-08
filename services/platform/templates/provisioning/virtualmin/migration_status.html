@@ -1,0 +1,14 @@
+{% load i18n %}
+{% if migration %}
+  <section class="space-y-2 rounded-lg border border-slate-700 bg-slate-800 p-4">
+    <h2 class="font-semibold text-slate-100">{% trans "Migration" %}</h2>
+    <p>{% trans "Status:" %} {{ migration.get_status_display }}</p>
+    <p>{% trans "Phase:" %} {{ migration.status }}</p>
+    {% if migration.status == "needs_review" %}
+      <p class="text-amber-300">{% trans "Needs review: operator action is required. Automatic migration is stopped." %}</p>
+      <p>{{ migration.error_detail }}</p>
+    {% elif migration.status == "completed" %}
+      <p>{% trans "Update routing/DNS manually and validate the target. The disabled source copy is retained; remove it manually after validation." %}</p>
+    {% endif %}
+  </section>
+{% endif %}

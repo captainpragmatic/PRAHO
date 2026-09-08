@@ -185,6 +185,7 @@ class VirtualminMigrationFoundationTests(TestCase):
                 patch("django.utils.timezone.now", return_value=clock),
                 patch("apps.provisioning.virtualmin_tasks.async_task", return_value=f"migration-{attempt}"),
             ):
+                self.assertTrue(migration.acquire_lease(uuid4(), timedelta(minutes=31)))
                 sweep = process_failed_virtualmin_jobs()
                 self.assertEqual(sweep["results"]["retried_jobs"], 1)
                 job.refresh_from_db()
@@ -200,7 +201,7 @@ class VirtualminMigrationFoundationTests(TestCase):
                     "job_id": str(job.pk),
                     "action": "busy",
                     "migration_id": str(migration.pk),
-                    "lease_acquired": True,
+                    "lease_acquired": False,
                 },
             )
             self.assertEqual(duplicate["action"], "stale_claim_discarded")
@@ -211,7 +212,7 @@ class VirtualminMigrationFoundationTests(TestCase):
             migration.refresh_from_db()
             self.assertEqual(migration.status, "pending")
             self.assertIsNotNone(migration.lease_token)
-            self.assertEqual(migration.worker_lease_expires_at, clock + timedelta(minutes=5))
+            self.assertEqual(migration.worker_lease_expires_at, clock + timedelta(minutes=31))
 
             clock += timedelta(minutes=31)
             with (

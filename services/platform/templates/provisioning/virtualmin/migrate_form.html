@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% load i18n ui_components %}
+
+{% block title %}{{ page_title }} - {{ account.domain }}{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+  <h1 class="text-2xl font-bold text-slate-100">{{ page_title }}</h1>
+  <form method="post" action="{{ form_action }}" class="space-y-4 rounded-lg border border-slate-700 bg-slate-800 p-6">
+    {% csrf_token %}
+    <p class="text-slate-100">{{ account.domain }} — {{ account.server.name }}</p>
+    <p class="text-sm text-amber-300">
+      {% trans "Downtime starts when the source domain is disabled and continues through backup, transfer, restore, verification, and manual routing/DNS changes." %}
+    </p>
+    <p class="text-sm text-slate-300">
+      {% trans "The source copy is retained and remains disabled. Remove it manually only after validating the target. PRAHO does not change routing or DNS." %}
+    </p>
+    <p class="text-sm text-slate-300">
+      {% trans "A previously suspended account stays suspended on the target." %}
+    </p>
+    {{ form.non_field_errors }}
+    <div>
+      {{ form.target_server.label_tag }}
+      {{ form.target_server }}
+      {{ form.target_server.errors }}
+    </div>
+    <div>
+      {{ form.confirm }}
+      {{ form.confirm.label_tag }}
+      {{ form.confirm.errors }}
+    </div>
+    {% trans "Start migration" as start_label %}
+    {% button start_label type="submit" variant="primary" %}
+    <a href="{{ cancel_url }}" class="text-slate-300">{% trans "Cancel" %}</a>
+  </form>
+</div>
+{% endblock %}

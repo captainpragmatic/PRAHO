@@ -12,7 +12,7 @@ from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 if TYPE_CHECKING:
-    from .virtualmin_models import VirtualminServer
+    from .virtualmin_models import VirtualminAccount, VirtualminServer
 
 _TERMINAL_STATUSES = ("completed", "failed", "rolled_back")
 
@@ -113,3 +113,8 @@ class VirtualminMigration(models.Model):
     def active_reservations(cls, server: VirtualminServer) -> int:
         """Reservation rows are authoritative; needs_review retains capacity."""
         return cls.objects.filter(target_server=server).exclude(status__in=_TERMINAL_STATUSES).count()
+
+
+def account_has_active_migration(account: VirtualminAccount) -> bool:
+    """Needs-review migrations retain ownership until explicitly resolved."""
+    return VirtualminMigration.objects.filter(account_id=account.pk).exclude(status__in=_TERMINAL_STATUSES).exists()

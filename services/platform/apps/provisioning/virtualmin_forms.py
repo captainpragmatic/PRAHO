@@ -464,3 +464,23 @@ class VirtualminAccountForm(forms.ModelForm):  # type: ignore[type-arg]
             raise ValidationError(_("An account with this domain already exists"))
 
         return domain
+
+
+class VirtualminMigrationForm(forms.Form):
+    target_server = forms.ModelChoiceField(
+        queryset=VirtualminServer.objects.none(),
+        widget=PRAHOSelectWidget(),
+        label=_("Target server"),
+    )
+    confirm = forms.BooleanField(
+        widget=PRAHOCheckboxWidget(),
+        label=_("I understand the downtime, retained-copy, and manual routing/DNS requirements."),
+    )
+
+    def __init__(self, *args: Any, account: VirtualminAccount, **kwargs: Any) -> None:
+        from .virtualmin_migration_service import VirtualminMigrationService  # noqa: PLC0415
+
+        super().__init__(*args, **kwargs)
+        targets = VirtualminMigrationService.eligible_targets(account)
+        field = cast("forms.ModelChoiceField[VirtualminServer]", self.fields["target_server"])
+        field.queryset = VirtualminServer.objects.filter(pk__in=[server.pk for server in targets])

@@ -43,6 +43,8 @@ from .virtualmin_validators import VirtualminValidator
 if TYPE_CHECKING:
     from .virtualmin_migration_service import MigrationResumeOutcome
 
+from .virtualmin_migration_models import account_has_active_migration
+
 logger = logging.getLogger(__name__)
 
 # Username generation constants
@@ -650,7 +652,7 @@ class VirtualminProvisioningService:
             rollback_details["error"] = str(e)
             return "failed", rollback_details
 
-    def suspend_account(  # noqa: PLR0911, PLR0915  # Complexity: multi-step workflow with rollback + cache self-heal
+    def suspend_account(  # noqa: PLR0911, PLR0912, PLR0915  # Complexity: multi-step workflow with rollback + cache self-heal + migration lock
         self, account: VirtualminAccount, reason: str = ""
     ) -> Result[bool, str]:  # Complexity: Virtualmin workflow  # Complexity: multi-step business logic
         """
@@ -670,6 +672,9 @@ class VirtualminProvisioningService:
             If database update fails after API call succeeds, will attempt
             to re-enable the domain in Virtualmin.
         """
+        if account_has_active_migration(account):
+            logger.info("✅ [VirtualminService] Migration lock blocks suspension: %s", account.pk)
+            return Err("Account has an active migration")
         idempotency_key: str | None = None
         try:
             # Idempotency check - already suspended
@@ -779,7 +784,7 @@ class VirtualminProvisioningService:
             logger.exception(f"Error suspending account {account.domain}: {e}")
             return Err(str(e))
 
-    def unsuspend_account(  # noqa: PLR0911, PLR0915  # Complexity: multi-step workflow with rollback + cache self-heal
+    def unsuspend_account(  # noqa: PLR0911, PLR0912, PLR0915  # Complexity: multi-step workflow with rollback + cache self-heal + migration lock
         self, account: VirtualminAccount
     ) -> Result[bool, str]:  # Complexity: Virtualmin workflow  # Complexity: multi-step business logic
         """
@@ -798,6 +803,9 @@ class VirtualminProvisioningService:
             If database update fails after API call succeeds, will attempt
             to re-disable the domain in Virtualmin.
         """
+        if account_has_active_migration(account):
+            logger.info("✅ [VirtualminService] Migration lock blocks activation: %s", account.pk)
+            return Err("Account has an active migration")
         idempotency_key: str | None = None
         try:
             # Idempotency check - already active
@@ -927,6 +935,10 @@ class VirtualminProvisioningService:
             (domain deleted in Virtualmin but not marked as such in DB).
             Note: Domain deletion cannot be rolled back - data loss is irreversible.
         """
+        if account_has_active_migration(account):
+            logger.info("✅ [VirtualminService] Migration lock blocks deletion: %s", account.pk)
+            return Err("Account has an active migration")
+
         # ⚠️ SAFETY CHECK: Prevent deletion of protected accounts
         if account.protected_from_deletion:
             error_msg = f"Account {account.domain} is protected from deletion. Disable protection first."
@@ -1136,10 +1148,13 @@ class VirtualminProvisioningService:
             return Err(creation_result.unwrap_err())
         return Ok(True)
 
-    def _execute_lifecycle_operation(
+    def _execute_lifecycle_operation(  # noqa: PLR0911  # Distinct guard exits: migration lock + per-operation outcomes
         self, account: VirtualminAccount, job: VirtualminProvisioningJob
     ) -> Result[bool, str]:
         """Run suspend/unsuspend/delete against the gateway reusing the SAME job."""
+        if account_has_active_migration(account):
+            logger.info("✅ [VirtualminService] Migration lock blocks lifecycle retry: %s", account.pk)
+            return Err("Account has an active migration")
         operations = {
             "suspend_domain": ("disable-domain", "suspended"),
             "unsuspend_domain": ("enable-domain", "active"),
@@ -1416,6 +1431,9 @@ class VirtualminProvisioningService:
         Returns:
             Result with enforcement actions taken
         """
+        if account_has_active_migration(account):
+            logger.info("✅ [VirtualminService] Migration lock skips enforcement: %s", account.pk)
+            return Ok({"action": "migration_locked", "actions_taken": []})
         try:
             # First detect drift
             sync_result = self.sync_account_from_virtualmin(account)
