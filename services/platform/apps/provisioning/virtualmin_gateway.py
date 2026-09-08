@@ -845,6 +845,7 @@ class VirtualminGateway:
         params: dict[str, Any] | None = None,
         response_format: str = "json",
         correlation_id: str = "",
+        timeout_seconds: int | None = None,
     ) -> Result[VirtualminResponse, VirtualminAPIError]:
         """
         Make authenticated call to Virtualmin API.
@@ -854,6 +855,7 @@ class VirtualminGateway:
             params: Parameters for the API call
             response_format: Response format ('json', 'xml', 'text')
             correlation_id: Correlation ID for request tracking
+            timeout_seconds: Per-call read timeout; None retains the current configured timeout
 
         Returns:
             Result containing VirtualminResponse or error
@@ -935,7 +937,7 @@ class VirtualminGateway:
         is_read_only = is_virtualmin_read_only_program(program)
         for attempt in range(VIRTUALMIN_MAX_RETRIES):
             try:
-                response = self._make_request(api_params, attempt + 1, auth=call_auth)
+                response = self._make_request(api_params, attempt + 1, auth=call_auth, timeout_seconds=timeout_seconds)
                 execution_time = time.time() - start_time
 
                 # Parse response
@@ -991,7 +993,11 @@ class VirtualminGateway:
         return Err(last_error, retriability=last_error.retriability)
 
     def _make_request(
-        self, params: dict[str, Any], attempt: int, auth: tuple[str, str] | None = None
+        self,
+        params: dict[str, Any],
+        attempt: int,
+        auth: tuple[str, str] | None = None,
+        timeout_seconds: int | None = None,
     ) -> requests.Response:
         """
         Make HTTP request to Virtualmin API.
@@ -1010,7 +1016,7 @@ class VirtualminGateway:
             VirtualminAPIError: On API-specific errors
         """
         try:
-            response = self._execute_http_request(params, auth=auth)
+            response = self._execute_http_request(params, auth=auth, timeout_seconds=timeout_seconds)
             self._validate_response_size(response)
             self._validate_http_status(response)
             return response
@@ -1050,7 +1056,12 @@ class VirtualminGateway:
                 retriability=Retriability.UNKNOWN,
             ) from e
 
-    def _execute_http_request(self, params: dict[str, Any], auth: tuple[str, str] | None = None) -> requests.Response:
+    def _execute_http_request(
+        self,
+        params: dict[str, Any],
+        auth: tuple[str, str] | None = None,
+        timeout_seconds: int | None = None,
+    ) -> requests.Response:
         """Execute HTTPS with DNS pinning and optional handshake-time certificate pinning.
 
         ``auth`` is the (username, password) resolved once per call(). When omitted (a direct
@@ -1074,9 +1085,14 @@ class VirtualminGateway:
                 )
             auth = creds.unwrap()
 
-        # Get current timeout configuration (supports hot-reloading)
+        # Get current timeout configuration (supports hot-reloading).
+        # The policy below is constructed per request; shared config is never mutated.
         timeout_config = get_virtualmin_timeouts()
-        request_timeout = timeout_config.get("API_REQUEST_TIMEOUT", self.config.timeout)
+        request_timeout = (
+            timeout_seconds
+            if timeout_seconds is not None
+            else timeout_config.get("API_REQUEST_TIMEOUT", self.config.timeout)
+        )
 
         # Build per-server policy — Virtualmin uses self-signed certs on some nodes
         virtualmin_policy = OutboundPolicy(

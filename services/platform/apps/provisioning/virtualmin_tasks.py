@@ -1283,7 +1283,7 @@ def update_virtualmin_server_statistics() -> dict[str, Any]:
 
 # Operations retry_virtualmin_job knows how to recover; anything else found
 # failed is terminal for the sweep (backup/restore jobs opt out separately).
-_RETRYABLE_OPERATIONS = ("create_domain", "suspend_domain", "unsuspend_domain", "delete_domain")
+_RETRYABLE_OPERATIONS = ("create_domain", "suspend_domain", "unsuspend_domain", "delete_domain", "migrate_domain")
 
 # A claimed (pending) job whose retry task has not reconciled it within this
 # window is presumed lost to a process death and returned to the failed pool.
@@ -1312,6 +1312,9 @@ def retry_virtualmin_job(job_id: str, claim_nonce: str = "") -> dict[str, Any]:
     service = VirtualminProvisioningService(job.server)
     result = service.retry_job(job)
     if result.is_ok():
+        outcome = result.unwrap()
+        if isinstance(outcome, dict):
+            return {"success": True, "job_id": job_id, **outcome}
         return {"success": True, "job_id": job_id}
     return {"success": False, "job_id": job_id, "error": str(result.unwrap_err())}
 

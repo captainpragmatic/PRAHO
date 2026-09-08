@@ -41,7 +41,7 @@ from .virtualmin_models import (
 from .virtualmin_validators import VirtualminValidator
 
 if TYPE_CHECKING:
-    pass
+    from .virtualmin_migration_service import MigrationResumeOutcome
 
 logger = logging.getLogger(__name__)
 
@@ -375,8 +375,10 @@ class VirtualminProvisioningService:
 
                         # Update server stats (track for rollback)
                         old_domain_count = account.server.current_domains
-                        account.server.current_domains += 1
-                        account.server.save(update_fields=["current_domains", "updated_at"])
+                        VirtualminServer.objects.filter(pk=account.server_id).update(
+                            current_domains=models.F("current_domains") + 1, updated_at=timezone.now()
+                        )
+                        account.server.refresh_from_db(fields=["current_domains"])
 
                         rollback_operations.append(
                             {
@@ -1061,7 +1063,7 @@ class VirtualminProvisioningService:
             logger.exception(f"Error deleting account {account.domain}: {e}")
             return Err(str(e))
 
-    def retry_job(self, job: VirtualminProvisioningJob) -> Result[bool, str]:
+    def retry_job(self, job: VirtualminProvisioningJob) -> Result[bool, str] | Result[MigrationResumeOutcome, str]:
         """
         Re-run a failed job on its EXISTING account and job rows.
 
@@ -1078,6 +1080,10 @@ class VirtualminProvisioningService:
             return self._retry_create_domain(account, job)
         if job.operation in ("suspend_domain", "unsuspend_domain", "delete_domain"):
             return self._execute_lifecycle_operation(account, job)
+        if job.operation == "migrate_domain":
+            from .virtualmin_migration_service import resume_migration  # noqa: PLC0415  # Deferred: dispatcher seam
+
+            return resume_migration(job)
         return Err(f"Unsupported retry operation '{job.operation}'")
 
     def _retry_create_domain(self, account: VirtualminAccount, job: VirtualminProvisioningJob) -> Result[bool, str]:

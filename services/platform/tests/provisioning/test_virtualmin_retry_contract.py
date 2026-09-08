@@ -99,7 +99,8 @@ class VirtualminRetryContractTests(SimpleTestCase):
         with (
             patch.object(gateway, "_check_rate_limit", return_value=True),
             patch.object(
-                gateway, "_execute_http_request", side_effect=lambda _params, auth=None: _response(503)
+                gateway, "_execute_http_request",
+                side_effect=lambda _params, auth=None, timeout_seconds=None: _response(503),
             ) as request_mock,
             patch("apps.provisioning.virtualmin_gateway.time.sleep"),
         ):
@@ -115,7 +116,8 @@ class VirtualminRetryContractTests(SimpleTestCase):
         with (
             patch.object(gateway, "_check_rate_limit", return_value=True),
             patch.object(
-                gateway, "_execute_http_request", side_effect=lambda _params, auth=None: _response(503)
+                gateway, "_execute_http_request",
+                side_effect=lambda _params, auth=None, timeout_seconds=None: _response(503),
             ) as request_mock,
             patch("apps.provisioning.virtualmin_gateway.time.sleep"),
         ):

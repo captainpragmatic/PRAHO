@@ -567,6 +567,7 @@ class VirtualminProvisioningJob(models.Model):
         ("install_ssl", _("Install SSL Certificate")),
         ("backup_domain", _("Backup Domain")),
         ("restore_domain", _("Restore Domain")),
+        ("migrate_domain", _("Migrate Domain")),
     )
 
     # Job identification

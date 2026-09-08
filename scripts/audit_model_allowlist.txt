@@ -72,6 +72,7 @@ tickets.TicketWorklog           # child of Ticket
 
 # ── 5. Virtualmin integration internals ────────────────────────────────────────
 provisioning.VirtualminDriftRecord      # internal drift detection
+provisioning.VirtualminMigration        # Round 1a internal lease/reservation state; lifecycle audit emission is deferred to Round 1b orchestration
 provisioning.VirtualminServer           # mirrors Server model
 
 # ── 6. Usage metering (high-volume operational data) ──────────────────────────
