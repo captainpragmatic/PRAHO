@@ -5,11 +5,15 @@
 <div class="bg-slate-800 rounded-lg border border-slate-700 p-6 mb-6">
     <div class="flex items-center justify-between">
         <div class="flex items-center">
-            {% if live_status.status == "completed" %}
+            {% if job.status == "completed" %}
                 <div class="w-10 h-10 bg-green-600 rounded-full flex items-center justify-center mr-4">
                     <span class="text-white text-lg">✓</span>
                 </div>
-            {% elif live_status.status == "failed" %}
+            {% elif job.status == "attention" %}
+                <div class="w-10 h-10 bg-amber-600 rounded-full flex items-center justify-center mr-4">
+                    <span class="text-white text-lg">!</span>
+                </div>
+            {% elif job.status == "failed" %}
                 <div class="w-10 h-10 bg-red-600 rounded-full flex items-center justify-center mr-4">
                     <span class="text-white text-lg">✕</span>
                 </div>
@@ -25,12 +29,12 @@
 
             <div>
                 <h2 class="text-xl font-semibold text-slate-100">
-                    {% if live_status.status == "completed" %}
+                    {% if job.status == "completed" %}
                         {% trans "Operation Completed" %}
-                    {% elif live_status.status == "failed" %}
-                        {% trans "Operation Failed" %}
-                    {% elif live_status.status == "attention" %}
+                    {% elif job.status == "attention" %}
                         {% trans "Operation Needs Attention" %}
+                    {% elif job.status == "failed" %}
+                        {% trans "Operation Failed" %}
                     {% elif live_status.status == "running" %}
                         {% trans "Operation In Progress" %}
                     {% else %}
@@ -52,9 +56,11 @@
         </div>
 
         <div class="text-right">
-            {% if live_status.status == "completed" %}
+            {% if job.status == "completed" %}
                 {% trans "Complete" as bt1 %}{% badge bt1 variant="success" %}
-            {% elif live_status.status == "failed" %}
+            {% elif job.status == "attention" %}
+                {% trans "Needs Attention" as bt5 %}{% badge bt5 variant="warning" %}
+            {% elif job.status == "failed" %}
                 {% trans "Failed" as bt2 %}{% badge bt2 variant="danger" %}
             {% elif live_status.status == "running" %}
                 {% trans "Running" as bt3 %}{% badge bt3 variant="warning" %}

@@ -566,6 +566,12 @@ def virtualmin_job_resolve(request: HttpRequest, job_id: str) -> HttpResponse:
         updated_at=timezone.now(),
     )
     if rows:
+        from .virtualmin_signals import audit_job_status_transition  # noqa: PLC0415  # Circular
+
+        job.refresh_from_db()
+        audit_job_status_transition(
+            job, actor_type="user", user=request.user if request.user.is_authenticated else None
+        )
         messages.success(request, _("Job marked resolved. The account is unlocked."))
     else:
         messages.error(request, _("Only a job awaiting attention can be resolved."))
@@ -709,7 +715,7 @@ def virtualmin_backup_status(request: HttpRequest, job_id: str) -> HttpResponse:
         return render(
             request,
             "provisioning/virtualmin/partials/job_status.html",
-            {"job": job, "live_status": live_status, "is_complete": job.status in ["completed", "failed"]},
+            {"job": job, "live_status": live_status, "is_complete": job.status in ["completed", "failed", "attention"]},
         )
 
     context = {
@@ -718,7 +724,7 @@ def virtualmin_backup_status(request: HttpRequest, job_id: str) -> HttpResponse:
         "live_status": live_status,
         "refresh_url": reverse("provisioning:virtualmin_backup_status", args=[job.id]),
         "account_url": reverse("provisioning:virtualmin_account_detail", args=[job.account.id]) if job.account else "",
-        "is_complete": job.status in ["completed", "failed"],
+        "is_complete": job.status in ["completed", "failed", "attention"],
     }
 
     return render(request, "provisioning/virtualmin/backup_status.html", context)

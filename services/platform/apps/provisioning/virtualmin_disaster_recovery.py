@@ -410,15 +410,23 @@ class VirtualminDisasterRecoveryService:
         """Get recommendations based on integrity issues"""
         recommendations = []
 
+        advice = {
+            "accounts_without_services": "🔗 Link orphaned accounts to PRAHO services or mark for cleanup",
+            "accounts_without_customers": "👤 Ensure all services have valid customer associations",
+            "accounts_without_virtualmin_username": "🏷️ Backfill the Virtualmin username on every account",
+            "accounts_with_unusable_recovery_seed": "🌱 Populate both PRAHO service and customer ids (recovery seed)",
+            "accounts_with_inconsistent_recovery_seed": "🌱 Reconcile recovery-seed ids with the linked service/customer",
+            "servers_without_usable_credentials": "🔑 Store a usable API credential (vault or field) for every server",
+        }
         for issue in issues:
-            if issue["issue"] == "accounts_without_services":
-                recommendations.append("🔗 Link orphaned accounts to PRAHO services or mark for cleanup")
-            elif issue["issue"] == "accounts_without_customers":
-                recommendations.append("👤 Ensure all services have valid customer associations")
-            elif issue["issue"] == "servers_without_credentials":
-                recommendations.append("🔑 Configure API credentials for all Virtualmin servers")
+            tip = advice.get(issue["issue"])
+            if tip:
+                recommendations.append(tip)
 
-        if not recommendations:
+        # Only claim readiness when there are genuinely no blocking issues —
+        # never alongside a critical report (the dishonest-publication class
+        # this branch exists to eliminate).
+        if not issues:
             recommendations.append("✅ PRAHO data integrity is excellent - ready for disaster recovery")
 
         return recommendations

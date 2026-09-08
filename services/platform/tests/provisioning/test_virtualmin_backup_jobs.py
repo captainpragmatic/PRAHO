@@ -13,6 +13,7 @@ from django.test import TransactionTestCase
 from django.urls import reverse
 from django.utils import timezone
 
+from apps.audit.models import AuditEvent
 from apps.common.types import Ok
 from apps.provisioning import virtualmin_tasks
 from apps.provisioning.spool import acquire_spool_reservation, release_spool_reservation
@@ -130,6 +131,19 @@ class BackupJobAdmissionTests(task_tests.VirtualminTaskTestBase):
         refused = self.management.create_backup_job(self.account)
         self.assertTrue(refused.is_err())
         self.assertIn("visibility timeout", refused.unwrap_err())
+
+    def test_terminal_transitions_emit_audit_events(self) -> None:
+        """C2: CAS transitions bypass post_save, so they must audit explicitly."""
+        job = self._pending_job()
+        with patch("apps.provisioning.virtualmin_backup_service.VirtualminBackupService") as service:
+            service.return_value.backup_domain.return_value = Ok({"backup_id": "b1"})
+            virtualmin_tasks.run_virtualmin_backup(str(job.pk))
+        self.assertTrue(
+            AuditEvent.objects.filter(
+                action="virtualmin_provisioning_job_completed", object_id=str(job.pk)
+            ).exists(),
+            "a CAS completion must still land on the audit trail",
+        )
 
     def test_claim_is_single_owner(self) -> None:
         """Duplicate task deliveries resolve to exactly one claim."""

@@ -21,7 +21,8 @@ from apps.provisioning import virtualmin_tasks
 from apps.provisioning.spool import acquire_spool_reservation
 from apps.provisioning.virtualmin_backup_service import BackupConfig, VirtualminBackupService
 from apps.provisioning.virtualmin_gateway import VirtualminResponse
-from apps.provisioning.virtualmin_migration_models import SpoolReservation
+from apps.provisioning.virtualmin_migration_models import SpoolReservation, VirtualminMigration
+from apps.provisioning.virtualmin_migration_service import VirtualminMigrationService
 from tests.provisioning import test_virtualmin_tasks as task_tests
 
 
@@ -227,13 +228,22 @@ class BackupTransportTests(task_tests.VirtualminTaskTestBase):
         self.assertTrue(fresh.exists())
         self.assertTrue(stranger.exists())
 
-    def test_migration_fetch_participates_in_spool_reservations(self) -> None:
-        """A standing reservation consuming the spool refuses the migration fetch leg."""
+    def test_migration_fetch_leg_aborts_when_spool_is_reserved(self) -> None:
+        """Drive the REAL migration _transfer fetch leg against a standing reservation."""
+        migration = VirtualminMigration.objects.create(
+            account=self.account, source_server=self.server, target_server=self.server, reason="manual", status="fetching"
+        )
+        service = VirtualminMigrationService()
+        service.spool = Path(self.spool.name)
+        service.transfer_timeout = 60
         with patch("apps.provisioning.spool.shutil.disk_usage") as usage:
             usage.return_value = type("du", (), {"free": 1000})()
-            blocker = acquire_spool_reservation(Path(self.spool.name), "virtualmin_backup_block.tar.gz", 900, "t", 60)
+            blocker = acquire_spool_reservation(Path(self.spool.name), "migration_block.tar.gz", 900, "t", 60)
             self.assertTrue(blocker.is_ok())
-            second = acquire_spool_reservation(
-                Path(self.spool.name), f"migration_{uuid4()}.tar.gz", 900, "migration:x", 60
-            )
-        self.assertTrue(second.is_err())
+            token = migration.lease_token
+            # _transfer aborts the migration (calls _abort) when the fetch leg
+            # cannot reserve spool capacity; assert it never ran a playbook.
+            with patch.object(service, "_abort") as abort:
+                service._transfer(migration, token or migration.pk)
+            abort.assert_called_once()
+        self.ansible.run_playbook.assert_not_called()

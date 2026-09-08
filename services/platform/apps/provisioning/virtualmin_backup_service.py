@@ -220,10 +220,12 @@ class VirtualminBackupService:
             self._update_backup_progress(backup_id, "verifying", 85)
             verification_result = self._verify_backup_integrity(backup_id, backup_metadata)
             if verification_result.is_err():
+                self._update_backup_progress(backup_id, "failed", 100)
                 return Err(verification_result.unwrap_err())
 
             # Stage boundary: no publication after a takeover rotated our token.
             if not self._owns_execution():
+                self._update_backup_progress(backup_id, "failed", 100)
                 return Err("Backup execution superseded; archive not published")
 
             # Finalize the manifest BEFORE publishing: a metadata object in S3
@@ -235,6 +237,7 @@ class VirtualminBackupService:
             self._update_backup_progress(backup_id, "uploading", 90)
             upload_result = self._upload_backup_to_s3(backup_id, backup_metadata)
             if upload_result.is_err():
+                self._update_backup_progress(backup_id, "failed", 100)
                 return upload_result
         finally:
             self._release_spool_artifacts(backup_metadata)
@@ -341,29 +344,40 @@ class VirtualminBackupService:
         from .spool import release_spool_reservation  # noqa: PLC0415
 
         if not (config.restore_email and config.restore_databases and config.restore_files and config.restore_ssl):
-            return Err("Component-selective restore is not supported yet; all components must be enabled")
+            return Err(
+                "Component-selective restore is not supported yet; all components must be enabled",
+                retriability=Retriability.NOT_RETRIABLE,
+            )
 
         # Download the archive + manifest into the spool (checksum-mandatory).
         self._update_restore_progress(restore_id, "downloading", 10)
         download = self._download_backup_to_spool(config.backup_id)
         if download.is_err():
-            return Err(download.unwrap_err())
+            return Err(download.unwrap_err(), retriability=retriability_of(download))
         spool_path, metadata = download.unwrap()
         archive_name = str(metadata["archive_name"])
         remote_pushed = False
-        determinate = True
+        # C3 fail-safe: an EXCEPTION after the push must NOT delete the pushed
+        # archive — it is the operator's reconciliation artifact.
+        determinate = False
         try:
             # Authorization: the backup must belong to THIS account and domain.
             if str(metadata.get("praho_service_id")) != str(account.service_id):
-                return Err("Backup does not belong to this account's service; restore refused")
+                return Err(
+                    "Backup does not belong to this account's service; restore refused",
+                    retriability=Retriability.NOT_RETRIABLE,
+                )
             if str(metadata.get("domain")) != account.domain:
-                return Err("Backup domain does not match the target account; restore refused")
+                return Err(
+                    "Backup domain does not match the target account; restore refused",
+                    retriability=Retriability.NOT_RETRIABLE,
+                )
 
             # Target ownership/state gate (force can NEVER override ownership).
             self._update_restore_progress(restore_id, "verifying_target", 25)
             gate = self._target_domain_gate(target_server, account, force=config.force_restore)
             if gate.is_err():
-                return Err(gate.unwrap_err())
+                return Err(gate.unwrap_err(), retriability=retriability_of(gate))
             domain_exists = gate.unwrap()
 
             # Safety backup of the live target BEFORE any destructive dispatch.
@@ -373,7 +387,10 @@ class VirtualminBackupService:
                     account=account, config=BackupConfig(), ownership=self._ownership
                 )
                 if safety.is_err():
-                    return Err(f"Pre-restore safety backup failed: {safety.unwrap_err()}")
+                    return Err(
+                        f"Pre-restore safety backup failed: {safety.unwrap_err()}",
+                        retriability=Retriability.NOT_RETRIABLE,
+                    )
                 safety_id = str(safety.unwrap().get("backup_id", ""))
                 if note_sink is not None:
                     note_sink({"safety_backup_id": safety_id})
@@ -381,22 +398,40 @@ class VirtualminBackupService:
                 safety_id = ""
 
             if not self._owns_execution():
-                return Err("Restore execution superseded; no destructive work performed")
+                return Err(
+                    "Restore execution superseded; no destructive work performed",
+                    retriability=Retriability.NOT_RETRIABLE,
+                )
 
             # Push the archive to the target node.
             self._update_restore_progress(restore_id, "pushing", 55)
             push = self._push_archive_to_target(target_server, archive_name, str(metadata["checksum_sha256"]))
             if push.is_err():
-                return Err(push.unwrap_err())
+                determinate = True  # nothing destructive was issued
+                return Err(push.unwrap_err(), retriability=retriability_of(push))
             remote_pushed = True
 
             # Staleness re-check immediately before the destructive call.
             regate = self._target_domain_gate(target_server, account, force=config.force_restore)
             if regate.is_err():
-                return Err(f"Pre-restore re-check failed: {regate.unwrap_err()}")
+                determinate = True  # nothing destructive was issued
+                return Err(
+                    f"Pre-restore re-check failed: {regate.unwrap_err()}", retriability=Retriability.NOT_RETRIABLE
+                )
+            # W1: a domain that APPEARED during the transfer never got its safety
+            # backup — refuse rather than overwrite it.
+            if regate.unwrap() and not domain_exists:
+                determinate = True
+                return Err(
+                    "Target domain appeared during the transfer and has no safety backup; restore refused",
+                    retriability=Retriability.NOT_RETRIABLE,
+                )
 
             if not self._owns_execution():
-                return Err("Restore execution superseded; no destructive work performed")
+                return Err(
+                    "Restore execution superseded; no destructive work performed",
+                    retriability=Retriability.NOT_RETRIABLE,
+                )
 
             # The one destructive call, explicit-success required.
             self._update_restore_progress(restore_id, "restoring", 70)
@@ -422,12 +457,12 @@ class VirtualminBackupService:
             self._update_restore_progress(restore_id, "verifying", 90)
             verify = self._verify_restored_domain(target_server, account)
             if verify.is_err():
-                determinate = False
                 return Err(
                     f"Restore issued but could not be verified: {verify.unwrap_err()}",
                     retriability=Retriability.UNKNOWN,
                 )
 
+            determinate = True
             self._update_restore_progress(restore_id, "completed", 100)
             return Ok(
                 {
@@ -459,18 +494,25 @@ class VirtualminBackupService:
         gateway = VirtualminGateway(VirtualminConfig(server=target_server))
         listing = list_migration_domains(gateway)
         if listing.is_err():
-            return Err(f"Target listing failed: {listing.unwrap_err()}")
+            return Err(f"Target listing failed: {listing.unwrap_err()}", retriability=Retriability.NOT_RETRIABLE)
         rows = [row for row in listing.unwrap() if row["domain"] == account.domain]
         if not rows:
             return Ok(False)
         row = rows[0]
         if not row["username"] or row["username"] != account.virtualmin_username:
-            return Err("Target domain exists with unknown or foreign ownership; restore refused regardless of force")
+            return Err(
+                "Target domain exists with unknown or foreign ownership; restore refused regardless of force",
+                retriability=Retriability.NOT_RETRIABLE,
+            )
         if row["enabled"] is None:
-            return Err("Target domain state is unverifiable; restore refused regardless of force")
+            return Err(
+                "Target domain state is unverifiable; restore refused regardless of force",
+                retriability=Retriability.NOT_RETRIABLE,
+            )
         if not force:
             return Err(
-                "Target domain is live; restoring would overwrite current data — enable force restore to override"
+                "Target domain is live; restoring would overwrite current data — enable force restore to override",
+                retriability=Retriability.NOT_RETRIABLE,
             )
         return Ok(True)
 
@@ -496,7 +538,7 @@ class VirtualminBackupService:
         )
         if result.is_err() or not result.unwrap().success:
             detail = result.unwrap_err() if result.is_err() else "playbook reported failure or timed out"
-            return Err(f"Backup archive push failed: {detail}")
+            return Err(f"Backup archive push failed: {detail}", retriability=Retriability.NOT_RETRIABLE)
         return Ok(None)
 
     def _verify_restored_domain(self, target_server: VirtualminServer, account: VirtualminAccount) -> Result[None, str]:
@@ -764,7 +806,7 @@ class VirtualminBackupService:
         spool = self._spool_dir()
         spool.mkdir(mode=0o700, parents=True, exist_ok=True)
         if spool.is_symlink() or spool.stat().st_mode & 0o077:
-            return Err("Transfer spool must be a private directory")
+            return Err("Transfer spool must be a private directory", retriability=Retriability.NOT_RETRIABLE)
         transfer_timeout = SettingsService.get_integer_setting("provisioning.migration_transfer_timeout_seconds", 3600)
         expected = estimated_transfer_bytes(int(metadata.get("disk_usage_mb") or 0))
         owner = f"job:{self._progress_key}" if getattr(self, "_progress_key", None) else f"backup:{archive_name}"
@@ -963,7 +1005,9 @@ class VirtualminBackupService:
 
             checksum = file_hash.hexdigest()
             expected_remote = metadata.get("checksum_sha256_remote")
-            if expected_remote and checksum != expected_remote:
+            if not expected_remote:
+                return Err("Backup transfer evidence missing (no remote checksum); refusing to publish")
+            if checksum != expected_remote:
                 return Err(
                     f"Backup archive checksum mismatch: spool={checksum} remote={expected_remote}; "
                     "transfer corruption suspected"
@@ -1121,23 +1165,29 @@ class VirtualminBackupService:
                 metadata_response = s3_client.get_object(Bucket=bucket_name, Key=metadata_key)
                 metadata = json.loads(metadata_response["Body"].read())
             except s3_client.exceptions.NoSuchKey:
-                return Err(f"Backup metadata not found: {backup_id}")
+                return Err(f"Backup metadata not found: {backup_id}", retriability=Retriability.NOT_RETRIABLE)
 
             if not metadata.get("checksum_sha256"):
-                return Err("Backup manifest lacks a checksum; refusing to restore unverifiable data")
+                return Err(
+                    "Backup manifest lacks a checksum; refusing to restore unverifiable data",
+                    retriability=Retriability.NOT_RETRIABLE,
+                )
             if not metadata.get("archive_name"):
-                return Err("Backup manifest lacks an archive name; legacy backups are not restorable")
+                return Err(
+                    "Backup manifest lacks an archive name; legacy backups are not restorable",
+                    retriability=Retriability.NOT_RETRIABLE,
+                )
 
             backup_key = f"virtualmin-backups/{backup_id}/backup.tar.gz"
             try:
                 file_size = int(s3_client.head_object(Bucket=bucket_name, Key=backup_key)["ContentLength"])
             except Exception:
-                return Err(f"Backup file not found in S3: {backup_id}")
+                return Err(f"Backup file not found in S3: {backup_id}", retriability=Retriability.NOT_RETRIABLE)
 
             spool = self._spool_dir()
             spool.mkdir(mode=0o700, parents=True, exist_ok=True)
             if spool.is_symlink() or spool.stat().st_mode & 0o077:
-                return Err("Transfer spool must be a private directory")
+                return Err("Transfer spool must be a private directory", retriability=Retriability.NOT_RETRIABLE)
             archive_name = str(metadata["archive_name"])
             local_path = str(spool / archive_name)
             transfer_timeout = SettingsService.get_integer_setting(
@@ -1149,13 +1199,17 @@ class VirtualminBackupService:
                 return Err(reservation.unwrap_err())
 
             logger.info(f"Downloading backup {backup_id} from S3 ({file_size} bytes)")
+            download_ok = False
             try:
                 s3_client.download_file(bucket_name, backup_key, local_path)
 
                 downloaded_size = os.path.getsize(local_path)
                 if downloaded_size != file_size:
                     os.remove(local_path)
-                    return Err(f"Downloaded file size mismatch: expected {file_size}, got {downloaded_size}")
+                    return Err(
+                        f"Downloaded file size mismatch: expected {file_size}, got {downloaded_size}",
+                        retriability=Retriability.NOT_RETRIABLE,
+                    )
 
                 file_hash = hashlib.sha256()
                 with open(local_path, "rb") as f:
@@ -1163,10 +1217,14 @@ class VirtualminBackupService:
                         file_hash.update(chunk)
                 if file_hash.hexdigest() != metadata["checksum_sha256"]:
                     os.remove(local_path)
-                    return Err("Backup checksum verification failed")
-            except Exception:
-                release_spool_reservation(archive_name)
-                raise
+                    return Err("Backup checksum verification failed", retriability=Retriability.NOT_RETRIABLE)
+                download_ok = True
+            finally:
+                # W2: a refused download must not hold phantom spool capacity for
+                # the reservation TTL. Success keeps it; the restore workflow's
+                # finally releases it once consumed.
+                if not download_ok:
+                    release_spool_reservation(archive_name)
 
             logger.info(f"Successfully downloaded backup {backup_id} ({file_size} bytes)")
             return Ok((local_path, metadata))
@@ -1174,18 +1232,3 @@ class VirtualminBackupService:
         except Exception as e:
             logger.error(f"S3 download failed for backup {backup_id}: {e}")
             return Err(f"S3 download failed: {e!s}")
-
-    def _find_last_full_backup(self, account: VirtualminAccount) -> Result[dict[str, Any], str]:
-        """Find the most recent full backup for incremental operations."""
-        retention_days = SettingsService.get_integer_setting(
-            "provisioning.backup_retention_days", _DEFAULT_BACKUP_RETENTION_DAYS
-        )
-        backups_result = self.list_backups(account, backup_type="full", max_age_days=retention_days)
-        if backups_result.is_err():
-            return Err(backups_result.unwrap_err())
-
-        backups = backups_result.unwrap()
-        if not backups:
-            return Err("No previous full backup found")
-
-        return Ok(backups[0])  # Most recent backup

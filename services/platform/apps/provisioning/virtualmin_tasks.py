@@ -892,7 +892,16 @@ _JOB_DISPATCH_WINDOW_HOURS = 2
 _JOB_DEADLINE_MARGIN_SECONDS = 300
 
 
-def _run_backup_restore_job(job_id: str, operation: str) -> dict[str, Any]:
+def _audit_job(job_id: Any) -> None:
+    """Emit the status-change audit for a CAS-updated backup/restore job."""
+    from .virtualmin_signals import audit_job_status_transition  # noqa: PLC0415  # Circular
+
+    job = VirtualminProvisioningJob.objects.filter(pk=job_id).first()
+    if job is not None:
+        audit_job_status_transition(job)
+
+
+def _run_backup_restore_job(job_id: str, operation: str) -> dict[str, Any]:  # noqa: C901  # Cohesive claim→run→terminal pipeline
     """Shared token-claimed runner for backup/restore jobs. Never raises."""
     from uuid import uuid4  # noqa: PLC0415
 
@@ -971,14 +980,20 @@ def _run_backup_restore_job(job_id: str, operation: str) -> dict[str, Any]:
             rows = VirtualminProvisioningJob.finish_execution(
                 job.pk, token, "attention", error, {"retriability": retriability_of(result).value}
             )
+            if rows:
+                _audit_job(job.pk)
             logger.warning("⚠️ [BackupJobs] restore job %s parked for attention: %s", job_id, error)
             return {"status": "attention" if rows else "superseded", "job_id": job_id, "error": error}
         rows = VirtualminProvisioningJob.finish_execution(
             job.pk, token, "failed", error, {"retriability": retriability_of(result).value}
         )
+        if rows:
+            _audit_job(job.pk)
         logger.warning("⚠️ [BackupJobs] %s job %s failed: %s", operation, job_id, error)
         return {"status": "failed" if rows else "superseded", "job_id": job_id, "error": error}
     rows = VirtualminProvisioningJob.finish_execution(job.pk, token, "completed", "", dict(result.unwrap()))
+    if rows:
+        _audit_job(job.pk)
     logger.info("✅ [BackupJobs] %s job %s completed", operation, job_id)
     return {"status": "completed" if rows else "superseded", "job_id": job_id}
 
@@ -1035,6 +1050,8 @@ def _reclaim_backup_restore_jobs(counts: dict[str, int]) -> None:
             next_retry_at=None,
             updated_at=now,
         )
+        if rows:
+            _audit_job(job_pk)
         counts["jobs_dispatch_lost"] += rows
 
     overdue = VirtualminProvisioningJob.objects.filter(
@@ -1055,6 +1072,7 @@ def _reclaim_backup_restore_jobs(counts: dict[str, int]) -> None:
             # The takeover releases the job's spool reservations in the same
             # sweep — the stage-boundary fence stops the old runner first.
             SpoolReservation.objects.filter(owner=f"job:{job.pk}").delete()
+            _audit_job(job.pk)
             counts["jobs_taken_over"] += rows
             logger.warning("⚠️ [BackupJobs] Took over %s job %s -> %s", job.operation, job.pk, takeover_status)
 

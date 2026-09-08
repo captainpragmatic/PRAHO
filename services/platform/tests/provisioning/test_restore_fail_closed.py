@@ -189,6 +189,30 @@ class RestoreFailClosedTests(TestCase):
         self.assertIs(retriability_of(result), Retriability.UNKNOWN)
         self.remote_cleanup.assert_not_called()
 
+    def test_deterministic_refusals_are_not_retriable(self) -> None:
+        """C1: a fail-closed refusal must be NOT_RETRIABLE, not UNKNOWN (which would park attention)."""
+        self.listing_mock.return_value = Ok([_listing_row("example.com", "owner", True)])
+        result = self.service.restore_domain(account=self.account, config=self.config)  # force not set
+        self.assertTrue(result.is_err())
+        self.assertIs(retriability_of(result), Retriability.NOT_RETRIABLE)
+
+    def test_appeared_domain_during_transfer_is_refused(self) -> None:
+        """W1: a domain absent at gate-1 but present at the re-gate has no safety backup — refuse."""
+        gate_calls = {"n": 0}
+
+        def listing_side_effect(gateway, **kwargs):
+            gate_calls["n"] += 1
+            # gate-1 sees nothing; the re-gate (after push) sees a live owned domain.
+            return Ok([]) if gate_calls["n"] == 1 else Ok([_listing_row("example.com", "owner", True)])
+
+        self.listing_mock.side_effect = listing_side_effect
+        self.config.force_restore = True
+        result = self.service.restore_domain(account=self.account, config=self.config)
+        self.assertTrue(result.is_err())
+        self.assertIn("appeared during the transfer", result.unwrap_err())
+        # Nothing destructive ran, so the pushed archive is cleaned (determinate).
+        self.remote_cleanup.assert_called_once()
+
     def test_component_selective_restore_is_refused_honestly(self) -> None:
         self.config.restore_email = False
         result = self.service.restore_domain(account=self.account, config=self.config)
