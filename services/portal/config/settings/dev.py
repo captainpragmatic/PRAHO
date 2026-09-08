@@ -93,6 +93,9 @@ INTERNAL_IPS = [
     "127.0.0.1",
     "localhost",
 ]
+# Remote dev clients (Docker port-forwards, VPN/Tailscale) opt into the toolbar
+# without editing checked-in settings; empty default keeps localhost-only.
+INTERNAL_IPS += [ip.strip() for ip in os.environ.get("DEV_INTERNAL_IPS", "").split(",") if ip.strip()]
 
 # API requests lose toolbar history/stats: middleware collects stats before rejecting non-HTML injection.
 # Excluding them removes per-request stack-trace capture overhead from every HMAC API call
