@@ -10,6 +10,7 @@ from uuid import uuid4
 
 from django.db import connection, transaction
 from django.test import TransactionTestCase
+from django.urls import reverse
 from django.utils import timezone
 
 from apps.common.types import Ok
@@ -22,6 +23,7 @@ from apps.provisioning.virtualmin_migration_models import (
 )
 from apps.provisioning.virtualmin_models import VirtualminProvisioningJob
 from apps.provisioning.virtualmin_service import VirtualminBackupManagementService
+from apps.users.models import User
 from tests.provisioning import test_virtualmin_tasks as task_tests
 
 
@@ -88,6 +90,31 @@ class BackupJobAdmissionTests(task_tests.VirtualminTaskTestBase):
         self.assertTrue(account_has_active_operation(self.account))
         refused = self.management.create_backup_job(self.account)
         self.assertTrue(refused.is_err())
+
+    def test_attention_job_resolves_only_via_the_staff_endpoint(self) -> None:
+        """Resolution releases the exclusion; non-attention jobs refuse."""
+        staff = User.objects.create_user(
+            email="resolver@example.com", password="resolver-test-password", staff_role="admin"
+        )
+        self.client.force_login(staff)
+        job = self._pending_job(operation="restore_domain")
+        url = reverse("provisioning:virtualmin_job_resolve", args=[job.pk])
+
+        refused = self.client.post(url, {"note": "not yet"})
+        self.assertEqual(refused.status_code, 302)
+        job.refresh_from_db()
+        self.assertEqual(job.status, "pending")
+
+        # fsm-bypass: park the job as an uncertain mutation.
+        VirtualminProvisioningJob.objects.filter(pk=job.pk).update(status="attention")
+        self.assertTrue(account_has_active_operation(self.account))
+        resolved = self.client.post(url, {"note": "domain verified on the node"})
+        self.assertEqual(resolved.status_code, 302)
+        job.refresh_from_db()
+        self.assertEqual(job.status, "failed")
+        self.assertIn("resolver@example.com", job.status_message)
+        self.assertIn("domain verified", job.status_message)
+        self.assertFalse(account_has_active_operation(self.account))
 
     def test_budget_rejects_only_oversized_jobs(self) -> None:
         """Default-config admission succeeds; an oversized estimate fails actionably."""

@@ -6,8 +6,10 @@ Implements PRAHO-as-Source-of-Truth disaster recovery patterns.
 from __future__ import annotations
 
 import logging
+import uuid
 from typing import Any
 
+from django.db import models
 from django.utils import timezone
 
 from apps.common.types import Err, Ok, Result
@@ -189,18 +191,19 @@ class VirtualminDisasterRecoveryService:
             return Err(str(e))
 
     def verify_praho_data_integrity(self) -> Result[dict[str, Any], str]:
-        """
-        Verify PRAHO data integrity for disaster recovery readiness.
+        """Verify the ACTUAL rebuild input set `reprovision_virtualmin_account` needs.
 
-        Since PRAHO is the source of truth, we must ensure PRAHO data
-        is sufficient to rebuild any Virtualmin server from scratch.
-
-        Returns:
-            Result with integrity report
+        Per account: linked service AND customer; a virtualmin_username; both
+        recovery-seed ids present AND consistent with the linked rows. Per
+        server: a usable credential through the vault-first resolver (the
+        legacy encrypted field is deliberately empty for vault-managed rows).
+        A missing node_deployment is reported as a transport-capability
+        warning, not a rebuild failure — gateway rebuilds work without it.
         """
         try:
             # Check for accounts missing critical data
             missing_data_issues = []
+            transport_warnings = []
 
             # Check for accounts without services
             orphaned_accounts = VirtualminAccount.objects.filter(service__isnull=True)
@@ -224,22 +227,91 @@ class VirtualminDisasterRecoveryService:
                     }
                 )
 
-            # Check for servers without proper configuration
-            misconfigured_servers = VirtualminServer.objects.filter(api_username="", encrypted_api_password=b"")
-            if misconfigured_servers.exists():
+            # Rebuild inputs: username and BOTH recovery-seed ids.
+            unnamed = VirtualminAccount.objects.filter(virtualmin_username="")
+            if unnamed.exists():
                 missing_data_issues.append(
                     {
-                        "issue": "servers_without_credentials",
-                        "count": misconfigured_servers.count(),
-                        "servers": list(misconfigured_servers.values_list("hostname", flat=True)),
+                        "issue": "accounts_without_virtualmin_username",
+                        "count": unnamed.count(),
+                        "domains": list(unnamed.values_list("domain", flat=True)),
+                    }
+                )
+            seedless = VirtualminAccount.objects.filter(
+                models.Q(praho_service_id__isnull=True) | models.Q(praho_customer_id__isnull=True)
+            )
+            if seedless.exists():
+                missing_data_issues.append(
+                    {
+                        "issue": "accounts_with_unusable_recovery_seed",
+                        "count": seedless.count(),
+                        "domains": list(seedless.values_list("domain", flat=True)),
+                    }
+                )
+            # Seed-consistency: the seed ids must match the linked rows. The
+            # UUIDField stores Django's int-coercion of the integer pk
+            # (UUID(int=pk)), so compare in that form.
+            inconsistent = [
+                account.domain
+                for account in VirtualminAccount.objects.select_related("service").filter(
+                    service__isnull=False, praho_service_id__isnull=False
+                )
+                if account.praho_service_id != uuid.UUID(int=int(account.service_id))
+            ]
+            if inconsistent:
+                missing_data_issues.append(
+                    {
+                        "issue": "accounts_with_inconsistent_recovery_seed",
+                        "count": len(inconsistent),
+                        "domains": inconsistent,
                     }
                 )
 
-            # Calculate recovery metrics
+            # Server credentials via the REAL resolution path (vault-first):
+            # checking the legacy field alone flags healthy vault-managed rows.
+            uncredentialed = [
+                server.hostname
+                for server in VirtualminServer.objects.all()
+                if not self._server_has_usable_credential(server)
+            ]
+            if uncredentialed:
+                missing_data_issues.append(
+                    {
+                        "issue": "servers_without_usable_credentials",
+                        "count": len(uncredentialed),
+                        "servers": uncredentialed,
+                    }
+                )
+
+            # Transport capability (warning class): manually-registered servers
+            # can be rebuilt via the gateway but have no archive transport.
+            transportless = [
+                server.hostname
+                for server in VirtualminServer.objects.all()
+                if getattr(server, "node_deployment", None) is None
+            ]
+            if transportless:
+                transport_warnings.append(
+                    {
+                        "issue": "servers_without_node_deployment",
+                        "count": len(transportless),
+                        "servers": transportless,
+                    }
+                )
+
+            # Calculate recovery metrics from the FULL input set.
             total_accounts = VirtualminAccount.objects.count()
-            recoverable_accounts = VirtualminAccount.objects.filter(
-                service__isnull=False, service__customer__isnull=False, status__in=["active", "suspended"]
-            ).count()
+            recoverable_accounts = (
+                VirtualminAccount.objects.filter(
+                    service__isnull=False,
+                    service__customer__isnull=False,
+                    praho_service_id__isnull=False,
+                    praho_customer_id__isnull=False,
+                    status__in=["active", "suspended"],
+                )
+                .exclude(virtualmin_username="")
+                .count()
+            )
 
             recovery_percentage = (recoverable_accounts / total_accounts * 100) if total_accounts > 0 else 100
 
@@ -270,6 +342,7 @@ class VirtualminDisasterRecoveryService:
                     "total_accounts": total_accounts,
                     "recoverable_accounts": recoverable_accounts,
                     "missing_data_issues": missing_data_issues,
+                    "transport_warnings": transport_warnings,
                     "issues_count": len(missing_data_issues),
                     "disaster_recovery_ready": len(missing_data_issues) == 0,
                     "check_timestamp": timezone.now().isoformat(),
@@ -280,6 +353,30 @@ class VirtualminDisasterRecoveryService:
         except Exception as e:
             logger.exception(f"Data integrity check failed: {e}")
             return Err(str(e))
+
+    @staticmethod
+    def _server_has_usable_credential(server: VirtualminServer) -> bool:
+        """Vault-first, matching the gateway's real resolution order."""
+        from apps.common.credential_vault import get_credential_vault  # noqa: PLC0415  # Circular
+
+        try:
+            vault_result = get_credential_vault().get_credential(
+                service_type="virtualmin",
+                service_identifier=server.hostname,
+                reason="Disaster-recovery readiness check",
+            )
+            if vault_result.is_ok():
+                username, password, _metadata = vault_result.unwrap()
+                if username and password:
+                    return True
+        except Exception:  # Vault outage must not crash the report
+            logger.warning("⚠️ [DR] Vault lookup failed for %s; falling back to the legacy field", server.hostname)
+        if not server.api_username:
+            return False
+        try:
+            return bool(server.get_api_password())
+        except Exception:  # Undecryptable legacy field == unusable
+            return False
 
     def _restore_quotas(
         self,

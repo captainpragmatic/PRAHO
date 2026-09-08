@@ -20,13 +20,12 @@ import os
 import re
 import shutil
 import tarfile
-import tempfile
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, TypedDict, cast
+from typing import Any, cast
 
 from django.core.cache import cache
 from django.utils import timezone
@@ -35,7 +34,7 @@ from apps.common.security_decorators import (
     audit_service_call,
     monitor_performance,
 )
-from apps.common.types import Err, Ok, Result
+from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 from apps.settings.services import SettingsService
 
 from .virtualmin_gateway import (
@@ -73,17 +72,6 @@ class RestoreConfig:
     restore_files: bool = True
     restore_ssl: bool = True
     force_restore: bool = False
-
-
-class RestoreOperationParams(TypedDict):
-    """Parameters for restore operation finalization"""
-
-    gateway: Any
-    account: Any
-    backup_metadata: dict[str, Any]
-    restore_id: str
-    config: RestoreConfig
-    rollback_data: dict[str, Any]
 
 
 logger = logging.getLogger(__name__)
@@ -157,121 +145,22 @@ class VirtualminBackupService:
         self._s3_client = None
         self._backup_bucket = None
 
-    @monitor_performance(max_duration_seconds=300, alert_threshold=60)
-    def _prepare_restore_session(
-        self, account: VirtualminAccount, config: RestoreConfig, restore_id: str
-    ) -> Result[tuple[str, dict[str, Any], dict[str, Any]], str]:
-        """Prepare restore session: download, verify backup, create rollback point."""
-        # Download and verify backup
-        self._update_restore_progress(restore_id, "downloading", 10)
-        download_result = self._download_backup_from_s3(config.backup_id)
-        if download_result.is_err():
-            return Err(download_result.unwrap_err())
-
-        backup_path, backup_metadata = download_result.unwrap()
-
-        # Verify backup integrity before restore
-        self._update_restore_progress(restore_id, "verifying", 20)
-        verification_result = self._verify_backup_before_restore(backup_path, backup_metadata)
-        if verification_result.is_err():
-            return Err(verification_result.unwrap_err())
-
-        # Create rollback point
-        self._update_restore_progress(restore_id, "creating_rollback", 25)
-        rollback_result = self._create_restore_rollback_point(account)
-        if rollback_result.is_err():
-            return Err(rollback_result.unwrap_err())
-
-        return Ok((backup_path, backup_metadata, rollback_result.unwrap()))
-
-    def _execute_restore_components(
-        self, gateway: Any, account: VirtualminAccount, backup_path: str, config: RestoreConfig, restore_id: str
-    ) -> list[str]:
-        """Execute restore operations for email, databases, files, and SSL."""
-        errors = []
-
-        if config.restore_email:
-            self._update_restore_progress(restore_id, "restoring_email", 30)
-            email_result = self._restore_email_data(gateway, account, backup_path)
-            if email_result.is_err():
-                error_msg = f"Email restore failed: {email_result.unwrap_err()}"
-                logger.error(error_msg)
-                errors.append(error_msg)
-
-        if config.restore_databases:
-            self._update_restore_progress(restore_id, "restoring_databases", 50)
-            db_result = self._restore_database_data(gateway, account, backup_path)
-            if db_result.is_err():
-                error_msg = f"Database restore failed: {db_result.unwrap_err()}"
-                logger.error(error_msg)
-                errors.append(error_msg)
-
-        if config.restore_files:
-            self._update_restore_progress(restore_id, "restoring_files", 70)
-            files_result = self._restore_file_data(gateway, account, backup_path)
-            if files_result.is_err():
-                error_msg = f"Files restore failed: {files_result.unwrap_err()}"
-                logger.error(error_msg)
-                errors.append(error_msg)
-
-        if config.restore_ssl:
-            self._update_restore_progress(restore_id, "restoring_ssl", 85)
-            ssl_result = self._restore_ssl_certificates(gateway, account, backup_path)
-            if ssl_result.is_err():
-                error_msg = f"SSL restore failed: {ssl_result.unwrap_err()}"
-                logger.error(error_msg)
-                errors.append(error_msg)
-
-        return errors
-
-    def _finalize_restore_operation(self, params: RestoreOperationParams) -> Result[dict[str, Any], str]:
-        """Verify restore integrity and finalize the operation."""
-        # Verify restore integrity
-        self._update_restore_progress(params["restore_id"], "verifying_restore", 90)
-        integrity_result = self._verify_restore_integrity(
-            params["gateway"], params["account"], params["backup_metadata"]
-        )
-        if integrity_result.is_err():
-            # Fail closed like the component-error path: mark progress failed and
-            # surface a rollback that itself failed, so the account is never left
-            # in an unknown state with only the integrity error reported.
-            self._update_restore_progress(params["restore_id"], "failed", 100)
-            rollback_result = self._execute_restore_rollback(params["account"], params["rollback_data"])
-            error_detail = f"Restore integrity check failed: {integrity_result.unwrap_err()}"
-            if rollback_result.is_err():
-                logger.error(
-                    f"🔥 [Backup] Rollback for {params['account'].domain} ALSO failed: {rollback_result.unwrap_err()}"
-                )
-                error_detail += (
-                    f" — rollback ALSO failed ({rollback_result.unwrap_err()}); "
-                    "account may be in an inconsistent state and needs manual reconciliation"
-                )
-            return Err(error_detail)
-
-        # Finalize restore
-        self._update_restore_progress(params["restore_id"], "completed", 100)
-        restore_summary = self._finalize_restore_summary(
-            params["account"], params["config"].backup_id, params["restore_id"], params["backup_metadata"]
-        )
-
-        logger.info(f"Restore completed successfully: {params['restore_id']}")
-        return Ok(restore_summary)
-
     def _call_checked(
         self, gateway: VirtualminGateway, program: str, params: dict[str, Any], timeout_seconds: int
     ) -> Result[dict[str, Any], str]:
         """Gateway call with the explicit-success discipline (no dead ok-branches)."""
         result = gateway.call(program, params, timeout_seconds=timeout_seconds)
         if result.is_err():
-            return Err(f"{program} failed: {result.unwrap_err()}")
+            return Err(f"{program} failed: {result.unwrap_err()}", retriability=retriability_of(result))
         response = result.unwrap()
         if not response.success:
             rejection = explicit_rejection(response.raw_response)
             if rejection is None:
-                return Err(f"{program} ambiguous: response could not be interpreted")
-            return Err(f"{program} rejected: {rejection}")
+                # Uncertainty about a possibly-executed command — never definite.
+                return Err(f"{program} ambiguous: response could not be interpreted", retriability=Retriability.UNKNOWN)
+            return Err(f"{program} rejected: {rejection}", retriability=Retriability.NOT_RETRIABLE)
         if not has_explicit_success(response):
-            return Err(f"{program} lacked an explicit synchronous success response")
+            return Err(f"{program} lacked an explicit synchronous success response", retriability=Retriability.UNKNOWN)
         return Ok(response.data)
 
     def _backup_command_timeout(self) -> int:
@@ -411,90 +300,229 @@ class VirtualminBackupService:
 
     @monitor_performance(max_duration_seconds=600, alert_threshold=120)
     @audit_service_call("restore_domain")
-    def restore_domain(
-        self, account: VirtualminAccount, config: RestoreConfig, target_server: VirtualminServer | None = None
+    def restore_domain(  # noqa: PLR0913  # Execution-context seams (job id, fencing, evidence sink)
+        self,
+        account: VirtualminAccount,
+        config: RestoreConfig,
+        target_server: VirtualminServer | None = None,
+        progress_key: str | None = None,
+        ownership: Callable[[], bool] | None = None,
+        note_sink: Callable[[dict[str, Any]], None] | None = None,
     ) -> Result[dict[str, Any], str]:
-        """
-        Restore Virtualmin domain from backup.
+        """Restore a domain from a published backup (transport-based, fail-closed).
 
-        Args:
-            account: Target Virtualmin account for restore
-            config: Restore configuration object
-            target_server: Target server (defaults to account's current server)
-
-        Returns:
-            Result with restore status or error message
+        Ambiguous remote outcomes return Err with UNKNOWN retriability — the
+        job layer parks those for operator attention instead of failing them.
         """
         target_server = target_server or self.server
         logger.info(f"Starting restore for account {account.domain} from backup {config.backup_id}")
-
+        restore_id = self._generate_restore_id(account, config.backup_id)
+        self._progress_key = progress_key or restore_id
+        self._ownership = ownership
         try:
-            # Initialize restore session
-            restore_id = self._generate_restore_id(account, config.backup_id)
             self._update_restore_progress(restore_id, "initializing", 0)
-
-            # Prepare restore session (download, verify, create rollback)
-            prepare_result = self._prepare_restore_session(account, config, restore_id)
-            if prepare_result.is_err():
-                return Err(prepare_result.unwrap_err())
-
-            backup_path, backup_metadata, rollback_data = prepare_result.unwrap()
-
-            # Execute restore operations
-            vm_config = VirtualminConfig(server=target_server)
-            gateway = VirtualminGateway(vm_config)
-
-            try:
-                # Execute restore components
-                errors = self._execute_restore_components(gateway, account, backup_path, config, restore_id)
-
-                # 🔒 FAIL-CLOSED (#326): component errors were collected then discarded, so a
-                # partial or total restore failure still finalized as "Restore completed
-                # successfully". Any component failure must roll back and surface as an error
-                # instead of reporting a fictional success.
-                if errors:
-                    logger.error(
-                        f"🔥 [Backup] Restore for {account.domain} had {len(errors)} component failure(s); "
-                        f"rolling back: {'; '.join(errors)}"
-                    )
-                    self._update_restore_progress(restore_id, "failed", 100)
-                    rollback_result = self._execute_restore_rollback(account, rollback_data)
-                    error_detail = f"Restore failed ({len(errors)} component error(s)): {'; '.join(errors)}"
-                    if rollback_result.is_err():
-                        # A failed rollback leaves the account in an unknown state — the
-                        # operator must be told, not left with only the component errors.
-                        logger.error(
-                            f"🔥 [Backup] Rollback for {account.domain} ALSO failed: {rollback_result.unwrap_err()}"
-                        )
-                        error_detail += (
-                            f" — rollback ALSO failed ({rollback_result.unwrap_err()}); "
-                            "account may be in an inconsistent state and needs manual reconciliation"
-                        )
-                    return Err(error_detail)
-
-                # Finalize restore operation
-                return self._finalize_restore_operation(
-                    RestoreOperationParams(
-                        gateway=gateway,
-                        account=account,
-                        backup_metadata=backup_metadata,
-                        restore_id=restore_id,
-                        config=config,
-                        rollback_data=rollback_data,
-                    )
-                )
-
-            except Exception as e:
-                # Execute rollback on any failure
-                logger.error(f"Restore failed, executing rollback: {e}")
-                self._execute_restore_rollback(account, rollback_data)
-                raise
-
+            return self._restore_workflow(account, config, target_server, restore_id, note_sink)
         except Exception as e:
             logger.error(f"Restore failed for account {account.domain}: {e}")
-            if "restore_id" in locals():
-                self._update_restore_progress(restore_id, "failed", 100)
+            self._update_restore_progress(restore_id, "failed", 100)
             return Err(f"Restore operation failed: {e!s}")
+        finally:
+            self._progress_key = None
+            self._ownership = None
+
+    def _restore_workflow(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Distinct fail-closed gates
+        self,
+        account: VirtualminAccount,
+        config: RestoreConfig,
+        target_server: VirtualminServer,
+        restore_id: str,
+        note_sink: Callable[[dict[str, Any]], None] | None,
+    ) -> Result[dict[str, Any], str]:
+        from .spool import release_spool_reservation  # noqa: PLC0415
+
+        if not (config.restore_email and config.restore_databases and config.restore_files and config.restore_ssl):
+            return Err("Component-selective restore is not supported yet; all components must be enabled")
+
+        # Download the archive + manifest into the spool (checksum-mandatory).
+        self._update_restore_progress(restore_id, "downloading", 10)
+        download = self._download_backup_to_spool(config.backup_id)
+        if download.is_err():
+            return Err(download.unwrap_err())
+        spool_path, metadata = download.unwrap()
+        archive_name = str(metadata["archive_name"])
+        remote_pushed = False
+        determinate = True
+        try:
+            # Authorization: the backup must belong to THIS account and domain.
+            if str(metadata.get("praho_service_id")) != str(account.service_id):
+                return Err("Backup does not belong to this account's service; restore refused")
+            if str(metadata.get("domain")) != account.domain:
+                return Err("Backup domain does not match the target account; restore refused")
+
+            # Target ownership/state gate (force can NEVER override ownership).
+            self._update_restore_progress(restore_id, "verifying_target", 25)
+            gate = self._target_domain_gate(target_server, account, force=config.force_restore)
+            if gate.is_err():
+                return Err(gate.unwrap_err())
+            domain_exists = gate.unwrap()
+
+            # Safety backup of the live target BEFORE any destructive dispatch.
+            if domain_exists:
+                self._update_restore_progress(restore_id, "safety_backup", 35)
+                safety = VirtualminBackupService(target_server).backup_domain(
+                    account=account, config=BackupConfig(), ownership=self._ownership
+                )
+                if safety.is_err():
+                    return Err(f"Pre-restore safety backup failed: {safety.unwrap_err()}")
+                safety_id = str(safety.unwrap().get("backup_id", ""))
+                if note_sink is not None:
+                    note_sink({"safety_backup_id": safety_id})
+            else:
+                safety_id = ""
+
+            if not self._owns_execution():
+                return Err("Restore execution superseded; no destructive work performed")
+
+            # Push the archive to the target node.
+            self._update_restore_progress(restore_id, "pushing", 55)
+            push = self._push_archive_to_target(target_server, archive_name, str(metadata["checksum_sha256"]))
+            if push.is_err():
+                return Err(push.unwrap_err())
+            remote_pushed = True
+
+            # Staleness re-check immediately before the destructive call.
+            regate = self._target_domain_gate(target_server, account, force=config.force_restore)
+            if regate.is_err():
+                return Err(f"Pre-restore re-check failed: {regate.unwrap_err()}")
+
+            if not self._owns_execution():
+                return Err("Restore execution superseded; no destructive work performed")
+
+            # The one destructive call, explicit-success required.
+            self._update_restore_progress(restore_id, "restoring", 70)
+            gateway = VirtualminGateway(VirtualminConfig(server=target_server))
+            restore_result = self._call_checked(
+                gateway,
+                "restore-domain",
+                {
+                    "domain": account.domain,
+                    "source": f"{_REMOTE_ARCHIVE_DIR}/{archive_name}",
+                    "all-features": True,
+                },
+                self._backup_command_timeout(),
+            )
+            if restore_result.is_err():
+                determinate = retriability_of(restore_result) is not Retriability.UNKNOWN
+                return Err(
+                    f"Restore failed: {restore_result.unwrap_err()}",
+                    retriability=retriability_of(restore_result),
+                )
+
+            # Post-restore verification (uncertainty here is NOT a definite failure).
+            self._update_restore_progress(restore_id, "verifying", 90)
+            verify = self._verify_restored_domain(target_server, account)
+            if verify.is_err():
+                determinate = False
+                return Err(
+                    f"Restore issued but could not be verified: {verify.unwrap_err()}",
+                    retriability=Retriability.UNKNOWN,
+                )
+
+            self._update_restore_progress(restore_id, "completed", 100)
+            return Ok(
+                {
+                    "restore_id": restore_id,
+                    "backup_id": config.backup_id,
+                    "safety_backup_id": safety_id,
+                    "domain": account.domain,
+                    "completed_at": timezone.now().isoformat(),
+                }
+            )
+        finally:
+            # Spool copy is re-downloadable from S3 — always remove + release.
+            try:
+                Path(spool_path).unlink(missing_ok=True)
+            except OSError:
+                logger.warning("⚠️ [Restore] Spool cleanup failed for %s", spool_path)
+            release_spool_reservation(archive_name)
+            # The pushed remote archive is removed only on DETERMINATE outcomes;
+            # an uncertain restore keeps it for operator reconciliation.
+            if remote_pushed and determinate:
+                self._cleanup_remote_archive(target_server, archive_name)
+
+    def _target_domain_gate(
+        self, target_server: VirtualminServer, account: VirtualminAccount, *, force: bool
+    ) -> Result[bool, str]:
+        """Fail-closed target inspection. Ok(True)=live domain, Ok(False)=absent."""
+        from .virtualmin_migration_service import list_migration_domains  # noqa: PLC0415
+
+        gateway = VirtualminGateway(VirtualminConfig(server=target_server))
+        listing = list_migration_domains(gateway)
+        if listing.is_err():
+            return Err(f"Target listing failed: {listing.unwrap_err()}")
+        rows = [row for row in listing.unwrap() if row["domain"] == account.domain]
+        if not rows:
+            return Ok(False)
+        row = rows[0]
+        if not row["username"] or row["username"] != account.virtualmin_username:
+            return Err("Target domain exists with unknown or foreign ownership; restore refused regardless of force")
+        if row["enabled"] is None:
+            return Err("Target domain state is unverifiable; restore refused regardless of force")
+        if not force:
+            return Err(
+                "Target domain is live; restoring would overwrite current data — enable force restore to override"
+            )
+        return Ok(True)
+
+    def _push_archive_to_target(
+        self, target_server: VirtualminServer, archive_name: str, expected_sha256: str
+    ) -> Result[None, str]:
+        from apps.infrastructure.ansible_service import AnsibleService  # noqa: PLC0415  # Circular
+
+        deployment = getattr(target_server, "node_deployment", None)
+        if deployment is None:
+            return Err(
+                f"Server {target_server.hostname} is manually registered (no managed node_deployment); "
+                "archive transport is unavailable"
+            )
+        transfer_timeout = SettingsService.get_integer_setting("provisioning.migration_transfer_timeout_seconds", 3600)
+        variables: dict[str, Any] = {
+            "archive_name": archive_name,
+            "spool_dir": str(self._spool_dir()),
+            "expected_sha256": expected_sha256,
+        }
+        result = AnsibleService().run_playbook(
+            deployment, "virtualmin_backup_push.yml", variables, timeout_seconds=transfer_timeout
+        )
+        if result.is_err() or not result.unwrap().success:
+            detail = result.unwrap_err() if result.is_err() else "playbook reported failure or timed out"
+            return Err(f"Backup archive push failed: {detail}")
+        return Ok(None)
+
+    def _verify_restored_domain(self, target_server: VirtualminServer, account: VirtualminAccount) -> Result[None, str]:
+        from .virtualmin_migration_service import list_migration_domains  # noqa: PLC0415
+
+        gateway = VirtualminGateway(VirtualminConfig(server=target_server))
+        listing = list_migration_domains(gateway)
+        if listing.is_err():
+            return Err(listing.unwrap_err())
+        rows = [row for row in listing.unwrap() if row["domain"] == account.domain]
+        if len(rows) != 1 or rows[0]["username"] != account.virtualmin_username:
+            return Err("restored domain missing or owner mismatch on the target listing")
+        return Ok(None)
+
+    def _cleanup_remote_archive(self, target_server: VirtualminServer, archive_name: str) -> None:
+        from apps.infrastructure.ansible_service import AnsibleService  # noqa: PLC0415  # Circular
+
+        deployment = getattr(target_server, "node_deployment", None)
+        if deployment is None:
+            return
+        try:
+            AnsibleService().run_playbook(
+                deployment, "virtualmin_remote_cleanup.yml", {"archive_name": archive_name}, timeout_seconds=300
+            )
+        except Exception:
+            logger.warning("⚠️ [Restore] Remote archive cleanup failed for %s", archive_name)
 
     def list_backups(
         self, account: VirtualminAccount | None = None, backup_type: str | None = None, max_age_days: int | None = None
@@ -1078,18 +1106,16 @@ class VirtualminBackupService:
         metadata.update({"status": "completed", "completed_at": timezone.now().isoformat(), "s3_info": upload_info})
         return metadata
 
-    def _download_backup_from_s3(  # noqa: PLR0911  # Complexity: multi-step business logic
+    def _download_backup_to_spool(  # noqa: PLR0911  # Distinct fail-closed gates
         self, backup_id: str
-    ) -> Result[
-        tuple[str, dict[str, Any]], str
-    ]:  # Complexity: Virtualmin workflow  # Complexity: multi-step business logic
-        """Download backup from S3 for restoration."""
+    ) -> Result[tuple[str, dict[str, Any]], str]:
+        """Download the archive + manifest into the reserved spool (checksum-mandatory)."""
+        from .spool import acquire_spool_reservation, release_spool_reservation  # noqa: PLC0415
 
         try:
             s3_client = self._get_s3_client()
             bucket_name = self._get_backup_bucket()
 
-            # Download metadata first
             metadata_key = f"virtualmin-backups/{backup_id}/metadata.json"
             try:
                 metadata_response = s3_client.get_object(Bucket=bucket_name, Key=metadata_key)
@@ -1097,113 +1123,479 @@ class VirtualminBackupService:
             except s3_client.exceptions.NoSuchKey:
                 return Err(f"Backup metadata not found: {backup_id}")
 
-            # Download backup file
-            backup_key = f"virtualmin-backups/{backup_id}/backup.tar.gz"
-            local_path = f"{tempfile.gettempdir()}/restore_{backup_id}.tar.gz"
+            if not metadata.get("checksum_sha256"):
+                return Err("Backup manifest lacks a checksum; refusing to restore unverifiable data")
+            if not metadata.get("archive_name"):
+                return Err("Backup manifest lacks an archive name; legacy backups are not restorable")
 
+            backup_key = f"virtualmin-backups/{backup_id}/backup.tar.gz"
             try:
-                # Check if backup file exists
-                s3_client.head_object(Bucket=bucket_name, Key=backup_key)
+                file_size = int(s3_client.head_object(Bucket=bucket_name, Key=backup_key)["ContentLength"])
             except Exception:
                 return Err(f"Backup file not found in S3: {backup_id}")
 
-            # Download with progress tracking
-            file_size = s3_client.head_object(Bucket=bucket_name, Key=backup_key)["ContentLength"]
+            spool = self._spool_dir()
+            spool.mkdir(mode=0o700, parents=True, exist_ok=True)
+            if spool.is_symlink() or spool.stat().st_mode & 0o077:
+                return Err("Transfer spool must be a private directory")
+            archive_name = str(metadata["archive_name"])
+            local_path = str(spool / archive_name)
+            transfer_timeout = SettingsService.get_integer_setting(
+                "provisioning.migration_transfer_timeout_seconds", 3600
+            )
+            owner = f"job:{self._progress_key}" if getattr(self, "_progress_key", None) else f"restore:{archive_name}"
+            reservation = acquire_spool_reservation(spool, archive_name, file_size, owner, transfer_timeout + 300)
+            if reservation.is_err():
+                return Err(reservation.unwrap_err())
 
             logger.info(f"Downloading backup {backup_id} from S3 ({file_size} bytes)")
-
-            # Use multipart download for large files
-            if file_size > S3_MULTIPART_THRESHOLD:
-                transfer_config = boto3.s3.transfer.TransferConfig(
-                    multipart_threshold=S3_MULTIPART_THRESHOLD,
-                    multipart_chunksize=BACKUP_CHUNK_SIZE,
-                    use_threads=True,
-                )
-                s3_client.download_file(bucket_name, backup_key, local_path, Config=transfer_config)
-            else:
+            try:
                 s3_client.download_file(bucket_name, backup_key, local_path)
 
-            # Verify downloaded file
-            if not os.path.exists(local_path):
-                return Err("Downloaded backup file not found")
+                downloaded_size = os.path.getsize(local_path)
+                if downloaded_size != file_size:
+                    os.remove(local_path)
+                    return Err(f"Downloaded file size mismatch: expected {file_size}, got {downloaded_size}")
 
-            downloaded_size = os.path.getsize(local_path)
-            if downloaded_size != file_size:
-                os.remove(local_path)
-                return Err(f"Downloaded file size mismatch: expected {file_size}, got {downloaded_size}")
-
-            # Verify checksum if available
-            if metadata.get("checksum_sha256"):
                 file_hash = hashlib.sha256()
                 with open(local_path, "rb") as f:
                     for chunk in iter(lambda: f.read(BACKUP_CHUNK_SIZE), b""):
                         file_hash.update(chunk)
-
                 if file_hash.hexdigest() != metadata["checksum_sha256"]:
                     os.remove(local_path)
                     return Err("Backup checksum verification failed")
+            except Exception:
+                release_spool_reservation(archive_name)
+                raise
 
-            logger.info(f"Successfully downloaded backup {backup_id} ({downloaded_size} bytes)")
+            logger.info(f"Successfully downloaded backup {backup_id} ({file_size} bytes)")
             return Ok((local_path, metadata))
 
         except Exception as e:
             logger.error(f"S3 download failed for backup {backup_id}: {e}")
             return Err(f"S3 download failed: {e!s}")
 
+    def _initialize_backup_metadata(
+        self, account: VirtualminAccount, backup_type: str, backup_id: str, config: BackupConfig
+    ) -> dict[str, Any]:
+        """Initialize backup metadata structure."""
+        return {
+            "backup_id": backup_id,
+            "domain": account.domain,
+            "server_hostname": self.server.hostname,
+            "backup_type": backup_type,
+            "created_at": timezone.now().isoformat(),
+            # str() for JSON type-stability: the account filter in list_backups compares
+            # str()-normalized ids, so the stored form survives pk-type changes and JSON
+            # round-trips. (Service.pk is a BigAutoField today; do NOT source this from
+            # account.praho_service_id — that UUIDField holds an int-coerced UUID.)
+            "praho_service_id": str(account.service_id),
+            "include_email": config.include_email,
+            "include_databases": config.include_databases,
+            "include_files": config.include_files,
+            "include_ssl": config.include_ssl,
+            "version": "1.0",
+            "status": "in_progress",
+            "archive_name": self._generate_archive_name(),
+            "disk_usage_mb": account.current_disk_usage_mb or 0,
+        }
+
+    def _update_backup_progress(self, backup_id: str, status: str, progress: int) -> None:
+        """Update backup progress in cache (keyed by the caller's key when set)."""
+        cache_id = getattr(self, "_progress_key", None) or backup_id
+        progress_key = f"{BACKUP_PROGRESS_CACHE_PREFIX}{cache_id}"
+        cache.set(
+            progress_key,
+            {"backup_id": backup_id, "status": status, "progress": progress, "updated_at": timezone.now().isoformat()},
+            CACHE_TIMEOUT,
+        )
+
+    def _update_restore_progress(self, restore_id: str, status: str, progress: int) -> None:
+        """Update restore progress in cache."""
+        progress_key = f"virtualmin_restore_progress_{restore_id}"
+        cache.set(
+            progress_key,
+            {
+                "restore_id": restore_id,
+                "status": status,
+                "progress": progress,
+                "updated_at": timezone.now().isoformat(),
+            },
+            CACHE_TIMEOUT,
+        )
+
+    def _spool_dir(self) -> Path:
+        return Path(
+            str(SettingsService.get_setting("provisioning.migration_spool_dir", "/var/lib/praho/migration-spool"))
+        )
+
+    def _fetch_archive_to_spool(  # noqa: PLR0911  # Distinct transport refusals
+        self, metadata: dict[str, Any]
+    ) -> Result[None, str]:
+        """Pull the remote archive into the controller spool and delete the remote copy."""
+        from apps.infrastructure.ansible_service import AnsibleService  # noqa: PLC0415  # Circular
+
+        from .spool import (  # noqa: PLC0415
+            acquire_spool_reservation,
+            estimated_transfer_bytes,
+            release_spool_reservation,
+        )
+
+        deployment = getattr(self.server, "node_deployment", None)
+        if deployment is None:
+            return Err(
+                f"Server {self.server.hostname} is manually registered (no managed node_deployment); "
+                "archive transport is unavailable"
+            )
+        archive_name = str(metadata["archive_name"])
+        spool = self._spool_dir()
+        spool.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if spool.is_symlink() or spool.stat().st_mode & 0o077:
+            return Err("Transfer spool must be a private directory")
+        transfer_timeout = SettingsService.get_integer_setting("provisioning.migration_transfer_timeout_seconds", 3600)
+        expected = estimated_transfer_bytes(int(metadata.get("disk_usage_mb") or 0))
+        owner = f"job:{self._progress_key}" if getattr(self, "_progress_key", None) else f"backup:{archive_name}"
+        reservation = acquire_spool_reservation(spool, archive_name, expected, owner, transfer_timeout + 300)
+        if reservation.is_err():
+            return Err(reservation.unwrap_err())
+        try:
+            variables: dict[str, Any] = {
+                "archive_name": archive_name,
+                "spool_dir": str(spool),
+                "spool_free_bytes": shutil.disk_usage(spool).free,
+            }
+            result = AnsibleService().run_playbook(
+                deployment, "virtualmin_backup_fetch.yml", variables, timeout_seconds=transfer_timeout
+            )
+            if result.is_err() or not result.unwrap().success:
+                detail = result.unwrap_err() if result.is_err() else "playbook reported failure or timed out"
+                return Err(f"Backup archive fetch failed: {detail}")
+            checksums = set(re.findall(r"BACKUP_SHA256=([0-9a-f]{64})(?![0-9a-f])", result.unwrap().stdout))
+            if len(checksums) != 1:
+                return Err("Backup fetch did not return exactly one SHA-256")
+            metadata["checksum_sha256_remote"] = checksums.pop()
+            metadata["backup_path"] = str(spool / archive_name)
+            metadata["backup_location"] = "spool"
+            return Ok(None)
+        except Exception as error:
+            return Err(f"Backup archive fetch failed: {error}")
+        finally:
+            release_spool_reservation(archive_name)
+
+    def _release_spool_artifacts(self, metadata: dict[str, Any]) -> None:
+        """Remove the spool file on determinate exits; never mask the outcome."""
+        if metadata.get("backup_location") != "spool":
+            return
+        try:
+            path = Path(str(metadata.get("backup_path", "")))
+            if path.exists():
+                path.unlink()
+        except OSError as error:
+            logger.warning("⚠️ [Backup] Spool cleanup failed: %s", error)
+
+    def _validate_backup_preconditions(self, account: VirtualminAccount) -> Result[None, str]:
+        """Validate that backup can proceed safely."""
+        # Transport capability gate BEFORE any remote archive is created:
+        # a manually-registered server has no Ansible path off the node.
+        if getattr(self.server, "node_deployment", None) is None:
+            return Err(
+                f"Server {self.server.hostname} is manually registered (no managed node_deployment); "
+                "archive transport is unavailable"
+            )
+        # Check server connectivity
+        config = VirtualminConfig(server=self.server)
+        gateway = VirtualminGateway(config)
+        ping_result = gateway.ping_server()
+        if not ping_result:
+            return Err(f"Server {self.server.hostname} is unreachable")
+
+        # Check account exists on server
+        account_info_result = gateway.get_domain_info(account.domain)
+        if account_info_result.is_err():
+            return Err(f"Failed to get domain info: {account_info_result.unwrap_err()}")
+
+        account_info = account_info_result.unwrap()
+        if not account_info.get("disk_usage_mb"):
+            return Err(f"Domain {account.domain} not found on server")
+
+        # Check available disk space (rough estimate)
+        disk_info = account_info.get("disk_usage_mb", 0)
+        account_info.get("disk_quota_mb", 0)
+
+        # Estimate backup size (typically 1.5x of current usage for full backup with compression)
+        estimated_backup_size_mb = int(disk_info * 1.5)
+
+        # Check if backup would exceed size limits
+        max_backup_size_gb = SettingsService.get_integer_setting(
+            "provisioning.max_backup_size_gb", _DEFAULT_MAX_BACKUP_SIZE_GB
+        )
+        if estimated_backup_size_mb > (max_backup_size_gb * 1024):
+            return Err(f"Estimated backup size ({estimated_backup_size_mb}MB) exceeds limit ({max_backup_size_gb}GB)")
+
+        logger.debug(
+            f"Backup preconditions validated for {account.domain}: "
+            f"disk_usage={disk_info}MB, estimated_backup={estimated_backup_size_mb}MB"
+        )
+
+        return Ok(None)
+
+    def _execute_full_backup(
+        self, account: VirtualminAccount, backup_id: str, metadata: dict[str, Any], config: BackupConfig
+    ) -> Result[str, str]:
+        """Execute full domain backup using Virtualmin API."""
+        try:
+            vm_config = VirtualminConfig(server=self.server)
+            gateway = VirtualminGateway(vm_config)
+
+            dest = f"{_REMOTE_ARCHIVE_DIR}/{metadata['archive_name']}"
+            backup_params: dict[str, Any] = {
+                "domain": account.domain,
+                "dest": dest,
+                "all-features": True,
+                "all-virtualservers": False,
+                "newformat": True,
+            }
+
+            # Add feature-specific flags
+            if not config.include_email:
+                backup_params["skip-features"] = "mail"
+            if not config.include_databases:
+                skip_features = str(backup_params.get("skip-features", ""))
+                backup_params["skip-features"] = skip_features + ",mysql" if skip_features else "mysql"
+            if not config.include_files:
+                skip_features = str(backup_params.get("skip-features", ""))
+                backup_params["skip-features"] = skip_features + ",dir" if skip_features else "dir"
+            if not config.include_ssl:
+                skip_features = str(backup_params.get("skip-features", ""))
+                backup_params["skip-features"] = skip_features + ",ssl" if skip_features else "ssl"
+
+            # Execute backup
+            self._update_backup_progress(backup_id, "backing_up", 30)
+            backup_result = self._call_checked(gateway, "backup-domain", backup_params, self._backup_command_timeout())
+            if backup_result.is_err():
+                return Err(backup_result.unwrap_err())
+
+            return Ok(dest)
+
+        except Exception as e:
+            logger.error(f"Full backup execution failed: {e}")
+            return Err(f"Full backup failed: {e!s}")
+
+    def _execute_config_backup(
+        self, account: VirtualminAccount, backup_id: str, metadata: dict[str, Any]
+    ) -> Result[str, str]:
+        """Execute configuration-only backup."""
+        try:
+            vm_config = VirtualminConfig(server=self.server)
+            gateway = VirtualminGateway(vm_config)
+
+            dest = f"{_REMOTE_ARCHIVE_DIR}/{metadata['archive_name']}"
+            backup_params: dict[str, Any] = {
+                "domain": account.domain,
+                "dest": dest,
+                "only-features": "virtualmin,dir",  # Config and basic structure only
+                "newformat": True,
+            }
+
+            self._update_backup_progress(backup_id, "backing_up_config", 50)
+            backup_result = self._call_checked(gateway, "backup-domain", backup_params, self._backup_command_timeout())
+            if backup_result.is_err():
+                return Err(backup_result.unwrap_err())
+
+            return Ok(dest)
+
+        except Exception as e:
+            logger.error(f"Config backup execution failed: {e}")
+            return Err(f"Config backup failed: {e!s}")
+
+    def _verify_backup_integrity(  # noqa: PLR0911, PLR0912, C901  # Complexity: multi-step business logic
+        self, backup_id: str, metadata: dict[str, Any]
+    ) -> Result[None, str]:  # Complexity: Virtualmin workflow  # Complexity: multi-step business logic
+        """Verify backup file integrity and completeness."""
+
+        try:
+            # Defense-in-depth: a still-remote archive means the fetch step was
+            # skipped — never pretend a controller-local file exists.
+            if metadata.get("backup_location") != "spool":
+                host = metadata.get("backup_host", self.server.hostname)
+                return Err(
+                    f"Backup archive has not been fetched into the spool (location="
+                    f"{metadata.get('backup_location', 'unknown')}, host={host}); refusing to verify"
+                )
+
+            backup_path = str(metadata["backup_path"])
+
+            # 1. File existence check
+            if not os.path.exists(backup_path):
+                return Err(f"Backup file not found: {backup_path}")
+
+            # 2. File size verification
+            file_size = os.path.getsize(backup_path)
+            if file_size == 0:
+                return Err("Backup file is empty")
+
+            max_backup_size_gb = SettingsService.get_integer_setting(
+                "provisioning.max_backup_size_gb", _DEFAULT_MAX_BACKUP_SIZE_GB
+            )
+            max_size_bytes = max_backup_size_gb * 1024 * 1024 * 1024
+            if file_size > max_size_bytes:
+                return Err(f"Backup file exceeds size limit: {file_size} bytes > {max_size_bytes} bytes")
+
+            # 3. Transfer-evidence check FIRST: the spool bytes must match the
+            # checksum observed on the node before any structural parsing.
+            file_hash = hashlib.sha256()
+            with open(backup_path, "rb") as f:
+                for chunk in iter(lambda: f.read(BACKUP_CHUNK_SIZE), b""):
+                    file_hash.update(chunk)
+
+            checksum = file_hash.hexdigest()
+            expected_remote = metadata.get("checksum_sha256_remote")
+            if expected_remote and checksum != expected_remote:
+                return Err(
+                    f"Backup archive checksum mismatch: spool={checksum} remote={expected_remote}; "
+                    "transfer corruption suspected"
+                )
+            metadata["checksum_sha256"] = checksum
+
+            # 4. Archive structure verification
+            try:
+                with tarfile.open(backup_path, "r:gz") as tar:
+                    members = tar.getnames()
+                    if not members:
+                        return Err("Backup archive is empty")
+
+                    # Update metadata with archive info
+                    metadata["file_count"] = len(members)
+                    metadata["file_size_bytes"] = file_size
+            except tarfile.TarError as e:
+                return Err(f"Invalid backup archive: {e}")
+
+            # 5. Feature completeness check
+            expected_features = []
+            if metadata.get("include_email"):
+                expected_features.append("mail")
+            if metadata.get("include_databases"):
+                expected_features.append("mysql")
+            if metadata.get("include_files"):
+                expected_features.append("dir")
+            if metadata.get("include_ssl"):
+                expected_features.append("ssl")
+
+            metadata["verified_at"] = timezone.now().isoformat()
+            metadata["verification_status"] = "passed"
+
+            logger.info(f"Backup {backup_id} verified: {file_size} bytes, {metadata.get('file_count', 0)} files")
+            return Ok(None)
+
+        except Exception as e:
+            logger.error(f"Backup verification failed for {backup_id}: {e}")
+            return Err(f"Backup verification failed: {e}")
+
+    def _upload_backup_to_s3(self, backup_id: str, metadata: dict[str, Any]) -> Result[dict[str, Any], str]:
+        """Upload backup files to S3 with encryption."""
+
+        try:
+            s3_client = self._get_s3_client()
+            bucket_name = self._get_backup_bucket()
+
+            # Defense-in-depth: only a fetched spool archive may be published.
+            if metadata.get("backup_location") != "spool":
+                return Err(
+                    f"Cannot upload backup {backup_id}: archive is not in the controller spool "
+                    f"(location={metadata.get('backup_location', 'unknown')})"
+                )
+
+            backup_path = str(metadata["backup_path"])
+
+            if not os.path.exists(backup_path):
+                return Err(f"Backup file not found for upload: {backup_path}")
+
+            backup_key = f"virtualmin-backups/{backup_id}/backup.tar.gz"
+            file_size = os.path.getsize(backup_path)
+
+            # Use multipart upload for large files
+            if file_size > S3_MULTIPART_THRESHOLD:
+                logger.info(f"Using multipart upload for {backup_id} ({file_size} bytes)")
+                transfer_config = boto3.s3.transfer.TransferConfig(
+                    multipart_threshold=S3_MULTIPART_THRESHOLD,
+                    multipart_chunksize=BACKUP_CHUNK_SIZE,
+                    use_threads=True,
+                )
+
+                s3_client.upload_file(
+                    backup_path,
+                    bucket_name,
+                    backup_key,
+                    ExtraArgs={
+                        "ServerSideEncryption": "AES256",
+                        "ContentType": "application/gzip",
+                        "Metadata": {
+                            "backup_id": backup_id,
+                            "domain": metadata.get("domain", "unknown"),
+                            "backup_type": metadata.get("backup_type", "full"),
+                        },
+                    },
+                    Config=transfer_config,
+                )
+            else:
+                # Direct upload for smaller files
+                with open(backup_path, "rb") as f:
+                    s3_client.put_object(
+                        Bucket=bucket_name,
+                        Key=backup_key,
+                        Body=f,
+                        ServerSideEncryption="AES256",
+                        ContentType="application/gzip",
+                        Metadata={
+                            "backup_id": backup_id,
+                            "domain": metadata.get("domain", "unknown"),
+                            "backup_type": metadata.get("backup_type", "full"),
+                        },
+                    )
+
+            # #326: upload metadata AFTER the archive succeeds. Previously metadata was written
+            # first, so an interrupted backup left a metadata.json in S3 with no archive — listed
+            # as restorable and skipping checksum verification. Writing it last means a metadata
+            # object only ever exists alongside its archive.
+            metadata_key = f"virtualmin-backups/{backup_id}/metadata.json"
+            s3_client.put_object(
+                Bucket=bucket_name,
+                Key=metadata_key,
+                Body=json.dumps(metadata, indent=2),
+                ContentType="application/json",
+                ServerSideEncryption="AES256",
+            )
+
+            # Clean up local backup file after successful upload
+            try:
+                os.remove(backup_path)
+                logger.debug(f"Cleaned up local backup file: {backup_path}")
+            except OSError as e:
+                logger.warning(f"Failed to clean up local backup file: {e}")
+
+            upload_info = {
+                "metadata_key": metadata_key,
+                "backup_key": backup_key,
+                "s3_bucket": bucket_name,
+                "file_size_bytes": file_size,
+                "uploaded_at": timezone.now().isoformat(),
+            }
+
+            logger.info(f"Successfully uploaded backup {backup_id} to S3 ({file_size} bytes)")
+            return Ok(upload_info)
+
+        except Exception as e:
+            logger.error(f"S3 upload failed: {e}")
+            return Err(f"S3 upload failed: {e!s}")
+
+    def _finalize_backup_metadata(self, metadata: dict[str, Any], upload_info: dict[str, Any]) -> dict[str, Any]:
+        """Finalize backup metadata with completion info."""
+        metadata.update({"status": "completed", "completed_at": timezone.now().isoformat(), "s3_info": upload_info})
+        return metadata
+
     def _verify_backup_before_restore(self, backup_path: str, metadata: dict[str, Any]) -> Result[None, str]:
         """Verify backup integrity before starting restore."""
         return Ok(None)
-
-    def _create_restore_rollback_point(self, account: VirtualminAccount) -> Result[dict[str, Any], str]:
-        """Create rollback point before restore operation."""
-        # Create minimal backup for rollback purposes
-        return Ok({"rollback_point": "created"})
-
-    def _restore_email_data(
-        self, gateway: VirtualminGateway, account: VirtualminAccount, backup_path: str
-    ) -> Result[None, str]:
-        """Restore email stores and configuration."""
-        return Ok(None)
-
-    def _restore_database_data(
-        self, gateway: VirtualminGateway, account: VirtualminAccount, backup_path: str
-    ) -> Result[None, str]:
-        """Restore database data and configuration."""
-        return Ok(None)
-
-    def _restore_file_data(
-        self, gateway: VirtualminGateway, account: VirtualminAccount, backup_path: str
-    ) -> Result[None, str]:
-        """Restore web files and uploads."""
-        return Ok(None)
-
-    def _restore_ssl_certificates(
-        self, gateway: VirtualminGateway, account: VirtualminAccount, backup_path: str
-    ) -> Result[None, str]:
-        """Restore SSL certificates and private keys."""
-        return Ok(None)
-
-    def _verify_restore_integrity(
-        self, gateway: VirtualminGateway, account: VirtualminAccount, metadata: dict[str, Any]
-    ) -> Result[None, str]:
-        """Verify restore operation completed successfully."""
-        return Ok(None)
-
-    def _execute_restore_rollback(self, account: VirtualminAccount, rollback_info: dict[str, Any]) -> Result[None, str]:
-        """Execute rollback if restore fails."""
-        return Ok(None)
-
-    def _finalize_restore_summary(
-        self, account: VirtualminAccount, backup_id: str, restore_id: str, metadata: dict[str, Any]
-    ) -> dict[str, Any]:
-        """Generate restore completion summary."""
-        return {
-            "restore_id": restore_id,
-            "backup_id": backup_id,
-            "domain": account.domain,
-            "completed_at": timezone.now().isoformat(),
-            "summary": "Restore completed successfully",
-        }
 
     def _find_last_full_backup(self, account: VirtualminAccount) -> Result[dict[str, Any], str]:
         """Find the most recent full backup for incremental operations."""

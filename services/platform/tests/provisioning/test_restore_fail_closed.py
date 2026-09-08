@@ -1,24 +1,46 @@
-"""#326: restore_domain must fail closed when component restores fail.
+"""Restore fails closed at every gate: authorization, ownership, force, ambiguity.
 
-Previously restore_domain collected the per-component error list from
-_execute_restore_components and then called _finalize_restore_operation
-unconditionally, so a partial or total restore failure still reported
-"Restore completed successfully". Component failures must now roll back
-and surface as an error instead of a fictional success.
+The transport-based restore (#431) replaced the stubbed component machinery.
+These tests pin the real gates: a backup restores only onto its own account,
+force can never override foreign or unverifiable ownership, a live domain
+gets a safety backup before any destructive dispatch, and ambiguous remote
+outcomes surface as UNKNOWN-retriability errors (parked for attention at the
+job layer) with the pushed archive retained for reconciliation.
 """
 
 from __future__ import annotations
 
+import json
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 from django.test import TestCase
 
-from apps.common.types import Err, Ok
+from apps.common.types import Err, Ok, Retriability, retriability_of
 from apps.provisioning.virtualmin_backup_service import RestoreConfig, VirtualminBackupService
+from apps.provisioning.virtualmin_gateway import VirtualminResponse
+
+
+def _listing_row(domain: str, username: str, enabled: bool | None) -> dict[str, Any]:
+    return {"domain": domain, "username": username, "enabled": enabled, "attributes": {}}
+
+
+def _restore_response(*, success: bool, raw: str) -> Ok[VirtualminResponse]:
+    return Ok(
+        VirtualminResponse(
+            success=success,
+            data={"status": "success"} if success else {"error": "guesswork"},
+            raw_response=raw,
+            http_status=200,
+            execution_time=0.1,
+            program="restore-domain",
+            server_hostname="vm.example.com",
+        )
+    )
 
 
 class RestoreFailClosedTests(TestCase):
-    """restore_domain surfaces component failures instead of finalizing as success."""
+    """The real restore workflow refuses everything it cannot prove safe."""
 
     def setUp(self) -> None:
         self.server = MagicMock()
@@ -26,150 +48,149 @@ class RestoreFailClosedTests(TestCase):
         self.service = VirtualminBackupService(self.server)
         self.account = MagicMock()
         self.account.domain = "example.com"
+        self.account.service_id = 42
+        self.account.virtualmin_username = "owner"
         self.config = RestoreConfig(backup_id="bk-1")
-
-    @patch("apps.provisioning.virtualmin_backup_service.VirtualminGateway")
-    @patch("apps.provisioning.virtualmin_backup_service.VirtualminConfig")
-    def test_component_errors_roll_back_and_return_err(
-        self, _mock_config_cls: MagicMock, _mock_gateway_cls: MagicMock
-    ) -> None:
-        """When a component restore fails, restore_domain rolls back and returns Err."""
-        with (
-            patch.object(
-                self.service,
-                "_prepare_restore_session",
-                return_value=Ok(("/var/backups/praho/backup.tar", {"meta": True}, {"rollback": True})),
-            ),
-            patch.object(
-                self.service,
-                "_execute_restore_components",
-                return_value=["Database restore failed: connection refused"],
-            ),
-            patch.object(self.service, "_execute_restore_rollback") as mock_rollback,
-            patch.object(self.service, "_finalize_restore_operation") as mock_finalize,
-            patch.object(self.service, "_update_restore_progress"),
-            patch.object(self.service, "_generate_restore_id", return_value="rs-1"),
-        ):
-            result = self.service.restore_domain(self.account, self.config)
-
-        self.assertTrue(result.is_err())
-        self.assertIn("component error", result.unwrap_err().lower())
-        mock_rollback.assert_called_once()
-        # A failed restore must NOT be finalized as success.
-        mock_finalize.assert_not_called()
-
-    @patch("apps.provisioning.virtualmin_backup_service.VirtualminGateway")
-    @patch("apps.provisioning.virtualmin_backup_service.VirtualminConfig")
-    def test_component_failure_marks_restore_progress_failed(
-        self, _mock_config_cls: MagicMock, _mock_gateway_cls: MagicMock
-    ) -> None:
-        """An operator polling progress must see 'failed', not a stuck intermediate phase."""
-        with (
-            patch.object(
-                self.service,
-                "_prepare_restore_session",
-                return_value=Ok(("/var/backups/praho/backup.tar", {"meta": True}, {"rollback": True})),
-            ),
-            patch.object(self.service, "_execute_restore_components", return_value=["Files restore failed"]),
-            patch.object(self.service, "_execute_restore_rollback", return_value=Ok(None)),
-            patch.object(self.service, "_update_restore_progress") as mock_progress,
-            patch.object(self.service, "_generate_restore_id", return_value="rs-fail"),
-        ):
-            self.service.restore_domain(self.account, self.config)
-
-        phases = [call.args[1] for call in mock_progress.call_args_list if len(call.args) > 1]
-        self.assertIn("failed", phases, f"progress must reach 'failed', got {phases}")
-
-    @patch("apps.provisioning.virtualmin_backup_service.VirtualminGateway")
-    @patch("apps.provisioning.virtualmin_backup_service.VirtualminConfig")
-    def test_rollback_failure_is_surfaced_in_the_error(
-        self, _mock_config_cls: MagicMock, _mock_gateway_cls: MagicMock
-    ) -> None:
-        """A failed rollback after a failed restore leaves the account in an unknown
-        state — the operator must be told, not left with only the component errors."""
-        with (
-            patch.object(
-                self.service,
-                "_prepare_restore_session",
-                return_value=Ok(("/var/backups/praho/backup.tar", {"meta": True}, {"rollback": True})),
-            ),
-            patch.object(self.service, "_execute_restore_components", return_value=["Database restore failed"]),
-            patch.object(
-                self.service,
-                "_execute_restore_rollback",
-                return_value=Err("rollback could not reach the server"),
-            ),
-            patch.object(self.service, "_update_restore_progress"),
-            patch.object(self.service, "_generate_restore_id", return_value="rs-rbfail"),
-        ):
-            result = self.service.restore_domain(self.account, self.config)
-
-        self.assertTrue(result.is_err())
-        err = result.unwrap_err().lower()
-        self.assertIn("rollback", err, f"a failed rollback must be surfaced, got: {result.unwrap_err()}")
-
-    @patch("apps.provisioning.virtualmin_backup_service.VirtualminGateway")
-    @patch("apps.provisioning.virtualmin_backup_service.VirtualminConfig")
-    def test_no_component_errors_finalizes_normally(
-        self, _mock_config_cls: MagicMock, _mock_gateway_cls: MagicMock
-    ) -> None:
-        """Non-regression: with no component errors the restore finalizes as before."""
-        with (
-            patch.object(
-                self.service,
-                "_prepare_restore_session",
-                return_value=Ok(("/var/backups/praho/backup.tar", {"meta": True}, {"rollback": True})),
-            ),
-            patch.object(self.service, "_execute_restore_components", return_value=[]),
-            patch.object(self.service, "_execute_restore_rollback") as mock_rollback,
-            patch.object(
-                self.service, "_finalize_restore_operation", return_value=Ok({"restored": True})
-            ) as mock_finalize,
-            patch.object(self.service, "_update_restore_progress"),
-            patch.object(self.service, "_generate_restore_id", return_value="rs-2"),
-        ):
-            result = self.service.restore_domain(self.account, self.config)
-
-        self.assertTrue(result.is_ok())
-        mock_finalize.assert_called_once()
-        mock_rollback.assert_not_called()
-
-
-class FinalizeIntegrityFailureTests(TestCase):
-    """_finalize_restore_operation must also fail closed on a failed rollback."""
-
-    def setUp(self) -> None:
-        self.server = MagicMock()
-        self.server.hostname = "vm.example.com"
-        self.service = VirtualminBackupService(self.server)
-        self.account = MagicMock()
-        self.account.domain = "example.com"
-
-    def _params(self) -> dict:
-        from apps.provisioning.virtualmin_backup_service import RestoreOperationParams  # noqa: PLC0415
-
-        return RestoreOperationParams(
-            gateway=MagicMock(),
-            account=self.account,
-            backup_metadata={"meta": True},
-            restore_id="rs-final",
-            config=RestoreConfig(backup_id="bk-1"),
-            rollback_data={"rollback": True},
+        self.metadata = {
+            "archive_name": "virtualmin_backup_" + "a" * 32 + ".tar.gz",
+            "checksum_sha256": "b" * 64,
+            "praho_service_id": "42",
+            "domain": "example.com",
+        }
+        download_patch = patch.object(
+            self.service, "_download_backup_to_spool", return_value=Ok(("/spool/x.tar.gz", self.metadata))
+        )
+        download_patch.start()
+        self.addCleanup(download_patch.stop)
+        release_patch = patch("apps.provisioning.spool.release_spool_reservation")
+        release_patch.start()
+        self.addCleanup(release_patch.stop)
+        self.gateway = MagicMock()
+        gateway_patch = patch(
+            "apps.provisioning.virtualmin_backup_service.VirtualminGateway", return_value=self.gateway
+        )
+        gateway_patch.start()
+        self.addCleanup(gateway_patch.stop)
+        self.listing = patch(
+            "apps.provisioning.virtualmin_migration_service.list_migration_domains",
+            return_value=Ok([]),
+        )
+        self.listing_mock = self.listing.start()
+        self.addCleanup(self.listing.stop)
+        self.push_patch = patch.object(self.service, "_push_archive_to_target", return_value=Ok(None))
+        self.push = self.push_patch.start()
+        self.addCleanup(self.push_patch.stop)
+        self.cleanup_patch = patch.object(self.service, "_cleanup_remote_archive")
+        self.remote_cleanup = self.cleanup_patch.start()
+        self.addCleanup(self.cleanup_patch.stop)
+        self.gateway.call.return_value = _restore_response(
+            success=True, raw=json.dumps({"status": "success"})
         )
 
-    def test_integrity_failure_with_failed_rollback_is_surfaced(self) -> None:
-        """A post-restore integrity failure whose rollback also fails must report both,
-        mark progress failed, and never claim success."""
-        with (
-            patch.object(self.service, "_verify_restore_integrity", return_value=Err("integrity mismatch")),
-            patch.object(self.service, "_execute_restore_rollback", return_value=Err("rollback unreachable")),
-            patch.object(self.service, "_update_restore_progress") as mock_progress,
-        ):
-            result = self.service._finalize_restore_operation(self._params())
-
+    def test_wrong_service_authorization_is_refused(self) -> None:
+        self.metadata["praho_service_id"] = "999"
+        result = self.service.restore_domain(account=self.account, config=self.config)
         self.assertTrue(result.is_err())
-        err = result.unwrap_err().lower()
-        self.assertIn("integrity", err)
-        self.assertIn("rollback", err)
-        phases = [call.args[1] for call in mock_progress.call_args_list if len(call.args) > 1]
-        self.assertIn("failed", phases, f"progress must reach 'failed', got {phases}")
+        self.assertIn("does not belong", result.unwrap_err())
+        self.push.assert_not_called()
+
+    def test_wrong_domain_binding_is_refused(self) -> None:
+        self.metadata["domain"] = "other.com"
+        result = self.service.restore_domain(account=self.account, config=self.config)
+        self.assertTrue(result.is_err())
+        self.assertIn("does not match", result.unwrap_err())
+        self.push.assert_not_called()
+
+    def test_foreign_owner_refused_regardless_of_force(self) -> None:
+        self.listing_mock.return_value = Ok([_listing_row("example.com", "intruder", True)])
+        self.config.force_restore = True
+        result = self.service.restore_domain(account=self.account, config=self.config)
+        self.assertTrue(result.is_err())
+        self.assertIn("foreign ownership", result.unwrap_err())
+        self.push.assert_not_called()
+
+    def test_unverifiable_state_refused_regardless_of_force(self) -> None:
+        self.listing_mock.return_value = Ok([_listing_row("example.com", "owner", None)])
+        self.config.force_restore = True
+        result = self.service.restore_domain(account=self.account, config=self.config)
+        self.assertTrue(result.is_err())
+        self.assertIn("unverifiable", result.unwrap_err())
+        self.push.assert_not_called()
+
+    def test_live_domain_requires_force(self) -> None:
+        self.listing_mock.return_value = Ok([_listing_row("example.com", "owner", True)])
+        result = self.service.restore_domain(account=self.account, config=self.config)
+        self.assertTrue(result.is_err())
+        self.assertIn("force restore", result.unwrap_err())
+        self.push.assert_not_called()
+
+    def test_forced_restore_takes_safety_backup_first_and_aborts_on_its_failure(self) -> None:
+        self.listing_mock.return_value = Ok([_listing_row("example.com", "owner", True)])
+        self.config.force_restore = True
+        with patch.object(
+            VirtualminBackupService, "backup_domain", return_value=Err("no space")
+        ) as safety:
+            result = self.service.restore_domain(account=self.account, config=self.config)
+        self.assertTrue(result.is_err())
+        self.assertIn("safety backup failed", result.unwrap_err())
+        safety.assert_called_once()
+        self.push.assert_not_called()
+
+    def test_safety_backup_id_is_persisted_before_destructive_dispatch(self) -> None:
+        self.listing_mock.return_value = Ok([_listing_row("example.com", "owner", True)])
+        self.config.force_restore = True
+        notes: list[dict[str, Any]] = []
+        order: list[str] = []
+        self.push.side_effect = lambda *a, **k: order.append("push") or Ok(None)
+        with patch.object(
+            VirtualminBackupService,
+            "backup_domain",
+            return_value=Ok({"backup_id": "safety-1"}),
+        ):
+            result = self.service.restore_domain(
+                account=self.account,
+                config=self.config,
+                note_sink=lambda note: (notes.append(note), order.append("note"))[0],
+            )
+        self.assertTrue(result.is_ok(), result)
+        self.assertEqual(notes, [{"safety_backup_id": "safety-1"}])
+        self.assertEqual(order, ["note", "push"])
+        self.assertEqual(result.unwrap()["safety_backup_id"], "safety-1")
+
+    def test_ambiguous_restore_is_unknown_retriability_and_retains_archive(self) -> None:
+        self.gateway.call.return_value = _restore_response(success=False, raw="")
+        result = self.service.restore_domain(account=self.account, config=self.config)
+        self.assertTrue(result.is_err())
+        self.assertIs(retriability_of(result), Retriability.UNKNOWN)
+        # Uncertain outcome: the pushed archive stays for reconciliation.
+        self.remote_cleanup.assert_not_called()
+
+    def test_explicit_rejection_is_definite_and_cleans_the_pushed_archive(self) -> None:
+        raw = json.dumps({"status": "error", "error": "disk full"})
+        self.gateway.call.return_value = _restore_response(success=False, raw=raw)
+        result = self.service.restore_domain(account=self.account, config=self.config)
+        self.assertTrue(result.is_err())
+        self.assertIn("disk full", result.unwrap_err())
+        self.assertIs(retriability_of(result), Retriability.NOT_RETRIABLE)
+        self.remote_cleanup.assert_called_once()
+
+    def test_unverified_restore_surfaces_as_uncertain(self) -> None:
+        # restore-domain succeeds but the domain never shows on the listing.
+        calls = {"n": 0}
+
+        def listing_side_effect(gateway: Any, **kwargs: Any) -> Any:
+            calls["n"] += 1
+            return Ok([])
+
+        self.listing_mock.side_effect = listing_side_effect
+        result = self.service.restore_domain(account=self.account, config=self.config)
+        self.assertTrue(result.is_err())
+        self.assertIn("could not be verified", result.unwrap_err())
+        self.assertIs(retriability_of(result), Retriability.UNKNOWN)
+        self.remote_cleanup.assert_not_called()
+
+    def test_component_selective_restore_is_refused_honestly(self) -> None:
+        self.config.restore_email = False
+        result = self.service.restore_domain(account=self.account, config=self.config)
+        self.assertTrue(result.is_err())
+        self.assertIn("all components", result.unwrap_err())

@@ -34,6 +34,11 @@ class Command(BaseCommand):
         restore_parser = subparsers.add_parser("restore", help="Restore domain from backup")
         restore_parser.add_argument("domain", help="Domain name to restore")
         restore_parser.add_argument("backup_id", help="Backup ID to restore from")
+        restore_parser.add_argument(
+            "--force-restore",
+            action="store_true",
+            help="Overwrite a live domain (a safety backup is taken first)",
+        )
         restore_parser.add_argument("--no-email", action="store_true", help="Skip email restore")
         restore_parser.add_argument("--no-databases", action="store_true", help="Skip database restore")
         restore_parser.add_argument("--no-files", action="store_true", help="Skip files restore")
@@ -150,6 +155,7 @@ class Command(BaseCommand):
 
         restore_config = RestoreConfig(
             backup_id=backup_id,
+            force_restore=bool(options.get("force_restore", False)),
             restore_email=not options.get("no_email", False),
             restore_databases=not options.get("no_databases", False),
             restore_files=not options.get("no_files", False),

@@ -282,14 +282,33 @@ GET /api/provisioning/virtualmin/jobs/?status=failed
 3. **Parallel Running** - Test PRAHO alongside existing setup
 4. **Data Validation** - Verify domain data consistency
 
-### Emergency Recovery
+### Disaster Recovery
 ```python
-from apps.provisioning.virtualmin_service import VirtualminEmergencyRecoveryService
+from apps.provisioning.virtualmin_disaster_recovery import VirtualminDisasterRecoveryService
 
-recovery = VirtualminEmergencyRecoveryService()
-result = recovery.rebuild_from_virtualmin_domains(server)
-# Rebuilds PRAHO data from Virtualmin server state
+dr = VirtualminDisasterRecoveryService()
+readiness = dr.verify_praho_data_integrity()   # rebuild-input readiness report
+result = dr.rebuild_server_from_praho(server)  # recreates accounts from PRAHO data
+# Per-account recreation goes through reprovision_virtualmin_account
+# (rotated password, recovery seed in the Virtualmin comment field).
 ```
+
+### Backup & Restore (job-based, #431)
+- `VirtualminBackupManagementService.create_backup_job` / `create_restore_job`
+  admit under the account-operation lock and run in Django-Q tasks (the CLI
+  `manage.py virtualmin_backup` uses the same job layer with inline execution).
+- Backups: `backup-domain` writes to the node's `/tmp` under a UUID archive
+  name → the `virtualmin_backup_fetch.yml` playbook pulls it into the private
+  transfer spool (checksum-evidenced, remote temp deleted) → the manifest is
+  finalized → archive then metadata land in S3 (`backup.*` settings).
+- Restores: fail-closed gates (backup↔account authorization, target-ownership
+  that `force_restore` can never override, live-domain force requirement,
+  pre-restore safety backup) → push playbook → `restore-domain` with an
+  explicit-success envelope → post-restore verification. Ambiguous outcomes
+  park the job in the non-terminal `attention` status for operator review.
+- Budgets derive from each job's size estimate against
+  `provisioning.backup_min_transfer_mib_s`; full + config backups only
+  (incremental was removed until a real incremental contract exists).
 
 ## 🎯 Key Benefits
 
@@ -314,7 +333,7 @@ result = recovery.rebuild_from_virtualmin_domains(server)
 ## 🚨 Important Notes
 
 1. **ACL User Required** - Create dedicated Webmin ACL user, not master admin
-2. **Backup Testing** - Implement and test backup verification monthly
+2. **Backup Testing** - Restore a recent backup on a staging node periodically; the pipeline verifies checksums, but only a real restore proves recoverability
 3. **Rate Limits** - Monitor API usage to stay within Virtualmin limits
 4. **SSL Verification** - Use certificate pinning in production
 5. **Recovery Seeds** - Limited to ~200 chars in Virtualmin comments

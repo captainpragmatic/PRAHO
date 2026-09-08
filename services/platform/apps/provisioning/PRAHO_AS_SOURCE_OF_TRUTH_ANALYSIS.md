@@ -65,7 +65,7 @@ def enforce_praho_state(self, account: VirtualminAccount, force: bool = False):
 **Implementation**: ✅ **Explicit enforcement mechanism** that forces Virtualmin to match PRAHO state.
 
 ### 6. **Server Replacement ("Cattle, Not Pets")**
-**Location**: `virtualmin_disaster_recovery.py` - Lines 32-128
+**Location**: `virtualmin_disaster_recovery.py` (`rebuild_server_from_praho`; line numbers drift — grep, do not trust old references) - Lines 32-128
 ```python
 def rebuild_server_from_praho(self, target_server: VirtualminServer, dry_run: bool = True):
     """
@@ -80,7 +80,7 @@ def rebuild_server_from_praho(self, target_server: VirtualminServer, dry_run: bo
 **Implementation**: ✅ **Complete server replacement capability** using only PRAHO data.
 
 ### 7. **Backup Strategy: PRAHO Data is Authoritative**
-**Location**: `virtualmin_disaster_recovery.py` - Lines 175-225
+**Location**: `virtualmin_disaster_recovery.py` (`rebuild_server_from_praho`; line numbers drift — grep, do not trust old references) - Lines 175-225
 ```python
 def verify_praho_data_integrity(self) -> Result[dict[str, Any], str]:
     """
@@ -155,7 +155,7 @@ def migrate_accounts_to_new_server(
 ```
 
 ### 2. **Complete Disaster Recovery**
-**Location**: `virtualmin_disaster_recovery.py`
+**Location**: `virtualmin_disaster_recovery.py` (`rebuild_server_from_praho`; line numbers drift — grep, do not trust old references)
 ```python
 def rebuild_server_from_praho(self, target_server: VirtualminServer):
     # Get all PRAHO accounts that should exist on this server
@@ -164,18 +164,15 @@ def rebuild_server_from_praho(self, target_server: VirtualminServer):
         status__in=["active", "suspended"]
     ).select_related('service', 'service__customer')
 
-    # Recreate each account using PRAHO as authority
+    # Recreate each account using PRAHO as authority. Rebuilds go through
+    # reprovision_virtualmin_account (NOT create_virtualmin_account, which
+    # refuses existing rows): it rotates the password, reuses the existing
+    # account/service rows, and re-runs domain creation on the target server.
     for account in praho_accounts:
-        result = provisioning_service.create_virtualmin_account(
-            service=account.service,  # PRAHO service drives recreation
-            domain=account.domain,
-            username=account.virtualmin_username,
-            template=account.template_name or "Default",
-            server=target_server
-        )
+        result = provisioning_service.reprovision_virtualmin_account(account, target_server)
 ```
 
-## 📊 **Implementation Score: 95/100**
+## 📊 **Implementation Status**
 
 | Design Principle | Implementation Status | Evidence |
 |------------------|----------------------|----------|
@@ -186,7 +183,7 @@ def rebuild_server_from_praho(self, target_server: VirtualminServer):
 | **No Virtualmin Clustering** | ✅ 100% | Independent server model |
 | **PRAHO Orchestration** | ✅ 100% | Server placement and load balancing |
 | **DNS-Based Traffic Management** | ✅ 90% | Architecture supports it (PowerDNS/CloudFlare ready) |
-| **Backup Strategy** | ✅ 95% | PRAHO data integrity verification + rebuild capability |
+| **Backup Strategy** | ✅ | Job-based backup/restore with real S3 transport (#431); readiness verified against the actual rebuild input set |
 
 ## 🎉 **Conclusion**
 

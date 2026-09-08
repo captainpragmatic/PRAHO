@@ -251,6 +251,16 @@ class VirtualminRestoreForm(forms.Form):
         help_text=_("Restore SSL certificates and private keys"),
     )
 
+    force_restore = forms.BooleanField(
+        required=False,
+        widget=PRAHOCheckboxWidget(),
+        label=_("Force restore over the live domain"),
+        help_text=_(
+            "Required when the domain currently exists: the restore overwrites its data. "
+            "A safety backup of the current state is taken first."
+        ),
+    )
+
     confirm_restore = forms.BooleanField(
         required=True,
         widget=PRAHOCheckboxWidget(),

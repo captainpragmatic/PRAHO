@@ -937,11 +937,42 @@ def _run_backup_restore_job(job_id: str, operation: str) -> dict[str, Any]:
             restore_databases=bool(params.get("restore_databases", True)),
             restore_files=bool(params.get("restore_files", True)),
             restore_ssl=bool(params.get("restore_ssl", True)),
+            force_restore=bool(params.get("force_restore", False)),
         )
-        result = service.restore_domain(account=job.account, config=restore_config, target_server=job.server)
+
+        def persist_note(note: dict[str, Any]) -> None:
+            # Token-fenced parameter merge: evidence (e.g. the safety backup id)
+            # is durable BEFORE any destructive dispatch, and a superseded
+            # runner cannot write it.
+            current = (
+                VirtualminProvisioningJob.objects.filter(pk=job.pk, execution_token=token)
+                .values_list("parameters", flat=True)
+                .first()
+            )
+            if current is None:
+                return
+            VirtualminProvisioningJob.objects.filter(pk=job.pk, execution_token=token).update(
+                parameters={**current, **note}, updated_at=timezone.now()
+            )
+
+        result = service.restore_domain(
+            account=job.account,
+            config=restore_config,
+            target_server=job.server,
+            progress_key=str(job.pk),
+            ownership=owns,
+            note_sink=persist_note,
+        )
 
     if result.is_err():
         error = str(result.unwrap_err())
+        if operation == "restore_domain" and retriability_of(result) is Retriability.UNKNOWN:
+            # Uncertain mutation: park for operator attention; exclusion holds.
+            rows = VirtualminProvisioningJob.finish_execution(
+                job.pk, token, "attention", error, {"retriability": retriability_of(result).value}
+            )
+            logger.warning("⚠️ [BackupJobs] restore job %s parked for attention: %s", job_id, error)
+            return {"status": "attention" if rows else "superseded", "job_id": job_id, "error": error}
         rows = VirtualminProvisioningJob.finish_execution(
             job.pk, token, "failed", error, {"retriability": retriability_of(result).value}
         )

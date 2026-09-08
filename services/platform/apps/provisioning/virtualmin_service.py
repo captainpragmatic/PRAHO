@@ -1803,6 +1803,7 @@ class VirtualminBackupManagementService:
                 "restore_databases": config.restore_databases,
                 "restore_files": config.restore_files,
                 "restore_ssl": config.restore_ssl,
+                "force_restore": config.force_restore,
                 "target_server_id": str(target_server.id),
                 "initiated_by": initiated_by,
             }
