@@ -126,6 +126,27 @@ class NodeDrainService:
                     cls._close(drain, "paused_needs_review", f"Enqueue failed: {error}")
 
     @classmethod
+    def close_interrupted(cls, drain_id: UUID) -> bool:
+        """Close a stale RUNNING drain for review; never adopt pending work.
+
+        The reclaim sweep must not call run() here: between selection and the
+        call the worker may checkpoint the drain back to pending with a fresh
+        token, and run() would then execute the whole drain inline inside the
+        sweep task's much smaller time budget.
+        """
+        timeout = cls._timeout()
+        with transaction.atomic():
+            drain = NodeDrain.objects.select_for_update().get(pk=drain_id)
+            if (
+                drain.status == "running"
+                and drain.worker_started_at
+                and drain.worker_started_at < timezone.now() - timedelta(seconds=timeout + 60)
+            ):
+                cls._close(drain, "paused_needs_review", "Worker interrupted; inspect the current migration")
+                return True
+        return False
+
+    @classmethod
     def cancel_drain(cls, drain: NodeDrain) -> Result[NodeDrain, str]:
         with transaction.atomic():
             drain = NodeDrain.objects.select_for_update().get(pk=drain.pk)

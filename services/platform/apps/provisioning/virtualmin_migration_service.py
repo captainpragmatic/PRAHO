@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import shutil
@@ -18,7 +19,7 @@ from django.utils import timezone
 from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 
 from .placement import order_placement_candidates
-from .virtualmin_gateway import PARSER_AMBIGUOUS_ERRORS, VirtualminConfig, VirtualminGateway
+from .virtualmin_gateway import VirtualminConfig, VirtualminGateway
 from .virtualmin_migration_models import VirtualminMigration, account_has_active_migration
 from .virtualmin_models import VirtualminAccount, VirtualminProvisioningJob, VirtualminServer
 
@@ -74,6 +75,29 @@ def _scalar(value: object) -> str:
     if isinstance(value, list):
         return " ".join(str(item) for item in value).strip()
     return str(value).strip()
+
+
+def _explicit_rejection(raw: str) -> str | None:
+    """Extract explicit remote rejection evidence, or None when ambiguous.
+
+    Migration commands request json=1, so a genuine Virtualmin rejection is a
+    parseable JSON envelope carrying its own failure markers. Anything else —
+    empty body, truncated JSON, proxy HTML, unrecognized text — is parser
+    guesswork and must be treated as an unknown outcome.
+    """
+    text = (raw or "").strip()
+    if not text.startswith("{"):
+        return None
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    status = str(data.get("status", "")).strip().lower()
+    if status in {"error", "failed", "failure"} or data.get("success") is False or data.get("error"):
+        return str(data.get("error") or data.get("message") or status or "rejected")
+    return None
 
 
 def list_migration_domains(gateway: VirtualminGateway, *, strict: bool = True) -> Result[list[dict[str, Any]], str]:
@@ -179,9 +203,12 @@ class VirtualminMigrationService:
         logger.info("✅ [VirtualminMigration] migration=%s phase=%s", migration.pk, status)
 
     @staticmethod
-    def _audit(migration: VirtualminMigration, action: str, *, compensation_failure: bool = False) -> None:
+    def _audit(
+        migration: VirtualminMigration, action: str, *, compensation_failure: bool = False, actor: User | None = None
+    ) -> None:
         from apps.audit.services import AuditContext, AuditEventData, AuditService  # noqa: PLC0415
 
+        user = actor or migration.initiated_by
         AuditService.log_event(
             AuditEventData(
                 event_type=f"virtualmin_migration_{action}",
@@ -190,8 +217,8 @@ class VirtualminMigrationService:
                 new_values={"status": migration.status, "error_detail": migration.error_detail},
             ),
             AuditContext(
-                user=migration.initiated_by,
-                actor_type="user" if migration.initiated_by_id else "system",
+                user=user,
+                actor_type="user" if user else "system",
                 metadata={
                     "source_app": "provisioning",
                     "compensation_failure": compensation_failure,
@@ -200,7 +227,7 @@ class VirtualminMigrationService:
             ),
         )
 
-    def _finish(
+    def _finish(  # noqa: PLR0913  # Terminal transition carries its full audit context
         self,
         migration: VirtualminMigration,
         token: UUID,
@@ -208,10 +235,11 @@ class VirtualminMigrationService:
         error: str = "",
         *,
         compensation_failure: bool = False,
+        actor: User | None = None,
     ) -> None:
         with transaction.atomic():
             self._move(migration, token, status, error_detail=error)
-            self._audit(migration, status, compensation_failure=compensation_failure)
+            self._audit(migration, status, compensation_failure=compensation_failure, actor=actor)
 
     def _local_preflight(self, account: VirtualminAccount, target: VirtualminServer) -> None:
         if not self.enabled:
@@ -350,12 +378,14 @@ class VirtualminMigrationService:
             raise RuntimeError(f"Ambiguous {program}: {result.unwrap_err()}")
         response = result.unwrap()
         if not response.success:
-            detail = response.data.get("error", response.data)
-            # A blank or unparseable body proves nothing about execution —
+            # Only a well-formed JSON envelope that ITSELF reports failure is
+            # rejection evidence. Blank bodies, truncated JSON, proxy HTML, or
+            # heuristic text/XML error guesses prove nothing about execution —
             # that ambiguity must never authorize compensation (delete/enable).
-            if not (response.raw_response or "").strip() or response.data.get("error") in PARSER_AMBIGUOUS_ERRORS:
-                raise RuntimeError(f"Ambiguous {program}: response could not be interpreted ({detail})")
-            raise DefiniteMigrationFailureError(f"{program} rejected: {detail}")
+            rejection = _explicit_rejection(response.raw_response)
+            if rejection is None:
+                raise RuntimeError(f"Ambiguous {program}: response could not be interpreted as a rejection")
+            raise DefiniteMigrationFailureError(f"{program} rejected: {rejection}")
         if response.data.get("status") != "success" and response.data.get("success") is not True:
             raise RuntimeError(f"{program} lacked an explicit synchronous success response")
 
@@ -498,8 +528,10 @@ class VirtualminMigrationService:
         # Final write-barrier check: an external writer (drift enforcement, an
         # operator) re-enabling the quiesced source after backup would create a
         # split-brain retained copy — park for review instead of completing.
-        if self._domain(migration.source_server, migration.account.domain)["enabled"] is True:
-            raise ValueError("Source domain was re-enabled by an external writer during migration")
+        # Require an AFFIRMATIVE disabled state: an unknown Status (None) is
+        # not proof the source stayed quiesced.
+        if self._domain(migration.source_server, migration.account.domain)["enabled"] is not False:
+            raise ValueError("Source domain is no longer verifiably quiesced (re-enabled by an external writer?)")
         with transaction.atomic():
             self._move(migration, token, "repointing")
             account = VirtualminAccount.objects.select_for_update().get(pk=migration.account_id)

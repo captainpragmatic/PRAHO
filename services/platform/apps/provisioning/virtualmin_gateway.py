@@ -542,12 +542,6 @@ class VirtualminQuotaExceededError(VirtualminAPIError):
     """Server quota exceeded - try different server"""
 
 
-# Error strings the parser fabricates when it cannot understand a response.
-# These are NOT rejection evidence from Virtualmin itself — mutating callers
-# must treat them as ambiguous outcomes, never as definite failures.
-PARSER_AMBIGUOUS_ERRORS = frozenset({"Empty response", "Invalid JSON structure"})
-
-
 class VirtualminResponseParser:
     """
     Handles Virtualmin's varied response formats: JSON/XML/text

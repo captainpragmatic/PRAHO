@@ -9,6 +9,8 @@
       <p>{{ migration.error_detail }}</p>
       <form method="post" action="{% url 'provisioning:virtualmin_migration_resolve' account.pk %}" class="space-y-2">
         {% csrf_token %}
+        <input type="hidden" name="migration_id" value="{{ migration.pk }}">
+
         <input type="text" name="note" maxlength="200" placeholder="{% trans 'What was repaired manually?' %}" class="w-full rounded border border-slate-600 bg-slate-900 p-2 text-slate-100">
         <button type="submit" class="rounded bg-amber-600 px-3 py-2 text-white" onclick="return confirm('{% trans 'Confirm the remote state was repaired manually. This releases the migration lock.' %}')">{% trans "Mark resolved" %}</button>
       </form>

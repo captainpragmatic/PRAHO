@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 from datetime import timedelta
 from unittest.mock import patch
+from uuid import uuid4
 
 from django.urls import reverse
 from django.utils import timezone
@@ -39,14 +41,72 @@ class MigrationBoundaryTests(MigrationTestBase):
         )
 
     def test_ambiguous_restore_parks_review_without_deletion(self) -> None:
-        """An empty 200 body proves nothing; it must never authorize compensation."""
-        self.effects[("target", "restore-domain")] = self._ambiguous_response("restore-domain", "target")
-        migration = self._start()
-        self._run(migration)
-        self.assertEqual(migration.status, "needs_review")
-        self.assertNotIn("delete-domain", self._programs("target"))
-        # The quiesced source must not have been touched by compensation either.
-        self.assertNotIn("enable-domain", self._programs("source"))
+        """Bodies without explicit JSON rejection evidence never authorize compensation."""
+        ambiguous_bodies = (
+            "",
+            "nonsense output",
+            '{"status":',
+            "<html>upstream error</html>",
+        )
+        for raw in ambiguous_bodies:
+            with self.subTest(raw=raw or "<blank>"):
+                self.events.clear()
+                VirtualminMigration.objects.all().delete()
+                self.effects[("target", "restore-domain")] = Ok(
+                    VirtualminResponse(
+                        success=False,
+                        data={"error": "parser guesswork"},
+                        raw_response=raw,
+                        http_status=200,
+                        execution_time=0.1,
+                        program="restore-domain",
+                        server_hostname=self.target.hostname,
+                    )
+                )
+                migration = self._start()
+                self._run(migration)
+                self.assertEqual(migration.status, "needs_review")
+                self.assertNotIn("delete-domain", self._programs("target"))
+                # The quiesced source must not have been touched by compensation either.
+                self.assertNotIn("enable-domain", self._programs("source"))
+                # Reset remote state for the next round.
+                self.original_calls["source"]("enable-domain", {"domain": self.account.domain})
+                self.target_gateway._domains.pop(self.account.domain, None)
+
+    def test_explicit_json_rejection_still_rolls_back(self) -> None:
+        """A genuine Virtualmin JSON rejection keeps the definitive rollback path."""
+        for error_value in ("disk full", {"message": "rejected"}):
+            with self.subTest(error=str(error_value)):
+                self.events.clear()
+                VirtualminMigration.objects.all().delete()
+                raw = json.dumps({"status": "error", "error": error_value})
+                rejection = Ok(
+                    VirtualminResponse(
+                        success=False,
+                        data={"error": error_value},
+                        raw_response=raw,
+                        http_status=200,
+                        execution_time=0.1,
+                        program="restore-domain",
+                        server_hostname=self.target.hostname,
+                    )
+                )
+
+                def rejecting_restore(response: Ok[VirtualminResponse] = rejection) -> Ok[VirtualminResponse]:
+                    # A definite restore rejection realistically leaves a
+                    # partial target domain — that is what compensation deletes.
+                    self.target_gateway.seed_domain(
+                        self.account.domain, username=self.account.virtualmin_username, enabled=False
+                    )
+                    return response
+
+                self.effects[("target", "restore-domain")] = rejecting_restore
+                migration = self._start()
+                self._run(migration)
+                self.assertEqual(migration.status, "rolled_back")
+                self.assertIn("delete-domain", self._programs("target"))
+                self.assertIn("enable-domain", self._programs("source"))
+                self.target_gateway._domains.pop(self.account.domain, None)
 
     def test_external_reenable_before_repoint_parks_review(self) -> None:
         """A writer re-enabling the quiesced source must block completion (split-brain)."""
@@ -97,6 +157,32 @@ class MigrationBoundaryTests(MigrationTestBase):
         counts = virtualmin_tasks.reclaim_stalled_virtualmin_operations()
         self.assertEqual(counts["migrations_requeued"], 0)
         self.enqueue.assert_not_called()
+
+    def test_auto_health_drain_dead_source_converges_to_review(self) -> None:
+        """A truly dead source still pauses honestly through its first failed attempt."""
+        # fsm-bypass: the triggering health failure is live and the node is gone.
+        VirtualminServer.objects.filter(pk=self.server.pk).update(
+            health_check_error="probe timeout", is_draining=True
+        )
+        drain = NodeDrain.objects.create(server=self.server, reason="auto_health", accounts_total=1)
+        self.effects[("source", "list-domains")] = self._error("source", "list-domains")
+        result = NodeDrainService.run(drain.pk)
+        self.assertTrue(result.is_ok(), result)
+        drain.refresh_from_db()
+        self.assertEqual(drain.status, "paused_needs_review")
+
+    def test_janitor_closes_interrupted_running_drain_without_adopting_work(self) -> None:
+        """Reclamation must close a stale running claim, never execute drain work inline."""
+        # fsm-bypass: fabricate a worker that died hours into a running drain.
+        drain = NodeDrain.objects.create(server=self.server, status="running")
+        past = timezone.now() - timedelta(hours=9)
+        NodeDrain.objects.filter(pk=drain.pk).update(updated_at=past, worker_started_at=past)
+        with patch.object(NodeDrainService, "run") as forbidden:
+            counts = virtualmin_tasks.reclaim_stalled_virtualmin_operations()
+        forbidden.assert_not_called()
+        self.assertEqual(counts["drains_reviewed"], 1)
+        drain.refresh_from_db()
+        self.assertEqual(drain.status, "paused_needs_review")
 
     def test_janitor_redispatches_stale_pending_drain(self) -> None:
         """A drain whose enqueue died between commit and dispatch is re-dispatched."""
@@ -220,7 +306,17 @@ class MigrationBoundaryTests(MigrationTestBase):
         VirtualminMigration.objects.filter(pk=migration.pk).update(status="needs_review")
         self.client.force_login(self.staff)
         url = reverse("provisioning:virtualmin_migration_resolve", args=[self.account.pk])
-        response = self.client.post(url, {"note": "target removed manually"})
+
+        # A stale or unbound form must not resolve whatever is under review now.
+        response = self.client.post(url, {"note": "no id"})
+        self.assertEqual(response.status_code, 302)
+        migration.refresh_from_db()
+        self.assertEqual(migration.status, "needs_review")
+        response = self.client.post(url, {"note": "wrong id", "migration_id": str(uuid4())})
+        migration.refresh_from_db()
+        self.assertEqual(migration.status, "needs_review")
+
+        response = self.client.post(url, {"note": "target removed manually", "migration_id": str(migration.pk)})
         self.assertEqual(response.status_code, 302)
         migration.refresh_from_db()
         self.assertEqual(migration.status, "failed")

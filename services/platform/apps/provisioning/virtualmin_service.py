@@ -929,7 +929,7 @@ class VirtualminProvisioningService:
             logger.exception(f"Error unsuspending account {account.domain}: {e}")
             return Err(str(e))
 
-    def delete_account(  # noqa: PLR0911, PLR0912, PLR0915  # Complexity: multi-step business logic
+    def delete_account(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-step business logic
         self, account: VirtualminAccount
     ) -> Result[bool, str]:  # Complexity: Virtualmin workflow  # Complexity: multi-step business logic
         """
@@ -1000,6 +1000,7 @@ class VirtualminProvisioningService:
             )
             job.save()
             job.mark_started()
+            stats_decremented = 0
 
             # Make API call
             result = gateway.call("delete-domain", {"domain": account.domain}, correlation_id=job.correlation_id)
@@ -1009,11 +1010,12 @@ class VirtualminProvisioningService:
 
                 if response.success:
                     try:
-                        # Update server stats (relative, lost-update safe)
-                        VirtualminServer.objects.filter(pk=account.server_id).update(
-                            current_domains=Greatest(models.F("current_domains") - 1, 0),
-                            updated_at=timezone.now(),
-                        )
+                        # Update server stats (relative, lost-update safe; the
+                        # rowcount records whether a decrement actually applied
+                        # so rollback never invents usage)
+                        stats_decremented = VirtualminServer.objects.filter(
+                            pk=account.server_id, current_domains__gt=0
+                        ).update(current_domains=models.F("current_domains") - 1, updated_at=timezone.now())
                         account.server.refresh_from_db(fields=["current_domains"])
 
                         # Mark account as terminated (don't delete for audit trail)
@@ -1058,13 +1060,15 @@ class VirtualminProvisioningService:
                         )
                         _clear_idempotency_key(idempotency_key, operation="delete", domain=account.domain)
 
-                        # Try to at least revert server stats (relative +1 undoes
-                        # this operation's own decrement without clobbering others)
+                        # Try to at least revert server stats — but only if this
+                        # operation's decrement actually applied, or the +1
+                        # would invent capacity usage out of nothing
                         try:
-                            VirtualminServer.objects.filter(pk=account.server_id).update(
-                                current_domains=models.F("current_domains") + 1, updated_at=timezone.now()
-                            )
-                            account.server.refresh_from_db(fields=["current_domains"])
+                            if stats_decremented:
+                                VirtualminServer.objects.filter(pk=account.server_id).update(
+                                    current_domains=models.F("current_domains") + 1, updated_at=timezone.now()
+                                )
+                                account.server.refresh_from_db(fields=["current_domains"])
                             logger.info(f"✅ [VirtualminService] Reverted server domain count for {account.domain}")
                         except Exception as revert_error:
                             logger.error(f"🔥 [VirtualminService] Failed to revert server stats: {revert_error}")
@@ -1605,6 +1609,15 @@ class VirtualminServerManagementService:
             Result with statistics or error message
         """
         try:
+            from .virtualmin_drain_service import server_has_active_migration  # noqa: PLC0415  # Circular
+
+            if server_has_active_migration(server):
+                # A migration in flight can complete between our remote read and
+                # this absolute write — the stale snapshot would erase the
+                # completion's capacity accounting. Skip; next sweep reconciles.
+                logger.info("✅ [ServerManagement] Stats skipped (active migration): %s", server.hostname)
+                return Ok({"skipped": "active_migration"})
+
             provisioning_service = VirtualminProvisioningService(server)
             gateway = provisioning_service._get_gateway(server)
 

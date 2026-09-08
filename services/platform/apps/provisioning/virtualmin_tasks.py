@@ -900,11 +900,14 @@ def reclaim_stalled_virtualmin_operations() -> dict[str, int]:
 
     stale = timezone.now() - timedelta(minutes=_RECLAIM_GRACE_MINUTES)
     counts = {"migrations_requeued": 0, "drains_requeued": 0, "drains_reviewed": 0}
-    stalled_migrations = (
+    stalled_migrations = list(
         # needs_review is non-terminal but policy "stop": requeueing it would churn.
+        # Oldest-first so newer stalls never starve older rows; the updated_at
+        # bump after each dispatch is the per-row retry backoff.
         VirtualminMigration.objects.exclude(status__in=(*_TERMINAL_STATUSES, "needs_review"))
         .filter(updated_at__lt=stale)
         .filter(models.Q(worker_lease_expires_at__isnull=True) | models.Q(worker_lease_expires_at__lt=timezone.now()))
+        .order_by("updated_at")
         .values_list("pk", flat=True)[:_RECLAIM_BATCH]
     )
     for migration_id in stalled_migrations:
@@ -914,18 +917,27 @@ def reclaim_stalled_virtualmin_operations() -> dict[str, int]:
             logger.warning("⚠️ [VirtualminTask] Requeued stalled migration %s", migration_id)
         except Exception:
             logger.exception("🔥 [VirtualminTask] Reclaim enqueue failed: migration=%s", migration_id)
-    for drain in NodeDrain.objects.filter(status__in=("pending", "running"), updated_at__lt=stale)[:_RECLAIM_BATCH]:
+        finally:
+            VirtualminMigration.objects.filter(pk=migration_id).update(updated_at=timezone.now())
+    stalled_drains = list(
+        NodeDrain.objects.filter(status__in=("pending", "running"), updated_at__lt=stale).order_by("updated_at")[
+            :_RECLAIM_BATCH
+        ]
+    )
+    for drain in stalled_drains:
         try:
             if drain.status == "pending":
                 NodeDrainService._enqueue(drain.pk, drain.task_token)
                 counts["drains_requeued"] += 1
-            else:
-                # A genuinely interrupted worker is closed to paused_needs_review
-                # by run()'s stale-claim branch; a fresher one returns untouched.
-                NodeDrainService.run(drain.pk)
+            elif NodeDrainService.close_interrupted(drain.pk):
+                # Never run() here: the worker may have checkpointed the drain
+                # back to pending with a fresh token between selection and now,
+                # and run() would execute the whole drain inside this sweep.
                 counts["drains_reviewed"] += 1
         except Exception:
             logger.exception("🔥 [VirtualminTask] Reclaim failed: drain=%s", drain.pk)
+        finally:
+            NodeDrain.objects.filter(pk=drain.pk, status__in=("pending", "running")).update(updated_at=timezone.now())
     return counts
 
 

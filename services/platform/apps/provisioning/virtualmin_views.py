@@ -8,6 +8,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Any, TypedDict, cast
+from uuid import UUID
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, user_passes_test
@@ -530,9 +531,15 @@ def virtualmin_migration_resolve(request: HttpRequest, account_id: str) -> HttpR
     from .virtualmin_migration_service import resolve_migration  # noqa: PLC0415
 
     account = get_object_or_404(VirtualminAccount, pk=account_id)
-    migration = account.migrations.filter(status="needs_review").first()
+    # Bind to the migration the operator actually saw — a stale form must not
+    # resolve a different migration that reached needs_review afterwards.
+    try:
+        migration_id = UUID(str(request.POST.get("migration_id", "")))
+    except ValueError:
+        migration_id = None
+    migration = account.migrations.filter(pk=migration_id, status="needs_review").first() if migration_id else None
     if migration is None:
-        messages.error(request, _("No migration awaiting review for this account."))
+        messages.error(request, _("That migration is no longer awaiting review; re-check the current status."))
     else:
         result = resolve_migration(migration, resolved_by=cast(User, request.user), note=request.POST.get("note", ""))
         if result.is_ok():
@@ -1862,6 +1869,12 @@ def virtualmin_accounts_sync(  # noqa: C901, PLR0912, PLR0915  # Complexity: mul
                         continue
                     if account.server_id != server.pk and account.server.status == "active":
                         logger.info("✅ [AccountSync] Preserving active owner: account=%s", account.pk)
+                        continue
+                    if account.domain not in account_data["domains"]:
+                        # Lenient listing parse may have dropped a malformed row —
+                        # never replace authoritative domains with a partial subset
+                        # that lost the account's primary domain.
+                        logger.warning("⚠️ [AccountSync] Primary domain missing from listing: account=%s", account.pk)
                         continue
                     # Update existing account
                     account.domain = account_data["primary_domain"]
