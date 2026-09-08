@@ -177,7 +177,11 @@ class NodeDrainService:
             cls._close(drain, "completed")
             return None
         drain.server.refresh_from_db()
-        if not drain.server.is_healthy:
+        if drain.reason != "auto_health" and not drain.server.is_healthy:
+            # An auto_health drain exists BECAUSE the source is flagged
+            # unhealthy — gating it on is_healthy would pause before the first
+            # account. Let the migration's own remote calls decide: a truly
+            # dead source fails admission and pauses the drain honestly.
             cls._close(drain, "paused_needs_review", "Source is unhealthy or unreachable")
             return None
         if deadline - monotonic() < migration_task_timeout() + 60:

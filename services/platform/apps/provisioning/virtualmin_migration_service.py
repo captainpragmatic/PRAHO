@@ -235,6 +235,10 @@ class VirtualminMigrationService:
         """Target-capacity and operator-configuration admission checks."""
         if not target.can_host_domain():
             raise ValueError("Target is unhealthy or full")
+        # Tags are hard filters everywhere — an explicit target must not
+        # bypass the placement tag policy that placement/eligible_targets apply.
+        if not order_placement_candidates([target]):
+            raise ValueError("Target server violates the placement tag policy")
         if target.current_domains + VirtualminMigration.active_reservations(target) >= target.max_domains:
             raise ValueError("Target capacity is reserved or full")
         if not self.spool.is_absolute():

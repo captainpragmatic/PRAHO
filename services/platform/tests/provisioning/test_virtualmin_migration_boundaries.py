@@ -9,16 +9,18 @@ from django.urls import reverse
 from django.utils import timezone
 
 from apps.common.types import Ok
+from apps.infrastructure.models import NodeDeployment
 from apps.provisioning import virtualmin_tasks
 from apps.provisioning.virtualmin_drain_service import NodeDrainService
+from apps.provisioning.virtualmin_forms import VirtualminMigrationForm
 from apps.provisioning.virtualmin_gateway import VirtualminResponse
 from apps.provisioning.virtualmin_migration_models import (
     NodeDrain,
     VirtualminMigration,
     account_has_active_migration,
 )
-from apps.provisioning.virtualmin_migration_service import resolve_migration
-from apps.provisioning.virtualmin_models import VirtualminServer
+from apps.provisioning.virtualmin_migration_service import VirtualminMigrationService, resolve_migration
+from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminServer
 from tests.provisioning.test_virtualmin_migration_service import MigrationTestBase
 
 
@@ -135,6 +137,74 @@ class MigrationBoundaryTests(MigrationTestBase):
         self.assertTrue(cancelled.is_ok(), cancelled)
         self.server.refresh_from_db()
         self.assertFalse(self.server.is_draining)
+
+    def test_auto_health_drain_proceeds_past_its_own_trigger(self) -> None:
+        """An auto_health drain exists because the source is unhealthy; it must not pause on that."""
+        # fsm-bypass: the health failure that triggered the drain is still live.
+        VirtualminServer.objects.filter(pk=self.server.pk).update(
+            health_check_error="probe timeout", is_draining=True
+        )
+
+        def fake_migrate(drain_row: NodeDrain, account: VirtualminAccount) -> str:
+            VirtualminAccount.objects.filter(pk=account.pk).update(server=self.target)
+            return ""
+
+        for reason, expect_attempt in (("manual", False), ("auto_health", True)):
+            with self.subTest(reason=reason):
+                drain = NodeDrain.objects.create(server=self.server, reason=reason, accounts_total=1)
+                with patch.object(NodeDrainService, "_migrate", side_effect=fake_migrate) as attempt:
+                    result = NodeDrainService.run(drain.pk)
+                drain.refresh_from_db()
+                status, attempts = drain.status, attempt.call_count
+                # fsm-bypass: detach this drain so the next subTest can admit one.
+                NodeDrain.objects.filter(pk=drain.pk).update(status="cancelled")
+                self.assertTrue(result.is_ok(), result)
+                if expect_attempt:
+                    self.assertGreater(attempts, 0)
+                    self.assertEqual(status, "completed")
+                else:
+                    self.assertEqual(attempts, 0)
+                    self.assertEqual(status, "paused_needs_review")
+
+    def test_explicit_target_respects_placement_tag_policy(self) -> None:
+        """Passing a target_server directly must not bypass the tag hard filters."""
+        self.settings_values["provisioning.placement_excluded_tags"] = ["decommissioning"]
+        VirtualminServer.objects.filter(pk=self.target.pk).update(tags=["decommissioning"])
+        self.target.refresh_from_db()
+        result = VirtualminMigrationService().start_migration(
+            self.account, self.target, initiated_by=self.staff
+        )
+        self.assertTrue(result.is_err(), result)
+        self.assertIn("placement tag policy", result.unwrap_err())
+        self.assertFalse(VirtualminMigration.objects.exclude(status="failed").exists())
+
+    def test_migration_form_preserves_policy_order(self) -> None:
+        """The dropdown must present targets in placement order, not database order."""
+        heavy = VirtualminServer.objects.create(
+            name="heavyweight",
+            hostname="heavyweight.example.com",
+            api_username="praho-acl",
+            last_health_check=timezone.now(),
+            current_domains=5,
+            weight=200,
+        )
+        heavy.set_api_password("heavy-test-password")
+        heavy.save()
+        template = self.target.node_deployment
+        NodeDeployment.objects.create(
+            provider=template.provider,
+            node_size=template.node_size,
+            region=template.region,
+            panel_type=template.panel_type,
+            hostname="prd-sha-het-de-fsn1-003",
+            node_number=3,
+            ipv4_address="203.0.113.3",
+            virtualmin_server=heavy,
+        )
+        form = VirtualminMigrationForm(account=self.account)
+        ordered = list(form.fields["target_server"].queryset)
+        # Strict weight priority: the heavier server leads despite higher load.
+        self.assertEqual([server.pk for server in ordered], [heavy.pk, self.target.pk])
 
     def test_resolve_rejects_non_review_states_and_view_flow(self) -> None:
         """Only needs_review resolves; the staff view drives the same contract."""
