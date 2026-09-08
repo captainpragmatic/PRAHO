@@ -176,42 +176,31 @@ def test_tax_profile_save(monitored_customer_page: Page) -> None:
 
     expect(cui_field).to_be_visible()
     original_cui = cui_field.input_value()
-    test_cui = "RO99999999"
+    # A checksum-valid Romanian CUI (check digit 7); the endpoint rejects invalid
+    # check digits, so the save must use a real one for a genuine success assertion.
+    test_cui = "RO14399847"
 
-    # fill() replaces existing content without needing triple_click
-    cui_field.fill(test_cui)
-
-    # Scope submit to the tax profile form to avoid the nav Logout button
-    save_btn = page.locator('button[type="submit"]').filter(
-        has_text=re.compile(r"Save Tax Profile|Salvează", re.IGNORECASE)
-    ).first
-    save_btn.click()
-    page.wait_for_load_state("networkidle")
-
-    # After save we should stay on /company/tax/ (redirect on success, or same page on error)
-    expect(page).to_have_url(re.compile(r"/company/tax/"))
-
-    # Check if save succeeded or the API returned an error
-    page_content = page.content()
-    if test_cui in page_content:
-        print("  ✅ Tax profile CUI updated successfully")
-    else:
-        # API may have returned a 500 — check for error message on page
-        error_indicators = ["Could not update", "error", "Error", "Nu s-a putut"]
-        has_error = any(indicator in page_content for indicator in error_indicators)
-        if has_error:
-            print("  [i] Tax profile save returned an API error — known backend limitation")
-        else:
-            assert test_cui in page_content, f"Expected '{test_cui}' on tax profile after save"
-
-    # --- Restore original CUI ---
-    restore_field = page.locator('input[name="cui"]')
-    if restore_field.count() > 0:
-        restore_field.fill(original_cui)
+    def _save_cui(value: str) -> None:
+        field = page.locator('input[name="cui"]')
+        field.fill(value)
+        # Scope submit to the tax profile form to avoid the nav Logout button.
         page.locator('button[type="submit"]').filter(
             has_text=re.compile(r"Save Tax Profile|Salvează", re.IGNORECASE)
         ).first.click()
         page.wait_for_load_state("networkidle")
+
+    try:
+        _save_cui(test_cui)
+        expect(page).to_have_url(re.compile(r"/company/tax/"))
+        # Re-fetch the page to prove the value persisted (not merely echoed).
+        page.goto(f"{BASE_URL}/company/tax/")
+        page.wait_for_load_state("networkidle")
+        expect(page.locator('input[name="cui"]')).to_have_value(test_cui)
+        print("  ✅ Tax profile CUI updated and persisted")
+    finally:
+        # Always restore the original value, even if an assertion above fails.
+        if page.locator('input[name="cui"]').count() > 0:
+            _save_cui(original_cui)
 
 
 # ===============================================================================
@@ -271,25 +260,35 @@ def test_profile_language_change(monitored_customer_page: Page) -> None:
 
     expect(lang_select).to_be_visible()
 
-    # Switch to Romanian
-    lang_select.select_option("ro")
-
-    save_btn = page.locator('button[type="submit"]:visible').first
-    save_btn.click()
-    page.wait_for_load_state("networkidle")
-
-    # After saving, at least one Romanian UI string should appear
-    page_content = page.content()
-    romanian_indicators = ["Salvează", "Profil", "Companie", "Echipă", "Adrese", "Setări"]
-    found_romanian = any(word in page_content for word in romanian_indicators)
-    assert found_romanian, "Expected Romanian UI strings after switching language to 'ro'"
-
-    # --- Restore English ---
-    lang_select_after = page.locator('select[name="preferred_language"], select#id_preferred_language')
-    if lang_select_after.count() > 0:
-        lang_select_after.select_option("en")
-        page.locator('button[type="submit"]:visible').first.click()
+    def _save_language(value: str) -> None:
+        select = page.locator('select[name="preferred_language"], select#id_preferred_language').first
+        select.select_option(value)
+        # Scope the submit to the profile form: the nav Logout button is also a
+        # submit and precedes the form, so `button[type=submit]:visible.first`
+        # would log the user out instead of saving.
+        form = page.locator('form:has(select[name="preferred_language"])').first
+        form.locator('button[type="submit"]').first.click()
         page.wait_for_load_state("networkidle")
+
+    try:
+        # Switch to Romanian
+        _save_language("ro")
+
+        # The wrong-button bug logged the user out; assert we're still authenticated.
+        assert "/login" not in page.url, f"Language save logged the user out — got {page.url}"
+
+        # Reload and prove the preference persisted (the select reflects it) and the
+        # active language is Romanian — assert the <html lang> attribute, which is
+        # definitive and locale-string-independent.
+        page.goto(f"{BASE_URL}/profile/")
+        page.wait_for_load_state("networkidle")
+        expect(page.locator('select[name="preferred_language"], select#id_preferred_language').first).to_have_value("ro")
+        expect(page.locator("html")).to_have_attribute("lang", "ro")
+        print("  ✅ Language switched to Romanian and persisted")
+    finally:
+        # Always restore English.
+        if page.locator('select[name="preferred_language"], select#id_preferred_language').count() > 0:
+            _save_language("en")
 
 
 # ===============================================================================
