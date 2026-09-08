@@ -289,6 +289,8 @@ class Command(BaseCommand):
                 "🚫 Sample data generation only works in DEBUG mode. This prevents accidental production usage."
             )
 
+        self._seed_deployment_dns_zone()
+
         # Suppress noisy signal/audit/django-q INFO logging during fixture generation.
         # Errors and warnings still surface. The audit trail is stored in DB regardless.
         noisy_loggers = [logging.getLogger(name) for name in ("apps", "django-q")]
@@ -301,6 +303,23 @@ class Command(BaseCommand):
         finally:
             for lgr, level in zip(noisy_loggers, prev_levels, strict=True):
                 lgr.setLevel(level)
+
+    def _seed_deployment_dns_zone(self) -> None:
+        from apps.settings.services import SettingsService  # noqa: PLC0415
+
+        # Intentionally cleared dev values are reseeded on the next sample-data run.
+        if not str(SettingsService.get_setting("node_deployment.dns_default_zone", "") or "").strip():
+            result = SettingsService.update_setting(
+                "node_deployment.dns_default_zone", "dev.praho.local", reason="dev sample data seed"
+            )
+            if result.is_err():
+                self.stdout.write(
+                    self.style.WARNING(f"⚠️ [SampleData] Deployment DNS zone seed failed: {result.unwrap_err()}")
+                )
+                return
+            self.stdout.write(self.style.SUCCESS("✅ [SampleData] Deployment DNS zone seeded: dev.praho.local"))
+        else:
+            self.stdout.write("✅ [SampleData] Configured deployment DNS zone preserved")
 
     def _generate(self, options: dict[str, Any]) -> None:
         fake = Faker("ro_RO")  # Romanian locale

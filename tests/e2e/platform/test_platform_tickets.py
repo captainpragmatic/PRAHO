@@ -20,6 +20,7 @@ from tests.e2e.helpers import (
     navigate_to_platform_page,
     run_responsive_breakpoints_test,
 )
+from tests.e2e.helpers.filter_tabs import ACTIVE_TAB_INPUT, visible_tablist
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -268,8 +269,8 @@ def test_ticket_list_and_navigation(monitored_staff_page: Page) -> None:
     assert stats_area.is_visible(timeout=2000), "Stats section should be visible"
 
     # Status filter
-    status_filter = page.locator("select[name='status']")
-    expect(status_filter).to_be_visible()
+    expect(visible_tablist(page)).to_be_visible()
+    expect(page.locator(f"{ACTIVE_TAB_INPUT}[value]")).to_be_attached()
 
     # HTMX search: type in search input, verify tickets container updates
     search_input = page.locator("#search")
