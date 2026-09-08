@@ -181,11 +181,17 @@ class CustomerRegistrationSerializer(serializers.Serializer):
                         },
                     }
                 else:
-                    # Result is Err, extract error message
-                    error_msg = result.value if isinstance(result, Err) else "Registration failed"
+                    # Result is Err — extract the message via unwrap_err(); Err has no .value,
+                    # so the previous `result.value` raised AttributeError and every registration
+                    # failure surfaced as the opaque "temporarily unavailable" catch-all below.
+                    error_msg = str(result.unwrap_err()) if isinstance(result, Err) else "Registration failed"
                     logger.error(f"🔥 [API Registration] Service error: {error_msg}")
                     raise serializers.ValidationError({"non_field_errors": [error_msg]})
 
+        except serializers.ValidationError:
+            # The Err branch above raises a ValidationError carrying the real reason;
+            # let it propagate instead of masking it as "temporarily unavailable".
+            raise
         except Exception as e:
             logger.error(f"🔥 [API Registration] Unexpected error: {e}")
             raise serializers.ValidationError(
