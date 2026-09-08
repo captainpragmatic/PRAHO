@@ -90,7 +90,9 @@ def _serialize_values_for_audit(values: dict[str, Any]) -> dict[str, Any]:
 # ===============================================================================
 
 # Financial thresholds in cents (Romanian business context)
-LARGE_REFUND_THRESHOLD_CENTS = 50000  # 500 EUR - requires finance team notification
+LARGE_REFUND_THRESHOLD_CENTS = (
+    50000  # 500 EUR default — runtime value via config.get_large_refund_threshold_cents (#401)
+)
 _CREDIT_SCORE_ADJUSTMENTS_META_KEY = "credit_score_adjustments"
 
 # ===============================================================================
@@ -1170,7 +1172,9 @@ def _handle_invoice_refund_completion(invoice: Invoice) -> None:
         # 5. Create finance team notification for significant refunds
         # M5 fix: Wrap in on_commit — email notification is an external side effect.
         # If the enclosing transaction rolls back, finance must NOT receive a ghost notification.
-        if invoice.total_cents >= LARGE_REFUND_THRESHOLD_CENTS:
+        from apps.billing.config import get_large_refund_threshold_cents  # runtime-configurable (#401)
+
+        if invoice.total_cents >= get_large_refund_threshold_cents():
             transaction.on_commit(lambda inv=invoice: _notify_finance_team_large_refund(inv))
 
         # 6. Compliance and audit logging
