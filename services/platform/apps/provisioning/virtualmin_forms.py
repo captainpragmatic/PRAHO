@@ -155,7 +155,6 @@ class VirtualminBackupForm(forms.Form):
 
     BACKUP_TYPE_CHOICES: ClassVar[list[tuple[str, Any]]] = [
         ("full", _("Full Backup - Complete domain backup with all data")),
-        ("incremental", _("Incremental Backup - Changes since last full backup")),
         ("config_only", _("Configuration Only - Settings and structure only")),
     ]
 
@@ -250,6 +249,16 @@ class VirtualminRestoreForm(forms.Form):
         widget=PRAHOCheckboxWidget(),
         label=_("Restore SSL Certificates"),
         help_text=_("Restore SSL certificates and private keys"),
+    )
+
+    force_restore = forms.BooleanField(
+        required=False,
+        widget=PRAHOCheckboxWidget(),
+        label=_("Force restore over the live domain"),
+        help_text=_(
+            "Required when the domain currently exists: the restore overwrites its data. "
+            "A safety backup of the current state is taken first."
+        ),
     )
 
     confirm_restore = forms.BooleanField(

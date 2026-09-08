@@ -1412,6 +1412,21 @@ CATALOG: tuple[SettingDef, ...] = (
         validation={"min": 0},
     ),
     SettingDef(
+        key="infrastructure.require_trusted_panel_certificate",
+        data_type="boolean",
+        default=False,
+        group="advanced",
+        section=_("Infrastructure"),
+        label=_("Require a CA-trusted panel certificate for activation"),
+        help_text=_(
+            "When enabled, verify_and_activate refuses to activate a server whose panel "
+            "certificate is not affirmatively CA-trusted (indeterminate probes also refuse). "
+            "Flip only after the Let's Encrypt staging drill."
+        ),
+        input_kind="toggle",
+        advanced=True,
+    ),
+    SettingDef(
         key="infrastructure.drain_enabled",
         data_type="boolean",
         default=False,
@@ -2045,6 +2060,19 @@ CATALOG: tuple[SettingDef, ...] = (
         label=_("Migration backup and restore timeout"),
         help_text=_("Timeout for each synchronous migration backup or restore."),
         unit="seconds",
+        input_kind="number",
+        advanced=True,
+        validation={"min": 1},
+    ),
+    SettingDef(
+        key="provisioning.backup_min_transfer_mib_s",
+        data_type="integer",
+        default=10,
+        group="advanced",
+        section=_("Provisioning"),
+        label=_("Minimum assumed transfer throughput"),
+        help_text=_("Floor throughput (MiB/s) used to derive per-job backup and restore time budgets."),
+        unit="MiB/s",
         input_kind="number",
         advanced=True,
         validation={"min": 1},

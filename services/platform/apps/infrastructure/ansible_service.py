@@ -88,6 +88,9 @@ class AnsibleService:
             "blesta.yml",
             "virtualmin_migrate_fetch.yml",
             "virtualmin_migrate_push.yml",
+            "virtualmin_backup_fetch.yml",
+            "virtualmin_backup_push.yml",
+            "virtualmin_remote_cleanup.yml",
             "blesta_harden.yml",
             "blesta_backup.yml",
         }

@@ -80,13 +80,33 @@ Replacing an existing pin is refused unless you add `--force`, so a mis-pasted U
 4. **Verify** the row is no longer listed by `pin_virtualmin_certificates --dry-run`, and
    that a provisioning action against the node succeeds.
 
-To size the work before deploying:
+To size the work before deploying (JSON report of plain-HTTP rows, stranded
+unpinnable rows, and SSH-pinnable candidates):
 
-```sql
-SELECT count(*) FROM provisioning_virtualmin_servers
-WHERE use_ssl = false
-   OR (ssl_verify = false AND ssl_cert_fingerprint = '');
+```bash
+python manage.py pin_virtualmin_certificates --report
 ```
+
+### Trusted panel-certificate activation gate (#436, drill-gated)
+
+`infrastructure.require_trusted_panel_certificate` (default **off**) makes node
+activation require an affirmatively CA-trusted panel certificate; untrusted
+AND indeterminate probes refuse (fail-closed) and keep the server disabled
+without discarding the deployment. Before flipping it on:
+
+1. On a DISPOSABLE node against **Let's Encrypt staging**, validate the real
+   Virtualmin CLI contract used by `virtualmin.yml` (`--host` vs `--domain` on
+   `generate-letsencrypt-cert`; whether `letsencrypt.cgi` exists at
+   `/usr/share/webmin/webmin/`; whether Virtualmin itself writes the
+   `/etc/webmin/letsencrypt-cert-<host>` marker — the playbook now writes the
+   marker itself only after BOTH issuance and install exit 0).
+2. Deploy a node end-to-end and grep the panel-stage output for
+   `LETSENCRYPT_FAILED` banners; a clean run should serve a CA-trusted
+   certificate for the fqdn on :10000.
+3. Only then remove the two `failed_when: false` suppressions in
+   `virtualmin.yml` and enable the setting. Respect LE rate limits
+   (5 authorization failures/identifier/hour; 50 certs/domain/week) — use the
+   staging CA for all tests.
 
 ---
 

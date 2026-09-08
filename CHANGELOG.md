@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Virtualmin backups and restores actually work** — backup archives are transported off the node into a private spool (checksum-evidenced, remote temp deleted) and published to S3 with finalized manifests; restores download, verify, authorize against the owning account, refuse foreign or unverifiable target ownership regardless of force, take a pre-restore safety backup, and issue a single verified restore — with execution moved out of web requests into budgeted, token-fenced background jobs under a shared account-operation lock, uncertain outcomes parked for operator attention, and the disaster-recovery readiness check validating the real rebuild inputs (#431).
+- A machine-readable `pin_virtualmin_certificates --report` sizing mode for the HTTPS/pin rollout (#337).
+- A drill-gated `infrastructure.require_trusted_panel_certificate` setting: node activation can require an affirmatively CA-trusted panel certificate, with visible `LETSENCRYPT_FAILED` reporting and real idempotency markers in the panel playbook (#436).
+- The drift-snapshot three-phase invariant is enforced (autocommit guard) and provider snapshot failures are classified by side-effect evidence, so ambiguous outcomes surface as reconciliation work instead of being mislabeled as clean failures (#350, ADR-0045).
 - Managed Virtualmin node drains with routing confirmation, coordinated health alerts, guarded stop/start, and replacement-node provenance.
 - Deterministic Virtualmin placement with strict weight priority, required/excluded tag settings, and source-region drain preference with fallback (#361).
 

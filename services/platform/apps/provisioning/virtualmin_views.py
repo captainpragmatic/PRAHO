@@ -551,6 +551,35 @@ def virtualmin_migration_resolve(request: HttpRequest, account_id: str) -> HttpR
 
 @login_required
 @user_passes_test(is_staff_or_superuser)
+@require_http_methods(["POST"])
+@audit_service_call("virtualmin_job_resolve")
+def virtualmin_job_resolve(request: HttpRequest, job_id: str) -> HttpResponse:
+    """Operator terminal resolution of an attention (uncertain) backup/restore job."""
+    job = get_object_or_404(VirtualminProvisioningJob, pk=job_id)
+    note = request.POST.get("note", "").strip() or _("operator confirmed remote state")
+    actor = request.user.email if request.user.is_authenticated else "system"
+    # fsm-bypass: CharField job status; attention -> failed is the only edge.
+    rows = VirtualminProvisioningJob.objects.filter(pk=job.pk, status="attention").update(
+        status="failed",
+        status_message=f"Manually resolved by {actor}: {note}",
+        next_retry_at=None,
+        updated_at=timezone.now(),
+    )
+    if rows:
+        from .virtualmin_signals import audit_job_status_transition  # noqa: PLC0415  # Circular
+
+        job.refresh_from_db()
+        audit_job_status_transition(
+            job, actor_type="user", user=request.user if request.user.is_authenticated else None
+        )
+        messages.success(request, _("Job marked resolved. The account is unlocked."))
+    else:
+        messages.error(request, _("Only a job awaiting attention can be resolved."))
+    return redirect("provisioning:virtualmin_job_status", job_id=job.pk)
+
+
+@login_required
+@user_passes_test(is_staff_or_superuser)
 @audit_service_call("virtualmin_backup_form")
 def virtualmin_account_backup(request: HttpRequest, account_id: str) -> HttpResponse:
     """💾 Create backup for Virtualmin account."""
@@ -634,6 +663,7 @@ def virtualmin_account_restore(request: HttpRequest, account_id: str) -> HttpRes
                 restore_databases=form.cleaned_data["restore_databases"],
                 restore_files=form.cleaned_data["restore_files"],
                 restore_ssl=form.cleaned_data["restore_ssl"],
+                force_restore=form.cleaned_data.get("force_restore", False),
             )
             restore_result = backup_management.create_restore_job(
                 account=account,
@@ -685,7 +715,12 @@ def virtualmin_backup_status(request: HttpRequest, job_id: str) -> HttpResponse:
         return render(
             request,
             "provisioning/virtualmin/partials/job_status.html",
-            {"job": job, "live_status": live_status, "is_complete": job.status in ["completed", "failed"]},
+            {
+                "job": job,
+                "live_status": live_status,
+                "is_complete": job.status in ["completed", "failed", "attention"],
+                "refresh_url": reverse("provisioning:virtualmin_backup_status", args=[job.id]),
+            },
         )
 
     context = {
@@ -694,7 +729,7 @@ def virtualmin_backup_status(request: HttpRequest, job_id: str) -> HttpResponse:
         "live_status": live_status,
         "refresh_url": reverse("provisioning:virtualmin_backup_status", args=[job.id]),
         "account_url": reverse("provisioning:virtualmin_account_detail", args=[job.account.id]) if job.account else "",
-        "is_complete": job.status in ["completed", "failed"],
+        "is_complete": job.status in ["completed", "failed", "attention"],
     }
 
     return render(request, "provisioning/virtualmin/backup_status.html", context)

@@ -201,7 +201,7 @@ def export_data(request: HttpRequest) -> HttpResponse:
 - Recovery time measurement tools
 
 **Evidence of partial implementation:**
-- `virtualmin_backup_service.py` has 6 bare `# TODO` comments (lines 559, 618, 657, 678, 697)
+- `virtualmin_backup_service.py` TODOs were resolved by the #431 transport work
 - `virtualmin_disaster_recovery.py` exists but with placeholder logic
 
 ### 2. Virtualmin Webhook Processors
@@ -369,7 +369,7 @@ See [ADR Index](../ADRs/README.md) for the complete list of 25 architecture deci
 
 ### Technical Debt Status
 - **Healthy:** Legacy wrappers are intentional, documented
-- **Concerning:** 6+ bare `# TODO` in backup service
+- **Resolved:** the backup-service TODOs were closed by #431
 - **Risk:** Multiple Result pattern implementations
 
 ### Recommendations for Future Archaeologists

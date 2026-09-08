@@ -74,6 +74,11 @@ urlpatterns = [
     # Backup and restore operations
     path("backups/", virtualmin_views.virtualmin_backups_list, name="virtualmin_backups"),
     path("jobs/<uuid:job_id>/status/", virtualmin_views.virtualmin_job_status, name="virtualmin_job_status"),
+    path(
+        "jobs/<uuid:job_id>/resolve/",
+        virtualmin_views.virtualmin_job_resolve,
+        name="virtualmin_job_resolve",
+    ),
     path("jobs/<uuid:job_id>/logs/", virtualmin_views.virtualmin_job_logs, name="virtualmin_job_logs"),
     path("bulk-actions/", virtualmin_views.virtualmin_bulk_actions, name="virtualmin_bulk_actions"),
 ]

@@ -199,6 +199,46 @@ def audit_virtualmin_account_deletion(
         logger.error(f"🔥 [ProvisioningAudit] Failed to audit Virtualmin account deletion: {e}")
 
 
+def audit_job_status_transition(
+    job: VirtualminProvisioningJob, *, actor_type: str = "system", user: Any = None
+) -> None:
+    """Emit the job status-change audit event for CAS transitions.
+
+    Token-fenced backup/restore transitions use queryset.update(), which fires
+    no post_save signal — call sites invoke this so ADR-0016 coverage holds and
+    every terminal outcome (incl. takeovers and operator resolutions) is on the
+    immutable trail.
+    """
+    if getattr(settings, "DISABLE_AUDIT_SIGNALS", False):
+        return
+    AuditService.log_event(
+        AuditEventData(
+            event_type=f"virtualmin_provisioning_job_{job.status}",
+            content_object=job,
+            new_values={
+                "status": job.status,
+                "status_message": job.status_message or None,
+                "completed_at": job.completed_at.isoformat() if job.completed_at else None,
+            },
+            description=f"Virtualmin provisioning job {job.status}: {job.operation} for "
+            f"{job.account.domain if job.account else 'unknown'}",
+        ),
+        context=AuditContext(
+            actor_type=actor_type,
+            user=user,
+            metadata={
+                "source_app": "provisioning",
+                "operational_event": True,
+                "provisioning_job": True,
+                "job_status_change": True,
+                "correlation_id": job.correlation_id,
+                "virtualmin_server": str(job.server.hostname) if job.server else None,
+                "requires_monitoring_alert": job.status in ("failed", "attention"),
+            },
+        ),
+    )
+
+
 @receiver(post_save, sender=VirtualminProvisioningJob)
 def audit_virtualmin_provisioning_jobs(
     sender: type[VirtualminProvisioningJob], instance: VirtualminProvisioningJob, created: bool, **kwargs: Any

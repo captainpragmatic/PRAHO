@@ -9,13 +9,110 @@ health — never activating a server PRAHO cannot actually authenticate to.
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, PropertyMock, patch
 
 from django.test import TestCase
 
 from apps.common.types import Err, Ok
 from apps.infrastructure.registration_service import NodeRegistrationService
 from apps.provisioning.virtualmin_models import VirtualminServer
+
+
+class TrustedPanelCertificateGateTests(TestCase):
+    """#436 flag-gated activation trust gate (default off = byte-identical)."""
+
+    def _disabled_server(self) -> VirtualminServer:
+        return VirtualminServer.objects.create(
+            name="Node: prd-cert-tst-001",
+            hostname="prd-cert-tst-001.example.com",
+            api_port=10000,
+            use_ssl=True,
+            ssl_verify=False,
+            ssl_cert_fingerprint="ab" * 32,
+            status="disabled",
+            api_username="praho-api",
+            encrypted_api_password=b"",
+            max_domains=50,
+            max_bandwidth_gb=1000,
+        )
+
+    def test_flag_off_activates_without_probing(self) -> None:
+        server = self._disabled_server()
+        with patch.object(NodeRegistrationService, "_panel_trust_refusal") as probe:
+            result = self._run_simple(server, flag=False)
+        probe.assert_not_called()
+        self.assertTrue(result.is_ok(), result)
+        server.refresh_from_db()
+        self.assertEqual(server.status, "active")
+
+    def _run_simple(self, server: VirtualminServer, flag: bool):
+        with (
+            patch("apps.common.credential_vault.get_credential_vault") as vault,
+            patch("apps.provisioning.virtualmin_gateway.VirtualminGateway") as gateway_cls,
+            patch(
+                "apps.settings.services.SettingsService.get_boolean_setting",
+                side_effect=lambda key, default=False: flag
+                if key == "infrastructure.require_trusted_panel_certificate"
+                else default,
+            ),
+        ):
+            vault.return_value.get_credential.return_value = Ok(("praho-api", "vault-pw", {}))
+            gateway_cls.return_value.test_connection.return_value = Ok({"healthy": True})
+            return NodeRegistrationService().verify_and_activate(server)
+
+    def test_flag_on_trusted_verdict_activates(self) -> None:
+        server = self._disabled_server()
+        with patch.object(NodeRegistrationService, "_panel_trust_refusal", return_value=None):
+            result = self._run_simple(server, flag=True)
+        self.assertTrue(result.is_ok(), result)
+        server.refresh_from_db()
+        self.assertEqual(server.status, "active")
+
+    def test_flag_on_untrusted_verdict_refuses(self) -> None:
+        server = self._disabled_server()
+        with patch.object(
+            NodeRegistrationService,
+            "_panel_trust_refusal",
+            return_value="Panel certificate for x is NOT CA-trusted: self-signed",
+        ):
+            result = self._run_simple(server, flag=True)
+        self.assertTrue(result.is_err())
+        self.assertIn("NOT CA-trusted", result.unwrap_err())
+        server.refresh_from_db()
+        self.assertEqual(server.status, "disabled")
+
+    def test_flag_on_indeterminate_refuses_fail_closed(self) -> None:
+        server = self._disabled_server()
+        with patch.object(
+            NodeRegistrationService,
+            "_panel_trust_refusal",
+            return_value="Panel certificate trust for x could not be evaluated (timeout); refusing under the strict policy",
+        ):
+            result = self._run_simple(server, flag=True)
+        self.assertTrue(result.is_err())
+        self.assertIn("could not be evaluated", result.unwrap_err())
+        server.refresh_from_db()
+        self.assertEqual(server.status, "disabled")
+
+    def test_refusal_verdicts_from_probe_shapes(self) -> None:
+        """_panel_trust_refusal maps probe dicts to verdicts correctly."""
+        service = NodeRegistrationService()
+        server = self._disabled_server()
+        deployment = MagicMock()
+        with (
+            patch.object(
+                type(server), "node_deployment", new_callable=PropertyMock, return_value=deployment, create=True
+            ),
+            patch("apps.infrastructure.validation_service.get_validation_service") as validation,
+        ):
+            if True:
+                probe = validation.return_value._probe_tls_trust
+                probe.return_value = {"trusted": True, "trust_evaluated": True}
+                self.assertIsNone(service._panel_trust_refusal(server))
+                probe.return_value = {"trusted": False, "trust_evaluated": True, "trust_error": "self signed"}
+                self.assertIn("NOT CA-trusted", service._panel_trust_refusal(server) or "")
+                probe.return_value = {"trusted": False, "trust_evaluated": False, "error": "timeout"}
+                self.assertIn("could not be evaluated", service._panel_trust_refusal(server) or "")
 
 
 class VerifyAndActivateTests(TestCase):

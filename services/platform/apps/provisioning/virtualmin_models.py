@@ -562,6 +562,10 @@ class VirtualminProvisioningJob(models.Model):
         ("completed", _("Completed")),
         ("failed", _("Failed")),
         ("cancelled", _("Cancelled")),
+        # Non-terminal: an interrupted/uncertain mutation (e.g. a restore whose
+        # worker died mid-run). Keeps the account-operation exclusion until an
+        # operator resolves it; never auto-recovered.
+        ("attention", _("Needs Attention")),
     )
 
     OPERATION_CHOICES: ClassVar[tuple[tuple[str, Any], ...]] = (
@@ -633,6 +637,11 @@ class VirtualminProvisioningJob(models.Model):
     # Execution tracking
     started_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
+    # Token-fenced execution (backup/restore): the runner that claimed the job
+    # holds the token; terminal writes are conditional on it, so a janitor
+    # takeover (which rotates the token) fences out late-returning runners.
+    execution_token = models.UUIDField(null=True, blank=True, editable=False)
+    execution_deadline = models.DateTimeField(null=True, blank=True)
     execution_time_seconds = models.DecimalField(max_digits=10, decimal_places=3, null=True, blank=True)
 
     # Django-Q2 task tracking
@@ -704,6 +713,9 @@ class VirtualminProvisioningJob(models.Model):
             cls.objects.filter(
                 models.Q(status="pending") | models.Q(status="running"),
             )
+            # Backup/restore run for hours under their own execution_deadline;
+            # the dedicated janitor sweep owns their recovery (two clocks).
+            .exclude(operation__in=("backup_domain", "restore_domain"))
             .filter(
                 models.Q(claimed_at__isnull=False, claimed_at__lt=cutoff)
                 | models.Q(claimed_at__isnull=True, started_at__isnull=False, started_at__lt=cutoff)
@@ -732,6 +744,58 @@ class VirtualminProvisioningJob(models.Model):
     def record_dispatch(cls, job_id: Any, task_id: str) -> int:
         """Persist the queue task id for the dispatched retry."""
         return cls.objects.filter(pk=job_id).update(task_id=task_id, updated_at=timezone.now())
+
+    # ------------------------------------------------------------------
+    # Token-fenced execution protocol (backup/restore jobs)
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def claim_execution(cls, job_id: Any, token: Any, deadline: Any) -> int:
+        """CAS pending→running; duplicate deliveries and reaper races yield one owner."""
+        return cls.objects.filter(pk=job_id, status="pending").update(
+            status="running",
+            started_at=timezone.now(),
+            execution_token=token,
+            execution_deadline=deadline,
+            updated_at=timezone.now(),
+        )
+
+    @classmethod
+    def owns_execution(cls, job_id: Any, token: Any) -> bool:
+        """Stage-boundary ownership check: token unchanged and deadline unexpired."""
+        return cls.objects.filter(pk=job_id, execution_token=token, execution_deadline__gt=timezone.now()).exists()
+
+    @classmethod
+    def finish_execution(
+        cls,
+        job_id: Any,
+        token: Any,
+        status: str,
+        message: str,
+        result: dict[str, Any] | None = None,
+    ) -> int:
+        """Token-fenced terminal write; a rotated token makes this a no-op."""
+        payload = dict(result or {})
+        return cls.objects.filter(pk=job_id, execution_token=token).update(
+            status=status,
+            status_message=message,
+            completed_at=timezone.now(),
+            result=payload,
+            next_retry_at=None,
+            updated_at=timezone.now(),
+        )
+
+    @classmethod
+    def take_over_execution(cls, job_id: Any, status: str, message: str) -> int:
+        """Janitor takeover: rotate the token in the same CAS that writes the status."""
+        return cls.objects.filter(pk=job_id, status="running").update(
+            status=status,
+            status_message=message,
+            execution_token=uuid.uuid4(),
+            completed_at=timezone.now(),
+            next_retry_at=None,
+            updated_at=timezone.now(),
+        )
 
     @property
     def can_retry(self) -> bool:

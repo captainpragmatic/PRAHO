@@ -23,7 +23,7 @@
             {% if is_complete %}
                 {% trans "Back to Account" as bt1 %}{% button bt1 href=account_url variant="primary" %}
             {% else %}
-                {% trans "Refresh" as bt2 %}{% button bt2 href=refresh_url variant="secondary" hx_get=refresh_url hx_swap="innerHTML" hx_target="#job-status-container" %}
+                {% trans "Refresh" as bt2 %}{% button bt2 href=refresh_url variant="secondary" hx_get=refresh_url hx_swap="outerHTML" hx_target="#job-status-container" %}
             {% endif %}
         </div>
     </div>
@@ -31,14 +31,7 @@
     <!-- =============================================================================== -->
     <!-- JOB STATUS CONTAINER (HTMX Target) -->
     <!-- =============================================================================== -->
-    <div id="job-status-container"
-         {% if not is_complete %}
-         hx-get="{{ refresh_url }}"
-         hx-trigger="every 3s"
-         hx-swap="innerHTML"
-         {% endif %}>
-        {% include "provisioning/virtualmin/partials/job_status.html" %}
-    </div>
+    {% include "provisioning/virtualmin/partials/job_status.html" %}
 
     <!-- =============================================================================== -->
     <!-- JOB DETAILS -->

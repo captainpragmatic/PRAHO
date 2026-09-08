@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import re
 import shutil
@@ -20,7 +19,8 @@ from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 
 from .placement import order_placement_candidates
 from .virtualmin_gateway import VirtualminConfig, VirtualminGateway
-from .virtualmin_migration_models import VirtualminMigration, account_has_active_migration
+from .virtualmin_gateway import explicit_rejection as _explicit_rejection
+from .virtualmin_migration_models import VirtualminMigration, account_has_active_operation
 from .virtualmin_models import VirtualminAccount, VirtualminProvisioningJob, VirtualminServer
 
 if TYPE_CHECKING:
@@ -75,29 +75,6 @@ def _scalar(value: object) -> str:
     if isinstance(value, list):
         return " ".join(str(item) for item in value).strip()
     return str(value).strip()
-
-
-def _explicit_rejection(raw: str) -> str | None:
-    """Extract explicit remote rejection evidence, or None when ambiguous.
-
-    Migration commands request json=1, so a genuine Virtualmin rejection is a
-    parseable JSON envelope carrying its own failure markers. Anything else —
-    empty body, truncated JSON, proxy HTML, unrecognized text — is parser
-    guesswork and must be treated as an unknown outcome.
-    """
-    text = (raw or "").strip()
-    if not text.startswith("{"):
-        return None
-    try:
-        data = json.loads(text)
-    except ValueError:
-        return None
-    if not isinstance(data, dict):
-        return None
-    status = str(data.get("status", "")).strip().lower()
-    if status in {"error", "failed", "failure"} or data.get("success") is False or data.get("error"):
-        return str(data.get("error") or data.get("message") or status or "rejected")
-    return None
 
 
 def list_migration_domains(gateway: VirtualminGateway, *, strict: bool = True) -> Result[list[dict[str, Any]], str]:
@@ -244,6 +221,8 @@ class VirtualminMigrationService:
     def _local_preflight(self, account: VirtualminAccount, target: VirtualminServer) -> None:
         if not self.enabled:
             raise ValueError("Virtualmin migration is disabled")
+        if account_has_active_operation(account):
+            raise ValueError("Account already has an active migration or backup/restore operation")
         if account.server_id == target.pk:
             raise ValueError("Source and target must differ")
         if account.status not in {"active", "suspended"}:
@@ -255,8 +234,6 @@ class VirtualminMigrationService:
                 raise ValueError("Both migration servers must be active")
             if not (hasattr(server, "node_deployment") and server.node_deployment is not None):
                 raise ValueError(f"Server {server.name}: manual registration has no managed node_deployment")
-        if account_has_active_migration(account):
-            raise ValueError("Account already has an active migration")
         self._admission_preflight(target)
 
     def _admission_preflight(self, target: VirtualminServer) -> None:
@@ -458,10 +435,23 @@ class VirtualminMigrationService:
 
     def _transfer(self, migration: VirtualminMigration, token: UUID) -> None:
         fetching = migration.status == "fetching"
+        reservation_name = migration.archive_name if fetching else ""
         try:
             self.spool.mkdir(mode=0o700, parents=True, exist_ok=True)
             if self.spool.is_symlink() or self.spool.stat().st_mode & 0o077:
                 raise ValueError("Migration spool must be a private directory")
+            if fetching:
+                from .spool import acquire_spool_reservation, estimated_transfer_bytes  # noqa: PLC0415
+
+                reserved = acquire_spool_reservation(
+                    self.spool,
+                    reservation_name,
+                    estimated_transfer_bytes(migration.account.current_disk_usage_mb or 0),
+                    f"migration:{migration.pk}",
+                    self.transfer_timeout + 300,
+                )
+                if reserved.is_err():
+                    raise ValueError(reserved.unwrap_err())
             variables: dict[str, Any] = {
                 "archive_name": migration.archive_name,
                 "spool_dir": str(self.spool),
@@ -481,6 +471,11 @@ class VirtualminMigrationService:
         except Exception as error:
             self._abort(migration, token, error)
             return
+        finally:
+            if fetching:
+                from .spool import release_spool_reservation  # noqa: PLC0415
+
+                release_spool_reservation(reservation_name)
         fields: dict[str, object] = {"archive_sha256": checksums.pop()} if fetching else {}
         self._move(migration, token, "pushing" if fetching else "restoring", **fields)
 

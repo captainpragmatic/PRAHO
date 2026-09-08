@@ -23,9 +23,7 @@ class Command(BaseCommand):
         # Backup command
         backup_parser = subparsers.add_parser("backup", help="Create domain backup")
         backup_parser.add_argument("domain", help="Domain name to backup")
-        backup_parser.add_argument(
-            "--type", choices=["full", "incremental", "config_only"], default="full", help="Backup type"
-        )
+        backup_parser.add_argument("--type", choices=["full", "config_only"], default="full", help="Backup type")
         backup_parser.add_argument("--no-email", action="store_true", help="Exclude email data")
         backup_parser.add_argument("--no-databases", action="store_true", help="Exclude databases")
         backup_parser.add_argument("--no-files", action="store_true", help="Exclude web files")
@@ -36,6 +34,11 @@ class Command(BaseCommand):
         restore_parser = subparsers.add_parser("restore", help="Restore domain from backup")
         restore_parser.add_argument("domain", help="Domain name to restore")
         restore_parser.add_argument("backup_id", help="Backup ID to restore from")
+        restore_parser.add_argument(
+            "--force-restore",
+            action="store_true",
+            help="Overwrite a live domain (a safety backup is taken first)",
+        )
         restore_parser.add_argument("--no-email", action="store_true", help="Skip email restore")
         restore_parser.add_argument("--no-databases", action="store_true", help="Skip database restore")
         restore_parser.add_argument("--no-files", action="store_true", help="Skip files restore")
@@ -99,10 +102,10 @@ class Command(BaseCommand):
             except VirtualminServer.DoesNotExist as e:
                 raise CommandError(f"Server '{options['server']}' not found") from e
 
-        # Initialize backup service
-        backup_service = VirtualminBackupService(server)
+        # Route through the job layer: same admission, same token-fenced
+        # execution, no jobless mutation path.
+        from apps.provisioning.virtualmin_service import VirtualminBackupManagementService  # noqa: PLC0415
 
-        # Execute backup
         self.stdout.write(f"Starting {options['type']} backup for domain: {domain}")
 
         config = BackupConfig(
@@ -112,15 +115,17 @@ class Command(BaseCommand):
             include_files=not options.get("no_files", False),
             include_ssl=not options.get("no_ssl", False),
         )
-        result = backup_service.backup_domain(account=account, config=config)
+        management = VirtualminBackupManagementService(server)
+        result = management.create_backup_job(account=account, config=config, initiated_by="cli", execute_inline=True)
 
         if result.is_err():
             raise CommandError(f"Backup failed: {result.unwrap_err()}")
 
-        backup_info = result.unwrap()
+        job = result.unwrap()
+        backup_info = job.result or {}
         self.stdout.write(self.style.SUCCESS("Backup completed successfully!"))
-        self.stdout.write(f"Backup ID: {backup_info['backup_id']}")
-        self.stdout.write(f"Created: {backup_info['created_at']}")
+        self.stdout.write(f"Job ID: {job.pk}")
+        self.stdout.write(f"Backup ID: {backup_info.get('backup_id', 'n/a')}")
 
     def _handle_restore(self, options: dict[str, Any]) -> None:
         """Handle restore command."""
@@ -141,29 +146,38 @@ class Command(BaseCommand):
             except VirtualminServer.DoesNotExist as e:
                 raise CommandError(f"Target server '{options['target_server']}' not found") from e
 
-        # Initialize backup service
-        backup_service = VirtualminBackupService(target_server)
+        # Route through the job layer: same admission, same token-fenced
+        # execution, no jobless mutation path.
+        from apps.provisioning.virtualmin_service import VirtualminBackupManagementService  # noqa: PLC0415
 
-        # Execute restore
         self.stdout.write(f"Starting restore for domain: {domain}")
         self.stdout.write(f"From backup: {backup_id}")
 
         restore_config = RestoreConfig(
             backup_id=backup_id,
+            force_restore=bool(options.get("force_restore", False)),
             restore_email=not options.get("no_email", False),
             restore_databases=not options.get("no_databases", False),
             restore_files=not options.get("no_files", False),
             restore_ssl=not options.get("no_ssl", False),
         )
-        result = backup_service.restore_domain(account=account, config=restore_config, target_server=target_server)
+        management = VirtualminBackupManagementService(target_server)
+        result = management.create_restore_job(
+            account=account,
+            config=restore_config,
+            target_server=target_server,
+            initiated_by="cli",
+            execute_inline=True,
+        )
 
         if result.is_err():
             raise CommandError(f"Restore failed: {result.unwrap_err()}")
 
-        restore_info = result.unwrap()
+        job = result.unwrap()
+        restore_info = job.result or {}
         self.stdout.write(self.style.SUCCESS("Restore completed successfully!"))
-        self.stdout.write(f"Restore ID: {restore_info['restore_id']}")
-        self.stdout.write(f"Completed: {restore_info['completed_at']}")
+        self.stdout.write(f"Job ID: {job.pk}")
+        self.stdout.write(f"Restore ID: {restore_info.get('restore_id', 'n/a')}")
 
     def _find_account_by_domain(self, domain: str) -> VirtualminAccount | None:
         """Find VirtualminAccount by domain name."""

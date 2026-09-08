@@ -16,8 +16,9 @@ import uuid
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.db import models, transaction
+from django.db import connection, models, transaction
 from django.db.models.functions import Greatest
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
@@ -74,7 +75,7 @@ def _clear_idempotency_key(idempotency_key: str | None, *, operation: str, domai
 
 def get_max_username_uniqueness_attempts() -> int:
     """Get max username uniqueness attempts from SettingsService (runtime)."""
-    from apps.settings.services import (  # noqa: PLC0415  # Deferred: avoids circular import
+    from apps.settings.services import (  # Deferred: avoids circular import  # noqa: PLC0415  # Circular
         SettingsService,  # Circular: cross-app  # Deferred: avoids circular import
     )
 
@@ -312,7 +313,7 @@ class VirtualminProvisioningService:
             logger.exception(f"Unexpected error reprovisioning Virtualmin account: {e}")
             return Err(f"Internal error: {e}")
 
-    def _execute_domain_creation(  # noqa: PLR0911,PLR0915
+    def _execute_domain_creation(  # noqa: PLR0911, PLR0915  # Complexity: cohesive workflow
         self, account: VirtualminAccount, job: VirtualminProvisioningJob
     ) -> Result[dict[str, Any], str]:
         """Execute domain creation on Virtualmin server with validation and rollback"""
@@ -499,7 +500,7 @@ class VirtualminProvisioningService:
 
         return Ok(None)
 
-    def _validate_provisioning_preconditions(  # noqa: PLR0911  # Pre-flight gate: one exit per precondition
+    def _validate_provisioning_preconditions(  # Pre-flight gate: one exit per precondition  # noqa: PLR0911  # Complexity: cohesive workflow
         self, account: VirtualminAccount, gateway: VirtualminGateway
     ) -> Result[bool, str]:
         """
@@ -549,7 +550,7 @@ class VirtualminProvisioningService:
             logger.exception(f"🔥 [VirtualminService] Validation error for {account.domain}: {e}")
             return Err(f"Validation error: {e}")
 
-    def _execute_rollback(  # Complexity: Virtualmin workflow  # noqa: C901, PLR0912, PLR0915  # Complexity: multi-step business logic
+    def _execute_rollback(  # Complexity: Virtualmin workflow  # Complexity: multi-step business logic  # noqa: C901, PLR0912, PLR0915  # Complexity: cohesive workflow
         self, rollback_operations: list[dict[str, Any]], gateway: VirtualminGateway, account: VirtualminAccount
     ) -> tuple[str, dict[str, Any]]:
         """
@@ -666,7 +667,7 @@ class VirtualminProvisioningService:
             rollback_details["error"] = str(e)
             return "failed", rollback_details
 
-    def suspend_account(  # noqa: PLR0911, PLR0912, PLR0915  # Complexity: multi-step workflow with rollback + cache self-heal + migration lock
+    def suspend_account(  # Complexity: multi-step workflow with rollback + cache self-heal + migration lock  # noqa: PLR0911, PLR0912, PLR0915  # Complexity: cohesive workflow
         self, account: VirtualminAccount, reason: str = ""
     ) -> Result[bool, str]:  # Complexity: Virtualmin workflow  # Complexity: multi-step business logic
         """
@@ -798,7 +799,7 @@ class VirtualminProvisioningService:
             logger.exception(f"Error suspending account {account.domain}: {e}")
             return Err(str(e))
 
-    def unsuspend_account(  # noqa: PLR0911, PLR0912, PLR0915  # Complexity: multi-step workflow with rollback + cache self-heal + migration lock
+    def unsuspend_account(  # Complexity: multi-step workflow with rollback + cache self-heal + migration lock  # noqa: PLR0911, PLR0912, PLR0915  # Complexity: cohesive workflow
         self, account: VirtualminAccount
     ) -> Result[bool, str]:  # Complexity: Virtualmin workflow  # Complexity: multi-step business logic
         """
@@ -929,7 +930,7 @@ class VirtualminProvisioningService:
             logger.exception(f"Error unsuspending account {account.domain}: {e}")
             return Err(str(e))
 
-    def delete_account(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-step business logic
+    def delete_account(  # Complexity: multi-step business logic  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: cohesive workflow
         self, account: VirtualminAccount
     ) -> Result[bool, str]:  # Complexity: Virtualmin workflow  # Complexity: multi-step business logic
         """
@@ -1114,14 +1115,12 @@ class VirtualminProvisioningService:
         if job.operation in ("suspend_domain", "unsuspend_domain", "delete_domain"):
             return self._execute_lifecycle_operation(account, job)
         if job.operation == "migrate_domain":
-            from .virtualmin_migration_service import resume_migration  # noqa: PLC0415  # Deferred: dispatcher seam
+            from .virtualmin_migration_service import resume_migration  # noqa: PLC0415  # Circular
 
             return resume_migration(job)
         return Err(f"Unsupported retry operation '{job.operation}'")
 
-    def _retry_create_domain(  # noqa: PLR0911
-        self, account: VirtualminAccount, job: VirtualminProvisioningJob
-    ) -> Result[bool, str]:
+    def _retry_create_domain(self, account: VirtualminAccount, job: VirtualminProvisioningJob) -> Result[bool, str]:  # noqa: PLR0911  # Complexity: cohesive workflow
         """
         Convergent create retry: a timed-out-but-remotely-successful
         create-domain must finalize local state, never re-create or rotate
@@ -1175,7 +1174,7 @@ class VirtualminProvisioningService:
             return Err(creation_result.unwrap_err())
         return Ok(True)
 
-    def _execute_lifecycle_operation(  # noqa: PLR0911  # Distinct guard exits: migration lock + per-operation outcomes
+    def _execute_lifecycle_operation(  # Distinct guard exits: migration lock + per-operation outcomes  # noqa: PLR0911  # Complexity: cohesive workflow
         self, account: VirtualminAccount, job: VirtualminProvisioningJob
     ) -> Result[bool, str]:
         """Run suspend/unsuspend/delete against the gateway reusing the SAME job."""
@@ -1201,7 +1200,7 @@ class VirtualminProvisioningService:
         if service_status is not None and service_status not in desired:
             job.mark_failed(f"Superseded by current service state '{service_status}'")
             VirtualminProvisioningJob.terminalize(job.pk)
-            from apps.provisioning.virtualmin_tasks import (  # noqa: PLC0415  # Deferred: avoids circular import
+            from apps.provisioning.virtualmin_tasks import (  # Deferred: avoids circular import  # noqa: PLC0415  # Circular
                 reconcile_virtualmin_service_state_async,  # Circular: cross-app
             )
 
@@ -1261,7 +1260,7 @@ class VirtualminProvisioningService:
                 "delete_domain": ("terminated",),
             }[job.operation]
             if current is not None and current not in desired_after:
-                from apps.provisioning.virtualmin_tasks import (  # noqa: PLC0415  # Deferred: avoids circular import
+                from apps.provisioning.virtualmin_tasks import (  # Deferred: avoids circular import  # noqa: PLC0415  # Circular
                     reconcile_virtualmin_service_state_async,  # Circular: cross-app
                 )
 
@@ -1609,7 +1608,7 @@ class VirtualminServerManagementService:
             Result with statistics or error message
         """
         try:
-            from .virtualmin_drain_service import server_has_active_migration  # noqa: PLC0415  # Circular
+            from .virtualmin_drain_service import server_has_active_migration  # Circular  # noqa: PLC0415  # Circular
 
             if server_has_active_migration(server):
                 # A migration in flight can complete between our remote read and
@@ -1665,7 +1664,12 @@ class VirtualminBackupManagementService:
         self.server = server
 
     def create_backup_job(
-        self, account: VirtualminAccount, config: BackupConfig | None = None, initiated_by: str = "system"
+        self,
+        account: VirtualminAccount,
+        config: BackupConfig | None = None,
+        initiated_by: str = "system",
+        *,
+        execute_inline: bool = False,
     ) -> Result[VirtualminProvisioningJob, str]:
         """
         Create and execute backup job for Virtualmin account.
@@ -1684,68 +1688,91 @@ class VirtualminBackupManagementService:
         """
         try:
             # Import here to avoid circular imports
-            from .virtualmin_backup_service import (  # Circular: same-app  # noqa: PLC0415  # Deferred: avoids circular import
+            from .virtualmin_backup_service import (  # Circular: same-app  # Deferred: avoids circular import  # noqa: PLC0415  # Circular
                 BackupConfig,
-                VirtualminBackupService,
             )
 
             # Use default config if none provided
             if config is None:
                 config = BackupConfig()
 
-            # Create provisioning job
-            job = VirtualminProvisioningJob.objects.create(
+            parameters = {
+                "backup_type": config.backup_type,
+                "include_email": config.include_email,
+                "include_databases": config.include_databases,
+                "include_files": config.include_files,
+                "include_ssl": config.include_ssl,
+                "initiated_by": initiated_by,
+            }
+            return self._admit_job(
+                account,
                 operation="backup_domain",
-                account=account,
-                server=self.server,
-                parameters={
-                    "backup_type": config.backup_type,
-                    "include_email": config.include_email,
-                    "include_databases": config.include_databases,
-                    "include_files": config.include_files,
-                    "include_ssl": config.include_ssl,
-                    "initiated_by": initiated_by,
-                },
-                status="running",
-                started_at=timezone.now(),
+                parameters=parameters,
+                task_path="apps.provisioning.virtualmin_tasks.run_virtualmin_backup",
+                execute_inline=execute_inline,
             )
-
-            # Initialize backup service
-            backup_service = VirtualminBackupService(self.server)
-
-            # Execute backup
-            backup_result = backup_service.backup_domain(account=account, config=config)
-
-            if backup_result.is_err():
-                # mark_failed persists the error to the real field (status_message); assigning a
-                # nonexistent `error_message` left the failure recorded nowhere.
-                job.mark_failed(
-                    backup_result.unwrap_err(),
-                    retriability=retriability_of(backup_result),
-                )
-
-                # Backup/restore have no branch in the retry dispatcher
-                # (process_failed_virtualmin_jobs handles create/suspend/unsuspend/delete
-                # only). Even explicitly retriable failures must opt out of the sweep until
-                # these operations have a dispatcher branch.
-                job.next_retry_at = None
-                job.save(update_fields=["next_retry_at", "updated_at"])
-
-                return Err(
-                    f"Backup failed: {backup_result.unwrap_err()}",
-                    retriability=retriability_of(backup_result),
-                )
-
-            # Update job with success
-            backup_info = backup_result.unwrap()
-            job.mark_completed(backup_info)
-
-            logger.info(f"Backup job completed successfully: {job.id}")
-            return Ok(job)
-
         except Exception as e:
             logger.error(f"Backup job creation failed: {e}")
             return Err(f"Backup job failed: {e!s}")
+
+    def _admit_job(  # Distinct admission refusals
+        self,
+        account: VirtualminAccount,
+        *,
+        operation: str,
+        parameters: dict[str, Any],
+        task_path: str,
+        execute_inline: bool,
+    ) -> Result[VirtualminProvisioningJob, str]:
+        """Durable admission: account lock + exclusion + pending row + queued task.
+
+        The job row and its queue message commit in one transaction (the ORM
+        broker shares the business DB); sync=False keeps django-q's sync mode
+        from executing the mutation INSIDE this transaction. Inline execution
+        (CLI) requires autocommit, commits admission first, then runs the task
+        function in-process under the same token-claim protocol.
+        """
+        from django_q.tasks import async_task  # noqa: PLC0415  # Circular
+
+        from .spool import estimated_transfer_bytes  # noqa: PLC0415  # Circular
+        from .virtualmin_backup_service import backup_task_timeout  # noqa: PLC0415  # Circular
+        from .virtualmin_migration_models import account_has_active_operation  # noqa: PLC0415  # Circular
+
+        estimated = estimated_transfer_bytes(account.current_disk_usage_mb or 0)
+        budget = backup_task_timeout(estimated)
+        retry_window = int(str(settings.Q_CLUSTER.get("retry", 0)))
+        if budget + 60 >= retry_window:
+            return Err(
+                f"Task budget {budget}s does not fit under the broker visibility timeout {retry_window}s; "
+                "raise Q_CLUSTER retry or provisioning.backup_min_transfer_mib_s"
+            )
+        if execute_inline and (connection.in_atomic_block or not transaction.get_autocommit()):
+            return Err("Inline execution requires autocommit; run outside any transaction")
+
+        parameters = {**parameters, "estimated_bytes": estimated, "task_budget_seconds": budget}
+        with transaction.atomic():
+            locked = VirtualminAccount.objects.select_for_update().get(pk=account.pk)
+            if account_has_active_operation(locked):
+                return Err("Account already has an active migration or backup/restore operation")
+            job = VirtualminProvisioningJob.objects.create(
+                operation=operation,
+                account=locked,
+                server=self.server,
+                parameters=parameters,
+                status="pending",
+            )
+            if not execute_inline:
+                async_task(task_path, str(job.pk), timeout=budget, sync=False)
+        if execute_inline:
+            from . import virtualmin_tasks  # noqa: PLC0415  # Circular
+
+            runner = getattr(virtualmin_tasks, task_path.rsplit(".", 1)[1])
+            runner(str(job.pk))
+            job.refresh_from_db()
+            if job.status != "completed":
+                return Err(f"{operation} failed: {job.status_message or job.status}")
+        logger.info("✅ [BackupJobs] Admitted %s job %s (budget %ss)", operation, job.pk, budget)
+        return Ok(job)
 
     def create_restore_job(
         self,
@@ -1753,6 +1780,8 @@ class VirtualminBackupManagementService:
         config: RestoreConfig,
         target_server: VirtualminServer | None = None,
         initiated_by: str = "system",
+        *,
+        execute_inline: bool = False,
     ) -> Result[VirtualminProvisioningJob, str]:
         """
         Create and execute restore job for Virtualmin account.
@@ -1767,63 +1796,29 @@ class VirtualminBackupManagementService:
             Result with provisioning job or error message
         """
         try:
-            # Import here to avoid circular imports
-            from .virtualmin_backup_service import (  # noqa: PLC0415  # Deferred: avoids circular import
-                VirtualminBackupService,  # Circular: same-app  # Deferred: avoids circular import
-            )
-
             target_server = target_server or self.server
-
-            # Create provisioning job
-            job = VirtualminProvisioningJob.objects.create(
-                operation="restore_domain",
-                account=account,
-                server=target_server,
-                parameters={
-                    "backup_id": config.backup_id,
-                    "restore_email": config.restore_email,
-                    "restore_databases": config.restore_databases,
-                    "restore_files": config.restore_files,
-                    "restore_ssl": config.restore_ssl,
-                    "target_server_id": str(target_server.id),
-                    "initiated_by": initiated_by,
-                },
-                status="running",
-                started_at=timezone.now(),
-            )
-
-            # Initialize backup service
-            backup_service = VirtualminBackupService(target_server)
-
-            # Execute restore
-            restore_result = backup_service.restore_domain(account=account, config=config, target_server=target_server)
-
-            if restore_result.is_err():
-                # See the backup path: assigning `error_message` silently dropped the failure.
-                job.mark_failed(
-                    restore_result.unwrap_err(),
-                    retriability=retriability_of(restore_result),
+            parameters = {
+                "backup_id": config.backup_id,
+                "restore_email": config.restore_email,
+                "restore_databases": config.restore_databases,
+                "restore_files": config.restore_files,
+                "restore_ssl": config.restore_ssl,
+                "force_restore": config.force_restore,
+                "target_server_id": str(target_server.id),
+                "initiated_by": initiated_by,
+            }
+            original_server = self.server
+            self.server = target_server
+            try:
+                return self._admit_job(
+                    account,
+                    operation="restore_domain",
+                    parameters=parameters,
+                    task_path="apps.provisioning.virtualmin_tasks.run_virtualmin_restore",
+                    execute_inline=execute_inline,
                 )
-
-                # Backup/restore have no branch in the retry dispatcher
-                # (process_failed_virtualmin_jobs handles create/suspend/unsuspend/delete
-                # only). Even explicitly retriable failures must opt out of the sweep until
-                # these operations have a dispatcher branch.
-                job.next_retry_at = None
-                job.save(update_fields=["next_retry_at", "updated_at"])
-
-                return Err(
-                    f"Restore failed: {restore_result.unwrap_err()}",
-                    retriability=retriability_of(restore_result),
-                )
-
-            # Update job with success
-            restore_info = restore_result.unwrap()
-            job.mark_completed(restore_info)
-
-            logger.info(f"Restore job completed successfully: {job.id}")
-            return Ok(job)
-
+            finally:
+                self.server = original_server
         except Exception as e:
             logger.error(f"Restore job creation failed: {e}")
             return Err(f"Restore job failed: {e!s}")

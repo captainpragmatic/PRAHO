@@ -161,3 +161,50 @@ class NodeDrain(models.Model):
 def account_has_active_migration(account: VirtualminAccount) -> bool:
     """Needs-review migrations retain ownership until explicitly resolved."""
     return VirtualminMigration.objects.filter(account_id=account.pk).exclude(status__in=_TERMINAL_STATUSES).exists()
+
+
+# Backup/restore job statuses that hold the account-operation exclusion.
+# "attention" is non-terminal by design: an uncertain mutation keeps ownership
+# until an operator resolves it.
+_ACTIVE_JOB_STATUSES = ("pending", "running", "attention")
+
+
+def account_has_active_operation(account: VirtualminAccount) -> bool:
+    """Two-sided admission: migrations and backup/restore jobs mutually exclude."""
+    from .virtualmin_models import VirtualminProvisioningJob  # noqa: PLC0415  # Circular
+
+    if account_has_active_migration(account):
+        return True
+    return VirtualminProvisioningJob.objects.filter(
+        account_id=account.pk,
+        operation__in=("backup_domain", "restore_domain"),
+        status__in=_ACTIVE_JOB_STATUSES,
+    ).exists()
+
+
+class SpoolRoot(models.Model):
+    """Singleton lock row: spool-capacity admission serializes on it.
+
+    select_for_update() on this row makes competing reservation admissions
+    (backup fetch, migration fetch, restore download) mutually exclusive even
+    when zero reservation rows exist — a sum-then-insert without it is write
+    skew waiting to overrun the spool disk.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    # Unique marker makes concurrent first-time get_or_create race-safe.
+    singleton = models.BooleanField(default=True, unique=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+
+class SpoolReservation(models.Model):
+    """Capacity reservation for one spool archive; lives until release/expiry."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    archive_name = models.CharField(max_length=120, unique=True)
+    expected_bytes = models.BigIntegerField()
+    owner = models.CharField(max_length=120)
+    expires_at = models.DateTimeField(db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)

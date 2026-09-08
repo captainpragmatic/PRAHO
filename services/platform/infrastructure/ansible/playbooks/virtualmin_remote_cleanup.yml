@@ -1,0 +1,16 @@
+---
+- name: Remove one Virtualmin backup temp archive from a node
+  hosts: all
+  gather_facts: false
+  become: false
+  tasks:
+    - name: Validate single-host cleanup inputs
+      ansible.builtin.assert:
+        that:
+          - ansible_play_hosts_all | length == 1
+          - archive_name is match('^virtualmin_backup_[0-9a-f]{32}\.tar\.gz$')
+
+    - name: Remove the remote temporary archive
+      ansible.builtin.file:
+        path: "/tmp/{{ archive_name }}"
+        state: absent

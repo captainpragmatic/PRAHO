@@ -886,6 +886,199 @@ def enqueue_virtualmin_migration(migration_id: str, timeout_seconds: int) -> str
 _RECLAIM_GRACE_MINUTES = 30
 _RECLAIM_BATCH = 5
 
+# Backup/restore job recovery clocks: a queued job whose dispatch never arrived
+# vs a running job past its own persisted execution deadline.
+_JOB_DISPATCH_WINDOW_HOURS = 2
+_JOB_DEADLINE_MARGIN_SECONDS = 300
+
+
+def _audit_job(job_id: Any) -> None:
+    """Emit the status-change audit for a CAS-updated backup/restore job."""
+    from .virtualmin_signals import audit_job_status_transition  # noqa: PLC0415  # Circular
+
+    job = VirtualminProvisioningJob.objects.filter(pk=job_id).first()
+    if job is not None:
+        audit_job_status_transition(job)
+
+
+def _run_backup_restore_job(job_id: str, operation: str) -> dict[str, Any]:  # noqa: C901  # Cohesive claim→run→terminal pipeline
+    """Shared token-claimed runner for backup/restore jobs. Never raises."""
+    from uuid import uuid4  # noqa: PLC0415
+
+    from .virtualmin_backup_service import BackupConfig, RestoreConfig, VirtualminBackupService  # noqa: PLC0415
+
+    try:
+        job = VirtualminProvisioningJob.objects.select_related("server", "account").get(pk=job_id)
+    except VirtualminProvisioningJob.DoesNotExist:
+        return {"status": "missing", "job_id": job_id}
+    if job.account is None:
+        if VirtualminProvisioningJob.objects.filter(
+            pk=job_id, status="pending"
+        ).update(  # fsm-bypass: CharField job status
+            status="failed", status_message="Job has no account", next_retry_at=None, updated_at=timezone.now()
+        ):
+            _audit_job(job_id)
+        return {"status": "failed", "job_id": job_id, "error": "no account"}
+
+    token = uuid4()
+    budget = int(job.parameters.get("task_budget_seconds", TASK_TIME_LIMIT))
+    deadline = timezone.now() + timedelta(seconds=budget)
+    if not VirtualminProvisioningJob.claim_execution(job.pk, token, deadline):
+        return {"status": "stale", "job_id": job_id}
+    # Audit the pending->running claim too, so the trail shows execution began.
+    _audit_job(job.pk)
+
+    def owns() -> bool:
+        return VirtualminProvisioningJob.owns_execution(job.pk, token)
+
+    service = VirtualminBackupService(job.server)
+    params = job.parameters
+    if operation == "backup_domain":
+        config = BackupConfig(
+            backup_type=str(params.get("backup_type", "full")),
+            include_email=bool(params.get("include_email", True)),
+            include_databases=bool(params.get("include_databases", True)),
+            include_files=bool(params.get("include_files", True)),
+            include_ssl=bool(params.get("include_ssl", True)),
+        )
+        result = service.backup_domain(account=job.account, config=config, progress_key=str(job.pk), ownership=owns)
+    else:
+        restore_config = RestoreConfig(
+            backup_id=str(params.get("backup_id", "")),
+            restore_email=bool(params.get("restore_email", True)),
+            restore_databases=bool(params.get("restore_databases", True)),
+            restore_files=bool(params.get("restore_files", True)),
+            restore_ssl=bool(params.get("restore_ssl", True)),
+            force_restore=bool(params.get("force_restore", False)),
+        )
+
+        def persist_note(note: dict[str, Any]) -> None:
+            # Token-fenced parameter merge: evidence (e.g. the safety backup id)
+            # is durable BEFORE any destructive dispatch, and a superseded
+            # runner cannot write it.
+            current = (
+                VirtualminProvisioningJob.objects.filter(pk=job.pk, execution_token=token)
+                .values_list("parameters", flat=True)
+                .first()
+            )
+            if current is None:
+                return
+            VirtualminProvisioningJob.objects.filter(pk=job.pk, execution_token=token).update(
+                parameters={**current, **note}, updated_at=timezone.now()
+            )
+
+        result = service.restore_domain(
+            account=job.account,
+            config=restore_config,
+            target_server=job.server,
+            progress_key=str(job.pk),
+            ownership=owns,
+            note_sink=persist_note,
+        )
+
+    if result.is_err():
+        error = str(result.unwrap_err())
+        if operation == "restore_domain" and retriability_of(result) is Retriability.UNKNOWN:
+            # Uncertain mutation: park for operator attention; exclusion holds.
+            rows = VirtualminProvisioningJob.finish_execution(
+                job.pk, token, "attention", error, {"retriability": retriability_of(result).value}
+            )
+            if rows:
+                _audit_job(job.pk)
+            logger.warning("⚠️ [BackupJobs] restore job %s parked for attention: %s", job_id, error)
+            return {"status": "attention" if rows else "superseded", "job_id": job_id, "error": error}
+        rows = VirtualminProvisioningJob.finish_execution(
+            job.pk, token, "failed", error, {"retriability": retriability_of(result).value}
+        )
+        if rows:
+            _audit_job(job.pk)
+        logger.warning("⚠️ [BackupJobs] %s job %s failed: %s", operation, job_id, error)
+        return {"status": "failed" if rows else "superseded", "job_id": job_id, "error": error}
+    rows = VirtualminProvisioningJob.finish_execution(job.pk, token, "completed", "", dict(result.unwrap()))
+    if rows:
+        _audit_job(job.pk)
+    logger.info("✅ [BackupJobs] %s job %s completed", operation, job_id)
+    return {"status": "completed" if rows else "superseded", "job_id": job_id}
+
+
+def run_virtualmin_backup(job_id: str) -> dict[str, Any]:
+    return _run_backup_restore_job(job_id, "backup_domain")
+
+
+def run_virtualmin_restore(job_id: str) -> dict[str, Any]:
+    return _run_backup_restore_job(job_id, "restore_domain")
+
+
+_SPOOL_ORPHAN_MAX_AGE_HOURS = 48
+
+
+def _sweep_spool_orphans(counts: dict[str, int]) -> None:
+    """Remove crash-orphaned spool archives of both name families."""
+    import re as _re  # noqa: PLC0415
+    import time  # noqa: PLC0415
+    from pathlib import Path  # noqa: PLC0415
+
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    spool = Path(str(SettingsService.get_setting("provisioning.migration_spool_dir", "/var/lib/praho/migration-spool")))
+    if not spool.is_dir():
+        return
+    pattern = _re.compile(r"^(migration_[0-9a-f-]{36}|virtualmin_backup_[0-9a-f]{32})\.tar\.gz$")
+    cutoff = time.time() - _SPOOL_ORPHAN_MAX_AGE_HOURS * 3600
+    for path in spool.iterdir():
+        try:
+            if pattern.match(path.name) and path.is_file() and path.stat().st_mtime < cutoff:
+                path.unlink()
+                counts["spool_orphans_removed"] += 1
+                logger.warning("⚠️ [VirtualminTask] Removed orphaned spool archive %s", path.name)
+        except OSError:
+            logger.exception("🔥 [VirtualminTask] Spool orphan sweep failed for %s", path)
+
+
+def _reclaim_backup_restore_jobs(counts: dict[str, int]) -> None:
+    """Two-clock recovery: dispatch window for pending, own deadline for running."""
+    from .virtualmin_migration_models import SpoolReservation  # noqa: PLC0415
+
+    now = timezone.now()
+    dispatch_cutoff = now - timedelta(hours=_JOB_DISPATCH_WINDOW_HOURS)
+    stale_pending = VirtualminProvisioningJob.objects.filter(
+        operation__in=("backup_domain", "restore_domain"), status="pending", created_at__lt=dispatch_cutoff
+    ).values_list("pk", flat=True)[:_RECLAIM_BATCH]
+    for job_pk in stale_pending:
+        rows = VirtualminProvisioningJob.objects.filter(
+            pk=job_pk, status="pending"
+        ).update(  # fsm-bypass: CharField job status
+            status="failed",
+            status_message="Dispatch lost: queued task never arrived",
+            next_retry_at=None,
+            updated_at=now,
+        )
+        if rows:
+            _audit_job(job_pk)
+        counts["jobs_dispatch_lost"] += rows
+
+    overdue = VirtualminProvisioningJob.objects.filter(
+        operation__in=("backup_domain", "restore_domain"), status="running"
+    ).filter(
+        models.Q(execution_deadline__lt=now - timedelta(seconds=_JOB_DEADLINE_MARGIN_SECONDS))
+        | models.Q(execution_deadline__isnull=True, updated_at__lt=dispatch_cutoff)
+    )[:_RECLAIM_BATCH]
+    for job in overdue:
+        # A killed restore worker is an UNCERTAIN mutation: park for operator
+        # attention (retains the account-operation exclusion). Backups are
+        # read-only remotely; failed is honest.
+        takeover_status = "attention" if job.operation == "restore_domain" else "failed"
+        rows = VirtualminProvisioningJob.take_over_execution(
+            job.pk, takeover_status, "Worker interrupted; execution deadline exceeded"
+        )
+        if rows:
+            # The takeover releases the job's spool reservations in the same
+            # sweep — the stage-boundary fence stops the old runner first.
+            SpoolReservation.objects.filter(owner=f"job:{job.pk}").delete()
+            _audit_job(job.pk)
+            counts["jobs_taken_over"] += rows
+            logger.warning("⚠️ [BackupJobs] Took over %s job %s -> %s", job.operation, job.pk, takeover_status)
+
 
 def reclaim_stalled_virtualmin_operations() -> dict[str, int]:
     """Recover migrations and drains whose only task delivery was lost.
@@ -899,7 +1092,14 @@ def reclaim_stalled_virtualmin_operations() -> dict[str, int]:
     from .virtualmin_migration_service import migration_task_timeout  # noqa: PLC0415  # Circular
 
     stale = timezone.now() - timedelta(minutes=_RECLAIM_GRACE_MINUTES)
-    counts = {"migrations_requeued": 0, "drains_requeued": 0, "drains_reviewed": 0}
+    counts = {
+        "migrations_requeued": 0,
+        "drains_requeued": 0,
+        "drains_reviewed": 0,
+        "jobs_dispatch_lost": 0,
+        "jobs_taken_over": 0,
+        "spool_orphans_removed": 0,
+    }
     stalled_migrations = list(
         # needs_review is non-terminal but policy "stop": requeueing it would churn.
         # Oldest-first so newer stalls never starve older rows; the updated_at
@@ -938,6 +1138,8 @@ def reclaim_stalled_virtualmin_operations() -> dict[str, int]:
             logger.exception("🔥 [VirtualminTask] Reclaim failed: drain=%s", drain.pk)
         finally:
             NodeDrain.objects.filter(pk=drain.pk, status__in=("pending", "running")).update(updated_at=timezone.now())
+    _reclaim_backup_restore_jobs(counts)
+    _sweep_spool_orphans(counts)
     return counts
 
 
