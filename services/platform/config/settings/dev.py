@@ -120,9 +120,17 @@ INTERNAL_IPS = [
     "127.0.0.1",
     "localhost",
 ]
+# Remote dev clients (Docker port-forwards, VPN/Tailscale) opt into the toolbar
+# without editing checked-in settings; empty default keeps localhost-only.
+INTERNAL_IPS += [ip.strip() for ip in os.environ.get("DEV_INTERNAL_IPS", "").split(",") if ip.strip()]
 
+# API requests lose toolbar history/stats: middleware collects stats before rejecting non-HTML injection.
+# Excluding them removes per-request stack-trace capture overhead from every HMAC API call
+# and de-instruments the keep-alive amplification path.
 DEBUG_TOOLBAR_CONFIG = {
-    "SHOW_TOOLBAR_CALLBACK": lambda request: DEBUG,
+    "SHOW_TOOLBAR_CALLBACK": lambda request: (
+        DEBUG and request.META.get("REMOTE_ADDR") in INTERNAL_IPS and not request.path.startswith("/api/")
+    ),
     "SHOW_COLLAPSED": True,
     "IS_RUNNING_TESTS": False,  # Fix for debug toolbar test issue
 }

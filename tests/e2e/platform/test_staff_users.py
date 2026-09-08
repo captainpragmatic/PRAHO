@@ -22,6 +22,7 @@ from playwright.sync_api import Page
 from tests.e2e.helpers import (
     PLATFORM_BASE_URL,
     REGISTER_URL,
+    SUPERUSER_EMAIL,
     MobileTestContext,
     assert_responsive_results,
     navigate_to_platform_page,
@@ -175,13 +176,15 @@ def _verify_customer_filter_from_list(page: Page) -> None:
 
 
 def _examine_user_detail_page(page: Page) -> None:
-    """Navigate into the first user detail link and assert required information is present."""
-    user_detail_links = page.locator('a[href*="/auth/users/"]:not([href$="/auth/users/"])')
-    if user_detail_links.count() == 0:
-        print("      [i] User detail links not yet implemented — list shows emails only")
-        return
+    """Inspect the seeded administrator's detail page and required information."""
+    navigate_to_platform_page(page, f"/auth/users/?search={SUPERUSER_EMAIL}")
+    page.wait_for_load_state("networkidle")
+    user_row = page.locator("table tbody tr").filter(
+        has=page.get_by_text(SUPERUSER_EMAIL, exact=True)
+    )
+    assert user_row.count() == 1, f"Seeded administrator {SUPERUSER_EMAIL} must appear in search results"
 
-    user_detail_links.first.click()
+    user_row.get_by_role("link", name="View", exact=True).click()
     page.wait_for_load_state("networkidle")
 
     assert "/auth/users/" in page.url, "Should navigate to user detail page"
