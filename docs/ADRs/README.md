@@ -72,6 +72,7 @@ providing a historical record of why the system is built the way it is.
 | [ADR-0041](ADR-0041-foreign-currency-efactura-accounting.md) | Foreign-Currency e-Factura Accounting | Accepted | 2026-07 |
 | [ADR-0042](ADR-0042-settings-catalog-and-consumer-contract.md) | Settings Catalog, Three-Surface UI, and Consumer Contract | Accepted | 2026-07-22 |
 | [ADR-0043](ADR-0043-audit-integrity-v2-retention-and-standalone-siem.md) | Audit Integrity v2, Retention Enforcement, and the Standalone-SIEM Contract | Accepted | 2026-07-23 |
+| [ADR-0044](ADR-0044-virtualmin-placement-policy.md) | Virtualmin Placement Policy | Accepted | 2026-09-08 |
 
 ### 🟡 Partially Superseded
 

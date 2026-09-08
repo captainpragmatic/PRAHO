@@ -85,7 +85,7 @@ class VirtualminServer(models.Model):
 
     # Load balancing and placement
     weight = models.PositiveIntegerField(
-        default=100, help_text=_("Server weight for load balancing (higher = more capacity)")
+        default=100, help_text=_("Server placement weight (higher = strictly preferred; ties broken by current load)")
     )
     region = models.CharField(max_length=50, blank=True, help_text=_("Geographic region for placement decisions"))
     tags = models.JSONField(default=list, help_text=_("Server tags for placement policies"))

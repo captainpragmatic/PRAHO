@@ -186,7 +186,7 @@ class NodeDrainService:
     @classmethod
     def _migrate(cls, drain: NodeDrain, account: VirtualminAccount) -> str:
         service = VirtualminMigrationService()
-        targets = sorted(service.eligible_targets(account), key=lambda server: (server.current_domains, str(server.pk)))
+        targets = service.eligible_targets(account, preferred_region=drain.server.region)
         if not targets:
             return "No eligible migration target"
         result = service.start_migration(

@@ -16,6 +16,7 @@ from django.utils import timezone
 
 from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 
+from .placement import order_placement_candidates
 from .virtualmin_gateway import VirtualminConfig, VirtualminGateway
 from .virtualmin_migration_models import VirtualminMigration, account_has_active_migration
 from .virtualmin_models import VirtualminAccount, VirtualminProvisioningJob, VirtualminServer
@@ -128,15 +129,18 @@ class VirtualminMigrationService:
         self.lease_ttl = timedelta(seconds=self.task_timeout + 60)
 
     @staticmethod
-    def eligible_targets(account: VirtualminAccount) -> list[VirtualminServer]:
-        return [
+    def eligible_targets(account: VirtualminAccount, preferred_region: str | None = None) -> list[VirtualminServer]:
+        candidates = [
             server
-            for server in VirtualminServer.objects.filter(status="active").exclude(pk=account.server_id)
+            for server in VirtualminServer.objects.filter(status="active", is_draining=False)
+            .exclude(pk=account.server_id)
+            .select_related("node_deployment")
             if hasattr(server, "node_deployment")
             and server.node_deployment is not None
             and server.can_host_domain()
             and server.current_domains + VirtualminMigration.active_reservations(server) < server.max_domains
         ]
+        return order_placement_candidates(candidates, preferred_region)
 
     @staticmethod
     def _gateway(server: VirtualminServer) -> VirtualminGateway:

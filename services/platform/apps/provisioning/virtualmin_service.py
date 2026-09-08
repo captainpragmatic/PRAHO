@@ -23,6 +23,7 @@ from django.utils.translation import gettext_lazy as _
 
 from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 
+from .placement import order_placement_candidates
 from .security_utils import IdempotencyManager
 from .virtualmin_backup_service import BackupConfig, RestoreConfig
 from .virtualmin_drain_service import coordinate_health_failure
@@ -41,6 +42,8 @@ from .virtualmin_models import (
 from .virtualmin_validators import VirtualminValidator
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from .virtualmin_migration_service import MigrationResumeOutcome
 
 from .virtualmin_migration_models import account_has_active_migration
@@ -1251,27 +1254,23 @@ class VirtualminProvisioningService:
         logger.info(f"✅ [VirtualminService] Retry completed {job.operation} for {account.domain}")
         return Ok(True)
 
-    def _select_best_server(self) -> Result[VirtualminServer, str]:
-        """
-        Select best available server for new domain.
-
-        Uses capacity-based placement with health checks.
-
-        Returns:
-            Result with selected server or error message
-        """
-        # Get healthy, active servers that can host domains
+    def _select_best_server(
+        self,
+        preferred_region: str | None = None,
+        required_tags: Sequence[str] | None = None,
+        exclude_server_ids: Sequence[Any] = (),
+    ) -> Result[VirtualminServer, str]:
+        """Select an admissible server using the shared placement policy."""
         available_servers = (
-            VirtualminServer.objects.filter(status="active")
+            VirtualminServer.objects.filter(status="active", is_draining=False)
             .exclude(current_domains__gte=models.F("max_domains"))
-            .order_by("current_domains")
-        )  # Prefer servers with lower load
-
-        for server in available_servers:
+            .exclude(pk__in=exclude_server_ids)
+        )
+        for server in order_placement_candidates(available_servers, preferred_region, required_tags):
             if server.can_host_domain():
                 return Ok(server)
 
-        return Err("No available servers can host new domains")
+        return Err(str(_("No available servers can host new domains")))
 
     def _generate_username_from_domain(self, domain: str) -> str:
         """

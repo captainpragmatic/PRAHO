@@ -251,18 +251,18 @@ class DrainTests(MigrationTestBase):
             action="node_drain_cancelled", object_id=str(drain.pk)
         ).exists())
 
-    def test_drain_uses_least_loaded_eligible_target(self) -> None:
-        """RED: no drain target ordering exists."""
+    def test_drain_preserves_eligible_target_policy_order(self) -> None:
+        """RED: the drain locally re-sorts the policy-ordered target list by load."""
         heavier = VirtualminServer.objects.create(
             name="heavier", hostname="heavier.example.com", api_username="test",
-            current_domains=50, last_health_check=timezone.now(),
+            weight=200, current_domains=50, last_health_check=timezone.now(),
         )
         drain = self._start_drain()
         with patch.object(
             VirtualminMigrationService, "eligible_targets", return_value=[heavier, self.target]
         ):
             self._fake_run(drain)
-        self.assertEqual(VirtualminMigration.objects.get(account=self.account).target_server_id, self.target.pk)
+        self.assertEqual(VirtualminMigration.objects.get(account=self.account).target_server_id, heavier.pk)
 
     def test_worker_checkpoints_without_overlapping_migrations(self) -> None:
         """RED: no bounded task checkpoint or stale-delivery token exists."""
