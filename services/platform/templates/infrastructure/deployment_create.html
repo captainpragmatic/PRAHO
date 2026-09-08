@@ -142,6 +142,12 @@
                 </div>
             </div>
 
+            <div>
+              {{ form.source_node.label_tag }}
+              {{ form.source_node }}
+              {{ form.source_node.errors }}
+            </div>
+
             <!-- Hostname Preview -->
             <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
                 <h2 class="text-lg font-semibold text-white mb-4">{% trans "Preview" %}</h2>

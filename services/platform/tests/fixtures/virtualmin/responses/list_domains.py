@@ -35,9 +35,8 @@ def multiline_response(
             },
         ]
 
-    data = []
-    for d in domains:
-        data.append({
+    data = [
+        {
             "name": d["name"],
             "values": {
                 "Username": d.get("username", d["name"].split(".")[0]),
@@ -45,10 +44,12 @@ def multiline_response(
                 "Server byte quota": d.get("disk_quota", "Unlimited"),
                 "Bandwidth usage": d.get("bandwidth_usage", "0 MB"),
                 "Bandwidth limit": d.get("bandwidth_quota", "Unlimited"),
-                "Features": "web dns mail mysql",
+                "Features": d.get("features", "web dns mail mysql"),
                 "Status": "Enabled" if d.get("enabled", True) else "Disabled",
             },
-        })
+        }
+        for d in domains
+    ]
 
     return {
         "command": "list-domains",

@@ -71,7 +71,9 @@ tickets.TicketComment           # child of Ticket
 tickets.TicketWorklog           # child of Ticket
 
 # ── 5. Virtualmin integration internals ────────────────────────────────────────
+provisioning.NodeDrain                  # lifecycle audited explicitly by NodeDrainService (node_drain_* events)
 provisioning.VirtualminDriftRecord      # internal drift detection
+provisioning.VirtualminMigration        # internal lease/reservation state; lifecycle audited by the migration orchestration
 provisioning.VirtualminServer           # mirrors Server model
 
 # ── 6. Usage metering (high-volume operational data) ──────────────────────────

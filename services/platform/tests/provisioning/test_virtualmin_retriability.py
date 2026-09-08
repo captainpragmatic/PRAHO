@@ -156,7 +156,11 @@ class ServiceTestServerConnectionRetriabilityTests(SimpleTestCase):
         gateway = MagicMock()
         gateway.get_server_info.return_value = Err("rate limited", retriability=Retriability.RETRIABLE)
 
-        with patch("apps.provisioning.virtualmin_service.VirtualminProvisioningService") as service_cls:
+        with (
+            # The migration guard runs a real query; MagicMock servers cannot satisfy it.
+            patch("apps.provisioning.virtualmin_drain_service.server_has_active_migration", return_value=False),
+            patch("apps.provisioning.virtualmin_service.VirtualminProvisioningService") as service_cls,
+        ):
             service_cls.return_value._get_gateway.return_value = gateway
             result = VirtualminServerManagementService().update_server_statistics(server)
 

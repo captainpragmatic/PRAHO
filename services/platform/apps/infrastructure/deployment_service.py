@@ -1168,11 +1168,48 @@ class NodeDeploymentService:
                 logger.warning(f"[Maintenance:{deployment.hostname}] Failed to log audit: maintenance failed")
             return Err(f"Maintenance failed: {e}")
 
-    def stop_node(
+    def _disable_linked_server_for_stop(
+        self,
+        deployment: NodeDeployment,
+        audit_ctx: InfrastructureAuditContext,
+        *,
+        force: bool = False,
+    ) -> Result[bool, str]:
+        """Refuse stopping an undrained Virtualmin node; disable the linked server otherwise."""
+        if not deployment.virtualmin_server_id:
+            return Ok(True)
+        from apps.provisioning.virtualmin_drain_service import server_has_active_migration  # noqa: PLC0415  # Circular
+        from apps.provisioning.virtualmin_models import VirtualminServer  # noqa: PLC0415  # Circular: app registry
+
+        with transaction.atomic():
+            server = VirtualminServer.objects.select_for_update().get(pk=deployment.virtualmin_server_id)
+            # Current state only: a finalized historical drain must never exempt
+            # workloads provisioned afterwards, and an in-flight migration
+            # touching this server (as source OR incoming target) has no local
+            # account row yet — check the migration table directly.
+            occupied = server.accounts.filter(status__in=("active", "suspended")).exists()
+            migrating = server_has_active_migration(server)
+            if (occupied or migrating) and not force:
+                error_msg = (
+                    "Node has an in-flight migration; resolve it or explicitly force stop"
+                    if migrating
+                    else "Node has undrained accounts; drain it or explicitly force stop"
+                )
+                InfrastructureAuditService.log_node_stop_failed(deployment, error_msg, audit_ctx)
+                logger.warning("⚠️ [NodeDrain] Stop refused: %s", deployment.hostname)
+                return Err(error_msg)
+            # fsm-bypass: VirtualminServer CharField; close admission before provider I/O.
+            server.status, server.failed_by_health_check = "disabled", False
+            server.save(update_fields=["status", "failed_by_health_check", "updated_at"])
+        return Ok(True)
+
+    def stop_node(  # noqa: PLR0911
         self,
         deployment: NodeDeployment,
         credentials: dict[str, str],
         user: User | None = None,
+        *,
+        force: bool = False,
     ) -> Result[bool, str]:
         """
         Stop (power off) a deployed node.
@@ -1197,7 +1234,7 @@ class NodeDeploymentService:
         if deployment.status == "stopped":
             return Ok(True)  # Already stopped
 
-        audit_ctx = InfrastructureAuditContext(user=user)
+        audit_ctx = InfrastructureAuditContext(user=user, metadata={"force": force})
 
         # Audit: stop started
         try:
@@ -1206,6 +1243,9 @@ class NodeDeploymentService:
             logger.warning(f"[Stop:{deployment.hostname}] Failed to log audit: stop started")
 
         try:
+            disable_result = self._disable_linked_server_for_stop(deployment, audit_ctx, force=force)
+            if disable_result.is_err():
+                return disable_result
             provider_type = deployment.provider.provider_type
             result = run_provider_command(
                 provider_type=provider_type,
@@ -1319,6 +1359,21 @@ class NodeDeploymentService:
                 message="Node started (powered on)",
                 phase="completed",
             )
+
+            if deployment.virtualmin_server_id:
+                from apps.provisioning.virtualmin_models import VirtualminServer  # noqa: PLC0415  # Circular
+
+                server = VirtualminServer.objects.get(pk=deployment.virtualmin_server_id)
+                if server.status == "disabled":
+                    activation = get_registration_service().verify_and_activate(server)
+                    if activation.is_err():
+                        raise ValueError(f"Powered on; Virtualmin activation failed: {activation.unwrap_err()}")
+                    # Clear the drain exclusion ONLY when no non-terminal drain
+                    # owns it — a drain admitted between activation and this
+                    # update must keep the server out of placement.
+                    VirtualminServer.objects.filter(pk=server.pk, status="active").exclude(
+                        drains__status__in=("pending", "running", "paused_needs_review")
+                    ).update(is_draining=False, updated_at=timezone.now())
 
             # Audit: start completed
             try:

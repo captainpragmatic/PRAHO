@@ -6,6 +6,7 @@ Imports all feature models for migrations and admin.
 # Import all models from feature files
 from .relationship_models import ServiceDomain, ServiceGroup, ServiceGroupMember, ServiceRelationship
 from .service_models import ProvisioningTask, Server, Service, ServicePlan
+from .virtualmin_migration_models import NodeDrain, VirtualminMigration
 from .virtualmin_models import (
     VirtualminAccount,
     VirtualminDriftRecord,
@@ -15,6 +16,7 @@ from .virtualmin_models import (
 
 # Re-export for external imports
 __all__ = [
+    "NodeDrain",
     "ProvisioningTask",
     "Server",
     "Service",
@@ -26,6 +28,7 @@ __all__ = [
     # Virtualmin models
     "VirtualminAccount",
     "VirtualminDriftRecord",
+    "VirtualminMigration",
     "VirtualminProvisioningJob",
     "VirtualminServer",
 ]

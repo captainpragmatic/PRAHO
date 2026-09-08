@@ -252,30 +252,32 @@ class SettingsService:
             or any(not isinstance(item, int) or isinstance(item, bool) for item in value.values())
         ):
             raise ValidationError(_("%(key)s: all JSON object values must be integers") % {"key": key})
+        cls._apply_list_rules(key, rules, value)
+
+    @classmethod
+    def _apply_list_rules(cls, key: str, rules: dict[str, Any], value: Any) -> None:
+        """📏 Enforce list-shape rules (size, item type/bounds, uniqueness, order)"""
         min_items = rules.get("min_items")
         if min_items is not None and isinstance(value, list) and len(value) < int(min_items):
             raise ValidationError(
-                _("%(key)s: list must contain at least %(min_items)s item(s)")
-                % {"key": key, "min_items": min_items}
+                _("%(key)s: list must contain at least %(min_items)s item(s)") % {"key": key, "min_items": min_items}
             )
         item_type = rules.get("item_type")
+        if item_type == "string" and (not isinstance(value, list) or any(not isinstance(item, str) for item in value)):
+            raise ValidationError(_("%(key)s: list values must be strings") % {"key": key})
         if item_type == "integer" and (
-            not isinstance(value, list)
-            or any(not isinstance(item, int) or isinstance(item, bool) for item in value)
+            not isinstance(value, list) or any(not isinstance(item, int) or isinstance(item, bool) for item in value)
         ):
             raise ValidationError(_("%(key)s: list values must be integers") % {"key": key})
         item_minimum = rules.get("item_min")
-        if (
-            item_minimum is not None
-            and isinstance(value, list)
-            and any(item < int(item_minimum) for item in value)
-        ):
+        if item_minimum is not None and isinstance(value, list) and any(item < int(item_minimum) for item in value):
             raise ValidationError(
-                _("%(key)s: list values must be at least %(item_min)s")
-                % {"key": key, "item_min": item_minimum}
+                _("%(key)s: list values must be at least %(item_min)s") % {"key": key, "item_min": item_minimum}
             )
-        if rules.get("unique_items") and isinstance(value, list) and any(
-            item in value[:index] for index, item in enumerate(value)
+        if (
+            rules.get("unique_items")
+            and isinstance(value, list)
+            and any(item in value[:index] for index, item in enumerate(value))
         ):
             raise ValidationError(_("%(key)s: list values must be unique") % {"key": key})
         order = rules.get("order")

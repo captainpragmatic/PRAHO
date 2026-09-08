@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import time
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any
 from unittest.mock import patch
@@ -61,6 +62,15 @@ class MockDomain:
         if not self.username:
             self.username = self.name.split(".")[0]
 
+    @property
+    def disabled(self) -> bool:
+        """Expose disabled state without duplicating the existing enabled flag."""
+        return not self.enabled
+
+    @disabled.setter
+    def disabled(self, value: bool) -> None:
+        self.enabled = not value
+
 
 @dataclass
 class CallRecord:
@@ -93,6 +103,7 @@ class MockVirtualminGateway:
 
         # State
         self._domains: dict[str, MockDomain] = {}
+        self._archives: dict[str, MockDomain] = {}
         self._calls: list[CallRecord] = []
         self.available_templates: list[str] = ["Default"]
 
@@ -152,6 +163,7 @@ class MockVirtualminGateway:
     def reset(self) -> None:
         """Clear all state and call history."""
         self._domains.clear()
+        self._archives.clear()
         self._calls.clear()
 
     # ---------------------------------------------------------------
@@ -164,6 +176,7 @@ class MockVirtualminGateway:
         params: dict[str, Any] | None = None,
         response_format: str = "json",
         correlation_id: str = "",
+        timeout_seconds: int | None = None,
     ) -> Result[VirtualminResponse, VirtualminAPIError]:
         """
         Main entry point - matches VirtualminGateway.call() signature.
@@ -367,6 +380,8 @@ class MockVirtualminGateway:
         handlers: dict[str, Any] = {
             "create-domain": self._handle_create_domain,
             "delete-domain": self._handle_delete_domain,
+            "backup-domain": self._handle_backup_domain,
+            "restore-domain": self._handle_restore_domain,
             "disable-domain": self._handle_disable_domain,
             "enable-domain": self._handle_enable_domain,
             "list-domains": self._handle_list_domains,
@@ -470,6 +485,7 @@ class MockVirtualminGateway:
                 "bandwidth_usage": f"{d.bandwidth_usage_mb} MB",
                 "bandwidth_quota": f"{d.bandwidth_quota_mb} MB",
                 "enabled": d.enabled,
+                "features": " ".join(d.features),
             }
             for d in self._domains.values()
         ]
@@ -506,6 +522,41 @@ class MockVirtualminGateway:
             "command": "modify-domain",
             "status": "success",
             "output": f"Domain {domain} modified successfully",
+        }
+
+    def _handle_backup_domain(self, params: dict[str, object]) -> dict[str, object]:
+        domain = str(params.get("domain", ""))
+        destination = str(params.get("dest", ""))
+        if domain not in self._domains:
+            raise VirtualminNotFoundError(
+                f"Virtual server {domain} does not exist", self.server_hostname, "backup-domain"
+            )
+        if not destination:
+            raise VirtualminAPIError("No archive destination specified", self.server_hostname, "backup-domain")
+        self._archives[destination] = deepcopy(self._domains[domain])
+        return {
+            "command": "backup-domain",
+            "status": "success",
+            "output": f"Backed up {domain} to {destination}",
+        }
+
+    def _handle_restore_domain(self, params: dict[str, object]) -> dict[str, object]:
+        source = str(params.get("source", ""))
+        archive = self._archives.get(source)
+        if archive is None:
+            raise VirtualminNotFoundError(
+                f"Archive {source} does not exist", self.server_hostname, "restore-domain"
+            )
+        domain = str(params.get("domain", archive.name))
+        if domain != archive.name:
+            raise VirtualminNotFoundError(
+                f"Archive {source} does not contain {domain}", self.server_hostname, "restore-domain"
+            )
+        self._domains[domain] = deepcopy(archive)
+        return {
+            "command": "restore-domain",
+            "status": "success",
+            "output": f"Restored {domain} from {source}",
         }
 
     def _handle_generic_success(self, params: dict[str, Any]) -> dict[str, Any]:

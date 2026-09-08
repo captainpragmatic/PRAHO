@@ -278,6 +278,7 @@ def deployment_create(request: HttpRequest) -> HttpResponse:
         if form.is_valid():
             deployment = form.save(commit=False)
             deployment.initiated_by = request.user
+            deployment.triggered_by_failover = deployment.source_node_id is not None
 
             # Atomic block to prevent race conditions on node number assignment
             with transaction.atomic():
@@ -312,14 +313,9 @@ def deployment_create(request: HttpRequest) -> HttpResponse:
                 user_id=request.user.id,
             )
 
-            # Audit: deployment created
-            try:
-                audit_ctx = InfrastructureAuditContext(
-                    user=request.user if request.user.is_authenticated else None, request=request
-                )
-                InfrastructureAuditService.log_deployment_created(deployment, audit_ctx)
-            except (DatabaseError, OSError):
-                logger.warning("⚠️ [Audit] Failed to log deployment creation for %s", deployment.hostname, exc_info=True)
+            # Audit: node_deployment_created is emitted once by the post_save
+            # signal handler (signals.py) — no explicit call here, or the
+            # event would be duplicated.
 
             messages.success(
                 request,
@@ -665,6 +661,7 @@ def deployment_stop(request: HttpRequest, pk: int) -> HttpResponse:
         deployment_id=deployment.id,
         provider_id=deployment.provider_id,
         user_id=request.user.id,
+        force=request.POST.get("force") == "on",
     )
 
     messages.success(request, f"Stop queued for '{deployment.hostname}'.")

@@ -18,13 +18,16 @@ from typing import TYPE_CHECKING, Any
 
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
+from django.db.models.functions import Greatest
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 
+from .placement import order_placement_candidates
 from .security_utils import IdempotencyManager
 from .virtualmin_backup_service import BackupConfig, RestoreConfig
+from .virtualmin_drain_service import coordinate_health_failure
 from .virtualmin_gateway import (
     VirtualminConfig,
     VirtualminGateway,
@@ -32,7 +35,6 @@ from .virtualmin_gateway import (
     get_virtualmin_config,
 )
 from .virtualmin_models import (
-    HEALTH_AUTO_FAIL_THRESHOLD,
     VirtualminAccount,
     VirtualminDriftRecord,
     VirtualminProvisioningJob,
@@ -41,7 +43,11 @@ from .virtualmin_models import (
 from .virtualmin_validators import VirtualminValidator
 
 if TYPE_CHECKING:
-    pass
+    from collections.abc import Sequence
+
+    from .virtualmin_migration_service import MigrationResumeOutcome
+
+from .virtualmin_migration_models import account_has_active_migration
 
 logger = logging.getLogger(__name__)
 
@@ -306,11 +312,15 @@ class VirtualminProvisioningService:
             logger.exception(f"Unexpected error reprovisioning Virtualmin account: {e}")
             return Err(f"Internal error: {e}")
 
-    def _execute_domain_creation(
+    def _execute_domain_creation(  # noqa: PLR0911,PLR0915
         self, account: VirtualminAccount, job: VirtualminProvisioningJob
     ) -> Result[dict[str, Any], str]:
         """Execute domain creation on Virtualmin server with validation and rollback"""
         try:
+            account.server.refresh_from_db(fields=["is_draining"])
+            if account.server.is_draining:
+                job.mark_failed("Target server is draining", retriability=Retriability.RETRIABLE)
+                return Err("Target server is draining", retriability=Retriability.RETRIABLE)
             gateway = self._get_gateway(account.server)
 
             # Mark job as started
@@ -375,8 +385,10 @@ class VirtualminProvisioningService:
 
                         # Update server stats (track for rollback)
                         old_domain_count = account.server.current_domains
-                        account.server.current_domains += 1
-                        account.server.save(update_fields=["current_domains", "updated_at"])
+                        VirtualminServer.objects.filter(pk=account.server_id).update(
+                            current_domains=models.F("current_domains") + 1, updated_at=timezone.now()
+                        )
+                        account.server.refresh_from_db(fields=["current_domains"])
 
                         rollback_operations.append(
                             {
@@ -579,8 +591,14 @@ class VirtualminProvisioningService:
                             rollback_details["successful_operations"] += 1
 
                     elif operation["operation"] == "revert_server_stats":
-                        account.server.current_domains = operation["params"]["domain_count"]
-                        account.server.save(update_fields=["current_domains", "updated_at"])
+                        # Relative decrement, not the snapshotted absolute — an
+                        # absolute write would destroy a concurrent creator's
+                        # F() increment (lost update).
+                        VirtualminServer.objects.filter(pk=account.server_id).update(
+                            current_domains=Greatest(models.F("current_domains") - 1, 0),
+                            updated_at=timezone.now(),
+                        )
+                        account.server.refresh_from_db(fields=["current_domains"])
                         op_result["status"] = "success"
                         rollback_details["successful_operations"] += 1
 
@@ -648,7 +666,7 @@ class VirtualminProvisioningService:
             rollback_details["error"] = str(e)
             return "failed", rollback_details
 
-    def suspend_account(  # noqa: PLR0911, PLR0915  # Complexity: multi-step workflow with rollback + cache self-heal
+    def suspend_account(  # noqa: PLR0911, PLR0912, PLR0915  # Complexity: multi-step workflow with rollback + cache self-heal + migration lock
         self, account: VirtualminAccount, reason: str = ""
     ) -> Result[bool, str]:  # Complexity: Virtualmin workflow  # Complexity: multi-step business logic
         """
@@ -668,6 +686,9 @@ class VirtualminProvisioningService:
             If database update fails after API call succeeds, will attempt
             to re-enable the domain in Virtualmin.
         """
+        if account_has_active_migration(account):
+            logger.info("✅ [VirtualminService] Migration lock blocks suspension: %s", account.pk)
+            return Err("Account has an active migration")
         idempotency_key: str | None = None
         try:
             # Idempotency check - already suspended
@@ -777,7 +798,7 @@ class VirtualminProvisioningService:
             logger.exception(f"Error suspending account {account.domain}: {e}")
             return Err(str(e))
 
-    def unsuspend_account(  # noqa: PLR0911, PLR0915  # Complexity: multi-step workflow with rollback + cache self-heal
+    def unsuspend_account(  # noqa: PLR0911, PLR0912, PLR0915  # Complexity: multi-step workflow with rollback + cache self-heal + migration lock
         self, account: VirtualminAccount
     ) -> Result[bool, str]:  # Complexity: Virtualmin workflow  # Complexity: multi-step business logic
         """
@@ -796,6 +817,9 @@ class VirtualminProvisioningService:
             If database update fails after API call succeeds, will attempt
             to re-disable the domain in Virtualmin.
         """
+        if account_has_active_migration(account):
+            logger.info("✅ [VirtualminService] Migration lock blocks activation: %s", account.pk)
+            return Err("Account has an active migration")
         idempotency_key: str | None = None
         try:
             # Idempotency check - already active
@@ -905,7 +929,7 @@ class VirtualminProvisioningService:
             logger.exception(f"Error unsuspending account {account.domain}: {e}")
             return Err(str(e))
 
-    def delete_account(  # noqa: PLR0911, PLR0912, PLR0915  # Complexity: multi-step business logic
+    def delete_account(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-step business logic
         self, account: VirtualminAccount
     ) -> Result[bool, str]:  # Complexity: Virtualmin workflow  # Complexity: multi-step business logic
         """
@@ -925,6 +949,10 @@ class VirtualminProvisioningService:
             (domain deleted in Virtualmin but not marked as such in DB).
             Note: Domain deletion cannot be rolled back - data loss is irreversible.
         """
+        if account_has_active_migration(account):
+            logger.info("✅ [VirtualminService] Migration lock blocks deletion: %s", account.pk)
+            return Err("Account has an active migration")
+
         # ⚠️ SAFETY CHECK: Prevent deletion of protected accounts
         if account.protected_from_deletion:
             error_msg = f"Account {account.domain} is protected from deletion. Disable protection first."
@@ -972,9 +1000,7 @@ class VirtualminProvisioningService:
             )
             job.save()
             job.mark_started()
-
-            # Store original server domain count for potential rollback
-            original_domain_count = account.server.current_domains
+            stats_decremented = 0
 
             # Make API call
             result = gateway.call("delete-domain", {"domain": account.domain}, correlation_id=job.correlation_id)
@@ -984,9 +1010,13 @@ class VirtualminProvisioningService:
 
                 if response.success:
                     try:
-                        # Update server stats
-                        account.server.current_domains = max(0, account.server.current_domains - 1)
-                        account.server.save(update_fields=["current_domains", "updated_at"])
+                        # Update server stats (relative, lost-update safe; the
+                        # rowcount records whether a decrement actually applied
+                        # so rollback never invents usage)
+                        stats_decremented = VirtualminServer.objects.filter(
+                            pk=account.server_id, current_domains__gt=0
+                        ).update(current_domains=models.F("current_domains") - 1, updated_at=timezone.now())
+                        account.server.refresh_from_db(fields=["current_domains"])
 
                         # Mark account as terminated (don't delete for audit trail)
                         account.status = "terminated"
@@ -1030,10 +1060,15 @@ class VirtualminProvisioningService:
                         )
                         _clear_idempotency_key(idempotency_key, operation="delete", domain=account.domain)
 
-                        # Try to at least revert server stats
+                        # Try to at least revert server stats — but only if this
+                        # operation's decrement actually applied, or the +1
+                        # would invent capacity usage out of nothing
                         try:
-                            account.server.current_domains = original_domain_count
-                            account.server.save(update_fields=["current_domains", "updated_at"])
+                            if stats_decremented:
+                                VirtualminServer.objects.filter(pk=account.server_id).update(
+                                    current_domains=models.F("current_domains") + 1, updated_at=timezone.now()
+                                )
+                                account.server.refresh_from_db(fields=["current_domains"])
                             logger.info(f"✅ [VirtualminService] Reverted server domain count for {account.domain}")
                         except Exception as revert_error:
                             logger.error(f"🔥 [VirtualminService] Failed to revert server stats: {revert_error}")
@@ -1061,7 +1096,7 @@ class VirtualminProvisioningService:
             logger.exception(f"Error deleting account {account.domain}: {e}")
             return Err(str(e))
 
-    def retry_job(self, job: VirtualminProvisioningJob) -> Result[bool, str]:
+    def retry_job(self, job: VirtualminProvisioningJob) -> Result[bool, str] | Result[MigrationResumeOutcome, str]:
         """
         Re-run a failed job on its EXISTING account and job rows.
 
@@ -1078,14 +1113,24 @@ class VirtualminProvisioningService:
             return self._retry_create_domain(account, job)
         if job.operation in ("suspend_domain", "unsuspend_domain", "delete_domain"):
             return self._execute_lifecycle_operation(account, job)
+        if job.operation == "migrate_domain":
+            from .virtualmin_migration_service import resume_migration  # noqa: PLC0415  # Deferred: dispatcher seam
+
+            return resume_migration(job)
         return Err(f"Unsupported retry operation '{job.operation}'")
 
-    def _retry_create_domain(self, account: VirtualminAccount, job: VirtualminProvisioningJob) -> Result[bool, str]:
+    def _retry_create_domain(  # noqa: PLR0911
+        self, account: VirtualminAccount, job: VirtualminProvisioningJob
+    ) -> Result[bool, str]:
         """
         Convergent create retry: a timed-out-but-remotely-successful
         create-domain must finalize local state, never re-create or rotate
         credentials; an absent remote domain re-runs creation on the same rows.
         """
+        account.server.refresh_from_db(fields=["is_draining"])
+        if account.server.is_draining:
+            job.mark_failed("Target server is draining", retriability=Retriability.RETRIABLE)
+            return Err("Target server is draining", retriability=Retriability.RETRIABLE)
         gateway = self._get_gateway(account.server)
         owner_result = gateway.get_domain_owner(account.domain)
         if owner_result.is_err():
@@ -1130,10 +1175,13 @@ class VirtualminProvisioningService:
             return Err(creation_result.unwrap_err())
         return Ok(True)
 
-    def _execute_lifecycle_operation(
+    def _execute_lifecycle_operation(  # noqa: PLR0911  # Distinct guard exits: migration lock + per-operation outcomes
         self, account: VirtualminAccount, job: VirtualminProvisioningJob
     ) -> Result[bool, str]:
         """Run suspend/unsuspend/delete against the gateway reusing the SAME job."""
+        if account_has_active_migration(account):
+            logger.info("✅ [VirtualminService] Migration lock blocks lifecycle retry: %s", account.pk)
+            return Err("Account has an active migration")
         operations = {
             "suspend_domain": ("disable-domain", "suspended"),
             "unsuspend_domain": ("enable-domain", "active"),
@@ -1221,27 +1269,23 @@ class VirtualminProvisioningService:
         logger.info(f"✅ [VirtualminService] Retry completed {job.operation} for {account.domain}")
         return Ok(True)
 
-    def _select_best_server(self) -> Result[VirtualminServer, str]:
-        """
-        Select best available server for new domain.
-
-        Uses capacity-based placement with health checks.
-
-        Returns:
-            Result with selected server or error message
-        """
-        # Get healthy, active servers that can host domains
+    def _select_best_server(
+        self,
+        preferred_region: str | None = None,
+        required_tags: Sequence[str] | None = None,
+        exclude_server_ids: Sequence[Any] = (),
+    ) -> Result[VirtualminServer, str]:
+        """Select an admissible server using the shared placement policy."""
         available_servers = (
-            VirtualminServer.objects.filter(status="active")
+            VirtualminServer.objects.filter(status="active", is_draining=False)
             .exclude(current_domains__gte=models.F("max_domains"))
-            .order_by("current_domains")
-        )  # Prefer servers with lower load
-
-        for server in available_servers:
+            .exclude(pk__in=exclude_server_ids)
+        )
+        for server in order_placement_candidates(available_servers, preferred_region, required_tags):
             if server.can_host_domain():
                 return Ok(server)
 
-        return Err("No available servers can host new domains")
+        return Err(str(_("No available servers can host new domains")))
 
     def _generate_username_from_domain(self, domain: str) -> str:
         """
@@ -1410,6 +1454,9 @@ class VirtualminProvisioningService:
         Returns:
             Result with enforcement actions taken
         """
+        if account_has_active_migration(account):
+            logger.info("✅ [VirtualminService] Migration lock skips enforcement: %s", account.pk)
+            return Ok({"action": "migration_locked", "actions_taken": []})
         try:
             # First detect drift
             sync_result = self.sync_account_from_virtualmin(account)
@@ -1541,19 +1588,8 @@ class VirtualminServerManagementService:
                     updated_at=timezone.now(),
                 )
                 server.refresh_from_db()
-                if server.status == "active" and server.consecutive_health_failures >= HEALTH_AUTO_FAIL_THRESHOLD:
-                    # Conditional on the CURRENT DB streak: a concurrent
-                    # success that reset the streak wins over this stale probe.
-                    VirtualminServer.objects.filter(
-                        pk=server.pk,
-                        status="active",
-                        consecutive_health_failures__gte=HEALTH_AUTO_FAIL_THRESHOLD,
-                    ).update(status="failed", failed_by_health_check=True, updated_at=timezone.now())
-                    server.refresh_from_db()
-                    logger.error(
-                        f"🔥 [ServerManagement] Auto-failed {server.hostname} after "
-                        f"{server.consecutive_health_failures} consecutive failed checks"
-                    )
+                coordinate_health_failure(server)
+                server.refresh_from_db()
 
                 logger.warning(f"⚠️ [ServerManagement] Health check failed for {server.hostname}: {error_msg}")
                 return Err(error_msg, retriability=retriability_of(result))
@@ -1573,6 +1609,15 @@ class VirtualminServerManagementService:
             Result with statistics or error message
         """
         try:
+            from .virtualmin_drain_service import server_has_active_migration  # noqa: PLC0415  # Circular
+
+            if server_has_active_migration(server):
+                # A migration in flight can complete between our remote read and
+                # this absolute write — the stale snapshot would erase the
+                # completion's capacity accounting. Skip; next sweep reconciles.
+                logger.info("✅ [ServerManagement] Stats skipped (active migration): %s", server.hostname)
+                return Ok({"skipped": "active_migration"})
+
             provisioning_service = VirtualminProvisioningService(server)
             gateway = provisioning_service._get_gateway(server)
 

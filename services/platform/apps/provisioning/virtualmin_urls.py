@@ -4,12 +4,13 @@
 
 from django.urls import path
 
-from . import virtualmin_views
+from . import virtualmin_drain_views, virtualmin_views
 
 # Note: We don't set app_name here since these URLs are included
 # in the main provisioning URLs with the "provisioning" namespace
 
 urlpatterns = [
+    path("servers/<uuid:server_id>/drain/", virtualmin_drain_views.node_drain, name="node_drain"),
     # Virtualmin server management
     path("servers/", virtualmin_views.virtualmin_servers_list, name="virtualmin_servers"),
     path("servers/create/", virtualmin_views.virtualmin_server_create, name="virtualmin_server_create"),
@@ -34,6 +35,16 @@ urlpatterns = [
         "accounts/<uuid:account_id>/delete/",
         virtualmin_views.virtualmin_account_delete,
         name="virtualmin_account_delete",
+    ),
+    path(
+        "accounts/<uuid:account_id>/migrate/",
+        virtualmin_views.virtualmin_account_migrate,
+        name="virtualmin_account_migrate",
+    ),
+    path(
+        "accounts/<uuid:account_id>/migration/resolve/",
+        virtualmin_views.virtualmin_migration_resolve,
+        name="virtualmin_migration_resolve",
     ),
     path(
         "accounts/<uuid:account_id>/backup/",

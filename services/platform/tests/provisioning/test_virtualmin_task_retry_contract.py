@@ -227,6 +227,15 @@ class AccountTaskRetryContractTests(SimpleTestCase):
         ("delete_virtualmin_account", "delete_account", ("account-1",)),
     )
 
+    def setUp(self) -> None:
+        # These contracts exercise retriability plumbing with MagicMock accounts
+        # (no DB). The migration-ownership guard added for #359 issues a real
+        # query, which a mock pk cannot satisfy — neutralize it here; its own
+        # behavior is pinned by the migration service tests against real rows.
+        patcher = patch.object(virtualmin_tasks, "_migration_locked", return_value=False)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def _account(self) -> MagicMock:
         account = MagicMock()
         account.id = "account-1"

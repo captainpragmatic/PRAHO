@@ -74,6 +74,7 @@ class VirtualminServer(models.Model):
     )
 
     # Server status and health
+    is_draining = models.BooleanField(default=False)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="active", verbose_name=_("Status"))
     last_health_check = models.DateTimeField(null=True, blank=True)
     health_check_error = models.TextField(blank=True)
@@ -84,7 +85,7 @@ class VirtualminServer(models.Model):
 
     # Load balancing and placement
     weight = models.PositiveIntegerField(
-        default=100, help_text=_("Server weight for load balancing (higher = more capacity)")
+        default=100, help_text=_("Server placement weight (higher = strictly preferred; ties broken by current load)")
     )
     region = models.CharField(max_length=50, blank=True, help_text=_("Geographic region for placement decisions"))
     tags = models.JSONField(default=list, help_text=_("Server tags for placement policies"))
@@ -196,8 +197,17 @@ class VirtualminServer(models.Model):
         self.encrypted_api_password = encrypted.encode()
 
     def can_host_domain(self) -> bool:
-        """Check if server can host another domain"""
-        return self.status == "active" and self.is_healthy and self.current_domains < self.max_domains
+        """Check if server can host another domain (reservation-aware)"""
+        from .virtualmin_migration_models import VirtualminMigration  # noqa: PLC0415  # Circular
+
+        return (
+            self.status == "active"
+            and not self.is_draining
+            and self.is_healthy
+            # In-flight migrations targeting this server occupy capacity before
+            # current_domains reflects them — every admission path must see it.
+            and self.current_domains + VirtualminMigration.active_reservations(self) < self.max_domains
+        )
 
     def update_stats(self, domains: int, disk_gb: float, bandwidth_gb: float) -> None:
         """Update server statistics"""
@@ -567,6 +577,7 @@ class VirtualminProvisioningJob(models.Model):
         ("install_ssl", _("Install SSL Certificate")),
         ("backup_domain", _("Backup Domain")),
         ("restore_domain", _("Restore Domain")),
+        ("migrate_domain", _("Migrate Domain")),
     )
 
     # Job identification

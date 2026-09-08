@@ -9,6 +9,7 @@ import logging
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any, TypedDict
+from uuid import UUID
 
 from django.conf import settings
 from django.core.cache import cache
@@ -29,6 +30,8 @@ from .security_utils import (
     log_security_event_safe,
     sanitize_log_parameters,
 )
+from .virtualmin_drain_service import NodeDrainService
+from .virtualmin_migration_models import NodeDrain
 from .virtualmin_models import (
     VirtualminAccount,
     VirtualminProvisioningJob,
@@ -857,6 +860,110 @@ def _handle_critical_provisioning_error(
     return _handle_critical_provisioning_error_secure(error, domain, service_id, correlation_id, safe_log_ctx)
 
 
+def run_node_drain(drain_id: str, task_token: str | None = None) -> dict[str, Any]:
+    try:
+        result = NodeDrainService.run(UUID(drain_id), UUID(task_token) if task_token else None)
+    except (ValueError, TypeError, NodeDrain.DoesNotExist) as error:
+        return {"success": False, "error": str(error)}
+    if result.is_err():
+        return {"success": False, "error": result.unwrap_err()}
+    drain = result.unwrap()
+    return {
+        "success": drain.status not in {"failed", "paused_needs_review"},
+        "drain_id": str(drain.pk),
+        "status": drain.status,
+    }
+
+
+def enqueue_virtualmin_migration(migration_id: str, timeout_seconds: int) -> str:
+    return async_task(
+        "apps.provisioning.virtualmin_tasks.run_virtualmin_migration",
+        migration_id,
+        timeout=timeout_seconds,
+    )
+
+
+_RECLAIM_GRACE_MINUTES = 30
+_RECLAIM_BATCH = 5
+
+
+def reclaim_stalled_virtualmin_operations() -> dict[str, int]:
+    """Recover migrations and drains whose only task delivery was lost.
+
+    Drain-driven migrations run inline (no broker message to redeliver), and a
+    checkpoint or enqueue can die between commit and dispatch. Without this
+    sweep such rows strand non-terminal forever — holding the account lock and
+    the capacity reservation while the source domain stays disabled.
+    """
+    from .virtualmin_migration_models import _TERMINAL_STATUSES, VirtualminMigration  # noqa: PLC0415  # Circular
+    from .virtualmin_migration_service import migration_task_timeout  # noqa: PLC0415  # Circular
+
+    stale = timezone.now() - timedelta(minutes=_RECLAIM_GRACE_MINUTES)
+    counts = {"migrations_requeued": 0, "drains_requeued": 0, "drains_reviewed": 0}
+    stalled_migrations = list(
+        # needs_review is non-terminal but policy "stop": requeueing it would churn.
+        # Oldest-first so newer stalls never starve older rows; the updated_at
+        # bump after each dispatch is the per-row retry backoff.
+        VirtualminMigration.objects.exclude(status__in=(*_TERMINAL_STATUSES, "needs_review"))
+        .filter(updated_at__lt=stale)
+        .filter(models.Q(worker_lease_expires_at__isnull=True) | models.Q(worker_lease_expires_at__lt=timezone.now()))
+        .order_by("updated_at")
+        .values_list("pk", flat=True)[:_RECLAIM_BATCH]
+    )
+    for migration_id in stalled_migrations:
+        try:
+            enqueue_virtualmin_migration(str(migration_id), migration_task_timeout())
+            counts["migrations_requeued"] += 1
+            logger.warning("⚠️ [VirtualminTask] Requeued stalled migration %s", migration_id)
+        except Exception:
+            logger.exception("🔥 [VirtualminTask] Reclaim enqueue failed: migration=%s", migration_id)
+        finally:
+            VirtualminMigration.objects.filter(pk=migration_id).update(updated_at=timezone.now())
+    stalled_drains = list(
+        NodeDrain.objects.filter(status__in=("pending", "running"), updated_at__lt=stale).order_by("updated_at")[
+            :_RECLAIM_BATCH
+        ]
+    )
+    for drain in stalled_drains:
+        try:
+            if drain.status == "pending":
+                NodeDrainService._enqueue(drain.pk, drain.task_token)
+                counts["drains_requeued"] += 1
+            elif NodeDrainService.close_interrupted(drain.pk):
+                # Never run() here: the worker may have checkpointed the drain
+                # back to pending with a fresh token between selection and now,
+                # and run() would execute the whole drain inside this sweep.
+                counts["drains_reviewed"] += 1
+        except Exception:
+            logger.exception("🔥 [VirtualminTask] Reclaim failed: drain=%s", drain.pk)
+        finally:
+            NodeDrain.objects.filter(pk=drain.pk, status__in=("pending", "running")).update(updated_at=timezone.now())
+    return counts
+
+
+def run_virtualmin_migration(migration_id: str) -> dict[str, Any]:
+    from uuid import UUID  # noqa: PLC0415
+
+    from .virtualmin_migration_service import VirtualminMigrationService  # noqa: PLC0415
+
+    try:
+        result = VirtualminMigrationService().run(UUID(migration_id))
+    except (TypeError, ValueError) as error:
+        return {"success": False, "error": str(error)}
+    if result.is_err():
+        return {"success": False, "error": result.unwrap_err()}
+    return {"success": True, **result.unwrap()}
+
+
+def _migration_locked(account: VirtualminAccount) -> bool:
+    from .virtualmin_migration_models import account_has_active_migration  # noqa: PLC0415
+
+    locked = account_has_active_migration(account)
+    if locked:
+        logger.info("✅ [VirtualminTask] Migration lock: account=%s", account.pk)
+    return locked
+
+
 def reconcile_virtualmin_service_state(  # noqa: PLR0911  # Convergence matrix: one exit per state pair
     service_id: str,
 ) -> dict[str, Any]:
@@ -879,6 +986,8 @@ def reconcile_virtualmin_service_state(  # noqa: PLR0911  # Convergence matrix: 
         return {"success": False, "error": f"Service {service_id} not found"}
 
     account = VirtualminAccount.objects.filter(service=service).select_related("server").first()
+    if account is not None and _migration_locked(account):
+        return {"success": True, "action": "migration_locked"}
 
     if service.status == "active":
         if account is None:
@@ -1017,6 +1126,9 @@ def suspend_virtualmin_account(account_id: str, reason: str = "") -> dict[str, A
         # Create provisioning service
         provisioning_service = VirtualminProvisioningService(account.server)
 
+        if _migration_locked(account):
+            return {"success": True, "action": "migration_locked"}
+
         # Execute suspension
         result = provisioning_service.suspend_account(account, reason)
 
@@ -1065,6 +1177,9 @@ def unsuspend_virtualmin_account(account_id: str) -> dict[str, Any]:
         # Create provisioning service
         provisioning_service = VirtualminProvisioningService(account.server)
 
+        if _migration_locked(account):
+            return {"success": True, "action": "migration_locked"}
+
         # Execute unsuspension
         result = provisioning_service.unsuspend_account(account)
 
@@ -1109,6 +1224,9 @@ def delete_virtualmin_account(account_id: str) -> dict[str, Any]:
             error_msg = f"Account {account_id} not found"
             logger.error(f"❌ [VirtualminTask] {error_msg}")
             return {"success": False, "error": error_msg}
+
+        if _migration_locked(account):
+            return {"success": True, "action": "migration_locked"}
 
         # Note: Protection check is handled in the service layer
         domain = account.domain  # Store for logging after deletion
@@ -1200,6 +1318,8 @@ def health_check_virtualmin_servers() -> dict[str, Any]:
                 f"{results['healthy_servers']}/{results['total_servers']} healthy"
             )
 
+            results["reclaimed"] = reclaim_stalled_virtualmin_operations()
+
             return {"success": True, "results": results}
 
         finally:
@@ -1283,7 +1403,7 @@ def update_virtualmin_server_statistics() -> dict[str, Any]:
 
 # Operations retry_virtualmin_job knows how to recover; anything else found
 # failed is terminal for the sweep (backup/restore jobs opt out separately).
-_RETRYABLE_OPERATIONS = ("create_domain", "suspend_domain", "unsuspend_domain", "delete_domain")
+_RETRYABLE_OPERATIONS = ("create_domain", "suspend_domain", "unsuspend_domain", "delete_domain", "migrate_domain")
 
 # A claimed (pending) job whose retry task has not reconciled it within this
 # window is presumed lost to a process death and returned to the failed pool.
@@ -1312,6 +1432,9 @@ def retry_virtualmin_job(job_id: str, claim_nonce: str = "") -> dict[str, Any]:
     service = VirtualminProvisioningService(job.server)
     result = service.retry_job(job)
     if result.is_ok():
+        outcome = result.unwrap()
+        if isinstance(outcome, dict):
+            return {"success": True, "job_id": job_id, **outcome}
         return {"success": True, "job_id": job_id}
     return {"success": False, "job_id": job_id, "error": str(result.unwrap_err())}
 
@@ -1374,11 +1497,16 @@ def process_failed_virtualmin_jobs() -> dict[str, Any]:
                     continue
 
                 try:
+                    dispatch_timeout = TASK_TIME_LIMIT
+                    if job.operation == "migrate_domain":
+                        from .virtualmin_migration_service import migration_task_timeout  # noqa: PLC0415
+
+                        dispatch_timeout = migration_task_timeout()
                     task_id = async_task(
                         "apps.provisioning.virtualmin_tasks.retry_virtualmin_job",
                         str(job.id),
                         now.isoformat(),  # claim nonce: only this claim's task may run the job
-                        timeout=TASK_TIME_LIMIT,
+                        timeout=dispatch_timeout,
                     )
                     VirtualminProvisioningJob.record_dispatch(job.pk, task_id)
                 except Exception as enqueue_error:

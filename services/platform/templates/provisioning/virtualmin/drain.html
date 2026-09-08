@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% block content %}
+<div class="space-y-4 text-slate-100">
+  <h1>{% trans "Drain server" %}: {{ server.name }}</h1>
+  {% if drain %}
+    <p>{{ drain.get_status_display }}: {{ drain.accounts_migrated }} / {{ drain.accounts_total }} {% trans "migrated" %}; {{ drain.accounts_skipped }} {% trans "skipped" %}</p>
+    <p>{{ drain.error_detail }}</p>
+    {% if drain.cancel_requested %}<p>{% trans "Cancellation requested; waiting for the current account." %}</p>{% endif %}
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="drain_id" value="{{ drain.pk }}">
+      {% if drain.status == "completed" and not drain.routing_confirmed %}
+        <p>{% trans "Migration is complete. This server remains excluded from placement until routing is confirmed." %}</p>
+        <label><input type="checkbox" name="routing_confirmed" required> {% trans "I confirm routing and DNS no longer use this server." %}</label>
+        <button name="action" value="finalize" hx-confirm="{% trans 'Finalize this drain and disable the server?' %}">{% trans "Finalize drain" %}</button>
+      {% elif drain.status == "pending" or drain.status == "running" or drain.status == "paused_needs_review" %}
+        <button name="action" value="cancel" hx-confirm="{% trans 'Cancel after the current account finishes?' %}">{% trans "Cancel drain" %}</button>
+      {% endif %}
+    </form>
+  {% endif %}
+  {% if server.status == "active" and not server.is_draining %}
+    <form method="post">
+      {% csrf_token %}
+      <button name="action" value="start" hx-confirm="{% trans 'Start migrating accounts off this server?' %}">{% trans "Start drain" %}</button>
+    </form>
+  {% endif %}
+</div>
+{% endblock %}

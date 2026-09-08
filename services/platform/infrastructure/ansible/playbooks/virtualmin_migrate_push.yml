@@ -1,0 +1,37 @@
+---
+- name: Push one Virtualmin migration archive
+  hosts: all
+  gather_facts: false
+  become: false
+  tasks:
+    - name: Validate single-host migration inputs
+      ansible.builtin.assert:
+        that:
+          - ansible_play_hosts_all | length == 1
+          - archive_name is match('^migration_[0-9a-f-]{36}\.tar\.gz$')
+          - spool_dir is match('^/')
+          - expected_sha256 is match('^[0-9a-f]{64}$')
+
+    - name: Copy archive into the target temporary directory
+      ansible.builtin.copy:
+        src: "{{ spool_dir }}/{{ archive_name }}"
+        dest: "/tmp/{{ archive_name }}"
+        owner: root
+        group: root
+        mode: '0600'
+        follow: false
+
+    - name: Inspect the transferred archive
+      ansible.builtin.stat:
+        path: "/tmp/{{ archive_name }}"
+        checksum_algorithm: sha256
+        follow: false
+      register: migration_archive
+
+    - name: Verify transferred archive checksum
+      ansible.builtin.assert:
+        that:
+          - migration_archive.stat.isreg | default(false)
+          - not (migration_archive.stat.islnk | default(false))
+          - migration_archive.stat.checksum | default('') == expected_sha256
+        fail_msg: "Migration archive SHA-256 mismatch on target; restore is forbidden"

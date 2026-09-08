@@ -8,6 +8,7 @@ from typing import Any, ClassVar, cast
 
 from django import forms
 from django.core.exceptions import ValidationError
+from django.db import models
 from django.utils.translation import gettext_lazy as _
 
 from apps.common.outbound_http import OutboundSecurityError, normalize_tls_cert_fingerprint
@@ -464,3 +465,33 @@ class VirtualminAccountForm(forms.ModelForm):  # type: ignore[type-arg]
             raise ValidationError(_("An account with this domain already exists"))
 
         return domain
+
+
+class VirtualminMigrationForm(forms.Form):
+    target_server = forms.ModelChoiceField(
+        queryset=VirtualminServer.objects.none(),
+        widget=PRAHOSelectWidget(),
+        label=_("Target server"),
+    )
+    confirm = forms.BooleanField(
+        widget=PRAHOCheckboxWidget(),
+        label=_("I understand the downtime, retained-copy, and manual routing/DNS requirements."),
+    )
+
+    def __init__(self, *args: Any, account: VirtualminAccount, **kwargs: Any) -> None:
+        from .virtualmin_migration_service import VirtualminMigrationService  # noqa: PLC0415
+
+        super().__init__(*args, **kwargs)
+        targets = VirtualminMigrationService.eligible_targets(account)
+        field = cast("forms.ModelChoiceField[VirtualminServer]", self.fields["target_server"])
+        # Preserve the placement-policy order in the dropdown — a bare pk__in
+        # filter would fall back to arbitrary database order.
+        position = models.Case(
+            *[models.When(pk=server.pk, then=index) for index, server in enumerate(targets)],
+            output_field=models.IntegerField(),
+        )
+        field.queryset = (
+            VirtualminServer.objects.filter(pk__in=[server.pk for server in targets])
+            .annotate(_placement_rank=position)
+            .order_by("_placement_rank")
+        )
