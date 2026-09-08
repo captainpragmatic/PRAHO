@@ -6,7 +6,7 @@ Tests for critical security vulnerabilities and Romanian compliance.
 import time
 from unittest.mock import patch
 
-from django.contrib.auth import get_user_model
+from django.contrib.auth import authenticate, get_user_model
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.test import TestCase
@@ -400,6 +400,47 @@ class TestSecureUserRegistrationService(TestCase):
         cache.clear()
 
     @patch('apps.common.security_decorators.log_security_event')
+    def test_registration_sets_usable_password(self, mock_log):
+        """The submitted password must be set on the new user so they can authenticate.
+
+        Regression: register_new_customer_owner created the user without passing the
+        password to create_user(), so set_password(None) left every registered user
+        with an unusable password (they could never log in). #499.
+        """
+        password = "CorrectHorse12!"
+        user_data = {
+            'email': 'loginable@newcompany.ro',
+            'first_name': 'Ana',
+            'last_name': 'Ionescu',
+            'phone': '+40721234500',
+            'password': password,
+            'accepts_marketing': False,
+            'gdpr_consent_date': '2023-01-01',
+        }
+        customer_data = {
+            'company_name': 'Loginable SRL',
+            'customer_type': 'company',
+            'vat_number': 'RO87654321',
+            'registration_number': '87654321',
+            'billing_address': 'Strada Test 123',
+            'billing_city': 'București',
+            'billing_postal_code': '010101',
+        }
+
+        result = SecureUserRegistrationService.register_new_customer_owner(
+            user_data=user_data, customer_data=customer_data, request_ip='192.168.1.1'
+        )
+
+        self.assertTrue(result.is_ok(), f"registration failed: {result}")
+        user, _customer = result.value
+        self.assertTrue(user.has_usable_password(), "registered user has an unusable password")
+        self.assertTrue(user.check_password(password), "submitted password was not set on the user")
+        self.assertIsNotNone(
+            authenticate(username='loginable@newcompany.ro', password=password),
+            "registered user cannot authenticate with the submitted password",
+        )
+
+    @patch('apps.common.security_decorators.log_security_event')
     def test_secure_registration_with_valid_data(self, mock_log):
         """Test secure registration with valid Romanian business data"""
         user_data = {
@@ -407,6 +448,7 @@ class TestSecureUserRegistrationService(TestCase):
             'first_name': 'Ion',
             'last_name': 'Popescu',
             'phone': '+40721234567',
+            'password': 'CorrectHorse12!',
             'accepts_marketing': True,
             'gdpr_consent_date': '2023-01-01'
         }
