@@ -74,6 +74,7 @@ class VirtualminServer(models.Model):
     )
 
     # Server status and health
+    is_draining = models.BooleanField(default=False)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="active", verbose_name=_("Status"))
     last_health_check = models.DateTimeField(null=True, blank=True)
     health_check_error = models.TextField(blank=True)
@@ -197,7 +198,12 @@ class VirtualminServer(models.Model):
 
     def can_host_domain(self) -> bool:
         """Check if server can host another domain"""
-        return self.status == "active" and self.is_healthy and self.current_domains < self.max_domains
+        return (
+            self.status == "active"
+            and not self.is_draining
+            and self.is_healthy
+            and self.current_domains < self.max_domains
+        )
 
     def update_stats(self, domains: int, disk_gb: float, bandwidth_gb: float) -> None:
         """Update server statistics"""

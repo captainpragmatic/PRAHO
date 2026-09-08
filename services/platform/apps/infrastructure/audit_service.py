@@ -132,6 +132,9 @@ class InfrastructureAuditService:
             metadata={
                 **context.metadata,
                 "initiated_by": str(deployment.initiated_by_id) if deployment.initiated_by_id else None,
+                "source_node_id": deployment.source_node_id,
+                "source_node_hostname": deployment.source_node.hostname if deployment.source_node else None,
+                "triggered_by_failover": deployment.triggered_by_failover,
             },
         )
 

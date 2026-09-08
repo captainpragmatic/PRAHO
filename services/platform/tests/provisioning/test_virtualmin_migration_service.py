@@ -40,7 +40,7 @@ from tests.provisioning import test_virtualmin_tasks as task_tests
     CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
     Q_CLUSTER={"retry": 14400, "orm": "default"},
 )
-class MigrationTests(task_tests.VirtualminTaskTestBase):
+class MigrationTestBase(task_tests.VirtualminTaskTestBase):
     def setUp(self) -> None:
         super().setUp()
         # fsm-bypass: establish the existing active account fixture.
@@ -213,6 +213,8 @@ class MigrationTests(task_tests.VirtualminTaskTestBase):
         )
         VirtualminServer.objects.filter(pk=self.target.pk).update(max_domains=1, current_domains=0)
 
+
+class MigrationTests(MigrationTestBase):
     def test_happy_path_order_evidence_repoint_and_audit(self) -> None:
         transitions: list[str] = []
         saves: list[set[str]] = []

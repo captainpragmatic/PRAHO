@@ -9,6 +9,7 @@ import logging
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any, TypedDict
+from uuid import UUID
 
 from django.conf import settings
 from django.core.cache import cache
@@ -29,6 +30,8 @@ from .security_utils import (
     log_security_event_safe,
     sanitize_log_parameters,
 )
+from .virtualmin_drain_service import NodeDrainService
+from .virtualmin_migration_models import NodeDrain
 from .virtualmin_models import (
     VirtualminAccount,
     VirtualminProvisioningJob,
@@ -855,6 +858,21 @@ def _handle_critical_provisioning_error(
         "correlation_id": correlation_id,
     }
     return _handle_critical_provisioning_error_secure(error, domain, service_id, correlation_id, safe_log_ctx)
+
+
+def run_node_drain(drain_id: str, task_token: str | None = None) -> dict[str, Any]:
+    try:
+        result = NodeDrainService.run(UUID(drain_id), UUID(task_token) if task_token else None)
+    except (ValueError, TypeError, NodeDrain.DoesNotExist) as error:
+        return {"success": False, "error": str(error)}
+    if result.is_err():
+        return {"success": False, "error": result.unwrap_err()}
+    drain = result.unwrap()
+    return {
+        "success": drain.status not in {"failed", "paused_needs_review"},
+        "drain_id": str(drain.pk),
+        "status": drain.status,
+    }
 
 
 def enqueue_virtualmin_migration(migration_id: str, timeout_seconds: int) -> str:

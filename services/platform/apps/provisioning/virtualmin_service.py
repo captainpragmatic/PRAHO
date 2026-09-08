@@ -25,6 +25,7 @@ from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 
 from .security_utils import IdempotencyManager
 from .virtualmin_backup_service import BackupConfig, RestoreConfig
+from .virtualmin_drain_service import coordinate_health_failure
 from .virtualmin_gateway import (
     VirtualminConfig,
     VirtualminGateway,
@@ -32,7 +33,6 @@ from .virtualmin_gateway import (
     get_virtualmin_config,
 )
 from .virtualmin_models import (
-    HEALTH_AUTO_FAIL_THRESHOLD,
     VirtualminAccount,
     VirtualminDriftRecord,
     VirtualminProvisioningJob,
@@ -308,11 +308,15 @@ class VirtualminProvisioningService:
             logger.exception(f"Unexpected error reprovisioning Virtualmin account: {e}")
             return Err(f"Internal error: {e}")
 
-    def _execute_domain_creation(
+    def _execute_domain_creation(  # noqa: PLR0911,PLR0915
         self, account: VirtualminAccount, job: VirtualminProvisioningJob
     ) -> Result[dict[str, Any], str]:
         """Execute domain creation on Virtualmin server with validation and rollback"""
         try:
+            account.server.refresh_from_db(fields=["is_draining"])
+            if account.server.is_draining:
+                job.mark_failed("Target server is draining", retriability=Retriability.RETRIABLE)
+                return Err("Target server is draining", retriability=Retriability.RETRIABLE)
             gateway = self._get_gateway(account.server)
 
             # Mark job as started
@@ -1098,12 +1102,17 @@ class VirtualminProvisioningService:
             return resume_migration(job)
         return Err(f"Unsupported retry operation '{job.operation}'")
 
-    def _retry_create_domain(self, account: VirtualminAccount, job: VirtualminProvisioningJob) -> Result[bool, str]:
+    def _retry_create_domain(  # noqa: PLR0911
+        self, account: VirtualminAccount, job: VirtualminProvisioningJob
+    ) -> Result[bool, str]:
         """
         Convergent create retry: a timed-out-but-remotely-successful
         create-domain must finalize local state, never re-create or rotate
         credentials; an absent remote domain re-runs creation on the same rows.
         """
+        account.server.refresh_from_db(fields=["is_draining"])
+        if account.server.is_draining:
+            return Err("Target server is draining", retriability=Retriability.RETRIABLE)
         gateway = self._get_gateway(account.server)
         owner_result = gateway.get_domain_owner(account.domain)
         if owner_result.is_err():
@@ -1565,19 +1574,8 @@ class VirtualminServerManagementService:
                     updated_at=timezone.now(),
                 )
                 server.refresh_from_db()
-                if server.status == "active" and server.consecutive_health_failures >= HEALTH_AUTO_FAIL_THRESHOLD:
-                    # Conditional on the CURRENT DB streak: a concurrent
-                    # success that reset the streak wins over this stale probe.
-                    VirtualminServer.objects.filter(
-                        pk=server.pk,
-                        status="active",
-                        consecutive_health_failures__gte=HEALTH_AUTO_FAIL_THRESHOLD,
-                    ).update(status="failed", failed_by_health_check=True, updated_at=timezone.now())
-                    server.refresh_from_db()
-                    logger.error(
-                        f"🔥 [ServerManagement] Auto-failed {server.hostname} after "
-                        f"{server.consecutive_health_failures} consecutive failed checks"
-                    )
+                coordinate_health_failure(server)
+                server.refresh_from_db()
 
                 logger.warning(f"⚠️ [ServerManagement] Health check failed for {server.hostname}: {error_msg}")
                 return Err(error_msg, retriability=retriability_of(result))

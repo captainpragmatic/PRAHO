@@ -870,6 +870,7 @@ def stop_node_task(
     deployment_id: int,
     provider_id: int,
     user_id: int | None = None,
+    force: bool = False,
 ) -> dict[str, Any]:
     """
     Async task to stop (power off) a node.
@@ -927,6 +928,7 @@ def stop_node_task(
         deployment=deployment,
         credentials=credentials,
         user=user,
+        force=force,
     )
 
     if result.is_err():
@@ -1048,6 +1050,7 @@ def start_node_task(
         "deployment_id": deployment_id,
         "hostname": deployment.hostname,
         "action": "started",
+        "virtualmin_status": (deployment.virtualmin_server.status if deployment.virtualmin_server else "unlinked"),
         "started_at": timezone.now().isoformat(),
     }
 
@@ -1330,6 +1333,7 @@ def queue_stop_node(
     deployment_id: int,
     provider_id: int,
     user_id: int | None = None,
+    force: bool = False,
 ) -> str:
     """
     Queue a node stop task.
@@ -1351,6 +1355,7 @@ def queue_stop_node(
         deployment_id,
         provider_id,
         user_id,
+        force=force,
         task_name=f"stop_node_{deployment_id}",
         hook="apps.infrastructure.tasks.lifecycle_complete_hook",
     )

@@ -16,6 +16,7 @@ These tests focus on:
 Note: Unit tests for individual functions are in test_provider_config.py
 """
 
+from collections.abc import Callable
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -575,15 +576,14 @@ class TestTaskQueueIntegration(TestCase):
 
         deployment = create_test_deployment(self.infra, status="completed")
 
-        queue_functions = [
+        queue_functions: list[tuple[Callable[..., str], str]] = [
             (queue_stop_node, "stop_node_task"),
             (queue_start_node, "start_node_task"),
             (queue_reboot_node, "reboot_node_task"),
         ]
 
         for queue_fn, expected_task in queue_functions:
-            with self.subTest(task=expected_task):
-                with mock.patch("django_q.tasks.async_task") as mock_async:
+            with self.subTest(task=expected_task), mock.patch("django_q.tasks.async_task") as mock_async:
                     mock_async.return_value = f"task-{expected_task}"
 
                     task_id = queue_fn(

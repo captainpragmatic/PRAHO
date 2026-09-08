@@ -22,6 +22,7 @@
         </div>
         <div class="mt-4 sm:mt-0 flex space-x-3">
             {% trans "Edit" as bt1 %}{% button bt1 href="edit/" variant="secondary" %}
+            <a href="{% url 'provisioning:node_drain' server.pk %}">{% trans "Drain server" %}</a>
             <form method="post" action="health/" class="inline">
                 {% csrf_token %}
                 {% trans "Health Check" as bt2 %}{% button bt2 type="submit" variant="primary" hx_post="health/" hx_target="#health-status" hx_indicator="#health-loading" hx_include="[name='csrfmiddlewaretoken']" %}

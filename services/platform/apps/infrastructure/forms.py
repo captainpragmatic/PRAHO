@@ -34,6 +34,7 @@ class NodeDeploymentForm(forms.ModelForm):
             "panel_type",
             "display_name",
             "backup_enabled",
+            "source_node",
         ]
         widgets = {
             "environment": forms.RadioSelect(attrs={"class": "sr-only peer", "x-model": "environment"}),

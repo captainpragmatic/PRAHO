@@ -235,14 +235,22 @@ class VirtualminMigrationService:
         *,
         initiated_by: User | None,
         reason: str = "manual",
+        enqueue: bool = True,
     ) -> Result[VirtualminMigration, str]:
         try:
             with transaction.atomic():
                 account = VirtualminAccount.objects.select_for_update().select_related("server").get(pk=account.pk)
-                target = VirtualminServer.objects.select_for_update().get(pk=target_server.pk)
+                servers = {
+                    server.pk: server
+                    for server in VirtualminServer.objects.select_for_update()
+                    .filter(pk__in=(account.server_id, target_server.pk))
+                    .order_by("pk")
+                }
+                account.server = servers[account.server_id]
+                target = servers[target_server.pk]
                 self._local_preflight(account, target)
-                if reason != "manual":
-                    raise ValueError("Only manual migration is implemented in this round")
+                if reason not in VirtualminMigration.Reason.values:
+                    raise ValueError("Invalid migration reason")
                 migration = VirtualminMigration.objects.create(
                     account=account,
                     source_server=account.server,
@@ -279,7 +287,8 @@ class VirtualminMigrationService:
                     self._finish(migration, token, "failed", str(error))
                     return Err(str(error))
                 self._move(migration, token, "pending", lease_token=None, worker_lease_expires_at=None)
-                transaction.on_commit(lambda: self._enqueue(migration.pk))
+                if enqueue:
+                    transaction.on_commit(lambda: self._enqueue(migration.pk))
             return Ok(migration)
         except (ValueError, IntegrityError, MigrationLeaseLostError) as error:
             return Err(str(error))

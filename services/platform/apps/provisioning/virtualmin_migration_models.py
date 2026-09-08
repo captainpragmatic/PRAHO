@@ -115,6 +115,49 @@ class VirtualminMigration(models.Model):
         return cls.objects.filter(target_server=server).exclude(status__in=_TERMINAL_STATUSES).count()
 
 
+class NodeDrain(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "pending", _("Pending")
+        RUNNING = "running", _("Running")
+        PAUSED = "paused_needs_review", _("Paused: needs review")
+        COMPLETED = "completed", _("Completed")
+        CANCELLED = "cancelled", _("Cancelled")
+        FAILED = "failed", _("Failed")
+
+    class Reason(models.TextChoices):
+        MANUAL = "manual", _("Manual")
+        AUTO_HEALTH = "auto_health", _("Automatic health trigger")
+
+    TERMINAL: ClassVar[tuple[str, ...]] = ("completed", "cancelled", "failed")
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    server = models.ForeignKey("provisioning.VirtualminServer", on_delete=models.PROTECT, related_name="drains")
+    status = models.CharField(max_length=24, choices=Status.choices, default=Status.PENDING)
+    initiated_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True)
+    reason = models.CharField(max_length=12, choices=Reason.choices, default=Reason.MANUAL)
+    accounts_total = models.PositiveIntegerField(default=0)
+    accounts_migrated = models.PositiveIntegerField(default=0)
+    accounts_skipped = models.PositiveIntegerField(default=0)
+    error_detail = models.TextField(blank=True)
+    routing_confirmed = models.BooleanField(default=False)
+    cancel_requested = models.BooleanField(default=False)
+    task_token = models.UUIDField(default=uuid.uuid4, editable=False)
+    current_migration = models.ForeignKey(VirtualminMigration, on_delete=models.PROTECT, null=True, blank=True)
+    worker_started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering: ClassVar[tuple[str, ...]] = ("-created_at",)
+        constraints: ClassVar[list[models.BaseConstraint]] = [
+            models.UniqueConstraint(
+                fields=("server",),
+                condition=~models.Q(status__in=("completed", "cancelled", "failed")),
+                name="unique_active_node_drain",
+            )
+        ]
+
+
 def account_has_active_migration(account: VirtualminAccount) -> bool:
     """Needs-review migrations retain ownership until explicitly resolved."""
     return VirtualminMigration.objects.filter(account_id=account.pk).exclude(status__in=_TERMINAL_STATUSES).exists()

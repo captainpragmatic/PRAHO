@@ -16,6 +16,7 @@ class NodeDeploymentRetriabilityTests(SimpleTestCase):
         deployment.hostname = "node.example.com"
         deployment.provider.provider_type = "hetzner"
         deployment.external_node_id = "node-1"
+        deployment.virtualmin_server_id = None
         provider_result = Err("provider rate limited", retriability=Retriability.RETRIABLE)
 
         with (
