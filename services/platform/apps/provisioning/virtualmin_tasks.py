@@ -883,6 +883,52 @@ def enqueue_virtualmin_migration(migration_id: str, timeout_seconds: int) -> str
     )
 
 
+_RECLAIM_GRACE_MINUTES = 30
+_RECLAIM_BATCH = 5
+
+
+def reclaim_stalled_virtualmin_operations() -> dict[str, int]:
+    """Recover migrations and drains whose only task delivery was lost.
+
+    Drain-driven migrations run inline (no broker message to redeliver), and a
+    checkpoint or enqueue can die between commit and dispatch. Without this
+    sweep such rows strand non-terminal forever — holding the account lock and
+    the capacity reservation while the source domain stays disabled.
+    """
+    from .virtualmin_migration_models import _TERMINAL_STATUSES, VirtualminMigration  # noqa: PLC0415  # Circular
+    from .virtualmin_migration_service import migration_task_timeout  # noqa: PLC0415  # Circular
+
+    stale = timezone.now() - timedelta(minutes=_RECLAIM_GRACE_MINUTES)
+    counts = {"migrations_requeued": 0, "drains_requeued": 0, "drains_reviewed": 0}
+    stalled_migrations = (
+        # needs_review is non-terminal but policy "stop": requeueing it would churn.
+        VirtualminMigration.objects.exclude(status__in=(*_TERMINAL_STATUSES, "needs_review"))
+        .filter(updated_at__lt=stale)
+        .filter(models.Q(worker_lease_expires_at__isnull=True) | models.Q(worker_lease_expires_at__lt=timezone.now()))
+        .values_list("pk", flat=True)[:_RECLAIM_BATCH]
+    )
+    for migration_id in stalled_migrations:
+        try:
+            enqueue_virtualmin_migration(str(migration_id), migration_task_timeout())
+            counts["migrations_requeued"] += 1
+            logger.warning("⚠️ [VirtualminTask] Requeued stalled migration %s", migration_id)
+        except Exception:
+            logger.exception("🔥 [VirtualminTask] Reclaim enqueue failed: migration=%s", migration_id)
+    for drain in NodeDrain.objects.filter(status__in=("pending", "running"), updated_at__lt=stale)[:_RECLAIM_BATCH]:
+        try:
+            if drain.status == "pending":
+                NodeDrainService._enqueue(drain.pk, drain.task_token)
+                counts["drains_requeued"] += 1
+            else:
+                # A genuinely interrupted worker is closed to paused_needs_review
+                # by run()'s stale-claim branch; a fresher one returns untouched.
+                NodeDrainService.run(drain.pk)
+                counts["drains_reviewed"] += 1
+        except Exception:
+            logger.exception("🔥 [VirtualminTask] Reclaim failed: drain=%s", drain.pk)
+    return counts
+
+
 def run_virtualmin_migration(migration_id: str) -> dict[str, Any]:
     from uuid import UUID  # noqa: PLC0415
 
@@ -1259,6 +1305,8 @@ def health_check_virtualmin_servers() -> dict[str, Any]:
                 f"✅ [VirtualminTask] Health check completed: "
                 f"{results['healthy_servers']}/{results['total_servers']} healthy"
             )
+
+            results["reclaimed"] = reclaim_stalled_virtualmin_operations()
 
             return {"success": True, "results": results}
 

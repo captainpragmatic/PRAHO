@@ -12,12 +12,13 @@ from uuid import UUID, uuid4
 
 from django.conf import settings
 from django.db import IntegrityError, transaction
+from django.db.models import F
 from django.utils import timezone
 
 from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 
 from .placement import order_placement_candidates
-from .virtualmin_gateway import VirtualminConfig, VirtualminGateway
+from .virtualmin_gateway import PARSER_AMBIGUOUS_ERRORS, VirtualminConfig, VirtualminGateway
 from .virtualmin_migration_models import VirtualminMigration, account_has_active_migration
 from .virtualmin_models import VirtualminAccount, VirtualminProvisioningJob, VirtualminServer
 
@@ -75,8 +76,14 @@ def _scalar(value: object) -> str:
     return str(value).strip()
 
 
-def list_migration_domains(gateway: VirtualminGateway) -> Result[list[dict[str, Any]], str]:
-    """Reuse call()'s VirtualminResponseParser output, retaining multiline attributes."""
+def list_migration_domains(gateway: VirtualminGateway, *, strict: bool = True) -> Result[list[dict[str, Any]], str]:
+    """Reuse call()'s VirtualminResponseParser output, retaining multiline attributes.
+
+    strict=True (migration admission) treats any malformed row as fatal — a
+    listing that cannot be fully trusted must not gate a collision check.
+    strict=False (account sync) skips malformed rows so one odd header or
+    separator row cannot abort a whole server's sync.
+    """
     result = gateway.call("list-domains", {"multiline": ""})
     if result.is_err():
         return Err(str(result.unwrap_err()))
@@ -87,7 +94,10 @@ def list_migration_domains(gateway: VirtualminGateway) -> Result[list[dict[str, 
     rows: list[dict[str, Any]] = []
     for item in items:
         if not isinstance(item, dict) or not item.get("name") or not isinstance(item.get("values"), dict):
-            return Err("Incomplete Virtualmin multiline domain listing")
+            if strict:
+                return Err("Incomplete Virtualmin multiline domain listing")
+            logger.warning("⚠️ [VirtualminMigration] Skipping malformed listing row: %r", item)
+            continue
         values = item["values"]
         state = _scalar(values.get("Status", "")).lower()
         rows.append(
@@ -243,7 +253,11 @@ class VirtualminMigrationService:
     ) -> Result[VirtualminMigration, str]:
         try:
             with transaction.atomic():
-                account = VirtualminAccount.objects.select_for_update().select_related("server").get(pk=account.pk)
+                # Lock ONLY the account row here — a select_related join would also
+                # lock the source server out of pk order (PostgreSQL locks joined
+                # rows), deadlocking concurrent A→B / B→A admissions against the
+                # ordered server locks below.
+                account = VirtualminAccount.objects.select_for_update().get(pk=account.pk)
                 servers = {
                     server.pk: server
                     for server in VirtualminServer.objects.select_for_update()
@@ -309,6 +323,10 @@ class VirtualminMigrationService:
                 migration.refresh_from_db()
                 if migration.status == "pending":
                     self._finish(migration, token, "failed", f"Enqueue failed: {error}")
+                else:
+                    migration.transition(
+                        token, migration.status, migration.status, lease_token=None, worker_lease_expires_at=None
+                    )
             logger.exception("🔥 [VirtualminMigration] Enqueue failed: migration=%s", migration_id)
 
     def _command(
@@ -328,7 +346,12 @@ class VirtualminMigrationService:
             raise RuntimeError(f"Ambiguous {program}: {result.unwrap_err()}")
         response = result.unwrap()
         if not response.success:
-            raise DefiniteMigrationFailureError(f"{program} rejected: {response.data.get('error', response.data)}")
+            detail = response.data.get("error", response.data)
+            # A blank or unparseable body proves nothing about execution —
+            # that ambiguity must never authorize compensation (delete/enable).
+            if not (response.raw_response or "").strip() or response.data.get("error") in PARSER_AMBIGUOUS_ERRORS:
+                raise RuntimeError(f"Ambiguous {program}: response could not be interpreted ({detail})")
+            raise DefiniteMigrationFailureError(f"{program} rejected: {detail}")
         if response.data.get("status") != "success" and response.data.get("success") is not True:
             raise RuntimeError(f"{program} lacked an explicit synchronous success response")
 
@@ -468,6 +491,11 @@ class VirtualminMigrationService:
         self._move(migration, token, "repointing")
 
     def _repoint(self, migration: VirtualminMigration, token: UUID) -> None:
+        # Final write-barrier check: an external writer (drift enforcement, an
+        # operator) re-enabling the quiesced source after backup would create a
+        # split-brain retained copy — park for review instead of completing.
+        if self._domain(migration.source_server, migration.account.domain)["enabled"] is True:
+            raise ValueError("Source domain was re-enabled by an external writer during migration")
         with transaction.atomic():
             self._move(migration, token, "repointing")
             account = VirtualminAccount.objects.select_for_update().get(pk=migration.account_id)
@@ -475,6 +503,13 @@ class VirtualminMigrationService:
                 raise ValueError("Account ownership changed during migration")
             account.server = migration.target_server
             account.save(update_fields=["server", "updated_at"])
+            # The restored domain occupies target capacity now; the reservation
+            # row dies with this completion, so account for it immediately. Any
+            # double count against the 6-hourly stats snapshot over-counts (the
+            # safe direction) and self-heals on the next snapshot.
+            VirtualminServer.objects.filter(pk=migration.target_server_id).update(
+                current_domains=F("current_domains") + 1, updated_at=timezone.now()
+            )
             self._finish(migration, token, "completed")
 
     def execute(self, migration: VirtualminMigration, lease_token: UUID) -> Result[VirtualminMigration, str]:
@@ -534,6 +569,29 @@ class VirtualminMigrationService:
                 lease_token=None,
                 worker_lease_expires_at=None,
             )
+
+
+def resolve_migration(
+    migration: VirtualminMigration, *, resolved_by: User | None, note: str
+) -> Result[VirtualminMigration, str]:
+    """Operator terminal resolution for a needs_review migration.
+
+    The operator repairs remote state by hand (re-enable the source, remove a
+    partial target, ...) and then releases the ownership lock, the capacity
+    reservation, and the one-active-migration constraint by failing the row.
+    """
+    service = VirtualminMigrationService()
+    token = uuid4()
+    if not migration.acquire_lease(token, service.lease_ttl):
+        return Err("Migration is currently owned by a worker; try again shortly")
+    migration.refresh_from_db()
+    if migration.status != "needs_review":
+        migration.transition(token, migration.status, migration.status, lease_token=None, worker_lease_expires_at=None)
+        return Err("Only a needs_review migration can be resolved manually")
+    actor = resolved_by.email if resolved_by else "system"
+    detail = f"Manually resolved by {actor}: {note or 'operator confirmed remote state'}"
+    service._finish(migration, token, "failed", detail)
+    return Ok(migration)
 
 
 def resume_migration(job: VirtualminProvisioningJob) -> Result[MigrationResumeOutcome, str]:

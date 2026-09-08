@@ -42,6 +42,11 @@ urlpatterns = [
         name="virtualmin_account_migrate",
     ),
     path(
+        "accounts/<uuid:account_id>/migration/resolve/",
+        virtualmin_views.virtualmin_migration_resolve,
+        name="virtualmin_migration_resolve",
+    ),
+    path(
         "accounts/<uuid:account_id>/backup/",
         virtualmin_views.virtualmin_account_backup,
         name="virtualmin_account_backup",

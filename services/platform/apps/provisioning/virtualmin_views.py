@@ -523,6 +523,27 @@ def virtualmin_account_migrate(request: HttpRequest, account_id: str) -> HttpRes
 
 @login_required
 @user_passes_test(is_staff_or_superuser)
+@require_http_methods(["POST"])
+@audit_service_call("virtualmin_migration_resolve")
+def virtualmin_migration_resolve(request: HttpRequest, account_id: str) -> HttpResponse:
+    """Operator terminal resolution of a needs_review migration (releases the lock)."""
+    from .virtualmin_migration_service import resolve_migration  # noqa: PLC0415
+
+    account = get_object_or_404(VirtualminAccount, pk=account_id)
+    migration = account.migrations.filter(status="needs_review").first()
+    if migration is None:
+        messages.error(request, _("No migration awaiting review for this account."))
+    else:
+        result = resolve_migration(migration, resolved_by=cast(User, request.user), note=request.POST.get("note", ""))
+        if result.is_ok():
+            messages.success(request, _("Migration marked resolved. The account is unlocked."))
+        else:
+            messages.error(request, result.unwrap_err())
+    return redirect("provisioning:virtualmin_account_detail", account_id=account.pk)
+
+
+@login_required
+@user_passes_test(is_staff_or_superuser)
 @audit_service_call("virtualmin_backup_form")
 def virtualmin_account_backup(request: HttpRequest, account_id: str) -> HttpResponse:
     """💾 Create backup for Virtualmin account."""
@@ -1798,8 +1819,9 @@ def virtualmin_accounts_sync(  # noqa: C901, PLR0912, PLR0915  # Complexity: mul
             # Get gateway for this server
             gateway = provisioning_service._get_gateway(server)
 
-            # List domains from this server
-            domains_result = list_migration_domains(gateway)
+            # List domains from this server (lenient: one malformed row must
+            # not abort the whole server's sync)
+            domains_result = list_migration_domains(gateway, strict=False)
 
             if domains_result.is_err():
                 error_msg = f"Failed to get domains from {server.name}: {domains_result.unwrap_err()}"

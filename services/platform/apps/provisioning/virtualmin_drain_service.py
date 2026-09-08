@@ -131,6 +131,11 @@ class NodeDrainService:
             drain = NodeDrain.objects.select_for_update().get(pk=drain.pk)
             if drain.status in NodeDrain.TERMINAL:
                 return Err("Only a non-terminal drain can be cancelled")
+            migration = drain.current_migration
+            if migration is not None and migration.status not in _TERMINAL_STATUSES:
+                # Cancelling would clear is_draining and re-admit the server to
+                # placement while its account is still mid-migration.
+                return Err("Resolve the in-flight migration before cancelling the drain")
             drain.cancel_requested = True
             drain.save(update_fields=["cancel_requested", "updated_at"])
             if drain.status != "running":

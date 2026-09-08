@@ -13,7 +13,7 @@ from apps.infrastructure.deployment_service import NodeDeploymentService
 from apps.infrastructure.forms import NodeDeploymentForm
 from apps.infrastructure.models import NodeDeployment
 from apps.infrastructure.tasks import queue_stop_node, start_node_task, stop_node_task
-from apps.provisioning.virtualmin_migration_models import NodeDrain
+from apps.provisioning.virtualmin_migration_models import NodeDrain, VirtualminMigration
 from apps.provisioning.virtualmin_models import VirtualminServer
 from tests.provisioning.test_virtualmin_migration_service import MigrationTestBase
 
@@ -171,6 +171,57 @@ class NodeDrainHookTests(MigrationTestBase):
             result = stop_node_task(self.deployment.pk, self.deployment.provider_id, force=True)
         self.assertTrue(result["success"])
         self.assertTrue(service.stop_node.call_args.kwargs["force"])
+
+    def test_stop_refuses_inflight_migration_target(self) -> None:
+        """An incoming migration has no local account row yet; stop must still refuse."""
+        VirtualminMigration.objects.create(
+            account=self.account, source_server=self.server, target_server=self.target, reason="manual"
+        )
+        target_deployment = self.target.node_deployment
+        NodeDeployment.objects.filter(pk=target_deployment.pk).update(status="completed")
+        target_deployment.refresh_from_db()
+        result = self.deployment_service.stop_node(target_deployment, {"api_token": "test"})
+        self.assertTrue(result.is_err(), result)
+        self.assertIn("in-flight migration", result.unwrap_err())
+        self.target.refresh_from_db()
+        self.assertEqual(self.target.status, "active")
+
+    def test_stop_refusal_survives_historical_finalized_drain(self) -> None:
+        """A finalized drain in the past must not exempt newly provisioned workloads."""
+        NodeDrain.objects.create(server=self.server, status="completed", routing_confirmed=True)
+        self._deployment_status("completed")
+        result = self.deployment_service.stop_node(self.deployment, {"api_token": "test"})
+        self.assertTrue(result.is_err(), result)
+        self.assertIn("undrained accounts", result.unwrap_err())
+        self.server.refresh_from_db()
+        self.assertEqual(self.server.status, "active")
+
+    def test_start_preserves_flag_for_newly_admitted_drain(self) -> None:
+        """A drain admitted around activation must keep the server out of placement."""
+        self._deployment_status("stopped")
+        self._disabled_draining_server()
+        NodeDrain.objects.create(server=self.server)
+
+        def activate(server: VirtualminServer) -> Ok[bool]:
+            # fsm-bypass: mirror verify_and_activate's disabled->active CAS.
+            VirtualminServer.objects.filter(pk=server.pk, status="disabled").update(status="active")
+            return Ok(True)
+
+        with (
+            patch(
+                "apps.infrastructure.deployment_service.run_provider_command",
+                return_value=Ok(SimpleNamespace(success=True)),
+            ),
+            patch(
+                "apps.infrastructure.registration_service.NodeRegistrationService.verify_and_activate",
+                side_effect=activate,
+            ),
+        ):
+            result = self.deployment_service.start_node(self.deployment, {"api_token": "test"})
+        self.assertTrue(result.is_ok(), result)
+        self.server.refresh_from_db()
+        self.assertEqual(self.server.status, "active")
+        self.assertTrue(self.server.is_draining)
 
     def test_create_with_optional_source_stamps_failover_and_audit(self) -> None:
         """RED: create ignores source_node and never stamps replacement provenance."""

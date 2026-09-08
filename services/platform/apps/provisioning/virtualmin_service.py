@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any
 
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
+from django.db.models.functions import Greatest
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
@@ -590,8 +591,14 @@ class VirtualminProvisioningService:
                             rollback_details["successful_operations"] += 1
 
                     elif operation["operation"] == "revert_server_stats":
-                        account.server.current_domains = operation["params"]["domain_count"]
-                        account.server.save(update_fields=["current_domains", "updated_at"])
+                        # Relative decrement, not the snapshotted absolute — an
+                        # absolute write would destroy a concurrent creator's
+                        # F() increment (lost update).
+                        VirtualminServer.objects.filter(pk=account.server_id).update(
+                            current_domains=Greatest(models.F("current_domains") - 1, 0),
+                            updated_at=timezone.now(),
+                        )
+                        account.server.refresh_from_db(fields=["current_domains"])
                         op_result["status"] = "success"
                         rollback_details["successful_operations"] += 1
 
@@ -994,9 +1001,6 @@ class VirtualminProvisioningService:
             job.save()
             job.mark_started()
 
-            # Store original server domain count for potential rollback
-            original_domain_count = account.server.current_domains
-
             # Make API call
             result = gateway.call("delete-domain", {"domain": account.domain}, correlation_id=job.correlation_id)
 
@@ -1005,9 +1009,12 @@ class VirtualminProvisioningService:
 
                 if response.success:
                     try:
-                        # Update server stats
-                        account.server.current_domains = max(0, account.server.current_domains - 1)
-                        account.server.save(update_fields=["current_domains", "updated_at"])
+                        # Update server stats (relative, lost-update safe)
+                        VirtualminServer.objects.filter(pk=account.server_id).update(
+                            current_domains=Greatest(models.F("current_domains") - 1, 0),
+                            updated_at=timezone.now(),
+                        )
+                        account.server.refresh_from_db(fields=["current_domains"])
 
                         # Mark account as terminated (don't delete for audit trail)
                         account.status = "terminated"
@@ -1051,10 +1058,13 @@ class VirtualminProvisioningService:
                         )
                         _clear_idempotency_key(idempotency_key, operation="delete", domain=account.domain)
 
-                        # Try to at least revert server stats
+                        # Try to at least revert server stats (relative +1 undoes
+                        # this operation's own decrement without clobbering others)
                         try:
-                            account.server.current_domains = original_domain_count
-                            account.server.save(update_fields=["current_domains", "updated_at"])
+                            VirtualminServer.objects.filter(pk=account.server_id).update(
+                                current_domains=models.F("current_domains") + 1, updated_at=timezone.now()
+                            )
+                            account.server.refresh_from_db(fields=["current_domains"])
                             logger.info(f"✅ [VirtualminService] Reverted server domain count for {account.domain}")
                         except Exception as revert_error:
                             logger.error(f"🔥 [VirtualminService] Failed to revert server stats: {revert_error}")
@@ -1115,6 +1125,7 @@ class VirtualminProvisioningService:
         """
         account.server.refresh_from_db(fields=["is_draining"])
         if account.server.is_draining:
+            job.mark_failed("Target server is draining", retriability=Retriability.RETRIABLE)
             return Err("Target server is draining", retriability=Retriability.RETRIABLE)
         gateway = self._get_gateway(account.server)
         owner_result = gateway.get_domain_owner(account.domain)

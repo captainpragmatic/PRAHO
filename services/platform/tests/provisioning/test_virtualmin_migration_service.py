@@ -255,7 +255,9 @@ class MigrationTests(MigrationTestBase):
         self.target.refresh_from_db()
         self.assertEqual(self.account.server_id, self.target.pk)
         self.assertEqual(self.server.current_domains, 10)
-        self.assertEqual(self.target.current_domains, 0)
+        # Completion accounts for the restored domain immediately — the
+        # reservation row died with the terminal status.
+        self.assertEqual(self.target.current_domains, 1)
         self.assertEqual(VirtualminMigration.active_reservations(self.target), 0)
         self.assertFalse(account_has_active_migration(self.account))
         self.assertFalse(self.source_gateway.domain_state_of(self.account.domain).enabled)
