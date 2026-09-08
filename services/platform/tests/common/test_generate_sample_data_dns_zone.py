@@ -1,13 +1,16 @@
 """Development deployment DNS zone seeding contracts."""
 
 from io import StringIO
+from unittest import mock
 
 from django.core.cache import cache
+from django.core.management import call_command
 from django.test import TestCase, override_settings
 
 from apps.common.management.commands.generate_sample_data import Command
+from apps.common.types import Err
 from apps.settings.models import SystemSetting
-from apps.settings.services import SettingsService
+from apps.settings.services import SettingsService, SettingValidationError
 
 DNS_ZONE_KEY = "node_deployment.dns_default_zone"
 
@@ -82,3 +85,32 @@ class SampleDataDNSZoneTests(TestCase):
         self.assertEqual(setting.updated_at, original_updated_at)
         self.assertEqual(SettingsService.get_setting(DNS_ZONE_KEY), "dev.praho.local")
         self.assertEqual(SystemSetting.objects.filter(key=DNS_ZONE_KEY).count(), 1)
+
+    def test_handle_invokes_seed_and_reports_write_failure_on_stderr(self) -> None:
+        """handle() must run the seed, and a write failure must reach stderr (the
+        Makefile wraps this command in `|| echo`, so exit-0 stdout noise is invisible)."""
+        stderr = StringIO()
+        failure = Err(SettingValidationError(key=DNS_ZONE_KEY, field="system", message="boom", code="system_error"))
+        with (
+            override_settings(DEBUG=True),
+            mock.patch.object(Command, "_generate"),
+            mock.patch.object(SettingsService, "update_setting", return_value=failure) as update,
+        ):
+            call_command("generate_sample_data", stdout=StringIO(), stderr=stderr)
+        update.assert_called_once()
+        self.assertIn("Deployment DNS zone seed failed", stderr.getvalue())
+
+    def test_preserved_zone_failing_deployment_validation_warns_on_stderr(self) -> None:
+        stderr = StringIO()
+        with self.captureOnCommitCallbacks(execute=True):
+            SystemSetting.objects.create(
+                key=DNS_ZONE_KEY, value=" spacey.example.com ", default_value="", data_type="string"
+            )
+        cache.clear()
+
+        command = Command(stdout=StringIO(), stderr=stderr)
+        with self.captureOnCommitCallbacks(execute=True):
+            command._seed_deployment_dns_zone()
+
+        self.assertIn("fails deployment", stderr.getvalue())
+        self.assertEqual(SystemSetting.objects.get(key=DNS_ZONE_KEY).value, " spacey.example.com ")

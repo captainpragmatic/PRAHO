@@ -48,6 +48,8 @@ services:
       - DJANGO_SECRET_KEY=dev-secret-key-for-development-only
       - DJANGO_SETTINGS_MODULE=config.settings.dev
       - PYTHONPATH=/app
+      # Debug-toolbar allowlist for non-loopback dev clients (empty = localhost only)
+      - DEV_INTERNAL_IPS=${DEV_INTERNAL_IPS:-}
       - SERVICE_NAME=platform
     depends_on:
       db:
@@ -74,6 +76,8 @@ services:
       - DEBUG=1
       - PLATFORM_API_BASE_URL=http://platform:8700/api
       - PLATFORM_API_SECRET=dev-shared-secret-change-in-production
+      # Debug-toolbar allowlist for non-loopback dev clients (empty = localhost only)
+      - DEV_INTERNAL_IPS=${DEV_INTERNAL_IPS:-}
       # Per-portal signing secret (#277). Unset/empty => sign with PLATFORM_API_SECRET.
       - PORTAL_HMAC_SECRET=${PORTAL_HMAC_SECRET:-}
       - PLATFORM_API_ALLOW_INSECURE_HTTP=true
