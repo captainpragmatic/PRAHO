@@ -99,10 +99,10 @@ class Command(BaseCommand):
             except VirtualminServer.DoesNotExist as e:
                 raise CommandError(f"Server '{options['server']}' not found") from e
 
-        # Initialize backup service
-        backup_service = VirtualminBackupService(server)
+        # Route through the job layer: same admission, same token-fenced
+        # execution, no jobless mutation path.
+        from apps.provisioning.virtualmin_service import VirtualminBackupManagementService  # noqa: PLC0415
 
-        # Execute backup
         self.stdout.write(f"Starting {options['type']} backup for domain: {domain}")
 
         config = BackupConfig(
@@ -112,15 +112,17 @@ class Command(BaseCommand):
             include_files=not options.get("no_files", False),
             include_ssl=not options.get("no_ssl", False),
         )
-        result = backup_service.backup_domain(account=account, config=config)
+        management = VirtualminBackupManagementService(server)
+        result = management.create_backup_job(account=account, config=config, initiated_by="cli", execute_inline=True)
 
         if result.is_err():
             raise CommandError(f"Backup failed: {result.unwrap_err()}")
 
-        backup_info = result.unwrap()
+        job = result.unwrap()
+        backup_info = job.result or {}
         self.stdout.write(self.style.SUCCESS("Backup completed successfully!"))
-        self.stdout.write(f"Backup ID: {backup_info['backup_id']}")
-        self.stdout.write(f"Created: {backup_info['created_at']}")
+        self.stdout.write(f"Job ID: {job.pk}")
+        self.stdout.write(f"Backup ID: {backup_info.get('backup_id', 'n/a')}")
 
     def _handle_restore(self, options: dict[str, Any]) -> None:
         """Handle restore command."""
@@ -141,10 +143,10 @@ class Command(BaseCommand):
             except VirtualminServer.DoesNotExist as e:
                 raise CommandError(f"Target server '{options['target_server']}' not found") from e
 
-        # Initialize backup service
-        backup_service = VirtualminBackupService(target_server)
+        # Route through the job layer: same admission, same token-fenced
+        # execution, no jobless mutation path.
+        from apps.provisioning.virtualmin_service import VirtualminBackupManagementService  # noqa: PLC0415
 
-        # Execute restore
         self.stdout.write(f"Starting restore for domain: {domain}")
         self.stdout.write(f"From backup: {backup_id}")
 
@@ -155,15 +157,23 @@ class Command(BaseCommand):
             restore_files=not options.get("no_files", False),
             restore_ssl=not options.get("no_ssl", False),
         )
-        result = backup_service.restore_domain(account=account, config=restore_config, target_server=target_server)
+        management = VirtualminBackupManagementService(target_server)
+        result = management.create_restore_job(
+            account=account,
+            config=restore_config,
+            target_server=target_server,
+            initiated_by="cli",
+            execute_inline=True,
+        )
 
         if result.is_err():
             raise CommandError(f"Restore failed: {result.unwrap_err()}")
 
-        restore_info = result.unwrap()
+        job = result.unwrap()
+        restore_info = job.result or {}
         self.stdout.write(self.style.SUCCESS("Restore completed successfully!"))
-        self.stdout.write(f"Restore ID: {restore_info['restore_id']}")
-        self.stdout.write(f"Completed: {restore_info['completed_at']}")
+        self.stdout.write(f"Job ID: {job.pk}")
+        self.stdout.write(f"Restore ID: {restore_info.get('restore_id', 'n/a')}")
 
     def _find_account_by_domain(self, domain: str) -> VirtualminAccount | None:
         """Find VirtualminAccount by domain name."""

@@ -72,6 +72,8 @@ tickets.TicketWorklog           # child of Ticket
 
 # ── 5. Virtualmin integration internals ────────────────────────────────────────
 provisioning.NodeDrain                  # lifecycle audited explicitly by NodeDrainService (node_drain_* events)
+provisioning.SpoolReservation           # transient capacity accounting rows; no business lifecycle
+provisioning.SpoolRoot                  # singleton serialization lock row; no business lifecycle
 provisioning.VirtualminDriftRecord      # internal drift detection
 provisioning.VirtualminMigration        # internal lease/reservation state; lifecycle audited by the migration orchestration
 provisioning.VirtualminServer           # mirrors Server model

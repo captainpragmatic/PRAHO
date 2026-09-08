@@ -20,6 +20,7 @@ import os
 import secrets
 import tarfile
 import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, TypedDict, cast
@@ -28,7 +29,6 @@ from django.core.cache import cache
 from django.utils import timezone
 
 from apps.common.security_decorators import (
-    atomic_with_retry,
     audit_service_call,
     monitor_performance,
 )
@@ -82,6 +82,28 @@ logger = logging.getLogger(__name__)
 
 # Backup configuration constants
 _DEFAULT_BACKUP_RETENTION_DAYS = 90  # Keep backups for 90 days (configurable via SettingsService)
+
+# Per-invocation allowance for the pre-subprocess ssh-wait/hostkey phase
+# (readiness 180s + lookup 10s + scan 30s + slack) and the S3 completion tail.
+_SSH_SETUP_MARGIN_SECONDS = 240
+_S3_COMPLETION_MARGIN_SECONDS = 300
+
+
+def backup_task_timeout(estimated_bytes: int) -> int:
+    """Size-derived task budget: backup-domain + fetch + S3 upload + margins.
+
+    Uses the JOB'S OWN size estimate (never the 50GB global ceiling, which
+    would exceed the broker visibility window and reject every admission).
+    """
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    backup_timeout = SettingsService.get_integer_setting("provisioning.migration_backup_timeout_seconds", 1800)
+    transfer_timeout = SettingsService.get_integer_setting("provisioning.migration_transfer_timeout_seconds", 3600)
+    mib_s = max(1, SettingsService.get_integer_setting("provisioning.backup_min_transfer_mib_s", 10))
+    s3_stage = estimated_bytes // (mib_s * 1024 * 1024) + _S3_COMPLETION_MARGIN_SECONDS
+    return backup_timeout + transfer_timeout + _SSH_SETUP_MARGIN_SECONDS + s3_stage + 300
+
+
 BACKUP_VERIFICATION_TIMEOUT = 300  # 5 minutes for verification (structural)
 BACKUP_COMPRESSION_LEVEL = 6  # Balance between speed and compression (structural)
 _DEFAULT_MAX_BACKUP_SIZE_GB = 50  # Maximum backup size in GB (configurable via SettingsService)
@@ -237,7 +259,7 @@ class VirtualminBackupService:
         else:
             return Err(f"Unsupported backup type: {backup_type}")
 
-    def _backup_workflow_chain(
+    def _backup_workflow_chain(  # noqa: PLR0911  # Complexity: cohesive workflow
         self, account: VirtualminAccount, backup_id: str, backup_metadata: dict[str, Any], config: BackupConfig
     ) -> Result[dict[str, Any], str]:
         """Execute the backup workflow as a chain of operations"""
@@ -245,6 +267,10 @@ class VirtualminBackupService:
         validation_result = self._validate_backup_preconditions(account)
         if validation_result.is_err():
             return Err(validation_result.unwrap_err())
+
+        # Stage boundary: a superseded runner must not dispatch remote work.
+        if not self._owns_execution():
+            return Err("Backup execution superseded; no remote work performed")
 
         # Execute backup based on type
         backup_result = self._execute_backup_by_type(config, account, backup_id, backup_metadata)
@@ -266,6 +292,10 @@ class VirtualminBackupService:
         if verification_result.is_err():
             return Err(verification_result.unwrap_err())
 
+        # Stage boundary: no publication after a takeover rotated our token.
+        if not self._owns_execution():
+            return Err("Backup execution superseded; archive not published")
+
         # Upload to S3 with encryption
         self._update_backup_progress(backup_id, "uploading", 90)
         upload_result = self._upload_backup_to_s3(backup_id, backup_metadata)
@@ -279,9 +309,12 @@ class VirtualminBackupService:
         return Ok(final_metadata)
 
     @audit_service_call("backup_domain")
-    @atomic_with_retry(max_retries=2, delay=1.0)
     def backup_domain(
-        self, account: VirtualminAccount, config: BackupConfig | None = None
+        self,
+        account: VirtualminAccount,
+        config: BackupConfig | None = None,
+        progress_key: str | None = None,
+        ownership: Callable[[], bool] | None = None,
     ) -> Result[dict[str, Any], str]:
         """
         Create comprehensive backup of Virtualmin domain.
@@ -303,8 +336,11 @@ class VirtualminBackupService:
         logger.info(f"Starting {config.backup_type} backup for account {account.domain}")
 
         try:
-            # Initialize backup session
+            # Initialize backup session; progress is keyed by the caller's key
+            # (the job id) when provided so the status page can follow it.
             backup_id = self._generate_backup_id(account)
+            self._progress_key: str | None = progress_key or backup_id
+            self._ownership = ownership
             backup_metadata = self._initialize_backup_metadata(account, config.backup_type, backup_id, config)
             self._update_backup_progress(backup_id, "initializing", 0)
 
@@ -316,10 +352,17 @@ class VirtualminBackupService:
             if "backup_id" in locals():
                 self._update_backup_progress(backup_id, "failed", 100)
             return Err(f"Backup operation failed: {e!s}")
+        finally:
+            self._progress_key = None
+            self._ownership = None
+
+    def _owns_execution(self) -> bool:
+        """Stage-boundary ownership check; True when no fencing was requested."""
+        checker = getattr(self, "_ownership", None)
+        return True if checker is None else bool(checker())
 
     @monitor_performance(max_duration_seconds=600, alert_threshold=120)
     @audit_service_call("restore_domain")
-    @atomic_with_retry(max_retries=1, delay=2.0)  # Less retries for restore - more risky
     def restore_domain(
         self, account: VirtualminAccount, config: RestoreConfig, target_server: VirtualminServer | None = None
     ) -> Result[dict[str, Any], str]:
@@ -588,8 +631,9 @@ class VirtualminBackupService:
         }
 
     def _update_backup_progress(self, backup_id: str, status: str, progress: int) -> None:
-        """Update backup progress in cache."""
-        progress_key = f"{BACKUP_PROGRESS_CACHE_PREFIX}{backup_id}"
+        """Update backup progress in cache (keyed by the caller's key when set)."""
+        cache_id = getattr(self, "_progress_key", None) or backup_id
+        progress_key = f"{BACKUP_PROGRESS_CACHE_PREFIX}{cache_id}"
         cache.set(
             progress_key,
             {"backup_id": backup_id, "status": status, "progress": progress, "updated_at": timezone.now().isoformat()},

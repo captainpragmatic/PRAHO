@@ -20,7 +20,7 @@ from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 
 from .placement import order_placement_candidates
 from .virtualmin_gateway import VirtualminConfig, VirtualminGateway
-from .virtualmin_migration_models import VirtualminMigration, account_has_active_migration
+from .virtualmin_migration_models import VirtualminMigration, account_has_active_operation
 from .virtualmin_models import VirtualminAccount, VirtualminProvisioningJob, VirtualminServer
 
 if TYPE_CHECKING:
@@ -244,6 +244,8 @@ class VirtualminMigrationService:
     def _local_preflight(self, account: VirtualminAccount, target: VirtualminServer) -> None:
         if not self.enabled:
             raise ValueError("Virtualmin migration is disabled")
+        if account_has_active_operation(account):
+            raise ValueError("Account already has an active migration or backup/restore operation")
         if account.server_id == target.pk:
             raise ValueError("Source and target must differ")
         if account.status not in {"active", "suspended"}:
@@ -255,8 +257,6 @@ class VirtualminMigrationService:
                 raise ValueError("Both migration servers must be active")
             if not (hasattr(server, "node_deployment") and server.node_deployment is not None):
                 raise ValueError(f"Server {server.name}: manual registration has no managed node_deployment")
-        if account_has_active_migration(account):
-            raise ValueError("Account already has an active migration")
         self._admission_preflight(target)
 
     def _admission_preflight(self, target: VirtualminServer) -> None:

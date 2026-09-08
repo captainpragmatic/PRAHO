@@ -16,7 +16,7 @@ from apps.billing.models import Currency
 from apps.common.types import Err, Retriability
 from apps.customers.models import Customer
 from apps.provisioning.models import Service, ServicePlan
-from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminProvisioningJob, VirtualminServer
+from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminServer
 from apps.provisioning.virtualmin_service import VirtualminBackupManagementService
 
 
@@ -62,17 +62,26 @@ class BackupJobFailureStateTests(TestCase):
 
     @patch("apps.provisioning.virtualmin_backup_service.VirtualminBackupService")
     def test_failed_backup_keeps_reason_and_opts_out_of_retry_sweep(self, mock_service_cls) -> None:
+        """Execution moved to the task; the failure contract holds at the task layer."""
+        from apps.provisioning.virtualmin_tasks import run_virtualmin_backup  # noqa: PLC0415  # Circular
+
         mock_service_cls.return_value.backup_domain.return_value = Err(
             "disk full — backup aborted", retriability=Retriability.RETRIABLE
         )
 
-        result = VirtualminBackupManagementService(self.vm_server).create_backup_job(self.account)
+        with patch("django_q.tasks.async_task", return_value="task-1"):
+            admitted = VirtualminBackupManagementService(self.vm_server).create_backup_job(self.account)
+        self.assertTrue(admitted.is_ok(), admitted)
+        job = admitted.unwrap()
+        self.assertEqual(job.status, "pending")
 
-        self.assertTrue(result.is_err())
-        job = VirtualminProvisioningJob.objects.get(operation="backup_domain", account=self.account)
+        outcome = run_virtualmin_backup(str(job.pk))
+        self.assertEqual(outcome["status"], "failed")
+        job.refresh_from_db()
         self.assertEqual(job.status, "failed")
         # The whole point of #295: the reason lands in the REAL field.
         self.assertIn("disk full", job.status_message)
         # And the sweeper must never pick it up: it would flip the job to "pending",
         # wipe status_message, and dispatch nothing (no backup branch exists).
         self.assertIsNone(job.next_retry_at)
+        self.assertEqual(job.result["retriability"], Retriability.RETRIABLE.value)
