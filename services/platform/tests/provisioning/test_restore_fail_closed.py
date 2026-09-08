@@ -157,6 +157,17 @@ class RestoreFailClosedTests(TestCase):
         self.assertEqual(order, ["note", "push"])
         self.assertEqual(result.unwrap()["safety_backup_id"], "safety-1")
 
+    def test_retriable_download_error_propagates_not_parked_unknown(self) -> None:
+        """C1: a RETRIABLE download failure must reach the caller RETRIABLE, not UNKNOWN."""
+        with patch.object(
+            self.service,
+            "_download_backup_to_spool",
+            return_value=Err("Transfer spool capacity is reserved; retry later", retriability=Retriability.RETRIABLE),
+        ):
+            result = self.service.restore_domain(account=self.account, config=self.config)
+        self.assertTrue(result.is_err())
+        self.assertIs(retriability_of(result), Retriability.RETRIABLE)
+
     def test_ambiguous_restore_is_unknown_retriability_and_retains_archive(self) -> None:
         self.gateway.call.return_value = _restore_response(success=False, raw="")
         result = self.service.restore_domain(account=self.account, config=self.config)

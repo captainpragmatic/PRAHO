@@ -715,7 +715,12 @@ def virtualmin_backup_status(request: HttpRequest, job_id: str) -> HttpResponse:
         return render(
             request,
             "provisioning/virtualmin/partials/job_status.html",
-            {"job": job, "live_status": live_status, "is_complete": job.status in ["completed", "failed", "attention"]},
+            {
+                "job": job,
+                "live_status": live_status,
+                "is_complete": job.status in ["completed", "failed", "attention"],
+                "refresh_url": reverse("provisioning:virtualmin_backup_status", args=[job.id]),
+            },
         )
 
     context = {

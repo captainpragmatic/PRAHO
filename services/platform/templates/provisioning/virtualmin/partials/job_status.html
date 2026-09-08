@@ -1,6 +1,11 @@
 {% load ui_components %}
 {% load i18n %}
 
+{# Self-replacing poll root: outerHTML swap so each response re-decides whether
+   to keep polling. A terminal/attention job renders WITHOUT hx-trigger, which
+   stops the refresh so the resolve form's input is no longer clobbered. #}
+<div id="job-status-container"
+     {% if not is_complete %}hx-get="{{ refresh_url }}" hx-trigger="every 3s" hx-swap="outerHTML"{% endif %}>
 <!-- Job Status Header -->
 <div class="bg-slate-800 rounded-lg border border-slate-700 p-6 mb-6">
     <div class="flex items-center justify-between">
@@ -118,3 +123,4 @@
     </div>
 </div>
 {% endif %}
+</div>

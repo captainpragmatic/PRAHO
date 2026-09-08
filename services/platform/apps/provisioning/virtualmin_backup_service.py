@@ -525,7 +525,8 @@ class VirtualminBackupService:
         if deployment is None:
             return Err(
                 f"Server {target_server.hostname} is manually registered (no managed node_deployment); "
-                "archive transport is unavailable"
+                "archive transport is unavailable",
+                retriability=Retriability.NOT_RETRIABLE,
             )
         transfer_timeout = SettingsService.get_integer_setting("provisioning.migration_transfer_timeout_seconds", 3600)
         variables: dict[str, Any] = {
@@ -1196,7 +1197,7 @@ class VirtualminBackupService:
             owner = f"job:{self._progress_key}" if getattr(self, "_progress_key", None) else f"restore:{archive_name}"
             reservation = acquire_spool_reservation(spool, archive_name, file_size, owner, transfer_timeout + 300)
             if reservation.is_err():
-                return Err(reservation.unwrap_err())
+                return Err(reservation.unwrap_err(), retriability=retriability_of(reservation))
 
             logger.info(f"Downloading backup {backup_id} from S3 ({file_size} bytes)")
             download_ok = False
@@ -1231,4 +1232,6 @@ class VirtualminBackupService:
 
         except Exception as e:
             logger.error(f"S3 download failed for backup {backup_id}: {e}")
-            return Err(f"S3 download failed: {e!s}")
+            # Pre-destructive: no restore was issued, so this is a determinate
+            # failure, not an ambiguous remote outcome to park for review.
+            return Err(f"S3 download failed: {e!s}", retriability=Retriability.NOT_RETRIABLE)

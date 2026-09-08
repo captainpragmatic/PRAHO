@@ -65,6 +65,17 @@ class DataIntegrityVerifierTests(task_tests.VirtualminTaskTestBase):
         report = self.dr.verify_praho_data_integrity().unwrap()
         self.assertNotIn("servers_without_usable_credentials", self._issues(report))
 
+    def test_unrecoverable_status_is_not_reported_ready(self) -> None:
+        """W3: all inputs present but account in 'error' → not ready, no 'excellent' claim."""
+        # fsm-bypass: fully-populated account, but not in a recoverable status.
+        VirtualminAccount.objects.filter(pk=self.account.pk).update(status="error")
+        self.vault.return_value.get_credential.return_value = Ok(("u", "p", None))
+        report = self.dr.verify_praho_data_integrity().unwrap()
+        self.assertFalse(report["disaster_recovery_ready"])
+        self.assertNotIn(
+            "✅ PRAHO data integrity is excellent - ready for disaster recovery", report["recommendations"]
+        )
+
     def test_no_credential_anywhere_is_flagged(self) -> None:
         self.server.encrypted_api_password = b""
         self.server.save(update_fields=["encrypted_api_password"])

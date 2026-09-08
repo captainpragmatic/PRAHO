@@ -912,11 +912,12 @@ def _run_backup_restore_job(job_id: str, operation: str) -> dict[str, Any]:  # n
     except VirtualminProvisioningJob.DoesNotExist:
         return {"status": "missing", "job_id": job_id}
     if job.account is None:
-        VirtualminProvisioningJob.objects.filter(
+        if VirtualminProvisioningJob.objects.filter(
             pk=job_id, status="pending"
         ).update(  # fsm-bypass: CharField job status
             status="failed", status_message="Job has no account", next_retry_at=None, updated_at=timezone.now()
-        )
+        ):
+            _audit_job(job_id)
         return {"status": "failed", "job_id": job_id, "error": "no account"}
 
     token = uuid4()
@@ -924,6 +925,8 @@ def _run_backup_restore_job(job_id: str, operation: str) -> dict[str, Any]:  # n
     deadline = timezone.now() + timedelta(seconds=budget)
     if not VirtualminProvisioningJob.claim_execution(job.pk, token, deadline):
         return {"status": "stale", "job_id": job_id}
+    # Audit the pending->running claim too, so the trail shows execution began.
+    _audit_job(job.pk)
 
     def owns() -> bool:
         return VirtualminProvisioningJob.owns_execution(job.pk, token)

@@ -335,6 +335,11 @@ class VirtualminDisasterRecoveryService:
                 else "critical"
             )
 
+            # W3: readiness requires BOTH no blocking issues AND every account
+            # actually recoverable. A fleet of fully-populated accounts all in
+            # 'error' produces zero missing-data issues but zero recoverable
+            # accounts — never publish "ready" beside a critical recovery %.
+            ready = not missing_data_issues and recoverable_accounts == total_accounts
             return Ok(
                 {
                     "integrity_status": integrity_status,
@@ -344,9 +349,9 @@ class VirtualminDisasterRecoveryService:
                     "missing_data_issues": missing_data_issues,
                     "transport_warnings": transport_warnings,
                     "issues_count": len(missing_data_issues),
-                    "disaster_recovery_ready": len(missing_data_issues) == 0,
+                    "disaster_recovery_ready": ready,
                     "check_timestamp": timezone.now().isoformat(),
-                    "recommendations": self._get_integrity_recommendations(missing_data_issues),
+                    "recommendations": self._get_integrity_recommendations(missing_data_issues, ready=ready),
                 }
             )
 
@@ -406,7 +411,7 @@ class VirtualminDisasterRecoveryService:
         except Exception as e:
             logger.warning(f"⚠️ [DisasterRecovery] Quota restoration error for {domain}: {e}")
 
-    def _get_integrity_recommendations(self, issues: list[dict[str, Any]]) -> list[str]:
+    def _get_integrity_recommendations(self, issues: list[dict[str, Any]], *, ready: bool | None = None) -> list[str]:
         """Get recommendations based on integrity issues"""
         recommendations = []
 
@@ -426,8 +431,15 @@ class VirtualminDisasterRecoveryService:
         # Only claim readiness when there are genuinely no blocking issues —
         # never alongside a critical report (the dishonest-publication class
         # this branch exists to eliminate).
-        if not issues:
+        # Only claim readiness when the caller confirms it (no issues AND every
+        # account recoverable). Backward-compatible default derives from issues.
+        is_ready = (not issues) if ready is None else ready
+        if is_ready:
             recommendations.append("✅ PRAHO data integrity is excellent - ready for disaster recovery")
+        elif not issues:
+            recommendations.append(
+                "⚠️ No missing-data issues, but some accounts are not in a recoverable state (check statuses)"
+            )
 
         return recommendations
 
