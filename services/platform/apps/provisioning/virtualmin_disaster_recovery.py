@@ -253,10 +253,17 @@ class VirtualminDisasterRecoveryService:
             # (UUID(int=pk)), so compare in that form.
             inconsistent = [
                 account.domain
-                for account in VirtualminAccount.objects.select_related("service").filter(
+                for account in VirtualminAccount.objects.select_related("service", "service__customer").filter(
                     service__isnull=False, praho_service_id__isnull=False
                 )
                 if account.praho_service_id != uuid.UUID(int=int(account.service_id))
+                or (
+                    # praho_customer_id is a PositiveIntegerField (raw id), NOT
+                    # the int-coerced UUID form praho_service_id uses.
+                    account.praho_customer_id is not None
+                    and account.service.customer_id is not None
+                    and int(account.praho_customer_id) != int(account.service.customer_id)
+                )
             ]
             if inconsistent:
                 missing_data_issues.append(

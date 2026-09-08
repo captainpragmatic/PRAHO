@@ -224,6 +224,21 @@ class RestoreFailClosedTests(TestCase):
         # Nothing destructive ran, so the pushed archive is cleaned (determinate).
         self.remote_cleanup.assert_called_once()
 
+    def test_malformed_manifest_archive_name_is_refused(self) -> None:
+        """Bot P1: a tampered S3 manifest archive name must never build a spool path."""
+        tampered = json.dumps({"archive_name": "../../etc/passwd.tar.gz", "checksum_sha256": "a" * 64}).encode()
+        body = type("B", (), {"read": staticmethod(lambda: tampered)})()
+        with (
+            patch.object(self.service, "_get_s3_client") as s3,
+            patch.object(self.service, "_get_backup_bucket", return_value="b"),
+        ):
+            s3.return_value.get_object.return_value = {"Body": body}
+            # setUp patches the instance method; call the REAL one via the class.
+            # Validation runs right after the manifest read, before any path build.
+            result = VirtualminBackupService._download_backup_to_spool(self.service, "bk-1")
+        self.assertTrue(result.is_err())
+        self.assertIn("malformed", result.unwrap_err())
+
     def test_component_selective_restore_is_refused_honestly(self) -> None:
         self.config.restore_email = False
         result = self.service.restore_domain(account=self.account, config=self.config)

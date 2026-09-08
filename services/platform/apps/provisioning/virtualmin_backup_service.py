@@ -110,6 +110,12 @@ S3_MULTIPART_THRESHOLD = 100 * 1024 * 1024  # 100MB threshold for multipart (str
 # parameter), never a controller-local tempfile.
 _REMOTE_ARCHIVE_DIR = "/tmp"  # noqa: S108  # Remote node path, not a local tempfile
 
+# A backup archive name is our own UUID-only construction. The RESTORE path
+# reads it back from the (untrusted) S3 manifest, so it must be validated
+# before it is ever joined into a spool path or a remote /tmp path — a
+# tampered "../../etc/x" would otherwise traverse.
+_ARCHIVE_NAME_RE = re.compile(r"^virtualmin_backup_[0-9a-f]{32}\.tar\.gz$")
+
 # Cache keys for backup status
 BACKUP_STATUS_CACHE_PREFIX = "virtualmin_backup_status_"
 BACKUP_PROGRESS_CACHE_PREFIX = "virtualmin_backup_progress_"
@@ -825,6 +831,9 @@ class VirtualminBackupService:
             )
             if result.is_err() or not result.unwrap().success:
                 detail = result.unwrap_err() if result.is_err() else "playbook reported failure or timed out"
+                # The fetch may have died before its own remote-delete task ran;
+                # never strand a multi-GB temp archive on the node.
+                self._cleanup_remote_archive(self.server, archive_name)
                 return Err(f"Backup archive fetch failed: {detail}")
             checksums = set(re.findall(r"BACKUP_SHA256=([0-9a-f]{64})(?![0-9a-f])", result.unwrap().stdout))
             if len(checksums) != 1:
@@ -1151,7 +1160,7 @@ class VirtualminBackupService:
         metadata.update({"status": "completed", "completed_at": timezone.now().isoformat(), "s3_info": upload_info})
         return metadata
 
-    def _download_backup_to_spool(  # noqa: PLR0911  # Distinct fail-closed gates
+    def _download_backup_to_spool(  # noqa: C901, PLR0911, PLR0912  # Distinct fail-closed gates
         self, backup_id: str
     ) -> Result[tuple[str, dict[str, Any]], str]:
         """Download the archive + manifest into the reserved spool (checksum-mandatory)."""
@@ -1176,6 +1185,13 @@ class VirtualminBackupService:
             if not metadata.get("archive_name"):
                 return Err(
                     "Backup manifest lacks an archive name; legacy backups are not restorable",
+                    retriability=Retriability.NOT_RETRIABLE,
+                )
+            # Validate the untrusted manifest name BEFORE any filesystem path
+            # is built from it (path-traversal guard on tampered manifests).
+            if not _ARCHIVE_NAME_RE.match(str(metadata["archive_name"])):
+                return Err(
+                    "Backup manifest archive name is malformed; refusing to build a spool path",
                     retriability=Retriability.NOT_RETRIABLE,
                 )
 

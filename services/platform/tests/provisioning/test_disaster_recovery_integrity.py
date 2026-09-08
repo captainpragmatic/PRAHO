@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid as _uuid
 from typing import Any
 from unittest.mock import patch
 
@@ -53,6 +54,15 @@ class DataIntegrityVerifierTests(task_tests.VirtualminTaskTestBase):
     def test_inconsistent_seed_is_flagged(self) -> None:
         # fsm-bypass: point the seed at a different service id.
         VirtualminAccount.objects.filter(pk=self.account.pk).update(praho_service_id=999999)
+        report = self.dr.verify_praho_data_integrity().unwrap()
+        self.assertIn("accounts_with_inconsistent_recovery_seed", self._issues(report))
+
+    def test_inconsistent_customer_seed_is_flagged(self) -> None:
+        """Bot P2: the seed customer id must match the linked customer too."""
+        # fsm-bypass: service id consistent, customer id pointing elsewhere.
+        VirtualminAccount.objects.filter(pk=self.account.pk).update(
+            praho_service_id=_uuid.UUID(int=self.service.id), praho_customer_id=987654
+        )
         report = self.dr.verify_praho_data_integrity().unwrap()
         self.assertIn("accounts_with_inconsistent_recovery_seed", self._issues(report))
 
