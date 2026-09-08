@@ -22,7 +22,7 @@ from hcloud.server_types.domain import ServerType
 from hcloud.servers.domain import Server
 from hcloud.ssh_keys.domain import SSHKey
 
-from apps.common.types import Err, Ok, Result
+from apps.common.types import Err, Ok, Result, Retriability
 from apps.infrastructure.cloud_gateway import (
     CloudProviderGateway,
     FirewallRule,
@@ -383,10 +383,18 @@ class HcloudService(CloudProviderGateway):
     # =========================================================================
 
     def create_snapshot(self, server_id: str, name: str) -> Result[str, str]:
-        """Create a server snapshot. Returns provider snapshot ID."""
+        """Create a server snapshot. Returns provider snapshot ID.
+
+        Retriability encodes side-effect evidence: NOT_RETRIABLE = the failure
+        happened BEFORE the create was dispatched (provably no resource);
+        UNKNOWN = the create was issued and the outcome is ambiguous (a
+        snapshot may exist and bill). Callers key compensation on this.
+        """
+        dispatched = False
         try:
             sid = int(server_id)
             server = self.client.servers.get_by_id(sid)
+            dispatched = True
             response = self.client.servers.create_image(server, description=name, type="snapshot")
             action = response.action
             action.wait_until_finished(max_retries=HCLOUD_ACTION_MAX_RETRIES)
@@ -395,7 +403,9 @@ class HcloudService(CloudProviderGateway):
             return Ok(str(image.id))
         except Exception as e:
             logger.error(f"🔥 [Hcloud] Snapshot creation failed for server {server_id}: {e}")
-            return Err(f"Snapshot creation failed: {e}")
+            if dispatched:
+                return Err(f"Snapshot creation ambiguous after dispatch: {e}", retriability=Retriability.UNKNOWN)
+            return Err(f"Snapshot creation failed before dispatch: {e}", retriability=Retriability.NOT_RETRIABLE)
 
     def restore_snapshot(self, server_id: str, snapshot_id: str) -> Result[bool, str]:
         """Restore a server from a snapshot."""

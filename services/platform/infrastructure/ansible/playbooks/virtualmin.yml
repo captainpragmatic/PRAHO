@@ -129,6 +129,16 @@
       notify: Restart apache
       ignore_errors: yes
 
+# Let's Encrypt issuance/install (#436). Failures stay non-fatal until the
+    # staging drill proves the real CLI contract — but they are VISIBLE
+    # (LETSENCRYPT_FAILED banners below), and the idempotency marker is only
+    # written by US after BOTH steps succeeded, so a failed attempt retries on
+    # the next run while a success stops re-requesting (LE rate-limit safety).
+    - name: Check for the Webmin Let's Encrypt installer
+      ansible.builtin.stat:
+        path: /usr/share/webmin/webmin/letsencrypt.cgi
+      register: letsencrypt_cgi
+
     - name: Generate Let's Encrypt certificate for Virtualmin
       ansible.builtin.command: >
         virtualmin generate-letsencrypt-cert
@@ -141,12 +151,47 @@
       failed_when: false
       changed_when: letsencrypt_result.rc == 0
 
+    - name: Report Let's Encrypt issuance failure
+      ansible.builtin.debug:
+        msg: "LETSENCRYPT_FAILED step=generate rc={{ letsencrypt_result.rc }} stderr={{ (letsencrypt_result.stderr | default(''))[-400:] }}"
+      when:
+        - letsencrypt_result.rc is defined
+        - letsencrypt_result.rc != 0
+
+    - name: Report missing Let's Encrypt installer
+      ansible.builtin.debug:
+        msg: "LETSENCRYPT_FAILED step=install rc=127 stderr=letsencrypt.cgi not found at /usr/share/webmin/webmin/"
+      when:
+        - letsencrypt_result.changed | default(false)
+        - not letsencrypt_cgi.stat.exists
+
     - name: Configure Webmin to use Let's Encrypt certificate
       ansible.builtin.command: >
         /usr/share/webmin/webmin/letsencrypt.cgi
         --host {{ inventory_hostname }}
-      when: letsencrypt_result.changed | default(false)
+      when:
+        - letsencrypt_result.changed | default(false)
+        - letsencrypt_cgi.stat.exists
+      register: letsencrypt_install
       failed_when: false
+
+    - name: Report Let's Encrypt install failure
+      ansible.builtin.debug:
+        msg: "LETSENCRYPT_FAILED step=install rc={{ letsencrypt_install.rc }} stderr={{ (letsencrypt_install.stderr | default(''))[-400:] }}"
+      when:
+        - letsencrypt_install.rc is defined
+        - letsencrypt_install.rc != 0
+
+    - name: Record successful certificate issuance and installation
+      ansible.builtin.file:
+        path: /etc/webmin/letsencrypt-cert-{{ inventory_hostname }}
+        state: touch
+        mode: '0644'
+      when:
+        - letsencrypt_result.rc is defined
+        - letsencrypt_result.rc == 0
+        - letsencrypt_install.rc is defined
+        - letsencrypt_install.rc == 0
 
     - name: Enable Virtualmin features
       ansible.builtin.command: >

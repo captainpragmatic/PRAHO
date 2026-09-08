@@ -177,6 +177,29 @@ class NodeRegistrationService:
             logger.error(f"🚨 [Registration] Failed to register node {deployment.hostname}: {e}")
             return Err(f"Registration failed: {e}")
 
+    def _panel_trust_refusal(self, server: VirtualminServer) -> str | None:
+        """None = affirmatively trusted; otherwise the refusal reason (#436)."""
+        deployment = getattr(server, "node_deployment", None)
+        if deployment is None:
+            return (
+                f"Trusted-certificate policy: {server.hostname} has no managed node_deployment; "
+                "cannot evaluate the panel certificate"
+            )
+        from .validation_service import get_validation_service  # noqa: PLC0415
+
+        probe = get_validation_service()._probe_tls_trust(deployment)
+        if probe.get("trusted") is True and probe.get("trust_evaluated") is True:
+            return None
+        if probe.get("trust_evaluated") is True:
+            return (
+                f"Panel certificate for {server.hostname} is NOT CA-trusted: "
+                f"{probe.get('trust_error') or 'verification failed'}"
+            )
+        return (
+            f"Panel certificate trust for {server.hostname} could not be evaluated "
+            f"({probe.get('error') or probe.get('trust_error') or 'probe failed'}); refusing under the strict policy"
+        )
+
     def verify_and_activate(self, server: VirtualminServer) -> Result[VirtualminServer, str]:  # noqa: PLR0911  # Guarded credential-verification workflow: one early Err per gate (vault-miss/empty-cred/handshake/not-healthy/CAS)
         """
         #347 GAP 2: confirm the API credential provisioned on the node actually
@@ -240,6 +263,24 @@ class NodeRegistrationService:
                 return Err(f"Credential check failed for {server.hostname}, leaving disabled: {health.unwrap_err()}")
             if health.unwrap().get("healthy") is not True:
                 return Err(f"Server {server.hostname} did not report healthy, leaving disabled: {health.unwrap()}")
+
+            # #436 (flag-gated, default off): under the strict policy, activation
+            # additionally requires an AFFIRMATIVE CA-trust verdict on the panel
+            # certificate. Indeterminate probes refuse too (fail-closed under an
+            # explicitly strict flag; the operator retries). Refusal keeps the
+            # server disabled — it never discards the deployment.
+            from apps.settings.services import SettingsService  # noqa: PLC0415  # Circular
+
+            if SettingsService.get_boolean_setting("infrastructure.require_trusted_panel_certificate", False):
+                trust_error = self._panel_trust_refusal(server)
+                if trust_error is not None:
+                    from apps.common.validators import log_security_event  # noqa: PLC0415  # Circular
+
+                    log_security_event(
+                        "virtualmin_activation_refused_untrusted_cert",
+                        {"server_id": str(server.pk), "hostname": server.hostname, "detail": trust_error},
+                    )
+                    return Err(trust_error)
 
             # CAS: only a still-'disabled' server may be activated — never resurrect a
             # 'failed'/'maintenance' server, and never race a concurrent transition.

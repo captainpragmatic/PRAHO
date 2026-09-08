@@ -10,15 +10,18 @@ from datetime import timedelta
 from unittest.mock import MagicMock, patch
 
 from django.conf import settings as django_settings
-from django.test import TestCase
+from django.db import transaction
+from django.test import TestCase, TransactionTestCase
 from django.utils import timezone
 from django.utils.module_loading import import_string
-from django_q.models import Schedule
+from django_q.models import OrmQ, Schedule
+from django_q.tasks import async_task
 
-from apps.common.types import Err, Ok
+from apps.common.types import Err, Ok, Retriability, retriability_of
 from apps.infrastructure.apps import InfrastructureConfig
 from apps.infrastructure.cloud_gateway import ServerInfo
 from apps.infrastructure.drift_remediation import EXECUTION_TASK_TIMEOUT_SECONDS, DriftRemediationService
+from apps.infrastructure.hcloud_service import HcloudService
 from apps.infrastructure.models import (
     CloudProvider,
     DriftCheck,
@@ -806,26 +809,72 @@ class TestCleanupSnapshots(DriftRemediationTestBase):
         self.assertEqual(expired.first().provider_snapshot_id, "snap-old")
 
 
-class TestSnapshotLifecycleHonesty(DriftRemediationTestBase):
-    """#321.1: _take_snapshot wrote status='available' directly and created no
-    row at all when the provider call failed, so a provider-create that
-    succeeded but then crashed before the DB write left a silent orphan, and the
-    'creating'/'failed' statuses were never written. It must record the attempt
-    BEFORE the provider call and commit a terminal status after."""
+class TestSnapshotLifecycleHonesty(TransactionTestCase):
+    """#321.1 + #350: three-phase honesty, now under REAL autocommit.
+
+    These tests previously ran inside TestCase's wrapping transaction — the
+    exact condition the new guard rejects — which meant the durability they
+    asserted was never real. TransactionTestCase exercises the actual commit
+    behaviour, and the guard discriminator proves an enclosing transaction is
+    refused before any row or provider call happens.
+    """
+
+    def setUp(self) -> None:
+        self.provider = CloudProvider.objects.create(
+            name="Snap Hetzner", provider_type="hetzner", code="het", credential_identifier="snap-cred"
+        )
+        self.region = NodeRegion.objects.create(
+            provider=self.provider, name="Falkenstein", provider_region_id="fsn1",
+            normalized_code="fsn1", country_code="de", city="Falkenstein",
+        )
+        self.size = NodeSize.objects.create(
+            provider=self.provider, name="Small", display_name="2 vCPU / 4GB", provider_type_id="cpx21",
+            vcpus=2, memory_gb=4, disk_gb=40, hourly_cost_eur="0.0100", monthly_cost_eur="5.00",
+        )
+        self.panel = PanelType.objects.create(
+            name="Snap Virtualmin", panel_type="virtualmin", ansible_playbook="virtualmin.yml"
+        )
+        self.deployment = NodeDeployment.objects.create(
+            environment="prd", node_type="sha", provider=self.provider, node_size=self.size,
+            region=self.region, panel_type=self.panel, hostname="prd-sha-het-de-fsn1-090",
+            node_number=90, status="completed", external_node_id="90090", ipv4_address="1.2.3.90",
+        )
+        self.service = DriftRemediationService()
 
     def _gateway(self, create_result):
         gw = MagicMock()
         gw.create_snapshot.return_value = create_result
         return gw
 
-    def test_provider_error_persists_failed_snapshot_row(self):
-        """A provider failure must leave a durable 'failed' row (was: no row)."""
+    def test_enclosing_transaction_is_refused_before_any_side_effect(self):
+        """#350: the invariant is enforced, not commented."""
+        gw = self._gateway(Ok("snap-never"))
+        with patch.object(self.service, "_get_gateway", return_value=gw), transaction.atomic():
+            result = self.service._take_snapshot(self.deployment)
+        self.assertTrue(result.is_err())
+        self.assertIn("autocommit", result.unwrap_err())
+        gw.create_snapshot.assert_not_called()
+        self.assertEqual(DriftSnapshot.objects.count(), 0)
+
+    def test_unclassified_provider_error_is_ambiguous_cleanup_failed(self):
+        """A bare Err (default UNKNOWN retriability) no longer claims 'provably
+        no resource': hcloud catches timeouts AFTER image creation too."""
         with patch.object(self.service, "_get_gateway", return_value=self._gateway(Err("provider boom"))):
             result = self.service._take_snapshot(self.deployment)
 
         self.assertTrue(result.is_err())
         rows = DriftSnapshot.objects.filter(deployment=self.deployment)
         self.assertEqual(rows.count(), 1, "the attempt must be durably recorded, not silently dropped")
+        self.assertEqual(rows.first().status, "cleanup_failed")
+
+    def test_pre_dispatch_error_is_definite_failed(self):
+        """NOT_RETRIABLE = the provider confirmed nothing was created."""
+        definite = Err("no such server", retriability=Retriability.NOT_RETRIABLE)
+        with patch.object(self.service, "_get_gateway", return_value=self._gateway(definite)):
+            result = self.service._take_snapshot(self.deployment)
+
+        self.assertTrue(result.is_err())
+        rows = DriftSnapshot.objects.filter(deployment=self.deployment)
         self.assertEqual(rows.first().status, "failed")
 
     def test_success_transitions_creating_to_available_with_id(self):
@@ -839,12 +888,6 @@ class TestSnapshotLifecycleHonesty(DriftRemediationTestBase):
         self.assertEqual(snap.provider_snapshot_id, "snap-xyz")
 
     def test_provider_raise_is_contained_and_marks_cleanup_failed(self):
-        """If the provider SDK raises (not returns Err), _take_snapshot must not
-        propagate — it returns Err so execute_remediation does not crash with the
-        request stuck in_progress. The raise is AMBIGUOUS (the provider may have
-        created the snapshot before the failure surfaced), so the row is marked
-        'cleanup_failed' (possible billable orphan, needs reconciliation), not
-        'failed' (which would assert no provider resource exists)."""
         gw = MagicMock()
         gw.create_snapshot.side_effect = RuntimeError("SDK exploded")
         with patch.object(self.service, "_get_gateway", return_value=gw):
@@ -854,6 +897,44 @@ class TestSnapshotLifecycleHonesty(DriftRemediationTestBase):
         rows = DriftSnapshot.objects.filter(deployment=self.deployment)
         self.assertEqual(rows.count(), 1)
         self.assertEqual(rows.first().status, "cleanup_failed")
+
+    def test_hcloud_classifies_post_dispatch_ambiguity(self):
+        """Through the REAL hcloud service: image created, wait raises -> UNKNOWN."""
+        service = object.__new__(HcloudService)
+        client = MagicMock()
+        service.client = client
+        client.servers.create_image.return_value.action.wait_until_finished.side_effect = TimeoutError("poll timeout")
+        result = service.create_snapshot("123", "praho-drift-test")
+        self.assertTrue(result.is_err())
+        self.assertIs(retriability_of(result), Retriability.UNKNOWN)
+
+        client2 = MagicMock()
+        service.client = client2
+        client2.servers.get_by_id.side_effect = RuntimeError("not found")
+        result2 = service.create_snapshot("123", "praho-drift-test")
+        self.assertTrue(result2.is_err())
+        self.assertIs(retriability_of(result2), Retriability.NOT_RETRIABLE)
+
+    def test_broker_enqueue_is_transactional_with_business_writes(self):
+        """ADR-0045 pin: intent row + queued message commit or roll back together."""
+        self.assertEqual(django_settings.Q_CLUSTER.get("orm"), "default")
+        queue_before = OrmQ.objects.count()
+
+        class BoomError(Exception):
+            pass
+
+        try:
+            with transaction.atomic():
+                DriftSnapshot.objects.create(
+                    deployment=self.deployment, provider_snapshot_id="", snapshot_type="pre_remediation",
+                    status="creating", expires_at=timezone.now() + timedelta(days=1),
+                )
+                async_task("apps.infrastructure.tasks.execute_remediation_task", 1, sync=False)
+                raise BoomError
+        except BoomError:
+            pass
+        self.assertEqual(OrmQ.objects.count(), queue_before)
+        self.assertEqual(DriftSnapshot.objects.count(), 0)
 
 
 class TestCleanupSnapshotTask(DriftRemediationTestBase):

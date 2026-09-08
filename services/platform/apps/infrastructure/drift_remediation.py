@@ -17,10 +17,10 @@ from typing import TYPE_CHECKING
 
 from django.core.exceptions import ValidationError
 from django.core.validators import validate_ipv4_address, validate_ipv6_address
-from django.db import transaction
+from django.db import connection, transaction
 from django.utils import timezone
 
-from apps.common.types import Err, Ok, Result
+from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 from apps.infrastructure.audit_service import InfrastructureAuditContext, InfrastructureAuditService
 from apps.infrastructure.cloud_gateway import CloudProviderGateway, get_cloud_gateway
 from apps.infrastructure.models import (
@@ -491,7 +491,7 @@ class DriftRemediationService:
 
         return Ok(True)
 
-    def execute_remediation(  # noqa: PLR0911  # Multi-step workflow: each gate exits early
+    def execute_remediation(  # noqa: C901, PLR0911  # Multi-step workflow: each gate exits early
         self,
         request: DriftRemediationRequest,
     ) -> Result[bool, str]:
@@ -520,8 +520,19 @@ class DriftRemediationService:
             return Err(snapshot_result.unwrap_err())
 
         snapshot = snapshot_result.unwrap()
+        # CAS on our claim: if the reaper terminalized this request while the
+        # snapshot was being created, we no longer own the execution — the id
+        # must not land on a terminal row, and we must NOT mutate the node.
+        # (The 7-day expiry sweep reaps the now-orphaned available snapshot.)
+        claimed = DriftRemediationRequest.objects.filter(pk=request.pk, status="in_progress").update(
+            snapshot_id=snapshot.provider_snapshot_id
+        )
+        if not claimed:
+            logger.warning(
+                "⚠️ [DriftRemediation] Lost execution ownership after snapshot; aborting request %s", request.pk
+            )
+            return Err("Execution ownership lost after snapshot; no mutation performed")
         request.snapshot_id = snapshot.provider_snapshot_id
-        request.save(update_fields=["snapshot_id"])
 
         # Step 2: Apply remediation
         gateway = self._get_gateway(deployment)
@@ -736,6 +747,17 @@ class DriftRemediationService:
         deployment: NodeDeployment,
     ) -> Result[DriftSnapshot, str]:
         """Call gateway.create_snapshot(), create DriftSnapshot record."""
+        # #350: the three-phase protocol is only sound when each phase commits
+        # immediately. Enforce the invariant instead of trusting a comment —
+        # an enclosing atomic block OR disabled autocommit would let an outer
+        # rollback erase the phase-1/phase-3 markers while the provider
+        # snapshot exists (a billable orphan with no PRAHO trace).
+        if connection.in_atomic_block or not transaction.get_autocommit():
+            return Err(
+                "Snapshot three-phase protocol requires autocommit; never wrap "
+                "execute_remediation in transaction.atomic() or disable autocommit"
+            )
+
         gateway = self._get_gateway(deployment)
         if gateway is None:
             return Err("Cannot get cloud gateway for snapshot")
@@ -743,9 +765,6 @@ class DriftRemediationService:
         name = f"praho-drift-{deployment.hostname}-{timezone.now().strftime('%Y%m%d%H%M%S')}"
 
         # Three explicit commit phases so a crash never leaves a silent orphan.
-        # This MUST NOT run inside an enclosing transaction (execute_remediation
-        # calls it after the claim's conditional update, with no atomic block) —
-        # otherwise the phase-1/phase-3 markers would roll back with the caller.
         #
         # Phase 1: durably record the attempt BEFORE the provider call. If the
         # process dies between the provider create and the id write, this
@@ -776,10 +795,17 @@ class DriftRemediationService:
             snapshot.save(update_fields=["status"])
             return Err(f"Snapshot creation raised: {e}")
 
-        # Phase 3: a returned Err is a structured provider failure (the gateway
-        # confirmed the call did not create a resource), so 'failed' is honest here.
+        # Phase 3: an Err's retriability carries the side-effect evidence.
+        # NOT_RETRIABLE = provider confirmed nothing was created -> 'failed'.
+        # Anything else (incl. the default UNKNOWN of an unclassified Err) is
+        # ambiguous -> 'cleanup_failed' (possible billable orphan). The old
+        # assumption that every Err proves absence was wrong: hcloud catches
+        # every exception, including timeouts AFTER the image was created.
         if result.is_err():
-            snapshot.status = "failed"
+            if retriability_of(result) is Retriability.NOT_RETRIABLE:
+                snapshot.status = "failed"
+            else:
+                snapshot.status = "cleanup_failed"
             snapshot.save(update_fields=["status"])
             return Err(f"Snapshot creation failed: {result.unwrap_err()}")
 

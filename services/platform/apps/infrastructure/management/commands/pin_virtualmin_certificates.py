@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 from typing import Any
 
@@ -31,6 +32,15 @@ class Command(BaseCommand):
             "silently retarget a healthy node's trust anchor)",
         )
         parser.add_argument(
+            "--report",
+            action="store_true",
+            help=(
+                "Machine-readable sizing report (JSON on stdout, exit 0): plain-HTTP active rows, "
+                "stranded unpinnable rows (no linked deployment), and SSH-pinnable candidates. "
+                "Replaces the manual sizing SQL from DEPLOYMENT.md."
+            ),
+        )
+        parser.add_argument(
             "--fingerprint",
             help=(
                 "Operator-supplied SHA-256 pin for ONE server (requires --server-id). For legacy rows with no "
@@ -52,6 +62,10 @@ class Command(BaseCommand):
                 uuid.UUID(str(server_id))
             except (ValueError, AttributeError, TypeError) as exc:
                 raise CommandError(f"{server_id!r} is not a valid VirtualminServer UUID") from exc
+
+        if options["report"]:
+            self._emit_report()
+            return
 
         if fingerprint is not None:
             self._pin_manually(server_id, fingerprint, dry_run=options["dry_run"], force=options["force"])
@@ -111,6 +125,25 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS(f"Pinned {pinned} Virtualmin certificate(s)"))
         if failed:
             raise CommandError(f"Failed to pin {failed} Virtualmin certificate(s)")
+
+    def _emit_report(self) -> None:
+        """#337 sizing: one JSON document an operator or script can consume."""
+        candidates = VirtualminServer.objects.filter(use_ssl=True, ssl_verify=False, ssl_cert_fingerprint="")
+        stranded = [s for s in candidates if not self._has_deployment(s)]
+        pinnable = [s for s in candidates if self._has_deployment(s)]
+        # Active rows only, matching the interactive report's deliberate filter.
+        insecure = list(VirtualminServer.objects.filter(use_ssl=False, status="active"))
+
+        def rows(servers: list[VirtualminServer]) -> list[dict[str, str]]:
+            return [{"id": str(s.id), "hostname": s.hostname} for s in servers]
+
+        report = {
+            "plain_http_active": {"count": len(insecure), "servers": rows(insecure)},
+            "stranded_unpinnable": {"count": len(stranded), "servers": rows(stranded)},
+            "ssh_pinnable_candidates": {"count": len(pinnable), "servers": rows(pinnable)},
+            "outstanding_work": bool(insecure or stranded or pinnable),
+        }
+        self.stdout.write(json.dumps(report, indent=2))
 
     def _report_unpinnable(self, stranded: list[VirtualminServer], server_id: str | None) -> None:
         """Surface rows that lose API connectivity, BEFORE the run reports a failure count (#337).
