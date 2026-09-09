@@ -148,7 +148,12 @@
       args:
         creates: /etc/webmin/letsencrypt-cert-{{ inventory_hostname }}
       register: letsencrypt_result
-      failed_when: false
+      # Fatal ONLY when letsencrypt_fatal is explicitly passed true (default false ==
+      # today's non-fatal behavior, byte-for-byte). The #436 staging drill flips this on
+      # a disposable node (`-e letsencrypt_fatal=true`) once the real CLI contract is proven;
+      # until then a node must still reach `active` even if this step fails. Do NOT enable
+      # by default and do NOT remove this until the drill validates the command flags.
+      failed_when: letsencrypt_result.rc != 0 and (letsencrypt_fatal | default(false) | bool)
       changed_when: letsencrypt_result.rc == 0
 
     - name: Report Let's Encrypt issuance failure
@@ -173,7 +178,8 @@
         - letsencrypt_result.changed | default(false)
         - letsencrypt_cgi.stat.exists
       register: letsencrypt_install
-      failed_when: false
+      # Same drill-gated fatality as the generate step above (default false == today).
+      failed_when: letsencrypt_install.rc is defined and letsencrypt_install.rc != 0 and (letsencrypt_fatal | default(false) | bool)
 
     - name: Report Let's Encrypt install failure
       ansible.builtin.debug:

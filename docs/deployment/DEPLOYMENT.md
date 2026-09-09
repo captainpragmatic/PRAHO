@@ -95,18 +95,29 @@ AND indeterminate probes refuse (fail-closed) and keep the server disabled
 without discarding the deployment. Before flipping it on:
 
 1. On a DISPOSABLE node against **Let's Encrypt staging**, validate the real
-   Virtualmin CLI contract used by `virtualmin.yml` (`--host` vs `--domain` on
-   `generate-letsencrypt-cert`; whether `letsencrypt.cgi` exists at
-   `/usr/share/webmin/webmin/`; whether Virtualmin itself writes the
-   `/etc/webmin/letsencrypt-cert-<host>` marker — the playbook now writes the
-   marker itself only after BOTH issuance and install exit 0).
-2. Deploy a node end-to-end and grep the panel-stage output for
-   `LETSENCRYPT_FAILED` banners; a clean run should serve a CA-trusted
-   certificate for the fqdn on :10000.
-3. Only then remove the two `failed_when: false` suppressions in
-   `virtualmin.yml` and enable the setting. Respect LE rate limits
-   (5 authorization failures/identifier/hour; 50 certs/domain/week) — use the
-   staging CA for all tests.
+   Virtualmin CLI contract used by `virtualmin.yml`. Current docs/source say the
+   playbook's invocation is wrong and must be corrected here first:
+   `generate-letsencrypt-cert` **requires `--domain <name>`** (the playbook passes
+   only `--host`, which errors "Missing --domain parameter"); `--renew` configures
+   auto-renewal, it does **not** trigger issuance; and a first-class **`--staging`**
+   flag exists for the staging CA. `--domain` names a Virtualmin virtual server, so
+   decide on the live node whether the node FQDN gets a virtual server or uses
+   Webmin's own LE flow. Also confirm `letsencrypt.cgi` exists at
+   `/usr/share/webmin/webmin/` and that the `/etc/webmin/letsencrypt-cert-<host>`
+   marker is the one **we** write (only after BOTH steps exit 0).
+2. **Exercise fatality without a code change**: the two Let's Encrypt steps are
+   now gated by a `letsencrypt_fatal` var (default **false** == today's non-fatal
+   behavior). Run the drill with `-e letsencrypt_fatal=true` so a failed cert step
+   aborts the play on the disposable node, and confirm a clean run still serves a
+   **CA-trusted** certificate for the fqdn on :10000 (one production-LE issuance is
+   needed to exercise the trust gate — staging certs chain to an untrusted root).
+   Grep the panel-stage output for `LETSENCRYPT_FAILED` banners.
+3. Only then, in production, enable the corrected command flags, wire
+   `letsencrypt_fatal=true` from the platform (or enable the
+   `infrastructure.require_trusted_panel_certificate` gate), and drop the now-inert
+   `default(false)` guards. Respect LE rate limits (5 authorization
+   failures/identifier/hour; 50 certs/domain/week) — use the staging CA for all
+   iteration.
 
 ---
 
