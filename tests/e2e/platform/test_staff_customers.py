@@ -75,6 +75,39 @@ def test_customer_list_page_loads(monitored_staff_page: Page) -> None:
     print(f"  ✅ Customer table displays {row_count} rows")
 
 
+def test_customer_row_navigates_via_delegated_dispatcher(monitored_staff_page: Page) -> None:
+    """The migrated clickable row (data-action='navigate') must navigate via platform-actions.js,
+    and the nested copy button (data-action='copy') must NOT navigate — proving the #284
+    inline-handler migration works end-to-end with the real dispatcher loaded."""
+    page = monitored_staff_page
+    navigate_to_platform_page(page, "/customers/")
+    page.wait_for_load_state("networkidle")
+
+    row = page.locator("tr[data-action='navigate']").first
+    if row.count() == 0:
+        print("  [i] No clickable customer rows seeded — skipping dispatcher navigation check")
+        return
+
+    expected = row.get_attribute("data-href")
+    assert expected and "/customers/" in expected, f"row data-href unexpected: {expected}"
+
+    # A nested copy button must claim its own click (closest() scoping) — clicking it does NOT navigate.
+    copy_btn = row.locator("button[data-action='copy']").first
+    if copy_btn.count() > 0 and copy_btn.is_visible():
+        copy_btn.click()
+        page.wait_for_timeout(300)
+        assert "/customers/" in page.url and page.url.rstrip("/").endswith("customers"), (
+            f"copy button wrongly navigated to {page.url}"
+        )
+        print("  ✅ Copy button did not trigger row navigation")
+
+    # Clicking the row navigates through the dispatcher.
+    row.click()
+    page.wait_for_load_state("networkidle")
+    assert re.search(r"/customers/\d+/", page.url), f"row click did not navigate to detail: {page.url}"
+    print(f"  ✅ Row navigated via dispatcher to {page.url}")
+
+
 def test_customer_list_search(monitored_staff_page: Page) -> None:
     """Search for a customer name and verify results filter."""
     page = monitored_staff_page

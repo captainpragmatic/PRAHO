@@ -247,8 +247,8 @@
 
 <!-- Hidden Modal Templates -->
 <template id="export-modal">
-  <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onclick="this.remove()">
-    <div class="bg-slate-800 rounded-lg p-6 w-full max-w-md mx-4" onclick="event.stopPropagation()">
+  <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" data-action="remove-self">
+    <div class="bg-slate-800 rounded-lg p-6 w-full max-w-md mx-4" data-action="stop">
       <h3 class="text-lg font-medium text-white mb-4">{% icon "document" %} {% trans 'Export Personal Data' %}</h3>
       <form hx-post="{% url 'audit:request_data_export' %}" hx-target="body" hx-swap="outerHTML">
         {% csrf_token %}
@@ -293,8 +293,8 @@
 </template>
 
 <template id="consent-modal">
-  <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onclick="this.remove()">
-    <div class="bg-slate-800 rounded-lg p-6 w-full max-w-md mx-4" onclick="event.stopPropagation()">
+  <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" data-action="remove-self">
+    <div class="bg-slate-800 rounded-lg p-6 w-full max-w-md mx-4" data-action="stop">
       <h3 class="text-lg font-medium text-white mb-4">{% icon "warning" %} {% trans 'Withdraw Consent' %}</h3>
       <form hx-post="{% url 'audit:withdraw_consent' %}" hx-target="body">
         {% csrf_token %}
@@ -322,8 +322,8 @@
 </template>
 
 <template id="deletion-modal">
-  <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onclick="this.remove()">
-    <div class="bg-slate-800 rounded-lg p-6 w-full max-w-md mx-4" onclick="event.stopPropagation()">
+  <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" data-action="remove-self">
+    <div class="bg-slate-800 rounded-lg p-6 w-full max-w-md mx-4" data-action="stop">
       <h3 class="text-lg font-medium text-white mb-4">{% icon "x" %} {% trans 'Request Account Deletion' %}</h3>
       <form hx-post="{% url 'audit:request_data_deletion' %}" hx-target="body">
         {% csrf_token %}
@@ -359,8 +359,8 @@
 </template>
 
 <template id="consent-settings-modal">
-  <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onclick="this.remove()">
-    <div class="bg-slate-800 rounded-lg p-6 w-full max-w-md mx-4" onclick="event.stopPropagation()">
+  <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" data-action="remove-self">
+    <div class="bg-slate-800 rounded-lg p-6 w-full max-w-md mx-4" data-action="stop">
       <h3 class="text-lg font-medium text-white mb-4">{% icon "document" %} {% trans 'Update Privacy Settings' %}</h3>
       <form hx-post="{% url 'audit:update_consent' %}" hx-target="body" hx-swap="outerHTML">
         {% csrf_token %}

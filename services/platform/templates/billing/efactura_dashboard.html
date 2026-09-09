@@ -131,7 +131,7 @@
       <h3 class="text-sm font-semibold text-white">{% icon "document" %} {% trans "All Documents" %} ({{ total_documents }})</h3>
       <div class="flex items-center gap-3">
         <!-- Status Filter -->
-        <select onchange="window.location.href='?status=' + this.value" class="bg-slate-700 text-sm text-slate-300 rounded border-slate-600 px-2 py-1">
+        <select data-action="navigate-select" data-href-base="?status=" class="bg-slate-700 text-sm text-slate-300 rounded border-slate-600 px-2 py-1">
           <option value="">{% trans "All Statuses" %}</option>
           {% for value, label in status_choices %}
           <option value="{{ value }}" {% if status_filter == value %}selected{% endif %}>{{ label }}</option>

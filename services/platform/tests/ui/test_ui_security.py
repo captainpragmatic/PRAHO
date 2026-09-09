@@ -293,17 +293,23 @@ class CORSSecurityTests(TestCase):
         self.assertIn("Access-Control-Allow-Methods", response)
 
 
-"""H5: table_enhanced must escape click_url in onclick handlers."""
+"""H5: table_enhanced row navigation must be XSS-safe."""
 
 
 class TableEnhancedXSSTests(SimpleTestCase):
-    """H5: click_url must use |escapejs, click_js must not be raw in onclick."""
+    """H5: click_url is delegated (#284) — it goes in an HTML-escaped data-href that the
+    platform dispatcher navigates same-origin, not a raw/escapejs onclick."""
 
-    def test_click_url_uses_escapejs(self):
+    def test_click_url_uses_html_escaped_data_href(self):
         template_path = Path(__file__).resolve().parents[2] / "templates/components/table_enhanced.html"
         content = template_path.read_text()
-        self.assertIn("click_url|escapejs", content)
-        self.assertNotIn("window.location.href='{{ row.click_url }}'", content)
+        # Migrated form: delegated navigate with the URL in an auto-HTML-escaped attribute.
+        self.assertIn('data-action="navigate" data-href="{{ row.click_url }}"', content)
+        # No inline onclick navigation, and no escapejs (which would corrupt the attribute
+        # into literal \\uXXXX); attribute auto-escaping + dispatcher same-origin validation
+        # are the XSS controls now.
+        self.assertNotIn("onclick=\"window.location", content)
+        self.assertNotIn("click_url|escapejs", content)
 
     def test_click_js_not_raw_in_onclick(self):
         template_path = Path(__file__).resolve().parents[2] / "templates/components/table_enhanced.html"
