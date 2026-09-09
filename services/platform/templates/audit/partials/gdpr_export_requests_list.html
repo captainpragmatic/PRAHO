@@ -90,7 +90,7 @@
                                 hx-target="#export-detail-{{ request.id }}"
                                 hx-swap="innerHTML"
                                 hx-indicator="#export-detail-{{ request.id }}-loading"
-                                onclick="toggleExportDetail(this, '{{ request.id }}')"
+                                data-action="invoke" data-invoke="toggleExportDetailAction" data-request-id="{{ request.id }}"
                                 title="{% trans 'View Details' %}">
                             <svg class="w-5 h-5 transform transition-transform duration-200 chevron-icon"
                                  fill="none"
@@ -162,6 +162,10 @@
 
 <!-- JavaScript for Export Detail Toggle -->
 <script nonce="{{ csp_nonce }}">
+function toggleExportDetailAction(el) {
+    toggleExportDetail(el, el.dataset.requestId);
+}
+
 function toggleExportDetail(button, requestId) {
     const detailDiv = document.getElementById('export-detail-' + requestId);
     const chevron = button.querySelector('.chevron-icon');

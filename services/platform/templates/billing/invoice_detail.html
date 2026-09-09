@@ -292,7 +292,7 @@
 <div id="invoiceRefundModal" class="hidden fixed inset-0 z-50 overflow-y-auto">
   <div class="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
     <div class="fixed inset-0 transition-opacity" aria-hidden="true">
-      <div class="absolute inset-0 bg-slate-900 opacity-75" onclick="hideInvoiceRefundModal()"></div>
+      <div class="absolute inset-0 bg-slate-900 opacity-75" data-action="invoke" data-invoke="hideInvoiceRefundModal"></div>
     </div>
 
     <div class="inline-block align-bottom bg-slate-800 rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
@@ -375,7 +375,7 @@
         </div>
 
         <div class="px-6 py-4 bg-slate-900 flex justify-end space-x-3">
-          <button type="button" onclick="hideInvoiceRefundModal()"
+          <button type="button" data-action="invoke" data-invoke="hideInvoiceRefundModal"
                   class="px-4 py-2 text-sm font-medium text-slate-400 hover:text-white">
             {% trans "Cancel" %}
           </button>
@@ -468,7 +468,7 @@ document.getElementById('invoiceRefundForm').addEventListener('submit', function
 <div id="invoiceRefundRequestModal" class="hidden fixed inset-0 z-50 overflow-y-auto">
   <div class="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
     <div class="fixed inset-0 transition-opacity" aria-hidden="true">
-      <div class="absolute inset-0 bg-slate-900 opacity-75" onclick="hideInvoiceRefundRequestModal()"></div>
+      <div class="absolute inset-0 bg-slate-900 opacity-75" data-action="invoke" data-invoke="hideInvoiceRefundRequestModal"></div>
     </div>
 
     <div class="inline-block align-bottom bg-slate-800 rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
@@ -528,7 +528,7 @@ document.getElementById('invoiceRefundForm').addEventListener('submit', function
         </div>
 
         <div class="px-6 py-4 bg-slate-900 flex justify-end space-x-3">
-          <button type="button" onclick="hideInvoiceRefundRequestModal()"
+          <button type="button" data-action="invoke" data-invoke="hideInvoiceRefundRequestModal"
                   class="px-4 py-2 text-sm font-medium text-slate-400 hover:text-white">
             {% trans "Cancel" %}
           </button>

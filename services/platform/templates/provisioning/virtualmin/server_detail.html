@@ -220,15 +220,15 @@
         <div class="px-6 py-4 border-b border-slate-700">
             <nav class="flex space-x-8">
                 <button class="text-blue-400 border-b-2 border-blue-400 pb-2 text-sm font-medium"
-                        onclick="showTab('live-domains')">
+                        data-action="invoke" data-invoke="showTabAction" data-tab-name="live-domains">
                     {% icon "globe" %} {% trans "Live Domains" %} ({{ actual_domains|length }})
                 </button>
                 <button class="text-slate-400 hover:text-slate-100 pb-2 text-sm font-medium"
-                        onclick="showTab('accounts')">
+                        data-action="invoke" data-invoke="showTabAction" data-tab-name="accounts">
                     {% icon "chart" %} {% trans "PRAHO Accounts" %} ({{ recent_accounts|length }})
                 </button>
                 <button class="text-slate-400 hover:text-slate-100 pb-2 text-sm font-medium"
-                        onclick="showTab('jobs')">
+                        data-action="invoke" data-invoke="showTabAction" data-tab-name="jobs">
                     {% icon "settings" %} {% trans "Recent Jobs" %} ({{ recent_jobs|length }})
                 </button>
             </nav>
@@ -427,6 +427,10 @@
 </div>
 
     <script nonce="{{ csp_nonce }}">
+        function showTabAction(el) {
+            showTab(el.dataset.tabName);
+        }
+
         function showTab(tabName) {
             // Hide all tabs
             const tabs = ['live-domains', 'accounts', 'jobs'];
@@ -450,8 +454,13 @@
             });
 
             // Highlight active button
-            event.target.classList.remove('text-slate-400', 'hover:text-slate-100');
-            event.target.classList.add('text-blue-400', 'border-b-2', 'border-blue-400');
+            const activeButton = Array.from(document.querySelectorAll('nav button')).find(
+                button => button.dataset.tabName === tabName
+            );
+            if (activeButton) {
+                activeButton.classList.remove('text-slate-400', 'hover:text-slate-100');
+                activeButton.classList.add('text-blue-400', 'border-b-2', 'border-blue-400');
+            }
         }
     </script>
 {% endblock %}

@@ -403,7 +403,7 @@
             {% icon "document" %} {% trans 'Download PDF' %}
           </a>
 
-          <button onclick="sendProforma({{ proforma.pk }})"
+          <button data-action="invoke" data-invoke="sendProformaAction" data-proforma-id="{{ proforma.pk }}"
                   class="block w-full text-center px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-md font-medium transition-colors">
             {% if is_staff_user %}
               {% icon "mail" %} {% trans 'Send to Customer' %}
@@ -425,6 +425,10 @@
 </div>
 
 <script nonce="{{ csp_nonce }}">
+function sendProformaAction(el) {
+    sendProforma(el.dataset.proformaId);
+}
+
 function sendProforma(proformaId) {
     if (confirm('{% trans "Send this proforma to the customer via email?" %}')) {
         fetch(`/app/billing/proformas/${proformaId}/send/`, {

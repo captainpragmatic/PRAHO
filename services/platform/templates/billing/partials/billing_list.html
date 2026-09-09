@@ -51,7 +51,7 @@ This template includes both the table content and header count update.
         </thead>
         <tbody class="divide-y divide-slate-700">
           {% for document in documents.object_list %}
-          <tr class="hover:bg-slate-700 cursor-pointer transition-colors" onclick="navigateToDocument('{{ document.type }}', '{{ document.id }}')">
+          <tr class="hover:bg-slate-700 cursor-pointer transition-colors" data-action="invoke" data-invoke="navigateToDocumentAction" data-document-type="{{ document.type }}" data-document-id="{{ document.id }}">
             <td class="px-6 py-4 whitespace-nowrap text-center">
               {% if document.type == 'proforma' %}
                 {% trans "Proforma" as bt1 %}{% badge bt1 icon="document" variant="primary" %}
@@ -143,6 +143,10 @@ This template includes both the table content and header count update.
 </div>
 
 <script nonce="{{ csp_nonce }}">
+function navigateToDocumentAction(el) {
+  navigateToDocument(el.dataset.documentType, el.dataset.documentId);
+}
+
 function navigateToDocument(type, id) {
   if (type === 'proforma') {
     window.location.href = "{% url 'billing:proforma_detail' 0 %}".replace('/0/', '/' + id + '/');

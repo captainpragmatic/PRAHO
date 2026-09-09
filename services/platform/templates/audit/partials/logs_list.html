@@ -71,7 +71,7 @@
                             hx-target="#event-detail-{{ event.id }}"
                             hx-swap="innerHTML"
                             hx-indicator="#event-detail-{{ event.id }}-loading"
-                            onclick="toggleEventDetail(this, '{{ event.id }}')"
+                            data-action="invoke" data-invoke="toggleEventDetailAction" data-event-id="{{ event.id }}"
                             >
                         <svg class="w-5 h-5 transform transition-transform duration-200 chevron-icon"
                              fill="none"
@@ -115,6 +115,10 @@
 
 <!-- JavaScript for Event Detail Toggle -->
 <script nonce="{{ csp_nonce }}">
+function toggleEventDetailAction(el) {
+    toggleEventDetail(el, el.dataset.eventId);
+}
+
 function toggleEventDetail(button, eventId) {
     const detailDiv = document.getElementById('event-detail-' + eventId);
     const chevron = button.querySelector('.chevron-icon');

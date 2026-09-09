@@ -16,6 +16,9 @@
  *   remove-self      (optional data-remove-closest)   — remove the element (or nearest match)
  *   show / hide      (data-target)                    — toggle `hidden` on #target
  *   stop             — no-op; claims the click so an ancestor navigate/etc. does not fire
+ *   filter-tab       (data-select-name, data-select-value) — set a form select + fire change
+ *   cookie-prefs     (data-fallback-message)          — open consent panel or alert fallback
+ *   reset-form       (data-reset-target)              — reset a target form (or closest)
  */
 (function () {
   "use strict";
@@ -117,6 +120,41 @@
         // No-op: exists so a wrapper element claims the click via closest(), keeping an
         // ancestor registry action (e.g. a row's navigate) from firing. It does NOT stop
         // ancestor Alpine/HTMX/native handlers — migrate propagation groups together.
+        break;
+      }
+      case "filter-tab": {
+        // Set a form-scoped <select> and fire its change event so an existing
+        // hx-trigger="change from:select[name=...]" re-runs the server-side filter.
+        var filterForm = el.closest("form");
+        if (filterForm) {
+          var filterSel = filterForm.querySelector(
+            'select[name="' + el.dataset.selectName + '"]'
+          );
+          if (filterSel) {
+            filterSel.value = el.dataset.selectValue || "";
+            filterSel.dispatchEvent(new Event("change", { bubbles: true }));
+          }
+        }
+        break;
+      }
+      case "cookie-prefs": {
+        // Open the cookie-preferences panel if the consent script registered one,
+        // else surface the fallback message (mirrors the portal's cookie-prefs).
+        if (typeof window.showCookiePreferences === "function") {
+          window.showCookiePreferences();
+        } else if (el.dataset.fallbackMessage) {
+          window.alert(el.dataset.fallbackMessage);
+        }
+        break;
+      }
+      case "reset-form": {
+        // Reset the target form (selector in data-reset-target, else the closest form).
+        // Contract mirrors the portal csp-actions.js reset-form.
+        var resetTarget = el.dataset.resetTarget;
+        var resetForm = resetTarget ? document.querySelector(resetTarget) : el.closest("form");
+        if (resetForm && typeof resetForm.reset === "function") {
+          resetForm.reset();
+        }
         break;
       }
       default:

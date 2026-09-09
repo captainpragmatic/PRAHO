@@ -113,7 +113,7 @@
                 {% comment %}Edit mode - expandable row controls{% endcomment %}
                 <div class="flex flex-col sm:flex-row space-y-1 sm:space-y-0 sm:space-x-2">
                   <button type="button"
-                          onclick="toggleExpandableEdit('{{ item.id }}')"
+                          data-action="invoke" data-invoke="toggleExpandableEditAction" data-item-id="{{ item.id }}"
                           class="inline-flex items-center justify-center px-2 py-1.5 text-xs font-medium rounded border border-blue-500 text-blue-400 hover:bg-blue-500 hover:text-white transition-colors min-h-[32px] sm:min-h-[28px]"
                           title="{% trans 'Edit item inline' %}"
                           id="edit-btn-{{ item.id }}">
@@ -122,7 +122,7 @@
                     <span class="hidden sm:block">{% trans "Edit" %}</span>
                   </button>
                   <button type="button"
-                          onclick="deleteOrderItem('{{ item.id }}')"
+                          data-action="invoke" data-invoke="deleteOrderItemAction" data-item-id="{{ item.id }}"
                           class="inline-flex items-center justify-center px-2 py-1.5 text-xs font-medium rounded border border-red-500 text-red-400 hover:bg-red-500 hover:text-white transition-colors min-h-[32px] sm:min-h-[28px]"
                           title="{% trans 'Delete item' %}">
                     <span class="mr-1">{% icon "x" %}</span>
@@ -155,7 +155,7 @@
                     <span class="mr-2">{% icon "document" %}</span>{% trans "Edit Item" %}: {{ item.product.name|default:"Custom Item" }}
                   </h4>
                   <button type="button"
-                          onclick="cancelExpandableEdit('{{ item.id }}')"
+                          data-action="invoke" data-invoke="cancelExpandableEditAction" data-item-id="{{ item.id }}"
                           class="text-slate-400 hover:text-white text-sm">
                     <span class="mr-1">{% icon "x" %}</span>{% trans "Cancel" %}
                   </button>
@@ -218,7 +218,7 @@
           </div>
           <div id="add-item-container">
             <button type="button"
-                    onclick="toggleAddItemForm()"
+                    data-action="invoke" data-invoke="toggleAddItemForm"
                     id="add-item-btn"
                     class="inline-flex items-center px-3 py-2 text-sm font-medium rounded-lg border border-green-600 text-green-400 hover:bg-green-600 hover:text-white transition-colors">
               <span class="mr-1">{% icon "plus" %}</span> {% trans "Add Item" %}
@@ -234,7 +234,7 @@
                 <span class="mr-2">{% icon "plus" %}</span>{% trans "Add New Item" %}
               </h4>
               <button type="button"
-                      onclick="cancelAddItemForm()"
+                      data-action="invoke" data-invoke="cancelAddItemForm"
                       class="text-slate-400 hover:text-white text-sm">
                 <span class="mr-1">{% icon "x" %}</span>{% trans "Cancel" %}
               </button>
@@ -261,7 +261,7 @@
         {% if request.resolver_match.url_name == 'order_edit' and order.status == "draft" or request.resolver_match.url_name == 'order_edit' and order.status == "awaiting_payment" %}
           <div class="mt-4">
             <button type="button"
-                    onclick="toggleAddItemForm()"
+                    data-action="invoke" data-invoke="toggleAddItemForm"
                     class="inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg border border-transparent bg-blue-600 text-white hover:bg-blue-700 focus:ring-2 focus:ring-blue-500">
               <span class="mr-1">{% icon "plus" %}</span> {% trans "Add First Item" %}
             </button>
@@ -278,7 +278,7 @@
               <span class="mr-2">{% icon "plus" %}</span>{% trans "Add First Item" %}
             </h4>
             <button type="button"
-                    onclick="cancelAddItemForm()"
+                    data-action="invoke" data-invoke="cancelAddItemForm"
                     class="text-slate-400 hover:text-white text-sm">
               <span class="mr-1">{% icon "x" %}</span>{% trans "Cancel" %}
             </button>
@@ -314,6 +314,10 @@ Edit mode uses inline expandable forms for better context preservation
 let activeEditRowId = null;
 
 // Toggle expandable edit form for order items
+function toggleExpandableEditAction(el) {
+    toggleExpandableEdit(el.dataset.itemId);
+}
+
 function toggleExpandableEdit(itemId) {
     const editRow = document.getElementById(`edit-row-${itemId}`);
     const editBtn = document.getElementById(`edit-btn-${itemId}`);
@@ -368,6 +372,10 @@ function toggleExpandableEdit(itemId) {
 }
 
 // Cancel expandable edit
+function cancelExpandableEditAction(el) {
+    cancelExpandableEdit(el.dataset.itemId);
+}
+
 function cancelExpandableEdit(itemId) {
     const editRow = document.getElementById(`edit-row-${itemId}`);
     const editBtn = document.getElementById(`edit-btn-${itemId}`);
@@ -388,7 +396,7 @@ function cancelExpandableEdit(itemId) {
 // Toggle Add Item form
 function toggleAddItemForm() {
     const formSection = document.getElementById('add-item-form-section') || document.getElementById('add-item-form-section-empty');
-    const addButton = document.getElementById('add-item-btn') || document.querySelector('button[onclick="toggleAddItemForm()"]');
+    const addButton = document.getElementById('add-item-btn') || document.querySelector('button[data-action="invoke"][data-invoke="toggleAddItemForm"]');
     const formContainer = document.getElementById('add-item-form-container') || document.getElementById('add-item-form-container-empty');
 
     if (!formSection || !formContainer) {
@@ -440,7 +448,7 @@ function toggleAddItemForm() {
 // Cancel Add Item form
 function cancelAddItemForm() {
     const formSection = document.getElementById('add-item-form-section') || document.getElementById('add-item-form-section-empty');
-    const addButton = document.getElementById('add-item-btn') || document.querySelector('button[onclick="toggleAddItemForm()"]');
+    const addButton = document.getElementById('add-item-btn') || document.querySelector('button[data-action="invoke"][data-invoke="toggleAddItemForm"]');
 
     if (formSection) {
         formSection.classList.add('hidden');
@@ -452,6 +460,10 @@ function cancelAddItemForm() {
 }
 
 // Delete Item with confirmation
+function deleteOrderItemAction(el) {
+    deleteOrderItem(el.dataset.itemId);
+}
+
 function deleteOrderItem(itemId) {
     if (!confirm('{% trans "Are you sure you want to delete this item? This action cannot be undone." %}')) {
         return;

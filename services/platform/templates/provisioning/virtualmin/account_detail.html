@@ -214,7 +214,7 @@
                                     data-csrf="{{ csrf_token }}"
                                     data-domain="{{ account.domain }}"
                                     data-protection-operation="{% if account.protected_from_deletion %}disable{% else %}enable{% endif %}"
-                                    onclick="confirmProtectionToggle(this)">
+                                    data-action="invoke" data-invoke="confirmProtectionToggleAction">
                                 {% if account.protected_from_deletion %}
                                     {% icon "lock" %} {% trans "Disable Protection" %}
                                 {% else %}
@@ -227,7 +227,7 @@
                             <button class="w-full px-4 py-2 text-sm font-medium text-red-400 bg-red-500/10 border border-red-500/20 hover:bg-red-500/20 rounded-lg transition-colors"
                                     data-delete-url="{{ delete_url }}"
                                     data-domain="{{ account.domain }}"
-                                    onclick="confirmAccountDelete(this)">
+                                    data-action="invoke" data-invoke="confirmAccountDeleteAction">
                                 {% icon "x" %} {% trans "Delete Account" %}
                             </button>
                             {% else %}
@@ -465,6 +465,14 @@
 </div>
 
 <script nonce="{{ csp_nonce }}">
+function confirmProtectionToggleAction(el) {
+    confirmProtectionToggle(el);
+}
+
+function confirmAccountDeleteAction(el) {
+    confirmAccountDelete(el);
+}
+
 function confirmProtectionToggle(button) {
     // Business field is data-protection-operation, NOT data-action: data-action is
     // reserved for the delegated dispatcher (#284), and reusing it here would let a

@@ -276,7 +276,7 @@
 {% if is_staff and order.status != "cancelled" and order.status != "completed" %}
 <div id="statusModal" class="hidden fixed inset-0 z-50 overflow-y-auto" role="dialog" aria-modal="true" aria-labelledby="statusModalTitle">
   <!-- Backdrop -->
-  <div class="fixed inset-0 bg-slate-900 opacity-75 transition-opacity" aria-hidden="true" onclick="hideStatusModal()"></div>
+  <div class="fixed inset-0 bg-slate-900 opacity-75 transition-opacity" aria-hidden="true" data-action="invoke" data-invoke="hideStatusModal"></div>
 
   <!-- Modal Content Container -->
   <div class="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
@@ -395,7 +395,7 @@
         </div>
 
         <div class="px-6 py-4 bg-slate-900 flex justify-end space-x-3">
-          <button type="button" onclick="hideStatusModal()"
+          <button type="button" data-action="invoke" data-invoke="hideStatusModal"
                   class="px-4 py-2 text-sm font-medium text-slate-400 hover:text-white">
             {% trans "Cancel" %}
           </button>
@@ -604,7 +604,7 @@ document.addEventListener('DOMContentLoaded', function() {
 <div id="refundModal" class="hidden fixed inset-0 z-50 overflow-y-auto">
   <div class="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
     <div class="fixed inset-0 transition-opacity" aria-hidden="true">
-      <div class="absolute inset-0 bg-slate-900 opacity-75" onclick="hideRefundModal()"></div>
+      <div class="absolute inset-0 bg-slate-900 opacity-75" data-action="invoke" data-invoke="hideRefundModal"></div>
     </div>
 
     <div class="inline-block align-bottom bg-slate-800 rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
@@ -689,7 +689,7 @@ document.addEventListener('DOMContentLoaded', function() {
         </div>
 
         <div class="px-6 py-4 bg-slate-900 flex justify-end space-x-3">
-          <button type="button" onclick="hideRefundModal()"
+          <button type="button" data-action="invoke" data-invoke="hideRefundModal"
                   class="px-4 py-2 text-sm font-medium text-slate-400 hover:text-white">
             {% trans "Cancel" %}
           </button>
@@ -782,7 +782,7 @@ document.getElementById('refundForm').addEventListener('submit', function(e) {
 <div id="orderRefundRequestModal" class="hidden fixed inset-0 z-50 overflow-y-auto">
   <div class="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
     <div class="fixed inset-0 transition-opacity" aria-hidden="true">
-      <div class="absolute inset-0 bg-slate-900 opacity-75" onclick="hideOrderRefundRequestModal()"></div>
+      <div class="absolute inset-0 bg-slate-900 opacity-75" data-action="invoke" data-invoke="hideOrderRefundRequestModal"></div>
     </div>
 
     <div class="inline-block align-bottom bg-slate-800 rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
@@ -842,7 +842,7 @@ document.getElementById('refundForm').addEventListener('submit', function(e) {
         </div>
 
         <div class="px-6 py-4 bg-slate-900 flex justify-end space-x-3">
-          <button type="button" onclick="hideOrderRefundRequestModal()"
+          <button type="button" data-action="invoke" data-invoke="hideOrderRefundRequestModal"
                   class="px-4 py-2 text-sm font-medium text-slate-400 hover:text-white">
             {% trans "Cancel" %}
           </button>

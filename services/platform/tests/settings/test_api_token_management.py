@@ -159,7 +159,11 @@ class APITokenManagementTests(TestCase):
         )
         self.assertIsNotNone(revoke_form)
         form_tag = revoke_form.group() if revoke_form else b""
-        self.assertIn(b"return confirm(", form_tag)
+        # #284: the destructive confirm is now the delegated submit-level gate
+        # (data-confirm, fail-closed in platform-actions.js), not an inline
+        # onsubmit="return confirm(...)" handler.
+        self.assertIn(b"data-confirm=", form_tag)
+        self.assertNotIn(b"return confirm(", form_tag)
         self.assertNotIn(b"hx-post=", form_tag)
         self.assertNotIn(b"hx-target=", form_tag)
         self.assertNotIn(b"hx-swap=", form_tag)

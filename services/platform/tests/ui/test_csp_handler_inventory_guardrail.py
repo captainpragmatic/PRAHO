@@ -31,8 +31,9 @@ _TEMPLATES = _PLATFORM_ROOT / "templates"
 _ON_HANDLER_RE = re.compile(r"""(?<![\w-])on[a-z]+\s*=\s*['"]""", re.IGNORECASE)
 
 # Current debt. This may only DECREASE — raising it means new inline-handler debt.
-# Lowered from 96 as the #284 handler migration progresses toward 0 (the CSP flip gate).
-EXPECTED_PLATFORM_HANDLERS = 63
+# The #284 handler migration is COMPLETE: every inline on*= handler is now a delegated
+# data-action. 0 is the CSP-flip gate — script-src-attr 'none' can only land at 0.
+EXPECTED_PLATFORM_HANDLERS = 0
 
 
 class PlatformInlineHandlerFreezeTests(SimpleTestCase):
