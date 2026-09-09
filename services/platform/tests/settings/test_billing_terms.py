@@ -23,6 +23,7 @@ from django.utils import timezone
 from apps.billing.config import (
     get_invoice_generation_lead_days,
     get_invoice_payment_terms_days,
+    get_large_refund_threshold_cents,
     get_payment_due_date,
 )
 from apps.billing.recurring_billing import fixed_renewal_schedule
@@ -47,6 +48,28 @@ class InvoicePaymentTermsTests(TestCase):
 
         result = get_invoice_payment_terms_days()
         self.assertEqual(result, 21)
+
+
+class LargeRefundThresholdTests(TestCase):
+    """The finance-notification refund threshold is runtime-configurable (#401)."""
+
+    def setUp(self) -> None:
+        SettingsService.clear_all_cache()
+
+    def tearDown(self) -> None:
+        SettingsService.clear_all_cache()
+
+    def test_default_is_500_eur(self) -> None:
+        self.assertEqual(get_large_refund_threshold_cents(), 50000)
+
+    def test_reads_operator_override(self) -> None:
+        result = SettingsService.update_setting(
+            key="billing.large_refund_notification_threshold_cents",
+            value=250000,
+            reason="test override",
+        )
+        self.assertTrue(result.is_ok(), result)
+        self.assertEqual(get_large_refund_threshold_cents(), 250000)
 
 
 class InvoiceGenerationLeadTimeTests(TestCase):
