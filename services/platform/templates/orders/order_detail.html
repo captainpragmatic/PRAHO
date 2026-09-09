@@ -284,7 +284,7 @@
     <span class="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
 
     <!-- Modal Content -->
-    <div class="inline-block align-bottom bg-slate-800 rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full relative z-10" onclick="event.stopPropagation()">
+    <div class="inline-block align-bottom bg-slate-800 rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full relative z-10" data-action="stop">
       <form id="statusForm" method="post" action="{% url 'orders:order_change_status' pk=order.id %}">
         {% csrf_token %}
         <div class="px-6 pt-6 pb-4">

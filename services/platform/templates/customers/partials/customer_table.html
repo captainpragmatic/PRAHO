@@ -30,7 +30,7 @@
       </thead>
       <tbody class="bg-slate-800/30 divide-y divide-slate-700">
         {% for customer in customers %}
-        <tr class="hover:bg-slate-700/50 transition-colors cursor-pointer" onclick="window.location.href='{% url 'customers:detail' customer.pk %}';">
+        <tr class="hover:bg-slate-700/50 transition-colors cursor-pointer" data-action="navigate" data-href="{% url 'customers:detail' customer.pk %}">
           <td class="px-6 py-4">
             <div>
               <div class="text-white font-medium flex items-center gap-2">
@@ -78,7 +78,7 @@
                 {% endif %}
               {% else %}
                 {% if customer.tax_profile and customer.tax_profile.cui %}
-                  <div class="text-white font-mono text-sm flex items-center gap-1">{% icon "building" size="sm" %} {{ customer.tax_profile.cui }} <button type="button" data-copy="{{ customer.tax_profile.cui }}" onclick="event.stopPropagation(); navigator.clipboard.writeText(this.dataset.copy)" class="text-slate-500 hover:text-white transition-colors" aria-label="{% trans 'Copy CUI' %}" title="{% trans 'Copy' %}">{% icon "copy" size="sm" %}</button></div>
+                  <div class="text-white font-mono text-sm flex items-center gap-1">{% icon "building" size="sm" %} {{ customer.tax_profile.cui }} <button type="button" data-copy="{{ customer.tax_profile.cui }}" data-action="copy" class="text-slate-500 hover:text-white transition-colors" aria-label="{% trans 'Copy CUI' %}" title="{% trans 'Copy' %}">{% icon "copy" size="sm" %}</button></div>
                 {% endif %}
                 {% if customer.tax_profile and customer.tax_profile.vat_number %}
                   <div class="text-slate-400 text-sm">{% icon "currency" size="sm" %} {{ customer.tax_profile.vat_number }}</div>
@@ -117,7 +117,7 @@
             {% endif %}
           </td>
 
-          <td class="px-6 py-4" onclick="event.stopPropagation();">
+          <td class="px-6 py-4" data-action="stop">
             <div class="flex items-center space-x-2">
               {% url 'customers:detail' customer.pk as detail_url %}
               {% url 'customers:edit' customer.pk as edit_url %}
@@ -135,7 +135,7 @@
 <!-- Mobile Card View (visible on mobile and tablet) -->
 <div class="lg:hidden space-y-3">
   {% for customer in customers %}
-  <div class="bg-slate-800/50 border border-slate-700 rounded-lg p-4 hover:bg-slate-700/50 transition-colors cursor-pointer" onclick="window.location.href='{% url 'customers:detail' customer.pk %}';">
+  <div class="bg-slate-800/50 border border-slate-700 rounded-lg p-4 hover:bg-slate-700/50 transition-colors cursor-pointer" data-action="navigate" data-href="{% url 'customers:detail' customer.pk %}">
     <!-- Header: Name + Status -->
     <div class="flex items-start justify-between gap-3 mb-3">
       <div class="flex-1 min-w-0">
@@ -193,14 +193,14 @@
           {% endif %}
         {% else %}
           {% if customer.tax_profile and customer.tax_profile.cui %}
-            <div class="text-white font-mono flex items-center gap-1">{% icon "building" size="sm" %} {{ customer.tax_profile.cui }} <button type="button" data-copy="{{ customer.tax_profile.cui }}" onclick="event.stopPropagation(); navigator.clipboard.writeText(this.dataset.copy)" class="text-slate-500 hover:text-white transition-colors" aria-label="{% trans 'Copy CUI' %}" title="{% trans 'Copy' %}">{% icon "copy" size="sm" %}</button></div>
+            <div class="text-white font-mono flex items-center gap-1">{% icon "building" size="sm" %} {{ customer.tax_profile.cui }} <button type="button" data-copy="{{ customer.tax_profile.cui }}" data-action="copy" class="text-slate-500 hover:text-white transition-colors" aria-label="{% trans 'Copy CUI' %}" title="{% trans 'Copy' %}">{% icon "copy" size="sm" %}</button></div>
           {% endif %}
         {% endif %}
       </div>
     </div>
 
     <!-- Service/Ticket Counts + Actions -->
-    <div class="flex items-center justify-between pt-3 border-t border-slate-700" onclick="event.stopPropagation();">
+    <div class="flex items-center justify-between pt-3 border-t border-slate-700" data-action="stop">
       <div class="flex items-center gap-2">
         {% if customer.active_services_count %}
           {% blocktrans count count=customer.active_services_count asvar svc_text2 %}{{ count }} svc{% plural %}{{ count }} svcs{% endblocktrans %}

@@ -45,7 +45,7 @@ Modern, standardized enhanced table component with:
       {% if rows %}
         {% for row in rows %}
         <tr class="hover:bg-slate-700 {% if row.clickable %}cursor-pointer transition-colors{% endif %}"
-            {% if row.clickable and row.click_url %}onclick="window.location.href='{{ row.click_url|escapejs }}'"{% endif %}
+            {% if row.clickable and row.click_url %}data-action="navigate" data-href="{{ row.click_url }}"{% endif %}
             {% if row.click_js %}data-click-action="{{ row.click_js|escapejs }}"{% endif %}>
 
           {% for cell in row.cells %}
@@ -66,7 +66,7 @@ Modern, standardized enhanced table component with:
 
           {% if show_actions %}
           <td class="px-6 py-4 whitespace-nowrap text-center text-sm font-medium"
-              {% if row.clickable %}onclick="event.stopPropagation()"{% endif %}>
+              {% if row.clickable %}data-action="stop"{% endif %}>
             {% for action in row.actions %}
               {% if action.component == 'button' %}
                 {% button action.text variant=action.variant size=action.size href=action.href class=action.class %}

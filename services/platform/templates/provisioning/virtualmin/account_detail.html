@@ -213,7 +213,7 @@
                                     data-protection-url="{{ toggle_protection_url }}"
                                     data-csrf="{{ csrf_token }}"
                                     data-domain="{{ account.domain }}"
-                                    data-action="{% if account.protected_from_deletion %}disable{% else %}enable{% endif %}"
+                                    data-protection-operation="{% if account.protected_from_deletion %}disable{% else %}enable{% endif %}"
                                     onclick="confirmProtectionToggle(this)">
                                 {% if account.protected_from_deletion %}
                                     {% icon "lock" %} {% trans "Disable Protection" %}
@@ -466,13 +466,22 @@
 
 <script nonce="{{ csp_nonce }}">
 function confirmProtectionToggle(button) {
-    const action = button.dataset.action;
+    // Business field is data-protection-operation, NOT data-action: data-action is
+    // reserved for the delegated dispatcher (#284), and reusing it here would let a
+    // dispatch value ("invoke", etc.) fall through to the no-confirm branch below.
+    const operation = button.dataset.protectionOperation;
     const domain = button.dataset.domain;
     const url = button.dataset.protectionUrl;
     const csrf = button.dataset.csrf;
 
+    // Fail safe: only the two known operations are allowed to act.
+    if (operation !== 'disable' && operation !== 'enable') {
+        console.warn('Unknown protection operation:', operation);
+        return;
+    }
+
     // Only require confirmation for DISABLING protection (dangerous action)
-    if (action === 'disable') {
+    if (operation === 'disable') {
         const actionText = 'Disable Protection';
         const message = `Type "I really am sure I want to do this!" to confirm disabling protection for ${domain}`;
 

@@ -48,7 +48,7 @@
             {% icon "check" %} {% trans 'Payment Recorded' %}
           </button>
           {% else %}
-          <button type="button" onclick="document.getElementById('paymentModal').classList.remove('hidden')"
+          <button type="button" data-action="show" data-target="paymentModal"
              class="inline-flex items-center px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-md font-medium transition-colors">
             {% icon "currency" %} {% trans 'Record Payment' %}
           </button>
@@ -392,7 +392,7 @@
 
         <div class="space-y-3">
           {% if can_convert and proforma.status != "converted" and proforma.status != "accepted" %}
-            <button type="button" onclick="document.getElementById('paymentModal').classList.remove('hidden')"
+            <button type="button" data-action="show" data-target="paymentModal"
                class="block w-full text-center px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-md font-medium transition-colors">
               {% icon "currency" %} {% trans 'Record Payment' %}
             </button>
@@ -455,9 +455,9 @@ function sendProforma(proformaId) {
 
 <!-- Record Payment Modal -->
 <div id="paymentModal" class="hidden fixed inset-0 z-50 overflow-y-auto">
-  <div class="fixed inset-0 bg-slate-900 opacity-75" onclick="document.getElementById('paymentModal').classList.add('hidden')"></div>
+  <div class="fixed inset-0 bg-slate-900 opacity-75" data-action="hide" data-target="paymentModal"></div>
   <div class="flex items-center justify-center min-h-screen p-4">
-    <div class="inline-block bg-slate-800 rounded-lg text-left overflow-hidden shadow-xl transform sm:max-w-lg sm:w-full relative z-10" onclick="event.stopPropagation()">
+    <div class="inline-block bg-slate-800 rounded-lg text-left overflow-hidden shadow-xl transform sm:max-w-lg sm:w-full relative z-10" data-action="stop">
       <form method="post" action="{% url 'billing:process_proforma_payment' pk=proforma.pk %}">
         {% csrf_token %}
         <div class="px-6 pt-6 pb-4">
@@ -501,7 +501,7 @@ function sendProforma(proformaId) {
         </div>
 
         <div class="px-6 py-4 bg-slate-900 flex justify-end space-x-3">
-          <button type="button" onclick="document.getElementById('paymentModal').classList.add('hidden')"
+          <button type="button" data-action="hide" data-target="paymentModal"
                   class="px-4 py-2 text-sm font-medium text-slate-400 hover:text-white">
             {% trans "Cancel" %}
           </button>

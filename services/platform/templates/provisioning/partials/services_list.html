@@ -108,7 +108,7 @@
       <tbody class="bg-slate-800 divide-y divide-slate-700">
         {% for service in services %}
         <tr class="hover:bg-slate-700 transition-colors cursor-pointer"
-            onclick="window.location.href='{% url 'provisioning:service_detail' service.pk %}'">
+            data-action="navigate" data-href="{% url 'provisioning:service_detail' service.pk %}">
           <td class="px-6 py-4 whitespace-nowrap">
             <div class="text-sm font-medium text-white">{{ service.service_name }}</div>
             {% if service.domain %}
@@ -145,7 +145,7 @@
             {{ service.created_at|date:"M d, Y" }}
           </td>
           {% if can_manage_services %}
-          <td class="px-6 py-4 whitespace-nowrap text-sm font-medium" onclick="event.stopPropagation();">
+          <td class="px-6 py-4 whitespace-nowrap text-sm font-medium" data-action="stop">
             <div class="flex space-x-2">
               {% url 'provisioning:service_edit' service.pk as edit_url %}
               {% trans "Edit" as edit_label %}{% button edit_label variant="secondary" href=edit_url %}
@@ -173,7 +173,7 @@
   <div class="sm:hidden divide-y divide-slate-700">
     {% for service in services %}
     <div class="p-4 hover:bg-slate-750 transition-colors cursor-pointer"
-         onclick="window.location.href='{% url 'provisioning:service_detail' service.pk %}'">
+         data-action="navigate" data-href="{% url 'provisioning:service_detail' service.pk %}">
       <div class="flex items-start justify-between mb-3">
         <div class="flex-1">
           <div class="text-sm font-medium text-white">{{ service.service_name }}</div>
@@ -218,7 +218,7 @@
           <div class="text-sm text-slate-300">{{ service.created_at|date:"M d, Y" }}</div>
         </div>
         {% if can_manage_services %}
-        <div class="flex space-x-2" onclick="event.stopPropagation();">
+        <div class="flex space-x-2" data-action="stop">
           {% url 'provisioning:service_edit' service.pk as edit_url_m %}
           {% trans "Edit" as edit_label_m %}{% button edit_label_m variant="secondary" href=edit_url_m %}
           {% if service.status == 'active' %}
