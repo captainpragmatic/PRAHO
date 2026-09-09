@@ -130,8 +130,11 @@ class SecurityHeadersMiddleware:
         if not response.get("Content-Security-Policy"):
             csp = (
                 "default-src 'self'; "
-                "style-src 'self' 'unsafe-inline' fonts.googleapis.com; "
-                "font-src 'self' fonts.gstatic.com; "
+                # Google Fonts hosts were allowlisted but never used — base.html loads only
+                # self-hosted assets — so they are dropped (#284). unsafe-inline/unsafe-eval
+                # stay until the handler migration (see note above).
+                "style-src 'self' 'unsafe-inline'; "
+                "font-src 'self'; "
                 "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
                 "img-src 'self' data: https:; "
                 "connect-src 'self'; "

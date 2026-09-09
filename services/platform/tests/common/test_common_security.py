@@ -406,9 +406,10 @@ class SecurityMiddlewareTest(TestCase):
         # Core directives remain intact.
         self.assertIn("script-src 'self' 'unsafe-inline'", csp_header)
         self.assertIn("style-src 'self' 'unsafe-inline'", csp_header)
-        # Still-needed external sources must survive the CDN cleanup.
-        self.assertIn('fonts.googleapis.com', csp_header)
-        self.assertIn('fonts.gstatic.com', csp_header)
+        # Google Fonts were allowlisted but never used — base.html loads only self-hosted
+        # assets — so they are removed too (#284).
+        self.assertNotIn('fonts.googleapis.com', csp_header)
+        self.assertNotIn('fonts.gstatic.com', csp_header)
 
     def test_security_headers_values(self):
         """Test specific security header values."""

@@ -28,6 +28,10 @@ MIDDLEWARE = [mw for mw in MIDDLEWARE if "debug_toolbar" not in mw]
 # Remove custom middleware that might interfere in tests
 test_middleware = [
     "django.middleware.security.SecurityMiddleware",
+    # Keep the CSP nonce + header middleware in tests so CI can catch a missing nonce
+    # or a policy regression — the security guarantee is only real if it is exercised (#284).
+    "apps.common.middleware.CSPNonceMiddleware",
+    "apps.common.middleware.SecurityHeadersMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.locale.LocaleMiddleware",
     "django.middleware.common.CommonMiddleware",
