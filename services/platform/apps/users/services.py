@@ -277,6 +277,7 @@ class SecureUserRegistrationService:
         """Type definition for user registration data"""
 
         email: EmailAddress
+        password: str  # Required: set on the new account so the user can authenticate
         first_name: str
         last_name: str
         phone: PhoneNumber | None
@@ -327,6 +328,7 @@ class SecureUserRegistrationService:
             # Step 2: Create the user account with security measures
             user = User.objects.create_user(
                 email=user_data["email"],  # Validated email
+                password=user_data["password"],  # Validated (min length) by the registration serializer
                 first_name=user_data["first_name"],  # XSS-safe
                 last_name=user_data["last_name"],  # XSS-safe
                 phone=user_data.get("phone", ""),  # Romanian format validated
