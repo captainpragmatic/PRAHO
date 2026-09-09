@@ -7,12 +7,12 @@
     {% if migration.status == "needs_review" %}
       <p class="text-amber-300">{% trans "Needs review: operator action is required. Automatic migration is stopped." %}</p>
       <p>{{ migration.error_detail }}</p>
-      <form method="post" action="{% url 'provisioning:virtualmin_migration_resolve' account.pk %}" class="space-y-2">
+      <form method="post" action="{% url 'provisioning:virtualmin_migration_resolve' account.pk %}" class="space-y-2" data-confirm="{% trans 'Confirm the remote state was repaired manually. This releases the migration lock.' %}">
         {% csrf_token %}
         <input type="hidden" name="migration_id" value="{{ migration.pk }}">
 
         <input type="text" name="note" maxlength="200" placeholder="{% trans 'What was repaired manually?' %}" class="w-full rounded border border-slate-600 bg-slate-900 p-2 text-slate-100">
-        <button type="submit" class="rounded bg-amber-600 px-3 py-2 text-white" onclick="return confirm('{% trans 'Confirm the remote state was repaired manually. This releases the migration lock.' %}')">{% trans "Mark resolved" %}</button>
+        <button type="submit" class="rounded bg-amber-600 px-3 py-2 text-white">{% trans "Mark resolved" %}</button>
       </form>
     {% elif migration.status == "completed" %}
       <p>{% trans "Update routing/DNS manually and validate the target. The disabled source copy is retained; remove it manually after validation." %}</p>

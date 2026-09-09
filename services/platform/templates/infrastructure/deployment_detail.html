@@ -33,7 +33,7 @@
                         </a>
                     {% endif %}
                     <form method="post" action="{% url 'infrastructure:deployment_reboot' deployment.id %}" class="inline"
-                          onsubmit="return confirm('{% trans "Reboot this node? Active connections will be interrupted." %}')">
+                          data-confirm="{% trans "Reboot this node? Active connections will be interrupted." %}">
                         {% csrf_token %}
                         <button type="submit" class="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg transition-colors">
                             {% icon "refresh" css_class="inline mr-1" %}
@@ -41,7 +41,7 @@
                         </button>
                     </form>
                     <form method="post" action="{% url 'infrastructure:deployment_stop' deployment.id %}" class="inline"
-                          onsubmit="return confirm('{% trans "Power off this node? All services will be stopped." %}')">
+                          data-confirm="{% trans "Power off this node? All services will be stopped." %}">
                         {% csrf_token %}
                         <label><input type="checkbox" name="force"> {% trans "Force stop even with undrained accounts" %}</label>
                         <button type="submit" class="px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-lg transition-colors">

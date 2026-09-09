@@ -86,6 +86,33 @@
         }
         break;
       }
+      case "confirm-dangerous": {
+        // Open the shared dangerous-action modal. It listens on WINDOW
+        // (@confirm-dangerous-action.window) and calls detail.action on confirm, so we
+        // dispatch on window (the old inline handlers dispatched on document, which does
+        // not reach a window listener) and build a TRUSTED callback from data attributes —
+        // never eval a string. The action submits the named form (the only operation these
+        // buttons performed).
+        var formId = el.dataset.submitForm;
+        window.dispatchEvent(
+          new CustomEvent("confirm-dangerous-action", {
+            detail: {
+              title: el.dataset.title || "",
+              message: el.dataset.message || "",
+              confirmText: el.dataset.confirmText || "I really am sure I want to do this!",
+              action: function () {
+                var form = formId ? document.getElementById(formId) : null;
+                if (form && typeof form.requestSubmit === "function") {
+                  form.requestSubmit();
+                } else if (form) {
+                  form.submit();
+                }
+              },
+            },
+          })
+        );
+        break;
+      }
       case "stop": {
         // No-op: exists so a wrapper element claims the click via closest(), keeping an
         // ancestor registry action (e.g. a row's navigate) from firing. It does NOT stop
@@ -94,6 +121,16 @@
       }
       default:
         break;
+    }
+  });
+
+  // Submit-level, fail-CLOSED confirm gate for destructive NATIVE forms. Unlike an onclick
+  // gate this covers keyboard submit and requestSubmit() (both fire the submit event), and
+  // it cancels the submission when the user declines — replacing onsubmit="return confirm()".
+  document.addEventListener("submit", function (event) {
+    var form = event.target.closest("form[data-confirm]");
+    if (form && !window.confirm(form.dataset.confirm)) {
+      event.preventDefault();
     }
   });
 

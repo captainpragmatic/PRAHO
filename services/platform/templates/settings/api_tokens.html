@@ -83,7 +83,7 @@
                 <td class="px-5 py-4 text-right">
                   {% trans "Revoke this API token? Any script using it will stop authenticating." as revoke_confirm %}
                   {# nosemgrep: django-no-csrf-token — csrf_token present on adjacent line #}
-                  <form method="post" action="{% url 'settings:api_token_revoke' token.pk %}" onsubmit="return confirm('{% filter force_escape %}{{ revoke_confirm|escapejs }}{% endfilter %}')">
+                  <form method="post" action="{% url 'settings:api_token_revoke' token.pk %}" data-confirm="{{ revoke_confirm }}">
                     {% csrf_token %}
                     {% trans "Revoke" as revoke_label %}
                     {% button revoke_label type="submit" variant="danger" size="sm" %}

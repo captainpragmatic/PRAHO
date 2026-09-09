@@ -261,7 +261,7 @@
                                         <input type="hidden" name="is_active" value="false">
                                         {% trans "Suspend" as suspend_btn %}
                                         <button type="button" class="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded bg-amber-900 text-amber-200 hover:bg-amber-800 transition-colors"
-                                          onclick="document.dispatchEvent(new CustomEvent('confirm-dangerous-action', {detail: {title: '{% trans "Suspend User" %}', message: '{% trans "Are you sure you want to suspend this user?" %}', confirmText: '{% trans "Suspend" %}', action: () => document.getElementById('suspend-form-{{ membership.user.pk }}').submit()}}))">
+                                          data-action="confirm-dangerous" data-title="{% trans "Suspend User" %}" data-message="{% trans "Are you sure you want to suspend this user?" %}" data-confirm-text="{% trans "Suspend" %}" data-submit-form="suspend-form-{{ membership.user.pk }}">
                                           {% icon "clock" size="sm" %} {{ suspend_btn }}
                                         </button>
                                     </form>
@@ -271,7 +271,7 @@
                                         <input type="hidden" name="is_active" value="true">
                                         {% trans "Activate" as activate_btn %}
                                         <button type="button" class="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded bg-green-900 text-green-200 hover:bg-green-800 transition-colors"
-                                          onclick="document.dispatchEvent(new CustomEvent('confirm-dangerous-action', {detail: {title: '{% trans "Activate User" %}', message: '{% trans "Are you sure you want to activate this user?" %}', confirmText: '{% trans "Activate" %}', action: () => document.getElementById('activate-form-{{ membership.user.pk }}').submit()}}))">
+                                          data-action="confirm-dangerous" data-title="{% trans "Activate User" %}" data-message="{% trans "Are you sure you want to activate this user?" %}" data-confirm-text="{% trans "Activate" %}" data-submit-form="activate-form-{{ membership.user.pk }}">
                                           {% icon "check" size="sm" %} {{ activate_btn }}
                                         </button>
                                     </form>
@@ -295,7 +295,7 @@
                                         {% csrf_token %}
                                         {% trans "Remove" as remove_btn %}
                                         <button type="button" class="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded bg-red-900 text-red-200 hover:bg-red-800 transition-colors"
-                                          onclick="document.dispatchEvent(new CustomEvent('confirm-dangerous-action', {detail: {title: '{% trans "Remove User" %}', message: '{% trans "Are you sure you want to remove this user? They will lose all access to this customer." %}', confirmText: '{% trans "Remove" %}', action: () => document.getElementById('remove-form-{{ membership.pk }}').submit()}}))">
+                                          data-action="confirm-dangerous" data-title="{% trans "Remove User" %}" data-message="{% trans "Are you sure you want to remove this user? They will lose all access to this customer." %}" data-confirm-text="{% trans "Remove" %}" data-submit-form="remove-form-{{ membership.pk }}">
                                           {% icon "x" size="sm" %} {{ remove_btn }}
                                         </button>
                                     </form>
