@@ -426,49 +426,26 @@ def test_customer_2fa_setup_access_and_flow(monitored_customer_page: Page) -> No
 # CUSTOMER SECURITY BOUNDARY TESTS
 # ===============================================================================
 
-def _check_staff_user_list_access(page: Page) -> bool:
-    """Return True if access to /auth/users/ was properly denied."""
-    if "/auth/users/" not in page.url:
-        print("    ✅ Redirected away from staff user list (access denied)")
-        return True
+def _check_staff_route_denied(page: Page, status: int | None) -> bool:
+    """Return True if a staff route was properly denied to a customer.
 
-    page_content = page.content().lower()
-    error_indicators = [
-        "permission denied", "access denied", "not authorized",
-        "forbidden", "not allowed", "insufficient privileges",
-        "you do not have permission", "403", "unauthorized",
-    ]
-    if any(indicator in page_content for indicator in error_indicators):
-        print("    ✅ Permission denied message displayed")
+    Isolation is proven by the HTTP status, not by page text: the portal has no
+    staff routes, so these paths return 404. Inferring denial from body text is
+    unsafe — Django's DEBUG 404 page contains a <table>, and a real exposed user
+    list could contain the word "denied" — so a 200 that actually serves content
+    must fail even if denial words appear. A redirect to login is also a denial.
+    """
+    if status == 404:
+        print("    ✅ Route absent (404) — staff area not served on the portal")
         return True
-
-    user_mgmt_content = page.locator('h1:has-text("User"), h1:has-text("Users"), table').count()
-    if user_mgmt_content > 0:
-        print("    ❌ Customer can access staff user management - SECURITY ISSUE")
+    if status in (301, 302, 303, 307, 308) or "/login" in page.url:
+        print("    ✅ Redirected to login (access denied)")
+        return True
+    if status == 200:
+        print(f"    ❌ Staff route served content (200) to a customer at {page.url} - SECURITY ISSUE")
         return False
-
-    print("    ✅ No user management content visible")
-    return True
-
-
-def _check_user_detail_access(page: Page) -> bool:
-    """Return True if access to /auth/users/1/ was properly denied."""
-    if "/auth/users/1/" not in page.url:
-        print("    ✅ Redirected away from user detail page")
-        return True
-
-    page_content = page.content().lower()
-    if any(indicator in page_content for indicator in ["permission", "denied", "forbidden", "403"]):
-        print("    ✅ User detail access denied")
-        return True
-
-    sensitive_content = page.locator('div:has-text("Email:"), div:has-text("@"), table td').count()
-    if sensitive_content > 0:
-        print("    ❌ Customer can view other user details - PRIVACY VIOLATION")
-        return False
-
-    print("    ✅ No sensitive user details visible")
-    return True
+    print(f"    ❌ Unexpected status {status} for staff route {page.url}")
+    return False
 
 
 def test_customer_staff_access_restrictions(monitored_customer_page: Page) -> None:
@@ -488,14 +465,18 @@ def test_customer_staff_access_restrictions(monitored_customer_page: Page) -> No
     require_authentication(page)
 
     print("  🔒 Testing staff user list access restriction")
-    page.goto(f"{BASE_URL}/auth/users/")
+    list_response = page.goto(f"{BASE_URL}/auth/users/")
     page.wait_for_load_state("networkidle")
-    assert _check_staff_user_list_access(page), "Customer should not have access to staff user management"
+    assert _check_staff_route_denied(page, list_response.status if list_response else None), (
+        "Customer should not have access to staff user management"
+    )
 
     print("  🔒 Testing individual user detail access restriction")
-    page.goto(f"{BASE_URL}/auth/users/1/")
+    detail_response = page.goto(f"{BASE_URL}/auth/users/1/")
     page.wait_for_load_state("networkidle")
-    assert _check_user_detail_access(page), "Customer should not access other user details"
+    assert _check_staff_route_denied(page, detail_response.status if detail_response else None), (
+        "Customer should not access other user details"
+    )
 
     print("  ✅ Verifying customer can still access own profile")
     page.goto(f"{BASE_URL}/profile/")

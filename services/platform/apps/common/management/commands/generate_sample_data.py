@@ -1041,12 +1041,13 @@ class Command(BaseCommand):
             is_current=True,
         )
 
-        # Tax profile — fully filled out
+        # Tax profile — fully filled out. Use a checksum-valid CUI (check digit 7) so the
+        # value survives the tax-profile save endpoint's strict Romanian CUI validation.
         CustomerTaxProfile.objects.create(
             customer=customer,
-            cui="RO12345678",
+            cui="RO14399847",
             is_vat_payer=True,
-            vat_number="RO12345678",
+            vat_number="RO14399847",
             registration_number="J40/1234/2020",
             reverse_charge_eligible=True,
         )

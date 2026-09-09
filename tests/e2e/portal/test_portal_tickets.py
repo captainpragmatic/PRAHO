@@ -207,32 +207,27 @@ def test_ticket_create_and_reply(monitored_customer_page: Page) -> None:
 
 
 def test_ticket_detail_badges(monitored_customer_page: Page) -> None:
-    """Test badge rendering on an existing ticket detail page."""
+    """Test badge rendering on a freshly created ticket with a known status."""
     page = monitored_customer_page
 
-    # Navigate to list, click first ticket
-    _navigate_to_ticket_list(page)
-
-    # Find a clickable ticket (desktop table row or mobile card link)
-    ticket_row = page.locator("tr[onclick*='/tickets/']").first
-    if ticket_row.is_visible(timeout=2000):
-        ticket_row.click()
-    else:
-        ticket_link = page.locator("a[href*='/tickets/']").first
-        expect(ticket_link).to_be_visible()
-        ticket_link.click()
-
-    page.wait_for_load_state("networkidle")
+    # Create a ticket so the detail page is deterministic (a fresh ticket is "Open"),
+    # rather than depending on whichever tickets happen to be seeded for this customer.
+    _create_customer_ticket(
+        page,
+        subject="E2E Portal: badge rendering check",
+        description="Automated portal E2E test asserting the status badge on a new ticket.",
+        priority="high",
+    )
     assert re.search(r"/tickets/\d+/", page.url), f"Should be on ticket detail: {page.url}"
 
-    # Status badge present
-    status_area = page.locator("#ticket-status-and-comments, .ticket-detail, main")
-    has_status = False
-    for status_text in ("Open", "In Progress", "Waiting", "Closed", "Deschis", "In progres", "Așteaptă", "Închis"):
-        if status_area.get_by_text(status_text, exact=True).first.is_visible(timeout=500):
-            has_status = True
-            break
-    assert has_status, "Ticket detail should display a status badge"
+    # A newly created ticket renders the "Open" badge (partials/status_and_comments.html
+    # renders the exact label "Open" / Romanian "Deschis").
+    status_area = page.locator("#ticket-status-and-comments")
+    expect(status_area).to_be_visible()
+    open_badge = status_area.get_by_text("Open", exact=True).first
+    if not open_badge.is_visible(timeout=1000):
+        open_badge = status_area.get_by_text("Deschis", exact=True).first
+    assert open_badge.is_visible(timeout=2000), "New ticket should display an 'Open' status badge"
 
     # No internal notes visible to customer
     amber_notes = page.locator("#comments-container .bg-amber-900\\/50")

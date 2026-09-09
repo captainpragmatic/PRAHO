@@ -421,7 +421,7 @@ def test_signup_form_successful_submission(page: Page) -> None:
         print(f"    Using test company: {test_company}")
 
         # Fill personal information
-        page.locator('input[name="first_name"]').fill("E2E")
+        page.locator('input[name="first_name"]').fill("Elena")
         page.locator('input[name="last_name"]').fill("TestUser")
         page.locator('input[name="email"]').fill(test_email)
         page.locator('input[name="phone"]').fill(test_phone)
@@ -445,9 +445,10 @@ def test_signup_form_successful_submission(page: Page) -> None:
         page.locator('input[name="password2"]').fill(test_password)
         print("    Password set")
 
-        # Accept GDPR consent
+        # Accept GDPR consent and the required terms
         page.locator('input[name="data_processing_consent"]').check()
-        print("    GDPR consent accepted")
+        page.locator('input[name="terms_accepted"]').check()
+        print("    GDPR consent + terms accepted")
 
         # Submit form
         submit_button = page.locator('button:has-text("Create Account")')
@@ -513,7 +514,7 @@ def test_signup_then_login_flow(page: Page) -> None:
         page.wait_for_load_state("networkidle")
 
         # Fill all required fields
-        page.locator('input[name="first_name"]').fill("E2E")
+        page.locator('input[name="first_name"]').fill("Elena")
         page.locator('input[name="last_name"]').fill("LoginTest")
         page.locator('input[name="email"]').fill(test_email)
         page.locator('select[name="customer_type"]').select_option("srl")
@@ -525,6 +526,7 @@ def test_signup_then_login_flow(page: Page) -> None:
         page.locator('input[name="password1"]').fill(test_password)
         page.locator('input[name="password2"]').fill(test_password)
         page.locator('input[name="data_processing_consent"]').check()
+        page.locator('input[name="terms_accepted"]').check()
 
         # Submit
         page.locator('button:has-text("Create Account")').click()
@@ -693,6 +695,7 @@ def _journey_fill_registration_form(page: Page, test_email: str, test_password: 
     page.locator('input[name="password1"]').fill(test_password)
     page.locator('input[name="password2"]').fill(test_password)
     page.locator('input[name="data_processing_consent"]').check()
+    page.locator('input[name="terms_accepted"]').check()
 
     marketing_checkbox = page.locator('input[name="marketing_consent"]')
     if marketing_checkbox.is_visible():
@@ -1076,6 +1079,7 @@ def test_signup_with_special_characters_in_company_name(page: Page) -> None:
         page.locator('input[name="password1"]').fill(test_password)
         page.locator('input[name="password2"]').fill(test_password)
         page.locator('input[name="data_processing_consent"]').check()
+        page.locator('input[name="terms_accepted"]').check()
 
         # Submit and check for success
         page.locator('button:has-text("Create Account")').click()
