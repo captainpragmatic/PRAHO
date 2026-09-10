@@ -326,9 +326,11 @@
   window.cancelExpandableEdit = cancelExpandableEdit;
   window.deleteOrderItem = deleteOrderItem;
 
-  // Cancel adapters used by the fetch-inserted add/edit form (order_item_form.html),
-  // whose own inline <script> never executes. Call the list handler if present, else
-  // the modal fallback — preserving the original typeof-guarded behaviour.
+  // Cancel adapters for the standalone add/edit modal (order_item_form.html), which the
+  // order-item view returns for a non-HX-Request navigation. (The in-page fetch flow here
+  // sets HX-Request and gets order_item_inline_form.html instead, whose buttons call
+  // cancelAddItemForm / cancelExpandableEdit directly.) Call the list handler if present,
+  // else the modal fallback — preserving the original typeof-guarded behaviour.
   window.cancelAddItemOrModal = function () {
     if (typeof window.cancelAddItemForm === "function") { window.cancelAddItemForm(); }
     else if (typeof window.hideAddItemModal === "function") { window.hideAddItemModal(); }

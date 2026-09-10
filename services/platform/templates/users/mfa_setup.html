@@ -175,13 +175,17 @@
 
 <!-- Copy Secret Key JavaScript -->
 <script nonce="{{ csp_nonce }}">
-function copySecret() {
+function copySecret(el) {
   const secretElement = document.getElementById('secret-key');
+  if (!secretElement) { return; }
   const textToCopy = secretElement.textContent;
 
   navigator.clipboard.writeText(textToCopy).then(function() {
-    // Visual feedback
-    const button = document.querySelector('[data-action="invoke"][data-invoke="copySecret"]');
+    // Visual feedback. The delegated dispatcher passes the clicked element; fall back to
+    // a lookup for any non-dispatcher caller, and guard so a missing button can't throw
+    // inside the promise.
+    const button = el || document.querySelector('[data-action="invoke"][data-invoke="copySecret"]');
+    if (!button) { return; }
     const originalText = button.textContent;
     button.textContent = '[OK]';
 
