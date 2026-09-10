@@ -144,7 +144,9 @@ class SecurityHeadersMiddleware:
                 "style-src 'self' 'unsafe-inline'; "
                 "font-src 'self'; "
                 f"{script_directives}"
-                "img-src 'self' data: https:; "
+                # Platform loads only local + base64 (QR) images — no external image hosts —
+                # so the historical `https:` wildcard was dead surface (#284 finding #11).
+                "img-src 'self' data:; "
                 "connect-src 'self'; "
                 "object-src 'none'; "
                 "base-uri 'self'; "
