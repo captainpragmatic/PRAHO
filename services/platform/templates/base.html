@@ -204,6 +204,9 @@
 
     <!-- Toast animations and auto-dismiss -->
     <script nonce="{{ csp_nonce }}">
+        // #284: htmx must not eval hx-on / js: bodies once 'unsafe-eval' is dropped.
+        // Every hx-on has been migrated to delegated listeners, so disable the eval path.
+        if (window.htmx) { htmx.config.allowEval = false; }
         document.addEventListener('DOMContentLoaded', function() {
             const toasts = document.querySelectorAll('[id^="toast-"]');
 

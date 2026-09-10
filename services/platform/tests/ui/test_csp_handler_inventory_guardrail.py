@@ -30,6 +30,17 @@ _TEMPLATES = _PLATFORM_ROOT / "templates"
 # ui_components.py sanitizer's own strip pattern.
 _ON_HANDLER_RE = re.compile(r"""(?<![\w-])on[a-z]+\s*=\s*['"]""", re.IGNORECASE)
 
+# Constructs that would re-force 'unsafe-eval' after the #284 eval removal. Each must
+# stay at 0 so a new hx-on / javascript: URL / new Function() sink can't quietly
+# reintroduce the eval dependency the CSP drops. (Attribute forms require '=' so prose
+# mentioning "hx-on" in a comment does not trip the guard.)
+_EVAL_FORCING_RES = {
+    "hx-on attribute": re.compile(r"""\bhx-on(?:::?)[a-z][\w:-]*\s*=\s*['"]""", re.IGNORECASE),
+    "javascript: URL": re.compile(r"""=\s*['"]\s*javascript:""", re.IGNORECASE),
+    "new Function()": re.compile(r"""\bnew\s+Function\s*\("""),
+    "eval() call": re.compile(r"""(?<![.\w])eval\s*\("""),
+}
+
 # Current debt. This may only DECREASE — raising it means new inline-handler debt.
 # The #284 handler migration is COMPLETE: every inline on*= handler is now a delegated
 # data-action. 0 is the CSP-flip gate — script-src-attr 'none' can only land at 0.
@@ -68,3 +79,20 @@ class PlatformInlineHandlerFreezeTests(SimpleTestCase):
         n_templates = sum(1 for _ in _TEMPLATES.rglob("*.html"))
         self.assertGreater(n_templates, 100, "template scan covered too few files — path likely wrong")
         self.assertTrue((_TEMPLATES / "base.html").exists(), "base.html not found — scan root is wrong")
+
+    def test_no_eval_forcing_constructs(self) -> None:
+        # #284 eval removal: hold the line so nothing re-forces 'unsafe-eval'. Alpine
+        # directive expressions are governed by the @alpinejs/csp build (its own parser),
+        # not scanned here; this catches the template-level eval sinks the CSP drops.
+        offenders: dict[str, list[str]] = {}
+        for path in _TEMPLATES.rglob("*.html"):
+            text = path.read_text()
+            for label, pattern in _EVAL_FORCING_RES.items():
+                if pattern.search(text):
+                    offenders.setdefault(str(path.relative_to(_PLATFORM_ROOT)), []).append(label)
+        self.assertEqual(
+            offenders,
+            {},
+            "Eval-forcing constructs reintroduced (would require 'unsafe-eval'): "
+            f"{offenders}. Use delegated listeners / data-action, not hx-on / javascript: / new Function.",
+        )
