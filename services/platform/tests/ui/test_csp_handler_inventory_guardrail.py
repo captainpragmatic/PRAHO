@@ -24,6 +24,20 @@ from django.test import SimpleTestCase
 # services/platform/tests/ui/ -> services/platform
 _PLATFORM_ROOT = Path(__file__).resolve().parents[2]
 _TEMPLATES = _PLATFORM_ROOT / "templates"
+# services/platform -> repo root -> shared/ui design-system JS + templates
+_REPO_ROOT = _PLATFORM_ROOT.parents[1]
+_SHARED_UI = _REPO_ROOT / "shared" / "ui"
+
+# Alpine component registrations (Alpine.data("name" / 'name') and inline x-data usages.
+_ALPINE_REGISTER_RE = re.compile(r"""Alpine\.data\(\s*['"]([\w$]+)['"]""")
+_XDATA_RE = re.compile(r'x-data\s*=\s*"([^"]*)"')
+# Leading identifier of a named x-data value (e.g. settingsForm('...') -> settingsForm).
+_XDATA_NAME_RE = re.compile(r"""^\s*([A-Za-z_$][\w$]*)""")
+# The JS files that register platform-visible components, in base.html load order.
+_ALPINE_JS = (
+    _PLATFORM_ROOT / "static" / "js" / "alpine-components.js",
+    _SHARED_UI / "static" / "js" / "alpine-shared-components.js",
+)
 
 # Matches an inline DOM event-handler attribute (on<event>=) that starts an attribute
 # (not the tail of a hyphenated/word attr like data-onboarding), mirroring the
@@ -95,4 +109,55 @@ class PlatformInlineHandlerFreezeTests(SimpleTestCase):
             {},
             "Eval-forcing constructs reintroduced (would require 'unsafe-eval'): "
             f"{offenders}. Use delegated listeners / data-action, not hx-on / javascript: / new Function.",
+        )
+
+
+class AlpineComponentRegistrationTests(SimpleTestCase):
+    """Under the @alpinejs/csp build a NAMED x-data that isn't registered via
+    Alpine.data() silently no-ops (no CSP violation, no exception, nothing a normal
+    test sees) — the directive just never initializes. Codex-review + the browser
+    oracle only cover the diff and the pages they visit; this scans the whole template
+    tree so an unregistered component on an unvisited page fails loudly (#284).
+
+    Inline object-literal x-data ("{ open: false }") is intentionally allowed: the
+    vendored @alpinejs/csp 3.15.0 parser evaluates object literals, member access,
+    string/bool literals and assignment — only the named-component form needs a
+    registration to exist.
+    """
+
+    def _registered(self) -> set[str]:
+        names: set[str] = set()
+        for js in _ALPINE_JS:
+            if js.exists():
+                names.update(_ALPINE_REGISTER_RE.findall(js.read_text()))
+        return names
+
+    def _used_named_components(self) -> dict[str, set[str]]:
+        """{component_name: {templates using it}} for NAMED x-data (skips inline {…})."""
+        used: dict[str, set[str]] = {}
+        roots = [_TEMPLATES] + ([_SHARED_UI] if _SHARED_UI.exists() else [])
+        for root in roots:
+            for path in root.rglob("*.html"):
+                for value in _XDATA_RE.findall(path.read_text()):
+                    if value.lstrip().startswith("{"):
+                        continue  # inline object literal — allowed under the CSP build
+                    m = _XDATA_NAME_RE.match(value)
+                    if m:
+                        used.setdefault(m.group(1), set()).add(str(path.relative_to(_REPO_ROOT)))
+        return used
+
+    def test_every_named_xdata_component_is_registered(self) -> None:
+        registered = self._registered()
+        used = self._used_named_components()
+        self.assertTrue(registered, "found no Alpine.data() registrations — JS paths are wrong")
+        # Canary: the scan must actually find named components, else a broken path
+        # would make this pass vacuously while real breakage ships.
+        self.assertGreaterEqual(len(used), 5, f"scan found too few named x-data components: {sorted(used)}")
+        missing = {name: sorted(paths) for name, paths in used.items() if name not in registered}
+        self.assertEqual(
+            missing,
+            {},
+            "Named x-data components with no Alpine.data() registration — under the CSP build "
+            f"these silently never initialize: {missing}. Register them (alpine-components.js / "
+            "alpine-shared-components.js) or use an inline object-literal x-data.",
         )
