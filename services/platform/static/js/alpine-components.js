@@ -9,6 +9,17 @@
  * on the component root — never interpolated into the (parsed, not eval'd) expression.
  */
 document.addEventListener("alpine:init", function () {
+  // The confirm-dangerous-action modal renders its `message` via x-html (some callers
+  // pass intentional markup, e.g. the critical-settings list below), so any dynamic
+  // value interpolated into a message MUST be HTML-escaped first — otherwise a value
+  // like a Virtualmin domain becomes an HTML-injection vector. This is normal module
+  // JS (not an Alpine directive expression), so it is unaffected by the CSP build.
+  function escapeHtml(value) {
+    return String(value).replace(/[&<>"']/g, function (ch) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch];
+    });
+  }
+
   // Dirty-only atomic change-set form (ADR-0042). Every control carries
   // data-setting-field/data-key/data-baseline; values are canonicalized client-side.
   Alpine.data("settingsForm", function (saveUrl) {
@@ -54,7 +65,7 @@ document.addEventListener("alpine:init", function () {
         if (criticalDirty.length && !this._criticalOk) {
           this.$dispatch("confirm-dangerous-action", {
             title: this.$root.dataset.criticalTitle,
-            message: this.$root.dataset.criticalMessage + "<br><code>" + criticalDirty.join("</code><br><code>") + "</code>",
+            message: this.$root.dataset.criticalMessage + "<br><code>" + criticalDirty.map(escapeHtml).join("</code><br><code>") + "</code>",
             confirmText: "CONFIRM",
             action: () => { this._criticalOk = true; this.save(); },
           });
@@ -278,7 +289,7 @@ document.addEventListener("alpine:init", function () {
         const data = this.$root.dataset;
         this.$dispatch("confirm-dangerous-action", {
           title: data.protectionTitle,
-          message: 'Type "I really am sure I want to do this!" to confirm this protection change for ' + data.domain,
+          message: 'Type "I really am sure I want to do this!" to confirm this protection change for ' + escapeHtml(data.domain),
           confirmText: "I really am sure I want to do this!",
           action: function () {
             htmx.ajax("POST", data.toggleProtectionUrl, {
@@ -293,7 +304,7 @@ document.addEventListener("alpine:init", function () {
         const data = this.$root.dataset;
         this.$dispatch("confirm-dangerous-action", {
           title: "Delete Virtualmin Account",
-          message: 'Type "I really am sure I want to do this!" to confirm permanent deletion of ' + data.domain,
+          message: 'Type "I really am sure I want to do this!" to confirm permanent deletion of ' + escapeHtml(data.domain),
           confirmText: "I really am sure I want to do this!",
           action: function () {
             htmx.ajax("DELETE", data.deleteUrl, { target: "body" });

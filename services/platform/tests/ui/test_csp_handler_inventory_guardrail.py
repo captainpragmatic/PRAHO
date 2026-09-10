@@ -52,7 +52,7 @@ _EVAL_FORCING_RES = {
     "hx-on attribute": re.compile(r"""\bhx-on(?:::?)[a-z][\w:-]*\s*=\s*['"]""", re.IGNORECASE),
     "javascript: URL": re.compile(r"""=\s*['"]\s*javascript:""", re.IGNORECASE),
     "new Function()": re.compile(r"""\bnew\s+Function\s*\("""),
-    "eval() call": re.compile(r"""(?<![.\w])eval\s*\("""),
+    "eval() call": re.compile(r"""(?<!\w)eval\s*\("""),  # (?<!\w) not (?<![.\w]) so window.eval( / globalThis.eval( are caught
 }
 
 # Current debt. This may only DECREASE — raising it means new inline-handler debt.
@@ -65,7 +65,7 @@ class PlatformInlineHandlerFreezeTests(SimpleTestCase):
     def _scan(self) -> dict[str, int]:
         counts: dict[str, int] = {}
         for path in _TEMPLATES.rglob("*.html"):
-            n = len(_ON_HANDLER_RE.findall(path.read_text()))
+            n = len(_ON_HANDLER_RE.findall(path.read_text(encoding="utf-8")))
             if n:
                 counts[str(path.relative_to(_PLATFORM_ROOT))] = n
         return counts
@@ -100,7 +100,7 @@ class PlatformInlineHandlerFreezeTests(SimpleTestCase):
         # not scanned here; this catches the template-level eval sinks the CSP drops.
         offenders: dict[str, list[str]] = {}
         for path in _TEMPLATES.rglob("*.html"):
-            text = path.read_text()
+            text = path.read_text(encoding="utf-8")
             for label, pattern in _EVAL_FORCING_RES.items():
                 if pattern.search(text):
                     offenders.setdefault(str(path.relative_to(_PLATFORM_ROOT)), []).append(label)
@@ -129,7 +129,7 @@ class AlpineComponentRegistrationTests(SimpleTestCase):
         names: set[str] = set()
         for js in _ALPINE_JS:
             if js.exists():
-                names.update(_ALPINE_REGISTER_RE.findall(js.read_text()))
+                names.update(_ALPINE_REGISTER_RE.findall(js.read_text(encoding="utf-8")))
         return names
 
     def _used_named_components(self) -> dict[str, set[str]]:
@@ -138,7 +138,7 @@ class AlpineComponentRegistrationTests(SimpleTestCase):
         roots = [_TEMPLATES] + ([_SHARED_UI] if _SHARED_UI.exists() else [])
         for root in roots:
             for path in root.rglob("*.html"):
-                for value in _XDATA_RE.findall(path.read_text()):
+                for value in _XDATA_RE.findall(path.read_text(encoding="utf-8")):
                     if value.lstrip().startswith("{"):
                         continue  # inline object literal — allowed under the CSP build
                     m = _XDATA_NAME_RE.match(value)
