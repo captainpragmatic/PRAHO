@@ -33,16 +33,17 @@ class ServicesListXSSTests(SimpleTestCase):
         )
 
     def test_service_name_sink_is_autoescaped_data_attribute(self) -> None:
-        """service_name now rides a data-service-name attribute; autoescape (no
-        |safe, no |escapejs) is the correct HTML-attribute-context protection."""
+        """service_name now rides the data-confirm attribute of the delegated
+        confirm-navigate action; autoescape (no |safe, no |escapejs) is the
+        correct HTML-attribute-context protection."""
         content = _TEMPLATE.read_text()
         data_matches = re.findall(
-            r'data-service-name="\{\{\s*service\.service_name([^}]*)\}\}"',
+            r'data-confirm="[^"]*\{\{\s*service\.service_name([^}]*)\}\}[^"]*"',
             content,
         )
         self.assertTrue(
             len(data_matches) > 0,
-            "Expected service_name to be carried in data-service-name attributes",
+            "Expected service_name to be carried in an autoescaped data-confirm attribute",
         )
         for filters in data_matches:
             self.assertNotIn("safe", filters, "service_name must stay autoescaped (no |safe)")

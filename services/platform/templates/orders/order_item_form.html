@@ -149,17 +149,6 @@
 </form>
 
 <script nonce="{{ csp_nonce }}">
-// Cancel adapters — call the list-fragment handler when present, else the modal
-// fallback (the button lives in both the inline-list and standalone-modal contexts).
-// Defined at top level so the delegated `invoke` dispatcher can reach them on window.
-function cancelAddItemOrModal(el) {
-    if (typeof cancelAddItemForm === 'function') { cancelAddItemForm(); }
-    else if (typeof hideAddItemModal === 'function') { hideAddItemModal(); }
-}
-function cancelEditItemOrModal(el) {
-    if (typeof cancelExpandableEdit === 'function') { cancelExpandableEdit(el.dataset.itemId); }
-    else if (typeof hideEditItemModal === 'function') { hideEditItemModal(); }
-}
 document.addEventListener('DOMContentLoaded', function() {
     // Update price displays when values change
     function updatePriceDisplays() {

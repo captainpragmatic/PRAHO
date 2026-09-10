@@ -924,4 +924,46 @@ document.getElementById('orderRefundRequestForm').addEventListener('submit', fun
 </script>
 {% endif %}
 
+<script nonce="{{ csp_nonce }}">
+(function () {
+  // #284: preflight toast + Pending-option gating, relocated from the swapped
+  // preflight_results partial so it runs under the nonce CSP — on initial load and
+  // after each "Run Validation" swap of #preflight-container. State comes from the
+  // partial's data-preflight-ok marker.
+  function showToast(message, variant) {
+    var bg = variant === 'success' ? 'bg-green-600' : (variant === 'warning' ? 'bg-yellow-600' : 'bg-red-600');
+    var toast = document.createElement('div');
+    toast.className = 'fixed top-4 right-4 z-50 ' + bg + ' text-white px-4 py-2 rounded-lg shadow-lg';
+    toast.textContent = message;
+    document.body.appendChild(toast);
+    setTimeout(function () { toast.style.opacity = '0'; toast.style.transition = 'opacity 0.3s'; }, 2000);
+    setTimeout(function () { if (toast.parentNode) { toast.parentNode.removeChild(toast); } }, 2400);
+  }
+  window.showToast = window.showToast || showToast;
+
+  function applyPreflight() {
+    var marker = document.querySelector('#preflight-container [data-preflight-ok]');
+    if (!marker) { return; }
+    var ok = marker.dataset.preflightOk === 'true';
+    var select = document.getElementById('new_status');
+    if (select) {
+      var opt = Array.prototype.slice.call(select.options).filter(function (o) {
+        return o.value === 'awaiting_payment';
+      })[0];
+      if (opt) { opt.disabled = !ok; }
+    }
+    if (ok) {
+      window.showToast("{% trans 'Validation passed — you may promote to Pending' %}", 'success');
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', applyPreflight);
+  document.body.addEventListener('htmx:afterSwap', function (e) {
+    if (e.detail && e.detail.target && e.detail.target.id === 'preflight-container') {
+      applyPreflight();
+    }
+  });
+})();
+</script>
+{% include 'orders/partials/_order_items_js.html' %}
 {% endblock %}

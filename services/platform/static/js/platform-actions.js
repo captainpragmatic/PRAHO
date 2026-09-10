@@ -19,6 +19,7 @@
  *   filter-tab       (data-select-name, data-select-value) — set a form select + fire change
  *   cookie-prefs     (data-fallback-message)          — open consent panel or alert fallback
  *   reset-form       (data-reset-target)              — reset a target form (or closest)
+ *   confirm-navigate (data-confirm, data-href)        — optional confirm() then navigate
  */
 (function () {
   "use strict";
@@ -154,6 +155,14 @@
         var resetForm = resetTarget ? document.querySelector(resetTarget) : el.closest("form");
         if (resetForm && typeof resetForm.reset === "function") {
           resetForm.reset();
+        }
+        break;
+      }
+      case "confirm-navigate": {
+        // Optional window.confirm gate (data-confirm) then same-origin navigate to
+        // data-href. Replaces bespoke "if (confirm(msg)) location.href = url" helpers.
+        if (!el.dataset.confirm || window.confirm(el.dataset.confirm)) {
+          safeNavigate(el.dataset.href);
         }
         break;
       }

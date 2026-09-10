@@ -114,33 +114,3 @@
 {% endif %}
 
 <!-- JavaScript for Event Detail Toggle -->
-<script nonce="{{ csp_nonce }}">
-function toggleEventDetailAction(el) {
-    toggleEventDetail(el, el.dataset.eventId);
-}
-
-function toggleEventDetail(button, eventId) {
-    const detailDiv = document.getElementById('event-detail-' + eventId);
-    const chevron = button.querySelector('.chevron-icon');
-    const isHidden = detailDiv.classList.contains('hidden');
-
-    if (isHidden) {
-        detailDiv.classList.remove('hidden');
-        chevron.style.transform = 'rotate(180deg)';
-        button.closest('.group').classList.add('expanded');
-    } else {
-        detailDiv.classList.add('hidden');
-        chevron.style.transform = 'rotate(0deg)';
-        button.closest('.group').classList.remove('expanded');
-    }
-}
-
-// Update results count after HTMX swap
-document.addEventListener('htmx:afterSwap', function() {
-    const count = document.querySelectorAll('.group').length;
-    const countElement = document.getElementById('results-count');
-    if (countElement) {
-        countElement.textContent = count + ' events';
-    }
-});
-</script>

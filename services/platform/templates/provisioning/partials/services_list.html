@@ -150,14 +150,16 @@
               {% url 'provisioning:service_edit' service.pk as edit_url %}
               {% trans "Edit" as edit_label %}{% button edit_label variant="secondary" href=edit_url %}
               {% if service.status == 'active' %}
-              <button data-action="invoke" data-invoke="confirmSuspendAction"
-                      data-service-id="{{ service.pk }}" data-service-name="{{ service.service_name }}"
+              <button data-action="confirm-navigate"
+                      data-confirm="{% trans 'Suspend service?' %} {{ service.service_name }}"
+                      data-href="{% url 'provisioning:service_suspend' service.pk %}"
                       class="text-red-400 hover:text-red-300 transition-colors">
                 {% icon "clock" %}
               </button>
               {% elif service.status == 'suspended' %}
-              <button data-action="invoke" data-invoke="confirmReactivateAction"
-                      data-service-id="{{ service.pk }}" data-service-name="{{ service.service_name }}"
+              <button data-action="confirm-navigate"
+                      data-confirm="{% trans 'Reactivate service?' %} {{ service.service_name }}"
+                      data-href="{% url 'provisioning:service_activate' service.pk %}"
                       class="text-green-400 hover:text-green-300 transition-colors">
                 {% icon "services" %}
               </button>
@@ -224,14 +226,16 @@
           {% url 'provisioning:service_edit' service.pk as edit_url_m %}
           {% trans "Edit" as edit_label_m %}{% button edit_label_m variant="secondary" href=edit_url_m %}
           {% if service.status == 'active' %}
-          <button data-action="invoke" data-invoke="confirmSuspendAction"
-                  data-service-id="{{ service.pk }}" data-service-name="{{ service.service_name }}"
+          <button data-action="confirm-navigate"
+                  data-confirm="{% trans 'Suspend service?' %} {{ service.service_name }}"
+                  data-href="{% url 'provisioning:service_suspend' service.pk %}"
                   class="text-red-400 hover:text-red-300 transition-colors text-sm">
             {% icon "clock" %}
           </button>
           {% elif service.status == 'suspended' %}
-          <button data-action="invoke" data-invoke="confirmReactivateAction"
-                  data-service-id="{{ service.pk }}" data-service-name="{{ service.service_name }}"
+          <button data-action="confirm-navigate"
+                  data-confirm="{% trans 'Reactivate service?' %} {{ service.service_name }}"
+                  data-href="{% url 'provisioning:service_activate' service.pk %}"
                   class="text-green-400 hover:text-green-300 transition-colors text-sm">
             {% icon "services" %}
           </button>
@@ -290,26 +294,3 @@
   </div>
   {% endif %}
 </div>
-
-<!-- Service Actions JavaScript -->
-<script nonce="{{ csp_nonce }}">
-function confirmSuspendAction(el) {
-  confirmSuspend(el.dataset.serviceId, el.dataset.serviceName);
-}
-
-function confirmReactivateAction(el) {
-  confirmReactivate(el.dataset.serviceId, el.dataset.serviceName);
-}
-
-function confirmSuspend(serviceId, serviceName) {
-  if (confirm('{% trans "Suspend service?" %} ' + serviceName)) {
-    window.location.href = '/app/provisioning/services/' + serviceId + '/suspend/';
-  }
-}
-
-function confirmReactivate(serviceId, serviceName) {
-  if (confirm('{% trans "Reactivate service?" %} ' + serviceName)) {
-    window.location.href = '/app/provisioning/services/' + serviceId + '/activate/';
-  }
-}
-</script>

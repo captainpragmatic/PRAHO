@@ -173,6 +173,9 @@ Dark theme interface for staff/admin audit log monitoring
     </main>
 </div>
 
+<!-- Delegated audit fragment behaviours (survive the enforcing nonce CSP, #284) -->
+<script src="{% static 'js/audit-fragments.js' %}"></script>
+
 <!-- Initialize HTMX -->
 <script nonce="{{ csp_nonce }}">
 document.addEventListener('DOMContentLoaded', function() {
@@ -184,6 +187,16 @@ document.addEventListener('DOMContentLoaded', function() {
             source: auditFilters,
             indicator: '#loading-spinner'
         });
+    }
+});
+
+// Results count after each swap (relocated from the logs_list partial so it
+// registers ONCE on the full page instead of re-binding on every swap).
+document.addEventListener('htmx:afterSwap', function() {
+    const countElement = document.getElementById('results-count');
+    if (countElement) {
+        const count = document.querySelectorAll('.group').length;
+        countElement.textContent = count + ' {% trans "events" %}';
     }
 });
 
