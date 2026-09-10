@@ -60,16 +60,17 @@ class CSPNonceRenderingTests(TestCase):
 
 @PRODUCTION_CSP_MIDDLEWARE
 class CSPHeaderEnforcementTests(TestCase):
-    """#284 landed: with a per-request nonce, script-src is nonce-based and drops
-    'unsafe-inline' + adds script-src-attr 'none'. style-src keeps 'unsafe-inline'
-    (out of #284 scope), and 'unsafe-eval' stays for Alpine/htmx.
+    """#284 fully landed: with a per-request nonce, script-src is nonce-ONLY (no
+    'unsafe-inline', no 'unsafe-eval') + script-src-attr 'none'. style-src keeps
+    'unsafe-inline' (out of #284 scope); the platform runs the @alpinejs/csp build.
     """
 
-    def test_script_src_is_nonce_based_without_unsafe_inline(self) -> None:
+    def test_script_src_is_nonce_only_no_unsafe(self) -> None:
         response = self.client.get(LOGIN_URL)
         csp = response.get("Content-Security-Policy", "")
         nonce = response.wsgi_request.csp_nonce
-        self.assertIn(f"script-src 'self' 'nonce-{nonce}' 'unsafe-eval'", csp)
+        self.assertIn(f"script-src 'self' 'nonce-{nonce}';", csp)
+        self.assertNotIn("'unsafe-eval'", csp)
         self.assertIn("script-src-attr 'none'", csp)
         # style-src is deliberately unchanged.
         self.assertIn("style-src 'self' 'unsafe-inline'", csp)

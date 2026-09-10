@@ -404,8 +404,10 @@ class SecurityMiddlewareTest(TestCase):
         csp_header = response.get('Content-Security-Policy', '')
         self.assertNotIn('unpkg.com', csp_header)
         self.assertNotIn('cdn.tailwindcss.com', csp_header)
-        # #284: script-src is nonce-based (no 'unsafe-inline'); style-src keeps it.
-        self.assertIn("script-src 'self' 'nonce-nonce-fixture-value' 'unsafe-eval'", csp_header)
+        # #284: script-src is nonce-ONLY (no 'unsafe-inline', no 'unsafe-eval');
+        # style-src keeps 'unsafe-inline' (out of scope).
+        self.assertIn("script-src 'self' 'nonce-nonce-fixture-value';", csp_header)
+        self.assertNotIn("'unsafe-eval'", csp_header)
         self.assertIn("script-src-attr 'none'", csp_header)
         self.assertIn("style-src 'self' 'unsafe-inline'", csp_header)
         # Google Fonts were allowlisted but never used — base.html loads only self-hosted
