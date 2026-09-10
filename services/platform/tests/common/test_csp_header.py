@@ -2,10 +2,14 @@
 
 History: the comprehensive security audit (H11) removed 'unsafe-eval', which
 silently broke ALL Alpine.js interactivity (standard Alpine compiles directive
-expressions via new Function()) and htmx hx-on:: handlers — the only symptom
-was a console CSP error. 'unsafe-eval' is restored deliberately until the
-CSP-hardening migration (#206 / #284) replaces both framework usages; only
-then may this contract flip back.
+expressions via new Function()) and htmx hx-on:: handlers. 'unsafe-eval' is
+retained deliberately.
+
+#284 landed the script 'unsafe-inline' removal: every inline on*= handler is a
+delegated data-action (freeze guardrail at 0) and every fragment script is
+relocated, so script-src now carries a per-request nonce + script-src-attr 'none'
+and drops 'unsafe-inline'. The middleware falls back to 'unsafe-inline' only when
+the request has no nonce (nonce middleware disabled) — a fail-safe, not the norm.
 """
 from django.http import HttpRequest, HttpResponse
 from django.test import SimpleTestCase
@@ -13,27 +17,49 @@ from django.test import SimpleTestCase
 from apps.common.middleware import CSPNonceMiddleware, SecurityHeadersMiddleware
 
 
-def _served_csp() -> str:
+def _served_csp(nonce: str = "testnonce1234567890") -> str:
     mw = SecurityHeadersMiddleware(lambda r: HttpResponse("ok"))
     request = HttpRequest()
     request.method = "GET"
     request.path = "/"
+    if nonce:
+        # Mirror CSPNonceMiddleware, which runs before SecurityHeadersMiddleware in prod.
+        request.csp_nonce = nonce
     response = mw(request)
     return response.get("Content-Security-Policy", "")
 
 
+def _script_src(csp: str) -> str:
+    for directive in csp.split(";"):
+        if directive.strip().startswith("script-src "):
+            return directive.strip()
+    return ""
+
+
 class CSPScriptSrcContractTests(SimpleTestCase):
-    """script-src must keep Alpine/htmx working until #206/#284 land."""
+    """script-src keeps Alpine/htmx working (unsafe-eval) but is nonce-based (#284)."""
 
     def test_csp_contains_unsafe_eval_for_alpine_and_htmx(self) -> None:
         """Regression: dropping 'unsafe-eval' kills every Alpine directive and
         hx-on:: handler in the admin UI (deploy form, modals, dropdowns)."""
         self.assertIn("'unsafe-eval'", _served_csp())
 
-    def test_csp_contains_unsafe_inline_until_nonce_migration(self) -> None:
-        """Inline event handlers (onclick=...) cannot carry nonces; removal is
-        gated on the #206 migration."""
-        self.assertIn("'unsafe-inline'", _served_csp())
+    def test_script_src_is_nonce_based_without_unsafe_inline(self) -> None:
+        """#284: with a request nonce, script-src carries 'nonce-...' + script-src-attr
+        'none' and drops 'unsafe-inline' (the nonce makes it inert anyway)."""
+        csp = _served_csp()
+        script_src = _script_src(csp)
+        self.assertIn("'nonce-testnonce1234567890'", script_src)
+        self.assertNotIn("'unsafe-inline'", script_src)
+        self.assertIn("'unsafe-eval'", script_src)
+        self.assertIn("script-src-attr 'none'", csp)
+
+    def test_missing_nonce_falls_back_to_unsafe_inline(self) -> None:
+        """Fail-safe: no request nonce (nonce middleware disabled) keeps 'unsafe-inline'
+        rather than emitting an empty nonce that blocks every inline script."""
+        script_src = _script_src(_served_csp(nonce=""))
+        self.assertIn("'unsafe-inline'", script_src)
+        self.assertNotIn("'nonce-", script_src)
 
     def test_csp_still_contains_self(self) -> None:
         """Sanity check: CSP should still have 'self' directive."""

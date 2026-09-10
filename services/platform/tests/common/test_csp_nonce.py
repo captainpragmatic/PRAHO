@@ -59,20 +59,22 @@ class CSPNonceRenderingTests(TestCase):
 
 
 @PRODUCTION_CSP_MIDDLEWARE
-class CSPHeaderInertnessTests(TestCase):
-    """Step 1 is behavior-neutral: header keeps 'unsafe-inline', no nonce source yet.
-
-    When a later [M7] step injects 'nonce-...' into the CSP header and drops
-    'unsafe-inline', it must update these assertions in the same change.
+class CSPHeaderEnforcementTests(TestCase):
+    """#284 landed: with a per-request nonce, script-src is nonce-based and drops
+    'unsafe-inline' + adds script-src-attr 'none'. style-src keeps 'unsafe-inline'
+    (out of #284 scope), and 'unsafe-eval' stays for Alpine/htmx.
     """
 
-    def test_header_still_allows_unsafe_inline(self) -> None:
+    def test_script_src_is_nonce_based_without_unsafe_inline(self) -> None:
         response = self.client.get(LOGIN_URL)
         csp = response.get("Content-Security-Policy", "")
-        self.assertIn("script-src 'self' 'unsafe-inline'", csp)
+        nonce = response.wsgi_request.csp_nonce
+        self.assertIn(f"script-src 'self' 'nonce-{nonce}' 'unsafe-eval'", csp)
+        self.assertIn("script-src-attr 'none'", csp)
+        # style-src is deliberately unchanged.
         self.assertIn("style-src 'self' 'unsafe-inline'", csp)
 
-    def test_header_has_no_nonce_source_yet(self) -> None:
+    def test_header_carries_a_nonce_source(self) -> None:
         response = self.client.get(LOGIN_URL)
         csp = response.get("Content-Security-Policy", "")
-        self.assertNotIn("'nonce-", csp)
+        self.assertIn(f"'nonce-{response.wsgi_request.csp_nonce}'", csp)

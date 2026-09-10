@@ -260,6 +260,14 @@ SECURE_BROWSER_XSS_FILTER = True
 SECURE_CONTENT_TYPE_NOSNIFF = True
 X_FRAME_OPTIONS = "DENY"
 
+# CSP script hardening (#284): serve a per-request nonce source + script-src-attr 'none'
+# and drop script 'unsafe-inline'. Every inline on*= handler is migrated to the delegated
+# data-action registry (freeze guardrail at 0) and every fragment script is relocated to a
+# static module, verified by the browser violation oracle. 'unsafe-eval' (Alpine/htmx) and
+# style 'unsafe-inline' are intentionally retained. SecurityHeadersMiddleware also honours
+# PLATFORM_CSP_ENFORCE_NONCE=1 to force-enable this per environment.
+CSP_SCRIPT_NONCE_ENFORCED = True
+
 # File upload security
 FILE_UPLOAD_MAX_MEMORY_SIZE = 10485760  # 10MB
 DATA_UPLOAD_MAX_MEMORY_SIZE = 10485760  # 10MB

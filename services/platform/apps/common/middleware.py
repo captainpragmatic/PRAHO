@@ -10,6 +10,7 @@ import hmac
 import json
 import logging
 import math
+import os
 import secrets
 import time
 import traceback
@@ -116,26 +117,33 @@ class SecurityHeadersMiddleware:
         response = self.get_response(request)
 
         # Content Security Policy.
-        # 'unsafe-inline' AND 'unsafe-eval' are both required until the CSP-hardening
-        # migration (#206 / #284) lands. Do NOT drop either in isolation:
-        #   - 'unsafe-inline': nonce attributes landed (#104 [M7] step 1), but inline event
-        #     handlers (onclick=, onkeydown=) cannot carry nonces and remain in templates.
-        #   - 'unsafe-eval': Alpine.js (standard build) compiles directive expressions via
-        #     new Function(), and htmx hx-on:: handlers eval their bodies. Removing it needs
-        #     BOTH frameworks refactored (Alpine CSP build + htmx hx-on -> nonce'd scripts) —
-        #     tracked in #206/#284. Dropping it alone silently breaks ALL admin-UI interactivity
-        #     (deploy form, modals, dropdowns) with only a console CSP error to show for it.
-        # The customer portal already serves the same 'unsafe-eval' policy for its Stripe/Alpine
-        # flows; this keeps the (VPN-gated) internal platform at parity, not silently broken.
+        # script 'unsafe-eval' stays: Alpine.js (standard build) compiles directive
+        # expressions via new Function(), and htmx hx-on:: handlers eval their bodies —
+        # dropping it silently breaks ALL admin-UI interactivity. style 'unsafe-inline'
+        # stays (Tailwind/utility styles, out of #284 scope).
+        #
+        # script 'unsafe-inline': the #284 migration removed every inline on*= handler
+        # (freeze guardrail at 0) and every inline <script> carries a per-request nonce,
+        # so we can flip to a nonce source + script-src-attr 'none'. Adding a nonce makes
+        # 'unsafe-inline' inert in modern browsers anyway, so nonce-add IS the removal.
+        # Gated so the flip can be enabled per-environment (and run report-only first).
         if not response.get("Content-Security-Policy"):
+            nonce = getattr(request, "csp_nonce", "")
+            enforce_nonce = bool(nonce) and (
+                getattr(settings, "CSP_SCRIPT_NONCE_ENFORCED", False)
+                or os.environ.get("PLATFORM_CSP_ENFORCE_NONCE") == "1"
+            )
+            if enforce_nonce:
+                script_directives = f"script-src 'self' 'nonce-{nonce}' 'unsafe-eval'; script-src-attr 'none'; "
+            else:
+                script_directives = "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
             csp = (
                 "default-src 'self'; "
                 # Google Fonts hosts were allowlisted but never used — base.html loads only
-                # self-hosted assets — so they are dropped (#284). unsafe-inline/unsafe-eval
-                # stay until the handler migration (see note above).
+                # self-hosted assets — so they are dropped (#284).
                 "style-src 'self' 'unsafe-inline'; "
                 "font-src 'self'; "
-                "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
+                f"{script_directives}"
                 "img-src 'self' data: https:; "
                 "connect-src 'self'; "
                 "object-src 'none'; "
