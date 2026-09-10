@@ -111,6 +111,15 @@ document.addEventListener("alpine:init", function () {
     return {
       testing: false,
       result: null,
+      // The @alpinejs/csp interpreter evaluates BOTH operands of `&&` (no
+      // short-circuit), so `result && result.success` in a template throws while
+      // `result` is null. Guard the null in real JS via getters instead (#284).
+      get resultSuccess() {
+        return this.result ? this.result.success : false;
+      },
+      get resultMessage() {
+        return this.result ? this.result.message : "";
+      },
       testConnection() {
         this.testing = true;
         this.result = null;
