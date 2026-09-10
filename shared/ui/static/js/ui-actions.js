@@ -6,6 +6,8 @@
  *   badge-dismiss — remove the badge containing the action element
  *   reload        — reload the current page
  *   invoke        — call the window global named in data-invoke, passing the element
+ *   invoke-change — like invoke but bound to the CHANGE event (for <select> etc.);
+ *                   a distinct action so a select's click never double-fires it
  *   confirm-submit — gate a submit button's click: call the return-gating global in
  *                    data-invoke, else confirm(data-confirm); preventDefault cancels it
  *   close-modal    — close the modal named in data-modal-id via window.closeModal
@@ -17,19 +19,51 @@
 (function () {
   "use strict";
 
-  // The guard test pins this allow-list to literal data-invoke template usage.
+  // The guard test pins this allow-list to literal data-invoke template usage
+  // (services/portal/tests/ui/test_registry_invoke_allowlist.py). Every data-invoke
+  // name used in ANY template must appear here exactly once, and vice versa.
   var INVOKE_ALLOWLIST = Object.freeze({
+    cancelAddItemForm: true,
+    cancelAddItemOrModal: true,
+    cancelEditItemOrModal: true,
+    cancelExpandableEditAction: true,
     checkWebAuthnSupport: true,
     closeEventDetail: true,
     closeModal: true,
+    confirmAccountDeleteAction: true,
     confirmDisable: true,
+    confirmProtectionToggleAction: true,
     confirmRegenerate: true,
+    copyAllCodes: true,
+    copyCodeAction: true,
+    copySecret: true,
+    deleteOrderItemAction: true,
+    dismissToastAction: true,
+    downloadCodes: true,
     exportCSV: true,
+    handleReplyActionChange: true,
+    hideInvoiceRefundModal: true,
+    hideInvoiceRefundRequestModal: true,
+    hideOrderRefundRequestModal: true,
+    hideRefundModal: true,
+    hideStatusModal: true,
+    printCodes: true,
+    removeFileAction: true,
     resetFilters: true,
+    sendProformaAction: true,
+    showBackupCodeInput: true,
     showInvoiceRefundModal: true,
     showInvoiceRefundRequestModal: true,
     showOrderRefundRequestModal: true,
     showRefundModal: true,
+    showTabAction: true,
+    submitBackupCode: true,
+    toggleAddItemForm: true,
+    toggleEventDetailAction: true,
+    toggleExpandableEditAction: true,
+    toggleExportDetailAction: true,
+    toggleMobileMenu: true,
+    togglePreviewAction: true,
   });
 
   document.addEventListener("click", function (event) {
@@ -116,6 +150,22 @@
       default:
         break;
     }
+  });
+
+  document.addEventListener("change", function (event) {
+    var el = event.target.closest('[data-action="invoke-change"]');
+    if (!el) {
+      return;
+    }
+    var changeName = el.dataset.invoke;
+    if (
+      !Object.prototype.hasOwnProperty.call(INVOKE_ALLOWLIST, changeName) ||
+      typeof window[changeName] !== "function"
+    ) {
+      console.warn("Blocked invoke-change action:", changeName);
+      return;
+    }
+    window[changeName](el);
   });
 
   document.addEventListener("keydown", function (event) {

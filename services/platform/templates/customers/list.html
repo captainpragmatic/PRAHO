@@ -92,7 +92,7 @@
       <div class="flex flex-wrap gap-1">
         {% for tab in status_tabs %}
         <button type="button"
-          onclick="this.closest('form').querySelector('select[name=status]').value='{{ tab.value }}'; this.closest('form').querySelector('select[name=status]').dispatchEvent(new Event('change'));"
+          data-action="filter-tab" data-select-name="status" data-select-value="{{ tab.value }}"
           class="px-3 py-1.5 text-sm rounded-md transition-colors {% if filter_active_tab == tab.value %}bg-slate-600 {{ tab.text_class }} border border-{{ tab.border_class|default:'slate-500' }}{% else %}text-slate-400 hover:text-white hover:bg-slate-700{% endif %}">
           {{ tab.label }}
         </button>

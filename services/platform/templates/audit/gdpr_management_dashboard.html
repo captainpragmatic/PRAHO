@@ -229,6 +229,9 @@ Professional interface for staff to manage all user GDPR requests
     </main>
 </div>
 
+<!-- Delegated audit fragment behaviours (survive the enforcing nonce CSP, #284) -->
+<script src="{% static 'js/audit-fragments.js' %}"></script>
+
 <!-- Initialize HTMX -->
 <script nonce="{{ csp_nonce }}">
 document.addEventListener('DOMContentLoaded', function() {
@@ -273,6 +276,38 @@ function resetFilters() {
 // Fix for HTMX loading
 htmx.config.defaultSwapStyle = 'innerHTML';
 htmx.config.defaultSwapDelay = 100;
+
+// Localized results count after each swap (relocated from the gdpr_export_requests_list
+// partial so it registers ONCE instead of re-binding on every swap).
+document.addEventListener('htmx:afterSwap', function() {
+    const countElement = document.getElementById('results-count');
+    if (countElement) {
+        const count = document.querySelectorAll('.group').length;
+        if (count === 0) {
+            countElement.textContent = '{% trans "No requests" %}';
+        } else if (count === 1) {
+            countElement.textContent = '1 {% trans "request" %}';
+        } else {
+            countElement.textContent = count + ' {% trans "requests" %}';
+        }
+    }
+});
+
+// Auto-refresh while any export is still processing (single interval, was previously
+// re-created on every swap inside the partial).
+setInterval(function() {
+    const processing = document.querySelectorAll('.group .animate-pulse');
+    if (processing.length === 0) {
+        return;
+    }
+    const form = document.getElementById('gdpr-filters');
+    if (form) {
+        htmx.ajax('GET', '{% url 'audit:gdpr_export_requests_list' %}', {
+            target: '#gdpr-results',
+            source: form
+        });
+    }
+}, 30000);
 </script>
 
 {% endblock %}

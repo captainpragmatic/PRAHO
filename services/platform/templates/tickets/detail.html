@@ -134,7 +134,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     <span class="text-slate-200">${file.name}</span>
                     <span class="ml-2 text-xs text-slate-400">(${formatFileSize(file.size)})</span>
                 </div>
-                <button type="button" class="text-red-400 hover:text-red-300" onclick="removeFile(${index})">
+                <button type="button" class="text-red-400 hover:text-red-300" data-action="invoke" data-invoke="removeFileAction" data-index="${index}">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
                     </svg>
@@ -143,6 +143,10 @@ document.addEventListener('DOMContentLoaded', function() {
             fileList.appendChild(fileItem);
         });
     }
+
+    window.removeFileAction = function(el) {
+        removeFile(Number(el.dataset.index));
+    };
 
     window.removeFile = function(index) {
         const dt = new DataTransfer();

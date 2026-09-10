@@ -192,7 +192,7 @@
                     {% endif %}
                     <span>{{ message.message }}</span>
                 </div>
-                <button onclick="dismissToast(this)" class="ml-4 inline-flex rounded-md p-1.5
+                <button data-action="invoke" data-invoke="dismissToastAction" class="ml-4 inline-flex rounded-md p-1.5
                        {% if message.tags == 'success' %}text-green-400 hover:bg-green-100 dark:text-green-400 dark:hover:bg-green-900{% elif message.tags == 'error' %}text-red-400 hover:bg-red-100 dark:text-red-400 dark:hover:bg-red-900{% elif message.tags == 'warning' %}text-yellow-400 hover:bg-yellow-100 dark:text-yellow-400 dark:hover:bg-yellow-900{% else %}text-blue-400 hover:bg-blue-100 dark:text-blue-400 dark:hover:bg-blue-900{% endif %}"
                        aria-label="Close notification">
                     {% icon "x-mark" style="filled" size="md" %}
@@ -230,6 +230,10 @@
                 }, 3000 + (index * 100));
             });
         });
+
+        function dismissToastAction(el) {
+            dismissToast(el);
+        }
 
         // Manual dismiss function
         function dismissToast(button) {

@@ -1,0 +1,44 @@
+{% load static i18n ui_components %}
+{% comment %}
+#284: orders-items.js holds the order-items logic. It cannot live in the swapped
+order_items_list partial (a fragment's inline <script> is blocked under the nonce CSP,
+and fetch()+innerHTML never runs inserted scripts). This block emits the per-request
+data on the FULL page (nonce'd, runs once on load); the static module reads it lazily.
+Include it once per order page, OUTSIDE any fetch-replaced container. Gated to the
+same condition the old inline script used (order_edit + can_edit), so the read-only
+detail page keeps loading no order-items JS.
+{% endcomment %}
+{% if request.resolver_match.url_name == 'order_edit' and can_edit %}
+{% icon 'document' as oiIcondocument %}
+{% icon 'x' as oiIconx %}
+{% icon 'clock' as oiIconclock %}
+{% icon 'check' as oiIconcheck %}
+<script nonce="{{ csp_nonce }}">
+window.PRAHO_ORDER_ITEMS = {
+  orderId: "{{ order.id|escapejs }}",
+  i18n: {
+    editing: "{% filter escapejs %}{% trans 'Editing...' %}{% endfilter %}",
+    loading: "{% filter escapejs %}{% trans 'Loading...' %}{% endfilter %}",
+    edit: "{% filter escapejs %}{% trans 'Edit' %}{% endfilter %}",
+    addItem: "{% filter escapejs %}{% trans 'Add Item' %}{% endfilter %}",
+    errLoadEdit: "{% filter escapejs %}{% trans 'Error loading edit form. Please try again.' %}{% endfilter %}",
+    errLoadAdd: "{% filter escapejs %}{% trans 'Error loading form. Please try again.' %}{% endfilter %}",
+    confirmDelete: "{% filter escapejs %}{% trans 'Are you sure you want to delete this item? This action cannot be undone.' %}{% endfilter %}",
+    csrfError: "{% filter escapejs %}{% trans 'Security token not found. Please refresh the page and try again.' %}{% endfilter %}",
+    itemDeleted: "{% filter escapejs %}{% trans 'Item deleted successfully' %}{% endfilter %}",
+    errorPrefix: "{% filter escapejs %}{% trans 'Error:' %}{% endfilter %}",
+    unknownError: "{% filter escapejs %}{% trans 'Unknown error occurred' %}{% endfilter %}",
+    errDelete: "{% filter escapejs %}{% trans 'Error deleting item. Please try again.' %}{% endfilter %}",
+    itemSaved: "{% filter escapejs %}{% trans 'Item saved successfully' %}{% endfilter %}",
+    errSubmit: "{% filter escapejs %}{% trans 'Error submitting form. Please try again.' %}{% endfilter %}"
+  },
+  icons: {
+    document: "{{ oiIcondocument|escapejs }}",
+    x: "{{ oiIconx|escapejs }}",
+    clock: "{{ oiIconclock|escapejs }}",
+    check: "{{ oiIconcheck|escapejs }}"
+  }
+};
+</script>
+<script src="{% static 'js/orders-items.js' %}"></script>
+{% endif %}

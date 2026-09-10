@@ -397,8 +397,9 @@ class CSPNonceMiddlewareTest(SimpleTestCase):
         self.assertIsInstance(request.csp_nonce, str)
         self.assertGreater(len(request.csp_nonce), 20)
 
-    def test_security_headers_do_not_inject_nonce_yet(self) -> None:
-        """SecurityHeadersMiddleware does NOT inject nonce into CSP until template migration (#104 [M7])."""
+    def test_security_headers_inject_nonce_when_present(self) -> None:
+        """#284: with a request nonce, SecurityHeadersMiddleware emits a nonce-based
+        script-src + script-src-attr 'none' (the flip landed)."""
         factory = RequestFactory()
         request = factory.get("/")
         request.csp_nonce = "test-nonce-value-12345"
@@ -410,11 +411,13 @@ class CSPNonceMiddlewareTest(SimpleTestCase):
         response = middleware(request)
 
         csp = response.get("Content-Security-Policy", "")
-        self.assertNotIn("nonce-", csp)
+        self.assertIn("'nonce-test-nonce-value-12345'", csp)
+        self.assertIn("script-src-attr 'none'", csp)
         self.assertIn("default-src 'self'", csp)
 
-    def test_security_headers_work_without_nonce(self) -> None:
-        """SecurityHeadersMiddleware works if CSPNonceMiddleware is not active."""
+    def test_security_headers_fall_back_without_nonce(self) -> None:
+        """Fail-safe: without a request nonce, the middleware keeps 'unsafe-inline'
+        (an empty nonce would block every inline script) and emits no nonce source."""
         factory = RequestFactory()
         request = factory.get("/")
         # No csp_nonce attribute set
@@ -427,6 +430,7 @@ class CSPNonceMiddlewareTest(SimpleTestCase):
 
         csp = response.get("Content-Security-Policy", "")
         self.assertIn("default-src 'self'", csp)
+        self.assertIn("script-src 'self' 'unsafe-inline'", csp)
         self.assertNotIn("nonce-", csp)
 
 

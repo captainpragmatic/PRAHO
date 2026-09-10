@@ -113,7 +113,7 @@
                 {% comment %}Edit mode - expandable row controls{% endcomment %}
                 <div class="flex flex-col sm:flex-row space-y-1 sm:space-y-0 sm:space-x-2">
                   <button type="button"
-                          onclick="toggleExpandableEdit('{{ item.id }}')"
+                          data-action="invoke" data-invoke="toggleExpandableEditAction" data-item-id="{{ item.id }}"
                           class="inline-flex items-center justify-center px-2 py-1.5 text-xs font-medium rounded border border-blue-500 text-blue-400 hover:bg-blue-500 hover:text-white transition-colors min-h-[32px] sm:min-h-[28px]"
                           title="{% trans 'Edit item inline' %}"
                           id="edit-btn-{{ item.id }}">
@@ -122,7 +122,7 @@
                     <span class="hidden sm:block">{% trans "Edit" %}</span>
                   </button>
                   <button type="button"
-                          onclick="deleteOrderItem('{{ item.id }}')"
+                          data-action="invoke" data-invoke="deleteOrderItemAction" data-item-id="{{ item.id }}"
                           class="inline-flex items-center justify-center px-2 py-1.5 text-xs font-medium rounded border border-red-500 text-red-400 hover:bg-red-500 hover:text-white transition-colors min-h-[32px] sm:min-h-[28px]"
                           title="{% trans 'Delete item' %}">
                     <span class="mr-1">{% icon "x" %}</span>
@@ -155,7 +155,7 @@
                     <span class="mr-2">{% icon "document" %}</span>{% trans "Edit Item" %}: {{ item.product.name|default:"Custom Item" }}
                   </h4>
                   <button type="button"
-                          onclick="cancelExpandableEdit('{{ item.id }}')"
+                          data-action="invoke" data-invoke="cancelExpandableEditAction" data-item-id="{{ item.id }}"
                           class="text-slate-400 hover:text-white text-sm">
                     <span class="mr-1">{% icon "x" %}</span>{% trans "Cancel" %}
                   </button>
@@ -218,7 +218,7 @@
           </div>
           <div id="add-item-container">
             <button type="button"
-                    onclick="toggleAddItemForm()"
+                    data-action="invoke" data-invoke="toggleAddItemForm"
                     id="add-item-btn"
                     class="inline-flex items-center px-3 py-2 text-sm font-medium rounded-lg border border-green-600 text-green-400 hover:bg-green-600 hover:text-white transition-colors">
               <span class="mr-1">{% icon "plus" %}</span> {% trans "Add Item" %}
@@ -234,7 +234,7 @@
                 <span class="mr-2">{% icon "plus" %}</span>{% trans "Add New Item" %}
               </h4>
               <button type="button"
-                      onclick="cancelAddItemForm()"
+                      data-action="invoke" data-invoke="cancelAddItemForm"
                       class="text-slate-400 hover:text-white text-sm">
                 <span class="mr-1">{% icon "x" %}</span>{% trans "Cancel" %}
               </button>
@@ -261,7 +261,7 @@
         {% if request.resolver_match.url_name == 'order_edit' and order.status == "draft" or request.resolver_match.url_name == 'order_edit' and order.status == "awaiting_payment" %}
           <div class="mt-4">
             <button type="button"
-                    onclick="toggleAddItemForm()"
+                    data-action="invoke" data-invoke="toggleAddItemForm"
                     class="inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg border border-transparent bg-blue-600 text-white hover:bg-blue-700 focus:ring-2 focus:ring-blue-500">
               <span class="mr-1">{% icon "plus" %}</span> {% trans "Add First Item" %}
             </button>
@@ -278,7 +278,7 @@
               <span class="mr-2">{% icon "plus" %}</span>{% trans "Add First Item" %}
             </h4>
             <button type="button"
-                    onclick="cancelAddItemForm()"
+                    data-action="invoke" data-invoke="cancelAddItemForm"
                     class="text-slate-400 hover:text-white text-sm">
               <span class="mr-1">{% icon "x" %}</span>{% trans "Cancel" %}
             </button>
@@ -303,428 +303,3 @@ Modal templates removed - using expandable row pattern instead for better UX
 Modals are now only used for the original order detail view (read-only mode)
 Edit mode uses inline expandable forms for better context preservation
 {% endcomment %}
-
-{% if request.resolver_match.url_name == 'order_edit' and can_edit %}
-<script nonce="{{ csp_nonce }}">
-// ===============================================================================
-// EXPANDABLE ROW PATTERN FOR ORDER ITEMS - PRAHO Platform
-// ===============================================================================
-
-// Global state for tracking open edit forms
-let activeEditRowId = null;
-
-// Toggle expandable edit form for order items
-function toggleExpandableEdit(itemId) {
-    const editRow = document.getElementById(`edit-row-${itemId}`);
-    const editBtn = document.getElementById(`edit-btn-${itemId}`);
-    const formContainer = document.getElementById(`inline-edit-form-${itemId}`);
-
-    if (!editRow || !editBtn || !formContainer) {
-        console.error('Required elements not found for item', itemId);
-        return;
-    }
-
-    // If there's already an active edit row, close it first
-    if (activeEditRowId && activeEditRowId !== itemId) {
-        cancelExpandableEdit(activeEditRowId);
-    }
-
-    if (editRow.classList.contains('hidden')) {
-        // Show the edit row
-        editRow.classList.remove('hidden');
-        editBtn.innerHTML = '<span class="mr-1">{% icon "document" %}</span> {% trans "Editing..." %}';
-        editBtn.disabled = true;
-        activeEditRowId = itemId;
-
-        // Load the edit form via HTMX
-        fetch(`/app/orders/{{ order.id }}/items/${itemId}/edit/`, {
-            method: 'GET',
-            headers: {
-                'HX-Request': 'true',
-                'X-Requested-With': 'XMLHttpRequest'
-            }
-        }).then(response => response.text())
-        .then(html => {
-            formContainer.innerHTML = html;
-            // Focus on first input field for better UX
-            const firstInput = formContainer.querySelector('input, select, textarea');
-            if (firstInput) {
-                firstInput.focus();
-            }
-        }).catch(error => {
-            console.error('Error loading edit form:', error);
-            formContainer.innerHTML = `
-                <div class="text-center text-red-400 py-4">
-                    <span class="mr-2">{% icon "x" %}</span>{% trans "Error loading edit form. Please try again." %}
-                </div>
-            `;
-            editBtn.innerHTML = '<span class="mr-1"></span> {% trans "Edit" %}';
-            editBtn.disabled = false;
-        });
-    } else {
-        // Hide the edit row
-        cancelExpandableEdit(itemId);
-    }
-}
-
-// Cancel expandable edit
-function cancelExpandableEdit(itemId) {
-    const editRow = document.getElementById(`edit-row-${itemId}`);
-    const editBtn = document.getElementById(`edit-btn-${itemId}`);
-
-    if (editRow) {
-        editRow.classList.add('hidden');
-    }
-    if (editBtn) {
-        editBtn.innerHTML = '<span class="mr-1"></span> {% trans "Edit" %}';
-        editBtn.disabled = false;
-    }
-
-    if (activeEditRowId === itemId) {
-        activeEditRowId = null;
-    }
-}
-
-// Toggle Add Item form
-function toggleAddItemForm() {
-    const formSection = document.getElementById('add-item-form-section') || document.getElementById('add-item-form-section-empty');
-    const addButton = document.getElementById('add-item-btn') || document.querySelector('button[onclick="toggleAddItemForm()"]');
-    const formContainer = document.getElementById('add-item-form-container') || document.getElementById('add-item-form-container-empty');
-
-    if (!formSection || !formContainer) {
-        console.error('Add item form elements not found');
-        return;
-    }
-
-    if (formSection.classList.contains('hidden')) {
-        // Show the add form
-        formSection.classList.remove('hidden');
-        if (addButton) {
-            addButton.innerHTML = '<span class="mr-1">{% icon "clock" %}</span> {% trans "Loading..." %}';
-            addButton.disabled = true;
-        }
-
-        // Load the add form via HTMX
-        fetch(`/app/orders/{{ order.id }}/items/add/`, {
-            method: 'GET',
-            headers: {
-                'HX-Request': 'true',
-                'X-Requested-With': 'XMLHttpRequest'
-            }
-        }).then(response => response.text())
-        .then(html => {
-            formContainer.innerHTML = html;
-            // Focus on first input field
-            const firstInput = formContainer.querySelector('input, select, textarea');
-            if (firstInput) {
-                firstInput.focus();
-            }
-        }).catch(error => {
-            console.error('Error loading add form:', error);
-            formContainer.innerHTML = `
-                <div class="text-center text-red-400 py-4">
-                    <span class="mr-2">{% icon "x" %}</span>{% trans "Error loading form. Please try again." %}
-                </div>
-            `;
-            if (addButton) {
-                addButton.innerHTML = '<span class="mr-1"></span> {% trans "Add Item" %}';
-                addButton.disabled = false;
-            }
-        });
-    } else {
-        // Hide the add form
-        cancelAddItemForm();
-    }
-}
-
-// Cancel Add Item form
-function cancelAddItemForm() {
-    const formSection = document.getElementById('add-item-form-section') || document.getElementById('add-item-form-section-empty');
-    const addButton = document.getElementById('add-item-btn') || document.querySelector('button[onclick="toggleAddItemForm()"]');
-
-    if (formSection) {
-        formSection.classList.add('hidden');
-    }
-    if (addButton) {
-        addButton.innerHTML = '<span class="mr-1"></span> {% trans "Add Item" %}';
-        addButton.disabled = false;
-    }
-}
-
-// Delete Item with confirmation
-function deleteOrderItem(itemId) {
-    if (!confirm('{% trans "Are you sure you want to delete this item? This action cannot be undone." %}')) {
-        return;
-    }
-
-    // Get CSRF token
-    const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value ||
-                     document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
-
-    if (!csrfToken) {
-        console.error('CSRF token not found');
-        {# nosemgrep: template-translate-as-no-escape — developer-managed translation string, escaped at output #}
-        {% trans "Security token not found. Please refresh the page and try again." as csrf_error_msg %}
-        alert('{{ csrf_error_msg|escapejs }}');
-        return;
-    }
-
-    fetch(`/app/orders/{{ order.id }}/items/${itemId}/delete/`, {
-        method: 'POST',
-        headers: {
-            'X-CSRFToken': csrfToken,
-            'X-Requested-With': 'XMLHttpRequest',
-            'Content-Type': 'application/x-www-form-urlencoded'
-        }
-    }).then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            // Remove the item row and its edit row
-            const itemRow = document.getElementById(`order-item-${itemId}`);
-            const editRow = document.getElementById(`edit-row-${itemId}`);
-
-            if (itemRow) itemRow.remove();
-            if (editRow) editRow.remove();
-
-            // Update totals without refreshing entire section
-            updateOrderTotals();
-
-            // Clean up active edit state if this item was being edited
-            if (activeEditRowId === itemId) {
-                activeEditRowId = null;
-            }
-
-            // Show success message
-            showNotification('success', `{% trans "Item deleted successfully" %}`);
-        } else {
-            {# nosemgrep: template-translate-as-no-escape — developer-managed translation string, escaped at output #}
-            {% trans "Error:" as error_prefix %}{% trans "Unknown error occurred" as unknown_error %}
-            alert('{{ error_prefix|escapejs }} ' + (data.error || '{{ unknown_error|escapejs }}'));
-        }
-    }).catch(error => {
-        console.error('Error deleting item:', error);
-        {# nosemgrep: template-translate-as-no-escape — developer-managed translation string, escaped at output #}
-        {% trans "Error deleting item. Please try again." as delete_error_msg %}
-        alert('{{ delete_error_msg|escapejs }}');
-    });
-}
-
-// Refresh the entire order items section
-function refreshOrderItemsSection() {
-    const orderItemsSection = document.getElementById('order-items-section');
-    if (!orderItemsSection) return;
-
-    fetch(`/app/orders/{{ order.id }}/items/`, {
-        method: 'GET',
-        headers: {
-            'HX-Request': 'true',
-            'X-Requested-With': 'XMLHttpRequest'
-        }
-    }).then(response => response.text())
-    .then(html => {
-        orderItemsSection.outerHTML = html;
-        // Also refresh financial summary if it exists
-        refreshFinancialSummary();
-    }).catch(error => {
-        console.error('Error refreshing order items:', error);
-    });
-}
-
-// Smart refresh that preserves JavaScript state by only updating table content
-function refreshOrderItemsSmart() {
-    const tableBody = document.querySelector('#order-items-section tbody');
-    if (!tableBody) {
-        // Fallback to full refresh if table structure not found
-        refreshOrderItemsSection();
-        return;
-    }
-
-    fetch(`/app/orders/{{ order.id }}/items/`, {
-        method: 'GET',
-        headers: {
-            'HX-Request': 'true',
-            'X-Requested-With': 'XMLHttpRequest'
-        }
-    }).then(response => response.text())
-    .then(html => {
-        const parser = new DOMParser();
-        const doc = parser.parseFromString(html, 'text/html');
-        const newTableBody = doc.querySelector('#order-items-section tbody');
-
-        if (newTableBody) {
-            // Replace only the table body content, preserving the outer structure
-            tableBody.innerHTML = newTableBody.innerHTML;
-        } else {
-            // Fallback to full refresh if parsing fails
-            refreshOrderItemsSection();
-        }
-
-        // Update totals
-        updateOrderTotals();
-    }).catch(error => {
-        console.error('Error smart refreshing order items:', error);
-        // Fallback to full refresh on error
-        refreshOrderItemsSection();
-    });
-}
-
-// Update order totals without refreshing entire section
-function updateOrderTotals() {
-    // Fetch updated order totals from server
-    fetch(`/app/orders/{{ order.id }}/items/`, {
-        method: 'GET',
-        headers: {
-            'HX-Request': 'true',
-            'X-Requested-With': 'XMLHttpRequest'
-        }
-    }).then(response => response.text())
-    .then(html => {
-        // Extract just the totals from the response
-        const parser = new DOMParser();
-        const doc = parser.parseFromString(html, 'text/html');
-
-        // Update individual total elements
-        const newSubtotal = doc.getElementById('order-subtotal');
-        const newTax = doc.getElementById('order-tax');
-        const newTotal = doc.getElementById('order-total');
-
-        const currentSubtotal = document.getElementById('order-subtotal');
-        const currentTax = document.getElementById('order-tax');
-        const currentTotal = document.getElementById('order-total');
-
-        if (newSubtotal && currentSubtotal) {
-            currentSubtotal.textContent = newSubtotal.textContent;
-        }
-        if (newTax && currentTax) {
-            currentTax.textContent = newTax.textContent;
-        }
-        if (newTotal && currentTotal) {
-            currentTotal.textContent = newTotal.textContent;
-        }
-
-        // Also refresh the financial summary sidebar if it exists
-        refreshFinancialSummary();
-    }).catch(error => {
-        console.error('Error updating order totals:', error);
-    });
-}
-
-// Refresh financial summary
-function refreshFinancialSummary() {
-    const financialSummary = document.getElementById('financial-summary');
-    if (!financialSummary) return;
-
-    // Fetch updated financial summary from server
-    fetch(`/app/orders/{{ order.id }}/`, {
-        method: 'GET',
-        headers: {
-            'HX-Request': 'true',
-            'HX-Target': 'financial-summary',
-            'X-Requested-With': 'XMLHttpRequest'
-        }
-    }).then(response => response.text())
-    .then(html => {
-        // Extract just the financial summary from the response
-        const parser = new DOMParser();
-        const doc = parser.parseFromString(html, 'text/html');
-        const newFinancialSummary = doc.getElementById('financial-summary');
-        if (newFinancialSummary && financialSummary) {
-            financialSummary.outerHTML = newFinancialSummary.outerHTML;
-        }
-    }).catch(error => {
-        console.error('Error refreshing financial summary:', error);
-    });
-}
-
-// Show notification (utility function)
-function showNotification(type, message) {
-    // Simple notification - could be enhanced with a toast system
-    if (type === 'success') {
-        // For now, use a simple approach - could be enhanced later
-        const notification = document.createElement('div');
-        notification.className = 'fixed top-4 right-4 bg-green-600 text-white px-4 py-2 rounded-lg shadow-lg z-50 transition-opacity';
-        notification.innerHTML = `<span class="mr-2">{% icon "check" %}</span>${message}`;
-        document.body.appendChild(notification);
-
-        setTimeout(() => {
-            notification.style.opacity = '0';
-            setTimeout(() => notification.remove(), 300);
-        }, 3000);
-    }
-}
-
-// Handle form submissions from expandable rows
-document.addEventListener('submit', function(e) {
-    const form = e.target;
-
-    // Check if this is an order item form (add or edit)
-    if (form.action.includes('/items/') && (form.action.includes('/add/') || form.action.includes('/edit/'))) {
-        e.preventDefault();
-
-        const formData = new FormData(form);
-
-        fetch(form.action, {
-            method: 'POST',
-            body: formData,
-            headers: {
-                'HX-Request': 'true',
-                'X-Requested-With': 'XMLHttpRequest'
-            }
-        }).then(response => response.text())
-        .then(html => {
-            // Check if response contains errors (forms with errors will be returned)
-            if (html.includes('error') || html.includes('<form')) {
-                // Update the form container with the error form
-                const formContainer = form.closest('[id*="form-container"]');
-                if (formContainer) {
-                    formContainer.innerHTML = html;
-                }
-            } else {
-                // Success - update totals and refresh the specific section
-                updateOrderTotals();
-
-                // Close any open forms
-                cancelAddItemForm();
-                if (activeEditRowId) {
-                    cancelExpandableEdit(activeEditRowId);
-                }
-
-                // For new items or edits, we need to refresh to show the updated item
-                // But use a targeted approach that preserves JavaScript state
-                setTimeout(() => {
-                    refreshOrderItemsSmart();
-                }, 100);
-
-                // Show success message
-                showNotification('success', '{% trans "Item saved successfully" %}');
-            }
-        }).catch(error => {
-            console.error('Form submission error:', error);
-            {# nosemgrep: template-translate-as-no-escape — developer-managed translation string, escaped at output #}
-            {% trans "Error submitting form. Please try again." as form_submit_error_msg %}
-            alert('{{ form_submit_error_msg|escapejs }}');
-        });
-    }
-});
-
-// Keyboard shortcuts for better UX
-document.addEventListener('keydown', function(e) {
-    // ESC key closes open forms
-    if (e.key === 'Escape') {
-        if (activeEditRowId) {
-            cancelExpandableEdit(activeEditRowId);
-        }
-
-        const addFormSection = document.getElementById('add-item-form-section') || document.getElementById('add-item-form-section-empty');
-        if (addFormSection && !addFormSection.classList.contains('hidden')) {
-            cancelAddItemForm();
-        }
-    }
-});
-
-// Initialize expandable row system when page loads
-document.addEventListener('DOMContentLoaded', function() {
-    console.log('[Orders] Expandable row system initialized');
-});
-</script>
-{% endif %}

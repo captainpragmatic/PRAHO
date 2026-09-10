@@ -16,6 +16,10 @@
  *   remove-self      (optional data-remove-closest)   — remove the element (or nearest match)
  *   show / hide      (data-target)                    — toggle `hidden` on #target
  *   stop             — no-op; claims the click so an ancestor navigate/etc. does not fire
+ *   filter-tab       (data-select-name, data-select-value) — set a form select + fire change
+ *   cookie-prefs     (data-fallback-message)          — open consent panel or alert fallback
+ *   reset-form       (data-reset-target)              — reset a target form (or closest)
+ *   confirm-navigate (data-confirm, data-href)        — optional confirm() then navigate
  */
 (function () {
   "use strict";
@@ -86,14 +90,94 @@
         }
         break;
       }
+      case "confirm-dangerous": {
+        // Open the shared dangerous-action modal. It listens on WINDOW
+        // (@confirm-dangerous-action.window) and calls detail.action on confirm, so we
+        // dispatch on window (the old inline handlers dispatched on document, which does
+        // not reach a window listener) and build a TRUSTED callback from data attributes —
+        // never eval a string. The action submits the named form (the only operation these
+        // buttons performed).
+        var formId = el.dataset.submitForm;
+        window.dispatchEvent(
+          new CustomEvent("confirm-dangerous-action", {
+            detail: {
+              title: el.dataset.title || "",
+              message: el.dataset.message || "",
+              confirmText: el.dataset.confirmText || "I really am sure I want to do this!",
+              action: function () {
+                var form = formId ? document.getElementById(formId) : null;
+                if (form && typeof form.requestSubmit === "function") {
+                  form.requestSubmit();
+                } else if (form) {
+                  form.submit();
+                }
+              },
+            },
+          })
+        );
+        break;
+      }
       case "stop": {
         // No-op: exists so a wrapper element claims the click via closest(), keeping an
         // ancestor registry action (e.g. a row's navigate) from firing. It does NOT stop
         // ancestor Alpine/HTMX/native handlers — migrate propagation groups together.
         break;
       }
+      case "filter-tab": {
+        // Set a form-scoped <select> and fire its change event so an existing
+        // hx-trigger="change from:select[name=...]" re-runs the server-side filter.
+        var filterForm = el.closest("form");
+        if (filterForm) {
+          var filterSel = filterForm.querySelector(
+            'select[name="' + el.dataset.selectName + '"]'
+          );
+          if (filterSel) {
+            filterSel.value = el.dataset.selectValue || "";
+            filterSel.dispatchEvent(new Event("change", { bubbles: true }));
+          }
+        }
+        break;
+      }
+      case "cookie-prefs": {
+        // Open the cookie-preferences panel if the consent script registered one,
+        // else surface the fallback message (mirrors the portal's cookie-prefs).
+        if (typeof window.showCookiePreferences === "function") {
+          window.showCookiePreferences();
+        } else if (el.dataset.fallbackMessage) {
+          window.alert(el.dataset.fallbackMessage);
+        }
+        break;
+      }
+      case "reset-form": {
+        // Reset the target form (selector in data-reset-target, else the closest form).
+        // Contract mirrors the portal csp-actions.js reset-form.
+        var resetTarget = el.dataset.resetTarget;
+        var resetForm = resetTarget ? document.querySelector(resetTarget) : el.closest("form");
+        if (resetForm && typeof resetForm.reset === "function") {
+          resetForm.reset();
+        }
+        break;
+      }
+      case "confirm-navigate": {
+        // Optional window.confirm gate (data-confirm) then same-origin navigate to
+        // data-href. Replaces bespoke "if (confirm(msg)) location.href = url" helpers.
+        if (!el.dataset.confirm || window.confirm(el.dataset.confirm)) {
+          safeNavigate(el.dataset.href);
+        }
+        break;
+      }
       default:
         break;
+    }
+  });
+
+  // Submit-level, fail-CLOSED confirm gate for destructive NATIVE forms. Unlike an onclick
+  // gate this covers keyboard submit and requestSubmit() (both fire the submit event), and
+  // it cancels the submission when the user declines — replacing onsubmit="return confirm()".
+  document.addEventListener("submit", function (event) {
+    var form = event.target.closest("form[data-confirm]");
+    if (form && !window.confirm(form.dataset.confirm)) {
+      event.preventDefault();
     }
   });
 

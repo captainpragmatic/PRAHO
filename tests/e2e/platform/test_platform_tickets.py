@@ -112,16 +112,21 @@ def _verify_badge_in_list(page: Page, ticket_url: str, expected_text: str) -> No
     assert match, f"Cannot extract ticket ID from {ticket_url}"
     ticket_id = match.group(1)
 
-    # Desktop table row (onclick contains the ticket URL)
-    row = page.locator(f"tr[onclick*='/tickets/{ticket_id}/']").first
+    # Desktop table row: #284 migrated the row from onclick="...tickets/ID/..." to the
+    # delegated data-action="navigate" dispatcher, so match data-href, not onclick.
+    row = page.locator(
+        f"tr[data-action='navigate'][data-href*='/tickets/{ticket_id}/']"
+    ).first
     if row.is_visible(timeout=2000):
         badge = row.get_by_text(expected_text, exact=True).first
         assert badge.is_visible(timeout=2000), (
             f"Expected '{expected_text}' badge in list row for ticket {ticket_id}"
         )
     else:
-        # Mobile card fallback — find via link
-        card = page.locator(f"a[href*='/tickets/{ticket_id}/']").first
+        # Mobile card fallback — also a delegated data-action element now, not an <a>.
+        card = page.locator(
+            f"[data-action='navigate'][data-href*='/tickets/{ticket_id}/']"
+        ).first
         assert card.is_visible(timeout=2000), f"Ticket {ticket_id} not found in list"
 
 

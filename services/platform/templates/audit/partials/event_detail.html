@@ -150,21 +150,3 @@
 </div>
 
 <!-- JavaScript to handle the details -->
-<script nonce="{{ csp_nonce }}">
-function closeEventDetail(button) {
-    const eventDetailsContainer = button.closest('.event-details');
-    if (eventDetailsContainer) {
-        eventDetailsContainer.classList.add('hidden');
-        // Also rotate the chevron back
-        const expandButton = eventDetailsContainer.parentElement.querySelector('.expand-btn .chevron-icon');
-        if (expandButton) {
-            expandButton.style.transform = 'rotate(0deg)';
-        }
-        // Remove expanded class from the group
-        const group = eventDetailsContainer.closest('.group');
-        if (group) {
-            group.classList.remove('expanded');
-        }
-    }
-}
-</script>

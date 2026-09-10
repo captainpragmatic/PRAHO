@@ -1,7 +1,7 @@
 {% load i18n %}
 {% load ui_components %}
 
-<div class="bg-slate-800 rounded-lg border {% if preflight_ok %}border-green-700{% else %}border-slate-700{% endif %} p-4">
+<div class="bg-slate-800 rounded-lg border {% if preflight_ok %}border-green-700{% else %}border-slate-700{% endif %} p-4" data-preflight-ok="{{ preflight_ok|yesno:'true,false' }}">
   <div class="flex items-center justify-between mb-2">
     <div class="text-sm font-medium {% if preflight_ok %}text-green-400{% else %}text-slate-300{% endif %}">
       {% if preflight_ok %}
@@ -38,36 +38,6 @@
   {% endif %}
 </div>
 
-<script nonce="{{ csp_nonce }}">
-  // Toggle Pending option/button availability based on validation result
-  (function(){
-    const ok = {{ preflight_ok|yesno:"true,false" }};
-    const select = document.getElementById('new_status');
-    if (select) {
-      const pendingOpt = Array.from(select.options).find(o => o.value === 'awaiting_payment');
-      if (pendingOpt) pendingOpt.disabled = !ok;
-    }
-  })();
-
-  // Toast helper (lightweight)
-  function showToast(message, variant) {
-    const bg = variant === 'success' ? 'bg-green-600' : (variant === 'warning' ? 'bg-yellow-600' : 'bg-red-600');
-    const toast = document.createElement('div');
-    toast.className = `fixed top-4 right-4 z-50 ${bg} text-white px-4 py-2 rounded-lg shadow-lg`;
-    toast.textContent = message;
-    document.body.appendChild(toast);
-    setTimeout(() => { toast.style.opacity = '0'; toast.style.transition = 'opacity 0.3s'; }, 2000);
-    setTimeout(() => { if (toast.parentNode) toast.parentNode.removeChild(toast); }, 2400);
-  }
-
-  // Show success toast when validation passes
-  (function(){
-    const ok = {{ preflight_ok|yesno:"true,false" }};
-    if (ok) {
-      showToast("{% trans 'Validation passed — you may promote to Pending' %}", 'success');
-    }
-  })();
-</script>
 
 <!-- Out-of-band update for modal summary -->
 <div id="modal-preflight" hx-swap-oob="true">

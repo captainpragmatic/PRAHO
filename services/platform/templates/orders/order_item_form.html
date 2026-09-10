@@ -133,9 +133,9 @@
   <div class="px-6 py-4 bg-slate-900 flex justify-end space-x-3">
     <button type="button"
             {% if action == 'create' %}
-              onclick="if(typeof cancelAddItemForm === 'function') cancelAddItemForm(); else if(typeof hideAddItemModal === 'function') hideAddItemModal();"
+              data-action="invoke" data-invoke="cancelAddItemOrModal"
             {% else %}
-              onclick="if(typeof cancelExpandableEdit === 'function') cancelExpandableEdit('{{ item.id }}'); else if(typeof hideEditItemModal === 'function') hideEditItemModal();"
+              data-action="invoke" data-invoke="cancelEditItemOrModal" data-item-id="{{ item.id }}"
             {% endif %}
             class="px-4 py-2 text-sm font-medium text-slate-400 hover:text-white">
       {% icon "x" %} {% trans "Cancel" %}

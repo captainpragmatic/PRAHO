@@ -50,11 +50,11 @@
                     {{ live_status.current_step|default:"Initializing..." }}
                 </p>
                 {% if job.status == "attention" %}
-                  <form method="post" action="{% url 'provisioning:virtualmin_job_resolve' job.pk %}" class="mt-2 space-y-2">
+                  <form method="post" action="{% url 'provisioning:virtualmin_job_resolve' job.pk %}" class="mt-2 space-y-2" data-confirm="{% trans 'Confirm the remote state was verified manually. This releases the account lock.' %}">
                     {% csrf_token %}
                     <p class="text-amber-300 text-sm">{% trans "The operation outcome is uncertain. Verify the domain state on the server, then mark this resolved to release the account." %}</p>
                     <input type="text" name="note" maxlength="200" placeholder="{% trans 'What was verified or repaired?' %}" class="w-full rounded border border-slate-600 bg-slate-900 p-2 text-sm text-slate-100">
-                    <button type="submit" class="rounded bg-amber-600 px-3 py-2 text-sm text-white" onclick="return confirm('{% trans 'Confirm the remote state was verified manually. This releases the account lock.' %}')">{% trans "Mark resolved" %}</button>
+                    <button type="submit" class="rounded bg-amber-600 px-3 py-2 text-sm text-white">{% trans "Mark resolved" %}</button>
                   </form>
                 {% endif %}
             </div>

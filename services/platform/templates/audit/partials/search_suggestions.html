@@ -48,28 +48,6 @@
     {% endif %}
 </div>
 
-<script nonce="{{ csp_nonce }}">
-document.addEventListener('DOMContentLoaded', function() {
-    // Handle suggestion item clicks
-    const suggestionItems = document.querySelectorAll('.suggestion-item');
-    suggestionItems.forEach(item => {
-        item.addEventListener('click', function() {
-            const value = this.getAttribute('data-value');
-            const searchInput = document.querySelector('input[name="search"]');
-            if (searchInput) {
-                searchInput.value = value;
-                // Hide suggestions
-                this.closest('.bg-white').style.display = 'none';
-                // Optionally trigger search
-                const form = searchInput.closest('form');
-                if (form) {
-                    form.dispatchEvent(new Event('submit'));
-                }
-            }
-        });
-    });
-});
-</script>
 {% else %}
 <div class="bg-white border border-gray-200 rounded-lg shadow-lg mt-1 p-3 text-sm text-gray-500">
     {% trans "No suggestions found" %}

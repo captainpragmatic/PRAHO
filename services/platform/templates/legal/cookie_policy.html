@@ -25,7 +25,7 @@
             </div>
             {# nosemgrep: template-translate-as-no-escape — developer-managed translation string, escaped at output #}
             {% trans "Cookie preferences panel will appear on next page load." as cookie_msg %}
-            <button onclick="window.showCookiePreferences ? window.showCookiePreferences() : alert('{{ cookie_msg|escapejs }}')"
+            <button data-action="cookie-prefs" data-fallback-message="{{ cookie_msg }}"
                     class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded font-medium transition-colors">
                 {% trans "Cookie Settings" %}
             </button>
