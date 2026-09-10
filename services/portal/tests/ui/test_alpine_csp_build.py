@@ -18,6 +18,7 @@ from django.test import SimpleTestCase
 REPO_ROOT = Path(__file__).resolve().parents[4]
 PORTAL_CSP_BUILD = REPO_ROOT / "services" / "portal" / "static" / "js" / "alpine-csp.min.js"
 PORTAL_STANDARD_BUILD = REPO_ROOT / "services" / "portal" / "static" / "js" / "alpine.min.js"
+PLATFORM_CSP_BUILD = REPO_ROOT / "services" / "platform" / "static" / "js" / "alpine-csp.min.js"
 PLATFORM_STANDARD_BUILD = REPO_ROOT / "services" / "platform" / "static" / "js" / "alpine.min.js"
 PORTAL_BASE_TEMPLATE = REPO_ROOT / "services" / "portal" / "templates" / "base.html"
 PLATFORM_BASE_TEMPLATE = REPO_ROOT / "services" / "platform" / "templates" / "base.html"
@@ -51,12 +52,15 @@ class AlpineCSPBuildGuardTests(SimpleTestCase):
                 self.assertIn(marker, source)
         self.assertIn('version:"3.15.0"', source)
 
-    def test_platform_standard_build_lacks_csp_parser_markers(self) -> None:
-        source = PLATFORM_STANDARD_BUILD.read_text(encoding="utf-8")
+    def test_platform_csp_build_matches_pinned_sha256(self) -> None:
+        # #284: platform now runs the same pinned @alpinejs/csp build as the portal.
+        digest = hashlib.sha256(PLATFORM_CSP_BUILD.read_bytes()).hexdigest()
 
-        for marker in CSP_PARSER_MARKERS:
-            with self.subTest(marker=marker):
-                self.assertNotIn(marker, source)
+        self.assertEqual(digest, PINNED_CSP_SHA256)
+
+    def test_platform_standard_build_is_absent(self) -> None:
+        # The eval-backed standard build was removed when the platform switched to CSP (#284).
+        self.assertFalse(PLATFORM_STANDARD_BUILD.exists())
 
     def test_portal_standard_build_is_absent(self) -> None:
         self.assertFalse(PORTAL_STANDARD_BUILD.exists())
@@ -65,10 +69,11 @@ class AlpineCSPBuildGuardTests(SimpleTestCase):
         portal_template = PORTAL_BASE_TEMPLATE.read_text(encoding="utf-8")
         platform_template = PLATFORM_BASE_TEMPLATE.read_text(encoding="utf-8")
 
+        # #284: both services now run the CSP build; neither loads the standard build.
         self.assertIn(PORTAL_CSP_REFERENCE, portal_template)
         self.assertNotIn(STANDARD_ALPINE_REFERENCE, portal_template)
-        self.assertIn(STANDARD_ALPINE_REFERENCE, platform_template)
-        self.assertNotIn(PORTAL_CSP_REFERENCE, platform_template)
+        self.assertIn(PORTAL_CSP_REFERENCE, platform_template)
+        self.assertNotIn(STANDARD_ALPINE_REFERENCE, platform_template)
 
     def test_portal_registers_components_before_alpine_boots(self) -> None:
         portal_template = PORTAL_BASE_TEMPLATE.read_text(encoding="utf-8")
@@ -76,3 +81,11 @@ class AlpineCSPBuildGuardTests(SimpleTestCase):
 
         self.assertLess(portal_template.index(SHARED_COMPONENTS_SCRIPT), alpine_csp_position)
         self.assertLess(portal_template.index(PORTAL_COMPONENTS_SCRIPT), alpine_csp_position)
+
+    def test_platform_registers_components_before_alpine_boots(self) -> None:
+        # The CSP build has no evaluator, so Alpine.data registrations must load before it.
+        platform_template = PLATFORM_BASE_TEMPLATE.read_text(encoding="utf-8")
+        alpine_csp_position = platform_template.index(PORTAL_CSP_SCRIPT)
+
+        self.assertLess(platform_template.index(SHARED_COMPONENTS_SCRIPT), alpine_csp_position)
+        self.assertLess(platform_template.index(PORTAL_COMPONENTS_SCRIPT), alpine_csp_position)

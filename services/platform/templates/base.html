@@ -25,7 +25,11 @@
   <link rel="stylesheet" href="{% static 'css/tailwind.min.css' %}">
   <script src="{% static 'js/htmx.min.js' %}"></script>
   <script defer src="{% static 'js/alpine-shared-components.js' %}"></script>
-  <script defer src="{% static 'js/alpine.min.js' %}"></script>
+  <script defer src="{% static 'js/alpine-components.js' %}"></script>
+  {# @alpinejs/csp build (no new-Function evaluator) so the platform can drop CSP
+     'unsafe-eval' (#284). Inline directive expressions are parsed, not eval'd; every
+     component is registered via Alpine.data in the two files above. #}
+  <script defer src="{% static 'js/alpine-csp.min.js' %}"></script>
   <script defer src="{% static 'js/components/modal.js' %}"></script>
   <script defer src="{% static 'js/ui-actions.js' %}"></script>
   <script defer src="{% static 'js/platform-actions.js' %}"></script>

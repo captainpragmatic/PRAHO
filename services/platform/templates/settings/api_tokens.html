@@ -14,13 +14,13 @@
       {% page_header title=page_title subtitle=_("Create separate credentials for scripts and integrations") icon="key" %}{% end_page_header %}
 
       {% if new_raw_token %}
-      <div class="rounded-lg border border-amber-500/50 bg-amber-950/30 p-4" x-data="{}">
+      <div class="rounded-lg border border-amber-500/50 bg-amber-950/30 p-4" x-data="apiTokenClipboard()">
         <h2 class="font-semibold text-amber-200">{% trans "Copy this token now" %}</h2>
         <p class="mt-1 text-sm text-amber-100/80">{% trans "For security, PRAHO stores only its hash and cannot show this value again." %}</p>
         <div class="mt-3 flex flex-col sm:flex-row gap-2">
           <code x-ref="rawToken" class="min-w-0 flex-1 break-all rounded bg-slate-950 px-3 py-2 text-sm text-amber-100">{{ new_raw_token }}</code>
           {% trans "Copy" as copy_label %}
-          {% button copy_label type="button" variant="warning" attrs="@click=\"navigator.clipboard.writeText($refs.rawToken.textContent.trim())\"" %}
+          {% button copy_label type="button" variant="warning" attrs="@click=\"copyToken()\"" %}
         </div>
       </div>
       {% endif %}

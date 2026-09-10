@@ -10,7 +10,11 @@
     {% include 'settings/partials/_sidebar.html' %}
 
     <main class="col-span-12 lg:col-span-9">
-      <div x-data="settingsForm('{% url 'settings:save_change_set' %}')" data-settings-form>
+      {% trans "Critical setting change" as critical_title %}
+      {% trans "You are changing critical platform behaviour:" as critical_message %}
+      {% trans "Settings saved" as saved_message %}
+      {% trans "Save failed" as save_failed_message %}
+      <div x-data="settingsForm('{% url 'settings:save_change_set' %}')" data-settings-form data-critical-title="{{ critical_title }}" data-critical-message="{{ critical_message }}" data-saved-message="{{ saved_message }}" data-save-failed-message="{{ save_failed_message }}">
         {% csrf_token %}
         <nav class="text-sm text-slate-400 mb-3">
           <a href="{% url 'settings:home' %}" class="hover:text-white">{% trans "Settings" %}</a>
@@ -31,8 +35,8 @@
         {% endif %}
 
         {% if is_integration %}
-        <div class="mt-4 mb-2" x-data="{ testing: false, result: null }">
-          <button type="button" :disabled="testing" @click="testing = true; result = null; fetch('{% url 'settings:integration_test' group.slug %}', { method: 'POST', headers: { 'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value } }).then(r => r.json()).then(data => { testing = false; result = data })" class="inline-flex items-center px-3 py-2 text-sm font-medium text-white bg-slate-600 border border-slate-600 rounded-lg hover:bg-slate-700 disabled:opacity-50">
+        <div class="mt-4 mb-2" x-data="settingsIntegrationTest" data-test-url="{% url 'settings:integration_test' group.slug %}">
+          <button type="button" :disabled="testing" @click="testConnection()" class="inline-flex items-center px-3 py-2 text-sm font-medium text-white bg-slate-600 border border-slate-600 rounded-lg hover:bg-slate-700 disabled:opacity-50">
             <span x-show="!testing">🔌 {% trans "Test connection" %}</span>
             <span x-show="testing" x-cloak>{% trans "Testing…" %}</span>
           </button>
@@ -94,5 +98,4 @@
     </main>
   </div>
 </div>
-{% include 'settings/partials/_form_js.html' %}
 {% endblock %}
