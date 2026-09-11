@@ -62,11 +62,17 @@ class DomainOperationService:
         operation.save(update_fields=["review_required_at", "error_message", "result", "updated_at"])
 
     @staticmethod
-    def dispatch(operation: DomainOperation) -> None:
-        """Commit the point after which a crash must be treated as uncertain."""
-        operation.mark_submitted()
-        operation.next_retry_at = timezone.now() + timedelta(minutes=15)
-        operation.save()
+    def dispatch(operation: DomainOperation) -> bool:
+        """Claim dispatch once, including when multiple workers resume preflight."""
+        with transaction.atomic():
+            Domain.objects.select_for_update().get(pk=operation.domain_id)
+            current = DomainOperation.objects.select_for_update().get(pk=operation.pk)
+            if current.state != "pending":
+                return False
+            operation.mark_submitted()
+            operation.next_retry_at = timezone.now() + timedelta(minutes=15)
+            operation.save()
+        return True
 
     @staticmethod
     def record_response(operation: DomainOperation, success: bool, payload: dict[str, Any]) -> None:
@@ -130,7 +136,8 @@ class DomainOperationService:
         data = {**config.registrant_data}
         if contact_result.unwrap():
             data["registrar_contact_id"] = contact_result.unwrap()
-        cls.dispatch(operation)
+        if not cls.dispatch(operation):
+            return Err(str(REGISTRATION_PENDING_MESSAGE))
         try:
             success, payload = DomainRegistrarGateway.register_domain(config.registrar, domain.name, config.years, data)
             cls.record_response(operation, success, payload)
@@ -211,15 +218,10 @@ class DomainOperationService:
             return Err(RENEWAL_PENDING)
         return Err(operation.error_message or "This renewal intent was rejected; review before creating another.")
 
-    @classmethod
-    def renew(cls, domain: Domain, years: int, token: str | None) -> Result[str, str]:  # noqa: PLR0911  # intent/preflight/dispatch outcomes
-        from .services import DomainLifecycleService, DomainRegistrarGateway, TLDService  # noqa: PLC0415
+    @staticmethod
+    def _claim_renewal(domain: Domain, years: int, key: str) -> Result[tuple[DomainOperation, bool], str]:
+        from .services import DomainLifecycleService, TLDService  # noqa: PLC0415
 
-        if not require_autocommit():
-            return Err(TRANSACTION_ERROR)
-        # Tokenless callers retain a stable legacy intent. Staff and paid orders
-        # supply a new explicit token for each intentional extension.
-        key = intent_digest(f"legacy:{years}" if token is None else f"token:{token}")
         with transaction.atomic():
             domain = Domain.objects.select_for_update(of=("self",)).select_related("tld", "registrar").get(pk=domain.pk)
             existing = DomainOperation.objects.filter(
@@ -230,29 +232,33 @@ class DomainOperationService:
             ).first()
             retry_preflight = (
                 existing is not None
-                and existing.state == "failed"
+                and existing.state in ("pending", "failed")
                 and existing.submitted_at is None
                 and existing.accepted_at is None
-                and existing.review_required_at is None
+                and (existing.state == "pending" or existing.review_required_at is None)
                 and existing.parameters.get("years") == years
             )
             if existing and not retry_preflight:
-                return cls._replay_renewal(existing, years)
+                return Ok((existing, False))
             error = DomainLifecycleService._validate_renewal_preconditions(
                 domain
             ) or TLDService.validate_renewal_period(domain.tld, years)
             if error:
                 return Err(error)
-            if DomainOperation.objects.filter(
+            unresolved = DomainOperation.objects.filter(
                 domain=domain,
                 operation_type="renew",
                 state__in=("pending", "submitted"),
-            ).exists():
+            )
+            if existing:
+                unresolved = unresolved.exclude(pk=existing.pk)
+            if unresolved.exists():
                 return Err("Another renewal is awaiting confirmation. Review and retry this item after it completes.")
             if existing:
                 operation = DomainOperation.objects.select_for_update().get(pk=existing.pk)
-                operation.retry_preflight()
-                operation.save()
+                if operation.state == "failed":
+                    operation.retry_preflight()
+                    operation.save()
             else:
                 operation = DomainOperation.objects.create(
                     domain=domain,
@@ -261,6 +267,23 @@ class DomainOperationService:
                     intent_key=key,
                     parameters={"years": years},
                 )
+        return Ok((operation, True))
+
+    @classmethod
+    def renew(cls, domain: Domain, years: int, token: str | None) -> Result[str, str]:  # noqa: PLR0911  # intent/preflight/dispatch outcomes
+        from .services import DomainRegistrarGateway  # noqa: PLC0415
+
+        if not require_autocommit():
+            return Err(TRANSACTION_ERROR)
+        # Staff and paid orders supply explicit, stable per-intent tokens.
+        key = intent_digest(f"legacy:{years}" if token is None else f"token:{token}")
+        claim = cls._claim_renewal(domain, years, key)
+        if claim.is_err():
+            return Err(claim.unwrap_err())
+        operation, needs_dispatch = claim.unwrap()
+        if not needs_dispatch:
+            return cls._replay_renewal(operation, years)
+        domain = operation.domain
         # A fresh registrar snapshot prevents local drift from becoming false proof
         # of renewal. The pending intent serializes this read with other renewals.
         info_result = DomainRegistrarGateway.get_domain_info(domain.registrar, domain.name)
@@ -282,7 +305,9 @@ class DomainOperationService:
             operation.save()
             return Err(operation.error_message)
         operation.parameters = {"years": years, "prev_expires_at": previous.isoformat()}
-        cls.dispatch(operation)
+        if not cls.dispatch(operation):
+            operation.refresh_from_db()
+            return cls._replay_renewal(operation, years)
         try:
             success, payload = DomainRegistrarGateway.renew_domain(
                 domain.registrar, domain, years, idempotency_token=key
@@ -357,7 +382,8 @@ class DomainOperationService:
             gateway = RegistrarGatewayFactory.create_gateway(domain.registrar)
             if gateway._verified_adapter_guard():
                 return
-            cls.dispatch(op)
+            if not cls.dispatch(op):
+                return
         result = gateway.update_nameservers(domain.name, op.parameters["nameservers"])
         payload: dict[str, Any] = {}
         if result.is_ok():

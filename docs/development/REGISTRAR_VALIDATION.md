@@ -84,8 +84,9 @@ refused while another renewal is unresolved. The paid order item remains
 unprocessed, visibly requiring review/retry after the earlier operation resolves;
 there is no automatic queue of chargeable renewals.
 
-A fresh registrar expiry snapshot is committed before renewal dispatch. A failed preflight read may safely retry the same
-intent because no mutation was dispatched. An
+A fresh registrar expiry snapshot is committed before renewal dispatch. A failed or interrupted preflight may safely resume the same
+intent because no mutation was dispatched. An atomic dispatch claim prevents two
+resuming workers from sending the mutation twice. An
 expiry advance confirms at most one intent, including across worker runs and
 webhook races. Historical overlapping submissions require review. Older reads
 cannot overwrite newer expiry evidence or trigger another chargeable renewal.

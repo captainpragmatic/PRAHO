@@ -626,7 +626,8 @@ class DomainLifecycleService:
         # Phase 2: submit to registrar (outside the transaction above). Use the stored
         # (lowercased) domain.name so the gateway idempotency key matches on any retry —
         # passing the raw domain_name would key "Example.com" separately from "example.com".
-        DomainOperationService.dispatch(op)
+        if not DomainOperationService.dispatch(op):
+            return Err("Operation already submitted; awaiting confirmation.")
         result = gateway.initiate_transfer(
             domain.name,
             epp_code,
@@ -674,7 +675,8 @@ class DomainLifecycleService:
             parameters={"nameservers": nameservers},
         )
 
-        DomainOperationService.dispatch(op)
+        if not DomainOperationService.dispatch(op):
+            return Err("Operation already submitted; awaiting confirmation.")
         result = gateway.update_nameservers(domain.name, nameservers)
         if result.is_ok():
             update = result.unwrap()
@@ -726,7 +728,8 @@ class DomainLifecycleService:
             parameters={"locked": locked},
         )
 
-        DomainOperationService.dispatch(op)
+        if not DomainOperationService.dispatch(op):
+            return Err("Operation already submitted; awaiting confirmation.")
         result = gateway.set_lock(domain.name, locked)
         if result.is_ok():
             lock_result = result.unwrap()

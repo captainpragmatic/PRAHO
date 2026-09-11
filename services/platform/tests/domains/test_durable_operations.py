@@ -5,7 +5,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from importlib import import_module
-from threading import Event
+from threading import Barrier, Event
 from unittest import skipUnless
 from unittest.mock import patch
 
@@ -348,6 +348,39 @@ class DurableOperationTests(IntentFixture, TransactionTestCase):
         self.assertFalse(Domain.objects.filter(name="example.ro").exists())
         self.assertFalse(AuditEvent.objects.filter(action="domain_operation_review_required").exists())
 
+    def test_interrupted_pending_renewal_resumes_the_same_intent(self) -> None:
+        operation = DomainOperation.objects.create(
+            domain=self.domain,
+            registrar=self.registrar,
+            operation_type="renew",
+            intent_key=intent_digest("token:resume"),
+            parameters={"years": 1},
+        )
+        with patch(
+            "apps.domains.services.DomainRegistrarGateway.renew_domain", return_value=(True, {"pending": True})
+        ) as renew:
+            result = DomainLifecycleService.process_domain_renewal(self.domain, idempotency_token="resume")
+            replay = DomainLifecycleService.process_domain_renewal(self.domain, idempotency_token="resume")
+        self.assertTrue(result.is_ok(), result)
+        self.assertTrue(replay.is_ok(), replay)
+        self.assertEqual(renew.call_count, 1)
+        self.assertEqual(DomainOperation.objects.count(), 1)
+        operation.refresh_from_db()
+        self.assertEqual(operation.state, "submitted")
+        self.assertEqual(operation.parameters["prev_expires_at"], self.expiry.isoformat())
+
+    def test_duplicate_webhook_preserves_notice_counters_and_does_not_audit_again(self) -> None:
+        self.domain.renewal_notices_sent = 14
+        self.domain.save(update_fields=["renewal_notices_sent"])
+        with patch("apps.domains.webhooks.DomainsAuditService.log_domain_event") as audit:
+            success, message = RegistrarWebhookView()._handle_domain_renewed(
+                self.domain, {"expires_at": self.expiry.isoformat()}, "127.0.0.1"
+            )
+        self.assertTrue(success, message)
+        self.domain.refresh_from_db()
+        self.assertEqual(self.domain.renewal_notices_sent, 14)
+        audit.assert_not_called()
+
 
 @skipUnless(connection.vendor == "postgresql", "Requires PostgreSQL row locks; exercised in Integration CI")
 @override_settings(REGISTRAR_ADAPTERS_VERIFIED=True, CACHES=LOCMEM_TEST_CACHE)
@@ -426,3 +459,37 @@ class RegistrarIntentPostgresConcurrencyTests(IntentFixture, TransactionTestCase
         self.assertEqual(sum(result.is_ok() for result in results), 1)
         self.assertEqual(DomainOperation.objects.count(), 1)
         self.assertEqual(renew.call_count, 1)
+
+    def test_concurrent_resumption_of_same_pending_intent_dispatches_once(self) -> None:
+        DomainOperation.objects.create(
+            domain=self.domain,
+            registrar=self.registrar,
+            operation_type="renew",
+            intent_key=intent_digest("token:resume"),
+            parameters={"years": 1},
+        )
+        preflight_barrier = Barrier(2)
+
+        def read_info(*args):
+            preflight_barrier.wait(timeout=10)
+            return Ok(self.info)
+
+        def request():
+            close_old_connections()
+            try:
+                return DomainLifecycleService.process_domain_renewal(self.domain, idempotency_token="resume")
+            finally:
+                connection.close()
+
+        self.preflight.side_effect = read_info
+        with (
+            patch(
+                "apps.domains.services.DomainRegistrarGateway.renew_domain", return_value=(True, {"pending": True})
+            ) as renew,
+            ThreadPoolExecutor(max_workers=2) as pool,
+        ):
+            results = list(pool.map(lambda _: request(), range(2)))
+        self.assertTrue(any(result.is_ok() for result in results))
+        self.assertEqual(renew.call_count, 1)
+        self.assertEqual(DomainOperation.objects.count(), 1)
+        self.assertEqual(DomainOperation.objects.get().state, "submitted")

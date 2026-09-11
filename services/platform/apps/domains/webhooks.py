@@ -272,9 +272,14 @@ class RegistrarWebhookView(View):
             expiry = parse_date(expires_at_raw)
             if expiry is None:
                 return False, "expires_at present but could not be parsed — renewal aborted"
+            previous_expiry = domain.expires_at
             self._apply_webhook_domain_fields(domain, webhook_data)
+            completed_operation = False
             for operation in DomainOperation.objects.filter(domain=domain, operation_type="renew", state="submitted"):
-                DomainOperationService.confirm_renewal(operation, expiry)
+                if DomainOperationService.confirm_renewal(operation, expiry):
+                    completed_operation = True
+            if domain.expires_at == previous_expiry and not completed_operation:
+                return True, "Renewal webhook already processed"
             domain.renewal_notices_sent = 0  # Reset renewal notices
             domain.save()
 
