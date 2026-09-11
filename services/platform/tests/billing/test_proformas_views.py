@@ -14,6 +14,7 @@ from django.utils import timezone
 
 from apps.billing.models import (
     Currency,
+    FXRate,
     ProformaInvoice,
     ProformaLine,
 )
@@ -66,10 +67,6 @@ class ProformaViewsTestCase(TestCase):
 
     def add_middleware_to_request(self, request):
         """Add required middleware to request"""
-        from django.contrib.messages.middleware import MessageMiddleware
-        from django.contrib.sessions.middleware import SessionMiddleware
-        from django.http import HttpResponse
-
         middleware = SessionMiddleware(lambda req: HttpResponse())
         middleware.process_request(request)
         request.session.save()
@@ -157,6 +154,95 @@ class ProformaViewsTestCase(TestCase):
         proforma = ProformaInvoice.objects.get(customer=self.customer)
         self.assertEqual(proforma.bill_to_name, 'Test Company SRL')
         self.assertEqual(proforma.bill_to_email, 'test@company.ro')
+
+    def test_proforma_create_honors_selected_eur_currency(self):
+        """#103 DISCRIMINATOR: a staff-selected non-RON currency must persist.
+
+        Current code silently forces RON (currency is never read), so this FAILS
+        pre-fix ('RON' != 'EUR') and passes once the create path reads + validates
+        + applies the posted currency. A resolvable EUR->RON rate is seeded because
+        the fail-closed admission guard requires one (no rate => no non-RON proforma).
+        """
+        eur, _ = Currency.objects.get_or_create(code='EUR', defaults={'symbol': '€', 'decimals': 2})
+        FXRate.objects.create(
+            base_code=eur,
+            quote_code=self.currency,  # RON
+            rate=Decimal('4.9771'),
+            as_of=timezone.now().date() - timezone.timedelta(days=2),
+            source=FXRate.Source.BNR,
+            source_reference='https://curs.bnr.ro/nbrfxrates.xml',
+            fetched_at=timezone.now(),
+        )
+        post_data = {
+            'customer': str(self.customer.pk),
+            'valid_until': '2024-12-31',
+            'currency': 'EUR',
+            'bill_to_name': 'Test Company SRL',
+            'bill_to_email': 'test@company.ro',
+            'line_0_description': 'Test Service',
+            'line_0_quantity': '1',
+            'line_0_unit_price': '100.00',
+            'line_0_vat_rate': '19',
+        }
+        request = self.factory.post('/billing/proformas/create/', post_data)
+        request.user = self.staff_user
+        request = self.add_middleware_to_request(request)
+
+        _handle_proforma_create_post(request)
+
+        proforma = ProformaInvoice.objects.get(customer=self.customer)
+        self.assertEqual(proforma.currency.code, 'EUR')
+
+    def test_proforma_create_rejects_non_ron_without_rate(self):
+        """#103 SAFETY: a non-RON currency with NO resolvable FX rate is rejected at
+        creation (fail-closed). No proforma is written, so money can never be taken for
+        a document whose invoice could not be issued for lack of a rate (stuck money)."""
+        Currency.objects.get_or_create(code='EUR', defaults={'symbol': '€', 'decimals': 2})
+        # Deliberately NO FXRate seeded for EUR->RON.
+        post_data = {
+            'customer': str(self.customer.pk),
+            'valid_until': '2024-12-31',
+            'currency': 'EUR',
+            'line_0_description': 'Test Service',
+            'line_0_quantity': '1',
+            'line_0_unit_price': '100.00',
+            'line_0_vat_rate': '19',
+        }
+        request = self.factory.post('/billing/proformas/create/', post_data)
+        request.user = self.staff_user
+        request = self.add_middleware_to_request(request)
+
+        response = _handle_proforma_create_post(request)
+
+        self.assertEqual(response.status_code, 200)  # re-rendered form, not a 302 redirect
+        self.assertFalse(ProformaInvoice.objects.filter(customer=self.customer).exists())
+
+    def test_proforma_create_normalizes_lowercase_currency(self):
+        """#103: a lowercase code is normalized to the case-sensitive PK (no DoesNotExist)."""
+        eur, _ = Currency.objects.get_or_create(code='EUR', defaults={'symbol': '€', 'decimals': 2})
+        FXRate.objects.create(
+            base_code=eur, quote_code=self.currency, rate=Decimal('4.9771'),
+            as_of=timezone.now().date() - timezone.timedelta(days=2),
+            source=FXRate.Source.BNR, source_reference='https://curs.bnr.ro/nbrfxrates.xml',
+            fetched_at=timezone.now(),
+        )
+        post_data = {
+            'customer': str(self.customer.pk),
+            'valid_until': '2024-12-31',
+            'currency': 'eur',
+            'line_0_description': 'Test Service',
+            'line_0_quantity': '1',
+            'line_0_unit_price': '100.00',
+            'line_0_vat_rate': '19',
+        }
+        request = self.factory.post('/billing/proformas/create/', post_data)
+        request.user = self.staff_user
+        request = self.add_middleware_to_request(request)
+
+        _handle_proforma_create_post(request)
+
+        proforma = ProformaInvoice.objects.get(customer=self.customer)
+        self.assertEqual(proforma.currency.code, 'EUR')
 
 
 class ProformaDetailViewTestCase(TestCase):

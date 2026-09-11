@@ -92,7 +92,7 @@ class CreateInvoiceFromOrderTests(TestCase):
         self.assertEqual(invoice.bill_to_tax_id, "")
 
     def test_create_from_order_preserves_foreign_currency_address_and_vat_context(self) -> None:
-        eur = Currency.objects.create(code="EUR", symbol="€", decimals=2)
+        eur, _ = Currency.objects.get_or_create(code="EUR", defaults={"symbol": "€", "decimals": 2})
         order = Order.objects.create(
             customer=self.customer,
             currency=eur,

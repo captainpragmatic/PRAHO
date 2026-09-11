@@ -147,11 +147,14 @@
               <label class="block text-sm font-medium text-slate-300 mb-2">
                 {% trans 'Currency' %} <span class="text-red-500">*</span>
               </label>
-              <select name="currency" required
-                class="w-full rounded-md border border-slate-600 bg-slate-700 px-3 py-2 text-white focus:ring-2 focus:ring-blue-500">
-                <option value="RON" selected>RON - Romanian Leu</option>
-                <option value="EUR">EUR - Euro</option>
-                <option value="USD">USD - US Dollar</option>
+              {% comment %} #103: preselect the stored currency on edit (immutable — disabled),
+              or the posted value on a create re-render, defaulting to RON on a fresh create. {% endcomment %}
+              {% if proforma %}{% firstof proforma.currency.code "RON" as selected_currency %}{% else %}{% firstof posted.currency "RON" as selected_currency %}{% endif %}
+              <select name="currency" required {% if proforma %}disabled{% endif %}
+                class="w-full rounded-md border border-slate-600 bg-slate-700 px-3 py-2 text-white focus:ring-2 focus:ring-blue-500 disabled:opacity-60">
+                <option value="RON" {% if selected_currency == "RON" %}selected{% endif %}>RON - Romanian Leu</option>
+                <option value="EUR" {% if selected_currency == "EUR" %}selected{% endif %}>EUR - Euro</option>
+                <option value="USD" {% if selected_currency == "USD" %}selected{% endif %}>USD - US Dollar</option>
               </select>
             </div>
             <div>
