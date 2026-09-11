@@ -171,9 +171,10 @@ class DomainOperationService:
         result = gateway.prepare_registration_contact(data)
         if result.is_err():
             operation.error_message = str(result.unwrap_err())
-            DomainOperationService.request_review(operation, "Contact creation unconfirmed")
             if retriability_of(result) != Retriability.UNKNOWN:
                 operation.domain.delete()
+                return Err(operation.error_message)
+            DomainOperationService.request_review(operation, "Contact creation unconfirmed")
             return Err("Contact creation unconfirmed; review the registration before retrying.")
         if result.unwrap():
             operation.parameters = {**operation.parameters, "registrar_contact_id": result.unwrap()}

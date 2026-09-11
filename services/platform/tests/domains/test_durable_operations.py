@@ -15,6 +15,7 @@ from django.db import IntegrityError, close_old_connections, connection, transac
 from django.test import TransactionTestCase, override_settings
 from django.utils import timezone
 
+from apps.audit.models import AuditEvent
 from apps.common.types import Err, Ok
 from apps.customers.models import Customer
 from apps.domains.gateways import DomainInfoResult, RegistrarAPIError
@@ -328,6 +329,24 @@ class DurableOperationTests(IntentFixture, TransactionTestCase):
         self.assertTrue(operation.parameters["contact_dispatched"])
         self.assertIsNotNone(operation.review_required_at)
         self.assertIsNone(operation.submitted_at)
+
+    def test_definite_contact_rejection_does_not_create_an_uncertainty_review(self) -> None:
+        registrar = Registrar.objects.create(name="rotld", api_endpoint="https://rest2-test.rotld.ro:6080")
+        config = DomainRegistrationConfig(self.customer, "example.ro", self.tld, registrar, CONTACT)
+        with (
+            patch.object(Registrar, "get_api_credentials", return_value=("test", "test")),
+            patch(
+                "apps.domains.gateways.rotld.ROTLDGateway._api_request",
+                side_effect=[
+                    response(FIXTURES["rotld_available"]),
+                    response({"error": 1, "result_code": "50001", "data": {}}),
+                ],
+            ),
+        ):
+            result = DomainLifecycleService._execute_domain_registration(config)
+        self.assertTrue(result.is_err())
+        self.assertFalse(Domain.objects.filter(name="example.ro").exists())
+        self.assertFalse(AuditEvent.objects.filter(action="domain_operation_review_required").exists())
 
 
 @skipUnless(connection.vendor == "postgresql", "Requires PostgreSQL row locks; exercised in Integration CI")
