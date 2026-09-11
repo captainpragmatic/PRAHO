@@ -25,7 +25,7 @@ from django.test import TestCase, override_settings
 
 from apps.common.types import Err, Ok, Retriability
 from apps.domains.gateways.base import MAX_RETRIES, DomainRenewalResult
-from apps.domains.gateways.errors import RegistrarAPIError, RegistrarConflictError
+from apps.domains.gateways.errors import RegistrarAPIError, RegistrarConflictError, RegistrarErrorCode
 from apps.domains.gateways.gandi import GandiGateway
 from apps.domains.models import Registrar
 from config.settings.test import LOCMEM_TEST_CACHE
@@ -127,7 +127,7 @@ class RenewalIdempotencyTokenTests(TestCase):
 
         self.assertTrue(first.is_err())
         self.assertTrue(second.is_err())
-        self.assertIsInstance(second.unwrap_err(), RegistrarConflictError)
+        self.assertEqual(second.unwrap_err().code, RegistrarErrorCode.OPERATION_PENDING)
         self.assertEqual(do_renew.call_count, 1, "an ambiguous result must retain the idempotency claim")
 
     def test_not_retriable_outcome_releases_same_token_claim(self) -> None:
