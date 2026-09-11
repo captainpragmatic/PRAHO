@@ -64,6 +64,23 @@ class SettingsPagesTests(TestCase):
         self.assertNotIn(str(row.value), content)  # not even ciphertext
         self.assertContains(response, "Configured")
 
+    def test_integration_test_result_bindings_are_csp_null_safe(self) -> None:
+        # #284: the platform runs the @alpinejs/csp build, whose interpreter evaluates
+        # BOTH operands of `&&` (no short-circuit). The old `result && result.message`
+        # / `result && result.success` bindings therefore threw "Cannot read property
+        # of null" on initial render (result is null), breaking the integration-test
+        # result display. The null-guard now lives in the settingsIntegrationTest
+        # getters (resultMessage / resultSuccess); the template must use those.
+        self.client.force_login(self.admin)
+        response = self.client.get(reverse("settings:group", args=["stripe"]))
+        content = response.content.decode()
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('x-text="resultMessage"', content)
+        self.assertIn("resultSuccess ?", content)
+        # The short-circuit forms would re-introduce the null-deref throw under CSP.
+        self.assertNotIn("result && result.message", content)
+        self.assertNotIn("result && result.success", content)
+
     def test_automation_page_renders(self) -> None:
         self.client.force_login(self.staff)
         response = self.client.get(reverse("settings:automation"))

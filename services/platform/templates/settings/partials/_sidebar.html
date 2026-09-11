@@ -1,5 +1,5 @@
 {% load i18n %}
-<aside class="col-span-12 lg:col-span-3" x-data="{ navOpen: window.innerWidth >= 1024 }">
+<aside class="col-span-12 lg:col-span-3" x-data="settingsSidebar">
   <div class="bg-slate-800 rounded-lg border border-slate-700 p-4 lg:sticky lg:top-4">
     <button type="button" class="lg:hidden w-full flex items-center justify-between text-sm font-medium text-white mb-3" @click="navOpen = !navOpen">
       <span>☰ {% trans "Settings menu" %}</span>

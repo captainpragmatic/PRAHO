@@ -5,7 +5,9 @@
 {% block title %}{% trans "Deploy New Node" %}{% endblock %}
 
 {% block content %}
-<div class="bg-slate-900 min-h-screen" x-data="deploymentForm()">
+<div class="bg-slate-900 min-h-screen" x-data="deploymentForm()"
+     data-dns-zone="{{ dns_zone }}"
+     data-hostname-preview-url="{% url 'infrastructure:hostname_preview_api' %}">
     <div class="max-w-4xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
         <!-- Header -->
         <div class="mb-6">
@@ -79,7 +81,7 @@
                                 class="w-full bg-slate-700 border-slate-600 rounded-lg text-white px-4 py-2">
                             <option value="">{% trans "Select Region" %}</option>
                             <template x-for="r in filteredRegions" :key="r.id">
-                                <option :value="r.id" x-text="`${r.name} (${r.country_code.toUpperCase()} / ${r.normalized_code})`"></option>
+                                <option :value="r.id" x-text="regionLabel(r)"></option>
                             </template>
                         </select>
                     </div>
@@ -98,10 +100,10 @@
                                 <div class="text-white font-medium" x-text="size.name"></div>
                                 <div class="text-slate-400 text-sm" x-text="size.display_name"></div>
                                 <div class="mt-2 text-sm">
-                                    <span class="text-slate-300" x-text="`${size.vcpus} vCPU / ${size.memory_gb}GB / ${size.disk_gb}GB`"></span>
+                                    <span class="text-slate-300" x-text="sizeResourceLabel(size)"></span>
                                 </div>
-                                <div class="mt-2 text-blue-400 font-semibold" x-text="`€${size.monthly_cost_eur}/mo`"></div>
-                                <div class="text-xs text-slate-500" x-text="`~${size.max_domains} domains`"></div>
+                                <div class="mt-2 text-blue-400 font-semibold" x-text="sizePriceLabel(size)"></div>
+                                <div class="text-xs text-slate-500" x-text="sizeDomainsLabel(size)"></div>
                             </div>
                         </label>
                     </template>
@@ -180,64 +182,4 @@
 {{ providers_data|json_script:"providers-data" }}
 {{ regions_data|json_script:"regions-data" }}
 {{ sizes_data|json_script:"sizes-data" }}
-<script nonce="{{ csp_nonce }}">
-function deploymentForm() {
-    return {
-        environment: 'prd',
-        nodeType: 'sha',
-        provider: '',
-        region: '',
-        nodeSize: '',
-        hostname: '',
-        fqdn: '',
-        dnsZone: '{{ dns_zone|escapejs }}',
-
-        regions: JSON.parse(document.getElementById('regions-data').textContent),
-        sizes: JSON.parse(document.getElementById('sizes-data').textContent),
-        providers: JSON.parse(document.getElementById('providers-data').textContent),
-
-        get filteredRegions() {
-            if (!this.provider) return [];
-            return this.regions.filter(r => r.provider_id == this.provider);
-        },
-
-        get filteredSizes() {
-            if (!this.provider) return [];
-            return this.sizes.filter(s => s.provider_id == this.provider);
-        },
-
-        get canSubmit() {
-            return this.provider && this.region && this.nodeSize;
-        },
-
-        updateRegions() {
-            this.region = '';
-            this.nodeSize = '';
-            this.updateHostname();
-        },
-
-        async updateHostname() {
-            if (!this.provider || !this.region) {
-                this.hostname = '';
-                this.fqdn = '';
-                return;
-            }
-
-            try {
-                const response = await fetch(`{% url 'infrastructure:hostname_preview_api' %}?environment=${this.environment}&node_type=${this.nodeType}&provider=${this.provider}&region=${this.region}`);
-                const data = await response.json();
-                this.hostname = data.hostname;
-                this.fqdn = data.fqdn;
-            } catch (e) {
-                console.error('Failed to get hostname preview:', e);
-            }
-        },
-
-        init() {
-            this.$watch('environment', () => this.updateHostname());
-            this.$watch('nodeType', () => this.updateHostname());
-        }
-    };
-}
-</script>
 {% endblock %}

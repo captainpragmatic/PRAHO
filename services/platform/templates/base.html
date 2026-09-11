@@ -25,7 +25,9 @@
   <link rel="stylesheet" href="{% static 'css/tailwind.min.css' %}">
   <script src="{% static 'js/htmx.min.js' %}"></script>
   <script defer src="{% static 'js/alpine-shared-components.js' %}"></script>
-  <script defer src="{% static 'js/alpine.min.js' %}"></script>
+  <script defer src="{% static 'js/alpine-components.js' %}"></script>
+  {# @alpinejs/csp build (no new-Function eval) so the platform can drop CSP 'unsafe-eval' (#284); components registered via Alpine.data in the two files above. #}
+  <script defer src="{% static 'js/alpine-csp.min.js' %}"></script>
   <script defer src="{% static 'js/components/modal.js' %}"></script>
   <script defer src="{% static 'js/ui-actions.js' %}"></script>
   <script defer src="{% static 'js/platform-actions.js' %}"></script>
@@ -204,6 +206,9 @@
 
     <!-- Toast animations and auto-dismiss -->
     <script nonce="{{ csp_nonce }}">
+        // #284: htmx must not eval hx-on / js: bodies once 'unsafe-eval' is dropped.
+        // Every hx-on has been migrated to delegated listeners, so disable the eval path.
+        if (window.htmx) { htmx.config.allowEval = false; }
         document.addEventListener('DOMContentLoaded', function() {
             const toasts = document.querySelectorAll('[id^="toast-"]');
 

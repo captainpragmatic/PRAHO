@@ -187,7 +187,10 @@ class APITokenManagementTests(TestCase):
         self.assertEqual(token.description, "Synchronizes customer data")
         self.assertIsNotNone(token.expires_at)
         self.assertContains(response, raw_key)
-        self.assertContains(response, "navigator.clipboard.writeText")
+        # #284: the copy affordance is now the delegated Alpine CSP-build component
+        # (apiTokenClipboard.copyToken); navigator.clipboard moved into the JS module so
+        # the template carries no eval'd/inline handler.
+        self.assertContains(response, "copyToken()")
         self.assertIn("no-store", response.headers["Cache-Control"])
 
         follow_up = self.client.get(self.url)

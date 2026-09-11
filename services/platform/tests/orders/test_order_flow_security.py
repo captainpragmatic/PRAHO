@@ -431,6 +431,7 @@ class CSPNonceMiddlewareTest(SimpleTestCase):
         csp = response.get("Content-Security-Policy", "")
         self.assertIn("default-src 'self'", csp)
         self.assertIn("script-src 'self' 'unsafe-inline'", csp)
+        self.assertNotIn("'unsafe-eval'", csp)
         self.assertNotIn("nonce-", csp)
 
 

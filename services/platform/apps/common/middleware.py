@@ -116,17 +116,16 @@ class SecurityHeadersMiddleware:
     def __call__(self, request: HttpRequest) -> HttpResponse:
         response = self.get_response(request)
 
-        # Content Security Policy.
-        # script 'unsafe-eval' stays: Alpine.js (standard build) compiles directive
-        # expressions via new Function(), and htmx hx-on:: handlers eval their bodies —
-        # dropping it silently breaks ALL admin-UI interactivity. style 'unsafe-inline'
-        # stays (Tailwind/utility styles, out of #284 scope).
-        #
-        # script 'unsafe-inline': the #284 migration removed every inline on*= handler
-        # (freeze guardrail at 0) and every inline <script> carries a per-request nonce,
-        # so we can flip to a nonce source + script-src-attr 'none'. Adding a nonce makes
-        # 'unsafe-inline' inert in modern browsers anyway, so nonce-add IS the removal.
-        # Gated so the flip can be enabled per-environment (and run report-only first).
+        # Content Security Policy. #284 removed BOTH script relaxations:
+        #   - 'unsafe-inline': every inline on*= handler is a delegated data-action
+        #     (freeze guardrail at 0) and every inline <script> carries a per-request
+        #     nonce, so script-src is nonce-based + script-src-attr 'none'.
+        #   - 'unsafe-eval': the platform runs the @alpinejs/csp build (parsed, not
+        #     new Function()) and htmx allowEval=false with every hx-on migrated, so no
+        #     eval path remains.
+        # style 'unsafe-inline' stays (Tailwind/utility styles, out of #284 scope).
+        # Gated so the flip can be enabled per-environment (and run report-only first);
+        # the no-nonce fallback keeps 'unsafe-inline' rather than emit an empty nonce.
         if not response.get("Content-Security-Policy"):
             nonce = getattr(request, "csp_nonce", "")
             enforce_nonce = bool(nonce) and (
@@ -134,9 +133,9 @@ class SecurityHeadersMiddleware:
                 or os.environ.get("PLATFORM_CSP_ENFORCE_NONCE") == "1"
             )
             if enforce_nonce:
-                script_directives = f"script-src 'self' 'nonce-{nonce}' 'unsafe-eval'; script-src-attr 'none'; "
+                script_directives = f"script-src 'self' 'nonce-{nonce}'; script-src-attr 'none'; "
             else:
-                script_directives = "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
+                script_directives = "script-src 'self' 'unsafe-inline'; "
             csp = (
                 "default-src 'self'; "
                 # Google Fonts hosts were allowlisted but never used — base.html loads only

@@ -71,6 +71,19 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     };
 
+    // #284: replaces hx-on::after-request on the reply form (which evals its body and
+    // forces 'unsafe-eval'). One delegated listener, registered once on the full page.
+    // The reply form hx-swaps innerHTML of #ticket-status-and-comments, which CONTAINS
+    // the form, so the swap detaches #reply-form and htmx redispatches the event from
+    // the surviving ancestor — evt.target is then the container, not the form. Use
+    // detail.elt (htmx's reference to the originating element, matching lines below).
+    document.body.addEventListener('htmx:afterRequest', function (evt) {
+        if (evt.detail && evt.detail.elt && evt.detail.elt.id === 'reply-form') {
+            evt.detail.elt.reset();
+            window.updateReplyCount();
+        }
+    });
+
     // Auto-resize textarea
     if (textarea) {
         textarea.addEventListener('input', function() {
