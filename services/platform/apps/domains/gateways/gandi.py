@@ -1,28 +1,21 @@
-"""
-Gandi REST API gateway for international domain registration.
+"""Gandi REST v5 contract (https://api.gandi.net/docs/domains/).
 
-API docs: https://api.gandi.net/docs/domains/
-Auth: Personal Access Token via Authorization header.
-Rate limit: 30 requests / 2 seconds (negotiable for resellers).
-
-PROVISIONAL — NOT SANDBOX-VERIFIED. Documented 202 acceptance responses are
-represented as accepted-but-unconfirmed results carrying the Location operation
-handle; inline completed-resource responses remain supported for compatibility.
-Live sandbox validation is still outstanding. Chargeable register/renew calls are
-gated behind settings.REGISTRAR_ADAPTERS_VERIFIED (default off) until an operator
-validates the adapter against real credentials.
+Documentation-aligned, NOT live-validated. Mutations acknowledge acceptance with
+202; only domain-details reads confirm state. The verification gate stays off.
 """
 
 from __future__ import annotations
 
-import logging
+from dataclasses import replace
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 from typing import Any
+from urllib.parse import urljoin, urlsplit
 
 import requests
 
 from apps.common.outbound_http import OutboundPolicy
-from apps.common.types import Err, Ok, Result, Retriability
+from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 
 from .base import (
     HTTP_ACCEPTED,
@@ -37,45 +30,99 @@ from .base import (
     NameserverUpdateResult,
     RegistrarGatewayFactory,
 )
-from .errors import RegistrarAPIError, RegistrarErrorCode, RegistrarTransientError
+from .contracts import api_endpoint, domain_identity, invalid_response, parse_date, required_contact, string_list
+from .errors import RegistrarAPIError, RegistrarTransientError
 
-logger = logging.getLogger(__name__)
+MAX_OPERATION_REFERENCE_LENGTH = 2048
+MIN_PRINTABLE_CHARACTER = 32
 
 GANDI_API_BASE = "https://api.gandi.net/v5"
-
+GANDI_HOSTS = frozenset({"api.gandi.net", "api.sandbox.gandi.net"})
 GANDI_POLICY = OutboundPolicy(
     name="gandi_registrar",
-    allowed_domains=frozenset({"api.gandi.net"}),
+    allowed_domains=GANDI_HOSTS,
+    allowed_ports=frozenset({443}),
     timeout_seconds=30.0,
     connect_timeout_seconds=10.0,
     verify_tls=True,
-    max_retries=0,  # we handle retries in base class
+    max_retries=0,
+    retry_connection_errors=False,
 )
 
 
 class GandiGateway(BaseRegistrarGateway):
-    """Gandi REST API gateway for international domains (.com, .net, .org, .eu, etc.)."""
-
     @property
     def gateway_name(self) -> str:
         return "gandi"
 
+    @property
+    def _api_base(self) -> str:
+        return api_endpoint(self.registrar.api_endpoint, GANDI_HOSTS, "/v5", frozenset({443}))
+
     def _get_outbound_policy(self) -> OutboundPolicy:
-        return GANDI_POLICY
+        return replace(GANDI_POLICY, allowed_domains=frozenset({str(urlsplit(self._api_base).hostname)}))
 
     def _auth_headers(self) -> dict[str, str]:
         _, api_key = self.registrar.get_api_credentials()
-        return {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        }
+        return {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
 
     def _get_sharing_id(self) -> str | None:
-        """Reseller sharing_id for per-customer billing (stored in api_username)."""
-        username = self.registrar.api_username
-        return username if username else None
+        return self.registrar.api_username or None
 
-    # -- Core operations -----------------------------------------------------
+    def _send(self, method: str, path: str, **kwargs: Any) -> Result[requests.Response, RegistrarAPIError]:
+        url = f"{self._api_base}{path}"
+        try:
+            return Ok(self._api_request(method, url, headers=self._auth_headers(), **kwargs))
+        except requests.RequestException:
+            return Err(
+                RegistrarTransientError(self.registrar.name, "Registrar connection failed"),
+                retriability=Retriability.RETRIABLE if method == "GET" else Retriability.UNKNOWN,
+            )
+
+    def _sharing_params(self) -> dict[str, str]:
+        sharing_id = self._get_sharing_id()
+        return {"sharing_id": sharing_id} if sharing_id else {}
+
+    def _operation_handle(self, response: requests.Response) -> str:
+        """Retain a bounded same-origin reference, never a URL to blindly follow."""
+        value = response.headers.get("Location", "")
+        if (
+            not isinstance(value, str)
+            or not value
+            or len(value) > MAX_OPERATION_REFERENCE_LENGTH
+            or any(ord(c) < MIN_PRINTABLE_CHARACTER for c in value)
+        ):
+            return ""
+        try:
+            url = urljoin(f"{self._api_base}/", value)
+            parsed, base = urlsplit(url), urlsplit(self._api_base)
+            if (
+                parsed.scheme != base.scheme
+                or parsed.hostname != base.hostname
+                or (parsed.port or 443) != (base.port or 443)
+                or parsed.username
+                or parsed.password
+                or parsed.fragment
+                or parsed.query
+                or not parsed.path.startswith("/v5/")
+                or len(url) > MAX_OPERATION_REFERENCE_LENGTH
+            ):
+                return ""
+        except ValueError:
+            return ""
+        return url
+
+    def _mutation_error(self, response: requests.Response, domain_name: str) -> Err[RegistrarAPIError]:
+        # A 200 is documented as dry-run validation, never mutation completion.
+        if response.status_code == HTTP_OK:
+            return Err(invalid_response("Gandi returned validation instead of mutation acceptance"))
+        return self._handle_error_response(response, "mutation", domain_name=domain_name)
+
+    def validate_registration_data(self, registrant_data: dict[str, Any]) -> None:
+        _ = self._api_base  # validate configuration before creating contacts or sending credentials
+        required_contact(registrant_data, ("first_name", "last_name", "email", "address", "country_code"))
+        if registrant_data.get("entity_type") == "company":
+            required_contact(registrant_data, ("company_name",))
 
     def _do_register(
         self,
@@ -84,63 +131,30 @@ class GandiGateway(BaseRegistrarGateway):
         registrant_data: dict[str, Any],
         nameservers: list[str] | None,
     ) -> Result[DomainRegistrationResult, RegistrarAPIError]:
-        url = f"{GANDI_API_BASE}/domain/domains"
-
         body: dict[str, Any] = {
             "fqdn": domain_name,
             "duration": years,
             "owner": self._map_registrant_to_gandi(registrant_data),
         }
-
         if nameservers:
             body["nameservers"] = nameservers
-
-        # Gandi documents sharing_id as a query parameter, not a body field.
-        params = {}
-        sharing_id = self._get_sharing_id()
-        if sharing_id:
-            params["sharing_id"] = sharing_id
-
-        try:
-            response = self._api_request("POST", url, json=body, params=params, headers=self._auth_headers())
-        except requests.RequestException as exc:
-            return Err(
-                # A registration POST may have reached the registrar before the network
-                # error — not provably safe to replay, so leave UNKNOWN (the default).
-                RegistrarTransientError(self.registrar.name, f"Network error during registration: {exc}"),
-            )
-
+        result = self._send("POST", "/domain/domains", json=body, params=self._sharing_params())
+        if result.is_err():
+            return Err(result.unwrap_err(), retriability=retriability_of(result))
+        response = result.unwrap()
         if response.status_code == HTTP_ACCEPTED:
-            data = self._safe_json(response)
-            expires_at = _parse_gandi_date(data.get("expires_at", ""))
-            if expires_at is not None:
-                return Ok(
-                    DomainRegistrationResult(
-                        registrar_domain_id=data.get("id", domain_name),
-                        expires_at=expires_at,
-                        nameservers=nameservers or self.registrar.default_nameservers or [],
-                        # authinfo, not auth_info — the identical misspelling this change
-                        # fixed on the write side. Gandi's domain-details response documents a
-                        # top-level `authinfo`, so the EPP credential read back was always "".
-                        epp_code=data.get("authinfo", ""),
-                    )
-                )
-            # The DOCUMENTED 202: body is {"message": ...} only, the operation handle is
-            # in Location. This is acceptance, not completion (#257) — returning it as a
-            # pending result replaces the old INVALID_RESPONSE error that would have
-            # failed every real registration.
+            # No response-body fields are proof of completion, even if an upstream
+            # happens to include id/expiry. Acceptance survives an empty/broken body.
             return Ok(
                 DomainRegistrationResult(
-                    registrar_domain_id=data.get("id", ""),
+                    registrar_domain_id="",
                     expires_at=None,
-                    nameservers=nameservers or self.registrar.default_nameservers or [],
-                    epp_code=data.get("authinfo", ""),
+                    nameservers=[],
                     pending=True,
-                    operation_handle=response.headers.get("Location", ""),
+                    operation_handle=self._operation_handle(response),
                 )
             )
-
-        return self._handle_error_response(response, f"register {domain_name}", domain_name=domain_name)
+        return self._mutation_error(response, domain_name)
 
     def _do_renew(
         self,
@@ -148,119 +162,59 @@ class GandiGateway(BaseRegistrarGateway):
         domain_name: str,
         years: int,
     ) -> Result[DomainRenewalResult, RegistrarAPIError]:
-        url = f"{GANDI_API_BASE}/domain/domains/{domain_name}/renew"
-
-        body = {"duration": years}
-
-        # Reseller billing attribution, same rule as _do_register: sharing_id is a query
-        # param; without it the chargeable renewal bills the PAT's default organization.
-        params = {}
-        sharing_id = self._get_sharing_id()
-        if sharing_id:
-            params["sharing_id"] = sharing_id
-
-        try:
-            response = self._api_request(
-                "POST",
-                url,
-                json=body,
-                params=params,
-                headers=self._auth_headers(),
-            )
-        except requests.RequestException as exc:
-            return Err(
-                # Renewal is not idempotent (a second renewal double-charges/double-extends)
-                # and the POST may have landed — leave UNKNOWN (the default).
-                RegistrarTransientError(self.registrar.name, f"Network error during renewal: {exc}"),
-            )
-
-        if response.status_code in (HTTP_OK, HTTP_ACCEPTED):
-            data = self._safe_json(response)
-            new_expires_at = _parse_gandi_date(data.get("expires_at", ""))
-            if new_expires_at is not None:
-                return Ok(DomainRenewalResult(new_expires_at=new_expires_at))
-            if response.status_code == HTTP_ACCEPTED:
-                # Documented acceptance: {"message": ...} + Location. Pending, not failed.
-                return Ok(
-                    DomainRenewalResult(
-                        new_expires_at=None,
-                        pending=True,
-                        operation_handle=response.headers.get("Location", ""),
-                    )
-                )
-            # A 200 is a completed-resource contract; without an expiry it is malformed.
-            return Err(
-                RegistrarAPIError(
-                    f"Gandi renewal response missing/invalid expires_at for {domain_name}",
-                    code=RegistrarErrorCode.INVALID_RESPONSE,
-                    registrar_name=self.registrar.name,
-                )
-            )
-
-        return self._handle_error_response(response, f"renew {domain_name}", domain_name=domain_name)
-
-    def _do_check_availability(
-        self,
-        domain_name: str,
-    ) -> Result[DomainAvailabilityResult, RegistrarAPIError]:
-        url = f"{GANDI_API_BASE}/domain/check"
-        params = {"name": domain_name}
-        # Reseller pricing: without sharing_id the check quotes the PAT's default
-        # organization's prices, not the reseller's.
-        sharing_id = self._get_sharing_id()
-        if sharing_id:
-            params["sharing_id"] = sharing_id
-
-        try:
-            response = self._api_request("GET", url, params=params, headers=self._auth_headers())
-        except requests.RequestException as exc:
-            return Err(
-                # Availability is a read-only GET — safe to replay after a network error.
-                RegistrarTransientError(self.registrar.name, f"Network error during availability check: {exc}"),
-                retriability=Retriability.RETRIABLE,
-            )
-
-        if response.status_code == HTTP_OK:
-            data = self._safe_json(response)
-            products = data.get("products", [])
-            if products:
-                product = products[0]
-                status = product.get("status", "unavailable")
-                price_data = product.get("prices", [{}])
-                price_cents = None
-                if price_data:
-                    price_raw = price_data[0].get("price_after_taxes")
-                    if price_raw is not None:
-                        # A malformed price must not raise out of the Result contract;
-                        # availability is the primary signal, so just omit the price.
-                        try:
-                            price_cents = int(float(price_raw) * 100)
-                        except (TypeError, ValueError):
-                            logger.warning("Gandi returned unparseable price %r for %s", price_raw, domain_name)
-                            price_cents = None
-
-                return Ok(
-                    DomainAvailabilityResult(
-                        domain_name=domain_name,
-                        available=status == "available",
-                        premium=product.get("premium", False),
-                        price_cents=price_cents,
-                    )
-                )
-
+        result = self._send(
+            "POST",
+            f"/domain/domains/{domain_name}/renew",
+            json={"duration": years},
+            params=self._sharing_params(),
+        )
+        if result.is_err():
+            return Err(result.unwrap_err(), retriability=retriability_of(result))
+        response = result.unwrap()
+        if response.status_code == HTTP_ACCEPTED:
             return Ok(
-                DomainAvailabilityResult(
-                    domain_name=domain_name,
-                    available=False,
+                DomainRenewalResult(
+                    new_expires_at=None,
+                    pending=True,
+                    operation_handle=self._operation_handle(response),
                 )
             )
+        return self._mutation_error(response, domain_name)
 
-        return self._handle_error_response(response, f"check availability for {domain_name}", domain_name=domain_name)
+    def _do_check_availability(self, domain_name: str) -> Result[DomainAvailabilityResult, RegistrarAPIError]:
+        result = self._send("GET", "/domain/check", params={"name": domain_name, **self._sharing_params()})
+        if result.is_err():
+            return Err(result.unwrap_err(), retriability=retriability_of(result))
+        response = result.unwrap()
+        if response.status_code != HTTP_OK:
+            return self._handle_error_response(response, "availability", domain_name=domain_name)
+        data = self._safe_object(response)
+        products = data.get("products")
+        if not isinstance(products, list) or not products:
+            raise invalid_response("Gandi availability response has no products")
+        product = products[0]
+        if not isinstance(product, dict) or product.get("status") not in ("available", "unavailable"):
+            raise invalid_response("Invalid Gandi availability status")
+        price_cents = None
+        prices = product.get("prices", [])
+        if isinstance(prices, list) and prices and isinstance(prices[0], dict):
+            try:
+                price = Decimal(str(prices[0].get("price_after_taxes")))
+                if price.is_finite() and price >= 0:
+                    price_cents = int(price * 100)
+            except (InvalidOperation, ValueError, OverflowError):
+                pass  # pricing is optional; never fabricate it from malformed data
+        return Ok(
+            DomainAvailabilityResult(
+                domain_name=domain_name,
+                available=product["status"] == "available",
+                premium=product.get("premium") is True,
+                price_cents=price_cents,
+            )
+        )
 
     def _do_verify_webhook(self, payload: str, signature: str, secret: str) -> bool:
         return self._verify_hmac_sha256(payload, signature, secret)
-
-    # -- Phase 2 operations --------------------------------------------------
 
     def _do_initiate_transfer(
         self,
@@ -268,141 +222,87 @@ class GandiGateway(BaseRegistrarGateway):
         epp_code: str,
         registrant_data: dict[str, Any] | None = None,
     ) -> Result[DomainTransferResult, RegistrarAPIError]:
-        # #265: Gandi requires `authinfo` and an owner contact on transfer-in. The
-        # service supplies validated registrant data; direct callers that omit it keep
-        # today's registrar-side missing-contact rejection rather than fabricating one.
-        url = f"{GANDI_API_BASE}/domain/transferin"
         body: dict[str, Any] = {"fqdn": domain_name, "authinfo": epp_code}
         if registrant_data is not None:
             body["owner"] = self._map_registrant_to_gandi(registrant_data)
-
-        # Query string, not body — the same rule _do_register already follows above. Gandi
-        # documents sharing_id as a query param AND as the reseller billing identifier, so
-        # in the body it is at best ignored: the chargeable transfer then bills the PAT's
-        # default organization instead of the customer's sharing org.
-        params = {}
-        sharing_id = self._get_sharing_id()
-        if sharing_id:
-            params["sharing_id"] = sharing_id
-
-        try:
-            response = self._api_request("POST", url, json=body, params=params, headers=self._auth_headers())
-        except requests.RequestException as exc:
-            # Transfer POST may have reached the registrar — not provably unapplied (UNKNOWN default).
-            return Err(RegistrarTransientError(self.registrar.name, f"Network error during transfer: {exc}"))
-
-        # 202 ONLY: a 200 here is the documented Dry-Run *validation* response, whose body
-        # can be {"status": "error", "errors": [...]} — accepting it would report a failed
-        # validation as a started transfer.
+        result = self._send("POST", "/domain/transferin", json=body, params=self._sharing_params())
+        if result.is_err():
+            return Err(result.unwrap_err(), retriability=retriability_of(result))
+        response = result.unwrap()
         if response.status_code == HTTP_ACCEPTED:
-            data = self._safe_json(response)  # size-capped, like every sibling parse
-            # The 202 body is documented as {"message": ...} only; the Location header is
-            # the sole operation handle. Reading id/status/expected_completion from it
-            # yields ""/"pending"/None on every real response, and services.py stores that
-            # empty string as the registrar operation id.
-            transfer_id = data.get("id") or response.headers.get("Location", "")
-            return Ok(
-                DomainTransferResult(
-                    transfer_id=transfer_id,
-                    status=data.get("status", "pending"),
-                    expected_completion=_parse_gandi_date(data.get("expected_completion", "")),
-                )
-            )
-        return self._handle_error_response(response, f"transfer {domain_name}", domain_name=domain_name)
+            return Ok(DomainTransferResult(transfer_id=self._operation_handle(response), status="pending"))
+        return self._mutation_error(response, domain_name)
 
     def _do_get_domain_info(self, domain_name: str) -> Result[DomainInfoResult, RegistrarAPIError]:
-        url = f"{GANDI_API_BASE}/domain/domains/{domain_name}"
-
-        try:
-            response = self._api_request("GET", url, headers=self._auth_headers())
-        except requests.RequestException as exc:
-            # get_domain_info is a read — safe to replay.
-            return Err(
-                RegistrarTransientError(self.registrar.name, f"Network error: {exc}"),
-                retriability=Retriability.RETRIABLE,
+        result = self._send("GET", f"/domain/domains/{domain_name}")
+        if result.is_err():
+            return Err(result.unwrap_err(), retriability=retriability_of(result))
+        response = result.unwrap()
+        if response.status_code != HTTP_OK:
+            return self._handle_error_response(response, "info", domain_name=domain_name)
+        data = self._safe_object(response)
+        name = domain_identity(data.get("fqdn"), domain_name)
+        statuses = string_list(data.get("status"))
+        nameservers = string_list(data.get("nameservers"))
+        dates = data.get("dates")
+        if not isinstance(dates, dict):
+            raise invalid_response("Gandi domain details are missing dates")
+        expiry = parse_date(dates.get("registry_ends_at"))
+        if dates.get("registry_ends_at") and expiry is None:
+            raise invalid_response("Invalid Gandi registry expiry")
+        blocked = {"clientHold", "serverHold", "pendingTransfer"}
+        known = blocked | {
+            "clientUpdateProhibited",
+            "clientTransferProhibited",
+            "clientDeleteProhibited",
+            "clientRenewProhibited",
+            "serverTransferProhibited",
+        }
+        status = "unknown" if set(statuses) - known else "pending" if blocked.intersection(statuses) else "active"
+        owner = data.get("contacts", {}).get("owner", {}) if isinstance(data.get("contacts", {}), dict) else {}
+        return Ok(
+            DomainInfoResult(
+                registrar_domain_id=str(data.get("id") or name),
+                domain_name=name,
+                status=status,
+                expires_at=expiry,
+                nameservers=nameservers,
+                registry_statuses=tuple(statuses),
+                locked="clientTransferProhibited" in statuses or "serverTransferProhibited" in statuses,
+                whois_privacy=isinstance(owner, dict) and owner.get("data_obfuscated") is True,
+                epp_code=data.get("authinfo", "") if isinstance(data.get("authinfo", ""), str) else "",
             )
-
-        if response.status_code == HTTP_OK:
-            data = response.json()
-            return Ok(
-                DomainInfoResult(
-                    registrar_domain_id=data.get("id", domain_name),
-                    domain_name=data.get("fqdn", domain_name),
-                    status=data.get("status", "unknown"),
-                    expires_at=_parse_gandi_date(data.get("dates", {}).get("registry_ends_at", "")),
-                    nameservers=data.get("nameservers", []),
-                    locked="clientTransferProhibited" in data.get("status", [])
-                    if isinstance(data.get("status"), list)
-                    else False,
-                    whois_privacy=data.get("whois_privacy", False),
-                    # authinfo, not auth_info — the identical misspelling this change
-                    # fixed on the write side. Gandi's domain-details response documents a
-                    # top-level `authinfo`, so the EPP credential read back was always "".
-                    epp_code=data.get("authinfo", ""),
-                )
-            )
-        return self._handle_error_response(response, f"info {domain_name}", domain_name=domain_name)
+        )
 
     def _do_update_nameservers(
-        self, domain_name: str, nameservers: list[str]
+        self,
+        domain_name: str,
+        nameservers: list[str],
     ) -> Result[NameserverUpdateResult, RegistrarAPIError]:
-        # #265: the endpoint expects the documented object wrapper {"nameservers": [...]},
-        # not a bare array. A bare array is a client error, so the update could never
-        # succeed — the service correctly reported failure, but for the wrong reason.
-        url = f"{GANDI_API_BASE}/domain/domains/{domain_name}/nameservers"
-
-        try:
-            response = self._api_request("PUT", url, json={"nameservers": nameservers}, headers=self._auth_headers())
-        except requests.RequestException as exc:
-            # Nameserver update is a mutation — may have applied; UNKNOWN default.
-            return Err(RegistrarTransientError(self.registrar.name, f"Network error: {exc}"))
-
-        if response.status_code == HTTP_OK:
-            return Ok(NameserverUpdateResult(nameservers=nameservers))
+        result = self._send("PUT", f"/domain/domains/{domain_name}/nameservers", json={"nameservers": nameservers})
+        if result.is_err():
+            return Err(result.unwrap_err(), retriability=retriability_of(result))
+        response = result.unwrap()
         if response.status_code == HTTP_ACCEPTED:
-            # Acceptance, not completion — the caller must not record the new
-            # nameservers locally until the registrar confirms (#257).
             return Ok(
                 NameserverUpdateResult(
                     nameservers=nameservers,
                     pending=True,
-                    operation_handle=response.headers.get("Location", ""),
+                    operation_handle=self._operation_handle(response),
                 )
             )
-        return self._handle_error_response(response, f"update nameservers for {domain_name}", domain_name=domain_name)
+        return self._mutation_error(response, domain_name)
 
     def _do_set_lock(self, domain_name: str, locked: bool) -> Result[DomainLockResult, RegistrarAPIError]:
-        # #265: transfer lock lives on the /status sub-resource, not the domain resource.
-        # The previous body patched the DOMAIN with tags/autorenew, so lock/unlock never
-        # touched the transfer-lock state at all — and unlock sent {"autorenew": None},
-        # which risked clearing autorenew instead. See https://api.gandi.net/docs/domains/
-        # (PATCH /v5/domain/domains/{domain}/status).
-        url = f"{GANDI_API_BASE}/domain/domains/{domain_name}/status"
-        body: dict[str, Any] = {"clientTransferProhibited": locked}
-
-        try:
-            response = self._api_request("PATCH", url, json=body, headers=self._auth_headers())
-        except requests.RequestException as exc:
-            # Lock toggle is a mutation — may have applied; UNKNOWN default.
-            return Err(RegistrarTransientError(self.registrar.name, f"Network error: {exc}"))
-
-        if response.status_code == HTTP_OK:
-            return Ok(DomainLockResult(locked=locked))
+        result = self._send("PATCH", f"/domain/domains/{domain_name}/status", json={"clientTransferProhibited": locked})
+        if result.is_err():
+            return Err(result.unwrap_err(), retriability=retriability_of(result))
+        response = result.unwrap()
         if response.status_code == HTTP_ACCEPTED:
-            # Acceptance, not completion — local lock state must wait for confirmation (#257).
-            return Ok(
-                DomainLockResult(
-                    locked=locked,
-                    pending=True,
-                    operation_handle=response.headers.get("Location", ""),
-                )
-            )
-        return self._handle_error_response(response, f"{'lock' if locked else 'unlock'} {domain_name}")
-
-    # -- Helpers -------------------------------------------------------------
+            return Ok(DomainLockResult(locked=locked, pending=True, operation_handle=self._operation_handle(response)))
+        return self._mutation_error(response, domain_name)
 
     def _map_registrant_to_gandi(self, registrant_data: dict[str, Any]) -> dict[str, Any]:
-        """Map PRAHO registrant data to Gandi's owner contact format."""
         return {
             "given": registrant_data.get("first_name", ""),
             "family": registrant_data.get("last_name", ""),
@@ -418,19 +318,7 @@ class GandiGateway(BaseRegistrarGateway):
 
 
 def _parse_gandi_date(date_str: str) -> datetime | None:
-    """Parse ISO 8601 date from Gandi API response.
-
-    Returns None on missing/unparseable input. Callers distinguish a malformed
-    completed-resource response from a documented 202 acceptance that is still
-    awaiting registrar confirmation — neither may fabricate a date.
-    """
-    if not date_str:
-        return None
-    try:
-        return datetime.fromisoformat(date_str.replace("Z", "+00:00"))
-    except ValueError:
-        return None
+    return parse_date(date_str)
 
 
-# Register with factory
 RegistrarGatewayFactory.register_gateway("gandi", GandiGateway)

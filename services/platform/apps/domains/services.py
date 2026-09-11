@@ -478,145 +478,13 @@ class DomainLifecycleService:
 
     @staticmethod
     def _execute_domain_registration(config: DomainRegistrationConfig) -> Result[Domain, str]:
-        """Execute the actual domain registration.
-
-        Two-step so the external registrar call never runs inside a DB transaction:
-        1. Create the local Domain row in ``pending`` state (records intent).
-        2. Submit to the registrar via the gateway. On success, persist the
-           registrar-returned fields and FSM-transition the domain to ``active``.
-           On failure, the domain stays ``pending`` (no failed state exists) so a
-           later retry/worker can re-submit — the gateway is idempotent per domain.
-
-        Returns Ok(domain) ONLY when the registrar confirms and the domain is
-        active. An explicit accepted-but-unconfirmed response keeps the domain
-        pending, records a submitted operation, and returns an awaiting-confirmation
-        Err that tells the caller not to resubmit. On a definite rejection the
-        pending row is removed and Err is returned so the caller can cleanly retry.
-        On an UNKNOWN outcome (network error / 5xx — the registrar may already hold
-        the registration) the row is kept pending and Err is returned so the caller
-        never reports success and never orphans a possibly-real registration.
-        """
-        try:
-            with transaction.atomic():
-                domain = Domain.objects.create(
-                    name=canonicalize_domain_name(config.domain_name),
-                    tld=config.tld,
-                    registrar=config.registrar,
-                    customer=config.customer,
-                    whois_privacy=config.whois_privacy,
-                    auto_renew=config.auto_renew,
-                )
-                logger.info("Created domain registration: %s for customer %s", config.domain_name, config.customer.id)
-        except Exception as e:
-            logger.error("Failed to create domain registration: %s", e)
-            return Err(cast(str, _("Failed to create domain registration")))
-
-        # Submit to the registrar OUTSIDE the transaction above — never hold a DB
-        # transaction open across network I/O.
-        outcome, message = DomainLifecycleService._submit_registration_to_registrar(domain, config)
-
-        if outcome == "confirmed":
-            domain.refresh_from_db()
-            return Ok(domain)
-        if outcome == "pending_accepted":
-            return Err(cast(str, REGISTRATION_PENDING_MESSAGE))
-        if outcome == "pending_unknown":
-            return Err(
-                cast(
-                    str,
-                    _(
-                        "Registration was submitted but the registrar did not confirm it. "
-                        "It is pending verification — do not resubmit."
-                    ),
-                )
-            )
-        # Definite rejection: the pending row has been removed, retry is safe.
-        return Err(cast(str, _("Registrar rejected the registration: {error}")).format(error=message))
-
-    @staticmethod
-    def _submit_registration_to_registrar(domain: Domain, config: DomainRegistrationConfig) -> tuple[str, str]:
-        """Submit a pending domain to its registrar and resolve its final state.
-
-        Returns one of:
-        - ("confirmed", "")       registrar confirmed; the domain is now active.
-        - ("pending_accepted", "") registrar accepted but has not confirmed; the
-                                  domain and a submitted operation stay pending.
-        - ("rejected", message)   definite failure (conflict/auth/validation); the
-                                  pending row is DELETED so a retry isn't deadlocked
-                                  by the uniqueness precondition.
-        - ("pending_unknown", message) network/5xx (UNKNOWN) or a post-confirm
-                                  persistence failure; the row is KEPT pending
-                                  because the registrar may hold the registration.
-        Never raises.
-        """
-        success, payload = DomainRegistrarGateway.register_domain(
-            config.registrar, domain.name, config.years, config.registrant_data
-        )
-
-        if not success:
-            error = str(payload.get("error", "unknown error"))
-            if payload.get("retriability") == Retriability.UNKNOWN.value:
-                logger.warning(
-                    "Registrar outcome UNKNOWN for %s (kept pending, do not resubmit): %s", domain.name, error
-                )
-                return "pending_unknown", error
-            # Definite rejection — remove the row so the customer can re-register.
-            logger.warning("Registrar rejected %s (row removed for clean retry): %s", domain.name, error)
-            domain.delete()
-            return "rejected", error
-
-        if payload.get("pending"):
-            # Accepted, not completed (#257): record the submitted operation so the
-            # reconciliation worker can converge it, keep the Domain row pending. A
-            # bookkeeping failure must not flip the outcome — the registrar HAS
-            # accepted, and the reconciler finds the domain via its pending status
-            # regardless of whether the operation row exists.
-            try:
-                with transaction.atomic():
-                    op = DomainOperation(
-                        domain=domain,
-                        registrar=config.registrar,
-                        operation_type="register",
-                        parameters={"years": config.years},
-                    )
-                    op.mark_submitted(
-                        registrar_operation_id=payload.get("operation_handle", ""),
-                    )
-                    op.save()
-            except Exception as e:
-                logger.error(
-                    "🔥 [Domain] Failed to record accepted registration operation for %s: %s",
-                    domain.name,
-                    e,
-                    exc_info=True,
-                )
-            return "pending_accepted", ""
+        from .operation_services import DomainOperationService  # noqa: PLC0415
 
         try:
-            with transaction.atomic():
-                locked = Domain.objects.select_for_update().get(pk=domain.pk)
-                # Another worker may have already completed this domain.
-                if locked.status != "pending":
-                    return ("confirmed", "") if locked.status == "active" else ("pending_unknown", "")
-
-                locked.registrar_domain_id = payload.get("registrar_domain_id", "")
-                if payload.get("expires_at"):
-                    locked.expires_at = payload["expires_at"]
-                if payload.get("nameservers"):
-                    locked.nameservers = payload["nameservers"]
-                if payload.get("epp_code"):
-                    locked.set_encrypted_epp_code(payload["epp_code"])
-                locked.registered_at = timezone.now()
-                locked.activate()  # FSM transition: pending -> active
-                locked.save()
-
-            logger.info("Registrar confirmed %s — domain active", domain.name)
-            return "confirmed", ""
-        except Exception as e:
-            # The registrar confirmed but we failed to record it — the domain IS
-            # registered, so keep the row pending (never delete/orphan) for reconciliation.
-            logger.error("Failed to persist registrar result for %s (kept pending): %s", domain.name, e)
-            return "pending_unknown", str(e)
+            return DomainOperationService.register(config)
+        except Exception:
+            logger.exception("Registration bookkeeping failed for %s", config.domain_name)
+            return Err("Could not record registration; review its status before retrying.")
 
     @staticmethod
     def _build_registrant_data(customer: Customer) -> Result[dict[str, Any], str]:
@@ -649,12 +517,12 @@ class DomainLifecycleService:
             "company_name": customer.company_name or "",
             "cui": tax.cui if tax else "",
             "cnp": tax.cnp if tax else "",
+            "registration_number": tax.registration_number if tax else "",
         }
 
         # Required for every registrant, plus entity-specific identity fields.
         required = ["first_name", "email", "phone", "address", "city", "postal_code", "country_code"]
         required.append("company_name" if entity_type == "company" else "last_name")
-        required.append("cui" if entity_type == "company" else "cnp")  # ROTLD regulatory requirement
 
         missing = [field for field in required if not data[field]]
         if missing:
@@ -679,134 +547,16 @@ class DomainLifecycleService:
         return None
 
     @staticmethod
-    def process_domain_renewal(  # noqa: PLR0911  # multi-outcome lifecycle: precondition/policy/pending/confirmed exits
+    def process_domain_renewal(
         domain: Domain, years: int = 1, idempotency_token: str | None = None
     ) -> Result[str, str]:
-        """Process domain renewal by renewing at the registrar first.
-
-        The registrar is the source of truth for the new expiry — the local row is
-        updated ONLY after the registrar confirms, using the registrar-returned
-        date (never local ``365 * years`` math). On any registrar failure the local
-        expiry is left untouched (failing toward "not renewed" is the safe
-        direction; a later registrar-sync can correct it upward).
-
-        Returns Ok(success_message) on confirmed renewal, Err(error_message) otherwise.
-        """
-        precondition_error = DomainLifecycleService._validate_renewal_preconditions(domain)
-        if precondition_error is not None:
-            return Err(precondition_error)
-
-        period_error = TLDService.validate_renewal_period(domain.tld, years)
-        if period_error is not None:
-            return Err(period_error)
-
-        success, payload = DomainRegistrarGateway.renew_domain(
-            domain.registrar, domain, years, idempotency_token=idempotency_token
-        )
-        if not success:
-            logger.warning("Registrar did not confirm renewal of %s: %s", domain.name, payload.get("error"))
-            if payload.get("retriability") == Retriability.UNKNOWN.value:
-                # UNKNOWN means the chargeable renewal MAY have applied. Record a
-                # submitted operation so the reconciler can later prove (expiry
-                # advanced past the snapshot) or visibly fail it — without this,
-                # a lost response leaves the charge with no durable trace.
-                try:
-                    with transaction.atomic():
-                        op = DomainOperation(
-                            domain=domain,
-                            registrar=domain.registrar,
-                            operation_type="renew",
-                            parameters={
-                                "years": years,
-                                "prev_expires_at": cast(datetime, domain.expires_at).isoformat(),
-                            },
-                        )
-                        op.mark_submitted()
-                        op.save()
-                except Exception:
-                    logger.error(
-                        "🔥 [Domain] Failed to record unknown-outcome renewal operation for %s",
-                        domain.name,
-                        exc_info=True,
-                    )
-            return Err(
-                cast(str, _("Registrar did not confirm the renewal: {error}")).format(
-                    error=payload.get("error", "unknown error")
-                )
-            )
-
-        if payload.get("pending"):
-            # Accepted, not completed (#257): the registrar has taken the chargeable
-            # renewal but not confirmed the new expiry. Record the submitted operation
-            # (with the pre-renewal expiry so the reconciler can prove the extension)
-            # and leave expires_at untouched — a bookkeeping failure logs loudly but
-            # must not turn an accepted renewal into a reported failure.
-            try:
-                with transaction.atomic():
-                    op = DomainOperation(
-                        domain=domain,
-                        registrar=domain.registrar,
-                        operation_type="renew",
-                        parameters={
-                            "years": years,
-                            "prev_expires_at": cast(datetime, domain.expires_at).isoformat(),
-                        },
-                    )
-                    op.mark_submitted(
-                        registrar_operation_id=payload.get("operation_handle", ""),
-                    )
-                    op.save()
-            except Exception as e:
-                logger.error(
-                    "🔥 [Domain] Failed to record accepted renewal operation for %s: %s",
-                    domain.name,
-                    e,
-                    exc_info=True,
-                )
-                # Unlike registrations (whose pending Domain row the reconciler
-                # scans), an untracked accepted renewal has NO durable state at
-                # all — leave an audit trace so the review queue surfaces it for
-                # manual sync.
-                try:
-                    from apps.audit.services import AuditService  # noqa: PLC0415
-
-                    AuditService.log_simple_event(
-                        "domain_renewal_accepted_untracked",
-                        description=(
-                            f"Registrar accepted a renewal of {domain.name} but recording its "
-                            "operation failed — confirm manually via domain_sync"
-                        ),
-                        metadata={
-                            "domain_name": domain.name,
-                            "years": years,
-                            "operation_handle": payload.get("operation_handle", ""),
-                        },
-                        actor_type="system",
-                    )
-                except Exception:
-                    logger.error(
-                        "🔥 [Domain] Audit fallback for untracked renewal of %s also failed",
-                        domain.name,
-                        exc_info=True,
-                    )
-            return Ok(cast(str, _("Renewal accepted by the registrar and awaiting confirmation.")))
-
-        new_expiration = payload.get("new_expires_at")
-        if not new_expiration:
-            return Err(cast(str, _("Registrar renewal succeeded but returned no new expiry date")))
+        from .operation_services import DomainOperationService  # noqa: PLC0415
 
         try:
-            with transaction.atomic():
-                domain.expires_at = new_expiration
-                domain.renewal_notices_sent = 0
-                domain.save(update_fields=["expires_at", "renewal_notices_sent", "updated_at"])
-
-            logger.info("Renewed domain %s for %d years at registrar, expires: %s", domain.name, years, new_expiration)
-            return Ok(cast(str, _("Domain renewed successfully")))
-
-        except Exception as e:
-            logger.error("Failed to persist renewal for %s: %s", domain.name, e)
-            return Err(cast(str, _("Failed to record the renewal")))
+            return DomainOperationService.renew(domain, years, idempotency_token)
+        except Exception:
+            logger.exception("Renewal bookkeeping failed for %s", domain.name)
+            return Err("Could not record renewal; review its status before retrying.")
 
     @staticmethod
     def update_domain_expiration(domain: Domain, new_expiration: datetime) -> Result[bool, str]:
@@ -830,6 +580,7 @@ class DomainLifecycleService:
     ) -> Result[DomainOperation, str]:
         """Initiate inbound domain transfer (two-phase: DB record + registrar submit)."""
         from .gateways import RegistrarGatewayFactory  # noqa: PLC0415
+        from .operation_services import DomainOperationService  # noqa: PLC0415
 
         try:
             gateway = RegistrarGatewayFactory.create_gateway(registrar)
@@ -875,6 +626,7 @@ class DomainLifecycleService:
         # Phase 2: submit to registrar (outside the transaction above). Use the stored
         # (lowercased) domain.name so the gateway idempotency key matches on any retry —
         # passing the raw domain_name would key "Example.com" separately from "example.com".
+        DomainOperationService.dispatch(op)
         result = gateway.initiate_transfer(
             domain.name,
             epp_code,
@@ -882,8 +634,9 @@ class DomainLifecycleService:
         )
         if result.is_ok():
             transfer = result.unwrap()
-            op.mark_submitted(registrar_operation_id=transfer.transfer_id)
-            op.save(update_fields=["state", "registrar_operation_id", "submitted_at", "updated_at"])
+            op.registrar_operation_id = transfer.transfer_id
+            op.accepted_at = timezone.now()
+            op.save(update_fields=["registrar_operation_id", "accepted_at", "updated_at"])
             logger.info("Transfer initiated for %s: %s", domain_name, transfer.transfer_id)
             return Ok(op)
 
@@ -893,7 +646,7 @@ class DomainLifecycleService:
         # the unique domain name isn't permanently stranded (the #260 deadlock class).
         error = result.unwrap_err()
         if retriability_of(result) == Retriability.UNKNOWN:
-            op.mark_failed(error.code.value)
+            op.error_message = error.code.value
             op.save(update_fields=["state", "error_message", "updated_at"])
             logger.warning(
                 "Transfer outcome UNKNOWN for %s (kept pending, do not resubmit): %s", domain_name, error.code.value
@@ -907,6 +660,7 @@ class DomainLifecycleService:
     def update_nameservers(domain: Domain, nameservers: list[str]) -> Result[DomainOperation, str]:
         """Update nameservers at the registrar (two-phase)."""
         from .gateways import RegistrarGatewayFactory  # noqa: PLC0415
+        from .operation_services import DomainOperationService  # noqa: PLC0415
 
         try:
             gateway = RegistrarGatewayFactory.create_gateway(domain.registrar)
@@ -920,18 +674,21 @@ class DomainLifecycleService:
             parameters={"nameservers": nameservers},
         )
 
+        DomainOperationService.dispatch(op)
         result = gateway.update_nameservers(domain.name, nameservers)
         if result.is_ok():
             update = result.unwrap()
             if update.pending:
                 # Accepted, not completed (#257): leave domain.nameservers untouched
                 # until the reconciler confirms the registrar applied the change.
-                op.mark_submitted(registrar_operation_id=update.operation_handle)
+                op.registrar_operation_id = update.operation_handle
+                op.accepted_at = timezone.now()
                 op.save(
                     update_fields=[
                         "state",
                         "registrar_operation_id",
                         "submitted_at",
+                        "accepted_at",
                         "updated_at",
                     ]
                 )
@@ -944,7 +701,10 @@ class DomainLifecycleService:
             return Ok(op)
 
         error = result.unwrap_err()
-        op.mark_failed(error.code.value)
+        if retriability_of(result) != Retriability.UNKNOWN:
+            op.mark_failed(error.code.value)
+        else:
+            op.error_message = error.code.value
         op.save(update_fields=["state", "error_message", "updated_at"])
         return Err(cast(str, _("Nameserver update failed: {error}")).format(error=error.code.value))
 
@@ -952,6 +712,7 @@ class DomainLifecycleService:
     def set_domain_lock(domain: Domain, locked: bool) -> Result[DomainOperation, str]:
         """Lock or unlock a domain at the registrar."""
         from .gateways import RegistrarGatewayFactory  # noqa: PLC0415
+        from .operation_services import DomainOperationService  # noqa: PLC0415
 
         try:
             gateway = RegistrarGatewayFactory.create_gateway(domain.registrar)
@@ -965,19 +726,20 @@ class DomainLifecycleService:
             parameters={"locked": locked},
         )
 
+        DomainOperationService.dispatch(op)
         result = gateway.set_lock(domain.name, locked)
         if result.is_ok():
             lock_result = result.unwrap()
             if lock_result.pending:
                 # Accepted, not completed (#257): local lock state waits for confirmation.
-                op.mark_submitted(
-                    registrar_operation_id=lock_result.operation_handle,
-                )
+                op.registrar_operation_id = lock_result.operation_handle
+                op.accepted_at = timezone.now()
                 op.save(
                     update_fields=[
                         "state",
                         "registrar_operation_id",
                         "submitted_at",
+                        "accepted_at",
                         "updated_at",
                     ]
                 )
@@ -990,7 +752,10 @@ class DomainLifecycleService:
             return Ok(op)
 
         error = result.unwrap_err()
-        op.mark_failed(error.code.value)
+        if retriability_of(result) != Retriability.UNKNOWN:
+            op.mark_failed(error.code.value)
+        else:
+            op.error_message = error.code.value
         op.save(update_fields=["state", "error_message", "updated_at"])
         return Err(cast(str, _("Lock update failed: {error}")).format(error=error.code.value))
 
@@ -1064,7 +829,6 @@ class DomainLifecycleService:
 # ===============================================================================
 
 RECONCILE_GRACE_MINUTES = 15
-RECONCILE_NOT_FOUND_DELETE_HOURS = 24
 RECONCILE_BATCH_LIMIT = 50
 RECONCILE_OP_MAX_AGE_HOURS = 72
 
@@ -1125,6 +889,7 @@ class DomainReconciliationService:
         )
         for operation_id in operation_ids:
             with transaction.atomic():
+                Domain.objects.select_for_update().get(pk=domain_id)
                 operation = DomainOperation.objects.select_for_update().get(pk=operation_id)
                 if operation.state != "submitted":
                     continue
@@ -1168,54 +933,6 @@ class DomainReconciliationService:
             cls._complete_lifecycle_operations(domain_id, operation_type)
         return activated
 
-    @staticmethod
-    def _remove_absent_registration(domain_id: UUID, delete_cutoff: datetime) -> bool:
-        """Delete an old pending registration proven absent at the registrar.
-
-        Mirrors the definite-rejection path in _submit_registration_to_registrar:
-        the unique domain name must not stay stranded (the #260 class) once the
-        registrar has provably never registered it.
-        """
-        from apps.audit.services import AuditService  # noqa: PLC0415
-
-        with transaction.atomic():
-            domain = Domain.objects.select_for_update().get(pk=domain_id)
-            if domain.status != "pending" or domain.created_at >= delete_cutoff:
-                return False
-
-            domain_name = domain.name
-            customer_id = str(domain.customer_id)
-            AuditService.log_simple_event(
-                "domain_registration_reconciled_absent",
-                description=cast(
-                    str,
-                    _("Pending domain {domain_name} was absent at the registrar after reconciliation."),
-                ).format(domain_name=domain_name),
-                metadata={
-                    "domain_name": domain_name,
-                    "customer_id": customer_id,
-                },
-                actor_type="system",
-            )
-            domain.delete()
-
-        logger.warning(
-            "⚠️ [Domains] Removed absent pending registration %s for customer %s",
-            domain_name,
-            customer_id,
-        )
-        return True
-
-    @staticmethod
-    def _parse_previous_expiry(parameters: dict[str, Any]) -> datetime | None:
-        raw_value = parameters.get("prev_expires_at")
-        if not isinstance(raw_value, str):
-            return None
-        try:
-            return datetime.fromisoformat(raw_value)
-        except ValueError:
-            return None
-
     @classmethod
     def _apply_confirmed_operation(cls, operation_id: UUID, info: DomainInfoResult | None) -> bool:  # noqa: PLR0911  # per-op-type confirm/decline exits
         """Atomically apply registrar-confirmed operation state.
@@ -1225,12 +942,13 @@ class DomainReconciliationService:
         this phase only harvests the race/crash gap that would otherwise strand the
         operation in ``submitted`` forever.
         """
+        candidate = DomainOperation.objects.get(pk=operation_id)
         with transaction.atomic():
+            domain = Domain.objects.select_for_update().get(pk=candidate.domain_id)
             operation = DomainOperation.objects.select_for_update().get(pk=operation_id)
             if operation.state != "submitted":
                 return False
 
-            domain = Domain.objects.select_for_update().get(pk=operation.domain_id)
             parameters = operation.parameters
 
             if operation.operation_type in ("register", "transfer_in"):
@@ -1244,19 +962,11 @@ class DomainReconciliationService:
                 return False
 
             if operation.operation_type == "renew":
-                # prev_expires_at IS the proof — without it (manual/ORM-created op)
-                # any non-null expiry would "confirm" an unproven renewal. Such an
-                # op stays submitted and fails visibly at the 72h cutoff instead.
-                previous_expiry = cls._parse_previous_expiry(parameters)
-                if info.expires_at is None or previous_expiry is None or info.expires_at <= previous_expiry:
-                    return False
+                from .operation_services import DomainOperationService  # noqa: PLC0415
 
-                domain.expires_at = info.expires_at
-                domain.renewal_notices_sent = 0
-                domain.save(update_fields=["expires_at", "renewal_notices_sent", "updated_at"])
-                operation.mark_completed(result_data={"new_expires_at": info.expires_at.isoformat()})
-                operation.save(update_fields=["state", "completed_at", "result", "updated_at"])
-                return True
+                if info.status != "active" or info.expires_at is None:
+                    return False
+                return DomainOperationService.confirm_renewal(operation, info.expires_at)
 
             if operation.operation_type == "nameserver_update":
                 requested_nameservers = parameters.get("nameservers")
@@ -1287,20 +997,22 @@ class DomainReconciliationService:
         return False
 
     @staticmethod
-    def _fail_operation_if_stale(operation_id: UUID, stale_cutoff: datetime) -> bool:
-        """Fail an unconfirmed operation once its reconciliation window expires."""
+    def _schedule_next_check(operation_id: UUID) -> None:
+        """Timeout means review, never failure or permission to resend a mutation."""
+        from .operation_services import DomainOperationService  # noqa: PLC0415
+
+        now = timezone.now()
         with transaction.atomic():
             operation = DomainOperation.objects.select_for_update().get(pk=operation_id)
-            if (
-                operation.state != "submitted"
-                or operation.submitted_at is None
-                or operation.submitted_at >= stale_cutoff
-            ):
-                return False
-
-            operation.mark_failed(cast(str, _("unconfirmed after 72h — investigate at the registrar")))
-            operation.save(update_fields=["state", "error_message", "updated_at"])
-            return True
+            if operation.state not in ("pending", "submitted"):
+                return
+            if (operation.submitted_at or operation.created_at) < now - timedelta(hours=RECONCILE_OP_MAX_AGE_HOURS):
+                operation.review_required_at = operation.review_required_at or now
+            if operation.review_required_at:
+                DomainOperationService.request_review(operation, "Unconfirmed after 72h; registrar review required.")
+            interval = timedelta(days=1) if operation.review_required_at else timedelta(hours=1)
+            operation.next_retry_at = now + interval
+            operation.save(update_fields=["review_required_at", "error_message", "next_retry_at", "updated_at"])
 
     @staticmethod
     def _expire_post_grace_domains(now: datetime) -> tuple[int, int]:
@@ -1373,283 +1085,123 @@ class DomainReconciliationService:
 
         return expired, errors
 
-    @classmethod
-    def reconcile(cls) -> DomainReconciliationSummary:  # noqa: C901, PLR0912, PLR0915  # one sweep, four independent convergence phases
-        """Reconcile pending domains, submitted operations, and post-grace expiry."""
-        from .gateways import RegistrarErrorCode  # noqa: PLC0415
-
-        now = timezone.now()
-        grace_cutoff = now - timedelta(minutes=RECONCILE_GRACE_MINUTES)
-        delete_cutoff = now - timedelta(hours=RECONCILE_NOT_FOUND_DELETE_HOURS)
-        operation_cutoff = now - timedelta(hours=RECONCILE_OP_MAX_AGE_HOURS)
-        info_cache: dict[str, Result[DomainInfoResult, RegistrarAPIError]] = {}
-
-        activated = 0
-        removed = 0
-        awaiting = 0
-        unconfirmed = 0
-        completed = 0
-        failed = 0
-        skipped = 0
-        errors = 0
-
-        pending_registrations = (
-            Domain.objects.filter(status="pending", created_at__lt=grace_cutoff)
-            .select_related("tld", "registrar", "customer")
-            .order_by("created_at")
-        )
-        eligible_registrations = 0
-        for domain in pending_registrations.iterator():
-            if eligible_registrations >= RECONCILE_BATCH_LIMIT:
-                break
-            try:
-                try:
-                    info_result = cls._get_domain_info(domain, info_cache)
-                except ValueError:
-                    # Skip-class rows must NOT consume the batch cap — 50 rows on a
-                    # misconfigured registrar would starve every newer row forever.
-                    skipped += 1
-                    logger.warning(
-                        "⚠️ [Domains] No registrar gateway for pending registration %s",
-                        domain.name,
-                    )
-                    continue
-                eligible_registrations += 1
-
-                if info_result.is_err():
-                    error = info_result.unwrap_err()
-                    if error.code == RegistrarErrorCode.DOMAIN_NOT_FOUND:
-                        # A submitted register op WITH a registrar operation handle
-                        # proves ACCEPTANCE — a slow async registration absent from
-                        # the info endpoint is never auto-deleted. Only UNKNOWN
-                        # submissions (no handle recorded) age out after 24h.
-                        accepted_evidence = (
-                            DomainOperation.objects.filter(domain=domain, operation_type="register", state="submitted")
-                            .exclude(registrar_operation_id="")
-                            .exists()
-                        )
-                        if accepted_evidence or domain.created_at >= delete_cutoff:
-                            awaiting += 1
-                        elif cls._remove_absent_registration(domain.pk, delete_cutoff):
-                            removed += 1
-                    else:
-                        errors += 1
-                        logger.warning(
-                            "⚠️ [Domains] Registrar info failed for pending registration %s: %s",
-                            domain.name,
-                            error.code.value,
-                        )
-                    continue
-
-                info = info_result.unwrap()
-                if info.expires_at is None:
-                    unconfirmed += 1
-                    continue
-
-                if cls._converge_lifecycle_domain(domain.pk, "pending", "register", info):
-                    activated += 1
-            except (ConcurrentTransition, TransitionNotAllowed):
-                errors += 1
-                logger.error(
-                    "🔥 [Domains] Pending registration reconciliation raced for %s",
-                    domain.name,
-                    exc_info=True,
-                )
-            except Exception:
-                errors += 1
-                logger.error(
-                    "🔥 [Domains] Pending registration reconciliation crashed for %s",
-                    domain.name,
-                    exc_info=True,
-                )
-
-        pending_transfers = (
-            Domain.objects.filter(status="transfer_in", created_at__lt=grace_cutoff)
-            .select_related("tld", "registrar", "customer")
-            .order_by("created_at")
-        )
-        eligible_transfers = 0
-        for domain in pending_transfers.iterator():
-            if eligible_transfers >= RECONCILE_BATCH_LIMIT:
-                break
-            try:
-                try:
-                    info_result = cls._get_domain_info(domain, info_cache)
-                except ValueError:
-                    skipped += 1
-                    logger.warning(
-                        "⚠️ [Domains] No registrar gateway for pending transfer %s",
-                        domain.name,
-                    )
-                    continue
-                eligible_transfers += 1
-
-                if info_result.is_err():
-                    error = info_result.unwrap_err()
-                    if error.code == RegistrarErrorCode.DOMAIN_NOT_FOUND:
-                        # Inbound transfers legitimately pend at the registry for
-                        # days — NEVER auto-delete a transfer_in row on NOT_FOUND.
-                        awaiting += 1
-                    else:
-                        errors += 1
-                        logger.warning(
-                            "⚠️ [Domains] Registrar info failed for pending transfer %s: %s",
-                            domain.name,
-                            error.code.value,
-                        )
-                    continue
-
-                info = info_result.unwrap()
-                if info.expires_at is None:
-                    unconfirmed += 1
-                    continue
-
-                if cls._converge_lifecycle_domain(domain.pk, "transfer_in", "transfer_in", info):
-                    activated += 1
-            except (ConcurrentTransition, TransitionNotAllowed):
-                errors += 1
-                logger.error(
-                    "🔥 [Domains] Pending transfer reconciliation raced for %s",
-                    domain.name,
-                    exc_info=True,
-                )
-            except Exception:
-                errors += 1
-                logger.error(
-                    "🔥 [Domains] Pending transfer reconciliation crashed for %s",
-                    domain.name,
-                    exc_info=True,
-                )
-
-        submitted_operations = (
-            DomainOperation.objects.filter(
-                state="submitted",
-                submitted_at__lt=grace_cutoff,
+    @staticmethod
+    def _adopt_legacy_domains(grace_cutoff: datetime) -> None:
+        """Give old pending rows a durable review schedule without inventing success."""
+        candidates = (
+            Domain.objects.filter(
+                status__in=("pending", "transfer_in"),
+                created_at__lt=grace_cutoff,
             )
-            .select_related("domain", "registrar")
-            .order_by("submitted_at")
+            .exclude(operations__operation_type__in=("register", "transfer_in"))
+            .order_by("created_at")
         )
-        renewals_completed_for: set[UUID] = set()
-        eligible_operations = 0
-        for operation in submitted_operations.iterator():
-            if eligible_operations >= RECONCILE_BATCH_LIMIT:
+        for candidate in candidates[:RECONCILE_BATCH_LIMIT]:
+            with transaction.atomic():
+                domain = Domain.objects.select_for_update().get(pk=candidate.pk)
+                kind = "register" if domain.status == "pending" else "transfer_in"
+                if (
+                    domain.status not in ("pending", "transfer_in")
+                    or domain.operations.filter(operation_type=kind).exists()
+                ):
+                    continue
+                operation = DomainOperation(domain=domain, registrar=domain.registrar, operation_type=kind)
+                operation.mark_submitted()
+                operation.submitted_at = domain.created_at
+                operation.review_required_at = timezone.now()
+                operation.parameters = {"legacy_submission": True}
+                operation.save()
+
+    @classmethod
+    def _reconcile_operation(
+        cls,
+        operation: DomainOperation,
+        info_cache: dict[str, Result[DomainInfoResult, RegistrarAPIError]],
+    ) -> str:
+        from .gateways import RegistrarErrorCode  # noqa: PLC0415
+        from .operation_services import DomainOperationService  # noqa: PLC0415
+
+        if operation.state == "pending":
+            if operation.parameters.get("after_registration"):
+                DomainOperationService.resume_registration_nameservers(operation.domain)
+            return "unconfirmed"
+        if operation.operation_type in ("register", "transfer_in") and operation.domain.status == "active":
+            return "completed" if cls._apply_confirmed_operation(operation.pk, None) else "unconfirmed"
+        result = cls._get_domain_info(operation.domain, info_cache)
+        if result.is_err():
+            # Absence cannot disprove a delayed or response-lost mutation.
+            return "awaiting" if result.unwrap_err().code == RegistrarErrorCode.DOMAIN_NOT_FOUND else "errors"
+        info = result.unwrap()
+        if operation.operation_type in ("register", "transfer_in"):
+            if info.status != "active" or info.expires_at is None:
+                return "unconfirmed"
+            expected = "pending" if operation.operation_type == "register" else "transfer_in"
+            if cls._converge_lifecycle_domain(operation.domain_id, expected, operation.operation_type, info):
+                DomainOperationService.resume_registration_nameservers(operation.domain)
+                return "activated"
+        return "completed" if cls._apply_confirmed_operation(operation.pk, info) else "unconfirmed"
+
+    @classmethod
+    def reconcile(cls) -> DomainReconciliationSummary:
+        """Check due work fairly; retain uncertain submissions for read-only review."""
+        now = timezone.now()
+        cutoff = now - timedelta(minutes=RECONCILE_GRACE_MINUTES)
+        cls._adopt_legacy_domains(cutoff)
+        summary: DomainReconciliationSummary = {
+            "success": True,
+            "activated": 0,
+            "removed": 0,
+            "awaiting": 0,
+            "unconfirmed": 0,
+            "completed": 0,
+            "failed": 0,
+            "expired": 0,
+            "skipped": 0,
+            "errors": 0,
+            "message": "",
+        }
+        info_cache: dict[str, Result[DomainInfoResult, RegistrarAPIError]] = {}
+        operations = (
+            DomainOperation.objects.filter(
+                Q(state="submitted", submitted_at__lt=cutoff) | Q(state="pending", created_at__lt=cutoff),
+            )
+            .filter(Q(next_retry_at__isnull=True) | Q(next_retry_at__lte=now))
+            .select_related(
+                "domain__registrar",
+                "registrar",
+            )
+            .order_by("next_retry_at", "created_at")
+        )
+        eligible = 0
+        for operation in operations.iterator():
+            if eligible >= RECONCILE_BATCH_LIMIT:
                 break
             try:
-                if operation.operation_type in ("register", "transfer_in"):
-                    # Lifecycle ops converge through the pending-domain phases above;
-                    # here we only harvest races (a webhook activated the domain
-                    # first) and the crash gap between domain activation and
-                    # operation completion — no registrar read needed.
-                    eligible_operations += 1
-                    if cls._apply_confirmed_operation(operation.pk, None):
-                        completed += 1
-                    elif cls._fail_operation_if_stale(operation.pk, operation_cutoff):
-                        failed += 1
-                        logger.error(
-                            "🔥 [Domains] Submitted %s operation for %s remained unconfirmed after 72h",
-                            operation.operation_type,
-                            operation.domain.name,
-                        )
-                    else:
-                        unconfirmed += 1
-                    continue
-
-                if operation.operation_type == "renew" and operation.domain_id in renewals_completed_for:
-                    # One registrar extension proves ONE intent: a second renew op
-                    # sharing the same snapshot waits for its own proof on a later
-                    # run (or fails visibly at 72h) instead of free-riding.
-                    unconfirmed += 1
-                    continue
-
-                try:
-                    info_result = cls._get_domain_info(operation.domain, info_cache)
-                except ValueError:
-                    skipped += 1
-                    logger.warning(
-                        "⚠️ [Domains] No registrar gateway for submitted %s operation on %s",
-                        operation.operation_type,
-                        operation.domain.name,
-                    )
-                    continue
-                eligible_operations += 1
-
-                if info_result.is_err():
-                    error = info_result.unwrap_err()
-                    errors += 1
-                    if cls._fail_operation_if_stale(operation.pk, operation_cutoff):
-                        failed += 1
-                        logger.error(
-                            "🔥 [Domains] Submitted %s operation for %s failed after 72h (latest registrar error: %s)",
-                            operation.operation_type,
-                            operation.domain.name,
-                            error.code.value,
-                        )
-                    else:
-                        logger.warning(
-                            "⚠️ [Domains] Registrar info failed for submitted %s operation on %s: %s",
-                            operation.operation_type,
-                            operation.domain.name,
-                            error.code.value,
-                        )
-                    continue
-
-                if cls._apply_confirmed_operation(operation.pk, info_result.unwrap()):
-                    completed += 1
-                    if operation.operation_type == "renew":
-                        renewals_completed_for.add(operation.domain_id)
-                    continue
-
-                if cls._fail_operation_if_stale(operation.pk, operation_cutoff):
-                    failed += 1
-                    logger.error(
-                        "🔥 [Domains] Submitted %s operation for %s remained unconfirmed after 72h",
-                        operation.operation_type,
-                        operation.domain.name,
-                    )
+                outcome = cls._reconcile_operation(operation, info_cache)
+                eligible += 1
+                if outcome == "activated":
+                    summary["activated"] += 1
+                elif outcome == "completed":
+                    summary["completed"] += 1
+                elif outcome == "awaiting":
+                    summary["awaiting"] += 1
+                elif outcome == "errors":
+                    summary["errors"] += 1
                 else:
-                    unconfirmed += 1
-            except (ConcurrentTransition, TransitionNotAllowed):
-                errors += 1
-                logger.error(
-                    "🔥 [Domains] Submitted operation reconciliation raced for %s",
-                    operation.domain.name,
-                    exc_info=True,
-                )
+                    summary["unconfirmed"] += 1
+            except ValueError:
+                summary["skipped"] += 1
             except Exception:
-                errors += 1
-                logger.error(
-                    "🔥 [Domains] Submitted operation reconciliation crashed for %s",
-                    operation.domain.name,
-                    exc_info=True,
-                )
-
-        expired, expiry_errors = cls._expire_post_grace_domains(now)
-        errors += expiry_errors
-
-        message = (
-            f"Reconciled domains: activated={activated}, removed={removed}, awaiting={awaiting}, "
-            f"unconfirmed={unconfirmed}, completed={completed}, failed={failed}, expired={expired}, "
-            f"skipped={skipped}, errors={errors}"
-        )
-        logger.info("✅ [Domains] %s", message)
-        return {
-            "success": errors == 0,
-            "activated": activated,
-            "removed": removed,
-            "awaiting": awaiting,
-            "unconfirmed": unconfirmed,
-            "completed": completed,
-            "failed": failed,
-            "expired": expired,
-            "skipped": skipped,
-            "errors": errors,
-            "message": message,
-        }
-
-
-# ===============================================================================
-# DOMAIN NOTIFICATION SERVICE
-# ===============================================================================
+                summary["errors"] += 1
+                logger.exception("Domain reconciliation failed for operation %s", operation.pk)
+            finally:
+                cls._schedule_next_check(operation.pk)
+        summary["expired"], expiry_errors = cls._expire_post_grace_domains(now)
+        summary["errors"] += expiry_errors
+        summary["success"] = summary["errors"] == 0
+        summary["message"] = ", ".join(f"{key}={value}" for key, value in summary.items() if key != "message")
+        logger.info("Reconciled domains: %s", summary["message"])
+        return summary
 
 
 class DomainNotificationService:
@@ -1991,7 +1543,9 @@ class DomainRegistrarGateway:
             logger.error("No gateway registered for %s — cannot register %s", registrar.name, domain_name)
             return False, {"error": f"No gateway for registrar {registrar.name}"}
 
-        result = gateway.register_domain(domain_name, years, customer_data)
+        result = gateway.register_domain(
+            domain_name, years, customer_data, nameservers=registrar.default_nameservers or None
+        )
         if result.is_ok():
             reg = result.unwrap()
             return True, {
@@ -2032,6 +1586,15 @@ class DomainRegistrarGateway:
         # Carry retriability like the registration facade: an UNKNOWN outcome means
         # the chargeable renewal MAY have applied and needs durable reconciliation.
         return False, {"error": str(result.unwrap_err()), "retriability": retriability_of(result).value}
+
+    @staticmethod
+    def get_domain_info(registrar: Registrar, domain_name: str) -> Result[DomainInfoResult, RegistrarAPIError]:
+        from .gateways import RegistrarAPIError, RegistrarGatewayFactory  # noqa: PLC0415
+
+        try:
+            return RegistrarGatewayFactory.create_gateway(registrar).get_domain_info(domain_name)
+        except ValueError:
+            return Err(RegistrarAPIError("No gateway configured"), retriability=Retriability.NOT_RETRIABLE)
 
     @staticmethod
     def check_domain_availability(registrar: Registrar, domain_name: str) -> tuple[bool, bool]:

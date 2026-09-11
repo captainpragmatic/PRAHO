@@ -109,6 +109,7 @@ class OutboundPolicy:
     tls_cert_fingerprint: str = ""
     max_retries: int = 0
     check_dns: bool = True
+    retry_connection_errors: bool = True
 
 
 # ---------------------------------------------------------------------------
@@ -439,7 +440,9 @@ class PinnedIPAdapter(HTTPAdapter):
         hostname: str,
         port: int = 443,
         tls_cert_fingerprint: str = "",
+        retry_connection_errors: bool = True,
     ) -> None:
+        self._retry_connection_errors = retry_connection_errors
         self._pinned_ip = pinned_ip
         self._hostname = hostname
         self._port = port
@@ -460,7 +463,9 @@ class PinnedIPAdapter(HTTPAdapter):
             ip_part = f"[{ip}]" if ":" in ip else ip
             request.url = parsed._replace(netloc=f"{ip_part}:{port}").geturl()
         if request.headers is not None:
-            request.headers.setdefault("Host", self._hostname)
+            default_port = 443 if urllib.parse.urlparse(request.url or "").scheme == "https" else 80
+            host = self._hostname if self._port == default_port else f"{self._hostname}:{self._port}"
+            request.headers.setdefault("Host", host)
 
     def send(  # noqa: PLR0913  # must match HTTPAdapter.send() signature
         self,
@@ -478,6 +483,8 @@ class PinnedIPAdapter(HTTPAdapter):
         try:
             return super().send(request, stream=stream, timeout=timeout, verify=verify, cert=cert, proxies=proxies)
         except requests.ConnectionError:
+            if not self._retry_connection_errors:
+                raise  # The request may have reached the server; do not replay mutations.
             # Re-resolve DNS — _resolve_dns already validates IPs are public
             try:
                 fresh_ips = _resolve_dns(self._hostname, self._port)
@@ -608,6 +615,7 @@ def _follow_redirects(
                 hostname=target.hostname,
                 port=target.port,
                 tls_cert_fingerprint=policy.tls_cert_fingerprint,
+                retry_connection_errors=policy.retry_connection_errors,
             ),
         )
 
@@ -686,6 +694,7 @@ def _execute_pinned_request(
                 hostname=target.hostname,
                 port=target.port,
                 tls_cert_fingerprint=policy.tls_cert_fingerprint,
+                retry_connection_errors=policy.retry_connection_errors,
             ),
         )
 

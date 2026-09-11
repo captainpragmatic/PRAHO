@@ -206,45 +206,18 @@ class DomainReconciliationTests(TestCase):
         gateway_factory.assert_not_called()
         self.assertEqual(gateway.calls, [])
 
-    def test_not_found_registration_is_kept_before_24h_and_removed_after_24h(self) -> None:
+    def test_not_found_registration_is_retained_for_review_across_sweeps(self) -> None:
         domain = self._domain("absent.example")
-        self._age_domain(domain, timedelta(hours=23))
-        gateway = StubGateway(
-            {
-                domain.name: Err(
-                    RegistrarNotFoundError(domain.name, self.registrar.name)
-                )
-            }
-        )
-
-        with patch("apps.audit.services.AuditService.log_simple_event") as audit_log:
-            first = self._run(gateway)
-            self.assertTrue(Domain.objects.filter(pk=domain.pk).exists())
-            self.assertEqual(first["awaiting"], 1)
-            audit_log.assert_not_called()
-
-            Domain.objects.filter(pk=domain.pk).update(
-                created_at=self.now - timedelta(hours=25)
-            )
-            second = self._run(gateway)
-
-        self.assertFalse(Domain.objects.filter(pk=domain.pk).exists())
-        self.assertEqual(second["removed"], 1)
-        # The delete also fires the post_delete security signal (domain_deleted) —
-        # that second audit event is desired; assert the reconciliation event exists.
-        reconciled_calls = [
-            call
-            for call in audit_log.call_args_list
-            if call.args and call.args[0] == "domain_registration_reconciled_absent"
-        ]
-        self.assertEqual(len(reconciled_calls), 1)
-        self.assertEqual(
-            reconciled_calls[0].kwargs["metadata"],
-            {
-                "domain_name": "absent.example",
-                "customer_id": str(self.customer.pk),
-            },
-        )
+        self._age_domain(domain, timedelta(hours=73))
+        gateway = StubGateway({domain.name: Err(RegistrarNotFoundError(domain.name, self.registrar.name))})
+        first = self._run(gateway)
+        self.assertEqual(first["awaiting"], 1)
+        operation = DomainOperation.objects.get(domain=domain)
+        self.assertIsNotNone(operation.review_required_at)
+        DomainOperation.objects.filter(pk=operation.pk).update(next_retry_at=None)
+        second = self._run(gateway)
+        self.assertTrue(Domain.objects.filter(pk=domain.pk).exists())
+        self.assertEqual(second["removed"], 0)
 
     def test_transfer_not_found_after_24h_is_never_deleted(self) -> None:
         domain = self._domain("transfer-missing.example")
@@ -466,10 +439,8 @@ class DomainReconciliationTests(TestCase):
         self.assertTrue(mismatched_domain.locked)
         self.assertEqual(mismatched_operation.state, "submitted")
 
-    def test_one_expiry_advance_completes_only_one_renewal_intent(self) -> None:
-        """Two pending renewals sharing one prev-expiry snapshot must not BOTH be
-        completed by a single registrar extension — only the oldest is proven;
-        the second stays submitted (and fails visibly at 72h if never proven)."""
+    def test_overlapping_legacy_renewals_require_review(self) -> None:
+        """An expiry read cannot identify which overlapping intent applied."""
         previous_expiry = self.now + timedelta(days=60)
         domain = self._domain("double-intent.example", active=True, expires_at=previous_expiry)
         first_op = self._submitted_operation(
@@ -491,9 +462,14 @@ class DomainReconciliationTests(TestCase):
 
         first_op.refresh_from_db()
         second_op.refresh_from_db()
-        self.assertEqual(result["completed"], 1)
-        self.assertEqual(first_op.state, "completed")
+        self.assertEqual(result["completed"], 0)
+        self.assertEqual(first_op.state, "submitted")
         self.assertEqual(second_op.state, "submitted")
+
+        self.assertIsNotNone(first_op.review_required_at)
+        self.assertIsNotNone(second_op.review_required_at)
+        DomainOperation.objects.filter(domain=domain).update(next_retry_at=None)
+        self.assertEqual(self._run(gateway)["completed"], 0)
 
     def test_accepted_registration_is_not_deleted_on_not_found(self) -> None:
         """A submitted register op WITH an operation handle proves the registrar
@@ -565,6 +541,7 @@ class DomainReconciliationTests(TestCase):
                 side_effect=_factory,
             ),
         ):
+            DomainReconciliationService.reconcile()
             result = DomainReconciliationService.reconcile()
 
         fresh.refresh_from_db()
@@ -587,7 +564,7 @@ class DomainReconciliationTests(TestCase):
         self.assertEqual(operation.state, "submitted")
         self.assertEqual(domain.expires_at, expiry)
 
-    def test_operation_older_than_72h_fails_without_changing_domain(self) -> None:
+    def test_operation_older_than_72h_requires_review_without_changing_domain(self) -> None:
         previous_expiry = self.now + timedelta(days=30)
         domain = self._domain(
             "stale-renewal.example",
@@ -617,13 +594,13 @@ class DomainReconciliationTests(TestCase):
 
         domain.refresh_from_db()
         operation.refresh_from_db()
-        self.assertEqual(result["failed"], 1)
+        self.assertEqual(result["failed"], 0)
         self.assertEqual(domain.expires_at, previous_expiry)
         self.assertEqual(domain.renewal_notices_sent, 14)
-        self.assertEqual(operation.state, "failed")
+        self.assertEqual(operation.state, "submitted")
         self.assertEqual(
             operation.error_message,
-            "unconfirmed after 72h — investigate at the registrar",
+            "Unconfirmed after 72h; registrar review required.",
         )
 
     def test_one_row_crash_does_not_stop_the_next_row(self) -> None:

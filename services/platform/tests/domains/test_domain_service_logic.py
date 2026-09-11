@@ -5,11 +5,12 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from unittest.mock import patch
 
-from django.test import TestCase
+from django.test import TransactionTestCase
 
 from apps.billing.models import Currency
 from apps.common.types import Ok as _Ok
 from apps.customers.models import Customer, CustomerAddress, CustomerTaxProfile
+from apps.domains.gateways.gandi import GandiGateway
 from apps.domains.models import TLD, Domain, DomainOrderItem, Registrar, TLDRegistrarAssignment
 from apps.domains.services import DomainLifecycleService, DomainOrderService, DomainValidationService
 from apps.orders.models import Order
@@ -24,6 +25,9 @@ class DomainFixtureMixin:
     """
 
     def setUp(self) -> None:
+        factory_patch = patch("apps.domains.gateways.RegistrarGatewayFactory.create_gateway", side_effect=GandiGateway)
+        factory_patch.start()
+        self.addCleanup(factory_patch.stop)
         self.ro = TLD.objects.create(
             extension="ro",
             description=".ro",
@@ -44,13 +48,13 @@ class DomainFixtureMixin:
             name="ro-registrar",
             display_name="RO Registrar",
             website_url="https://ro.example.test",
-            api_endpoint="https://api.ro.example.test",
+            api_endpoint="https://api.gandi.net/v5",
         )
         self.com_ro_registrar = Registrar.objects.create(
             name="com-ro-registrar",
             display_name="COM.RO Registrar",
             website_url="https://com-ro.example.test",
-            api_endpoint="https://api.com-ro.example.test",
+            api_endpoint="https://api.gandi.net/v5",
         )
         TLDRegistrarAssignment.objects.create(
             tld=self.ro,
@@ -95,7 +99,7 @@ class DomainFixtureMixin:
         )
 
 
-class DomainServiceLogicTests(DomainFixtureMixin, TestCase):
+class DomainServiceLogicTests(DomainFixtureMixin, TransactionTestCase):
     def test_longest_configured_tld_suffix_wins(self) -> None:
         self.assertEqual(DomainValidationService.extract_tld_from_domain("Shop.Example.COM.RO"), "com.ro")
         self.assertEqual(DomainValidationService.extract_tld_from_domain("example.ro"), "ro")
@@ -235,7 +239,7 @@ class DomainServiceLogicTests(DomainFixtureMixin, TestCase):
         self.assertEqual(DomainOrderItem.objects.count(), 2)
 
 
-class DomainOrderRenewTransferProcessingTests(DomainFixtureMixin, TestCase):
+class DomainOrderRenewTransferProcessingTests(DomainFixtureMixin, TransactionTestCase):
     """#430: renew items must link the owned Domain and be processable; transfer/unhandled
     actions must be logged, not silently dropped."""
 

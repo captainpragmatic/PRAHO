@@ -178,10 +178,10 @@ class GandiGatewayRegisterTests(TestCase):
 
         self.assertTrue(result.is_ok())
         reg = result.unwrap()
-        self.assertEqual(reg.registrar_domain_id, "gandi-dom-123")
-        self.assertEqual(reg.expires_at, datetime(2027, 4, 6, tzinfo=UTC))
-        self.assertEqual(reg.epp_code, "EPP-SECRET")
-        self.assertFalse(reg.pending)
+        self.assertEqual(reg.registrar_domain_id, "")
+        self.assertIsNone(reg.expires_at)
+        self.assertEqual(reg.epp_code, "")
+        self.assertTrue(reg.pending)
         self.assertEqual(reg.operation_handle, "")
 
     @patch("apps.domains.gateways.gandi.GandiGateway._api_request")
@@ -251,7 +251,7 @@ class GandiGatewayRenewTests(TestCase):
         mock_cache.get.side_effect = [0, None]
         mock_cache.add.return_value = True
         self.registrar.api_username = "reseller-org-id"
-        mock_request.return_value = _mock_response(200, {"expires_at": "2028-01-01T00:00:00Z"})
+        mock_request.return_value = _mock_response(202, {"message": "Accepted"})
 
         result = self.gateway.renew_domain("REG-1", "example.com", 1)
 
@@ -265,7 +265,7 @@ class GandiGatewayRenewTests(TestCase):
     ) -> None:
         mock_cache.get.side_effect = [0, None]
         mock_cache.add.return_value = True
-        mock_request.return_value = _mock_response(200, {"expires_at": "2028-01-01T00:00:00Z"})
+        mock_request.return_value = _mock_response(202, {"message": "Accepted"})
 
         result = self.gateway.renew_domain("REG-1", "example.com", 1)
 
@@ -364,7 +364,7 @@ class GandiGatewayAvailabilityTests(TestCase):
     ) -> None:
         mock_cache.get.return_value = 0
         self.registrar.api_username = "reseller-org-id"
-        mock_request.return_value = _mock_response(200, {"products": []})
+        mock_request.return_value = _mock_response(200, {"products": [{"status": "unavailable"}]})
 
         result = self.gateway.check_availability("example.com")
 
@@ -399,6 +399,7 @@ class ROTLDGatewayRegisterTests(TestCase):
             "entity_type": "company",
             "company_name": "SC Exemplu SRL",
             "cui": "RO12345678",
+            "registrar_contact_id": "CONTACT-123",
         }
 
     @patch("apps.domains.gateways.rotld.ROTLDGateway._api_request")
@@ -406,22 +407,18 @@ class ROTLDGatewayRegisterTests(TestCase):
     def test_successful_registration(self, mock_cache: MagicMock, mock_request: MagicMock) -> None:
         mock_cache.get.side_effect = [0, None]
         mock_request.return_value = _mock_response(
-            201,
-            {
-                "domain": {
-                    "id": "rotld-12345",
-                    "expire_at": "2027-04-06T00:00:00Z",
-                    "authcode": "RO-EPP-SECRET",
-                },
-            },
+            200,
+            {"error": 0, "result_code": "00200", "data": {
+                "domain": "exemplu.ro", "expiration_date": "2027-04-06T00:00:00Z"
+            }},
         )
 
         result = self.gateway.register_domain("exemplu.ro", 1, self.registrant)
 
         self.assertTrue(result.is_ok())
         reg = result.unwrap()
-        self.assertEqual(reg.registrar_domain_id, "rotld-12345")
-        self.assertEqual(reg.epp_code, "RO-EPP-SECRET")
+        self.assertEqual(reg.registrar_domain_id, "exemplu.ro")
+        self.assertEqual(reg.epp_code, "")
 
     @patch("apps.domains.gateways.rotld.ROTLDGateway._api_request")
     @patch("apps.domains.gateways.base.cache")
@@ -449,12 +446,12 @@ class ROTLDGatewayRegistrantMappingTests(TestCase):
             "entity_type": "company",
             "company_name": "SC Exemplu SRL",
             "cui": "RO12345678",
-            "email": "ion@example.com",
+            "email": "ion@example.com", "phone": "+40721000000",
         }
         mapped = self.gateway._map_registrant_to_rotld(data)
 
-        self.assertEqual(mapped["org"], "SC Exemplu SRL")
-        self.assertEqual(mapped["fiscal_code"], "RO12345678")
+        self.assertEqual(mapped["name"], "SC Exemplu SRL")
+        self.assertEqual(mapped["cnp_fiscal_code"], "RO12345678")
         self.assertNotIn("cnp", mapped)
 
     def test_individual_registrant_includes_cnp(self) -> None:
@@ -463,11 +460,11 @@ class ROTLDGatewayRegistrantMappingTests(TestCase):
             "last_name": "Popescu",
             "entity_type": "individual",
             "cnp": "1234567890123",
-            "email": "ion@example.com",
+            "email": "ion@example.com", "phone": "+40721000000",
         }
         mapped = self.gateway._map_registrant_to_rotld(data)
 
-        self.assertEqual(mapped["cnp"], "1234567890123")
+        self.assertEqual(mapped["cnp_fiscal_code"], "1234567890123")
         self.assertNotIn("org", mapped)
         self.assertNotIn("fiscal_code", mapped)
 
@@ -552,7 +549,7 @@ class IdempotencyTests(TestCase):
         result = self.gateway.register_domain("example.com", 1, {})
 
         self.assertTrue(result.is_err())
-        self.assertIsInstance(result.unwrap_err(), RegistrarConflictError)
+        self.assertEqual(result.unwrap_err().code, RegistrarErrorCode.OPERATION_PENDING)
 
 
 # ===============================================================================
@@ -662,7 +659,7 @@ class IdempotencyClaimTests(TestCase):
             result = self.gateway.register_domain("example.com", 1, self.registrant)
 
         self.assertTrue(result.is_err())
-        self.assertIsInstance(result.unwrap_err(), RegistrarConflictError)
+        self.assertEqual(result.unwrap_err().code, RegistrarErrorCode.OPERATION_PENDING)
         # Crucially, the registrar was never called for the duplicate request.
         mock_do.assert_not_called()
 
@@ -696,7 +693,7 @@ class IdempotencyClaimTests(TestCase):
 
         self.assertTrue(result.is_err())
         # The in-progress claim must be deleted so a legitimate retry can proceed.
-        mock_cache.delete.assert_any_call("domain_reg:gandi:example.com")
+        mock_cache.delete.assert_any_call(f"domain_reg:{self.gateway.cache_namespace}:example.com")
 
 
 class CircuitBreakerRecoveryTests(TestCase):
@@ -723,7 +720,7 @@ class CircuitBreakerRecoveryTests(TestCase):
         # add() atomically seeds the counter + TTL on the first failure (no incr/set race).
         mock_cache.add.return_value = True
         self.gateway._record_failure(RegistrarTransientError("gandi", "boom"))
-        mock_cache.add.assert_called_once_with("cb:gandi:failures", 1, CIRCUIT_BREAKER_RESET_SECONDS)
+        mock_cache.add.assert_called_once_with(f"cb:{self.gateway.cache_namespace}:failures", 1, CIRCUIT_BREAKER_RESET_SECONDS)
         mock_cache.incr.assert_not_called()
 
 

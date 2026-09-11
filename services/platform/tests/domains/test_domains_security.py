@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
-from django.test import Client, TestCase
+from django.test import Client, TestCase, TransactionTestCase
 from django.urls import reverse
 
 from apps.common.encryption import decrypt_sensitive_data, is_encrypted
@@ -87,7 +87,7 @@ class RegistrarFormSecurityTests(TestCase):
         self.assertFalse(bad.is_valid())
 
 
-class DomainRegistrationRaceConditionTests(TestCase):
+class DomainRegistrationRaceConditionTests(TransactionTestCase):
     def setUp(self) -> None:
         self.tld = TLD.objects.create(
             extension="com",
@@ -100,10 +100,10 @@ class DomainRegistrationRaceConditionTests(TestCase):
             max_registration_period=10,
         )
         self.registrar = Registrar.objects.create(
-            name="test-registrar",
+            name="gandi",
             display_name="Test Registrar",
             website_url="https://example.com",
-            api_endpoint="https://api.example.com",
+            api_endpoint="https://api.gandi.net/v5",
             status="active",
         )
         # Associate registrar as primary for the TLD

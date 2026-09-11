@@ -12,7 +12,7 @@ _REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
 _NIGHTLY_WORKFLOW = _REPOSITORY_ROOT / ".github" / "workflows" / "nightly.yml"
 _INTEGRATION_WORKFLOW = _REPOSITORY_ROOT / ".github" / "workflows" / "integration.yml"
 _CONCURRENCY_STEP_NAME = "Concurrency tests (PostgreSQL)"
-_API_TOKEN_STEP_NAME = "API token concurrency tests (PostgreSQL)"
+_API_TOKEN_STEP_NAME = "API token and registrar intent tests (PostgreSQL)"
 _PLATFORM_STEP_NAME = "Platform tests with coverage (no failfast — complete picture)"
 _BILLING_CONCURRENCY_TEST_CLASS = (
     "tests.billing.test_payment_intent_security."
@@ -90,6 +90,7 @@ class NightlyPostgresConcurrencyWorkflowTests(SimpleTestCase):
         self.assertEqual(api_token_step["env"]["DJANGO_SETTINGS_MODULE"], "config.settings.ci")
         command = api_token_step["run"]
         self.assertIn(_API_TOKEN_CONCURRENCY_TEST_CLASS, command)
+        self.assertIn("tests.domains.test_durable_operations", command)
         self.assertIn("--settings=config.settings.ci", command)
         self.assertNotIn("config.settings.test", command)
         self.assertNotIn("--parallel", command)

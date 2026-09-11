@@ -299,10 +299,10 @@ class GandiDomainInfoTests(TestCase):
             {
                 "id": "gandi-123",
                 "fqdn": "example.com",
-                "status": "active",
+                "status": ["clientTransferProhibited"],
                 "dates": {"registry_ends_at": "2028-01-01T00:00:00Z"},
                 "nameservers": ["ns1.gandi.net", "ns2.gandi.net"],
-                "whois_privacy": True,
+                "contacts": {"owner": {"data_obfuscated": True}},
                 "authinfo": "EPP-CODE",  # Gandi's documented field name
             },
         )
@@ -328,13 +328,13 @@ class GandiNameserverTests(TestCase):
     @patch("apps.domains.gateways.base.cache")
     def test_successful_ns_update(self, mock_cache: MagicMock, mock_request: MagicMock) -> None:
         mock_cache.get.return_value = 0
-        mock_request.return_value = _mock_response(200, {})
+        mock_request.return_value = _mock_response(202, {})
 
         result = self.gateway.update_nameservers("example.com", ["ns1.new.com", "ns2.new.com"])
 
         self.assertTrue(result.is_ok())
         self.assertEqual(result.unwrap().nameservers, ["ns1.new.com", "ns2.new.com"])
-        self.assertFalse(result.unwrap().pending)
+        self.assertTrue(result.unwrap().pending)
 
 
 @override_settings(REGISTRAR_ADAPTERS_VERIFIED=True)
@@ -349,13 +349,13 @@ class GandiLockTests(TestCase):
     @patch("apps.domains.gateways.base.cache")
     def test_lock_domain(self, mock_cache: MagicMock, mock_request: MagicMock) -> None:
         mock_cache.get.return_value = 0
-        mock_request.return_value = _mock_response(200, {})
+        mock_request.return_value = _mock_response(202, {})
 
         result = self.gateway.set_lock("example.com", locked=True)
 
         self.assertTrue(result.is_ok())
         self.assertTrue(result.unwrap().locked)
-        self.assertFalse(result.unwrap().pending)
+        self.assertTrue(result.unwrap().pending)
 
 
 # ===============================================================================
@@ -376,17 +376,13 @@ class ROTLDTransferTests(TestCase):
     def test_successful_transfer(self, mock_cache: MagicMock, mock_request: MagicMock) -> None:
         mock_cache.get.side_effect = _cache_get_stub
         mock_request.return_value = _mock_response(
-            201,
-            {
-                "id": "rotld-tx-456",
-                "status": "pending",
-            },
+            200, {"error": 0, "result_code": "00200", "data": {}},
         )
 
         result = self.gateway.initiate_transfer("exemplu.ro", "EPP-CODE")
 
         self.assertTrue(result.is_ok())
-        self.assertEqual(result.unwrap().transfer_id, "rotld-tx-456")
+        self.assertEqual(result.unwrap().transfer_id, "")
 
 
 class ROTLDDomainInfoTests(TestCase):
@@ -402,15 +398,10 @@ class ROTLDDomainInfoTests(TestCase):
         mock_cache.get.return_value = 0
         mock_request.return_value = _mock_response(
             200,
-            {
-                "domain": {
-                    "id": "rotld-123",
-                    "status": "active",
-                    "expire_at": "2028-01-01T00:00:00Z",
-                    "nameservers": [{"hostname": "ns1.rotld.ro"}, {"hostname": "ns2.rotld.ro"}],
-                    "locked": True,
-                },
-            },
+            {"error": 0, "result_code": "00200", "data": {
+                "domain": "exemplu.ro", "expiration_date": "2028-01-01T00:00:00Z",
+                "statuses": ["OK", "TransferProhibited"], "nameservers": ["ns1.rotld.ro", "ns2.rotld.ro"],
+            }},
         )
 
         result = self.gateway.get_domain_info("exemplu.ro")
