@@ -1394,6 +1394,7 @@ class DomainOrderService:
     @staticmethod
     def process_domain_order_items(order: Order) -> list[Domain]:  # noqa: PLR0912  # per-action dispatch with per-outcome handling
         """⚡ Process all domain order items for paid order"""
+        from .operation_services import DomainOperationService  # noqa: PLC0415
 
         processed_domains = []
 
@@ -1478,8 +1479,11 @@ class DomainOrderService:
                     )
 
                     if renewal_result.is_ok():
-                        processed_domains.append(item.domain)
-                        logger.info("✅ [Domain] Processed renewal: %s", item.domain_name)
+                        if DomainOperationService.renewal_completed(item.domain, item.years, f"order_item:{item.pk}"):
+                            processed_domains.append(item.domain)
+                            logger.info("✅ [Domain] Processed renewal: %s", item.domain_name)
+                        else:
+                            logger.info("Domain renewal for order item %s awaits registrar confirmation", item.pk)
                     else:
                         logger.error(
                             "🔥 [Domain] Failed to process renewal %s: %s",

@@ -33,7 +33,9 @@ responses never mean a completed mutation. A bounded same-origin `Location` is
 retained as a reference; the worker never follows it or invents an operations API.
 Domain details, including `dates.registry_ends_at` and the registry status array,
 are the source of truth. Pending, held and unknown statuses do not activate a
-pending domain.
+pending domain. Gandi documents an empty status array for an unrestricted
+domain; it is valid when the remaining domain details validate, unlike a missing
+or malformed status field.
 
 ROTLD uses form POST commands with `command`, `format=json`, `lang=en`, and HTTP
 Digest authentication. The selected historical sandbox API is
@@ -82,7 +84,9 @@ a tokenless legacy caller has one stable intent per duration and must adopt
 explicit tokens for subsequent intentional renewals. A different intent is
 refused while another renewal is unresolved. The paid order item remains
 unprocessed, visibly requiring review/retry after the earlier operation resolves;
-there is no automatic queue of chargeable renewals.
+there is no automatic queue of chargeable renewals. An accepted renewal also
+remains unprocessed until its durable operation is completed; rerunning the order
+task then recognizes completion without submitting another renewal.
 
 A fresh registrar expiry snapshot is committed before renewal dispatch. A failed or interrupted preflight may safely resume the same
 intent because no mutation was dispatched. An atomic dispatch claim prevents two

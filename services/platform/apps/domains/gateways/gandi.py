@@ -258,6 +258,8 @@ class GandiGateway(BaseRegistrarGateway):
             "clientRenewProhibited",
             "serverTransferProhibited",
         }
+        # Gandi documents [] for an unlocked domain: no restriction flags.
+        # Missing/malformed status is rejected above; [] is a valid array.
         status = "unknown" if set(statuses) - known else "pending" if blocked.intersection(statuses) else "active"
         owner = data.get("contacts", {}).get("owner", {}) if isinstance(data.get("contacts", {}), dict) else {}
         return Ok(

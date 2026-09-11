@@ -125,6 +125,16 @@ class RegistrarContractTests(SimpleTestCase):
         self.assertTrue(result.locked)
         self.assertTrue(result.whois_privacy)
 
+    def test_gandi_documented_empty_restriction_list_is_valid(self) -> None:
+        # The official domain-list example includes an unlocked domain with
+        # status: []; these are restriction flags, not a mandatory "active" enum.
+        body = {**FIXTURES["gandi_info"], "status": []}
+        with patch.object(self.gandi, "_api_request", return_value=response(body)):
+            result = self.gandi.get_domain_info("example.com").unwrap()
+        self.assertEqual(result.status, "active")
+        self.assertFalse(result.locked)
+        self.assertEqual(result.registry_statuses, ())
+
     def test_gandi_pending_and_unknown_statuses_do_not_confirm_active(self) -> None:
         for statuses in (["pendingTransfer"], ["clientHold"], ["futureStatus"]):
             body = {**FIXTURES["gandi_info"], "status": statuses}

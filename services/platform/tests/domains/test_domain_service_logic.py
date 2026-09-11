@@ -10,9 +10,12 @@ from django.test import TransactionTestCase
 from apps.billing.models import Currency
 from apps.common.types import Ok as _Ok
 from apps.customers.models import Customer, CustomerAddress, CustomerTaxProfile
+from apps.domains.gateways import DomainInfoResult
 from apps.domains.gateways.gandi import GandiGateway
-from apps.domains.models import TLD, Domain, DomainOrderItem, Registrar, TLDRegistrarAssignment
+from apps.domains.models import TLD, Domain, DomainOperation, DomainOrderItem, Registrar, TLDRegistrarAssignment
+from apps.domains.operation_services import DomainOperationService, renewal_intent_key
 from apps.domains.services import DomainLifecycleService, DomainOrderService, DomainValidationService
+from apps.domains.tasks import process_order_domain_items
 from apps.orders.models import Order
 
 
@@ -97,6 +100,17 @@ class DomainFixtureMixin:
             customer_email=self.customer.primary_email,
             customer_name=self.customer.name,
         )
+
+    def _complete_paid_renewal(self, domain: Domain) -> None:
+        item = DomainOrderItem.objects.get(order=self.order, domain=domain, action="renew")
+        operation = DomainOperation(
+            domain=domain,
+            registrar=domain.registrar,
+            operation_type="renew",
+            intent_key=renewal_intent_key(item.years, f"order_item:{item.pk}"),
+        )
+        operation.mark_completed()
+        operation.save()
 
 
 class DomainServiceLogicTests(DomainFixtureMixin, TransactionTestCase):
@@ -274,9 +288,9 @@ class DomainOrderRenewTransferProcessingTests(DomainFixtureMixin, TransactionTes
         )
         self.assertTrue(success, item)
 
-        with patch.object(
-            DomainLifecycleService, "process_domain_renewal", return_value=_Ok("renewed")
-        ) as mock_renew:
+        self._complete_paid_renewal(domain)
+
+        with patch.object(DomainLifecycleService, "process_domain_renewal", return_value=_Ok("renewed")) as mock_renew:
             processed = DomainOrderService.process_domain_order_items(self.order)
 
         mock_renew.assert_called_once()
@@ -298,8 +312,13 @@ class DomainOrderRenewTransferProcessingTests(DomainFixtureMixin, TransactionTes
 
     def test_process_logs_transfer_instead_of_silent_drop(self) -> None:
         DomainOrderItem.objects.create(
-            order=self.order, domain_name="transfer.ro", tld=self.ro, action="transfer", years=1,
-            unit_price_cents=800, total_price_cents=800,
+            order=self.order,
+            domain_name="transfer.ro",
+            tld=self.ro,
+            action="transfer",
+            years=1,
+            unit_price_cents=800,
+            total_price_cents=800,
         )
 
         with self.assertLogs("apps.domains.services", level="WARNING") as logs:
@@ -311,8 +330,13 @@ class DomainOrderRenewTransferProcessingTests(DomainFixtureMixin, TransactionTes
     def test_process_logs_unhandled_action_instead_of_silent_drop(self) -> None:
         """The catch-all `else` branch — previously claimed covered, but nothing exercised it."""
         DomainOrderItem.objects.create(
-            order=self.order, domain_name="mystery.ro", tld=self.ro, action="teleport", years=1,
-            unit_price_cents=100, total_price_cents=100,
+            order=self.order,
+            domain_name="mystery.ro",
+            tld=self.ro,
+            action="teleport",
+            years=1,
+            unit_price_cents=100,
+            total_price_cents=100,
         )
 
         with self.assertLogs("apps.domains.services", level="ERROR") as logs:
@@ -325,12 +349,17 @@ class DomainOrderRenewTransferProcessingTests(DomainFixtureMixin, TransactionTes
         """One malformed item must not stop the order's valid items from processing."""
         domain = self._owned_domain("valid.ro")
         DomainOrderItem.objects.create(
-            order=self.order, domain_name="mystery.ro", tld=self.ro, action="teleport", years=1,
-            unit_price_cents=100, total_price_cents=100,
+            order=self.order,
+            domain_name="mystery.ro",
+            tld=self.ro,
+            action="teleport",
+            years=1,
+            unit_price_cents=100,
+            total_price_cents=100,
         )
-        DomainOrderService.create_domain_order_item(
-            order=self.order, domain_name="valid.ro", action="renew", years=1
-        )
+        DomainOrderService.create_domain_order_item(order=self.order, domain_name="valid.ro", action="renew", years=1)
+
+        self._complete_paid_renewal(domain)
 
         with (
             self.assertLogs("apps.domains.services", level="ERROR"),
@@ -361,6 +390,8 @@ class DomainOrderRenewTransferProcessingTests(DomainFixtureMixin, TransactionTes
             if domain.pk == first_domain.pk:
                 raise RuntimeError("registrar adapter crashed")
             return _Ok("renewed")
+
+        self._complete_paid_renewal(second_domain)
 
         with (
             self.assertLogs("apps.domains.services", level="ERROR") as logs,
@@ -395,6 +426,8 @@ class DomainOrderRenewTransferProcessingTests(DomainFixtureMixin, TransactionTes
             list(DomainOrderItem.objects.filter(order=self.order).values_list("action", flat=True)),
             ["register", "renew"],
         )
+
+        self._complete_paid_renewal(valid_domain)
 
         with (
             self.assertLogs("apps.domains.services", level="ERROR") as logs,
@@ -469,8 +502,14 @@ class DomainOrderRenewTransferProcessingTests(DomainFixtureMixin, TransactionTes
             name="foreign.ro", tld=self.ro, registrar=self.ro_registrar, customer=other_customer, status="active"
         )
         DomainOrderItem.objects.create(
-            order=self.order, domain_name="foreign.ro", tld=self.ro, action="renew", years=1,
-            unit_price_cents=900, total_price_cents=900, domain=foreign_domain,
+            order=self.order,
+            domain_name="foreign.ro",
+            tld=self.ro,
+            action="renew",
+            years=1,
+            unit_price_cents=900,
+            total_price_cents=900,
+            domain=foreign_domain,
         )
 
         with (
@@ -482,3 +521,29 @@ class DomainOrderRenewTransferProcessingTests(DomainFixtureMixin, TransactionTes
         mock_renew.assert_not_called()
         self.assertEqual(processed, [])
         self.assertTrue(any("refusing to renew" in m for m in logs.output))
+
+    def test_paid_renewal_waits_for_confirmation_then_replays_without_another_charge(self) -> None:
+        domain = self._owned_domain("pending-renewal.ro")
+        domain.expires_at = datetime(2028, 1, 1, tzinfo=UTC)
+        domain.registrar_domain_id = domain.name
+        domain.save()
+        success, item = DomainOrderService.create_domain_order_item(
+            order=self.order, domain_name=domain.name, action="renew", years=1
+        )
+        self.assertTrue(success, item)
+        info = DomainInfoResult(domain.name, domain.name, "active", domain.expires_at, [])
+        with (
+            patch("apps.domains.services.DomainRegistrarGateway.get_domain_info", return_value=_Ok(info)),
+            patch(
+                "apps.domains.services.DomainRegistrarGateway.renew_domain", return_value=(True, {"pending": True})
+            ) as renew,
+        ):
+            pending = process_order_domain_items(str(self.order.pk))
+            self.assertFalse(pending["success"])
+            self.assertEqual(pending["processed"], 0)
+            operation = DomainOperation.objects.get(domain=domain, operation_type="renew")
+            self.assertTrue(DomainOperationService.confirm_renewal(operation, datetime(2029, 1, 1, tzinfo=UTC)))
+            confirmed = process_order_domain_items(str(self.order.pk))
+        self.assertTrue(confirmed["success"])
+        self.assertEqual(confirmed["processed"], 1)
+        self.assertEqual(renew.call_count, 1)

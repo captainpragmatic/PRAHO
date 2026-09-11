@@ -33,6 +33,10 @@ def intent_digest(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
+def renewal_intent_key(years: int, token: str | None) -> str:
+    return intent_digest(f"legacy:{years}" if token is None else f"token:{token}")
+
+
 def require_autocommit() -> bool:
     return connection.get_autocommit() and not connection.in_atomic_block
 
@@ -207,6 +211,17 @@ class DomainOperationService:
                 op.save()
 
     @staticmethod
+    def renewal_completed(domain: Domain, years: int, token: str) -> bool:
+        """Paid-order fulfillment requires confirmation of this exact intent."""
+        return DomainOperation.objects.filter(
+            domain=domain,
+            registrar=domain.registrar,
+            operation_type="renew",
+            intent_key=renewal_intent_key(years, token),
+            state="completed",
+        ).exists()
+
+    @staticmethod
     def _replay_renewal(operation: DomainOperation, years: int) -> Result[str, str]:
         if operation.parameters.get("years") != years:
             return Err("This renewal intent was already used with a different duration.")
@@ -276,7 +291,7 @@ class DomainOperationService:
         if not require_autocommit():
             return Err(TRANSACTION_ERROR)
         # Staff and paid orders supply explicit, stable per-intent tokens.
-        key = intent_digest(f"legacy:{years}" if token is None else f"token:{token}")
+        key = renewal_intent_key(years, token)
         claim = cls._claim_renewal(domain, years, key)
         if claim.is_err():
             return Err(claim.unwrap_err())
