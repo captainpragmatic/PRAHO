@@ -30,6 +30,7 @@ language, then the runtime default. Signed-in users following system defaults
 use those defaults regardless of browser language. Locale activation is scoped
 to the web request and response language headers match the rendered content.
 
+Country labels and new-form defaults follow the active English/Romanian UI language.
 Country settings initialize new forms; they do not rewrite existing addresses.
 Posted country values and explicit initials win. Creation APIs accept the
 country and fall back to the configured default when it is omitted. Partial
@@ -95,6 +96,13 @@ platform settings access and portal API access remain separate.
 4. Run settings consumer-contract, profile/API, formatting, cache, country, and
    cross-service parity tests, plus the full lint/test gates. DCO must pass on
    every PR commit and the squash commit must retain its sign-off.
+
+Browser negotiation deliberately uses Django 5.2's bounded Accept-Language parser.
+The public request helper falls back to the process-wide `LANGUAGE_CODE`, so it
+cannot preserve the runtime-default contract on its own. The isolated import is
+covered by mirrored weighted, malformed, oversized-header, and fallback tests;
+recheck it when upgrading the pinned Django 5.2 dependency. This avoids maintaining
+a separate HTTP parser or changing global settings during a request.
 
 Framework references: [Django language selection](https://docs.djangoproject.com/en/5.2/topics/i18n/translation/#how-django-discovers-language-preference)
 and [Django timezone presentation](https://docs.djangoproject.com/en/5.2/topics/i18n/timezones/).

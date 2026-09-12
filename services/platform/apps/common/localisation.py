@@ -12,6 +12,7 @@ from babel import Locale
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 from django.utils.dateparse import parse_date, parse_datetime
+from django.utils.translation import get_language
 from django.utils.translation import gettext_lazy as _
 
 COUNTRY_CODE_LENGTH = 2
@@ -65,8 +66,8 @@ def normalize_country_code(value: object) -> str:
     return _localized_country_codes().get(str(value or "").strip().casefold(), "")
 
 
-def country_name(code: str, language: str = "en") -> str:
-    return dict(country_choices(language)).get(code, code)
+def country_name(code: str, language: str | None = None) -> str:
+    return dict(country_choices(language or get_language() or "en")).get(code, code)
 
 
 def validate_timezone(value: str) -> None:

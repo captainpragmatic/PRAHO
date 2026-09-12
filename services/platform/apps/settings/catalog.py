@@ -17,9 +17,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from django.utils.functional import lazy
 from django.utils.translation import gettext_lazy as _
 
-from apps.common.localisation import COUNTRIES, DATE_FORMAT_CHOICES, LANGUAGES, TIMEZONES, country_choices
+from apps.common.localisation import COUNTRIES, DATE_FORMAT_CHOICES, LANGUAGES, TIMEZONES, country_name
 
 if TYPE_CHECKING:
     from django.utils.functional import _StrPromise
@@ -141,7 +142,7 @@ CATALOG: tuple[SettingDef, ...] = (
         input_kind="select",
         help_text=_("Initial country for new customer addresses. Existing addresses and tax rules are preserved."),
         validation={"choices": sorted(COUNTRIES)},
-        choice_labels=dict(country_choices()),
+        choice_labels={code: lazy(country_name, str)(code) for code in sorted(COUNTRIES)},
     ),
     SettingDef(
         key="system.timezone",

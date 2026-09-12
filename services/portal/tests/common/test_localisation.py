@@ -10,6 +10,7 @@ from django.utils import timezone, translation
 from apps.common.localisation import (
     DisplayLocalisation,
     LocalisationDefaults,
+    country_name,
     format_localised_date,
     normalize_country_code,
     resolve_display,
@@ -18,6 +19,11 @@ from apps.common.localisation_middleware import LocalisationMiddleware, sync_lan
 
 
 class DisplayLocalisationTests(SimpleTestCase):
+    def test_country_names_follow_the_active_language_and_allow_explicit_language(self):
+        with translation.override("ro"):
+            self.assertEqual(country_name("DE"), "Germania")
+            self.assertEqual(country_name("DE", "en"), "Germany")
+
     def test_country_normalization_excludes_unknown_and_aggregate_regions(self):
         for value in ("ZZ", "Unknown Region", "EU", "European Union", "UN", "QO", "XA", "XB"):
             with self.subTest(value=value):
@@ -100,6 +106,19 @@ class LanguageLocalisationTests(SimpleTestCase):
                 self.request(authenticated=False, HTTP_ACCEPT_LANGUAGE=header)
             )
             self.assertEqual(response.content.decode(), expected)
+
+    def test_browser_quality_and_invalid_headers_preserve_runtime_fallback(self):
+        for header, expected in (
+            ("fr,en;q=0.8,ro;q=0.2", "en"),
+            ("fr,ro;q=0.9,en;q=0.8", "ro"),
+            ("en;q=invalid,ro", "ro"),
+            (",".join(["fr"] * 400) + ",en", "ro"),
+        ):
+            with self.subTest(header=header[:50]):
+                response = LocalisationMiddleware(lambda request: HttpResponse(request.LANGUAGE_CODE))(
+                    self.request(authenticated=False, HTTP_ACCEPT_LANGUAGE=header)
+                )
+                self.assertEqual(response.content.decode(), expected)
 
     def test_signed_in_inheritance_beats_browser_language(self) -> None:
         response = LocalisationMiddleware(lambda request: HttpResponse(request.LANGUAGE_CODE))(

@@ -7,6 +7,11 @@ from django.conf import settings
 from django.http import HttpRequest, HttpResponse
 from django.utils import translation
 from django.utils.cache import patch_vary_headers
+
+# Django 5.2's public request helper hardcodes settings.LANGUAGE_CODE on fallback.
+# Its bounded parser lets unsupported browser languages inherit the runtime default
+# without changing process-wide settings or maintaining a second HTTP parser.
+# Django is pinned to 5.2; mirrored negotiation tests guard upgrades of this import.
 from django.utils.translation.trans_real import parse_accept_lang_header
 
 from apps.common.localisation import LANGUAGES

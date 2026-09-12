@@ -13,6 +13,7 @@ from django.utils.translation import override
 from apps.common.localisation_services import get_localisation_defaults, get_request_localisation
 from apps.customers.forms import CustomerAddressForm, CustomerCreationForm, CustomerEditForm
 from apps.customers.models import CustomerAddress
+from apps.settings.catalog import defs_for_group
 from apps.settings.services import SettingsService
 from apps.users.models import UserProfile
 from tests.factories.core_factories import create_full_customer, create_staff_user
@@ -63,6 +64,15 @@ class LocalisationConsumerTests(TestCase):
         self.assertEqual(CustomerAddressForm(initial={"country": "France"}).initial["country"], "France")
         bound = CustomerAddressForm(data={"country": "Italy"})
         self.assertEqual(bound["country"].value(), "Italy")
+
+    def test_country_labels_and_new_form_defaults_follow_each_request_language(self):
+        self.set_value("system.default_country", "DE")
+        definition = next(item for item in defs_for_group("localisation") if item.key == "system.default_country")
+        label = definition.choice_labels["DE"]
+        for language, expected in (("en", "Germany"), ("ro", "Germania"), ("en", "Germany")):
+            with override(language):
+                self.assertEqual(str(label), expected)
+                self.assertEqual(CustomerCreationForm()["country"].value(), expected)
 
     def test_country_does_not_replace_existing_address(self) -> None:
         self.set_value("system.default_country", "DE")
