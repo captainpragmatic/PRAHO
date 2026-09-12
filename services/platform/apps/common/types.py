@@ -331,31 +331,9 @@ class CurrencyCode(StrEnum):
             return False
 
 
-@dataclass(frozen=True)
-class Money:
-    """Money type with currency support"""
-
-    amount: int  # Store in cents/bani for precision
-    currency: str = "RON"
-
-    def __post_init__(self) -> None:
-        if self.currency not in [c.value for c in CurrencyCode]:
-            raise ValueError(f"Unsupported currency: {self.currency}")
-
-    @classmethod
-    def from_decimal(cls, amount: float, currency: str = "RON") -> Money:
-        """Create Money from decimal amount"""
-        return cls(int(amount * 100), currency)
-
-    def to_decimal(self) -> float:
-        """Get decimal amount"""
-        return self.amount / 100
-
-    def __str__(self) -> str:
-        if self.currency == "RON":
-            return f"{self.to_decimal():.2f} lei"
-        else:
-            return f"{self.currency} {self.to_decimal():.2f}"
+# NOTE: monetary amounts are stored as integer cents/bani on models (ADR-0025).
+# The unused `Money` value object was removed (#103); the `CurrencyCode` enum (above)
+# and the `Currency = str` alias (below) remain in use.
 
 
 # ===============================================================================
