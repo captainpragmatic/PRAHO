@@ -139,13 +139,13 @@ class PreflightCurrencyValidationTests(TestCase):
                 self.assertEqual(data["preview"]["total_cents"], 2975)
 
 
-        # ---------------------------------------------------------------------------
-        # 3. Null server guard
-        # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# 2. Null server guard
+# ---------------------------------------------------------------------------
 
 
-        class NullServerGuardTests(TestCase):
-            """Verify _provision_confirmed_order_item returns error when no server available."""
+class NullServerGuardTests(TestCase):
+    """Verify _provision_confirmed_order_item returns error when no server available."""
 
     def test_no_server_returns_error_dict(self) -> None:
         """When _get_server_for_product_type returns None, provisioning returns error."""

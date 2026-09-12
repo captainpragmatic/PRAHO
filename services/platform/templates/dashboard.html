@@ -191,12 +191,12 @@
                 <div class="text-slate-400 text-sm leading-4">
                   {% if user.is_staff_user %}
                     {% if document.document_type == 'invoice' %}
-                    {% trans 'Invoice' %} #{{ document.number }} - {% localised_date document.created_at "date" %}
+                    {% trans 'Invoice' %} #{{ document.number }} - {{ document.created_at|date:"d.m.Y" }}
                     {% else %}
-                    {% trans 'Proforma' %} #{{ document.number }} - {% localised_date document.created_at "date" %}
+                    {% trans 'Proforma' %} #{{ document.number }} - {{ document.created_at|date:"d.m.Y" }}
                     {% endif %}
                   {% else %}
-                  {% localised_date document.created_at "date" %}
+                  {{ document.created_at|date:"d.m.Y" }}
                   {% endif %}
                 </div>
                 <div class="text-white font-medium text-sm leading-4">

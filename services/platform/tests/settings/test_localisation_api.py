@@ -10,6 +10,7 @@ from rest_framework.test import APIRequestFactory
 from apps.api.customers.serializers import CustomerProfileSerializer
 from apps.api.localisation.views import localisation_defaults
 from apps.api.users.views import customer_profile_api
+from apps.common.performance.rate_limiting import BurstRateThrottle
 from apps.settings.services import SettingsService
 from apps.users.models import UserProfile
 from tests.factories.core_factories import create_staff_user
@@ -27,6 +28,18 @@ class LocalisationAPITests(TestCase):
     def test_defaults_require_hmac_service_authentication(self) -> None:
         response = localisation_defaults(self.request("/api/localisation/", authenticated=False))
         self.assertEqual(response.status_code, 401)
+
+    @override_settings(
+        RATE_LIMITING_ENABLED=True,
+        CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache", "LOCATION": "localisation-throttle"}},
+    )
+    def test_unsigned_traffic_is_ip_throttled_without_blocking_verified_portal(self):
+        with patch.object(BurstRateThrottle, "get_rate", return_value="1/minute"):
+            for expected in (401, 429):
+                response = localisation_defaults(self.request("/api/localisation/", authenticated=False))
+                self.assertEqual(response.status_code, expected)
+            response = localisation_defaults(self.request("/api/localisation/"))
+            self.assertEqual(response.status_code, 200)
 
     def test_defaults_are_allowlisted_and_available_without_user_identity(self) -> None:
         SettingsService.update_setting("system.customer_date_format", "%Y-%m-%d")

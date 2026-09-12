@@ -5,7 +5,8 @@ import os
 from datetime import UTC, datetime
 from unittest.mock import patch
 
-from django.test import SimpleTestCase, TestCase
+from django.template.loader import render_to_string
+from django.test import RequestFactory, SimpleTestCase, TestCase
 from django.utils.translation import override
 
 from apps.audit.services import CustomersAuditService
@@ -30,6 +31,26 @@ class DeploymentLocalisationTests(SimpleTestCase):
 
 
 class FinancialDisplayLocalisationTests(TestCase):
+    @override("en")
+    def test_dashboard_embedded_documents_keep_fixed_dates_for_both_audiences(self):
+        staff = create_staff_user(username="dashboard_locale", staff_role="admin")
+        staff.profile.timezone = "UTC"
+        staff.profile.date_format = "%Y-%m-%d"
+        staff.profile.save()
+        request = RequestFactory().get("/")
+        request.user = staff
+        for is_staff in (True, False):
+            for kind in ("invoice", "proforma"):
+                with self.subTest(is_staff=is_staff, kind=kind):
+                    document = {"id": 1, "document_type": kind, "created_at": datetime(2025, 12, 31, 22, 30, tzinfo=UTC)}
+                    rendered = render_to_string(
+                        "dashboard.html",
+                        {"user": {"is_staff_user": is_staff, "username": "example"}, "recent_documents": [document]},
+                        request=request,
+                    )
+                    self.assertIn("01.01.2026", rendered)
+                    self.assertNotIn("2025-12-31", rendered)
+
     @override("en")
     def test_invoice_page_keeps_the_document_day_and_fixed_format(self):
         staff = create_staff_user(username="financial_locale", staff_role="admin")
