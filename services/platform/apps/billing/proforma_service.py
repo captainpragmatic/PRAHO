@@ -135,7 +135,7 @@ class ProformaService:
 
     @staticmethod
     @transaction.atomic
-    def create_from_order(order: Order) -> Result[Any, str]:
+    def create_from_order(order: Order) -> Result[Any, str]:  # noqa: PLR0915  # #103 admission guard pushed >50
         """Create a proforma invoice from an order, synchronously (DB only, ~20ms).
 
         Why synchronous: proforma creation is a DB-only operation (no PDF, no email).
@@ -143,6 +143,10 @@ class ProformaService:
         This ensures the proforma exists in the same transaction that sets order to awaiting_payment.
         Per F3: must be inside the same transaction, NOT in on_commit callback.
         """
+        from apps.billing.currency_service import (  # noqa: PLC0415  # ADR-0007: deferred billing dependency
+            CurrencyNotIssuableError,
+            assert_currency_issuable,
+        )
         from apps.billing.proforma_models import (  # noqa: PLC0415
             ProformaInvoice as ProformaModel,
         )
@@ -187,6 +191,9 @@ class ProformaService:
 
             # Set currency explicitly from order (F10: never rely on defaults)
             currency = order.currency
+            # #103: fail closed BEFORE writing — a non-RON order with no resolvable FX
+            # rate must not create a proforma that could later strand a payment.
+            assert_currency_issuable(order.currency.code, timezone.localdate())
 
             # Calculate VAT using the same engine as invoices for consistency.
             # H5 fix: Subtract discount_cents from subtotal before VAT calculation so
@@ -303,6 +310,12 @@ class ProformaService:
             )
             return Ok(proforma)
 
+        except CurrencyNotIssuableError as e:
+            # Fail closed: returning Err inside transaction.atomic() would otherwise COMMIT
+            # the already-allocated sequence number. Roll back so no state leaks.
+            transaction.set_rollback(True)
+            logger.warning("⚠️ [Proforma] Currency admission rejected order %s: %s", order.id, e)
+            return Err(str(e))
         except Exception as e:
             logger.exception("🔥 [Proforma] Failed to create proforma from order: %s", e)
             return Err(f"Failed to create proforma from order: {e}")

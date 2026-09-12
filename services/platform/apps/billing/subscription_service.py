@@ -201,7 +201,7 @@ class SubscriptionService:
     """
 
     @staticmethod
-    def create_subscription(
+    def create_subscription(  # noqa: PLR0915  # #103 admission guard pushed >50
         customer: Customer,
         product: Product,
         data: SubscriptionCreateData,
@@ -236,6 +236,17 @@ class SubscriptionService:
                 # subscriptions must retain the paid order's currency snapshot.
                 currency_code = data.get("currency_code", "RON").upper()
                 currency = _resolve_creation_currency(currency_code)
+                # #103: fail closed on a non-RON currency with no resolvable FX rate.
+                from apps.billing.currency_service import (  # noqa: PLC0415  # ADR-0007: deferred billing dependency
+                    CurrencyNotIssuableError,
+                    assert_currency_issuable,
+                )
+
+                try:
+                    assert_currency_issuable(currency.code, timezone.localdate())
+                except CurrencyNotIssuableError as exc:
+                    raise _SubscriptionCreationError(str(exc)) from exc
+
                 service, existing = _resolve_creation_service(
                     customer,
                     product,

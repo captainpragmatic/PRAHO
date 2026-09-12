@@ -533,6 +533,13 @@ class PaymentService:
                 )
 
             resolved_currency = proforma.currency.code
+            # #103: fail closed on the authoritative proforma currency before creating an
+            # intent / returning a client secret (covers new, resumed, and bound attempts).
+            from django.utils import timezone  # noqa: PLC0415
+
+            from apps.billing.currency_service import assert_currency_issuable  # noqa: PLC0415  # ADR-0007
+
+            assert_currency_issuable(resolved_currency, timezone.localdate())
             resolved_order_number = order.order_number
             payment_metadata = {
                 **(metadata or {}),
@@ -1111,6 +1118,14 @@ class PaymentService:
                     client_secret=None,
                     error=f"Proforma {proforma.number} has expired",
                 )
+
+            # #103: fail closed before creating a reservation / dispatching to the gateway
+            # if the proforma's currency has no resolvable FX rate.
+            from django.utils import timezone  # noqa: PLC0415
+
+            from apps.billing.currency_service import assert_currency_issuable  # noqa: PLC0415  # ADR-0007
+
+            assert_currency_issuable(proforma.currency.code, timezone.localdate())
 
             saved_method = (
                 CustomerPaymentMethod.objects.filter(
