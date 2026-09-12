@@ -1,4 +1,4 @@
-{% load i18n %}
+{% load localisation_tags i18n %}
 {% load ui_components %}
 
 {% for reply in replies %}
@@ -31,7 +31,7 @@
 
                 <!-- Timestamp -->
                 <p class="text-slate-400 text-sm" title="{{ reply.created_at|date:'c' }}">
-                    {{ reply.created_at|date:"d.m.Y H:i" }}
+                    {% localised_date reply.created_at "datetime" %}
                 </p>
             </div>
 

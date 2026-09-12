@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load i18n ui_components formatting %}
+{% load localisation_tags i18n ui_components formatting %}
 
 {% block title %}{{ service.service_name }} - {% trans "Service Details" %}{% endblock %}
 
@@ -478,7 +478,7 @@
                       {% badge service.status|status_label variant=service.status|status_variant icon=service.status|status_icon size="xs" rounded="full" %}
                     </div>
                     <div class="text-xs text-slate-400">
-                      {% trans "Last updated" %} {{ service.updated_at|date:"M d, Y H:i" }}
+                      {% trans "Last updated" %} {% localised_date service.updated_at "datetime" %}
                     </div>
                   </div>
 
@@ -489,7 +489,7 @@
                       <div class="w-2 h-2 bg-green-400 rounded-full flex-shrink-0"></div>
                       <div class="flex-1">
                         <div class="text-sm text-white font-medium">{% trans "Service Activated" %}</div>
-                        <div class="text-xs text-slate-400">{{ service.activated_at|date:"M d, Y H:i" }}</div>
+                        <div class="text-xs text-slate-400">{% localised_date service.activated_at "datetime" %}</div>
                       </div>
                     </div>
                     {% endif %}
@@ -498,7 +498,7 @@
                       <div class="w-2 h-2 bg-blue-400 rounded-full flex-shrink-0"></div>
                       <div class="flex-1">
                         <div class="text-sm text-white font-medium">{% trans "Service Created" %}</div>
-                        <div class="text-xs text-slate-400">{{ service.created_at|date:"M d, Y H:i" }}</div>
+                        <div class="text-xs text-slate-400">{% localised_date service.created_at "datetime" %}</div>
                       </div>
                     </div>
                   </div>

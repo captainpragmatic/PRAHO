@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% load i18n %}
+{% load localisation_tags i18n %}
 {% load ui_components %}
 {% load settings_tags %}
 
@@ -64,7 +64,7 @@
 
             {% if consent_status.last_updated %}
             <div class="text-xs text-slate-400 mt-3">
-              {% trans 'Last updated:' %} {{ consent_status.last_updated|date:"M d, Y" }}
+              {% trans 'Last updated:' %} {% localised_date consent_status.last_updated "date" %}
             </div>
             {% endif %}
           </div>
@@ -150,7 +150,7 @@
               <div class="text-sm font-medium text-white">
                 {% trans 'Export' %} #{{ export.id|slice:":8" }}
               </div>
-              <div class="text-xs text-slate-400">{{ export.requested_at|date:"M d, Y H:i" }}</div>
+              <div class="text-xs text-slate-400">{% localised_date export.requested_at "datetime" %}</div>
             </div>
             <div class="flex items-center space-x-2">
               <!-- Status Badge -->
@@ -200,7 +200,7 @@
           {% for change in consent_history %}
           <div class="p-3 bg-slate-700 rounded-lg">
             <div class="text-sm font-medium text-white">{{ change.action }}</div>
-            <div class="text-xs text-slate-400">{{ change.timestamp|date:"M d, Y H:i" }}</div>
+            <div class="text-xs text-slate-400">{% localised_date change.timestamp "datetime" %}</div>
             {% if change.status == 'completed' %}
               {% trans "Completed" as bt_completed %}{% badge bt_completed variant="success" icon="check" %}
             {% endif %}

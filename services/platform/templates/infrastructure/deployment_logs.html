@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% load i18n %}
+{% load localisation_tags i18n %}
 
 {% block title %}{% trans "Logs" %} - {{ deployment.hostname }}{% endblock %}
 
@@ -29,7 +29,7 @@
                 <div class="space-y-2 font-mono text-sm max-h-[70vh] overflow-y-auto">
                     {% for log in logs %}
                     <div class="flex items-start space-x-3 py-2 {% if not forloop.last %}border-b border-slate-700{% endif %}">
-                        <span class="text-slate-500 whitespace-nowrap">{{ log.created_at|date:"Y-m-d H:i:s" }}</span>
+                        <span class="text-slate-500 whitespace-nowrap">{% localised_date log.created_at "datetime_seconds" %}</span>
                         <span class="px-2 py-0.5 rounded text-xs
                             {% if log.level == 'ERROR' %}bg-red-500/20 text-red-400
                             {% elif log.level == 'WARNING' %}bg-yellow-500/20 text-yellow-400

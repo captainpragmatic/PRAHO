@@ -48,7 +48,7 @@
                 <label for="label" class="block text-sm font-medium text-slate-300 mb-2">
                     {% trans "Label (optional)" %}
                 </label>
-                <input type="text" id="label" name="label" maxlength="50"
+                <input type="text" id="label" name="label" value="{{ values.label|default:'' }}" maxlength="50"
                        class="w-full bg-slate-700 border border-slate-600 text-slate-100 text-sm rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent placeholder-slate-500"
                        placeholder="{% trans 'e.g. Home, Office, Warehouse' %}">
             </div>
@@ -58,7 +58,7 @@
                 <label for="address_line1" class="block text-sm font-medium text-slate-300 mb-2">
                     {% trans "Street Address" %} <span class="text-red-400">*</span>
                 </label>
-                <input type="text" id="address_line1" name="address_line1" required
+                <input type="text" id="address_line1" name="address_line1" value="{{ values.address_line1|default:'' }}" required
                        class="w-full bg-slate-700 border border-slate-600 text-slate-100 text-sm rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent placeholder-slate-500"
                        placeholder="{% trans 'Str. Exemplu nr. 1' %}">
             </div>
@@ -68,7 +68,7 @@
                 <label for="address_line2" class="block text-sm font-medium text-slate-300 mb-2">
                     {% trans "Address Line 2" %}
                 </label>
-                <input type="text" id="address_line2" name="address_line2"
+                <input type="text" id="address_line2" name="address_line2" value="{{ values.address_line2|default:'' }}"
                        class="w-full bg-slate-700 border border-slate-600 text-slate-100 text-sm rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent placeholder-slate-500"
                        placeholder="{% trans 'Apartment, suite, floor (optional)' %}">
             </div>
@@ -79,7 +79,7 @@
                     <label for="city" class="block text-sm font-medium text-slate-300 mb-2">
                         {% trans "City" %} <span class="text-red-400">*</span>
                     </label>
-                    <input type="text" id="city" name="city" required
+                    <input type="text" id="city" name="city" value="{{ values.city|default:'' }}" required
                            class="w-full bg-slate-700 border border-slate-600 text-slate-100 text-sm rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent placeholder-slate-500"
                            placeholder="{% trans 'București' %}">
                 </div>
@@ -87,7 +87,7 @@
                     <label for="county" class="block text-sm font-medium text-slate-300 mb-2">
                         {% trans "County" %}
                     </label>
-                    <input type="text" id="county" name="county"
+                    <input type="text" id="county" name="county" value="{{ values.county|default:'' }}"
                            class="w-full bg-slate-700 border border-slate-600 text-slate-100 text-sm rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent placeholder-slate-500"
                            placeholder="{% trans 'București' %}">
                 </div>
@@ -99,7 +99,7 @@
                     <label for="postal_code" class="block text-sm font-medium text-slate-300 mb-2">
                         {% trans "Postal Code" %}
                     </label>
-                    <input type="text" id="postal_code" name="postal_code"
+                    <input type="text" id="postal_code" name="postal_code" value="{{ values.postal_code|default:'' }}"
                            class="w-full bg-slate-700 border border-slate-600 text-slate-100 text-sm rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent font-mono placeholder-slate-500"
                            placeholder="010101">
                 </div>
@@ -109,19 +109,9 @@
                     </label>
                     <select id="country" name="country" required
                             class="w-full bg-slate-700 border border-slate-600 text-slate-100 text-sm rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
-                        <option value="RO" selected>{% trans "Romania" %}</option>
-                        <option value="DE">{% trans "Germany" %}</option>
-                        <option value="FR">{% trans "France" %}</option>
-                        <option value="IT">{% trans "Italy" %}</option>
-                        <option value="ES">{% trans "Spain" %}</option>
-                        <option value="NL">{% trans "Netherlands" %}</option>
-                        <option value="BE">{% trans "Belgium" %}</option>
-                        <option value="AT">{% trans "Austria" %}</option>
-                        <option value="PL">{% trans "Poland" %}</option>
-                        <option value="HU">{% trans "Hungary" %}</option>
-                        <option value="BG">{% trans "Bulgaria" %}</option>
-                        <option value="GB">{% trans "United Kingdom" %}</option>
-                        <option value="US">{% trans "United States" %}</option>
+                        {% for code, label in country_choices %}
+                        <option value="{{ code }}" {% if code == selected_country %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
                     </select>
                 </div>
             </div>

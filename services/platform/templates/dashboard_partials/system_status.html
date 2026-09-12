@@ -1,4 +1,4 @@
-{% load ui_components %}
+{% load localisation_tags ui_components %}
 {% load i18n %}
 
 <div id="system-status-widget">
@@ -30,7 +30,7 @@
 
   <div class="mt-4 pt-4 border-t border-slate-700 flex items-center justify-between">
     <p class="text-slate-400 text-xs">
-      {% trans 'Last update' %}: {{ current_time|date:"d.m.Y H:i" }}
+      {% trans 'Last update' %}: {% localised_date current_time "datetime" %}
     </p>
     <button hx-post="{% url 'system_status_refresh' %}" hx-target="#system-status-widget" hx-swap="innerHTML" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}' hx-indicator="#status-spinner" class="text-xs text-slate-500 hover:text-blue-400 transition-colors">
       <span id="status-spinner" class="htmx-indicator">

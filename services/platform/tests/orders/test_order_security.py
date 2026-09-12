@@ -154,7 +154,7 @@ class OrderCreateCustomerScopingTests(TestCase):
         """The staff preview must quote the same reverse-charge VAT the
         persisted order will carry, not destination-country VAT."""
         Customer.objects.filter(pk=self.customer_a.pk).update(company_name="Accessible GmbH")
-        CustomerAddress.objects.create(
+        address = CustomerAddress.objects.create(
             customer=self.customer_a,
             is_billing=True,
             address_line1="Teststrasse 1",
@@ -182,25 +182,28 @@ class OrderCreateCustomerScopingTests(TestCase):
         )
         self.client.force_login(self.staff)
 
-        with patch(
-            "apps.orders.views._get_accessible_customer_ids",
-            return_value=[self.customer_a.id],
-        ):
-            response = self.client.post(
-                "/orders/create/preview/",
-                {
-                    "customer": str(self.customer_a.id),
-                    "currency": "RON",
-                    "first_product": str(product.id),
-                    "first_billing_period": "monthly",
-                    "first_quantity": "1",
-                },
-            )
+        for country in ("DE", "Germany", "Germania"):
+            with (
+                self.subTest(country=country),
+                patch("apps.orders.views._get_accessible_customer_ids", return_value=[self.customer_a.id]),
+            ):
+                address.country = country
+                address.save(update_fields=["country"])
+                response = self.client.post(
+                    "/orders/create/preview/",
+                    {
+                        "customer": str(self.customer_a.id),
+                        "currency": "RON",
+                        "first_product": str(product.id),
+                        "first_billing_period": "monthly",
+                        "first_quantity": "1",
+                    },
+                )
 
-        self.assertEqual(response.status_code, 200)
-        self.assertFalse(response.context["error"])
-        self.assertEqual(response.context["vat_cents"], 0, "reverse charge must quote 0% VAT")
-        self.assertEqual(response.context["total_cents"], 10_000)
+                self.assertEqual(response.status_code, 200)
+                self.assertFalse(response.context["error"])
+                self.assertEqual(response.context["vat_cents"], 0, "reverse charge must quote 0% VAT")
+                self.assertEqual(response.context["total_cents"], 10_000)
 
 
 class DraftOrderMassAssignmentTests(TestCase):

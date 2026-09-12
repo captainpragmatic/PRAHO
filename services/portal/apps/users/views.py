@@ -12,7 +12,6 @@ from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render, resolve_url
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
-from django.utils.translation import activate
 from django.utils.translation import gettext as _
 from django.views.decorators.cache import never_cache
 from django.views.decorators.csrf import csrf_protect
@@ -25,6 +24,8 @@ from apps.common.decorators import (
     require_authentication,
     require_billing_access,
 )
+from apps.common.localisation_middleware import sync_language_selection
+from apps.common.localisation_services import store_localisation_preferences
 from apps.common.rate_limit_feedback import is_rate_limited_error
 from apps.users.forms import (
     ChangePasswordForm,
@@ -237,6 +238,11 @@ def login_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912, PL
                     # Store in Django session (secure, handled by framework)
                     # Store correct user_id (platform user.id) and primary customer_id separately
                     # Middleware will resolve active_customer_id from accessible customers list
+                    request.session.pop("_language", None)
+                    request.session.pop("localisation_preferences_saved", None)
+                    store_localisation_preferences(
+                        request, auth_response.get("customer_data", {}).get("localisation_preferences")
+                    )
                     request.session["user_id"] = user_id
                     request.session["customer_id"] = customer_id  # Legacy field, prefer active_customer_id
                     request.session["email"] = email
@@ -414,13 +420,17 @@ def _load_profile_form_data(request: HttpRequest, user_id: int) -> CustomerProfi
         profile_data = api_client.get_customer_profile(user_id)
 
         if profile_data:
+            profile_values = profile_data.get("profile", {})
+            preferences = profile_values.get("localisation_preferences", profile_values)
+            store_localisation_preferences(request, preferences)
             return CustomerProfileForm(
                 initial={
                     "first_name": profile_data.get("first_name", ""),
                     "last_name": profile_data.get("last_name", ""),
                     "phone": profile_data.get("phone", ""),
-                    "preferred_language": profile_data.get("profile", {}).get("preferred_language", "en"),
-                    "timezone": profile_data.get("profile", {}).get("timezone", "Europe/Bucharest"),
+                    "preferred_language": preferences.get("preferred_language", ""),
+                    "timezone": preferences.get("timezone", ""),
+                    "date_format": preferences.get("date_format", ""),
                     "email_notifications": profile_data.get("profile", {}).get("email_notifications", True),
                     "sms_notifications": profile_data.get("profile", {}).get("sms_notifications", False),
                     "marketing_emails": profile_data.get("profile", {}).get("marketing_emails", False),
@@ -447,8 +457,9 @@ def _handle_profile_update(
             "first_name": form.cleaned_data["first_name"],
             "last_name": form.cleaned_data["last_name"],
             "phone": form.cleaned_data["phone"],
-            "preferred_language": form.cleaned_data.get("preferred_language", "en"),
-            "timezone": form.cleaned_data.get("timezone", "Europe/Bucharest"),
+            "preferred_language": form.cleaned_data.get("preferred_language", ""),
+            "timezone": form.cleaned_data.get("timezone", ""),
+            "date_format": form.cleaned_data.get("date_format", ""),
             "email_notifications": form.cleaned_data.get("email_notifications", True),
             "sms_notifications": form.cleaned_data.get("sms_notifications", False),
             "marketing_emails": form.cleaned_data.get("marketing_emails", False),
@@ -459,25 +470,12 @@ def _handle_profile_update(
         if result:
             logger.info(f"✅ [Portal Profile] Profile updated for customer {customer_id}")
 
-            # Handle language change
-            new_language = form.cleaned_data.get("preferred_language", "en")
-            current_language = request.session.get("_language", "en")
-
-            if new_language != current_language:
-                request.session["_language"] = new_language
-                # Activate language immediately for this request (same as /i18n/setlang/)
-                activate(new_language)
-                logger.info(
-                    f"✅ [Portal Profile] Language changed from {current_language} to {new_language} for customer {customer_id}"
-                )
-                logger.info(
-                    f"🌐 [Portal Profile] Language activated: {new_language}, Test translation: {_('Language')}"
-                )
-                messages.success(request, _("Profile and language updated successfully!"))
-            else:
-                messages.success(request, _("Profile updated successfully!"))
-
-            return redirect("users:profile")
+            request.session["localisation_preferences_saved"] = True
+            store_localisation_preferences(request, update_data)
+            messages.success(request, _("Profile updated successfully!"))
+            response = redirect("users:profile")
+            sync_language_selection(request, response, str(update_data["preferred_language"]))
+            return response
         else:
             messages.error(request, _("Error updating profile. Please try again."))
 

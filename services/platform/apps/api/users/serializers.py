@@ -4,7 +4,8 @@
 
 import io
 import logging
-from typing import Any, cast
+import re
+from typing import TYPE_CHECKING, Any, cast
 
 import pyotp
 import qrcode
@@ -14,11 +15,17 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 from django.contrib.auth.tokens import default_token_generator
 from django.core.mail import send_mail
+from django.db import transaction
 from django.template.loader import render_to_string
 from django.utils.encoding import force_bytes, force_str
 from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
 from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
+
+from apps.common.localisation import DATE_FORMAT_CHOICES, LANGUAGE_CHOICES
+
+if TYPE_CHECKING:
+    from apps.users.models import User
 
 User = get_user_model()
 
@@ -337,3 +344,47 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
         logger.info(f"✅ [Password Reset] Password reset completed for user: {user.email}")
 
         return {"success": True, "message": "Password reset successfully. You can now login with your new password."}
+
+
+class ProfileUpdateSerializer(serializers.Serializer):
+    """Validate the entire profile update before either user or profile is saved."""
+
+    first_name = serializers.CharField(required=False, allow_blank=True, max_length=30)
+    last_name = serializers.CharField(required=False, allow_blank=True, max_length=30)
+    phone = serializers.CharField(required=False, allow_blank=True, max_length=20)
+    preferred_language = serializers.ChoiceField(choices=LANGUAGE_CHOICES, required=False, allow_blank=True)
+    timezone = serializers.CharField(required=False, allow_blank=True, max_length=50)
+    date_format = serializers.ChoiceField(choices=DATE_FORMAT_CHOICES, required=False, allow_blank=True)
+    email_notifications = serializers.BooleanField(required=False)
+    sms_notifications = serializers.BooleanField(required=False)
+    marketing_emails = serializers.BooleanField(required=False)
+
+    def validate_phone(self, value: str) -> str:
+        """Keep the same phone contract across both profile endpoints."""
+        if value and not re.match(r"^(\+40[\s\.]?[0-9][\s\.0-9]{8,11}[0-9]|0[0-9]{9})$", value):
+            raise serializers.ValidationError(_("Invalid Romanian phone number format."))
+        return value
+
+    def validate_timezone(self, value: str) -> str:
+        from apps.common.localisation import validate_timezone  # noqa: PLC0415
+
+        validate_timezone(value)
+        return value
+
+    def update(self, instance: "User", validated_data: dict[str, Any]) -> "User":
+        from apps.users.models import UserProfile  # noqa: PLC0415  # Runtime cross-app dependency
+
+        with transaction.atomic():
+            profile, _created = UserProfile.objects.get_or_create(user=instance)
+            user_fields = {"first_name", "last_name", "phone"}
+            for key, value in validated_data.items():
+                setattr(instance if key in user_fields else profile, key, value)
+            changed_user_fields = sorted(user_fields.intersection(validated_data))
+            if changed_user_fields:
+                instance.save(update_fields=changed_user_fields)
+            changed_profile_fields = sorted(set(validated_data).difference(user_fields))
+            if changed_profile_fields:
+                profile.save(update_fields=[*changed_profile_fields, "updated_at"])
+        # Replace any previously cached reverse relation before serializing the response.
+        instance.profile = profile
+        return instance

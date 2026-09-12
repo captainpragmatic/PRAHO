@@ -22,6 +22,7 @@ from rest_framework.response import Response
 
 from apps.api.secure_auth import public_api_endpoint, require_customer_authentication
 from apps.billing.models import Currency
+from apps.common.localisation import normalize_country_code
 from apps.common.performance.rate_limiting import (
     EndpointRateThrottle,
     PortalHMACBurstThrottle,
@@ -53,7 +54,6 @@ from .serializers import (
 logger = logging.getLogger(__name__)
 
 # Constants
-ISO_COUNTRY_CODE_LENGTH = 2
 IDEMPOTENCY_KEY_MIN_LENGTH = 16
 IDEMPOTENCY_KEY_MAX_LENGTH = 64
 
@@ -290,9 +290,7 @@ def calculate_cart_totals(  # noqa: PLR0915  # Complexity: multi-step business l
 
         # Use the same current billing address and tax profile as order creation.
         billing_address = OrderService.build_billing_address_from_customer(customer)
-        customer_country = str(billing_address.get("country") or "RO").upper().strip()
-        if len(customer_country) != ISO_COUNTRY_CODE_LENGTH:
-            customer_country = "RO"
+        customer_country = normalize_country_code(billing_address.get("country")) or "RO"
         vat_number = str(billing_address.get("vat_number") or "")
         is_business = bool(billing_address.get("company_name")) or bool(vat_number)
 
@@ -384,7 +382,7 @@ def _resolve_currency(raw_code: object) -> tuple[Currency | None, Response | Non
 @permission_classes([AllowAny])  # No permissions required (auth handled by secure_auth)
 @throttle_classes([PortalHMACRateThrottle, PortalHMACBurstThrottle, OrderCalculateThrottle])
 @require_customer_authentication
-def preflight_order(  # noqa: PLR0911, PLR0912, PLR0915  # Complexity: multi-step business logic
+def preflight_order(  # noqa: PLR0911, PLR0915  # Complexity: multi-step business logic
     request: Request, customer: Customer
 ) -> Response:  # Complexity: order processing pipeline  # Complexity: multi-step business logic
     """
@@ -504,16 +502,7 @@ def preflight_order(  # noqa: PLR0911, PLR0912, PLR0915  # Complexity: multi-ste
         # Calculate VAT using the VAT calculator
         company_name = billing_address.get("company_name", "")
         vat_number = billing_address.get("vat_number", "")
-        country_raw = billing_address.get("country", "România")
-
-        # Normalize country name to ISO code for VAT calculation - DEFAULT TO RO for compliance
-        if country_raw in ["România", "Romania", "RO", ""] or not country_raw:
-            country = "RO"
-        else:
-            country = country_raw.upper().strip()
-            # If country code looks invalid, default to RO for compliance
-            if len(country) != ISO_COUNTRY_CODE_LENGTH:
-                country = "RO"
+        country = normalize_country_code(billing_address.get("country")) or "RO"
         is_business = bool(company_name) or bool(vat_number)
 
         logger.info(

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load ui_components %}
+{% load localisation_tags ui_components %}
 {% load i18n %}
 
 {% block title %}{{ page_title }} - {% trans "Backup Status" %}{% endblock %}
@@ -63,12 +63,12 @@
                         </div>
                         <div>
                             <dt class="text-sm font-medium text-slate-400">{% trans "Started" %}</dt>
-                            <dd class="mt-1 text-sm text-slate-100">{{ job.started_at|date:"M d, Y H:i:s" }}</dd>
+                            <dd class="mt-1 text-sm text-slate-100">{% localised_date job.started_at "datetime_seconds" %}</dd>
                         </div>
                         {% if job.completed_at %}
                         <div>
                             <dt class="text-sm font-medium text-slate-400">{% trans "Completed" %}</dt>
-                            <dd class="mt-1 text-sm text-slate-100">{{ job.completed_at|date:"M d, Y H:i:s" }}</dd>
+                            <dd class="mt-1 text-sm text-slate-100">{% localised_date job.completed_at "datetime_seconds" %}</dd>
                         </div>
                         {% endif %}
                         {% if job.parameters %}
@@ -101,7 +101,7 @@
                         </div>
                         <div class="ml-3">
                             <p class="text-sm font-medium text-slate-100">{% trans "Job Created" %}</p>
-                            <p class="text-xs text-slate-400">{{ job.started_at|date:"H:i:s" }}</p>
+                            <p class="text-xs text-slate-400">{% localised_date job.started_at "time_seconds" %}</p>
                         </div>
                     </div>
 
@@ -168,7 +168,7 @@
                         </div>
                         <div class="ml-3">
                             <p class="text-sm font-medium text-slate-100">{% trans "Job Created" %}</p>
-                            <p class="text-xs text-slate-400">{{ job.started_at|date:"H:i:s" }}</p>
+                            <p class="text-xs text-slate-400">{% localised_date job.started_at "time_seconds" %}</p>
                         </div>
                     </div>
 

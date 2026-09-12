@@ -26,10 +26,7 @@
     <script src="{% static 'js/htmx.min.js' %}"></script>
     <script defer src="{% static 'js/alpine-shared-components.js' %}"></script>
     <script defer src="{% static 'js/alpine-components.js' %}"></script>
-    {# @alpinejs/csp build (no new-Function evaluator) — the portal runs WITHOUT
-       'unsafe-eval'; expressions must stay within the CSP grammar and components
-       are registered via Alpine.data in the two alpine-*components.js files above.
-       Platform keeps the standard build (its CSP retains eval). #}
+    {# CSP build: register components via Alpine.data; avoid eval-based expressions. #}
     <script defer src="{% static 'js/alpine-csp.min.js' %}"></script>
     <script src="{% static 'js/components/modal.js' %}"></script>
     <script src="{% static 'js/ui-actions.js' %}"></script>

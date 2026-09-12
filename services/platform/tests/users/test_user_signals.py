@@ -274,8 +274,8 @@ class SignalIntegrationTest(TestCase):
         profile = user.profile
 
         # Check profile defaults
-        self.assertEqual(profile.preferred_language, 'en')
-        self.assertEqual(profile.timezone, 'Europe/Bucharest')
+        self.assertEqual(profile.preferred_language, '')
+        self.assertEqual(profile.timezone, '')
         self.assertTrue(profile.email_notifications)
 
         # Update user and check profile is saved
@@ -433,7 +433,7 @@ class SignalDisconnectionTest(TestCase):
 
             # Profile should not be saved automatically
             profile.refresh_from_db()
-            self.assertEqual(profile.preferred_language, 'en')  # Original value
+            self.assertEqual(profile.preferred_language, '')  # Original value
 
             # But we can save profile manually
             profile.preferred_language = 'ro'

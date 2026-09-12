@@ -1,10 +1,10 @@
-{% load static %}
+{% load localisation_tags static %}
 {% load i18n %}
 {% load ui_components %}
 {% load formatting %}
 
 {% if export_requests %}
-    {% for request in export_requests %}
+    {% for export_request in export_requests %}
         <!-- GDPR Export Request Card -->
         <div class="bg-slate-800 border border-slate-700 rounded-lg overflow-hidden hover:border-slate-600 transition-colors group">
             <div class="p-4">
@@ -13,67 +13,67 @@
                     <div class="flex-1 min-w-0">
                         <div class="flex items-center space-x-2 mb-2 flex-wrap">
                             <!-- Status Badge -->
-                            {% if request.status == 'pending' %}
+                            {% if export_request.status == 'pending' %}
                                 {% trans "Pending" as bt1 %}{% badge bt1 icon="clock" variant="warning" size="sm" %}
-                            {% elif request.status == 'processing' %}
+                            {% elif export_request.status == 'processing' %}
                                 {% trans "Processing" as bt2 %}{% badge bt2 icon="settings" variant="info" size="sm" %}
-                            {% elif request.status == 'completed' %}
-                                {% if current_time > request.expires_at %}
+                            {% elif export_request.status == 'completed' %}
+                                {% if current_time > export_request.expires_at %}
                                     {% trans "Expired" as bt3 %}{% badge bt3 variant="danger" size="sm" %}
                                 {% else %}
                                     {% trans "Completed" as bt4 %}{% badge bt4 icon="check" variant="success" size="sm" %}
                                 {% endif %}
-                            {% elif request.status == 'failed' %}
+                            {% elif export_request.status == 'failed' %}
                                 {% trans "Failed" as bt5 %}{% badge bt5 icon="x" variant="danger" size="sm" %}
                             {% endif %}
 
                             <!-- Export Type -->
-                            {% badge request.export_type|upper variant="secondary" size="xs" %}
+                            {% badge export_request.export_type|upper variant="secondary" size="xs" %}
 
                             <!-- User Info -->
-                            <span class="text-blue-400 text-sm font-medium">{{ request.requested_by_display }}</span>
+                            <span class="text-blue-400 text-sm font-medium">{{ export_request.requested_by_display }}</span>
 
                             <!-- Timestamp -->
                             <span class="text-slate-500">•</span>
-                            <span class="text-slate-400 text-sm" title="{{ request.requested_at|date:'Y-m-d H:i:s' }}">
-                                {{ request.requested_at|timesince }} {% trans "ago" %}
+                            <span class="text-slate-400 text-sm" title="{% localised_date export_request.requested_at "datetime_seconds" %}">
+                                {{ export_request.requested_at|timesince }} {% trans "ago" %}
                             </span>
                         </div>
 
                         <!-- Export Scope Info -->
                         <div class="text-white font-medium text-sm mb-1">
-                            {% trans "Export ID:" %} {{ request.id|slice:":8" }}...
-                            {% if request.record_count %}
-                                ({{ request.record_count }} {% trans "records" %})
+                            {% trans "Export ID:" %} {{ export_request.id|slice:":8" }}...
+                            {% if export_request.record_count %}
+                                ({{ export_request.record_count }} {% trans "records" %})
                             {% endif %}
                         </div>
 
                         <!-- File and Size Info -->
                         <div class="text-xs text-slate-400 space-x-3 flex flex-wrap items-center">
-                            {% if request.file_size %}
-                                <span class="text-slate-300">{% icon "folder" %} {{ request.file_size|filesizeformat }}</span>
+                            {% if export_request.file_size %}
+                                <span class="text-slate-300">{% icon "folder" %} {{ export_request.file_size|filesizeformat }}</span>
                             {% endif %}
 
-                            {% if request.download_count > 0 %}
-                                <span class="text-slate-300">{% icon "download" %} {{ request.download_count }} {% trans "download" %}{% if request.download_count != 1 %}s{% endif %}</span>
+                            {% if export_request.download_count > 0 %}
+                                <span class="text-slate-300">{% icon "download" %} {{ export_request.download_count }} {% trans "download" %}{% if export_request.download_count != 1 %}s{% endif %}</span>
                             {% endif %}
 
-                            {% if request.status == 'completed' %}
-                                <span class="{% if current_time > request.expires_at %}text-red-400{% else %}text-green-400{% endif %}">
-                                    {% icon "clock" %} {% trans "Expires:" %} {{ request.expires_at|date:"M d, Y H:i" }}
+                            {% if export_request.status == 'completed' %}
+                                <span class="{% if current_time > export_request.expires_at %}text-red-400{% else %}text-green-400{% endif %}">
+                                    {% icon "clock" %} {% trans "Expires:" %} {% localised_date export_request.expires_at "datetime" %}
                                 </span>
                             {% endif %}
 
-                            {% if request.error_message %}
-                                <span class="text-red-400">{% icon "x" %} {{ request.error_message|truncatewords:8 }}</span>
+                            {% if export_request.error_message %}
+                                <span class="text-red-400">{% icon "x" %} {{ export_request.error_message|truncatewords:8 }}</span>
                             {% endif %}
                         </div>
 
                         <!-- Export Scope Details -->
-                        {% if request.scope %}
+                        {% if export_request.scope %}
                         <div class="mt-2 text-xs text-slate-500">
                             <strong>{% trans "Scope:" %}</strong>
-                            {% for key, value in request.scope.items %}
+                            {% for key, value in export_request.scope.items %}
                                 {% if value %}
                                     <span class="inline-block bg-slate-700 px-2 py-1 rounded mr-1 mb-1">{{ key|title }}</span>
                                 {% endif %}
@@ -86,11 +86,11 @@
                     <div class="flex flex-col space-y-1 ml-4">
                         <!-- Expand/Details Button -->
                         <button class="text-slate-400 hover:text-white transition-colors expand-btn"
-                                hx-get="{% url 'audit:gdpr_export_detail' request.id %}"
-                                hx-target="#export-detail-{{ request.id }}"
+                                hx-get="{% url 'audit:gdpr_export_detail' export_request.id %}"
+                                hx-target="#export-detail-{{ export_request.id }}"
                                 hx-swap="innerHTML"
-                                hx-indicator="#export-detail-{{ request.id }}-loading"
-                                data-action="invoke" data-invoke="toggleExportDetailAction" data-request-id="{{ request.id }}"
+                                hx-indicator="#export-detail-{{ export_request.id }}-loading"
+                                data-action="invoke" data-invoke="toggleExportDetailAction" data-request-id="{{ export_request.id }}"
                                 title="{% trans 'View Details' %}">
                             <svg class="w-5 h-5 transform transition-transform duration-200 chevron-icon"
                                  fill="none"
@@ -105,24 +105,24 @@
 
                         <!-- Quick Actions -->
                         <div class="flex flex-col space-y-1">
-                            {% if request.status == 'pending' %}
-                                <form method="post" action="{% url 'audit:process_export_request' request.id %}" class="inline">
+                            {% if export_request.status == 'pending' %}
+                                <form method="post" action="{% url 'audit:process_export_request' export_request.id %}" class="inline">
                                     {% csrf_token %}
                                     <input type="hidden" name="action" value="process_now">
                                     {% trans "" as bt6 %}{% button bt6 variant="success" size="xs" type="submit" title="Process Now" %}
                                 </form>
-                            {% elif request.status == 'completed' and current_time <= request.expires_at %}
-                                {% trans "" as bt7 %}{% button bt7 variant="primary" size="xs" href="/app/audit/gdpr_management/download/"|add:request.id|add:"/" title="Download Export" %}
-                            {% elif request.status == 'completed' and current_time > request.expires_at %}
-                                <form method="post" action="{% url 'audit:process_export_request' request.id %}" class="inline">
+                            {% elif export_request.status == 'completed' and current_time <= export_request.expires_at %}
+                                {% trans "" as bt7 %}{% button bt7 variant="primary" size="xs" href="/app/audit/gdpr_management/download/"|add:export_request.id|add:"/" title="Download Export" %}
+                            {% elif export_request.status == 'completed' and current_time > export_request.expires_at %}
+                                <form method="post" action="{% url 'audit:process_export_request' export_request.id %}" class="inline">
                                     {% csrf_token %}
                                     <input type="hidden" name="action" value="delete_expired">
                                     {% trans "Delete this expired export?" as confirm_delete %}
                                     {% trans "" as bt8 %}{% button bt8 variant="danger" size="xs" type="submit" hx_confirm=confirm_delete title="Delete Expired" %}
                                 </form>
-                            {% elif request.status == 'processing' %}
+                            {% elif export_request.status == 'processing' %}
                                 <span class="text-blue-400 text-xs animate-pulse">{% icon "settings" %}</span>
-                            {% elif request.status == 'failed' %}
+                            {% elif export_request.status == 'failed' %}
                                 <span class="text-red-400 text-xs">{% icon "x" %}</span>
                             {% endif %}
                         </div>
@@ -130,9 +130,9 @@
                 </div>
 
                 <!-- Expandable Details -->
-                <div id="export-detail-{{ request.id }}" class="mt-4 pt-4 border-t border-slate-700 hidden export-details">
+                <div id="export-detail-{{ export_request.id }}" class="mt-4 pt-4 border-t border-slate-700 hidden export-details">
                     <!-- Loading indicator will be shown here -->
-                    <div id="export-detail-{{ request.id }}-loading" class="htmx-indicator">
+                    <div id="export-detail-{{ export_request.id }}-loading" class="htmx-indicator">
                         <div class="flex items-center justify-center py-4">
                             {% spinner size="sm" color="blue" %}
                             <span class="ml-2 text-sm text-slate-400">{% trans "Loading details..." %}</span>

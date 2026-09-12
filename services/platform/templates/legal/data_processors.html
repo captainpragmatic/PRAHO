@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load i18n %}
+{% load localisation_tags i18n %}
 {% load settings_tags %}
 
 {% block title %}{% trans "Third-Party Data Processors" %} - PRAHO Platform{% endblock %}
@@ -10,7 +10,7 @@
     <div class="mb-8">
         <h1 class="text-3xl font-bold text-white mb-2">{% trans "Third-Party Data Processors" %}</h1>
         <p class="text-slate-400">
-            {% trans "Last updated" %}: {{ last_updated|date:"F j, Y" }}
+            {% trans "Last updated" %}: {% localised_date last_updated "date" %}
         </p>
     </div>
 

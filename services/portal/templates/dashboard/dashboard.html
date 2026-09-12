@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% load i18n %}
+{% load localisation_tags i18n %}
 {% load ui_components formatting %}
 
 {% block title %}{% trans 'Dashboard' %} - PRAHO Portal{% endblock %}
@@ -142,7 +142,7 @@
               </div>
               <div class="flex items-center justify-between mt-1">
                 <div class="text-slate-400 text-sm leading-4">
-                  {{ ticket.created_at|date:"d.m.Y" }}
+                  {% localised_date ticket.created_at "date" %}
                 </div>
                 <div class="text-slate-400 text-sm leading-4">
                   #{{ ticket.ticket_number|default:ticket.id }}
@@ -209,7 +209,7 @@
 
           <div class="flex items-center justify-between">
             <span class="text-slate-300">{% trans 'Customer Since' %}</span>
-            <span class="text-white">{{ primary_customer.created_at|date:"M Y" }}</span>
+            <span class="text-white">{% localised_date primary_customer.created_at "month_year" %}</span>
           </div>
           {% endif %}
           {% endwith %}

@@ -1,4 +1,4 @@
-{% load i18n %}
+{% load localisation_tags i18n %}
 {% load ui_components %}
 
 <!-- Status Card -->
@@ -54,7 +54,7 @@
         </div>
         <div>
             <p class="text-slate-400 text-sm">{% trans 'Created At' %}:</p>
-            <p class="text-white font-medium">{{ ticket.created_at|date:"d.m.Y H:i" }}</p>
+            <p class="text-white font-medium">{% localised_date ticket.created_at "datetime" %}</p>
         </div>
         <div>
             <p class="text-slate-400 text-sm">{% trans 'Created By' %}:</p>

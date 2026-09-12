@@ -1,4 +1,4 @@
-{% load i18n %}
+{% load localisation_tags i18n %}
 <div class="bg-slate-800 rounded-lg border border-slate-700 p-5">
   <div class="flex items-center justify-between mb-3">
     <h3 class="text-sm font-semibold text-white">🕘 {% trans "History" %} — <code class="font-mono text-blue-300">{{ definition.key }}</code></h3>
@@ -17,7 +17,7 @@
         </div>
         <div class="text-xs text-slate-500 whitespace-nowrap">
           {% if event.user %}{{ event.user.email }} ·{% endif %}
-          {{ event.timestamp|date:"Y-m-d H:i" }}
+          {% localised_date event.timestamp "datetime" %}
         </div>
       </div>
       {% if event.metadata.reason %}

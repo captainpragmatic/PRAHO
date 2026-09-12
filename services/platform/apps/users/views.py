@@ -21,7 +21,7 @@ from django.contrib.auth.views import (
     PasswordResetDoneView,
     PasswordResetView,
 )
-from django.db import models
+from django.db import models, transaction
 from django.db.models import QuerySet
 from django.forms import Form
 from django.http import HttpRequest, HttpResponse, HttpResponseBase, JsonResponse
@@ -762,31 +762,27 @@ def user_profile(request: HttpRequest) -> HttpResponse:
     profile, _created = UserProfile.objects.get_or_create(user=user)
 
     if request.method == "POST":
-        # Handle language change if present
-        if "language" in request.POST:
-            selected_language = request.POST.get("language")
-            # Set the language in session
-            session_key = getattr(settings, "LANGUAGE_SESSION_KEY", "django_language")
-            request.session[session_key] = selected_language
-
-            # Also set the cookie for future requests
-            cookie_name = getattr(settings, "LANGUAGE_COOKIE_NAME", "django_language")
-            response = redirect("users:user_profile")
-            response.set_cookie(
-                cookie_name,
-                selected_language or "",
-                max_age=365 * 24 * 60 * 60,  # 1 year
-                httponly=True,
-                samesite="Lax",
-                secure=request.is_secure(),
-            )
-            return response
-
-        form = UserProfileForm(request.POST, instance=profile)
+        form_data = request.POST.copy()
+        if "language" in form_data and "preferred_language" not in form_data:
+            form_data["preferred_language"] = form_data["language"]
+        # The staff page renders personal/localisation fields only. Preserve hidden
+        # notification and emergency-contact preferences on these partial submissions.
+        for field in UserProfileForm.Meta.fields:
+            if field not in form_data:
+                form_data[field] = getattr(profile, field)
+        for field in ("first_name", "last_name", "phone"):
+            if field not in form_data:
+                form_data[field] = getattr(user, field)
+        form = UserProfileForm(form_data, instance=profile)
         if form.is_valid():
-            form.save()
+            from apps.common.localisation_middleware import sync_language_selection  # noqa: PLC0415
+
+            with transaction.atomic():
+                form.save()
             messages.success(request, _("Profile updated successfully."))
-            return redirect("users:user_profile")
+            response = redirect("users:user_profile")
+            sync_language_selection(request, response, profile.preferred_language)
+            return response
     else:
         form = UserProfileForm(instance=profile)
 

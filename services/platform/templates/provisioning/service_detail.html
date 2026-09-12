@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% load i18n %}
+{% load localisation_tags i18n %}
 {% load ui_components %}
 {% load formatting %}
 
@@ -36,13 +36,13 @@
                 <div class="flex flex-wrap items-center text-slate-400 text-sm mt-2 space-x-2">
                     <span class="flex items-center">
                         <span class="mr-1">{% icon "calendar" size="sm" %}</span>
-                        {{ service.created_at|date:"d.m.Y H:i" }}
+                        {% localised_date service.created_at "datetime" %}
                     </span>
                     {% if service.updated_at != service.created_at %}
                         <span class="text-slate-500">•</span>
                         <span class="flex items-center">
                             <span class="mr-1">{% icon "clock" size="sm" %}</span>
-                            {{ service.updated_at|date:"d.m.Y H:i" }}
+                            {% localised_date service.updated_at "datetime" %}
                         </span>
                     {% endif %}
                     {% if service.provisioning_task_id %}
@@ -91,7 +91,7 @@
                     </p>
                     {% if service.last_provisioning_attempt %}
                     <p class="text-xs text-red-400 mt-1">
-                        {% trans 'Last attempt:' %} {{ service.last_provisioning_attempt|date:"d.m.Y H:i" }}
+                        {% trans 'Last attempt:' %} {% localised_date service.last_provisioning_attempt "datetime" %}
                     </p>
                     {% endif %}
                 </div>
@@ -318,7 +318,7 @@
                                 {% elif service.status == 'cancelled' %}{% trans 'Cancelled' %}
                                 {% else %}{{ service.status|title }}{% endif %}
                             </p>
-                            <p class="text-slate-400 text-sm">{% trans 'Last updated' %} {{ service.updated_at|date:"d.m.Y H:i" }}</p>
+                            <p class="text-slate-400 text-sm">{% trans 'Last updated' %} {% localised_date service.updated_at "datetime" %}</p>
                         </div>
                     </div>
 
@@ -329,7 +329,7 @@
                         </div>
                         <div>
                             <p class="text-white font-medium">{% trans 'Service Created' %}</p>
-                            <p class="text-slate-400 text-sm">{{ service.created_at|date:"d.m.Y H:i" }}</p>
+                            <p class="text-slate-400 text-sm">{% localised_date service.created_at "datetime" %}</p>
                         </div>
                     </div>
                 </div>
