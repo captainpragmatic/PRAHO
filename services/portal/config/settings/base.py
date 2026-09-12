@@ -50,7 +50,6 @@ MIDDLEWARE: list[str] = [
     # 🔒 SECURITY: API rate limiting after sessions (cart limits need session key)
     "apps.common.rate_limiting.APIRateLimitMiddleware",  # API + cart session rate limiting
     "django.middleware.locale.LocaleMiddleware",  # After sessions
-    "apps.users.middleware.SessionLanguageMiddleware",  # Activate session language
     "django.middleware.common.CommonMiddleware",  # After locale
     "django.middleware.csrf.CsrfViewMiddleware",  # CSRF protection
     "django.contrib.messages.middleware.MessageMiddleware",  # Messages support
@@ -62,6 +61,7 @@ MIDDLEWARE: list[str] = [
     "apps.common.middleware.CSPNonceMiddleware",
     "apps.common.middleware.SecurityHeadersMiddleware",
     "apps.users.middleware.PortalAuthenticationMiddleware",  # Portal validation
+    "apps.common.localisation_middleware.LocalisationMiddleware",
 ]
 
 ROOT_URLCONF = "config.urls"

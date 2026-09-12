@@ -19,6 +19,8 @@ from typing import TYPE_CHECKING, Any
 
 from django.utils.translation import gettext_lazy as _
 
+from apps.common.localisation import COUNTRIES, DATE_FORMAT_CHOICES, LANGUAGES, TIMEZONES, country_choices
+
 if TYPE_CHECKING:
     from django.utils.functional import _StrPromise
 
@@ -61,6 +63,7 @@ class SettingDef:
     requires_restart: bool = False
     advanced: bool = False
     validation: dict[str, Any] | None = field(default=None, hash=False)
+    choice_labels: dict[str, LazyLabel] = field(default_factory=dict, hash=False)
 
 
 GROUPS: tuple[GroupDef, ...] = (
@@ -82,6 +85,7 @@ GROUPS: tuple[GroupDef, ...] = (
     ),
     GroupDef("domains", ZONE_BUSINESS, _("Domains"), _("Expiry notices and domain add-on pricing")),
     GroupDef("customers", ZONE_BUSINESS, _("Customers & Credit"), _("Credit scoring and engagement weighting")),
+    GroupDef("localisation", ZONE_BUSINESS, _("Localisation"), _("Language, country, timezone, and web date defaults")),
     GroupDef("support", ZONE_BUSINESS, _("Support"), _("Ticket attachment policy")),
     GroupDef("security", ZONE_BUSINESS, _("Security & Access"), _("Session timeouts and access policy")),
     GroupDef("stripe", ZONE_INTEGRATIONS, _("Stripe"), _("Payment gateway credentials and state")),
@@ -115,6 +119,67 @@ GROUPS_BY_SLUG: dict[str, GroupDef] = {g.slug: g for g in GROUPS}
 
 
 CATALOG: tuple[SettingDef, ...] = (
+    SettingDef(
+        key="system.default_language",
+        data_type="string",
+        default="en",
+        group="localisation",
+        section=_("Defaults"),
+        label=_("Default language"),
+        input_kind="select",
+        help_text=_("Language for users who follow the system default and visitors without a language preference."),
+        validation={"choices": sorted(LANGUAGES)},
+        choice_labels={"en": _("English"), "ro": _("Romanian")},
+    ),
+    SettingDef(
+        key="system.default_country",
+        data_type="string",
+        default="RO",
+        group="localisation",
+        section=_("Defaults"),
+        label=_("Default country"),
+        input_kind="select",
+        help_text=_("Initial country for new customer addresses. Existing addresses and tax rules are preserved."),
+        validation={"choices": sorted(COUNTRIES)},
+        choice_labels=dict(country_choices()),
+    ),
+    SettingDef(
+        key="system.timezone",
+        data_type="string",
+        default="Europe/Bucharest",
+        group="localisation",
+        section=_("Defaults"),
+        label=_("Display timezone"),
+        input_kind="select",
+        help_text=_(
+            "Timezone for web timestamps when a user follows the system default. Accounting dates keep their existing rules."
+        ),
+        validation={"choices": sorted(TIMEZONES)},
+    ),
+    SettingDef(
+        key="system.staff_date_format",
+        data_type="string",
+        default="%d.%m.%Y",
+        group="localisation",
+        section=_("Date display"),
+        label=_("Staff date format"),
+        input_kind="select",
+        help_text=_("Default date format on staff web pages. Times use the 24-hour clock."),
+        validation={"choices": [value for value, label in DATE_FORMAT_CHOICES]},
+        choice_labels=dict(DATE_FORMAT_CHOICES),
+    ),
+    SettingDef(
+        key="system.customer_date_format",
+        data_type="string",
+        default="%d.%m.%Y",
+        group="localisation",
+        section=_("Date display"),
+        label=_("Customer date format"),
+        input_kind="select",
+        help_text=_("Default date format on customer web pages. Portal changes appear within one minute."),
+        validation={"choices": [value for value, label in DATE_FORMAT_CHOICES]},
+        choice_labels=dict(DATE_FORMAT_CHOICES),
+    ),
     SettingDef(
         key="audit.compliant_score_threshold",
         data_type="integer",

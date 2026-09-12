@@ -29,6 +29,8 @@ from apps.common.constants import (
     IDENTIFIER_MAX_LENGTH,
     MIN_RESPONSE_TIME_SECONDS,
 )
+from apps.common.localisation import country_name
+from apps.common.localisation_services import get_localisation_defaults
 from apps.common.request_ip import get_safe_client_ip
 from apps.common.ro_counties import detect_county
 from apps.common.security_decorators import secure_invitation_system, secure_user_registration
@@ -391,7 +393,7 @@ class SecureUserRegistrationService:
                 city=customer_data.get("billing_city", ""),  # Sanitized
                 postal_code=customer_data.get("billing_postal_code", ""),  # Sanitized
                 county=detect_county(customer_data.get("billing_city", "")),
-                country="România",
+                country=customer_data.get("country") or country_name(get_localisation_defaults().default_country),
                 is_current=True,
             )
 

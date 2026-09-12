@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load i18n %}
+{% load localisation_tags i18n %}
 {% load formatting %}
 {% load ui_components %}
 
@@ -72,7 +72,7 @@
         <div>
           <dt class="text-sm font-medium text-slate-400">{% trans "Issue Date" %}</dt>
           <dd class="mt-1 text-sm text-white">
-            {{ invoice.issued_at|date:"d.m.Y" }}
+            {% localised_date invoice.issued_at "date" %}
           </dd>
         </div>
 
@@ -80,7 +80,7 @@
         <div>
           <dt class="text-sm font-medium text-slate-400">{% trans "Due Date" %}</dt>
           <dd class="mt-1 text-sm text-white">
-            {{ invoice.due_at|date:"d.m.Y" }}
+            {% localised_date invoice.due_at "date" %}
           </dd>
         </div>
 
@@ -89,7 +89,7 @@
           <dt class="text-sm font-medium text-slate-400">{% trans "Payment Date" %}</dt>
           <dd class="mt-1 text-sm text-white">
             {% if invoice.paid_at %}
-              {{ invoice.paid_at|date:"d.m.Y H:i" }}
+              {% localised_date invoice.paid_at "datetime" %}
             {% else %}
               <span class="text-slate-500">{% trans "Not paid" %}</span>
             {% endif %}
@@ -137,7 +137,7 @@
               <div class="text-xs text-slate-500 mt-1">SKU: {{ item.seller_item_id }}</div>
               {% endif %}
               {% if item.period_start and item.period_end %}
-              <div class="text-xs text-slate-500">{{ item.period_start|date:"d.m.Y" }} — {{ item.period_end|date:"d.m.Y" }}</div>
+              <div class="text-xs text-slate-500">{% localised_date item.period_start "date" %} — {% localised_date item.period_end "date" %}</div>
               {% endif %}
             </td>
             <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-400">
@@ -209,7 +209,7 @@
           <p class="text-xs text-slate-500 mt-1">SKU: {{ item.seller_item_id }}</p>
           {% endif %}
           {% if item.period_start and item.period_end %}
-          <p class="text-xs text-slate-500">{{ item.period_start|date:"d.m.Y" }} — {{ item.period_end|date:"d.m.Y" }}</p>
+          <p class="text-xs text-slate-500">{% localised_date item.period_start "date" %} — {% localised_date item.period_end "date" %}</p>
           {% endif %}
         </div>
         <div class="flex items-center justify-between text-xs text-slate-400">
@@ -267,7 +267,7 @@
           {% for payment in payments %}
           <tr>
             <td class="px-6 py-4 whitespace-nowrap text-sm text-white">
-              {{ payment.created_at|date:"d.m.Y H:i" }}
+              {% localised_date payment.created_at "datetime" %}
             </td>
             <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-400">
               {{ payment.get_payment_method_display }}

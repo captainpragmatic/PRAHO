@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% load i18n %}
+{% load localisation_tags i18n %}
 {% load ui_components %}
 
 {% block title %}{% trans "Automation & Schedules" %} - PRAHO Platform{% endblock %}
@@ -31,7 +31,7 @@
             <tr>
               <td class="px-4 py-3 text-white">{{ entry.schedule.name|default:entry.schedule.func }}</td>
               <td class="px-4 py-3 text-slate-400">{{ entry.schedule.schedule_type }}{% if entry.schedule.minutes %} / {{ entry.schedule.minutes }}m{% endif %}</td>
-              <td class="px-4 py-3 text-slate-400">{{ entry.schedule.next_run|date:"Y-m-d H:i" }}</td>
+              <td class="px-4 py-3 text-slate-400">{% localised_date entry.schedule.next_run "datetime" %}</td>
               <td class="px-4 py-3 text-slate-400">{% if entry.last_task %}{{ entry.last_task.started|timesince }} {% trans "ago" %}{% else %}—{% endif %}</td>
               <td class="px-4 py-3">
                 {% if entry.last_task %}

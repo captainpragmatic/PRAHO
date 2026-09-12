@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load i18n %}
+{% load localisation_tags i18n %}
 {% load ui_components %}
 
 {% block title %}{{ product.name }} - {% trans "Product Details" %} - PRAHO Platform{% endblock %}
@@ -84,7 +84,7 @@
 
           <div>
             <dt class="text-sm font-medium text-slate-400">{% trans 'Created' %}</dt>
-            <dd class="mt-1 text-sm text-white">{{ product.created_at|date:"j F Y, H:i" }}</dd>
+            <dd class="mt-1 text-sm text-white">{% localised_date product.created_at "datetime" %}</dd>
           </div>
         </dl>
 

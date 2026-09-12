@@ -1,13 +1,12 @@
 """
-Portal Authentication and Language Middleware
+Portal Authentication Middleware
 Production-ready two-tier validation with jitter, single-flight locks, and stale-while-revalidate.
-Also handles language activation from session for i18n.
+Localisation policy is applied by apps.common.localisation_middleware.
 """
 
 import logging
 import random
 import time
-from collections.abc import Callable
 from datetime import datetime, timedelta
 from typing import Any, ClassVar, cast
 
@@ -18,9 +17,9 @@ from django.middleware.csrf import get_token
 from django.shortcuts import redirect
 from django.utils import timezone as django_timezone
 from django.utils.http import urlencode
-from django.utils.translation import activate, get_language
 
 from apps.api_client.services import PlatformAPIError, api_client
+from apps.common.localisation_services import store_localisation_preferences
 
 logger = logging.getLogger(__name__)
 
@@ -269,6 +268,8 @@ class PortalAuthenticationMiddleware:
             is_valid = validation_response and validation_response.get("active", False)
 
             if is_valid:
+                if "localisation_preferences" in validation_response:
+                    store_localisation_preferences(request, validation_response["localisation_preferences"])
                 # Update session with successful validation
                 request.session["validated_at"] = now.isoformat()
                 request.session["next_validate_at"] = self._calculate_next_validation_time(now).isoformat()
@@ -389,35 +390,3 @@ class PortalAuthenticationMiddleware:
             f"✅ [Auth] {session_type} session is within valid lifetime ({session_age:.0f}s / {max_age_seconds:.0f}s)"
         )
         return True
-
-
-class SessionLanguageMiddleware:
-    """
-    Middleware to activate language from Django session.
-
-    This ensures that when users select a language in the profile page,
-    it persists across all pages by activating the session language
-    for every request.
-
-    Must be placed AFTER Django's LocaleMiddleware in MIDDLEWARE setting.
-    """
-
-    def __init__(self, get_response: Callable[..., Any]) -> None:
-        self.get_response = get_response
-
-    def __call__(self, request: HttpRequest) -> HttpResponse:
-        # Check if there's a language stored in session
-        session_language = request.session.get("_language")
-
-        if session_language:
-            current_language = get_language()
-
-            # If session language differs from current, activate it
-            if session_language != current_language:
-                activate(session_language)
-                logger.debug(
-                    f"🌐 [Language Middleware] Activated {session_language} from session (was {current_language})"
-                )
-
-        response: HttpResponse = self.get_response(request)
-        return response

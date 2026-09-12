@@ -142,8 +142,8 @@ class MinimalUserModelTestCase(TestCase):
         self.assertTrue(hasattr(user, 'profile'))
         profile = user.profile
         self.assertEqual(str(profile), 'Profile for test@example.com')
-        self.assertEqual(profile.preferred_language, 'en')
-        self.assertEqual(profile.timezone, 'Europe/Bucharest')
+        self.assertEqual(profile.preferred_language, '')
+        self.assertEqual(profile.timezone, '')
 
 
 class MinimalCustomerMembershipTestCase(TestCase):

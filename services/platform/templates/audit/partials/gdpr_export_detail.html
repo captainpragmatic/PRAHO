@@ -1,4 +1,4 @@
-{% load static %}
+{% load localisation_tags static %}
 {% load i18n %}
 {% load ui_components %}
 {% load formatting %}
@@ -22,7 +22,7 @@
 
                 <div class="flex justify-between">
                     <span class="text-slate-400">{% trans "Requested:" %}</span>
-                    <span class="text-white">{{ export_request.requested_at|date:"M d, Y H:i" }}</span>
+                    <span class="text-white">{% localised_date export_request.requested_at "datetime" %}</span>
                 </div>
 
                 <div class="flex justify-between">
@@ -57,14 +57,14 @@
                 {% if export_request.started_at %}
                     <div class="flex justify-between">
                         <span class="text-slate-400">{% trans "Started:" %}</span>
-                        <span class="text-white">{{ export_request.started_at|date:"M d, Y H:i" }}</span>
+                        <span class="text-white">{% localised_date export_request.started_at "datetime" %}</span>
                     </div>
                 {% endif %}
 
                 {% if export_request.completed_at %}
                     <div class="flex justify-between">
                         <span class="text-slate-400">{% trans "Completed:" %}</span>
-                        <span class="text-white">{{ export_request.completed_at|date:"M d, Y H:i" }}</span>
+                        <span class="text-white">{% localised_date export_request.completed_at "datetime" %}</span>
                     </div>
                 {% endif %}
 
@@ -130,7 +130,7 @@
                 <div class="flex justify-between items-center">
                     <span class="text-slate-400">{% trans "Expires:" %}</span>
                     <span class="{% if is_expired %}text-red-400{% else %}text-white{% endif %}">
-                        {{ export_request.expires_at|date:"M d, Y H:i" }}
+                        {% localised_date export_request.expires_at "datetime" %}
                         {% if is_expired %}
                             ({% trans "Expired" %})
                         {% else %}

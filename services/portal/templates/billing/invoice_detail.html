@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load i18n %}
+{% load localisation_tags i18n %}
 {% load formatting %}
 {% load ui_components %}
 
@@ -73,7 +73,7 @@
         <div>
           <dt class="text-sm font-medium text-slate-400">{% trans "Issue Date" %}</dt>
           <dd class="mt-1 text-sm text-white">
-            {{ invoice.issued_at|romanian_date|default:"—" }}
+            {% localised_date invoice.issued_at "datetime_seconds" as localised_date_1 %}{{ localised_date_1|default:"—" }}
           </dd>
         </div>
 
@@ -81,7 +81,7 @@
         <div>
           <dt class="text-sm font-medium text-slate-400">{% trans "Due Date" %}</dt>
           <dd class="mt-1 text-sm text-white">
-            {{ invoice.due_at|romanian_date|default:"—" }}
+            {% localised_date invoice.due_at "datetime_seconds" as localised_date_2 %}{{ localised_date_2|default:"—" }}
           </dd>
         </div>
 
@@ -90,7 +90,7 @@
           <dt class="text-sm font-medium text-slate-400">{% trans "Payment Date" %}</dt>
           <dd class="mt-1 text-sm text-white">
             {% if invoice.paid_at %}
-              {{ invoice.paid_at|romanian_date:"datetime" }}
+              {% localised_date invoice.paid_at "datetime" %}
             {% else %}
               <span class="text-slate-500">{% trans "Not paid" %}</span>
             {% endif %}
@@ -152,7 +152,7 @@
                 <div class="text-xs text-slate-500 mt-1">SKU: {{ line.seller_item_id }}</div>
                 {% endif %}
                 {% if line.period_start and line.period_end %}
-                <div class="text-xs text-slate-500">{{ line.period_start|date:"d.m.Y" }} — {{ line.period_end|date:"d.m.Y" }}</div>
+                <div class="text-xs text-slate-500">{% localised_date line.period_start "date" %} — {% localised_date line.period_end "date" %}</div>
                 {% endif %}
               </td>
               <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-400">
@@ -227,7 +227,7 @@
             <p class="text-xs text-slate-500 mt-1">SKU: {{ line.seller_item_id }}</p>
             {% endif %}
             {% if line.period_start and line.period_end %}
-            <p class="text-xs text-slate-500">{{ line.period_start|date:"d.m.Y" }} — {{ line.period_end|date:"d.m.Y" }}</p>
+            <p class="text-xs text-slate-500">{% localised_date line.period_start "date" %} — {% localised_date line.period_end "date" %}</p>
             {% endif %}
           </div>
 

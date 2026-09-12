@@ -7,7 +7,7 @@ This template is dynamically loaded and contains only the results section.
 ===============================================================================
 {% endcomment %}
 
-{% load i18n %}
+{% load localisation_tags i18n %}
 {% load formatting %}
 {% load ui_components %}
 
@@ -58,7 +58,7 @@ This template is dynamically loaded and contains only the results section.
                   </div>
                   <div class="flex items-center">
                     <span class="mr-1">{% icon "clock" %}</span>
-                    {{ order.created_at|date:"M d, Y" }}
+                    {% localised_date order.created_at "date" %}
                   </div>
                   <div class="flex items-center">
                     <span class="mr-1">{% icon "orders" %}</span>

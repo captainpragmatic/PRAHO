@@ -498,13 +498,14 @@ class UserProfileViewTest(BaseViewTestCase):
             'timezone': 'Europe/Bucharest'
         })
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 302)
 
         # Check profile was updated
         self.user.refresh_from_db()
         profile.refresh_from_db()
         # Verify the view processed the POST request successfully
-        self.assertIn(response.status_code, (200, 302))
+        self.assertEqual(self.user.first_name, "Updated")
+        self.assertEqual(profile.preferred_language, "ro")
 
 
 # ===============================================================================
@@ -711,7 +712,7 @@ class SecurityTest(BaseViewTestCase):
         response = self.client.post(reverse('users:user_profile'), {
             'first_name': malicious_script,
             'last_name': 'Test'
-        })
+        }, follow=True)
 
         # Check that script tags are escaped in response
         # Check that malicious scripts are not rendered (legitimate scripts in head are OK)

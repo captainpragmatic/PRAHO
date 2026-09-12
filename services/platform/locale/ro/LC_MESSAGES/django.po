@@ -20162,3 +20162,82 @@ msgstr "Nu s-a găsit niciun(o) users."
 
 #~ msgid "more"
 #~ msgstr "mai mult"
+
+msgid "Localisation"
+msgstr "Localizare"
+
+msgid "Language, country, timezone, and web date defaults"
+msgstr ""
+"Limba, țara, fusul orar și formatele implicite ale datelor în interfața web"
+
+msgid "Defaults"
+msgstr "Valori implicite"
+
+msgid "Default language"
+msgstr "Limba implicită"
+
+msgid "Default country"
+msgstr "Țara implicită"
+
+msgid "Display timezone"
+msgstr "Fus orar pentru afișare"
+
+msgid "Date display"
+msgstr "Afișarea datelor"
+
+msgid "Staff date format"
+msgstr "Formatul datelor pentru personal"
+
+msgid "Customer date format"
+msgstr "Formatul datelor pentru clienți"
+
+msgid "Use system default"
+msgstr "Folosește valoarea implicită a sistemului"
+
+msgid "Select a valid timezone."
+msgstr "Selectați un fus orar valid."
+
+msgid ""
+"Language for users who follow the system default and visitors without a "
+"language preference."
+msgstr ""
+"Limba pentru utilizatorii care folosesc valoarea implicită și vizitatorii "
+"fără o preferință de limbă."
+
+msgid ""
+"Initial country for new customer addresses. Existing addresses and tax rules"
+" are preserved."
+msgstr ""
+"Țara inițială pentru adresele noi ale clienților. Adresele existente și "
+"regulile fiscale sunt păstrate."
+
+msgid ""
+"Timezone for web timestamps when a user follows the system default. "
+"Accounting dates keep their existing rules."
+msgstr ""
+"Fusul orar pentru orele afișate în interfața web când utilizatorul urmează "
+"valoarea implicită. Datele contabile își păstrează regulile existente."
+
+msgid "Default date format on staff web pages. Times use the 24-hour clock."
+msgstr ""
+"Formatul implicit al datelor în interfața personalului. Orele sunt afișate "
+"în format de 24 de ore."
+
+msgid ""
+"Default date format on customer web pages. Portal changes appear within one "
+"minute."
+msgstr ""
+"Formatul implicit al datelor în interfața clienților. Modificările apar în "
+"portal în cel mult un minut."
+
+msgid "DD.MM.YYYY — 23.11.2026"
+msgstr "DD.MM.YYYY — 23.11.2026"
+
+msgid "YYYY-MM-DD — 2026-11-23"
+msgstr "YYYY-MM-DD — 2026-11-23"
+
+msgid "DD/MM/YYYY — 23/11/2026"
+msgstr "DD/MM/YYYY — 23/11/2026"
+
+msgid "MM/DD/YYYY — 11/23/2026"
+msgstr "MM/DD/YYYY — 11/23/2026"

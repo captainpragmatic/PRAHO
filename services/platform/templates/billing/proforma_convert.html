@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load i18n %}
+{% load localisation_tags i18n %}
 {% load ui_components %}
 
 {% block title %}{% trans "Convert Proforma" %} {{ proforma.number }} - PRAHO Platform{% endblock %}
@@ -64,11 +64,11 @@
         </div>
         <div class="flex justify-between">
           <span class="text-slate-400">{% trans 'Created:' %}</span>
-          <span class="text-white">{{ proforma.created_at|date:"d.m.Y H:i" }}</span>
+          <span class="text-white">{% localised_date proforma.created_at "datetime" %}</span>
         </div>
         <div class="flex justify-between">
           <span class="text-slate-400">{% trans 'Valid Until:' %}</span>
-          <span class="text-white">{{ proforma.valid_until|date:"d.m.Y" }}</span>
+          <span class="text-white">{% localised_date proforma.valid_until "date" %}</span>
         </div>
         <div class="flex justify-between">
           <span class="text-slate-400">{% trans 'Status:' %}</span>

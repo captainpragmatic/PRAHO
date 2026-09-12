@@ -7,7 +7,7 @@ This template includes both the table content and header count update.
 ===============================================================================
 {% endcomment %}
 
-{% load i18n %}
+{% load localisation_tags i18n %}
 {% load ui_components %}
 
 <!-- Multi-target HTMX response -->
@@ -107,7 +107,7 @@ This template includes both the table content and header count update.
             </td>
 
             <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-300 text-center font-mono">
-              {{ document.created_at|date:"d.m.Y" }}
+              {% localised_date document.created_at "date" %}
             </td>
           </tr>
           {% endfor %}

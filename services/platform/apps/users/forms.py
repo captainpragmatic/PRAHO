@@ -6,13 +6,14 @@ Romanian-localized authentication and profile forms.
 import re
 from typing import Any, ClassVar, TypeVar, cast
 
-import pytz
 from django import forms
 from django.conf import settings
 from django.contrib.auth.forms import UserCreationForm
 from django.core.exceptions import ValidationError
 from django.utils import timezone  # For GDPR consent timestamps
 from django.utils.translation import gettext_lazy as _
+
+from apps.common.localisation import DATE_FORMAT_CHOICES, INHERIT_LABEL, LANGUAGE_CHOICES, TIMEZONES
 
 from .models import CustomerMembership, User, UserProfile
 from .services import UserRegistrationService
@@ -293,18 +294,16 @@ class UserProfileForm(forms.ModelForm):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
+        self.fields["preferred_language"].choices = [("", INHERIT_LABEL), *LANGUAGE_CHOICES]
+        self.fields["timezone"] = forms.ChoiceField(
+            required=False, choices=[("", INHERIT_LABEL), *((zone, zone) for zone in sorted(TIMEZONES))]
+        )
+        self.fields["date_format"].choices = [("", INHERIT_LABEL), *DATE_FORMAT_CHOICES]
         # Pre-populate user fields
         if self.instance and self.instance.user:
             self.fields["first_name"].initial = self.instance.user.first_name
             self.fields["last_name"].initial = self.instance.user.last_name
             self.fields["phone"].initial = self.instance.user.phone
-
-    def clean_timezone(self) -> str:
-        """Validate timezone"""
-        timezone: str | None = self.cleaned_data.get("timezone")
-        if timezone and timezone not in pytz.all_timezones:
-            raise ValidationError(_("Invalid timezone selected."))
-        return timezone or ""
 
     def clean_phone(self) -> str:
         """Validate Romanian phone number format"""

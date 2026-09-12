@@ -11,9 +11,12 @@ script-src-attr 'none' with NEITHER 'unsafe-inline' NOR 'unsafe-eval':
 The middleware falls back to 'unsafe-inline' (never 'unsafe-eval') only when the
 request has no nonce (nonce middleware disabled) — a fail-safe, not the norm.
 """
+from unittest.mock import patch
+
 from django.http import HttpRequest, HttpResponse
 from django.test import SimpleTestCase
 
+from apps.common.localisation import LocalisationDefaults
 from apps.common.middleware import CSPNonceMiddleware, SecurityHeadersMiddleware
 
 
@@ -86,7 +89,9 @@ class CSPMiddlewareActiveInTestsTests(SimpleTestCase):
     catch a missing header or nonce — the guarantee is only real if it runs (#284)."""
 
     def test_response_carries_csp_header(self) -> None:
-        response = self.client.get("/")
+        # Keep this CSP-only test independent of runtime settings storage.
+        with patch("apps.common.localisation_services.get_localisation_defaults", return_value=LocalisationDefaults()):
+            response = self.client.get("/")
         self.assertIn("Content-Security-Policy", response)
 
     def test_request_receives_a_nonce(self) -> None:

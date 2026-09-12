@@ -527,7 +527,10 @@ def _row_context(definition: SettingDef, row: SystemSetting | None) -> dict[str,
         "modified": row is not None and row.get_typed_value() != definition.default,
         "configured": configured,
         "updated_at": row.updated_at if row is not None else None,
-        "choices": (definition.validation or {}).get("choices", []),
+        "choices": [
+            (value, definition.choice_labels.get(str(value), str(value)))
+            for value in (definition.validation or {}).get("choices", [])
+        ],
     }
 
 

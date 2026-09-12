@@ -3,34 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from functools import lru_cache
 from typing import Any
 
-from babel import Locale
 from django.core.exceptions import ObjectDoesNotExist
 
 from apps.common.cnp_validator import CNPValidator
+from apps.common.localisation import normalize_country_code
 
-_ISO_ALPHA_2_LENGTH = 2
-
-
-@lru_cache(maxsize=1)
-def _localized_country_codes() -> dict[str, str]:
-    """Index English and Romanian CLDR country names by their ISO alpha-2 code."""
-    country_codes: dict[str, str] = {}
-    for locale_name in ("en", "ro"):
-        for code, country_name in Locale.parse(locale_name).territories.items():
-            normalized_code = str(code).upper()
-            if len(normalized_code) == _ISO_ALPHA_2_LENGTH and normalized_code.isalpha():
-                country_codes[normalized_code.casefold()] = normalized_code
-                country_codes[str(country_name).strip().casefold()] = normalized_code
-    return country_codes
-
-
-def normalize_country_code(value: object) -> str:
-    """Return an ISO alpha-2 code, or empty when a free-text country is unknown."""
-    normalized = str(value or "").strip()
-    return _localized_country_codes().get(normalized.casefold(), "")
+__all__ = ["normalize_country_code"]
 
 
 def billing_country_code(value: object, *, default: str = "RO") -> str:

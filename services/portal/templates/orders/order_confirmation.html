@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load i18n ui_components %}
+{% load localisation_tags i18n ui_components %}
 
 {% block title %}{% trans "Order Confirmed" %}{% endblock %}
 
@@ -41,7 +41,7 @@
             {% trans "Order" %} #{{ order.order_number }}
           </h2>
           <p class="text-slate-400 text-sm mt-1">
-            {% trans "Created at" %}: {{ order.created_at|date:"d M Y, H:i" }}
+            {% trans "Created at" %}: {% localised_date order.created_at "datetime" %}
           </p>
         </div>
 

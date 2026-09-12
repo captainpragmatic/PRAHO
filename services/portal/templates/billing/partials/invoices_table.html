@@ -1,4 +1,4 @@
-{% load i18n %}
+{% load localisation_tags i18n %}
 {% load ui_components %}
 {% load formatting %}
 
@@ -83,7 +83,7 @@
             {% endif %}
           </td>
           <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-400">
-            {{ invoice.created_at|date:"d.m.Y" }}
+            {% localised_date invoice.created_at "date" %}
           </td>
         </tr>
         {% endfor %}
@@ -142,7 +142,7 @@
       </div>
     </div>
     <div class="flex items-center justify-between text-sm">
-      <span class="text-slate-400 font-mono">{{ invoice.created_at|date:"d.m.Y" }}</span>
+      <span class="text-slate-400 font-mono">{% localised_date invoice.created_at "date" %}</span>
       <span class="text-white font-medium font-mono">{{ invoice.total_cents|cents_to_currency|romanian_currency:invoice.currency.code }}</span>
     </div>
   </div>

@@ -39,6 +39,11 @@ the right to submit it under the project’s license.
 
   git commit -s -m "feat: add new API"
 
+Before the first push, verify every commit in the PR range has a sign-off matching
+its author. Keep the sign-off when amending or rebasing. Squash merges must also
+include a `Signed-off-by:` trailer; merge only after DCO and all required checks
+pass on the final PR head.
+
 Pull Request Checklist
 ----------------------
 - [ ] My commits are signed off with DCO (`Signed-off-by:`)

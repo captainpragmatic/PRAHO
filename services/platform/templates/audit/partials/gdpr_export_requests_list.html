@@ -1,4 +1,4 @@
-{% load static %}
+{% load localisation_tags static %}
 {% load i18n %}
 {% load ui_components %}
 {% load formatting %}
@@ -35,7 +35,7 @@
 
                             <!-- Timestamp -->
                             <span class="text-slate-500">•</span>
-                            <span class="text-slate-400 text-sm" title="{{ request.requested_at|date:'Y-m-d H:i:s' }}">
+                            <span class="text-slate-400 text-sm" title="{% localised_date request.requested_at "datetime_seconds" %}">
                                 {{ request.requested_at|timesince }} {% trans "ago" %}
                             </span>
                         </div>
@@ -60,7 +60,7 @@
 
                             {% if request.status == 'completed' %}
                                 <span class="{% if current_time > request.expires_at %}text-red-400{% else %}text-green-400{% endif %}">
-                                    {% icon "clock" %} {% trans "Expires:" %} {{ request.expires_at|date:"M d, Y H:i" }}
+                                    {% icon "clock" %} {% trans "Expires:" %} {% localised_date request.expires_at "datetime" %}
                                 </span>
                             {% endif %}
 

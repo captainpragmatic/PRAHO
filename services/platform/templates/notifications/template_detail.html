@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load ui_components %}
+{% load localisation_tags ui_components %}
 {% load i18n %}
 
 {% block title %}{{ object.key }} - {% trans "Email Template" %}{% endblock %}
@@ -176,13 +176,13 @@
                     <div>
                         <dt class="text-sm font-medium text-slate-500 dark:text-slate-400">{% trans "Created" %}</dt>
                         <dd class="mt-1 text-sm text-slate-900 dark:text-slate-100">
-                            {{ object.created_at|date:"d M Y, H:i" }}
+                            {% localised_date object.created_at "datetime" %}
                         </dd>
                     </div>
                     <div>
                         <dt class="text-sm font-medium text-slate-500 dark:text-slate-400">{% trans "Last Updated" %}</dt>
                         <dd class="mt-1 text-sm text-slate-900 dark:text-slate-100">
-                            {{ object.updated_at|date:"d M Y, H:i" }}
+                            {% localised_date object.updated_at "datetime" %}
                         </dd>
                     </div>
                     {% if object.created_by %}
