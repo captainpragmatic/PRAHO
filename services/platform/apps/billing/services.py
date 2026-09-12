@@ -338,6 +338,9 @@ class ProformaConversionService:
                     bill_to_country=billing_country_code(getattr(proforma, "bill_to_country", "")),
                     meta={"proforma_id": str(proforma.id), "proforma_number": proforma.number},
                 )
+                # #103: freeze the FX snapshot at this reversible conversion moment so
+                # issue() consumes it — a later FXRate row cannot flip the invoice's RON VAT.
+                invoice.freeze_fx_snapshot()
                 # Issue via FSM transition to set locked_at and issued_at
                 invoice.issue()
                 invoice.save()

@@ -130,6 +130,53 @@ class InvoiceExchangeRateSnapshotTestCase(TestCase):
             invoice.save(update_fields=["tax_point_date"])
 
     @patch("apps.billing.invoice_models.timezone.now")
+    def test_issue_consumes_prefrozen_snapshot_and_ignores_later_rate(self, now: object) -> None:
+        """#103 DISCRIMINATOR: a snapshot frozen at the reversible conversion moment is
+        CONSUMED by issue(), never re-resolved — so a later/shadow FXRate cannot flip an
+        issued invoice's RON VAT. Fails pre-fix (issue() re-resolved to the DB rate)."""
+        now.return_value = self.issued_at
+        self._rate()  # a resolvable DB rate (5.01234567) that a re-resolve would pick
+        invoice = self._invoice(self.eur, "INV-EUR-PREFROZEN")
+        # Freeze a DIFFERENT snapshot on the draft, as conversion would:
+        invoice.tax_point_date = date(2026, 7, 20)
+        invoice.exchange_to_ron = Decimal("4.00000000")
+        invoice.exchange_rate_as_of = date(2026, 7, 19)
+        invoice.exchange_rate_source = FXRate.Source.BNR
+        invoice.exchange_rate_source_reference = "frozen-at-conversion"
+
+        invoice.issue()
+        invoice.save()
+
+        self.assertEqual(invoice.exchange_to_ron, Decimal("4.00000000"))
+        self.assertEqual(invoice.exchange_rate_source_reference, "frozen-at-conversion")
+
+    @patch("apps.billing.invoice_models.timezone.now")
+    def test_freeze_fx_snapshot_resolves_then_issue_consumes(self, now: object) -> None:
+        """#103: freeze_fx_snapshot() resolves + freezes at the reversible moment (defaulting
+        tax_point_date to the RO-local date); issue() then consumes it even if a shadow
+        FXRate lands afterward."""
+        now.return_value = self.issued_at
+        expected = self._rate()
+        invoice = self._invoice(self.eur, "INV-EUR-FREEZE-METHOD")
+
+        invoice.freeze_fx_snapshot()
+
+        self.assertEqual(invoice.tax_point_date, date(2026, 7, 20))
+        self.assertEqual(invoice.exchange_to_ron, expected.rate)
+
+        # A shadow row that a re-resolve would now prefer (later as_of):
+        FXRate.objects.create(
+            base_code=self.eur, quote_code=self.ron, rate=Decimal("9.99999999"),
+            as_of=date(2026, 7, 19), source=FXRate.Source.BNR,
+            source_reference="shadow", fetched_at=self.issued_at,
+        )
+
+        invoice.issue()
+        invoice.save()
+
+        self.assertEqual(invoice.exchange_to_ron, expected.rate)
+
+    @patch("apps.billing.invoice_models.timezone.now")
     def test_status_only_save_persists_complete_issue_snapshot(self, now: object) -> None:
         now.return_value = self.issued_at
         expected = self._rate()
