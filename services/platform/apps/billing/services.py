@@ -18,6 +18,7 @@ This file serves as a re-export hub following ADR-0012 feature-based organizatio
 from __future__ import annotations
 
 import logging
+from copy import deepcopy
 from datetime import timedelta
 from decimal import Decimal
 
@@ -38,6 +39,7 @@ from apps.billing.fiscal_identity import (
     validated_cnp_or_empty,
 )
 from apps.billing.models import Invoice, InvoiceLine
+from apps.billing.tax_evidence import capture_vat_evidence, derive_tax_category
 from apps.common.financial_arithmetic import calculate_document_totals
 from apps.common.tax_service import CustomerVATInfo, TaxService
 from apps.common.types import Err, Ok, Result
@@ -151,6 +153,7 @@ class InvoiceService:
                     currency=order.currency,
                     subtotal_cents=vat_result.subtotal_cents,
                     tax_cents=vat_result.vat_cents,
+                    vat_evidence=capture_vat_evidence(vat_result),
                     total_cents=vat_result.total_cents,
                     discount_cents=order_discount_cents,
                     status="draft",
@@ -179,6 +182,7 @@ class InvoiceService:
                         quantity=item.quantity,
                         unit_price_cents=item.unit_price_cents,
                         tax_rate=vat_rate_decimal,
+                        tax_category_code=derive_tax_category(vat_result),
                     )
                     # Setup fee as its own line so Σ(line gross) includes it (EN16931 BT-106) and
                     # the invoice lines reconcile with the header subtotal (which counts setup via
@@ -192,6 +196,7 @@ class InvoiceService:
                             quantity=Decimal("1"),
                             unit_price_cents=setup_cents,
                             tax_rate=vat_rate_decimal,
+                            tax_category_code=derive_tax_category(vat_result),
                         )
 
                 # Log invoice creation
@@ -279,7 +284,7 @@ class ProformaConversionService:
     @staticmethod
     @transaction.atomic
     def convert_to_invoice(proforma_id: str) -> Result[Any, str]:
-        """Convert a proforma to a real invoice with tax recalculation."""
+        """Convert a proforma, preserving its agreed amounts and recorded VAT decision."""
         from apps.billing.models import ProformaInvoice  # noqa: PLC0415  # Deferred: test mockability
 
         try:
@@ -324,6 +329,8 @@ class ProformaConversionService:
                     tax_cents=tax_cents,
                     total_cents=total_cents,
                     discount_cents=proforma.discount_cents,
+                    vat_evidence=deepcopy(proforma.vat_evidence),
+                    converted_from_proforma=proforma,
                     due_at=tz.now() + timedelta(days=30),
                     bill_to_name=proforma.bill_to_name or "",
                     bill_to_email=proforma.bill_to_email or "",
@@ -338,10 +345,6 @@ class ProformaConversionService:
                     bill_to_country=billing_country_code(getattr(proforma, "bill_to_country", "")),
                     meta={"proforma_id": str(proforma.id), "proforma_number": proforma.number},
                 )
-                # Issue via FSM transition to set locked_at and issued_at
-                invoice.issue()
-                invoice.save()
-
                 # Copy line items — copy ALL fields including EN16931 and financial fields
                 for line in proforma.lines.all():
                     InvoiceLine.objects.create(
@@ -365,6 +368,10 @@ class ProformaConversionService:
                         seller_item_id=line.seller_item_id,
                         sort_order=line.sort_order,
                     )
+
+                # Assemble all lines before issuance freezes the ledger.
+                invoice.issue()
+                invoice.save()
 
                 from apps.billing.metering_models import BillingCycle  # noqa: PLC0415
 

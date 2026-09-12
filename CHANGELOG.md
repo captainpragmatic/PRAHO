@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **D390 services review** — billing staff can reconcile monthly outgoing EU reverse-charge service supplies, inspect invoice contributions and whole-leu rounding, and download reconciliation CSV or a locally validated draft XML for accountant review. New billing documents preserve the original VAT decision and available VIES proof; incomplete historical evidence and unresolved fiscal adjustments block XML (#405).
+
 - **Localisation settings with working consumers** — staff can configure default language, country, display timezone, and separate staff/customer date presets. Both web services honor saved profile overrides or “Use system default”; customer address forms carry their configured country through creation. Financial documents and accounting date rules retain their existing conventions (#380).
 
 - **Virtualmin backups and restores actually work** — backup archives are transported off the node into a private spool (checksum-evidenced, remote temp deleted) and published to S3 with finalized manifests; restores download, verify, authorize against the owning account, refuse foreign or unverifiable target ownership regardless of force, take a pre-restore safety backup, and issue a single verified restore — with execution moved out of web requests into budgeted, token-fenced background jobs under a shared account-operation lock, uncertain outcomes parked for operator attention, and the disaster-recovery readiness check validating the real rebuild inputs (#431).

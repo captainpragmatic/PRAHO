@@ -36,6 +36,7 @@ from apps.billing.recurring_billing import (
     next_billing_period_end,
 )
 from apps.billing.recurring_models import RecurringPaymentAuthorization
+from apps.billing.services import ProformaConversionService
 from apps.billing.subscription_models import Subscription
 from apps.billing.subscription_service import SubscriptionLifecycleService
 from apps.billing.tasks import (
@@ -43,7 +44,7 @@ from apps.billing.tasks import (
     reconcile_recurring_payment_submissions,
     run_payment_collection,
 )
-from apps.customers.models import Customer, CustomerAddress, CustomerPaymentMethod
+from apps.customers.models import Customer, CustomerAddress, CustomerPaymentMethod, CustomerTaxProfile
 from apps.products.models import Product
 from apps.provisioning.models import Service, ServicePlan
 from apps.settings.services import SettingsService
@@ -412,6 +413,23 @@ class SubscriptionInvoicePaymentTestCase(_SubscriptionInvoicePaymentFixture, Tes
         cycle = BillingCycle.objects.get(subscription=subscription)
         self.assertEqual(cycle.proforma.bill_to_cnp, "1850101123451")
         self.assertEqual(cycle.proforma.bill_to_tax_id, "")
+
+    def test_recurring_proforma_records_and_preserves_reverse_charge_evidence(self) -> None:
+        CustomerTaxProfile.objects.create(customer=self.customer, vat_number="DE136695976", is_vat_payer=True)
+        CustomerAddress.objects.create(customer=self.customer, is_billing=True, address_line1="Example 1",
+            city="Berlin", county="Berlin", postal_code="10115", country="DE")
+        now = timezone.now()
+        subscription = self._create_aligned_subscription("EVIDENCE", now)
+        result = RecurringBillingOrchestrator.prepare_due_proformas(as_of=now)
+        self.assertEqual(result["errors"], [])
+        cycle = BillingCycle.objects.get(subscription=subscription)
+        proforma = cycle.proforma
+        self.assertEqual(proforma.vat_evidence["category"], "AE")
+        self.assertEqual(proforma.vat_evidence["scenario"], "eu_b2b_reverse")
+        self.assertEqual(set(proforma.lines.values_list("tax_category_code", flat=True)), {"AE"})
+        invoice = ProformaConversionService.convert_to_invoice(str(proforma.pk)).unwrap()
+        self.assertEqual(invoice.vat_evidence, proforma.vat_evidence)
+        self.assertEqual(invoice.total_cents, proforma.total_cents)
 
     def test_recurring_proforma_normalizes_romanian_address_country(self) -> None:
         CustomerAddress.objects.create(
