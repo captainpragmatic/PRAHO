@@ -16,6 +16,7 @@ from django.utils import timezone
 from django.utils.translation import gettext as _t
 
 from apps.billing.efactura.settings import ro_local_date
+from apps.billing.tax_evidence import capture_vat_evidence, derive_tax_category
 from apps.common.types import Err, Ok, Result
 from apps.common.validators import log_security_event
 
@@ -39,13 +40,6 @@ def _period_delta(billing_period: str) -> timedelta:
         "annual": timedelta(days=365),
         "quarterly": timedelta(days=91),
     }.get(billing_period, timedelta(days=30))
-
-
-def _derive_tax_category(vat_result: Any) -> str:
-    """Derive EU VAT category code from VAT calculation result."""
-    if vat_result.vat_cents == 0:
-        return "Z"  # Zero-rated
-    return "S"  # Standard rated
 
 
 if TYPE_CHECKING:
@@ -209,6 +203,7 @@ class ProformaService:
                 currency=currency,
                 subtotal_cents=vat_result.subtotal_cents,
                 tax_cents=vat_result.vat_cents,
+                vat_evidence=capture_vat_evidence(vat_result),
                 total_cents=vat_result.total_cents,
                 valid_until=timezone.now() + timedelta(days=_get_proforma_validity_days()),
                 bill_to_name=bill_to_name,
@@ -248,7 +243,7 @@ class ProformaService:
                     period_start=period_start,
                     period_end=period_end,
                     sort_order=sort_order,
-                    tax_category_code=_derive_tax_category(vat_result),
+                    tax_category_code=derive_tax_category(vat_result),
                 )
                 line.calculate_totals()
                 line.save()
@@ -269,7 +264,7 @@ class ProformaService:
                         period_start=period_start,
                         period_end=period_end,
                         sort_order=sort_order,
-                        tax_category_code=_derive_tax_category(vat_result),
+                        tax_category_code=derive_tax_category(vat_result),
                     )
                     setup_line.calculate_totals()
                     setup_line.save()

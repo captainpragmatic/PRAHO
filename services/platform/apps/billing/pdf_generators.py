@@ -23,7 +23,7 @@ from reportlab.pdfgen import canvas
 
 from apps.billing.document_adjustments import validate_no_unsupported_adjustments
 from apps.billing.models import Invoice, ProformaInvoice
-from apps.billing.tax_evidence import REVERSE_CHARGE_LEGAL_BASIS
+from apps.billing.tax_evidence import REVERSE_CHARGE_LEGAL_BASIS, recorded_tax_category
 from apps.common.utils import format_romanian_date
 
 logger = logging.getLogger(__name__)
@@ -460,7 +460,8 @@ class RomanianDocumentPDFGenerator:
         # VAT breakdown by rate from the GROSS line subtotals. Keyed by the Decimal
         # tax_rate (not int(rate*100)) so e.g. 9% and 9.5% are distinct buckets.
         vat_groups: dict[Decimal, dict[str, Decimal]] = defaultdict(lambda: {"base": Decimal("0"), "tax": Decimal("0")})
-        has_reverse_charge = False
+        explicit_category = recorded_tax_category(self.document)
+        has_reverse_charge = explicit_category == "AE"
         gross = Decimal("0")
 
         lines = self.document.lines.all()
@@ -470,7 +471,7 @@ class RomanianDocumentPDFGenerator:
             vat_groups[rate_key]["tax"] += line.line_total - line.subtotal
             gross += line.subtotal
 
-            if getattr(line, "tax_category_code", "") == "AE":
+            if explicit_category is None and getattr(line, "tax_category_code", "") == "AE":
                 has_reverse_charge = True
 
         # Document-level discount (BT-92/107), DERIVED the same way the e-Factura XML

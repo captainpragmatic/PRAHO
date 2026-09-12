@@ -33,6 +33,7 @@ from apps.common.financial_arithmetic import HasLineTotals, calculate_document_t
 from apps.common.validators import log_security_event
 
 from .currency_models import Currency
+from .invoice_querysets import InvoiceLineQuerySet, InvoiceQuerySet
 
 logger = logging.getLogger(__name__)
 
@@ -159,6 +160,9 @@ class Invoice(models.Model):
     sent_at = models.DateTimeField(null=True, blank=True)
     paid_at = models.DateTimeField(null=True, blank=True)
 
+    # Recorded tax decision; empty for historical or manual documents.
+    vat_evidence = models.JSONField(default=dict, blank=True, editable=False)
+
     # Metadata
     meta = models.JSONField(default=dict, blank=True)
 
@@ -199,6 +203,8 @@ class Invoice(models.Model):
         blank=True,
         help_text=_("Proforma that was converted to this invoice"),
     )
+
+    objects = InvoiceQuerySet.as_manager()
 
     class Meta:
         db_table = "billing_invoices"
@@ -270,6 +276,10 @@ class Invoice(models.Model):
     )
     _FISCAL_SNAPSHOT_FIELDS: ClassVar[frozenset[str]] = frozenset(
         {
+            "number",
+            "customer_id",
+            "vat_evidence",
+            "locked_at",
             "currency_id",
             "exchange_to_ron",
             "exchange_rate_as_of",
@@ -304,17 +314,22 @@ class Invoice(models.Model):
         # H2 fix: Skip clean() when update_fields contains no locked fields.
         # This avoids the immutability DB query on status/meta-only saves.
         normalized_update_fields = set(update_fields or ())
-        if "currency" in normalized_update_fields:
-            normalized_update_fields.add("currency_id")
+        for foreign_key in ("currency", "customer"):
+            if foreign_key in normalized_update_fields:
+                normalized_update_fields.add(f"{foreign_key}_id")
         if update_fields and not (normalized_update_fields & self._LOCKED_FIELDS):
             self._validate_mutable_update(normalized_update_fields)
             super().save(*args, **kwargs)
             return
 
-        self.clean()
-        if self.total_cents and self.tax_cents:
-            self.subtotal_cents = self.total_cents - self.tax_cents
-        super().save(*args, **kwargs)
+        with transaction.atomic():
+            if self.pk:
+                # Serialize issuance with edits to this invoice and its lines.
+                type(self).objects.select_for_update().filter(pk=self.pk).exists()
+            self.clean()
+            if self.total_cents and self.tax_cents:
+                self.subtotal_cents = self.total_cents - self.tax_cents
+            super().save(*args, **kwargs)
 
     def clean(self) -> None:
         """🔒 Validate invoice data for security issues"""
@@ -352,7 +367,7 @@ class Invoice(models.Model):
         # Validate invoice immutability rules — financial fields are frozen
         # once locked. Status transitions (mark_as_paid, void) are still
         # allowed because they don't alter monetary values.
-        if self.locked_at and self.pk:
+        if self.pk:
             locked_field_names = sorted(self._LOCKED_FIELDS)
             db_vals = type(self).objects.filter(pk=self.pk).values("locked_at", *locked_field_names).first()
             if (
@@ -587,6 +602,13 @@ class Invoice(models.Model):
                 f"💰 [Invoice] {self.number} partially paid: {self.total_cents - remaining}/{self.total_cents} cents"
             )
 
+    def delete(self, *args: Any, **kwargs: Any) -> tuple[int, dict[str, int]]:
+        with transaction.atomic():
+            persisted = type(self).objects.select_for_update().filter(pk=self.pk).first()
+            if persisted and persisted.locked_at:
+                raise ValidationError(_("Cannot delete issued invoices."))
+            return super().delete(*args, **kwargs)
+
 
 class InvoiceLine(models.Model):
     """
@@ -646,6 +668,8 @@ class InvoiceLine(models.Model):
     )
     sort_order = models.PositiveSmallIntegerField(default=0, help_text=_("Display/XML sequence (BT-126)"))
 
+    objects = InvoiceLineQuerySet.as_manager()
+
     class Meta:
         db_table = "billing_invoice_lines"
         verbose_name = _("Invoice Line")
@@ -671,9 +695,35 @@ class InvoiceLine(models.Model):
         ]
 
     def save(self, *args: Any, **kwargs: Any) -> None:
-        # Calculate totals before saving
-        self.calculate_totals()
-        super().save(*args, **kwargs)
+        with transaction.atomic():
+            parent_ids = {self.invoice_id}
+            original = type(self).objects.filter(pk=self.pk).first() if self.pk else None
+            if original:
+                parent_ids.add(original.invoice_id)
+            parents = Invoice.objects.select_for_update().filter(pk__in=parent_ids)
+            if any(parent.locked_at for parent in parents):
+                mutable = {"service", "billing_cycle"}
+                changed = original is None or any(
+                    getattr(self, field.attname) != getattr(original, field.attname)
+                    for field in self._meta.concrete_fields
+                    if field.name not in mutable
+                )
+                if changed:
+                    raise ValidationError(_("Cannot modify lines on an issued invoice."))
+                # Linkage-only saves must not recalculate any frozen amounts.
+                super().save(*args, **kwargs)
+                return
+            self.calculate_totals()
+            super().save(*args, **kwargs)
+
+    def delete(self, *args: Any, **kwargs: Any) -> tuple[int, dict[str, int]]:
+        with transaction.atomic():
+            # An unsaved reassignment must not disguise the persisted parent.
+            parent_id = type(self).objects.filter(pk=self.pk).values_list("invoice_id", flat=True).first()
+            parent = Invoice.objects.select_for_update().filter(pk=parent_id).first() if parent_id is not None else None
+            if parent and parent.locked_at:
+                raise ValidationError(_("Cannot delete lines on an issued invoice."))
+            return super().delete(*args, **kwargs)
 
     def calculate_totals(self) -> int:
         """Calculate tax and line total with proper banker's rounding for Romanian VAT compliance."""

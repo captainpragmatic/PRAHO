@@ -30,7 +30,7 @@ from apps.billing.document_adjustments import (
 from apps.billing.efactura.settings import ro_local_date
 from apps.billing.exchange_rate_service import ExchangeRateService
 from apps.billing.fiscal_identity import normalize_business_tax_id, normalize_country_code, validated_cnp_or_empty
-from apps.billing.tax_evidence import REVERSE_CHARGE_LEGAL_BASIS
+from apps.billing.tax_evidence import REVERSE_CHARGE_LEGAL_BASIS, recorded_tax_category
 from apps.common.tax_service import TaxService
 
 # UBL 2.1 Namespaces
@@ -133,6 +133,22 @@ class CompanyInfo:
         return tax_id.strip()
 
 
+def get_supplier_info() -> CompanyInfo:
+    """Resolve the operating entity from the shared invoice supplier settings."""
+    return CompanyInfo(
+        name=getattr(settings, "COMPANY_NAME", ""),
+        tax_id=getattr(settings, "EFACTURA_COMPANY_CUI", ""),
+        registration_number=getattr(settings, "COMPANY_REGISTRATION_NUMBER", ""),
+        street=getattr(settings, "COMPANY_STREET", ""),
+        city=getattr(settings, "COMPANY_CITY", ""),
+        postal_code=getattr(settings, "COMPANY_POSTAL_CODE", ""),
+        country_code=getattr(settings, "COMPANY_COUNTRY_CODE", "RO"),
+        country_name=getattr(settings, "COMPANY_COUNTRY_NAME", "Romania"),
+        email=getattr(settings, "COMPANY_EMAIL", ""),
+        phone=getattr(settings, "COMPANY_PHONE", ""),
+    )
+
+
 class XMLBuilderError(Exception):
     """Exception raised when XML building fails."""
 
@@ -149,18 +165,7 @@ class BaseUBLBuilder:
     def _get_supplier_info(self) -> CompanyInfo:
         """Get supplier (seller) information from settings."""
         if self._supplier is None:
-            self._supplier = CompanyInfo(
-                name=getattr(settings, "COMPANY_NAME", ""),
-                tax_id=getattr(settings, "EFACTURA_COMPANY_CUI", ""),
-                registration_number=getattr(settings, "COMPANY_REGISTRATION_NUMBER", ""),
-                street=getattr(settings, "COMPANY_STREET", ""),
-                city=getattr(settings, "COMPANY_CITY", ""),
-                postal_code=getattr(settings, "COMPANY_POSTAL_CODE", ""),
-                country_code=getattr(settings, "COMPANY_COUNTRY_CODE", "RO"),
-                country_name=getattr(settings, "COMPANY_COUNTRY_NAME", "Romania"),
-                email=getattr(settings, "COMPANY_EMAIL", ""),
-                phone=getattr(settings, "COMPANY_PHONE", ""),
-            )
+            self._supplier = get_supplier_info()
         return self._supplier
 
     def _get_customer_info(self) -> CompanyInfo:
@@ -285,13 +290,11 @@ class BaseUBLBuilder:
         return line.unit_code if line.unit_code else UNIT_CODE_PIECE
 
     def _get_tax_category(self) -> str:
-        """Determine the document-level VAT category (UNCL5305) from customer + tax.
+        """Use recorded decisions on new documents, retaining legacy presentation."""
+        explicit = recorded_tax_category(self.invoice)
+        if explicit is not None:
+            return explicit
 
-        Derived authoritatively from customer location and the invoice tax total — NOT
-        from the stored line.tax_category_code, which is only ever "S"/"Z" ("Z" being
-        overloaded: zero VAT can be domestic zero-rated OR EU reverse charge). Single
-        category per invoice — every line shares it (BR-AE-1 etc.). Deterministic.
-        """
         customer = self._get_customer_info()
         country = (customer.country_code or "").upper()
 

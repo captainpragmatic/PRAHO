@@ -8,6 +8,7 @@ from django import forms
 from django.core.exceptions import ValidationError
 from django.utils.translation import gettext_lazy as _
 
+from .ec_sales_service import ReportingPeriod
 from .payment_models import PaymentRetryPolicy
 
 _INPUT_CLASS = (
@@ -15,6 +16,42 @@ _INPUT_CLASS = (
     "focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
 )
 _CHECKBOX_CLASS = "h-4 w-4 rounded border-slate-600 bg-slate-900 text-blue-600 focus:ring-blue-500"
+
+
+class D390PeriodForm(forms.Form):
+    month = forms.DateField(
+        label=_("Reporting month"),
+        input_formats=["%Y-%m"],
+        widget=forms.DateInput(format="%Y-%m", attrs={"type": "month", "class": _INPUT_CLASS}),
+    )
+
+    def clean_month(self) -> ReportingPeriod:
+        month = self.cleaned_data["month"]
+        try:
+            return ReportingPeriod(month.year, month.month)
+        except ValueError as exc:
+            raise ValidationError(_("Choose a month from February 2020 through December 2100.")) from exc
+
+
+class D390ExportForm(D390PeriodForm):
+    action = forms.ChoiceField(choices=[("csv", "CSV"), ("xml", "XML")], widget=forms.HiddenInput)
+    source_fingerprint = forms.CharField(min_length=64, max_length=64, widget=forms.HiddenInput)
+    surname = forms.CharField(label=_("Declarant surname"), max_length=75, required=False)
+    given_name = forms.CharField(label=_("Declarant given name"), max_length=75, required=False)
+    role = forms.CharField(label=_("Declarant role"), max_length=50, required=False)
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.fields["month"].widget = forms.HiddenInput()
+        _style_form_fields(self)
+
+    def clean(self) -> dict[str, Any]:
+        cleaned = super().clean() or {}
+        if cleaned.get("action") == "xml":
+            for field in ("surname", "given_name", "role"):
+                if not cleaned.get(field):
+                    self.add_error(field, _("Required for XML export."))
+        return cleaned
 
 
 class PaymentRetryPolicyForm(forms.Form):

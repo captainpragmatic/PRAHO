@@ -13,9 +13,10 @@ repos:
     rev: v5.0.0
     hooks:
       - id: trailing-whitespace
-        exclude: ^migrations/.*\.py$
+        # The ANAF schema is an original download verified by SHA-256.
+        exclude: ^(migrations/.*\.py|services/platform/apps/billing/d390_schema/d390_12022021\.xsd)$
       - id: end-of-file-fixer
-        exclude: ^migrations/.*\.py$
+        exclude: ^(migrations/.*\.py|services/platform/apps/billing/d390_schema/d390_12022021\.xsd)$
       - id: check-yaml
       - id: check-added-large-files
         args: ['--maxkb=1000']

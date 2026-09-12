@@ -24,6 +24,7 @@ from django.utils import timezone
 from django_fsm import TransitionNotAllowed
 
 from apps.audit.services import AuditService
+from apps.billing.tax_evidence import capture_vat_evidence, derive_tax_category
 from apps.common.tax_service import CustomerVATInfo, TaxService
 from apps.common.types import Err, Ok, Result
 from apps.customers.models import CustomerAddress, CustomerTaxProfile
@@ -160,6 +161,7 @@ class UsageInvoiceService:
                 currency=currency,
                 subtotal_cents=net_amount_cents,  # NET amount before tax (not gross)
                 tax_cents=tax_cents,
+                vat_evidence=capture_vat_evidence(vat_result),
                 total_cents=total_cents,
                 discount_cents=discount_cents,
                 issued_at=timezone.now(),
@@ -205,6 +207,7 @@ class UsageInvoiceService:
                         quantity=1,
                         unit_price_cents=agg.charge_cents,
                         tax_rate=vat_rate,
+                        tax_category_code=derive_tax_category(vat_result),
                         line_total_cents=agg.charge_cents,  # Pre-tax
                     )
 

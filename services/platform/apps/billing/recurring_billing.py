@@ -345,9 +345,9 @@ class RecurringBillingOrchestrator:
         from apps.common.tax_service import TaxService  # noqa: PLC0415
 
         from .proforma_models import ProformaInvoice, ProformaLine, ProformaSequence  # noqa: PLC0415
-        from .proforma_service import _derive_tax_category  # noqa: PLC0415
         from .services import _build_customer_vat_info  # noqa: PLC0415
         from .subscription_models import Subscription  # noqa: PLC0415
+        from .tax_evidence import capture_vat_evidence, derive_tax_category  # noqa: PLC0415
 
         run_at = as_of or timezone.now()
         result = RecurringPreparationResult(
@@ -430,7 +430,7 @@ class RecurringBillingOrchestrator:
                                 customer_info=_build_customer_vat_info(customer, country=bill_to_country),
                             )
                             vat_rate = (vat_result.vat_rate / Decimal("100")).quantize(Decimal("0.0001"))
-                            tax_category = _derive_tax_category(vat_result)
+                            tax_category = derive_tax_category(vat_result)
 
                             sequence, _ = ProformaSequence.objects.get_or_create(scope="default")
                             sequence = ProformaSequence.objects.select_for_update(of=("self",)).get(pk=sequence.pk)
@@ -460,6 +460,7 @@ class RecurringBillingOrchestrator:
                                 bill_to_region=getattr(billing_address, "county", "") or "",
                                 bill_to_postal=getattr(billing_address, "postal_code", "") or "",
                                 bill_to_country=bill_to_country,
+                                vat_evidence=capture_vat_evidence(vat_result),
                                 meta={
                                     "type": "recurring",
                                     "source": "recurring_billing",
