@@ -33,8 +33,11 @@ to the web request and response language headers match the rendered content.
 Country settings initialize new forms; they do not rewrite existing addresses.
 Posted country values and explicit initials win. Creation APIs accept the
 country and fall back to the configured default when it is omitted. Partial
-updates preserve existing country values. Country defaults do not determine VAT
-eligibility or alter existing fiscal snapshots.
+updates preserve existing country values. Country-dependent consumers normalize
+English/Romanian names and ISO codes through one shared helper before VAT,
+validation, and audit decisions. The country setting initializes new addresses;
+VAT still uses the actual billing country and tax profile, and existing fiscal
+snapshots are preserved.
 
 ## Display boundary
 
@@ -50,7 +53,9 @@ template can provide its existing placeholder.
 
 No request-wide timezone activation is used. ORM calendar lookups, recurring
 billing, registry operations, scheduler clocks, invoice PDFs, and e-Factura keep
-their existing rules. Document/API endpoints retain their prior language policy.
+their existing rules. Billing/e-Factura pages and embedded invoice/payment dates
+retain their existing fixed rendering too. Document/API endpoints retain their
+prior language policy.
 HTML date inputs and machine-readable timestamp attributes retain their wire
 formats. Explicit Romanian date utilities remain available for documents.
 

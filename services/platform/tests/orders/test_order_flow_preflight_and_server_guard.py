@@ -112,7 +112,7 @@ class PreflightCurrencyValidationTests(TestCase):
 
     def test_non_vat_payer_eu_business_uses_profile_for_preview(self) -> None:
         """Preflight must not quote reverse charge when the tax profile disables it."""
-        CustomerAddress.objects.create(
+        address = CustomerAddress.objects.create(
             customer=self.customer,
             is_billing=True,
             address_line1="Teststrasse 1",
@@ -127,21 +127,25 @@ class PreflightCurrencyValidationTests(TestCase):
             is_vat_payer=False,
         )
 
-        status_code, data = _call_preflight(self.customer, self.cart_items)
+        for country in ("DE", "Germany", "Germania"):
+            with self.subTest(country=country):
+                address.country = country
+                address.save(update_fields=["country"])
+                status_code, data = _call_preflight(self.customer, self.cart_items)
 
-        self.assertEqual(status_code, 200)
-        self.assertEqual(data["preview"]["subtotal_cents"], 2500)
-        self.assertEqual(data["preview"]["vat_cents"], 475)
-        self.assertEqual(data["preview"]["total_cents"], 2975)
+                self.assertEqual(status_code, 200)
+                self.assertEqual(data["preview"]["subtotal_cents"], 2500)
+                self.assertEqual(data["preview"]["vat_cents"], 475)
+                self.assertEqual(data["preview"]["total_cents"], 2975)
 
 
-# ---------------------------------------------------------------------------
-# 3. Null server guard
-# ---------------------------------------------------------------------------
+        # ---------------------------------------------------------------------------
+        # 3. Null server guard
+        # ---------------------------------------------------------------------------
 
 
-class NullServerGuardTests(TestCase):
-    """Verify _provision_confirmed_order_item returns error when no server available."""
+        class NullServerGuardTests(TestCase):
+            """Verify _provision_confirmed_order_item returns error when no server available."""
 
     def test_no_server_returns_error_dict(self) -> None:
         """When _get_server_for_product_type returns None, provisioning returns error."""

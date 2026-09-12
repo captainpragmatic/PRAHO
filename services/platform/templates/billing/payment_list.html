@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load localisation_tags i18n %}
+{% load i18n %}
 {% load formatting %}
 {% load ui_components %}
 
@@ -45,7 +45,7 @@
         {% for payment in payments %}
         <tr>
           <td class="px-6 py-4 whitespace-nowrap text-sm text-white">
-            {% localised_date payment.created_at "datetime" %}
+            {{ payment.created_at|date:"d.m.Y H:i" }}
           </td>
           <td class="px-6 py-4 whitespace-nowrap text-sm text-white">
             {{ payment.customer.name }}

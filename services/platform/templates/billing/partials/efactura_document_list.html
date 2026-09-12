@@ -1,4 +1,4 @@
-{% load localisation_tags i18n %}
+{% load i18n %}
 {% load ui_components %}
 
 {% if documents_page %}
@@ -42,7 +42,7 @@
         {{ doc.anaf_upload_index|default:"-"|truncatechars:20 }}
       </td>
       <td class="px-4 py-3 text-sm text-slate-400">
-        {% localised_date doc.submitted_at "datetime" as localised_date_1 %}{{ localised_date_1|default:"-" }}
+        {{ doc.submitted_at|date:"d M Y H:i"|default:"-" }}
       </td>
       <td class="px-4 py-3 text-sm text-slate-400">
         {{ doc.retry_count }}

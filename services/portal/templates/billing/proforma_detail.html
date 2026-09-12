@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load localisation_tags i18n %}
+{% load i18n %}
 {% load ui_components %}
 {% load formatting %}
 
@@ -14,7 +14,7 @@
         {% icon "document" size="lg" css_class="text-white" %} {% trans "Proforma" %} <span class="block sm:inline mt-1 sm:mt-0">{{ proforma.number }}</span>
       </h1>
       <p class="mt-2 text-slate-400 text-sm sm:text-base">
-        {% trans "Created on" %} {% localised_date proforma.created_at "datetime" %}
+        {% trans "Created on" %} {{ proforma.created_at|romanian_date:"datetime" }}
       </p>
     </div>
     <div class="mt-4 sm:ml-16 sm:mt-0 sm:flex-none">
@@ -56,12 +56,12 @@
   {% elif proforma.is_expired %}
     {% trans "Proforma Expired" as alert_title %}
     {# nosemgrep: template-blocktranslate-no-escape — asvar stores in variable, autoescaped when rendered #}
-    {% localised_date proforma.valid_until "datetime_seconds" as localised_date_2 %}{% blocktrans with date=localised_date_2 asvar alert_msg %}This proforma expired on {{ date }}. It can no longer be processed.{% endblocktrans %}
+    {% blocktrans with date=proforma.valid_until|romanian_date asvar alert_msg %}This proforma expired on {{ date }}. It can no longer be processed.{% endblocktrans %}
     {% alert alert_msg variant="danger" title=alert_title css_class="mb-6" %}
   {% else %}
     {% trans "Proforma Valid" as alert_title %}
     {# nosemgrep: template-blocktranslate-no-escape — asvar stores in variable, autoescaped when rendered #}
-    {% localised_date proforma.valid_until "datetime_seconds" as localised_date_3 %}{% blocktrans with date=localised_date_3 asvar alert_msg %}Valid until {{ date }}. Please contact us to proceed with this quote.{% endblocktrans %}
+    {% blocktrans with date=proforma.valid_until|romanian_date asvar alert_msg %}Valid until {{ date }}. Please contact us to proceed with this quote.{% endblocktrans %}
     {% alert alert_msg variant="success" title=alert_title css_class="mb-6" %}
   {% endif %}
 
@@ -157,7 +157,7 @@
                   <div class="text-xs text-slate-500 mt-1">SKU: {{ line.seller_item_id }}</div>
                   {% endif %}
                   {% if line.period_start and line.period_end %}
-                  <div class="text-xs text-slate-500">{% localised_date line.period_start "date" %} — {% localised_date line.period_end "date" %}</div>
+                  <div class="text-xs text-slate-500">{{ line.period_start|date:"d.m.Y" }} — {{ line.period_end|date:"d.m.Y" }}</div>
                   {% endif %}
                 </td>
                 <td class="px-4 py-4 text-right text-sm text-white">
@@ -198,7 +198,7 @@
               <p class="text-xs text-slate-500 mt-1">SKU: {{ line.seller_item_id }}</p>
               {% endif %}
               {% if line.period_start and line.period_end %}
-              <p class="text-xs text-slate-500">{% localised_date line.period_start "date" %} — {% localised_date line.period_end "date" %}</p>
+              <p class="text-xs text-slate-500">{{ line.period_start|date:"d.m.Y" }} — {{ line.period_end|date:"d.m.Y" }}</p>
               {% endif %}
             </div>
 
@@ -273,7 +273,7 @@
             <div class="flex justify-between">
               <span>{% trans 'Valid until:' %}</span>
               <span class="{% if proforma.is_expired %}text-red-400{% else %}text-white{% endif %}">
-                {% localised_date proforma.valid_until "datetime_seconds" %}
+                {{ proforma.valid_until|romanian_date }}
               </span>
             </div>
           </div>

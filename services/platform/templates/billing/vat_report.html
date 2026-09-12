@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load localisation_tags i18n %}
+{% load i18n %}
 {% load formatting %}
 
 {% block title %}{% trans "VAT Report" %} - PRAHO Platform{% endblock %}
@@ -108,7 +108,7 @@
               {{ invoice.customer.name }}
             </td>
             <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-400">
-              {% localised_date invoice.issued_at "date" %}
+              {{ invoice.issued_at|date:"d.m.Y" }}
             </td>
             <td class="px-6 py-4 whitespace-nowrap text-sm text-white text-right">
               {{ invoice.subtotal_cents|cents_to_currency|romanian_currency:invoice.currency.code }}

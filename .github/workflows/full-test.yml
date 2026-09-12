@@ -124,6 +124,10 @@ jobs:
       run: make lint
 
     - name: Run full test suite (make test-fast — all 5 phases)
+      # Integration tests need a functional cache. Platform unit commands select
+      # config.settings.test explicitly, and portal commands select their own settings.
+      env:
+        DJANGO_SETTINGS_MODULE: config.settings.dev
       run: make test-fast
 
     - name: Type checking (all services)

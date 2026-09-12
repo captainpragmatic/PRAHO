@@ -203,7 +203,7 @@ class CartCalculateProductByUUIDTestCase(TestCase):
 
     def test_non_vat_payer_eu_business_uses_profile_and_billing_country(self) -> None:
         """The cart quote must match the invoice path's profile-aware VAT decision."""
-        CustomerAddress.objects.create(
+        address = CustomerAddress.objects.create(
             customer=self.customer,
             is_billing=True,
             address_line1="Teststrasse 1",
@@ -218,15 +218,19 @@ class CartCalculateProductByUUIDTestCase(TestCase):
             is_vat_payer=False,
         )
 
-        data = _call_calculate(
-            self.customer,
-            self.currency,
-            [_cart_item(product_id=self.product.id, quantity=1)],
-        )
+        for country in ("DE", "Germany", "Germania"):
+            with self.subTest(country=country):
+                address.country = country
+                address.save(update_fields=["country"])
+                data = _call_calculate(
+                    self.customer,
+                    self.currency,
+                    [_cart_item(product_id=self.product.id, quantity=1)],
+                )
 
-        self.assertEqual(data["subtotal_cents"], 3000)
-        self.assertEqual(data["tax_cents"], 570)
-        self.assertEqual(data["total_cents"], 3570)
+                self.assertEqual(data["subtotal_cents"], 3000)
+                self.assertEqual(data["tax_cents"], 570)
+                self.assertEqual(data["total_cents"], 3570)
 
     def test_fractional_vat_rate_is_preserved_exactly(self) -> None:
         vat_result = MagicMock(

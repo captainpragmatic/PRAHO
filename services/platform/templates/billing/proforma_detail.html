@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load localisation_tags i18n %}
+{% load i18n %}
 {% load ui_components %}
 {% load formatting %}
 
@@ -15,7 +15,7 @@
         {% icon "document" %} {% trans "Proforma" %} {{ proforma.number }}
       </h1>
       <p class="mt-2 text-slate-400">
-        {% trans "Created on" %} {% localised_date proforma.created_at "datetime" %}
+        {% trans "Created on" %} {{ proforma.created_at|date:"d.m.Y H:i" }}
       </p>
     </div>
     <div class="mt-4 sm:ml-16 sm:mt-0 sm:flex-none">
@@ -94,7 +94,7 @@
       <div class="ml-3">
         <h3 class="text-sm font-medium text-red-200">{% trans 'Proforma Expired' %}</h3>
         <div class="mt-1 text-sm text-red-300">
-          <p>{% trans 'This proforma expired on' %} {% localised_date proforma.valid_until "date" %}. {% trans 'It can no longer be converted to an invoice.' %}</p>
+          <p>{% trans 'This proforma expired on' %} {{ proforma.valid_until|date:"d.m.Y" }}. {% trans 'It can no longer be converted to an invoice.' %}</p>
         </div>
       </div>
     </div>
@@ -108,7 +108,7 @@
       <div class="ml-3">
         <h3 class="text-sm font-medium text-green-200">{% trans 'Proforma Valid' %}</h3>
         <div class="mt-1 text-sm text-green-300">
-          <p>{% trans 'Valid until' %} {% localised_date proforma.valid_until "date" %}. {% trans 'Ready for conversion to invoice.' %}</p>
+          <p>{% trans 'Valid until' %} {{ proforma.valid_until|date:"d.m.Y" }}. {% trans 'Ready for conversion to invoice.' %}</p>
         </div>
       </div>
     </div>
@@ -210,7 +210,7 @@
                     <div class="text-xs text-slate-500 mt-1">SKU: {{ line.seller_item_id }}</div>
                   {% endif %}
                   {% if line.period_start and line.period_end %}
-                    <div class="text-xs text-slate-500">{% localised_date line.period_start "date" %} — {% localised_date line.period_end "date" %}</div>
+                    <div class="text-xs text-slate-500">{{ line.period_start|date:"d.m.Y" }} — {{ line.period_end|date:"d.m.Y" }}</div>
                   {% endif %}
                 </td>
                 <td class="px-4 py-4 text-right text-sm text-white">
@@ -247,7 +247,7 @@
               <p class="text-xs text-slate-500 mt-1">SKU: {{ line.seller_item_id }}</p>
               {% endif %}
               {% if line.period_start and line.period_end %}
-              <p class="text-xs text-slate-500">{% localised_date line.period_start "date" %} — {% localised_date line.period_end "date" %}</p>
+              <p class="text-xs text-slate-500">{{ line.period_start|date:"d.m.Y" }} — {{ line.period_end|date:"d.m.Y" }}</p>
               {% endif %}
             </div>
             <div class="flex items-center justify-between mb-2">
@@ -333,7 +333,7 @@
             <div class="flex justify-between">
               <span>{% trans 'Valid until:' %}</span>
               <span class="{% if proforma.is_expired %}text-red-400{% else %}text-white{% endif %}">
-                {% localised_date proforma.valid_until "date" %}
+                {{ proforma.valid_until|date:"d.m.Y" }}
               </span>
             </div>
           </div>

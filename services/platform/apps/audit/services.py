@@ -23,6 +23,7 @@ from django.db import models, transaction
 from django.db.models import Q
 from django.utils import timezone
 
+from apps.common.localisation import normalize_country_code
 from apps.common.request_ip import get_safe_client_ip
 from apps.common.types import EmailAddress, Err, Ok, Result
 from apps.settings.services import SettingsService
@@ -2501,7 +2502,7 @@ class CustomersAuditService:
             "is_validated": address.is_validated,
             "validated_at": address.validated_at.isoformat() if address.validated_at else None,
             "full_address": address.get_full_address(),
-            "is_romanian_address": address.country == "România",
+            "is_romanian_address": normalize_country_code(address.country) == "RO",
             "created_at": address.created_at.isoformat(),
             "updated_at": address.updated_at.isoformat(),
             **context.metadata,

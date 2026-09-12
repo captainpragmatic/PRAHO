@@ -564,7 +564,7 @@
                                 {{ invoice.number }}
                             </h3>
                             <p class="text-sm text-slate-400">
-                                {% localised_date invoice.created_at "date" %} •
+                                {{ invoice.created_at|date:"d M Y" }} •
                                 {% if invoice.total %}{{ invoice.total|floatformat:2 }} {% trans 'RON' %}{% endif %}
                             </p>
                         </div>

@@ -88,7 +88,7 @@
               </div>
               <div class="flex items-center justify-between mt-1">
                 <div class="text-slate-400 text-sm leading-4">
-                  {% localised_date invoice.created_at "date" %}
+                  {{ invoice.created_at|date:"d.m.Y" }}
                 </div>
                 <div class="text-white font-medium text-sm leading-4">
                   {{ invoice.total_cents|cents_to_currency|romanian_currency:invoice.currency.code }}
