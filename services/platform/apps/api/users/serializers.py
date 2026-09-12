@@ -378,4 +378,6 @@ class ProfileUpdateSerializer(serializers.Serializer):
             changed_profile_fields = sorted(set(validated_data).difference(user_fields))
             if changed_profile_fields:
                 profile.save(update_fields=[*changed_profile_fields, "updated_at"])
+        # Replace any previously cached reverse relation before serializing the response.
+        instance.profile = profile
         return instance

@@ -101,12 +101,15 @@ class LegacyProfileLocalisationTests(TestCase):
 
     def test_legacy_partial_save_accepts_timezone_and_date_overrides_then_inheritance(self):
         for values in ({"timezone": "Asia/Tokyo", "date_format": "%m/%d/%Y"}, {"timezone": "", "date_format": ""}):
+            # Profile access before saving must not leave stale values in the API response.
+            self.assertIsNotNone(self.user.profile)
             serializer = CustomerProfileSerializer(self.user, data=values, partial=True)
             self.assertTrue(serializer.is_valid(), serializer.errors)
             serializer.save()
             profile = UserProfile.objects.get(user=self.user)
             self.assertEqual((profile.timezone, profile.date_format), (values["timezone"], values["date_format"]))
             self.assertTrue(profile.email_notifications)
+            self.assertEqual(serializer.data["localisation_preferences"], {"preferred_language": "", **values})
 
     def test_profile_save_failure_rolls_back_user_changes(self):
         original_name = self.user.first_name
