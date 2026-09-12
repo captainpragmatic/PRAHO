@@ -14,7 +14,7 @@ from django.utils import timezone
 
 from apps.billing.ec_sales_service import ReportingPeriod, aggregate_ec_services
 from apps.billing.efactura.xml_builder import UBLInvoiceBuilder
-from apps.billing.invoice_models import Invoice, InvoiceLine
+from apps.billing.invoice_models import Invoice, InvoiceLine, InvoiceSequence
 from apps.billing.models import Currency
 from apps.billing.proforma_service import ProformaService
 from apps.billing.services import InvoiceService, ProformaConversionService
@@ -133,6 +133,8 @@ class TaxEvidenceLifecycleTests(TestCase):
                 invoice.save(update_fields=[field])
             with self.assertRaises(ValidationError):
                 Invoice.objects.filter(pk=invoice.pk).update(**{field: value})
+            with self.assertRaises(ValidationError), transaction.atomic():
+                Invoice.objects.bulk_update([invoice], [field])
         invoice.refresh_from_db()
         line = invoice.lines.first()
         for field, value in (
@@ -182,6 +184,47 @@ class TaxEvidenceLifecycleTests(TestCase):
         self.assertTrue(InvoiceLine.objects.filter(pk=line.pk, invoice=invoice).exists())
         with self.assertRaises(ValidationError):
             draft.lines.update(invoice=invoice)
+
+    def test_temporary_number_is_allocated_before_issuance_locks_the_invoice(self):
+        invoice = InvoiceService().create_from_order(self.order).unwrap()
+        invoice.number = "TMP-D390-ISSUE"
+        invoice.save(update_fields=["number"])
+        sequence = InvoiceSequence.objects.get(scope="default")
+        expected_number = sequence.next_number_preview
+        expected_value = sequence.last_value + 1
+        invoice.issue()
+        issued_at = invoice.issued_at
+        evidence = deepcopy(invoice.vat_evidence)
+        invoice.save(update_fields=["status"])
+        self.assertEqual(invoice.number, expected_number)
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.number, expected_number)
+        self.assertEqual(invoice.issued_at, issued_at)
+        self.assertEqual(invoice.vat_evidence, evidence)
+        self.assertIsNotNone(invoice.locked_at)
+        invoice.save(update_fields=["status"])
+        sequence.refresh_from_db()
+        self.assertEqual(sequence.last_value, expected_value)
+        with self.assertRaises(ValidationError):
+            Invoice.objects.filter(pk=invoice.pk).update(number="INV-CHANGED")
+
+    def test_numbering_failure_rolls_back_invoice_issuance(self):
+        invoice = InvoiceService().create_from_order(self.order).unwrap()
+        invoice.number = "TMP-D390-FAILURE"
+        invoice.save(update_fields=["number"])
+        invoice.issue()
+        with (
+            patch(
+                "apps.billing.numbering_service.InvoiceNumberingService.get_next_number",
+                side_effect=RuntimeError("sequence unavailable"),
+            ),
+            self.assertRaises(RuntimeError),
+        ):
+            invoice.save(update_fields=["status"])
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.status, "draft")
+        self.assertIsNone(invoice.locked_at)
+        self.assertEqual(invoice.number, "TMP-D390-FAILURE")
 
     def test_explicit_zero_override_is_not_rendered_as_reverse_charge(self):
         invoice = InvoiceService().create_from_order(self.order).unwrap()

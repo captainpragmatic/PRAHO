@@ -293,6 +293,7 @@ class Invoice(models.Model):
 
     _ISSUE_TRANSITION_FIELDS: ClassVar[frozenset[str]] = frozenset(
         {
+            "number",
             "issued_at",
             "locked_at",
             "tax_point_date",
@@ -306,7 +307,7 @@ class Invoice(models.Model):
     def save(self, *args: Any, **kwargs: Any) -> None:
         """Calculate subtotal from total and tax on save with validation"""
         update_fields = kwargs.get("update_fields")
-        if update_fields and self.status == "issued" and "status" in update_fields and self.locked_at is not None:
+        if update_fields and self.status == "issued" and "status" in update_fields:
             # A status-only save after issue() must not create an issued row without
             # the fiscal timestamps and exchange-rate evidence set by the transition.
             update_fields = set(update_fields) | self._ISSUE_TRANSITION_FIELDS

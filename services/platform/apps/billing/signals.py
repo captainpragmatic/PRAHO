@@ -544,21 +544,27 @@ def store_original_invoice_values(sender: type[Invoice], instance: Invoice, **kw
         logger.exception(f"🔥 [Invoice Signal] Failed to store original values: {e}")
 
 
-@receiver(post_save, sender=Invoice)
-def handle_invoice_number_generation(sender: type[Invoice], instance: Invoice, created: bool, **kwargs: Any) -> None:
+@receiver(pre_save, sender=Invoice)
+def handle_invoice_number_generation(sender: type[Invoice], instance: Invoice, **kwargs: Any) -> None:
     """
-    Generate proper invoice number when status changes to 'issued'.
-    Romanian law requires sequential numbering only for issued invoices.
+    Allocate the legal number in the same transaction that persists issuance.
+
+    The number must be assigned before locked_at reaches the database. It then
+    participates in the same fiscal snapshot as the evidence and issue timestamp.
     """
     try:
-        if not created and instance.status == "issued" and instance.number.startswith("TMP-"):
+        if not instance._state.adding and instance.status == "issued" and instance.number.startswith("TMP-"):
+            if Invoice.objects.filter(pk=instance.pk, locked_at__isnull=False).exists():
+                return  # Existing locked history cannot be renumbered by a later save.
             # Generate proper invoice number
             from .numbering_service import InvoiceNumberingService
 
             new_number = InvoiceNumberingService.get_next_number()
 
-            # Update without triggering signals again
-            Invoice.objects.filter(pk=instance.pk).update(number=new_number, issued_at=timezone.now())
+            old_number = instance.number
+            instance.number = new_number
+            if instance.issued_at is None:
+                instance.issued_at = timezone.now()
 
             logger.info(f"📋 [Invoice] Generated number {new_number} for invoice {instance.pk}")
 
@@ -568,12 +574,13 @@ def handle_invoice_number_generation(sender: type[Invoice], instance: Invoice, c
                 reference_id=new_number,
                 description=f"Invoice number generated: {new_number}",
                 status="success",
-                evidence={"old_number": instance.number, "new_number": new_number},
+                evidence={"old_number": old_number, "new_number": new_number},
             )
             AuditService.log_compliance_event(compliance_request)
 
     except Exception as e:
         logger.exception(f"🔥 [Invoice Signal] Failed to generate invoice number: {e}")
+        raise  # Roll back issuance instead of committing a locked temporary number.
 
 
 @receiver(post_delete, sender=Invoice)
