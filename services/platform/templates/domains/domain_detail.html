@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% load localisation_tags ui_components %}
+{% load ui_components %}
 {% load formatting %}
 {% load i18n %}
 
@@ -89,7 +89,7 @@
                             <dt class="text-sm font-medium text-slate-500 dark:text-slate-400">{% trans "Registered" %}</dt>
                             <dd class="mt-1 text-sm text-slate-900 dark:text-white">
                                 {% if domain.registered_at %}
-                                    {% localised_date domain.registered_at "date" %}
+                                    {{ domain.registered_at|romanian_date:"long" }}
                                 {% else %}
                                     {% trans "Not yet registered" %}
                                 {% endif %}
@@ -99,7 +99,7 @@
                             <dt class="text-sm font-medium text-slate-500 dark:text-slate-400">{% trans "Expires" %}</dt>
                             <dd class="mt-1 text-sm text-slate-900 dark:text-white">
                                 {% if domain.expires_at %}
-                                    {% localised_date domain.expires_at "date" %}
+                                    {{ domain.expires_at|romanian_date:"long" }}
                                     {% if days_until_expiry is not None %}
                                         <span class="text-slate-500">({{ days_until_expiry }} {% trans "days" %})</span>
                                     {% endif %}
@@ -167,7 +167,7 @@
                                             {{ item.get_action_display }} - {{ item.years }} {% trans "year" %}{{ item.years|pluralize }}
                                         </p>
                                         <p class="text-sm text-slate-500 dark:text-slate-400">
-                                            {% localised_date item.created_at "datetime" %}
+                                            {{ item.created_at|romanian_date:"datetime" }}
                                         </p>
                                     </div>
                                     <div class="text-right">

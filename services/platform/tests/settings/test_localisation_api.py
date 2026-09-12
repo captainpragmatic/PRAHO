@@ -9,6 +9,7 @@ from rest_framework.test import APIRequestFactory
 
 from apps.api.customers.serializers import CustomerProfileSerializer
 from apps.api.localisation.views import localisation_defaults
+from apps.api.users.serializers import ProfileUpdateSerializer
 from apps.api.users.views import customer_profile_api
 from apps.common.performance.rate_limiting import BurstRateThrottle
 from apps.settings.services import SettingsService
@@ -68,6 +69,13 @@ class LocalisationAPITests(TestCase):
         previous = user.first_name
         user.refresh_from_db()
         self.assertEqual(user.first_name, previous)
+
+    def test_both_profile_serializers_enforce_the_same_phone_contract(self):
+        for serializer_class in (ProfileUpdateSerializer, CustomerProfileSerializer):
+            for phone, valid in (("", True), ("+40 721 123 456", True), ("invalid phone", False)):
+                with self.subTest(serializer=serializer_class.__name__, phone=phone):
+                    serializer = serializer_class(data={"phone": phone}, partial=True)
+                    self.assertEqual(serializer.is_valid(), valid, serializer.errors)
 
     def test_profile_partial_update_and_effective_legacy_fields(self) -> None:
         user = create_staff_user(username="api_localisation", staff_role="support")

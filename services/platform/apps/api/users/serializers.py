@@ -4,6 +4,7 @@
 
 import io
 import logging
+import re
 from typing import TYPE_CHECKING, Any, cast
 
 import pyotp
@@ -357,6 +358,12 @@ class ProfileUpdateSerializer(serializers.Serializer):
     email_notifications = serializers.BooleanField(required=False)
     sms_notifications = serializers.BooleanField(required=False)
     marketing_emails = serializers.BooleanField(required=False)
+
+    def validate_phone(self, value: str) -> str:
+        """Keep the same phone contract across both profile endpoints."""
+        if value and not re.match(r"^(\+40[\s\.]?[0-9][\s\.0-9]{8,11}[0-9]|0[0-9]{9})$", value):
+            raise serializers.ValidationError(_("Invalid Romanian phone number format."))
+        return value
 
     def validate_timezone(self, value: str) -> str:
         from apps.common.localisation import validate_timezone  # noqa: PLC0415

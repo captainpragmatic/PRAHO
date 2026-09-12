@@ -1119,6 +1119,7 @@ class CustomerEditForm(CountryDefaultsMixin, forms.Form):
     )
 
     def __init__(self, customer: Customer, *args: Any, **kwargs: Any) -> None:
+        explicit_initial = kwargs.pop("initial", None)
         super().__init__(*args, **kwargs)
         self.customer = customer
 
@@ -1214,7 +1215,7 @@ class CustomerEditForm(CountryDefaultsMixin, forms.Form):
                     }
                 )
 
-        self.initial.update(kwargs.get("initial") or {})
+        self.initial.update(explicit_initial or {})
 
     def clean_company_name(self) -> str:
         """Require company name for companies"""

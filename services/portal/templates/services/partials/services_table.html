@@ -1,4 +1,4 @@
-{% load localisation_tags i18n %}
+{% load i18n %}
 {% load ui_components formatting %}
 
 {% if rate_limited %}
@@ -47,7 +47,7 @@
             {% badge service.status|status_label variant=service.status|status_variant icon=service.status|status_icon size="xs" rounded="full" css_class="w-28 justify-center" %}
           </td>
           <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-400">
-            {% localised_date service.next_billing_date "date" as localised_date_1 %}{{ localised_date_1|default:"N/A" }}
+            {{ service.next_billing_date|date:"M d, Y"|default:"N/A" }}
           </td>
         </tr>
         {% endfor %}

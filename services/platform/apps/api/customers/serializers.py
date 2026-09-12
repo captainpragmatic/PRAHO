@@ -448,12 +448,6 @@ class CustomerProfileSerializer(ProfileUpdateSerializer):
     last_name = serializers.CharField(max_length=30)
     phone = serializers.CharField(max_length=20, required=False, allow_blank=True)
 
-    def validate_phone(self, value: str) -> str:
-        """Validate Romanian phone format"""
-        if value and not re.match(r"^(\+40[\s\.]?[0-9][\s\.0-9]{8,11}[0-9]|0[0-9]{9})$", value):
-            raise serializers.ValidationError(_("Invalid Romanian phone number format."))
-        return value
-
     def to_representation(self, instance: User) -> dict[str, Any]:
         """
         Convert user and profile data to API response format.

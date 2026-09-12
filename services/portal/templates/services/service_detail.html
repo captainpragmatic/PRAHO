@@ -124,9 +124,9 @@
         <!-- Next Billing -->
         {% trans 'Next Bill' as st2_label %}
         {% if service.next_billing_date %}
-          {% localised_date service.next_billing_date "date" as localised_date_1 %}{% stat_tile st2_label localised_date_1 icon="clock" variant="primary" meta=service.billing_cycle_display %}
+          {% stat_tile st2_label service.next_billing_date|date:"M d" icon="clock" variant="primary" meta=service.billing_cycle_display %}
         {% elif service.expires_at %}
-          {% localised_date service.expires_at "date" as localised_date_2 %}{% stat_tile st2_label localised_date_2 icon="clock" variant="warning" meta=service.billing_cycle_display %}
+          {% stat_tile st2_label service.expires_at|date:"M d" icon="clock" variant="warning" meta=service.billing_cycle_display %}
         {% else %}
           {% trans 'Calculating...' as st2_val %}{% stat_tile st2_label st2_val icon="clock" variant="default" %}
         {% endif %}
@@ -664,7 +664,7 @@
                       <span class="text-slate-400">{% trans "Next Bill Date" %}</span>
                       <span class="text-white">
                         {% if service.next_billing_date %}
-                          {% localised_date service.next_billing_date "date" %}
+                          {{ service.next_billing_date|date:"M d, Y" }}
                         {% else %}
                           <span class="text-slate-500">{% trans "N/A" %}</span>
                         {% endif %}

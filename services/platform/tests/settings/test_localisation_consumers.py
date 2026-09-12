@@ -5,16 +5,17 @@ from unittest.mock import patch
 
 from django.core.cache import cache
 from django.template import Context, Template
+from django.template.loader import render_to_string
 from django.test import RequestFactory, TestCase, override_settings
 from django.urls import reverse
 from django.utils.translation import override
 
 from apps.common.localisation_services import get_localisation_defaults, get_request_localisation
-from apps.customers.forms import CustomerAddressForm, CustomerCreationForm
+from apps.customers.forms import CustomerAddressForm, CustomerCreationForm, CustomerEditForm
 from apps.customers.models import CustomerAddress
 from apps.settings.services import SettingsService
 from apps.users.models import UserProfile
-from tests.factories.core_factories import create_staff_user
+from tests.factories.core_factories import create_full_customer, create_staff_user
 
 
 @override_settings(CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}})
@@ -67,6 +68,37 @@ class LocalisationConsumerTests(TestCase):
         self.set_value("system.default_country", "DE")
         address = CustomerAddress(pk=42, country="France")
         self.assertEqual(CustomerAddressForm(instance=address)["country"].value(), "France")
+
+    def test_customer_edit_preserves_saved_primary_and_billing_countries(self):
+        self.set_value("system.default_country", "DE")
+        customer = create_full_customer()
+        address = customer.get_primary_address()
+        address.country = "France"
+        address.save(update_fields=["country"])
+        CustomerAddress.objects.create(
+            customer=customer, is_billing=True, is_primary=False, country="Italy",
+            address_line1="Example 1", city="Rome", county="Rome", postal_code="00100",
+        )
+        form = CustomerEditForm(customer)
+        self.assertEqual(form["country"].value(), "France")
+        self.assertEqual(form["billing_country"].value(), "Italy")
+        explicit = CustomerEditForm(customer, initial={"country": "Spain"})
+        self.assertEqual(explicit["country"].value(), "Spain")
+
+    def test_gdpr_list_dates_use_the_http_request_preferences(self):
+        self.set_value("system.timezone", "Europe/Bucharest")
+        self.staff.profile.timezone = "UTC"
+        self.staff.profile.date_format = "%Y-%m-%d"
+        self.staff.profile.save()
+        request = RequestFactory().get("/")
+        request.user = self.staff
+        rendered = render_to_string(
+            "audit/partials/gdpr_export_requests_list.html",
+            {"export_requests": [{"id": "00000000-0000-0000-0000-000000000001", "status": "processing",
+                                  "requested_at": datetime(2025, 12, 31, 22, 30, tzinfo=UTC)}]},
+            request=request,
+        )
+        self.assertIn('title="2025-12-31 22:30:00"', rendered)
 
     def test_default_country_and_override_reach_persisted_customer(self):
         self.set_value("system.default_country", "DE")
@@ -129,6 +161,22 @@ class LocalisationConsumerTests(TestCase):
         profile.refresh_from_db()
         self.assertEqual((profile.preferred_language, profile.timezone, profile.date_format), ("", "", ""))
         self.assertTrue(profile.email_notifications)
+
+    def test_staff_profile_preserves_preferences_not_rendered_on_the_page(self):
+        profile = self.staff.profile
+        profile.email_notifications = True
+        profile.sms_notifications = True
+        profile.marketing_emails = True
+        profile.save()
+        self.client.force_login(self.staff)
+        response = self.client.get(reverse("users:user_profile"))
+        for field in ("email_notifications", "sms_notifications", "marketing_emails"):
+            self.assertNotContains(response, f'name="{field}"')
+        self.assertEqual(self.client.post(reverse("users:user_profile"), {"timezone": "UTC"}).status_code, 302)
+        profile.refresh_from_db()
+        self.assertTrue(profile.email_notifications)
+        self.assertTrue(profile.sms_notifications)
+        self.assertTrue(profile.marketing_emails)
 
     def test_invalid_profile_does_not_partially_save(self) -> None:
         self.client.force_login(self.staff)

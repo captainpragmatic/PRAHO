@@ -54,7 +54,8 @@ template can provide its existing placeholder.
 No request-wide timezone activation is used. ORM calendar lookups, recurring
 billing, registry operations, scheduler clocks, invoice PDFs, and e-Factura keep
 their existing rules. Billing/e-Factura pages and embedded invoice/payment dates
-retain their existing fixed rendering too. Document/API endpoints retain their
+retain their existing fixed rendering too. Registry registration/expiry dates,
+billing schedules, and scheduler next-run displays also retain their prior formats. Document/API endpoints retain their
 prior language policy.
 HTML date inputs and machine-readable timestamp attributes retain their wire
 formats. Explicit Romanian date utilities remain available for documents.

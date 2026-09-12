@@ -765,6 +765,8 @@ def user_profile(request: HttpRequest) -> HttpResponse:
         form_data = request.POST.copy()
         if "language" in form_data and "preferred_language" not in form_data:
             form_data["preferred_language"] = form_data["language"]
+        # The staff page renders personal/localisation fields only. Preserve hidden
+        # notification and emergency-contact preferences on these partial submissions.
         for field in UserProfileForm.Meta.fields:
             if field not in form_data:
                 form_data[field] = getattr(profile, field)
