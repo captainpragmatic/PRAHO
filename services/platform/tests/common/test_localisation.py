@@ -11,12 +11,20 @@ from apps.common.localisation import (
     DisplayLocalisation,
     LocalisationDefaults,
     format_localised_date,
+    normalize_country_code,
     resolve_display,
 )
 from apps.common.localisation_middleware import LocalisationMiddleware, sync_language_selection
 
 
 class DisplayLocalisationTests(SimpleTestCase):
+    def test_country_normalization_excludes_unknown_and_aggregate_regions(self):
+        for value in ("ZZ", "Unknown Region", "EU", "European Union", "UN", "QO", "XA", "XB"):
+            with self.subTest(value=value):
+                self.assertEqual(normalize_country_code(value), "")
+        for value in ("DE", "Germany", "Germania"):
+            self.assertEqual(normalize_country_code(value), "DE")
+
     def test_presets_and_explicit_override(self) -> None:
         for pattern, expected in (
             ("%d.%m.%Y", "23.11.2026"),

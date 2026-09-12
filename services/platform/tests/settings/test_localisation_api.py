@@ -120,6 +120,13 @@ class LegacyProfileLocalisationTests(TestCase):
             data["localisation_preferences"], {"preferred_language": "", "timezone": "", "date_format": ""}
         )
 
+    def test_legacy_full_update_still_requires_nonblank_names(self):
+        for data in ({"timezone": "UTC"}, {"first_name": "", "last_name": "", "timezone": "UTC"}):
+            serializer = CustomerProfileSerializer(self.user, data=data)
+            self.assertFalse(serializer.is_valid())
+            self.assertIn("first_name", serializer.errors)
+            self.assertIn("last_name", serializer.errors)
+
     def test_legacy_partial_save_accepts_timezone_and_date_overrides_then_inheritance(self):
         for values in ({"timezone": "Asia/Tokyo", "date_format": "%m/%d/%Y"}, {"timezone": "", "date_format": ""}):
             # Profile access before saving must not leave stale values in the API response.

@@ -10,6 +10,7 @@ from django.test import RequestFactory, SimpleTestCase, TestCase
 from django.utils.translation import override
 
 from apps.audit.services import CustomersAuditService
+from apps.billing.fiscal_identity import billing_country_code
 from apps.customers.contact_service import ContactService
 from apps.customers.models import CustomerAddress
 from tests.factories.core_factories import create_full_customer, create_full_invoice, create_staff_user
@@ -67,6 +68,11 @@ class FinancialDisplayLocalisationTests(TestCase):
 
 
 class CountryConsumerLocalisationTests(TestCase):
+    def test_billing_snapshots_reject_unknown_and_aggregate_regions(self):
+        for value in ("ZZ", "EU", "UN", "Unknown Region"):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                billing_country_code(value)
+
     def test_romanian_names_and_iso_code_share_validation_and_audit_context(self):
         customer = create_full_customer()
         for country in ("RO", "Romania", "România"):

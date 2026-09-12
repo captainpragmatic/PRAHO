@@ -55,10 +55,9 @@ def _localized_country_codes() -> dict[str, str]:
     """Preserve the fiscal country normalizer's English/Romanian compatibility."""
     country_codes: dict[str, str] = {}
     for language in ("en", "ro"):
-        for code, name in Locale.parse(language).territories.items():
-            if len(code) == COUNTRY_CODE_LENGTH and code.isalpha():
-                country_codes[code.casefold()] = code.upper()
-                country_codes[str(name).strip().casefold()] = code.upper()
+        for code, name in country_choices(language):
+            country_codes[code.casefold()] = code
+            country_codes[name.strip().casefold()] = code
     return country_codes
 
 

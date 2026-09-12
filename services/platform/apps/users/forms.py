@@ -295,8 +295,13 @@ class UserProfileForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
 
         self.fields["preferred_language"].choices = [("", INHERIT_LABEL), *LANGUAGE_CHOICES]
+        timezone_field = self.fields["timezone"]
         self.fields["timezone"] = forms.ChoiceField(
-            required=False, choices=[("", INHERIT_LABEL), *((zone, zone) for zone in sorted(TIMEZONES))]
+            required=timezone_field.required,
+            label=timezone_field.label,
+            help_text=timezone_field.help_text,
+            widget=timezone_field.widget,
+            choices=[("", INHERIT_LABEL), *((zone, zone) for zone in sorted(TIMEZONES))],
         )
         self.fields["date_format"].choices = [("", INHERIT_LABEL), *DATE_FORMAT_CHOICES]
         # Pre-populate user fields

@@ -78,6 +78,8 @@ Login and periodic session-validation responses carry optional raw
 other sessions refresh on their existing authentication-validation cadence.
 Profile reads retain effective language/timezone fields for older clients and
 add raw inheritance preferences separately. The portal can read older payloads.
+The legacy customer-profile PUT keeps its required, nonblank first/last-name
+contract; `/api/users/profile/` supports partial updates with optional names.
 
 Small pure helpers are mirrored across the isolated services with parity tests;
 platform settings access and portal API access remain separate.

@@ -192,6 +192,7 @@ class LocalisationConsumerTests(TestCase):
         response = self.client.get(reverse("users:user_profile"))
         self.assertEqual(response["Content-Language"], "ro")
         self.assertContains(response, 'lang="ro"')
+        self.assertContains(response, "Fus Orar")
 
     def test_catalog_rejects_invalid_values(self) -> None:
         for key, value in (

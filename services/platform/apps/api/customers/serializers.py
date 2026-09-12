@@ -443,7 +443,8 @@ class CustomerProfileSerializer(ProfileUpdateSerializer):
     Serializer for customer profile data.
     """
 
-    # User fields
+    # Preserve this legacy endpoint's full-update contract. /api/users/profile/
+    # uses the shared serializer's optional names for partial updates instead.
     first_name = serializers.CharField(max_length=30)
     last_name = serializers.CharField(max_length=30)
     phone = serializers.CharField(max_length=20, required=False, allow_blank=True)
