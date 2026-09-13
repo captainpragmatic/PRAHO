@@ -271,6 +271,31 @@ CATALOG: tuple[SettingDef, ...] = (
         validation={"min": 0},
     ),
     SettingDef(
+        key="billing.fx.bnr_fetch_enabled",
+        data_type="boolean",
+        default=False,
+        group="advanced",
+        section=_("Billing"),
+        label=_("Automated BNR exchange-rate fetch"),
+        help_text=_(
+            "When on, a daily task ingests BNR reference rates. Off by default — the "
+            "manual record_exchange_rate command stays authoritative until enabled."
+        ),
+        input_kind="toggle",
+        advanced=True,
+    ),
+    SettingDef(
+        key="billing.fx.pairs",
+        data_type="list",
+        default=["EUR", "USD"],
+        group="advanced",
+        section=_("Billing"),
+        label=_("Fetched currency pairs"),
+        help_text=_("Foreign currency codes to fetch daily against RON."),
+        input_kind="chips",
+        advanced=True,
+    ),
+    SettingDef(
         key="billing.credit_consecutive_bonus_12",
         data_type="integer",
         default=20,

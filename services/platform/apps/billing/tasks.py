@@ -2203,3 +2203,101 @@ def reverify_expired_vat_validations() -> dict[str, Any]:
 def reverify_expired_vat_validations_async() -> str:
     """Queue periodic VIES re-verification task."""
     return async_task("apps.billing.tasks.reverify_expired_vat_validations", timeout=TASK_TIME_LIMIT)
+
+
+# ===============================================================================
+# #103: Automated BNR exchange-rate ingestion (feature-flagged, last-good on failure)
+# ===============================================================================
+
+
+def _fx_alert(subject: str, message: str) -> None:
+    """Alert staff of an FX problem; log loudly if delivery fails / no recipients (W8)."""
+    from apps.notifications.services import NotificationService  # noqa: PLC0415
+
+    if not NotificationService.send_admin_alert(subject, message, alert_type="critical"):
+        logger.error("🔥 [BNR] FX alert not delivered (recipients configured?): %s — %s", subject, message)
+
+
+def _fx_audit(event_type: str, description: str, metadata: dict[str, Any]) -> None:
+    AuditService.log_simple_event(event_type, description=description, metadata=metadata, actor_type="system")
+
+
+def fetch_bnr_exchange_rates() -> dict[str, Any]:
+    """Daily scheduled BNR reference-rate ingestion (#103), feature-flagged OFF by default.
+
+    The manual record_exchange_rate command stays authoritative until enabled. Any fetch
+    failure retains last-good rates (the gateway writes nothing) and alerts staff. Returns
+    a result dict (Django-Q marks the task done regardless — see the FX status surface for
+    the true outcome).
+    """
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    if not SettingsService.get_boolean_setting("billing.fx.bnr_fetch_enabled", False):
+        return {"success": True, "skipped": "disabled"}
+
+    lock = DistributedLock("fetch_bnr_exchange_rates", blocking=False)
+    if not lock.acquire():
+        logger.info("💱 [BNR] fetch skipped — another run holds the lock")
+        return {"success": True, "skipped": "locked"}
+    try:
+        return _run_bnr_exchange_fetch()
+    finally:
+        lock.release()
+
+
+def _run_bnr_exchange_fetch() -> dict[str, Any]:
+    from datetime import timedelta  # noqa: PLC0415
+
+    from apps.billing.currency_models import Currency, FXRate  # noqa: PLC0415
+    from apps.billing.fx_rate_ingestion import FXRateConflictError, record_fx_rate  # noqa: PLC0415
+    from apps.billing.gateways.bnr_gateway import BNR_API_URL, BNRGateway  # noqa: PLC0415
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    pairs = SettingsService.get_list_setting("billing.fx.pairs", ["EUR", "USD"])
+    result = BNRGateway.fetch_rates(pairs)
+    if not result.api_available:
+        _fx_alert("BNR exchange-rate fetch failed", result.error_message or "feed unavailable")
+        _fx_audit("fx_rate_fetch_failed", "BNR exchange-rate fetch failed", {"error": result.error_message})
+        return {"success": False, "error": result.error_message}
+
+    assert result.publication_date is not None  # api_available implies a validated publication
+    as_of = result.publication_date + timedelta(days=1)  # pub + 1 CALENDAR day (art. 290(2))
+    ron = Currency.objects.get(code="RON")
+    recorded = 0
+    conflicts: list[str] = []
+    for code, rate in result.rates.items():
+        base = Currency.objects.get(code=code)
+        try:
+            with transaction.atomic():
+                _row, created = record_fx_rate(base, ron, as_of, rate, FXRate.Source.BNR, BNR_API_URL, "bnr-fetch")
+            recorded += int(created)
+        except FXRateConflictError as exc:
+            conflicts.append(f"{code}: {exc}")
+
+    if conflicts:
+        _fx_alert("BNR exchange-rate conflict", "; ".join(conflicts))
+    _fx_audit(
+        "fx_rate_fetched",
+        f"BNR exchange rates recorded for {as_of}",
+        {"as_of": as_of.isoformat(), "recorded": recorded, "conflicts": conflicts, "pairs": list(result.rates)},
+    )
+    return {"success": not conflicts, "recorded": recorded, "conflicts": conflicts, "as_of": as_of.isoformat()}
+
+
+def setup_fx_scheduled_tasks() -> dict[str, str]:
+    """Register the daily BNR fetch CRON — independently of billing, so the billing
+    auto-renew guard cannot block it. Runs weekday afternoons in Europe/Bucharest local
+    time (DST-varying), after BNR's ~13:00 publication."""
+    from django_q.models import Schedule  # noqa: PLC0415
+
+    name = "fx-bnr-daily-fetch"
+    Schedule.objects.update_or_create(
+        name=name,
+        defaults={
+            "func": "apps.billing.tasks.fetch_bnr_exchange_rates",
+            "schedule_type": Schedule.CRON,
+            "cron": "0 14 * * 1-5",
+            "repeats": -1,
+        },
+    )
+    return {name: "registered"}
