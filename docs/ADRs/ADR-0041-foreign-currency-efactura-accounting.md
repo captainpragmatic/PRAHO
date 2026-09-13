@@ -27,7 +27,8 @@ up only the requested direction; it never silently inverts a rate. Every new
 rate used for issuance records its legal validity date, approved source, source
 reference, and acquisition time. `as_of` is the date the rate is legally valid
 for VAT, never the publication date: a BNR rate communicated on day D applies
-from the next banking day (article 290(2) methodological norms), and the
+from the next CALENDAR day and continues until the next publication (article
+290(2) + Norme metodologice pct. 35; superseded wording — see ADR-0046), and the
 operator or importer recording the row performs that translation. Historical
 rows migrate as `legacy_unknown` and cannot be consumed for new issuance until
 an operator supplies trustworthy provenance.
