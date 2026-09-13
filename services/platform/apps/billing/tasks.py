@@ -2250,7 +2250,8 @@ def fetch_bnr_exchange_rates() -> dict[str, Any]:
     try:
         return _run_bnr_exchange_fetch()
     finally:
-        lock.release()
+        if not lock.release():  # False ⇒ the lock timeout expired mid-run; a concurrent run may have overlapped
+            logger.warning("💱 [BNR] lock expired before release — a concurrent fetch may have overlapped")
 
 
 def _run_bnr_exchange_fetch() -> dict[str, Any]:
@@ -2259,11 +2260,20 @@ def _run_bnr_exchange_fetch() -> dict[str, Any]:
     from apps.billing.currency_models import Currency, FXRate  # noqa: PLC0415
     from apps.billing.fx_rate_ingestion import FXRateConflictError, record_fx_rate  # noqa: PLC0415
     from apps.billing.gateways.bnr_gateway import BNR_API_URL, BNRGateway  # noqa: PLC0415
+    from apps.common.outbound_http import OutboundSecurityError  # noqa: PLC0415
     from apps.common.system_status import record_fx_fetch_outcome  # noqa: PLC0415
     from apps.settings.services import SettingsService  # noqa: PLC0415
 
     pairs = SettingsService.get_list_setting("billing.fx.pairs", ["EUR", "USD"])
-    result = BNRGateway.fetch_rates(pairs)
+    try:
+        result = BNRGateway.fetch_rates(pairs)
+    except OutboundSecurityError as exc:
+        # An SSRF/policy block is already audited at high severity in the gateway; also
+        # alert + record the outcome (so "any fetch failure alerts staff" holds), then
+        # re-raise so the security event stays loud in the task record.
+        _fx_alert("BNR fetch blocked by outbound policy", str(exc))
+        record_fx_fetch_outcome(success=False, detail=f"outbound blocked: {exc}")
+        raise
     if not result.api_available:
         detail = result.error_message or "feed unavailable"
         _fx_alert("BNR exchange-rate fetch failed", detail)
@@ -2273,15 +2283,17 @@ def _run_bnr_exchange_fetch() -> dict[str, Any]:
 
     assert result.publication_date is not None  # api_available implies a validated publication
     as_of = result.publication_date + timedelta(days=1)  # pub + 1 CALENDAR day (art. 290(2))
-    ron = Currency.objects.get(code="RON")
 
-    # H2: the whole publication writes atomically. A mid-batch failure (a conflict, or a
-    # rate that clears the gateway's checks but trips the model's precision validators)
-    # rolls back EVERY currency, so the feed is never half-applied. The audit/alert/outcome
-    # calls run OUTSIDE the transaction so they survive that rollback.
+    # H2: the whole publication writes atomically. A mid-batch failure (a conflict, a rate
+    # that clears the gateway's checks but trips the model's precision validators, or a
+    # Currency row missing for a configured/RON code) rolls back EVERY currency, so the feed
+    # is never half-applied. The RON + per-pair Currency lookups are INSIDE the try so a
+    # config/table drift alerts rather than escaping silently. The audit/alert/outcome calls
+    # run OUTSIDE the transaction so they survive that rollback.
     recorded = 0
     try:
         with transaction.atomic():
+            ron = Currency.objects.get(code="RON")
             for code, rate in result.rates.items():
                 base = Currency.objects.get(code=code)
                 _row, created = record_fx_rate(base, ron, as_of, rate, FXRate.Source.BNR, BNR_API_URL, "bnr-fetch")

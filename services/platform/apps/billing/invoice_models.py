@@ -535,6 +535,13 @@ class Invoice(models.Model):
         date) needs a verified-receipt carrier that does not yet exist and is deferred (see
         ADR-0041); passing reservation-time (``Payment.received_at``) would freeze the
         wrong date, so the issue-date default is used until that carrier lands.
+
+        Persistence caveat: this sets the FX fields on the instance but does NOT save them,
+        and ``save()`` only auto-includes them once ``issue()`` has set status/locked_at
+        (see ``_ISSUE_TRANSITION_FIELDS``). The sole caller today freezes, issues, and saves
+        in one transaction, so this is safe. A future out-of-transaction freeze (the deferred
+        advance-receipt carrier) MUST persist the FX fields explicitly, or a later
+        ``save(update_fields=...)`` that omits them will silently drop the snapshot.
         """
         if tax_point_date is not None:
             self.tax_point_date = tax_point_date

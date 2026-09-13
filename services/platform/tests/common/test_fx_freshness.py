@@ -61,6 +61,14 @@ class FxFreshnessCheckTests(TestCase):
         pairs.return_value = ["RON"]
         self.assertEqual(_check_fx_freshness().level, StatusLevel.GREY)
 
+    def test_degrades_to_red_on_unexpected_error(self, _pairs: object) -> None:
+        # An unexpected raise (e.g. a transient DB error) must NOT propagate out of the
+        # aggregator and take the daily status task (and its FX pager) down — and must fail
+        # to RED, not GREY (GREY reads as recovery and clears the alert dedup).
+        with patch("apps.common.system_status._compute_fx_freshness", side_effect=RuntimeError("db down")):
+            status = _check_fx_freshness()
+        self.assertEqual(status.level, StatusLevel.RED)
+
 
 @override_settings(CACHES=LOCMEM_TEST_CACHE)
 class FxFreshnessAlertTests(TestCase):

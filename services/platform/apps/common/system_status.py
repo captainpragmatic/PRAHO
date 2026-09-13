@@ -390,14 +390,36 @@ def _check_backup() -> SubsystemStatus:
 
 
 def _check_fx_freshness() -> SubsystemStatus:
-    """FX-rate freshness for foreign-currency issuance (#103).
+    """FX-rate freshness for foreign-currency issuance (#103), guarded so an unexpected
+    error cannot silently disable the daily FX pager.
 
-    Resolver-accurate and computed LIVE (never trusts a cached level for its
+    ``check_all_subsystems`` does not wrap its members, so an uncaught raise here (e.g. a
+    transient ``OperationalError`` from the settings/FXRate queries below) would abort the
+    whole daily status task before it caches results or runs ``_alert_on_fx_freshness`` —
+    the very pager that surfaces a silently-failed fetch. On any such error we return RED,
+    never GREY: ``_alert_on_fx_freshness`` treats GREY as recovery and clears the dedup key,
+    so a GREY-on-error would convert "cannot verify FX" into "recovered".
+    """
+    try:
+        return _compute_fx_freshness()
+    except Exception as exc:  # a status check must degrade to RED, never take the task down
+        logger.warning("🔴 [SystemStatus] FX freshness check errored: %s", exc)
+        return SubsystemStatus(
+            name="FX rates",
+            level=StatusLevel.RED,
+            message="Freshness check errored",
+            detail=f"Could not verify FX freshness (treated as blocking): {exc}",
+        )
+
+
+def _compute_fx_freshness() -> SubsystemStatus:
+    """Resolver-accurate, computed LIVE (never trusts a cached level for its
     date-sensitivity): for each configured foreign pair it attempts today's
     currency->RON resolution with the same semantics ``Invoice.issue()`` uses.
     RED  = a pair cannot resolve today (missing / unprovenanced) → foreign issuance
            for it is blocked;
-    AMBER= resolves but the rate is older than the staleness window;
+    AMBER= resolves but the rate is older than the staleness window, or the last daily
+           fetch failed while last-good rates still resolve;
     GREEN= every configured pair resolves and is fresh;
     GREY = no foreign pairs configured.
     """

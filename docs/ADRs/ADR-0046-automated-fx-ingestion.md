@@ -98,3 +98,9 @@ the manual command stays authoritative until an operator enables it.
   `ExchangeRateService.resolve` docstring. `FXRate.as_of`'s model `help_text` still reads
   "next banking day"; it is knowingly left stale to avoid a no-op schema migration and is
   not authoritative.
+- **Usage invoicing** (`usage_invoice_service`) is not given an explicit `assert_currency_issuable`
+  admission guard here: it calls `issue()` directly, and issuance precedes collection, so an
+  unresolvable rate fails the invoice loud *before* any money is taken (unbilled usage,
+  recoverable by ingesting a rate and re-issuing) — not a stuck-money hole. Its behaviour is
+  unchanged by this PR (`issue()` resolved FX inline before too). A uniform admission guard
+  there is future work for the usage-invoicing owner.

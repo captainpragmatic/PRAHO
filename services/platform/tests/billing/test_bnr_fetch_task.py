@@ -57,6 +57,23 @@ class FetchBnrExchangeRatesTaskTests(TestCase):
         self.assertFalse(FXRate.objects.exists())  # last-good retained
         mock_alert.assert_called_once()
 
+    @patch(_ALERT, return_value=True)
+    @patch(_FETCH)
+    @patch(_PAIRS, return_value=["EUR"])
+    @patch(_FLAG, return_value=True)
+    def test_outbound_security_block_alerts_then_reraises(
+        self, _flag: object, _pairs: object, mock_fetch: object, mock_alert: object
+    ) -> None:
+        # An SSRF/policy block must alert staff (docstring contract) AND re-raise so the
+        # security event stays loud in the task record — not be swallowed.
+        from apps.common.outbound_http import OutboundSecurityError  # noqa: PLC0415
+
+        mock_fetch.side_effect = OutboundSecurityError("blocked host")
+        with self.assertRaises(OutboundSecurityError):
+            fetch_bnr_exchange_rates()
+        mock_alert.assert_called_once()
+        self.assertFalse(FXRate.objects.exists())
+
     @patch("apps.billing.tasks.DistributedLock.acquire", return_value=False)
     @patch(_FLAG, return_value=True)
     def test_lock_held_skips(self, _flag: object, _acquire: object) -> None:
