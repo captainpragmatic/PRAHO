@@ -10,12 +10,14 @@ from datetime import timedelta
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
+from django.conf import settings
 from django.core.checks import run_checks
 from django.db import OperationalError
 from django.test import TestCase, override_settings
 from django.utils import timezone
 from django.utils.translation import override
 
+from apps.billing.config import DEFAULT_CURRENCY_CODE
 from apps.billing.currency_models import Currency, FXRate
 from apps.billing.metering_models import BillingCycle
 from apps.billing.payment_models import Payment
@@ -338,6 +340,14 @@ class RONWithoutRateTests(_CurrencyAdmissionCases, _SubscriptionInvoicePaymentFi
 
 
 class DefaultCurrencyConfigurationTests(TestCase):
+    def test_single_default_currency_source_of_truth(self) -> None:
+        """#103: BILLING_DEFAULT_CURRENCY is the one declared default; the former dead
+        DEFAULT_CURRENCY / SUPPORTED_CURRENCIES orphans were removed."""
+        self.assertTrue(hasattr(settings, "BILLING_DEFAULT_CURRENCY"))
+        self.assertFalse(hasattr(settings, "DEFAULT_CURRENCY"))
+        self.assertFalse(hasattr(settings, "SUPPORTED_CURRENCIES"))
+        self.assertEqual(DEFAULT_CURRENCY_CODE, settings.BILLING_DEFAULT_CURRENCY)
+
     def test_ron_check_does_not_query_the_database(self) -> None:
         with override_settings(BILLING_DEFAULT_CURRENCY="RON"), self.assertNumQueries(0):
             self.assertEqual(run_checks(tags=["billing_currency"]), [])

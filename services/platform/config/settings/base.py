@@ -454,8 +454,11 @@ ROMANIAN_BUSINESS_CONTEXT = {
 }
 
 # Currency settings
-DEFAULT_CURRENCY = "RON"
-SUPPORTED_CURRENCIES = ["RON", "EUR", "USD"]
+# The default billing currency is BILLING_DEFAULT_CURRENCY (resolved via
+# apps.billing.config.DEFAULT_CURRENCY_CODE and validated by the billing_currency
+# system check, #103). The former DEFAULT_CURRENCY / SUPPORTED_CURRENCIES constants
+# were unused orphans and were removed; supported codes live in the CurrencyCode enum.
+BILLING_DEFAULT_CURRENCY = os.environ.get("BILLING_DEFAULT_CURRENCY", "RON")
 
 # ===============================================================================
 # EXTERNAL INTEGRATIONS
