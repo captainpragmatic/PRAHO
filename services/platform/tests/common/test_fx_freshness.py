@@ -82,3 +82,32 @@ class FxFreshnessAlertTests(TestCase):
         _alert_on_fx_freshness(self._status(StatusLevel.GREEN), 3600)  # recovery clears dedup
         _alert_on_fx_freshness(self._status(StatusLevel.RED), 3600)
         self.assertEqual(mock_alert.call_count, 2)
+
+
+@override_settings(CACHES=LOCMEM_TEST_CACHE)
+@patch(_PAIRS, return_value=["EUR"])
+class FxFetchOutcomeVisibilityTests(TestCase):
+    """H3: a failed daily fetch must stay visible on the live status even when last-good
+    rates still resolve — otherwise a bounced alert email leaves the failure invisible."""
+
+    def setUp(self) -> None:
+        self.eur, _ = Currency.objects.get_or_create(code="EUR", defaults={"symbol": "€", "decimals": 2})
+        self.ron, _ = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei", "decimals": 2})
+        cache.clear()
+        FXRate.objects.create(
+            base_code=self.eur, quote_code=self.ron, rate=Decimal("5.00000000"),
+            as_of=timezone.localdate() - timedelta(days=1),
+            source=FXRate.Source.BNR, source_reference="ref", fetched_at=timezone.now(),
+        )
+
+    def test_failed_fetch_surfaces_amber_even_with_fresh_rates(self, _pairs: object) -> None:
+        from apps.common.system_status import record_fx_fetch_outcome  # noqa: PLC0415
+
+        # A fresh last-good rate alone is GREEN...
+        self.assertEqual(_check_fx_freshness().level, StatusLevel.GREEN)
+        # ...but a recorded ingestion failure must escalate despite the fresh rate (H3).
+        record_fx_fetch_outcome(success=False, detail="feed unavailable")
+        self.assertEqual(_check_fx_freshness().level, StatusLevel.AMBER)
+        # A subsequent successful fetch clears the failure.
+        record_fx_fetch_outcome(success=True, detail="recorded 1")
+        self.assertEqual(_check_fx_freshness().level, StatusLevel.GREEN)

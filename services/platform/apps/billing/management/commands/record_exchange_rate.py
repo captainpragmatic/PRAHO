@@ -40,8 +40,9 @@ class Command(BaseCommand):
             dest="as_of",
             help=(
                 "Date the rate is legally valid for VAT (YYYY-MM-DD). A BNR rate "
-                "communicated on day D applies from the next banking day — enter "
-                "the validity date, not the publication date (art. 290(2) norms)."
+                "communicated on day D applies from the next CALENDAR day — enter "
+                "the validity date (publication + 1 day), not the publication date "
+                "(art. 290(2) + Norme pct. 35; see ADR-0046)."
             ),
         )
         parser.add_argument(

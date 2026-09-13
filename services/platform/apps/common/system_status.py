@@ -22,6 +22,32 @@ logger = logging.getLogger(__name__)
 CACHE_KEY = "system_status_results"
 CACHE_TIMEOUT = 86400 * 2  # 48 hours
 
+# #103 (H3): the most recent BNR fetch outcome, kept independently of rate age so a
+# failed ingestion stays visible even while last-good rates are still fresh. A successful
+# fetch clears it; a failure persists for a week (until the next good fetch or manual fix).
+_FX_FETCH_OUTCOME_KEY = "fx:last_fetch_outcome"
+_FX_FETCH_OUTCOME_TTL = 86400 * 7
+
+
+def record_fx_fetch_outcome(*, success: bool, detail: str) -> None:
+    """Persist the last BNR fetch outcome for the freshness surface (#103, H3).
+
+    Rate *age* alone cannot tell a failed daily fetch from a quiet weekend, so a failed
+    ingestion whose last-good rates are still fresh would otherwise read GREEN (and, if the
+    alert email also bounced, be entirely invisible). Recording the outcome here lets
+    ``_check_fx_freshness`` escalate to AMBER — which the daily task then alerts on.
+    """
+    from django.utils import timezone  # noqa: PLC0415
+
+    if success:
+        cache.delete(_FX_FETCH_OUTCOME_KEY)
+        return
+    cache.set(
+        _FX_FETCH_OUTCOME_KEY,
+        {"detail": detail, "at": timezone.now().isoformat()},
+        timeout=_FX_FETCH_OUTCOME_TTL,
+    )
+
 
 class StatusLevel(StrEnum):
     GREEN = "green"  # Configured and connected
@@ -405,6 +431,9 @@ def _check_fx_freshness() -> SubsystemStatus:
         if snapshot.as_of < today - timedelta(days=stale_after):
             stale.append(f"{code} (as of {snapshot.as_of})")
 
+    # H3: a failed daily fetch must stay visible even when last-good rates still resolve.
+    fetch_failure = cache.get(_FX_FETCH_OUTCOME_KEY)
+
     if missing:
         return SubsystemStatus(
             name="FX rates",
@@ -418,6 +447,17 @@ def _check_fx_freshness() -> SubsystemStatus:
             level=StatusLevel.AMBER,
             message=f"Stale (> {stale_after}d): {', '.join(stale)}",
             detail="Rates still resolve, but a fresher publication is overdue.",
+        )
+    if fetch_failure:
+        return SubsystemStatus(
+            name="FX rates",
+            level=StatusLevel.AMBER,
+            message="Last BNR fetch failed",
+            detail=(
+                f"All pairs still resolve on last-good rates, but the most recent ingestion "
+                f"failed ({fetch_failure.get('detail')} at {fetch_failure.get('at')}). "
+                f"Fix ingestion before the rates go stale."
+            ),
         )
     return SubsystemStatus(
         name="FX rates",

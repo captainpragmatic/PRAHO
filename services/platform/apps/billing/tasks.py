@@ -1768,11 +1768,19 @@ def _replay_unbound_recurring_submission(
     claim_token: uuid.UUID,
 ) -> Any:
     """Replay one already-authorized unknown submission with its original key."""
+    from apps.billing.currency_service import assert_currency_issuable  # noqa: PLC0415  # ADR-0007
     from apps.billing.payment_service import _mark_invoice_payment_attempt_failed  # noqa: PLC0415
     from apps.billing.recurring_submission_service import (  # noqa: PLC0415
         record_recurring_submission_replay_started,
         record_recurring_submission_result,
     )
+
+    # H1: an "unbound" submission may have crashed BEFORE Stripe received the original
+    # request, so this replay can create the FIRST real charge. Fail closed on an
+    # unresolvable non-RON rate before charging — the raise is caught by the batch loop,
+    # which releases the claim for retry / operator recovery (it does NOT cancel the
+    # submission, so the charge is deferred, never lost). RON short-circuits in the guard.
+    assert_currency_issuable(submission.payment.currency.code, timezone.localdate())
 
     submission = record_recurring_submission_replay_started(submission.id, claim_token)
     payment = submission.payment
@@ -2251,37 +2259,50 @@ def _run_bnr_exchange_fetch() -> dict[str, Any]:
     from apps.billing.currency_models import Currency, FXRate  # noqa: PLC0415
     from apps.billing.fx_rate_ingestion import FXRateConflictError, record_fx_rate  # noqa: PLC0415
     from apps.billing.gateways.bnr_gateway import BNR_API_URL, BNRGateway  # noqa: PLC0415
+    from apps.common.system_status import record_fx_fetch_outcome  # noqa: PLC0415
     from apps.settings.services import SettingsService  # noqa: PLC0415
 
     pairs = SettingsService.get_list_setting("billing.fx.pairs", ["EUR", "USD"])
     result = BNRGateway.fetch_rates(pairs)
     if not result.api_available:
-        _fx_alert("BNR exchange-rate fetch failed", result.error_message or "feed unavailable")
+        detail = result.error_message or "feed unavailable"
+        _fx_alert("BNR exchange-rate fetch failed", detail)
         _fx_audit("fx_rate_fetch_failed", "BNR exchange-rate fetch failed", {"error": result.error_message})
+        record_fx_fetch_outcome(success=False, detail=detail)
         return {"success": False, "error": result.error_message}
 
     assert result.publication_date is not None  # api_available implies a validated publication
     as_of = result.publication_date + timedelta(days=1)  # pub + 1 CALENDAR day (art. 290(2))
     ron = Currency.objects.get(code="RON")
-    recorded = 0
-    conflicts: list[str] = []
-    for code, rate in result.rates.items():
-        base = Currency.objects.get(code=code)
-        try:
-            with transaction.atomic():
-                _row, created = record_fx_rate(base, ron, as_of, rate, FXRate.Source.BNR, BNR_API_URL, "bnr-fetch")
-            recorded += int(created)
-        except FXRateConflictError as exc:
-            conflicts.append(f"{code}: {exc}")
 
-    if conflicts:
-        _fx_alert("BNR exchange-rate conflict", "; ".join(conflicts))
+    # H2: the whole publication writes atomically. A mid-batch failure (a conflict, or a
+    # rate that clears the gateway's checks but trips the model's precision validators)
+    # rolls back EVERY currency, so the feed is never half-applied. The audit/alert/outcome
+    # calls run OUTSIDE the transaction so they survive that rollback.
+    recorded = 0
+    try:
+        with transaction.atomic():
+            for code, rate in result.rates.items():
+                base = Currency.objects.get(code=code)
+                _row, created = record_fx_rate(base, ron, as_of, rate, FXRate.Source.BNR, BNR_API_URL, "bnr-fetch")
+                recorded += int(created)
+    except (
+        Exception
+    ) as exc:  # any write failure must roll back the batch and alert, never partial-write or escape silently
+        kind = "conflict" if isinstance(exc, FXRateConflictError) else "error"
+        detail = f"{as_of}: {exc}"
+        _fx_alert(f"BNR exchange-rate {kind}", detail)
+        _fx_audit(f"fx_rate_{kind}", f"BNR exchange-rate {kind}", {"error": str(exc), "as_of": as_of.isoformat()})
+        record_fx_fetch_outcome(success=False, detail=detail)
+        return {"success": False, kind: str(exc), "as_of": as_of.isoformat()}
+
     _fx_audit(
         "fx_rate_fetched",
         f"BNR exchange rates recorded for {as_of}",
-        {"as_of": as_of.isoformat(), "recorded": recorded, "conflicts": conflicts, "pairs": list(result.rates)},
+        {"as_of": as_of.isoformat(), "recorded": recorded, "pairs": list(result.rates)},
     )
-    return {"success": not conflicts, "recorded": recorded, "conflicts": conflicts, "as_of": as_of.isoformat()}
+    record_fx_fetch_outcome(success=True, detail=f"recorded {recorded} pair(s) for {as_of}")
+    return {"success": True, "recorded": recorded, "as_of": as_of.isoformat()}
 
 
 def setup_fx_scheduled_tasks() -> dict[str, str]:
