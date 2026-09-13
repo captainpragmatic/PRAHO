@@ -363,6 +363,70 @@ def _check_backup() -> SubsystemStatus:
         )
 
 
+def _check_fx_freshness() -> SubsystemStatus:
+    """FX-rate freshness for foreign-currency issuance (#103).
+
+    Resolver-accurate and computed LIVE (never trusts a cached level for its
+    date-sensitivity): for each configured foreign pair it attempts today's
+    currency->RON resolution with the same semantics ``Invoice.issue()`` uses.
+    RED  = a pair cannot resolve today (missing / unprovenanced) → foreign issuance
+           for it is blocked;
+    AMBER= resolves but the rate is older than the staleness window;
+    GREEN= every configured pair resolves and is fresh;
+    GREY = no foreign pairs configured.
+    """
+    from datetime import timedelta  # noqa: PLC0415
+
+    from django.utils import timezone  # noqa: PLC0415
+
+    from apps.billing.exchange_rate_service import ExchangeRateError, ExchangeRateService  # noqa: PLC0415
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    pairs = [str(c).strip().upper() for c in SettingsService.get_list_setting("billing.fx.pairs", ["EUR", "USD"])]
+    foreign = [c for c in pairs if c and c != "RON"]
+    if not foreign:
+        return SubsystemStatus(
+            name="FX rates",
+            level=StatusLevel.GREY,
+            message="No foreign currencies",
+            detail="billing.fx.pairs lists no non-RON currency",
+        )
+
+    today = timezone.localdate()
+    stale_after = SettingsService.get_integer_setting("billing.fx.stale_after_days", 4)
+    missing: list[str] = []
+    stale: list[str] = []
+    for code in foreign:
+        try:
+            snapshot = ExchangeRateService.resolve(code, "RON", today)
+        except ExchangeRateError:
+            missing.append(code)
+            continue
+        if snapshot.as_of < today - timedelta(days=stale_after):
+            stale.append(f"{code} (as of {snapshot.as_of})")
+
+    if missing:
+        return SubsystemStatus(
+            name="FX rates",
+            level=StatusLevel.RED,
+            message=f"No usable rate today: {', '.join(missing)}",
+            detail="Foreign-currency issuance is blocked for these until a provenanced rate is provisioned.",
+        )
+    if stale:
+        return SubsystemStatus(
+            name="FX rates",
+            level=StatusLevel.AMBER,
+            message=f"Stale (> {stale_after}d): {', '.join(stale)}",
+            detail="Rates still resolve, but a fresher publication is overdue.",
+        )
+    return SubsystemStatus(
+        name="FX rates",
+        level=StatusLevel.GREEN,
+        message="Fresh",
+        detail=f"Resolvable today: {', '.join(foreign)}",
+    )
+
+
 def check_all_subsystems() -> list[SubsystemStatus]:
     """
     Check all subsystems and return their status.
@@ -380,6 +444,7 @@ def check_all_subsystems() -> list[SubsystemStatus]:
         _check_credential_vault(),
         _check_sentry(),
         _check_backup(),
+        _check_fx_freshness(),
     ]
 
     # Log warnings for any non-green statuses
