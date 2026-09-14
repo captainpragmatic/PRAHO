@@ -1,0 +1,29 @@
+{
+  "provenance": {
+    "kind": "synthetic documentation-derived examples; not captured sandbox traffic",
+    "reviewed": "2026-09-11",
+    "gandi": "https://api.gandi.net/docs/domains/",
+    "gandi_sandbox": "https://api.sandbox.gandi.net/docs/sandbox/",
+    "rotld": "ROTLD REST API revision 1.0.2, 2013-01-09; ROTLD-authored historical PDF",
+    "rotld_mirror": "https://pdfcoffee.com/rotld-rest-api-documentation-pdf-free.html",
+    "rotld_original_unavailable": "http://rest2-test.rotld.ro/rest-api/RESTAPI%20DOCUMENTATION.pdf/at_download/file"
+  },
+  "gandi_info": {
+    "fqdn": "example.com",
+    "dates": {"registry_ends_at": "2028-01-01T00:00:00Z", "registry_created_at": "2025-01-01T00:00:00Z"},
+    "status": ["clientTransferProhibited"],
+    "nameservers": ["ns1.example.net", "ns2.example.net"],
+    "contacts": {"owner": {"data_obfuscated": true}}
+  },
+  "rotld_contact": {"error": 0, "result_code": "00200", "data": {"cid": "CONTACT-EXAMPLE"}},
+  "rotld_available": {"error": 0, "result_code": "00200", "data": {"status": "Available"}},
+  "rotld_register": {
+    "error": 0, "result_code": "00200",
+    "data": {"domain": "example.ro", "expiration_date": "2028-01-01 00:00:00", "registration_date": "2026-01-01 00:00:00", "registrant_id": "CONTACT-EXAMPLE"}
+  },
+  "rotld_info": {
+    "error": 0, "result_code": "00200",
+    "data": {"domain": "example.ro", "expiration_date": "2028-01-01 00:00:00", "statuses": ["OK", "TransferProhibited"], "nameservers": ["ns1.example.net", "ns2.example.net"], "registrant_id": "CONTACT-EXAMPLE"}
+  },
+  "rotld_empty": {"error": 0, "result_code": "00200", "data": {}}
+}

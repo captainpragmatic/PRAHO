@@ -7,6 +7,8 @@
     "test_ticket_mobile_responsiveness"
   ],
   "allowed_duplicate_name_patterns": [
+    "^DisplayLocalisationTests\\.test_",
+    "^LanguageLocalisationTests\\.test_",
     "^CoerceRetryAfterSecondsTests\\.test_",
     "^RomanianDateFilterTimezoneTestCase\\.test_",
     "^TestProdLoggingConfiguration\\.test_",

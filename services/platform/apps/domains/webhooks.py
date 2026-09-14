@@ -7,9 +7,9 @@ import json
 import logging
 import re
 from collections.abc import Callable
-from datetime import datetime
 from typing import Any
 
+from django.db import transaction
 from django.http import HttpRequest, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.utils.decorators import method_decorator
@@ -23,7 +23,9 @@ from apps.common.request_ip import get_safe_client_ip
 from apps.common.validators import log_security_event
 
 from .domain_names import canonicalize_domain_name
-from .models import Domain, Registrar
+from .gateways.contracts import parse_date
+from .models import Domain, DomainOperation, Registrar
+from .operation_services import DomainOperationService
 from .services import DomainRegistrarGateway
 
 # Webhook payload validation constants (#130/M8)
@@ -198,10 +200,9 @@ class RegistrarWebhookView(View):
 
         expires_at = webhook_data.get("expires_at")
         if expires_at and isinstance(expires_at, str):
-            try:
-                domain.expires_at = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
-            except ValueError:
-                logger.warning(f"⚠️ [Webhook] Invalid expires_at format: {expires_at}")
+            expiry = parse_date(expires_at)
+            if expiry is not None and (domain.expires_at is None or expiry > domain.expires_at):
+                domain.expires_at = expiry
 
         nameservers = webhook_data.get("nameservers")
         if nameservers and isinstance(nameservers, list):
@@ -217,10 +218,15 @@ class RegistrarWebhookView(View):
             if valid_ns:
                 domain.nameservers = valid_ns
 
+    @transaction.atomic
     def _handle_domain_registered(
         self, domain: Domain, webhook_data: dict[str, Any], client_ip: str
     ) -> tuple[bool, str]:
         """✅ Handle domain registration completion"""
+        domain = Domain.objects.select_for_update().get(pk=domain.pk)
+        self._apply_webhook_domain_fields(domain, webhook_data)
+        if domain.expires_at is None:
+            return False, "Registration confirmation requires a valid expiry"
         try:
             try:
                 domain.activate()
@@ -255,16 +261,25 @@ class RegistrarWebhookView(View):
             logger.error(f"🔥 [Webhook] Failed to process domain registration: {e}")
             return False, str(e)
 
+    @transaction.atomic
     def _handle_domain_renewed(self, domain: Domain, webhook_data: dict[str, Any], client_ip: str) -> tuple[bool, str]:
         """🔄 Handle domain renewal notification"""
+        domain = Domain.objects.select_for_update().get(pk=domain.pk)
         try:
             expires_at_raw = webhook_data.get("expires_at")
             if not expires_at_raw or not isinstance(expires_at_raw, str):
                 return False, "Missing expires_at in renewal webhook"
-            old_expires_at = domain.expires_at
-            self._apply_webhook_domain_fields(domain, webhook_data)
-            if domain.expires_at == old_expires_at:
+            expiry = parse_date(expires_at_raw)
+            if expiry is None:
                 return False, "expires_at present but could not be parsed — renewal aborted"
+            previous_expiry = domain.expires_at
+            self._apply_webhook_domain_fields(domain, webhook_data)
+            completed_operation = False
+            for operation in DomainOperation.objects.filter(domain=domain, operation_type="renew", state="submitted"):
+                if DomainOperationService.confirm_renewal(operation, expiry):
+                    completed_operation = True
+            if domain.expires_at == previous_expiry and not completed_operation:
+                return True, "Renewal webhook already processed"
             domain.renewal_notices_sent = 0  # Reset renewal notices
             domain.save()
 

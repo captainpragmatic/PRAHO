@@ -128,6 +128,9 @@ class ProformaInvoice(models.Model):
     valid_until = models.DateTimeField(default=timezone.now, help_text=_("Proforma expires after this date"))
     created_at = models.DateTimeField(auto_now_add=True)
 
+    # Recorded tax decision; empty for historical or manual documents.
+    vat_evidence = models.JSONField(default=dict, blank=True, editable=False)
+
     # Metadata
     meta = models.JSONField(default=dict, blank=True)
     notes = models.TextField(blank=True, help_text=_("Additional notes for the proforma"))

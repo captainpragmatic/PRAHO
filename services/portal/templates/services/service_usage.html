@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load i18n %}
+{% load localisation_tags i18n %}
 {% load ui_components %}
 
 {% block title %}{% trans "Usage Statistics" %} - {{ service.name }}{% endblock %}
@@ -155,7 +155,7 @@
                         {% for entry in usage_history %}
                             <tr>
                                 <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
-                                    {{ entry.date|date:"M j, Y H:i" }}
+                                    {% localised_date entry.date "datetime" %}
                                 </td>
                                 <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
                                     {{ entry.disk_usage|default:"-" }}

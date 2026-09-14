@@ -13,6 +13,9 @@ from django.db import transaction
 from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 
+from apps.api.users.serializers import ProfileUpdateSerializer
+from apps.common.localisation import country_name, normalize_country_code, resolve_display
+from apps.common.localisation_services import get_localisation_defaults, user_localisation_preferences
 from apps.common.request_ip import get_safe_client_ip
 from apps.common.types import Err, Ok
 from apps.customers.models import Customer, CustomerAddress, CustomerTaxProfile
@@ -101,6 +104,7 @@ class CustomerRegistrationDataSerializer(serializers.Serializer):
     city = serializers.CharField(max_length=100)
     county = serializers.CharField(max_length=100, required=False, allow_blank=True)
     postal_code = serializers.CharField(max_length=10)
+    country = serializers.CharField(max_length=100, required=False)
     data_processing_consent = serializers.BooleanField()
     marketing_consent = serializers.BooleanField(default=False)
 
@@ -301,7 +305,8 @@ class CustomerCreationSerializer(serializers.Serializer):
                         city=billing_address_data.get("city", ""),
                         county=billing_address_data.get("state", ""),
                         postal_code=billing_address_data.get("postal_code", ""),
-                        country=billing_address_data.get("country", "România"),
+                        country=billing_address_data.get("country")
+                        or country_name(get_localisation_defaults().default_country),
                     )
 
                 # Create owner membership for the user
@@ -408,7 +413,7 @@ class CustomerBillingAddressUpdateSerializer(serializers.Serializer):
     city = serializers.CharField(max_length=100, required=False, allow_blank=True)
     county = serializers.CharField(max_length=100, required=False, allow_blank=True)
     postal_code = serializers.CharField(max_length=10, required=False, allow_blank=True)
-    country = serializers.CharField(max_length=100, default="România", required=False)
+    country = serializers.CharField(max_length=100, required=False)
 
     # Romanian business compliance fields
     fiscal_code = serializers.CharField(max_length=20, required=False, allow_blank=True)
@@ -417,7 +422,12 @@ class CustomerBillingAddressUpdateSerializer(serializers.Serializer):
 
     def validate_postal_code(self, value: str) -> str:
         """Validate Romanian postal code format"""
-        if value and not re.match(r"^\d{6}$", value):
+        country = (
+            self.initial_data.get("country")
+            or self.context.get("country")
+            or get_localisation_defaults().default_country
+        )
+        if normalize_country_code(country) == "RO" and value and not re.fullmatch(r"[0-9]{6}", value):
             raise serializers.ValidationError(_("Postal code must be 6 digits for Romanian addresses"))
         return value
 
@@ -428,87 +438,35 @@ class CustomerBillingAddressUpdateSerializer(serializers.Serializer):
         return value.upper() if value else value
 
 
-class CustomerProfileSerializer(serializers.Serializer):
+class CustomerProfileSerializer(ProfileUpdateSerializer):
     """
     Serializer for customer profile data.
     """
 
-    # User fields
+    # Preserve this legacy endpoint's full-update contract. /api/users/profile/
+    # uses the shared serializer's optional names for partial updates instead.
     first_name = serializers.CharField(max_length=30)
     last_name = serializers.CharField(max_length=30)
     phone = serializers.CharField(max_length=20, required=False, allow_blank=True)
-
-    # Profile preferences
-    preferred_language = serializers.ChoiceField(choices=[("ro", "Română"), ("en", "English")], default="ro")
-    timezone = serializers.ChoiceField(
-        choices=[("Europe/Bucharest", "Europe/Bucharest"), ("UTC", "UTC")], default="Europe/Bucharest"
-    )
-
-    # Notification preferences
-    email_notifications = serializers.BooleanField(default=True)
-    sms_notifications = serializers.BooleanField(default=False)
-    marketing_emails = serializers.BooleanField(default=False)
-
-    def validate_phone(self, value: str) -> str:
-        """Validate Romanian phone format"""
-        if value and not re.match(r"^(\+40[\s\.]?[0-9][\s\.0-9]{8,11}[0-9]|0[0-9]{9})$", value):
-            raise serializers.ValidationError(_("Invalid Romanian phone number format."))
-        return value
-
-    def update(self, instance: User, validated_data: dict[str, Any]) -> User:
-        """
-        Update user profile data.
-        """
-        # Update user fields
-        instance.first_name = validated_data.get("first_name", instance.first_name)
-        instance.last_name = validated_data.get("last_name", instance.last_name)
-        instance.phone = validated_data.get("phone", instance.phone)
-        instance.save()
-
-        # Update or create user profile
-        profile, created = instance.profile.get_or_create(
-            defaults={
-                "preferred_language": validated_data.get("preferred_language", "ro"),
-                "timezone": validated_data.get("timezone", "Europe/Bucharest"),
-                "email_notifications": validated_data.get("email_notifications", True),
-                "sms_notifications": validated_data.get("sms_notifications", False),
-                "marketing_emails": validated_data.get("marketing_emails", False),
-            }
-        )
-
-        if not created:
-            # Update existing profile
-            profile.preferred_language = validated_data.get("preferred_language", profile.preferred_language)
-            profile.timezone = validated_data.get("timezone", profile.timezone)
-            profile.email_notifications = validated_data.get("email_notifications", profile.email_notifications)
-            profile.sms_notifications = validated_data.get("sms_notifications", profile.sms_notifications)
-            profile.marketing_emails = validated_data.get("marketing_emails", profile.marketing_emails)
-            profile.save()
-
-        return instance
 
     def to_representation(self, instance: User) -> dict[str, Any]:
         """
         Convert user and profile data to API response format.
         """
-        try:
-            profile = instance.profile
-        except AttributeError:
-            # Create default profile if missing
-            profile = instance.profile.create(
-                preferred_language="ro",
-                timezone="Europe/Bucharest",
-                email_notifications=True,
-                sms_notifications=False,
-                marketing_emails=False,
-            )
+        from apps.users.models import UserProfile  # noqa: PLC0415  # Runtime cross-app dependency
+
+        profile, _created = UserProfile.objects.get_or_create(user=instance)
+        preferences = user_localisation_preferences(instance)
+        display = resolve_display(get_localisation_defaults(), preferences)
 
         return {
             "first_name": instance.first_name,
             "last_name": instance.last_name,
             "phone": instance.phone,
-            "preferred_language": profile.preferred_language,
-            "timezone": profile.timezone,
+            "preferred_language": display.language,
+            "timezone": display.timezone,
+            "date_format": display.date_format,
+            "localisation_preferences": preferences,
             "email_notifications": profile.email_notifications,
             "sms_notifications": profile.sms_notifications,
             "marketing_emails": profile.marketing_emails,

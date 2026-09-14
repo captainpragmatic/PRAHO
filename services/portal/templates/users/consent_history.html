@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% load i18n %}
+{% load localisation_tags i18n %}
 {% load ui_components %}
 
 {% block title %}{% trans 'Consent History' %} - PragmaticHost{% endblock %}
@@ -28,7 +28,7 @@
           </div>
           <p class="text-xs text-slate-400 mb-2">{% trans 'Required for account operation and service delivery' %}</p>
           {% if profile.gdpr_consent_date %}
-            <p class="text-xs text-slate-500">{% trans 'Granted on:' %} {{ profile.gdpr_consent_date|date:"M d, Y" }}</p>
+            <p class="text-xs text-slate-500">{% trans 'Granted on:' %} {% localised_date profile.gdpr_consent_date "date" %}</p>
           {% endif %}
         </div>
 

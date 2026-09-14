@@ -15,6 +15,9 @@ from django.db import transaction
 from django.forms.models import ModelChoiceField  # For form field type checking
 from django.utils.translation import gettext_lazy as _
 
+from apps.common.localisation import country_name
+from apps.common.localisation_forms import CountryDefaultsMixin
+from apps.common.localisation_services import get_localisation_defaults
 from apps.common.types import CurrencyCode
 from apps.common.validators import SecureInputValidator
 from apps.users.models import CustomerMembership
@@ -281,7 +284,7 @@ class CustomerBillingProfileForm(forms.ModelForm):
 # ===============================================================================
 
 
-class CustomerAddressForm(forms.ModelForm):
+class CustomerAddressForm(CountryDefaultsMixin, forms.ModelForm):
     """
     Customer address form with Romanian fields.
     """
@@ -339,16 +342,6 @@ class CustomerAddressForm(forms.ModelForm):
             ),
         }
 
-    def clean_postal_code(self) -> str:
-        """Validate Romanian postal code format"""
-        postal_code: str | None = self.cleaned_data.get("postal_code")
-        country: str | None = self.cleaned_data.get("country")
-
-        if country in ("România", "Romania") and postal_code and not re.match(r"^[0-9]{6}$", postal_code):
-            raise ValidationError(_("Romanian postal codes must be 6 digits"))
-
-        return postal_code or ""
-
 
 # ===============================================================================
 # CUSTOMER NOTE FORM
@@ -386,7 +379,7 @@ class CustomerNoteForm(forms.ModelForm):
 # ===============================================================================
 
 
-class CustomerCreationForm(forms.Form):
+class CustomerCreationForm(CountryDefaultsMixin, forms.Form):
     """
     Composite form for creating a customer with all profiles.
     Aligned with registration form structure for consistency.
@@ -612,6 +605,11 @@ class CustomerCreationForm(forms.Form):
         ),
     )
 
+    country = forms.CharField(max_length=100, required=False, label=_("Country"))
+
+    def clean_country(self) -> str:
+        return self.cleaned_data.get("country") or country_name(get_localisation_defaults().default_country)
+
     # Billing Configuration
     payment_terms = forms.IntegerField(
         initial=30,
@@ -671,10 +669,6 @@ class CustomerCreationForm(forms.Form):
     def clean(self) -> dict[str, Any]:
         """Cross-field validation"""
         cleaned_data = super().clean()
-
-        # Guard clause: if cleaned_data is None (validation failed), return early
-        if cleaned_data is None:
-            return {}
 
         customer_type: str | None = cleaned_data.get("customer_type")
         company_name: str | None = cleaned_data.get("company_name")
@@ -765,7 +759,7 @@ class CustomerCreationForm(forms.Form):
                 city=data["city"],
                 county=data["county"],
                 postal_code=data["postal_code"],
-                country="Romania",
+                country=data["country"],
                 is_current=True,
             )
 
@@ -783,7 +777,7 @@ class CustomerCreationForm(forms.Form):
 # ===============================================================================
 
 
-class CustomerEditForm(forms.Form):
+class CustomerEditForm(CountryDefaultsMixin, forms.Form):
     """
     Comprehensive customer edit form for updating all customer information.
     Combines core customer, tax profile, billing profile, and address information.
@@ -1125,11 +1119,12 @@ class CustomerEditForm(forms.Form):
     )
 
     def __init__(self, customer: Customer, *args: Any, **kwargs: Any) -> None:
+        explicit_initial = kwargs.pop("initial", None)
         super().__init__(*args, **kwargs)
         self.customer = customer
 
         # Pre-populate form with existing customer data
-        if not self.data:  # Only populate initial if no form data is being processed
+        if not self.is_bound:  # Preserve bound input, including empty submissions
             tax_profile = customer.get_tax_profile()
             billing_profile = customer.get_billing_profile()
             primary_address = customer.get_primary_address()
@@ -1216,9 +1211,11 @@ class CustomerEditForm(forms.Form):
                         "billing_city": "",
                         "billing_county": "",
                         "billing_postal_code": "",
-                        "billing_country": "Romania",
+                        "billing_country": country_name(get_localisation_defaults().default_country),
                     }
                 )
+
+        self.initial.update(explicit_initial or {})
 
     def clean_company_name(self) -> str:
         """Require company name for companies"""
@@ -1282,37 +1279,9 @@ class CustomerEditForm(forms.Form):
             return cast(str, SecureInputValidator.validate_safe_url(website))
         return website or ""
 
-    def clean_postal_code(self) -> str:
-        """Validate Romanian postal code format"""
-        postal_code: str | None = self.cleaned_data.get("postal_code")
-        country: str | None = self.cleaned_data.get("country")
-
-        if country in ("România", "Romania") and postal_code and not re.match(r"^[0-9]{6}$", postal_code):
-            raise ValidationError(_("Romanian postal codes must be 6 digits"))
-
-        return postal_code or ""
-
-    def clean_billing_postal_code(self) -> str:
-        """Validate Romanian billing postal code format"""
-        billing_postal_code: str | None = self.cleaned_data.get("billing_postal_code")
-        billing_country: str | None = self.cleaned_data.get("billing_country")
-
-        if (
-            billing_country in ("România", "Romania")
-            and billing_postal_code
-            and not re.match(r"^[0-9]{6}$", billing_postal_code)
-        ):
-            raise ValidationError(_("Romanian postal codes must be 6 digits"))
-
-        return billing_postal_code or ""
-
     def clean(self) -> dict[str, Any]:
         """Cross-field validation including billing address"""
         cleaned_data = super().clean()
-
-        # Guard clause: if cleaned_data is None (validation failed), return early
-        if cleaned_data is None:
-            return {}
 
         billing_same_as_primary: bool = cleaned_data.get("billing_same_as_primary", True)
 

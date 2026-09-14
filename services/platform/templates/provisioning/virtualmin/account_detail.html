@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load ui_components %}
+{% load localisation_tags ui_components %}
 {% load i18n %}
 
 {% block title %}{{ page_title }} - {{ account.domain }}{% endblock %}
@@ -173,7 +173,7 @@
                             </div>
                             <div>
                                 <dt class="text-sm font-medium text-slate-400">{% trans "Created" %}</dt>
-                                <dd class="mt-1 text-sm text-slate-100">{{ account.created_at|date:"M d, Y" }}</dd>
+                                <dd class="mt-1 text-sm text-slate-100">{% localised_date account.created_at "date" %}</dd>
                             </div>
                             <div>
                                 <dt class="text-sm font-medium text-slate-400">{% trans "Server" %}</dt>
@@ -256,7 +256,7 @@
                             <div class="flex items-center justify-between">
                                 <div>
                                     <p class="text-sm font-medium text-slate-100">
-                                        {{ backup.created_at|date:"M d, Y H:i:s" }}
+                                        {% localised_date backup.created_at "datetime_seconds" %}
                                     </p>
                                     {% if backup.size_bytes %}
                                     <p class="text-xs text-slate-400">
@@ -324,12 +324,12 @@
                                                 {{ job.get_operation_display }}
                                             </p>
                                             <p class="text-xs text-slate-400">
-                                                {% trans "Created" %}: {{ job.created_at|date:"M d, Y H:i" }}
+                                                {% trans "Created" %}: {% localised_date job.created_at "datetime" %}
                                                 {% if job.started_at %}
-                                                    • {% trans "Started" %}: {{ job.started_at|date:"H:i" }}
+                                                    • {% trans "Started" %}: {% localised_date job.started_at "time" %}
                                                 {% endif %}
                                                 {% if job.completed_at %}
-                                                    • {% trans "Completed" %}: {{ job.completed_at|date:"H:i" }}
+                                                    • {% trans "Completed" %}: {% localised_date job.completed_at "time" %}
                                                 {% endif %}
                                             </p>
                                             {% if job.correlation_id %}

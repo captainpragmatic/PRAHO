@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% load i18n %}
+{% load localisation_tags i18n %}
 {% load ui_components %}
 
 {% block title %}{% trans 'Account Settings' %} - PragmaticHost{% endblock %}
@@ -56,6 +56,7 @@
           <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
             {% form_field form.preferred_language %}
             {% form_field form.timezone %}
+            {% form_field form.date_format %}
           </div>
         </div>
 
@@ -125,7 +126,7 @@
 
           <div>
             <dt class="text-sm font-medium text-slate-400">{% trans 'Member Since' %}</dt>
-            <dd class="mt-1 text-sm text-white">{{ profile.date_joined|slice:":10"|default:'N/A' }}</dd>
+            <dd class="mt-1 text-sm text-white">{% localised_date profile.date_joined as joined_date %}{{ joined_date|default:"N/A" }}</dd>
           </div>
         </div>
 

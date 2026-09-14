@@ -623,7 +623,12 @@ class DomainOperation(ConcurrentTransitionMixin, models.Model):
     completed_at = models.DateTimeField(null=True, blank=True)
 
     # Registrar reference (e.g. transfer ID, operation ID)
-    registrar_operation_id = models.CharField(max_length=200, blank=True)
+    registrar_operation_id = models.CharField(max_length=2048, blank=True)
+
+    # Intent identity and evidence must outlive the gateway's short-lived cache.
+    intent_key = models.CharField(max_length=64, null=True, blank=True)  # noqa: DJ001  # NULL permits unkeyed legacy rows
+    accepted_at = models.DateTimeField(null=True, blank=True)
+    review_required_at = models.DateTimeField(null=True, blank=True)
 
     # Results and errors
     result = models.JSONField(default=dict, blank=True)
@@ -648,6 +653,11 @@ class DomainOperation(ConcurrentTransitionMixin, models.Model):
             models.Index(fields=["domain", "operation_type"], name="domainop_domain_type_idx"),
             models.Index(fields=["state", "next_retry_at"], name="domainop_retry_idx"),
         )
+        constraints: ClassVar[list[models.BaseConstraint]] = [
+            models.UniqueConstraint(
+                fields=["registrar", "domain", "operation_type", "intent_key"], name="domainop_unique_intent"
+            ),
+        ]
 
     def __str__(self) -> str:
         return f"{self.get_operation_type_display()} {self.domain.name} [{self.state}]"
@@ -683,9 +693,27 @@ class DomainOperation(ConcurrentTransitionMixin, models.Model):
             self.__dict__.update(saved)
             raise
 
+    @transition(
+        field=state,
+        source="failed",
+        target="pending",
+        conditions=[
+            lambda op: (
+                isinstance(op, DomainOperation)
+                and op.submitted_at is None
+                and op.accepted_at is None
+                and op.review_required_at is None
+            )
+        ],
+    )
+    def retry_preflight(self) -> None:
+        """Retry an intent that failed before any registrar mutation was dispatched."""
+        self.error_message = ""
+        self.next_retry_at = None
+
     @transition(field=state, source="pending", target="submitted")
     def mark_submitted(self, registrar_operation_id: str = "") -> None:
-        """Transition to submitted state (Phase 1: registrar accepted the request)."""
+        """Record dispatch before HTTP; accepted_at separately records acceptance."""
         self.submitted_at = timezone.now()
         self.registrar_operation_id = registrar_operation_id
 

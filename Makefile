@@ -23,7 +23,7 @@ PYTHON_PLATFORM_MANAGE = $(PYTHON_PLATFORM) manage.py
 # Defaults to config.settings.dev; override PORTAL_DJANGO_SETTINGS_MODULE only
 # for an explicitly selected portal runtime, such as the CSP E2E gate.
 PORTAL_DJANGO_SETTINGS_MODULE ?= config.settings.dev
-PYTHON_PORTAL = cd services/portal && DJANGO_SETTINGS_MODULE="$(PORTAL_DJANGO_SETTINGS_MODULE)" $(PWD)/$(VENV_DIR)/bin/python
+PYTHON_PORTAL = cd services/portal && PYTHONPATH= PYTHONNOUSERSITE=1 DJANGO_SETTINGS_MODULE="$(PORTAL_DJANGO_SETTINGS_MODULE)" $(PWD)/$(VENV_DIR)/bin/python
 PYTHON_PORTAL_MANAGE = $(PYTHON_PORTAL) manage.py
 
 # Shared Python for workspace-level tasks
@@ -333,7 +333,7 @@ test-platform-pytest:
 test-portal:
 	@echo "🧪 [Portal] Testing without database access (strict isolation)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@cd services/portal && PYTHONPATH= PYTHONNOUSERSITE=1 $(PWD)/$(VENV_DIR)/bin/python -m pytest -v
+	@$(PYTHON_PORTAL) -m pytest -v
 	@echo "✅ Portal tests completed - database access properly blocked!"
 
 test-integration:
@@ -478,7 +478,7 @@ test-fast:
 	@echo "📋 Phase 1: Platform service tests (failfast + parallel)"
 	@$(PYTHON_PLATFORM_MANAGE) test tests --settings=$(PLATFORM_TEST_SETTINGS) --verbosity=2 --failfast --parallel
 	@echo "📋 Phase 2: Portal service tests"
-	@cd services/portal && PYTHONPATH= PYTHONNOUSERSITE=1 $(PWD)/$(VENV_DIR)/bin/python -m pytest -v --maxfail=5
+	@$(PYTHON_PORTAL) -m pytest -v --maxfail=5
 	@echo "📋 Phase 3: Integration tests"
 	@PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/python -m pytest tests/integration/ -v --maxfail=5
 	@echo "📋 Phase 4: Database cache tests"

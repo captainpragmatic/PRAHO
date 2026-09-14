@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load static %}
+{% load localisation_tags static %}
 {% load i18n %}
 {% load ui_components %}
 
@@ -146,7 +146,7 @@ Professional interface for staff to manage audit system
                                     <p class="text-slate-400 text-sm">{{ event.description|default:event.user.email }}</p>
                                 </div>
                             </div>
-                            <span class="text-slate-400 text-sm">{{ event.timestamp|date:"H:i" }}</span>
+                            <span class="text-slate-400 text-sm">{% localised_date event.timestamp "time" %}</span>
                         </div>
                     {% endfor %}
                 </div>

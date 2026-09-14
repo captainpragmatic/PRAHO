@@ -1,4 +1,4 @@
-{% load i18n %}
+{% load localisation_tags i18n %}
 {% load ui_components %}
 
 {% if rate_limited %}
@@ -50,7 +50,7 @@
             </div>
           </td>
           <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-400">
-            {{ ticket.created_at|date:"d.m.Y"|default:"—" }}
+            {% localised_date ticket.created_at "date" as localised_date_1 %}{{ localised_date_1|default:"—" }}
           </td>
         </tr>
         {% endfor %}
@@ -90,7 +90,7 @@
     </div>
     <div class="flex items-center justify-between text-sm">
       <span class="text-slate-400">
-        {{ ticket.created_at|date:"d.m.Y"|default:"—" }}
+        {% localised_date ticket.created_at "date" as localised_date_2 %}{{ localised_date_2|default:"—" }}
       </span>
     </div>
   </div>

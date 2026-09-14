@@ -657,7 +657,7 @@ def order_create_preview(request: HttpRequest) -> HttpResponse:
 
         billing = customer.get_billing_address()
         tax_profile = customer.get_tax_profile()
-        country = (billing.country if billing and billing.country else "RO").upper()
+        country = billing_country_code(billing.country if billing else None)
         vat_number = getattr(tax_profile, "vat_number", None) or getattr(tax_profile, "cui", None)
         is_business = bool(getattr(customer, "company_name", ""))
 

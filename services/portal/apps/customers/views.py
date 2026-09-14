@@ -21,6 +21,8 @@ from apps.common.decorators import (
     require_billing_access,
     require_customer_role,
 )
+from apps.common.localisation import country_choices
+from apps.common.localisation_services import get_request_localisation
 from apps.common.rate_limit_feedback import is_rate_limited_error
 
 logger = logging.getLogger(__name__)
@@ -360,6 +362,13 @@ def company_address_add_view(request: HttpRequest) -> HttpResponse:
         messages.error(request, _("No customer selected."))
         return redirect("users:company_profile")
 
+    policy = get_request_localisation(request)
+    context = {
+        "page_title": _("Add Address"),
+        "country_choices": country_choices(policy.language),
+        "selected_country": request.POST.get("country", policy.country),
+        "values": request.POST,
+    }
     if request.method == "POST":
         is_primary = request.POST.get("is_primary") in ("on", "true", "1", "yes")
         is_billing = request.POST.get("is_billing") in ("on", "true", "1", "yes")
@@ -372,7 +381,7 @@ def company_address_add_view(request: HttpRequest) -> HttpResponse:
             "address_line2": request.POST.get("address_line2", "").strip(),
             "city": request.POST.get("city", "").strip(),
             "county": request.POST.get("county", "").strip(),
-            "country": request.POST.get("country", "RO").strip(),
+            "country": request.POST.get("country", policy.country).strip(),
             "postal_code": request.POST.get("postal_code", "").strip(),
         }
         try:
@@ -393,9 +402,9 @@ def company_address_add_view(request: HttpRequest) -> HttpResponse:
                 logger.error("Failed to add address: %s", exc)
                 messages.error(request, _("Could not add address. Please try again."))
 
-        return render(request, "customers/address_form.html", {"page_title": _("Add Address")})
+        return render(request, "customers/address_form.html", context)
 
-    return render(request, "customers/address_form.html", {"page_title": _("Add Address")})
+    return render(request, "customers/address_form.html", context)
 
 
 @require_customer_role(required_roles=_OWNER_ROLES)

@@ -21,7 +21,7 @@ from apps.billing.services import ProformaConversionService
 from apps.customers.models import Customer
 
 # The seed migration's module name starts with a digit, so import it by string.
-_seed_migration = import_module("apps.billing.migrations.0046_seed_supported_currencies")
+_seed_migration = import_module("apps.billing.migrations.0047_seed_supported_currencies")
 
 
 class ForeignCurrencyConversionE2ETests(TestCase):

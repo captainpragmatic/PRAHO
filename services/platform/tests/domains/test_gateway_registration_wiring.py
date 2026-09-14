@@ -13,10 +13,11 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from unittest.mock import patch
 
-from django.test import TestCase, override_settings
+from django.test import TestCase, TransactionTestCase, override_settings
 
+from apps.common.types import Ok
 from apps.customers.models import Customer, CustomerAddress, CustomerTaxProfile
-from apps.domains.gateways import RegistrarGatewayFactory
+from apps.domains.gateways import DomainInfoResult, RegistrarGatewayFactory
 from apps.domains.models import TLD, Domain, DomainOperation, Registrar, TLDRegistrarAssignment
 from apps.domains.services import DomainLifecycleService
 
@@ -41,7 +42,7 @@ class GatewayFactoryRegistrationTests(TestCase):
         self.assertIn("rotld", available)
 
 
-class DomainRegistrationGatewayWiringTests(TestCase):
+class DomainRegistrationGatewayWiringTests(TransactionTestCase):
     """C2 — the live registration path must invoke the gateway."""
 
     def setUp(self) -> None:
@@ -56,10 +57,10 @@ class DomainRegistrationGatewayWiringTests(TestCase):
             max_registration_period=10,
         )
         self.registrar = Registrar.objects.create(
-            name="test-registrar",
+            name="gandi",
             display_name="Test Registrar",
             website_url="https://example.com",
-            api_endpoint="https://api.example.com",
+            api_endpoint="https://api.gandi.net/v5",
             status="active",
         )
         TLDRegistrarAssignment.objects.create(
@@ -193,7 +194,7 @@ class DomainRegistrationGatewayWiringTests(TestCase):
         self.assertEqual(domain.status, "pending")
 
 
-class RenewalGatewayWiringTests(TestCase):
+class RenewalGatewayWiringTests(TransactionTestCase):
     """process_domain_renewal must contact the registrar, not just extend locally."""
 
     def setUp(self) -> None:
@@ -204,8 +205,8 @@ class RenewalGatewayWiringTests(TestCase):
             min_registration_period=1, max_registration_period=10,
         )
         self.registrar = Registrar.objects.create(
-            name="test-registrar", display_name="Test Registrar",
-            website_url="https://example.com", api_endpoint="https://api.example.com", status="active",
+            name="gandi", display_name="Test Registrar",
+            website_url="https://example.com", api_endpoint="https://api.gandi.net/v5", status="active",
         )
         self.customer = Customer.objects.create(
             name="John Doe", primary_email="cust@example.com",
@@ -215,6 +216,12 @@ class RenewalGatewayWiringTests(TestCase):
             name="renew.com", tld=self.tld, registrar=self.registrar, customer=self.customer,
             status="active", registrar_domain_id="REG-1", expires_at=datetime(2026, 1, 1, tzinfo=UTC),
         )
+
+        info_patch = patch("apps.domains.services.DomainRegistrarGateway.get_domain_info", return_value=Ok(
+            DomainInfoResult("REG-1", self.domain.name, "active", self.domain.expires_at, [])
+        ))
+        info_patch.start()
+        self.addCleanup(info_patch.stop)
 
     def test_renewal_calls_gateway_and_persists_registrar_expiry(self) -> None:
         registrar_expiry = datetime(2028, 1, 1, tzinfo=UTC)
@@ -289,37 +296,14 @@ class RenewalGatewayWiringTests(TestCase):
         self.assertEqual(op.state, "submitted")
         self.assertEqual(op.parameters["prev_expires_at"], original_expiry.isoformat())
 
-    def test_pending_renewal_bookkeeping_failure_leaves_an_audit_trace(self) -> None:
-        """If saving the renewal's DomainOperation fails, nothing durable points at
-        the accepted renewal (unlike registrations, whose pending Domain row the
-        reconciler scans) — the audit trail must record it for manual follow-up."""
-        operation_url = "https://api.gandi.net/v5/domain/domains/renew.com/renew/operations/43"
-
+    def test_failed_intent_persistence_prevents_registrar_call(self) -> None:
         with (
-            patch(
-                "apps.domains.services.DomainRegistrarGateway.renew_domain",
-                return_value=(
-                    True,
-                    {"new_expires_at": None, "pending": True, "operation_handle": operation_url},
-                ),
-            ),
-            patch(
-                "apps.domains.models.DomainOperation.save",
-                side_effect=RuntimeError("db write failed"),
-            ),
-            patch("apps.audit.services.AuditService.log_simple_event") as audit_log,
+            patch("apps.domains.services.DomainRegistrarGateway.renew_domain") as renew,
+            patch("apps.domains.models.DomainOperation.save", side_effect=RuntimeError("db write failed")),
         ):
-            result = DomainLifecycleService.process_domain_renewal(self.domain, years=1)
-
-        self.assertTrue(result.is_ok(), result)
-        untracked_calls = [
-            call
-            for call in audit_log.call_args_list
-            if call.args and call.args[0] == "domain_renewal_accepted_untracked"
-        ]
-        self.assertEqual(len(untracked_calls), 1)
-        self.assertEqual(untracked_calls[0].kwargs["metadata"]["domain_name"], self.domain.name)
-        self.assertEqual(untracked_calls[0].kwargs["metadata"]["operation_handle"], operation_url)
+            result = DomainLifecycleService.process_domain_renewal(self.domain)
+        self.assertTrue(result.is_err())
+        renew.assert_not_called()
 
     def test_renewal_failure_returns_err_and_does_not_extend(self) -> None:
         original_expiry = self.domain.expires_at
@@ -440,7 +424,7 @@ class RegistrantDataBuildingTests(TestCase):
 
 
 @override_settings(REGISTRAR_ADAPTERS_VERIFIED=False)
-class UnverifiedAdapterRegistrationTests(TestCase):
+class UnverifiedAdapterRegistrationTests(TransactionTestCase):
     """P1 (PR #256 review): with adapters unverified, registration must fail cleanly —
     return Err AND delete the pending row so the domain isn't deadlocked from retry."""
 

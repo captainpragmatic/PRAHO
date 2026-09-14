@@ -155,7 +155,7 @@ jobs:
         PYTHONPATH=$(pwd) ${{ env.UV_PROJECT_ENVIRONMENT }}/bin/python manage.py migrate --no-input
         PYTHONPATH=$(pwd) ${{ env.UV_PROJECT_ENVIRONMENT }}/bin/python manage.py createcachetable
 
-    - name: API token concurrency tests (PostgreSQL)
+    - name: API token and registrar intent tests (PostgreSQL)
       # The tests run in ~3s, but the runner builds a fresh test database
       # first (full migration stack), which alone can exceed 3 minutes on a
       # slow runner — that flake has struck twice (tests passed, then the
@@ -167,6 +167,7 @@ jobs:
         cd services/platform
         PYTHONPATH="$PWD" "$UV_PROJECT_ENVIRONMENT/bin/python" manage.py test \
           tests.api.test_api_token_concurrency.APITokenPostgresConcurrencyTests \
+          tests.domains.test_durable_operations \
           --settings=config.settings.ci --verbosity=2
 
     - name: Service isolation security tests (make test-security)

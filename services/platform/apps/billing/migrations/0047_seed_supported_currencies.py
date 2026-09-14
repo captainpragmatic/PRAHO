@@ -35,7 +35,7 @@ def unseed_currencies(apps, schema_editor):
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("billing", "0045_rerun_legacy_refund_recovery"),
+        ("billing", "0046_invoice_vat_evidence_proformainvoice_vat_evidence"),
     ]
 
     operations = [

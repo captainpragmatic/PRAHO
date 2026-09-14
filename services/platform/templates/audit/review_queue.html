@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load static %}
+{% load localisation_tags static %}
 {% load i18n %}
 {% load ui_components %}
 
@@ -90,7 +90,7 @@ AuditEventReview companion model, so AuditEvent stays append-only.
                         <tbody class="divide-y divide-slate-700">
                             {% for event in events %}
                                 <tr>
-                                    <td class="px-4 py-3 text-sm text-slate-300 whitespace-nowrap">{{ event.timestamp|date:"Y-m-d H:i" }}</td>
+                                    <td class="px-4 py-3 text-sm text-slate-300 whitespace-nowrap">{% localised_date event.timestamp "datetime" %}</td>
                                     <td class="px-4 py-3 text-sm">
                                         <span class="text-white">{{ event.get_action_display }}</span>
                                         {% if event.description %}
@@ -102,7 +102,7 @@ AuditEventReview companion model, so AuditEvent stays append-only.
                                     <td class="px-4 py-3 text-sm">
                                         {% if event.review %}
                                             <span class="text-green-400">
-                                                {% blocktrans with reviewer=event.review.reviewed_by.get_full_name|default:_("a deleted user") when=event.review.reviewed_at|date:"Y-m-d H:i" %}Reviewed by {{ reviewer }} on {{ when }}{% endblocktrans %}
+                                                {% localised_date event.review.reviewed_at "datetime" as localised_date_2 %}{% blocktrans with reviewer=event.review.reviewed_by.get_full_name|default:_("a deleted user") when=localised_date_2 %}Reviewed by {{ reviewer }} on {{ when }}{% endblocktrans %}
                                             </span>
                                         {% else %}
                                             <form method="post" action="{% url 'audit:mark_event_reviewed' event.id %}" class="flex items-center gap-2">

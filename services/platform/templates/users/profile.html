@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% load i18n %}
+{% load localisation_tags i18n %}
 {% load ui_components %}
 
 {% block title %}{% trans 'User Profile' %} - PRAHO Platform{% endblock %}
@@ -79,38 +79,9 @@
           </h4>
 
           <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
-              <label for="language" class="block text-sm font-medium text-slate-300 mb-1">
-                {% trans 'Language' %}
-              </label>
-              <select name="language" id="language"
-                      class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
-                {% get_current_language as LANGUAGE_CODE %}
-                {% get_available_languages as LANGUAGES %}
-                {% get_language_info_list for LANGUAGES as languages %}
-                {% for language in languages %}
-                <option value="{{ language.code }}" {% if language.code == LANGUAGE_CODE %}selected{% endif %}>
-                  {% if language.code == 'en' %}🇬🇧 {{ language.name_local }}{% elif language.code == 'ro' %}🇷🇴 {{ language.name_local }}{% else %}{{ language.name_local }}{% endif %}
-                </option>
-                {% endfor %}
-              </select>
-              <p class="mt-1 text-xs text-slate-400">
-                {% trans 'Interface language changes when you save' %} (Current: {{ LANGUAGE_CODE }})
-              </p>
-            </div>
-
-            <div>
-              <label for="timezone" class="block text-sm font-medium text-slate-300 mb-1">
-                {% trans 'Timezone' %}
-              </label>
-              <select name="timezone" id="timezone"
-                      class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
-                <option value="Europe/Bucharest" selected>🇷🇴 Europe/Bucharest</option>
-                <option value="UTC">🌍 UTC</option>
-                <option value="Europe/London">🇬🇧 Europe/London</option>
-                <option value="Europe/Paris">🇫🇷 Europe/Paris</option>
-              </select>
-            </div>
+            {% form_field form.preferred_language %}
+            {% form_field form.timezone %}
+            {% form_field form.date_format %}
           </div>
         </div>
 
@@ -156,7 +127,7 @@
 
           <div>
             <dt class="text-sm font-medium text-slate-400">{% trans 'Member Since' %}</dt>
-            <dd class="mt-1 text-sm text-white">{{ user.date_joined|date:"d.m.Y" }}</dd>
+            <dd class="mt-1 text-sm text-white">{% localised_date user.date_joined "date" %}</dd>
           </div>
         </div>
 
@@ -165,7 +136,7 @@
             <dt class="text-sm font-medium text-slate-400">{% trans 'Last Login' %}</dt>
             <dd class="mt-1 text-sm text-white">
               {% if user.last_login %}
-                {{ user.last_login|date:"d.m.Y H:i" }}
+                {% localised_date user.last_login "datetime" %}
               {% else %}
                 <span class="text-slate-500">{% trans 'Never' %}</span>
               {% endif %}
@@ -256,7 +227,7 @@
 
           {% if user.gdpr_consent_date %}
           <div class="text-xs text-slate-400">
-            {% trans 'Last updated:' %} {{ user.gdpr_consent_date|date:"M d, Y" }}
+            {% trans 'Last updated:' %} {% localised_date user.gdpr_consent_date "date" %}
           </div>
           {% endif %}
         </div>

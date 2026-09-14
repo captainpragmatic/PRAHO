@@ -1,4 +1,4 @@
-{% load i18n %}
+{% load localisation_tags i18n %}
 {% load ui_components %}
 
 <!-- =============================================================================== -->
@@ -142,7 +142,7 @@
             {% endif %}
           </td>
           <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-400">
-            {{ service.created_at|date:"M d, Y" }}
+            {% localised_date service.created_at "date" %}
           </td>
           {% if can_manage_services %}
           <td class="px-6 py-4 whitespace-nowrap text-sm font-medium" data-action="stop">
@@ -219,7 +219,7 @@
       <div class="flex items-center justify-between">
         <div>
           <div class="text-xs text-slate-400 uppercase tracking-wide">{% trans 'Created' %}</div>
-          <div class="text-sm text-slate-300">{{ service.created_at|date:"M d, Y" }}</div>
+          <div class="text-sm text-slate-300">{% localised_date service.created_at "date" %}</div>
         </div>
         {% if can_manage_services %}
         <div class="flex space-x-2" data-action="stop">

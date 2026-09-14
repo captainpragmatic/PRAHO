@@ -12,6 +12,9 @@ from django.core.exceptions import ValidationError
 from django.utils.translation import gettext_lazy as _
 
 from apps.api_client.services import PlatformAPIError, api_client
+from apps.common.localisation import DATE_FORMAT_CHOICES, INHERIT_LABEL, LANGUAGE_CHOICES, TIMEZONES, country_name
+from apps.common.localisation_forms import CountryDefaultsMixin
+from apps.common.localisation_services import get_localisation_defaults
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +69,7 @@ class CustomerLoginForm(forms.Form):
     )
 
 
-class CustomerRegistrationForm(forms.Form):
+class CustomerRegistrationForm(CountryDefaultsMixin, forms.Form):
     """
     Customer registration form with Romanian business context.
     Sends registration data to Platform API for processing.
@@ -253,6 +256,11 @@ class CustomerRegistrationForm(forms.Form):
         ),
     )
 
+    country = forms.CharField(label=_("Country"), max_length=100, required=False)
+
+    def clean_country(self) -> str:
+        return self.cleaned_data.get("country") or country_name(get_localisation_defaults().default_country)
+
     # ===============================================================================
     # GDPR COMPLIANCE
     # ===============================================================================
@@ -387,6 +395,7 @@ class CustomerRegistrationForm(forms.Form):
                     "city": self.cleaned_data["city"],
                     "county": self.cleaned_data["county"],
                     "postal_code": self.cleaned_data["postal_code"],
+                    "country": self.cleaned_data["country"],
                     "data_processing_consent": self.cleaned_data["data_processing_consent"],
                     "marketing_consent": self.cleaned_data.get("marketing_consent", False),
                     "terms_accepted": self.cleaned_data.get("terms_accepted", False),
@@ -446,32 +455,18 @@ class CustomerProfileForm(forms.Form):
 
     preferred_language = forms.ChoiceField(
         label=_("Preferred Language"),
-        choices=[
-            ("ro", _("Română")),
-            ("en", _("English")),
-        ],
-        initial="ro",
-        widget=forms.Select(
-            attrs={
-                "class": "w-full px-4 py-3 border border-slate-600 bg-slate-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            }
-        ),
+        required=False,
+        choices=[("", INHERIT_LABEL), *LANGUAGE_CHOICES],
     )
-
     timezone = forms.ChoiceField(
         label=_("Timezone"),
-        choices=[
-            ("Europe/Bucharest", _("Europe/Bucharest (Romania)")),
-            ("UTC", _("UTC (Universal Time)")),
-            ("Europe/London", _("Europe/London")),
-            ("Europe/Paris", _("Europe/Paris")),
-        ],
-        initial="Europe/Bucharest",
-        widget=forms.Select(
-            attrs={
-                "class": "w-full px-4 py-3 border border-slate-600 bg-slate-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            }
-        ),
+        required=False,
+        choices=[("", INHERIT_LABEL), *((zone, zone) for zone in sorted(TIMEZONES))],
+    )
+    date_format = forms.ChoiceField(
+        label=_("Date format"),
+        required=False,
+        choices=[("", INHERIT_LABEL), *DATE_FORMAT_CHOICES],
     )
 
     email_notifications = forms.BooleanField(
@@ -728,7 +723,7 @@ class CompanyProfileForm(forms.Form):
         return phone
 
 
-class CompanyCreationForm(forms.Form):
+class CompanyCreationForm(CountryDefaultsMixin, forms.Form):
     """
     Company creation form with comprehensive Romanian business validation.
     Creates a new customer with complete business profile information.
@@ -968,19 +963,6 @@ class CompanyCreationForm(forms.Form):
             raise forms.ValidationError(_("Phone number must start with a valid Romanian prefix"))
 
         return f"+40{phone_clean}"
-
-    def clean_postal_code(self) -> str:
-        """Validate Romanian postal code"""
-        postal_code = str(self.cleaned_data.get("postal_code", "")).strip()
-
-        if not postal_code:
-            return postal_code
-
-        # Romanian postal codes are 6 digits
-        if not postal_code.isdigit() or len(postal_code) != MIN_PHONE_DIGITS:
-            raise forms.ValidationError(_("Romanian postal code must be exactly 6 digits"))
-
-        return postal_code
 
     def clean(self) -> dict[str, Any]:
         """Cross-field validation"""

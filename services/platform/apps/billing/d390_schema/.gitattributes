@@ -1,0 +1,2 @@
+# Preserve the official download byte for byte, including CRLF and whitespace.
+*.xsd -text -diff

@@ -1,4 +1,4 @@
-{% load i18n %}
+{% load localisation_tags i18n %}
 {% load ui_components %}
 
 <!-- Event Detail View using Card Component -->
@@ -9,7 +9,7 @@
         <div>
             <h4 class="text-sm font-medium text-slate-300 mb-1">{% trans "Timestamp" %}</h4>
             <p class="text-white text-sm">
-                {{ event.timestamp|date:'Y-m-d H:i:s' }} <br>
+                {% localised_date event.timestamp "datetime_seconds" %} <br>
                 <span class="text-slate-400">({{ event.timestamp|timesince }} {% trans "ago" %})</span>
             </p>
         </div>

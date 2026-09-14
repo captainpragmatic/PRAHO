@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load i18n %}
+{% load localisation_tags i18n %}
 {% load ui_components %}
 {% load formatting %}
 
@@ -231,7 +231,7 @@
                   </div>
                   <div class="flex items-center">
                     <span class="mr-1">{% icon "clock" %}</span>
-                    {{ order.created_at|date:"M d, Y" }}
+                    {% localised_date order.created_at "date" %}
                   </div>
                   <div class="flex items-center">
                     <span class="mr-1">{% icon "orders" %}</span>
@@ -346,7 +346,7 @@
               <div>
                 <h4 class="text-slate-300 font-medium text-sm mb-1">{% trans "Details" %}</h4>
                 <div class="space-y-1 text-sm text-slate-400">
-                  <div>{% icon "clock" %} {{ order.created_at|date:"M d, Y" }}</div>
+                  <div>{% icon "clock" %} {% localised_date order.created_at "date" %}</div>
                   <div>{% icon "orders" %} {{ order.items.count }} {% trans "item" %}{{ order.items.count|pluralize }}</div>
                 </div>
               </div>

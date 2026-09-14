@@ -155,6 +155,7 @@ class DomainInfoResult:
     locked: bool = False
     whois_privacy: bool = False
     epp_code: str = ""
+    registry_statuses: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -233,6 +234,24 @@ class BaseRegistrarGateway(ABC):
     def _do_verify_webhook(self, payload: str, signature: str, secret: str) -> bool:
         """Registrar-specific webhook signature verification."""
 
+    # Registrars with a separate contact or nameserver API override these hooks.
+    registration_sets_nameservers: ClassVar[bool] = True
+    registration_requires_contact: ClassVar[bool] = False
+
+    def validate_registration_data(self, registrant_data: dict[str, Any]) -> None:
+        """Raise a definite validation error before external registration work."""
+        return None
+
+    def prepare_registration_contact(self, registrant_data: dict[str, Any]) -> Result[str | None, RegistrarAPIError]:
+        """Return a provider contact ID, or None when contact data travels inline."""
+        return Ok(None)
+
+    @property
+    def cache_namespace(self) -> str:
+        identity = f"{self.registrar.pk}:{self.registrar.api_endpoint.rstrip('/')}"
+        digest = hashlib.sha256(identity.encode()).hexdigest()[:24]
+        return f"{self.gateway_name}:{digest}"
+
     # -- Phase 2 optional interface (override to enable) ---------------------
 
     def _do_initiate_transfer(
@@ -297,7 +316,7 @@ class BaseRegistrarGateway(ABC):
         if guard := self._verified_adapter_guard():
             return guard
         return self._execute_idempotent_operation(
-            idempotency_key=f"domain_reg:{self.gateway_name}:{domain_name}",
+            idempotency_key=f"domain_reg:{self.cache_namespace}:{domain_name}",
             fn=lambda: self._do_register(domain_name, years, registrant_data, nameservers),
             operation=f"register:{domain_name}",
             audit_event="domain_registration",
@@ -338,7 +357,7 @@ class BaseRegistrarGateway(ABC):
         )
         intent = f"token:{token_fingerprint}" if token_fingerprint is not None else str(years)
         return self._execute_idempotent_operation(
-            idempotency_key=f"domain_renew:{self.gateway_name}:{domain_name}:{intent}",
+            idempotency_key=f"domain_renew:{self.cache_namespace}:{domain_name}:{intent}",
             fn=lambda: self._do_renew(registrar_domain_id, domain_name, years),
             operation=f"renew:{domain_name}",
             audit_event="domain_renewal",
@@ -389,7 +408,7 @@ class BaseRegistrarGateway(ABC):
         except NotImplementedError:
             return Err(
                 RegistrarAPIError(
-                    unsupported, code=RegistrarErrorCode.INTERNAL_ERROR, registrar_name=self.registrar.name
+                    unsupported, code=RegistrarErrorCode.UNSUPPORTED_OPERATION, registrar_name=self.registrar.name
                 ),
                 retriability=Retriability.NOT_RETRIABLE,
             )
@@ -438,7 +457,13 @@ class BaseRegistrarGateway(ABC):
             if existing is not None and existing != _IDEMPOTENCY_IN_PROGRESS:
                 return Ok(existing)
             self.logger.warning("Concurrent %s already in progress — rejecting duplicate", operation)
-            return Err(RegistrarConflictError(domain_name, self.registrar.name))
+            return Err(
+                RegistrarAPIError(
+                    "Registrar operation is already pending",
+                    code=RegistrarErrorCode.OPERATION_PENDING,
+                    registrar_name=self.registrar.name,
+                )
+            )
 
         # Exception-safety: _retry(fn) can raise (e.g. _safe_json → RegistrarAPIError on
         # an oversized body). Convert any escape to an Err (default retriability=UNKNOWN,
@@ -599,7 +624,7 @@ class BaseRegistrarGateway(ABC):
         if err := self._check_circuit_breaker():
             return err
 
-        idempotency_key = f"domain_transfer:{self.gateway_name}:{domain_name}"
+        idempotency_key = f"domain_transfer:{self.cache_namespace}:{domain_name}"
         cached = cache.get(idempotency_key)
         if cached is not None and cached != _IDEMPOTENCY_IN_PROGRESS:
             self.logger.info("Idempotency hit for %s transfer", domain_name)
@@ -613,7 +638,13 @@ class BaseRegistrarGateway(ABC):
             if existing is not None and existing != _IDEMPOTENCY_IN_PROGRESS:
                 return Ok(existing)
             self.logger.warning("Concurrent %s transfer already in progress — rejecting duplicate", domain_name)
-            return Err(RegistrarConflictError(domain_name, self.registrar.name))
+            return Err(
+                RegistrarAPIError(
+                    "Registrar operation is already pending",
+                    code=RegistrarErrorCode.OPERATION_PENDING,
+                    registrar_name=self.registrar.name,
+                )
+            )
 
         result = self._run_phase2_op(
             lambda: self._do_initiate_transfer(domain_name, epp_code, registrant_data),
@@ -806,6 +837,12 @@ class BaseRegistrarGateway(ABC):
             )
         return response.json()
 
+    def _safe_object(self, response: requests.Response) -> dict[str, Any]:
+        data = self._safe_json(response)
+        if not isinstance(data, dict):
+            raise RegistrarAPIError("Expected a JSON object", code=RegistrarErrorCode.INVALID_RESPONSE)
+        return data
+
     # -- Audit logging -------------------------------------------------------
 
     def _audit_api_call(
@@ -844,7 +881,7 @@ class BaseRegistrarGateway(ABC):
     # -- Circuit breaker (Django cache-backed) -------------------------------
 
     def _circuit_breaker_key(self) -> str:
-        return f"cb:{self.gateway_name}:failures"
+        return f"cb:{self.cache_namespace}:failures"
 
     def _check_circuit_breaker(self) -> Err[RegistrarAPIError] | None:
         failures = cache.get(self._circuit_breaker_key(), 0)
@@ -965,11 +1002,8 @@ class BaseRegistrarGateway(ABC):
         """
         status = response.status_code
 
-        try:
-            data = self._safe_json(response)
-            message = data.get("message", data.get("error", response.text[:200]))
-        except Exception:
-            message = response.text[:200]
+        # Registrar error bodies can echo contact PII or authorization keys.
+        # Classify by status without carrying raw content into logs or operations.
 
         # Single-exit mapping of HTTP status → (typed error, retriability). The retriability
         # tag is load-bearing: NOT_RETRIABLE lets the registration/transfer lifecycle delete the
@@ -979,8 +1013,7 @@ class BaseRegistrarGateway(ABC):
         retriability: Retriability
         if status in (HTTP_UNAUTHORIZED, HTTP_FORBIDDEN):
             # 401/403 are definite rejections (bad/insufficient credentials).
-            detail = message if status == HTTP_UNAUTHORIZED else f"Forbidden: {message}"
-            error = RegistrarAuthError(self.registrar.name, detail=detail)
+            error = RegistrarAuthError(self.registrar.name)
             retriability = Retriability.NOT_RETRIABLE
         elif status == HTTP_NOT_FOUND:
             error = RegistrarNotFoundError(domain_name or operation, self.registrar.name)
@@ -999,16 +1032,14 @@ class BaseRegistrarGateway(ABC):
         elif status >= HTTP_SERVER_ERROR:
             # A 5xx on a mutating call (register/renew) may have committed server-side;
             # this generic handler can't prove non-application, so leave it UNKNOWN.
-            error = RegistrarTransientError(
-                self.registrar.name, f"{self.gateway_name} server error ({status}): {message}"
-            )
+            error = RegistrarTransientError(self.registrar.name, f"{self.gateway_name} server error ({status})")
             retriability = Retriability.UNKNOWN
         elif status in (HTTP_BAD_REQUEST, HTTP_UNPROCESSABLE):
             # 400/422 are definite client-side rejections (bad EPP code, invalid registrant,
             # malformed request) — the registrar did NOT apply the operation. NOT_RETRIABLE so
             # the lifecycle deletes the pending row and a corrected retry can proceed.
             error = RegistrarAPIError(
-                f"{self.gateway_name} rejected {operation}: {status} {message}",
+                f"{self.gateway_name} rejected {operation}: HTTP {status}",
                 code=RegistrarErrorCode.INVALID_REGISTRANT_DATA,
                 registrar_name=self.registrar.name,
             )
@@ -1016,7 +1047,7 @@ class BaseRegistrarGateway(ABC):
         else:
             # Unmapped status — can't prove non-application, leave UNKNOWN.
             error = RegistrarAPIError(
-                f"{self.gateway_name} API error for {operation}: {status} {message}",
+                f"{self.gateway_name} API error for {operation}: HTTP {status}",
                 code=RegistrarErrorCode.INTERNAL_ERROR,
                 registrar_name=self.registrar.name,
             )

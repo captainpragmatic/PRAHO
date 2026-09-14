@@ -1,4 +1,4 @@
-{% load static %}
+{% load localisation_tags static %}
 {% load i18n %}
 {% load ui_components %}
 
@@ -37,7 +37,7 @@
 
                             <!-- Timestamp -->
                             <span class="text-slate-500">•</span>
-                            <span class="text-slate-400 text-sm" title="{{ event.timestamp|date:'Y-m-d H:i:s' }}">
+                            <span class="text-slate-400 text-sm" title="{% localised_date event.timestamp "datetime_seconds" %}">
                                 {{ event.timestamp|timesince }} {% trans "ago" %}
                             </span>
                         </div>

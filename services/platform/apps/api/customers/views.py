@@ -21,6 +21,8 @@ from apps.api.core import ReadOnlyAPIViewSet
 from apps.api.core.permissions import IsAuthenticatedAndAccessible
 from apps.api.core.throttling import AuthThrottle, BurstAPIThrottle
 from apps.api.secure_auth import public_api_endpoint, require_customer_authentication, require_portal_authentication
+from apps.common.localisation import country_name
+from apps.common.localisation_services import get_localisation_defaults
 from apps.common.performance.rate_limiting import (
     BurstRateThrottle,
     CustomerRateThrottle,
@@ -755,7 +757,9 @@ def update_customer_billing_address(  # noqa: C901, PLR0912, PLR0915  # Complexi
     logger.info(f"🏠 [Billing Address API] Update request for customer {customer.id}")
 
     # Validate input using our custom serializer
-    serializer = CustomerBillingAddressUpdateSerializer(data=request.data)
+    existing_address = customer.get_primary_address()
+    existing_country = existing_address.country if existing_address else None
+    serializer = CustomerBillingAddressUpdateSerializer(data=request.data, context={"country": existing_country})
     if not serializer.is_valid():
         logger.warning(f"⚠️ [Billing Address API] Validation failed for customer {customer.id}")
         return Response(
@@ -825,7 +829,9 @@ def update_customer_billing_address(  # noqa: C901, PLR0912, PLR0915  # Complexi
                         user=acting_user,
                         address_data=address_data,
                         is_current=True,
-                        country=address_fields.get("country", "România"),
+                        country=address_fields.get("country")
+                        or existing_country
+                        or country_name(get_localisation_defaults().default_country),
                         address_line2=address_fields.get("address_line2", ""),
                     )
                 else:
@@ -1443,7 +1449,7 @@ def customer_addresses_add(request: HttpRequest, customer: Customer) -> Response
         address_line2=data.get("address_line2", ""),
         city=city,
         county=data.get("county", ""),
-        country=data.get("country", "Romania"),
+        country=data.get("country") or country_name(get_localisation_defaults().default_country),
         postal_code=data.get("postal_code", ""),
     )
     logger.info(f"✅ [Customer API] Address {address.id} added to customer {customer.id}")

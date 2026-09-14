@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load i18n %}
+{% load localisation_tags i18n %}
 {% load ui_components %}
 
 {% block title %}{{ customer.name }} - {% trans 'Customer Details' %}{% endblock %}
@@ -117,11 +117,11 @@
                         </div>
                         <div class="flex">
                             <span class="text-sm font-medium text-slate-400 w-32">{% trans 'Created' %}:</span>
-                            <span class="text-sm text-white">{{ customer.created_at|date:"d M Y H:i" }}</span>
+                            <span class="text-sm text-white">{% localised_date customer.created_at "datetime" %}</span>
                         </div>
                         <div class="flex">
                             <span class="text-sm font-medium text-slate-400 w-32">{% trans 'Updated' %}:</span>
-                            <span class="text-sm text-white">{{ customer.updated_at|date:"d M Y H:i" }}</span>
+                            <span class="text-sm text-white">{% localised_date customer.updated_at "datetime" %}</span>
                         </div>
                     </div>
                 </div>
@@ -491,7 +491,7 @@
                                 {% if service.service_plan %}{{ service.service_plan.name }}{% else %}{% trans 'Service' %}{% endif %}
                             </h3>
                             <p class="text-sm text-slate-400">
-                                {% trans 'Created' %}: {{ service.created_at|date:"d M Y" }}
+                                {% trans 'Created' %}: {% localised_date service.created_at "date" %}
                                 {% if service.domain %}• {{ service.domain }}{% endif %}
                             </p>
                         </div>
@@ -638,7 +638,7 @@
                                 #{{ ticket.id }} - {{ ticket.title|truncatechars:50 }}
                             </h3>
                             <p class="text-sm text-slate-400">
-                                {{ ticket.created_at|date:"d M Y H:i" }}
+                                {% localised_date ticket.created_at "datetime" %}
                                 {% if ticket.priority %}• {% trans 'Priority' %}: {{ ticket.get_priority_display }}{% endif %}
                             </p>
                         </div>

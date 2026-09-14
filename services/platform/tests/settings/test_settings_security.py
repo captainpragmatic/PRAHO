@@ -11,6 +11,7 @@ from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.test import Client, TestCase
 from django.urls import reverse
+from django.utils.translation import override
 
 from apps.common.encryption import encrypt_value, is_encrypted
 from apps.settings.models import SystemSetting
@@ -66,6 +67,7 @@ class EncryptionSecurityTests(TestCase):
         self.assertFalse(is_encrypted(str(setting.value)))
         self.assertEqual(setting.value, 30)
 
+    @override("en")
     def test_encryption_display_value_security(self):
         """🔒 Test that sensitive values are hidden in display"""
         setting = SystemSetting.objects.create(

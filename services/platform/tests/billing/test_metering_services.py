@@ -48,7 +48,7 @@ from apps.billing.services import (
 from apps.billing.tasks import reconcile_recurring_payment_submissions
 from apps.billing.usage_invoice_service import UsageBillingService
 from apps.common.types import Err
-from apps.customers.models import Customer, CustomerAddress, CustomerPaymentMethod
+from apps.customers.models import Customer, CustomerAddress, CustomerPaymentMethod, CustomerTaxProfile
 from apps.products.models import Product
 from apps.settings.services import SettingsService
 
@@ -965,6 +965,19 @@ class UsageInvoiceServiceTestCase(TestCase):
         self.assertTrue(result.is_ok(), result)
         invoice = Invoice.objects.get(id=result.unwrap()["invoice_id"])
         self.assertEqual(invoice.bill_to_country, "RO")
+
+    def test_usage_invoice_records_reverse_charge_decision_and_category(self):
+        CustomerTaxProfile.objects.create(customer=self.customer, vat_number="DE136695976", is_vat_payer=True)
+        CustomerAddress.objects.create(customer=self.customer, is_billing=True, address_line1="Example 1",
+            city="Berlin", county="Berlin", postal_code="10115", country="DE")
+        result = self.service.generate_invoice_from_cycle(str(self.billing_cycle.id))
+        self.assertTrue(result.is_ok(), result)
+        invoice = Invoice.objects.get(id=result.unwrap()["invoice_id"])
+        self.assertEqual(invoice.vat_evidence["scenario"], "eu_b2b_reverse")
+        self.assertEqual(invoice.vat_evidence["vat_number"], "DE136695976")
+        self.assertEqual(invoice.vat_evidence["subtotal_cents"], invoice.subtotal_cents)
+        self.assertEqual(set(invoice.lines.values_list("tax_category_code", flat=True)), {"AE"})
+        self.assertIsNotNone(invoice.locked_at)
 
     def test_usage_invoice_uses_foreign_billing_country_for_snapshot_and_vat(self):
         CustomerAddress.objects.create(

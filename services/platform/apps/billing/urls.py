@@ -4,7 +4,7 @@
 
 from django.urls import path
 
-from . import views
+from . import d390_views, views
 
 app_name = "billing"
 
@@ -47,6 +47,7 @@ urlpatterns = [
     # Reports
     path("reports/", views.billing_reports, name="reports"),
     path("reports/vat/", views.vat_report, name="vat_report"),
+    path("reports/d390/", d390_views.d390_report, name="d390_report"),
     # ===============================================================================
     # PAYMENT API ENDPOINTS FOR PORTAL CONSUMPTION
     # ===============================================================================

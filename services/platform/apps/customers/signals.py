@@ -28,6 +28,7 @@ from apps.audit.services import (
     AuditService,
     ComplianceEventRequest,
 )
+from apps.common.localisation import normalize_country_code
 from apps.common.validators import log_security_event
 from apps.settings.services import SettingsService
 
@@ -465,7 +466,7 @@ def handle_address_changes(
             )
 
         # Address validation for Romanian addresses
-        if instance.country == "România" and not instance.is_validated:
+        if normalize_country_code(instance.country) == "RO" and not instance.is_validated:
             _trigger_romanian_address_validation(instance)
 
         # NOTE: _ensure_single_current_address was removed in 0017 migration.
@@ -979,7 +980,7 @@ def _trigger_romanian_address_validation(address: CustomerAddress) -> None:
 def _verify_primary_address_compliance(address: CustomerAddress) -> None:
     """Verify primary address compliance for Romanian companies"""
     try:
-        if address.is_primary and address.country == "România":
+        if address.is_primary and normalize_country_code(address.country) == "RO":
             # Romanian companies must have primary address in Romania
             compliance_request = ComplianceEventRequest(
                 compliance_type="primary_address_compliance",

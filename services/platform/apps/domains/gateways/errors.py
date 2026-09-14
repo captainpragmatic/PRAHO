@@ -26,6 +26,8 @@ class RegistrarErrorCode(StrEnum):
     INVALID_RESPONSE = "invalid_response"
     WEBHOOK_SIGNATURE_INVALID = "webhook_signature_invalid"
     NOT_CONFIGURED = "not_configured"
+    OPERATION_PENDING = "operation_pending"
+    UNSUPPORTED_OPERATION = "unsupported_operation"
     INTERNAL_ERROR = "internal_error"
 
 

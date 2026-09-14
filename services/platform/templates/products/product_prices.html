@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load i18n %}
+{% load localisation_tags i18n %}
 {% load ui_components %}
 
 {% block title %}{% trans "Pricing" %}: {{ product.name }} - PRAHO Platform{% endblock %}
@@ -141,7 +141,7 @@
                   → <span class="font-bold">{{ price.promo_price|floatformat:2 }} {{ currency_group.grouper.symbol }}</span>
                 </div>
                 <div class="text-xs text-red-400 mt-1">
-                  {% trans 'Valid until' %} {{ price.promo_valid_until|date:"j M Y" }}
+                  {% trans 'Valid until' %} {% localised_date price.promo_valid_until "date" %}
                 </div>
               </div>
             </div>

@@ -17,6 +17,8 @@ from django.db.models import QuerySet
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
+from apps.common.localisation import DATE_FORMAT_CHOICES, validate_timezone
+
 if TYPE_CHECKING:
     pass
 
@@ -484,18 +486,16 @@ class UserProfile(models.Model):
 
     # Language specific
     preferred_language = models.CharField(
-        max_length=5, choices=[("en", _("English")), ("ro", _("Romanian"))], default="en"
+        max_length=5, choices=[("en", _("English")), ("ro", _("Romanian"))], default="", blank=True
     )
 
     # Preferences
-    timezone = models.CharField(max_length=50, default="Europe/Bucharest")
+    timezone = models.CharField(max_length=50, default="", blank=True, validators=[validate_timezone])
     date_format = models.CharField(
         max_length=20,
-        choices=[
-            ("%d.%m.%Y", "DD.MM.YYYY"),
-            ("%Y-%m-%d", "YYYY-MM-DD"),
-        ],
-        default="%d.%m.%Y",
+        choices=DATE_FORMAT_CHOICES,
+        default="",
+        blank=True,
     )
 
     # Notifications

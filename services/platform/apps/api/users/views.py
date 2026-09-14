@@ -29,6 +29,8 @@ from apps.api.secure_auth import (
 )
 from apps.api.users.authentication import HashedTokenAuthentication
 from apps.common.constants import HMAC_NTP_SKEW_SECONDS, HMAC_TIMESTAMP_WINDOW_SECONDS
+from apps.common.localisation import resolve_display
+from apps.common.localisation_services import get_localisation_defaults, user_localisation_preferences
 from apps.common.performance.rate_limiting import (
     BurstRateThrottle,
     CustomerRateThrottle,
@@ -48,6 +50,7 @@ from .serializers import (
     MFAVerifySerializer,
     PasswordResetConfirmSerializer,
     PasswordResetRequestSerializer,
+    ProfileUpdateSerializer,
     TokenObtainRequestSerializer,
 )
 
@@ -129,6 +132,7 @@ def portal_login_api(request: HttpRequest) -> JsonResponse:
             "is_staff": user.is_staff,
             "is_active": user.is_active,
             "customer_id": user.primary_customer.id if user.primary_customer else None,
+            "localisation_preferences": user_localisation_preferences(user),
         }
 
         return JsonResponse({"success": True, "user": user_data, "message": "Authentication successful"})
@@ -503,6 +507,7 @@ def validate_session_secure(request: HttpRequest) -> Response:
             response_data = {
                 "active": True,
                 "membership_hash": membership_hash,
+                "localisation_preferences": user_localisation_preferences(user),
                 "revoke_before": next_validation.isoformat(),
             }
 
@@ -966,9 +971,13 @@ def customer_profile_api(request: HttpRequest, user: User) -> Response:
             if created:
                 logger.info(f"✅ [Profile API] Created default profile for customer: {user.email}")
 
+            preferences = user_localisation_preferences(user)
+            display = resolve_display(get_localisation_defaults(), preferences)
             profile_data["profile"] = {
-                "preferred_language": profile.preferred_language,
-                "timezone": profile.timezone,
+                "preferred_language": display.language,
+                "timezone": display.timezone,
+                "date_format": display.date_format,
+                "localisation_preferences": preferences,
                 "email_notifications": profile.email_notifications,
                 "sms_notifications": profile.sms_notifications,
                 "marketing_emails": profile.marketing_emails,
@@ -980,33 +989,11 @@ def customer_profile_api(request: HttpRequest, user: User) -> Response:
             # Get profile data from HMAC-signed request body
             request_data = request.data if hasattr(request, "data") else {}
 
-            # Update basic user fields
-            user.first_name = request_data.get("first_name", user.first_name)
-            user.last_name = request_data.get("last_name", user.last_name)
-            user.phone = request_data.get("phone", user.phone)
-            user.save()
-
-            # Update or create profile
-            profile, created = UserProfile.objects.get_or_create(user=user)
-
-            # Update profile fields if provided in request body
-            if "preferred_language" in request_data:
-                profile.preferred_language = request_data["preferred_language"]
-            if "timezone" in request_data:
-                profile.timezone = request_data["timezone"]
-            if "email_notifications" in request_data:
-                profile.email_notifications = request_data["email_notifications"]
-            if "sms_notifications" in request_data:
-                profile.sms_notifications = request_data["sms_notifications"]
-            if "marketing_emails" in request_data:
-                profile.marketing_emails = request_data["marketing_emails"]
-
-            profile.save()
-
-            if created:
-                logger.info(f"✅ [Profile API] Created new profile for customer: {user.email}")
-            else:
-                logger.info(f"✅ [Profile API] Updated existing profile for customer: {user.email}")
+            serializer = ProfileUpdateSerializer(data=request_data)
+            if not serializer.is_valid():
+                return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+            serializer.update(user, serializer.validated_data)
+            logger.info(f"✅ [Profile API] Updated profile for customer: {user.email}")
 
             return Response({"success": True, "message": "Profile updated successfully"})
 

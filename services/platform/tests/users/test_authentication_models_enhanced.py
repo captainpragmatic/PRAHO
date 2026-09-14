@@ -530,9 +530,9 @@ class EnhancedUserProfileTest(TestCase):
         """Test profile default values"""
         profile = self.user.profile
 
-        self.assertEqual(profile.preferred_language, 'en')
-        self.assertEqual(profile.timezone, 'Europe/Bucharest')
-        self.assertEqual(profile.date_format, '%d.%m.%Y')
+        self.assertEqual(profile.preferred_language, '')
+        self.assertEqual(profile.timezone, '')
+        self.assertEqual(profile.date_format, '')
         self.assertTrue(profile.email_notifications)
         self.assertFalse(profile.sms_notifications)
         self.assertFalse(profile.marketing_emails)

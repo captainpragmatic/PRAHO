@@ -8,7 +8,7 @@
                 {% trans "Restore domain from backup" %}
             </p>
         </div>ml" %}
-{% load ui_components %}
+{% load localisation_tags ui_components %}
 {% load i18n %}
 
 {% block title %}{{ page_title }} - {% trans "Restore Backup" %}{% endblock %}
@@ -228,10 +228,10 @@
                         <div class="flex items-center justify-between">
                             <div>
                                 <p class="text-sm font-medium text-slate-100">
-                                    {{ backup.created_at|date:"M d, Y" }}
+                                    {% localised_date backup.created_at "date" %}
                                 </p>
                                 <p class="text-xs text-slate-400">
-                                    {{ backup.created_at|date:"H:i:s" }}
+                                    {% localised_date backup.created_at "time_seconds" %}
                                 </p>
                             </div>
                             {% if backup.is_completed %}

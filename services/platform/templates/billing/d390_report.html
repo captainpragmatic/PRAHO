@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% load i18n ui_components %}
+
+{% block title %}{% trans "D390 review" %} - PRAHO{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto px-4 py-6 text-slate-100 space-y-6">
+  <a href="{% url 'billing:reports' %}" class="text-blue-400">{% trans "Billing reports" %}</a>
+  <h1 class="text-2xl font-semibold">{% trans "D390 review" %}</h1>
+  <p class="text-amber-300">{% trans "Services-only draft for accountant review." %}</p>
+  <p class="text-slate-400">{% trans "Outgoing intra-Community services (P), grouped by the recorded tax point. Confirm the operating entity's reporting obligations and filing with your accountant." %}</p>
+  <form method="get" class="bg-slate-800 rounded-lg p-4 flex items-end gap-4">
+    <div>
+      {{ period_form.month.label_tag }}
+      {{ period_form.month }}
+      <div class="text-red-300">{{ period_form.month.errors }}</div>
+    </div>
+    {% trans "Preview" as preview_label %}
+    {% button preview_label type="submit" %}
+  </form>
+  {% if report %}
+  <div class="bg-slate-800 rounded-lg p-4">
+    <p>{% trans "Candidate lines" %}: {{ report.candidate_line_ids|length }} · {% trans "Included" %}: {{ report.contributions|length }} · {% trans "Blocking exceptions" %}: {{ report.exceptions|length }}</p>
+    <p class="mt-2">{% trans "Base in RON" %}: {{ report.base_ron }} · {% trans "Whole lei" %}: {{ report.rounded_ron }} · {% trans "Rounding difference" %}: {{ report.rounding_difference }}</p>
+  </div>
+  {% if report.partners %}
+  <div class="overflow-x-auto bg-slate-800 rounded-lg">
+    <table class="w-full text-sm">
+      <caption class="p-4 text-left font-semibold">{% trans "Partner supplies" %}</caption>
+      <thead class="bg-slate-700"><tr>
+        <th class="p-3 text-left">{% trans "Partner / VAT" %}</th>
+        <th class="p-3 text-right">{% trans "RON base" %}</th>
+        <th class="p-3 text-right">{% trans "Whole lei" %}</th>
+        <th class="p-3 text-right">{% trans "Rounding difference" %}</th>
+      </tr></thead>
+      <tbody>
+        {% for partner in report.partners %}
+        <tr class="border-t border-slate-700">
+          <td class="p-3">{{ partner.partner_name }} · {{ partner.country }}{{ partner.vat_body }} · {{ partner.operation }}</td>
+          <td class="p-3 text-right">{{ partner.base_ron }}</td>
+          <td class="p-3 text-right">{{ partner.rounded_ron }}</td>
+          <td class="p-3 text-right">{{ partner.rounding_difference }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="overflow-x-auto bg-slate-800 rounded-lg">
+    <table class="w-full text-sm">
+      <caption class="p-4 text-left font-semibold">{% trans "Invoice reconciliation" %}</caption>
+      <thead class="bg-slate-700"><tr>
+        <th class="p-3 text-left">{% trans "Invoice / line" %}</th>
+        <th class="p-3 text-left">{% trans "Tax point" %}</th>
+        <th class="p-3 text-right">{% trans "Base / discount in cents" %}</th>
+        <th class="p-3 text-right">{% trans "RON rate / base" %}</th>
+      </tr></thead>
+      <tbody>
+        {% for line in report.contributions %}
+        <tr class="border-t border-slate-700">
+          <td class="p-3"><a class="text-blue-400" href="{% url 'billing:invoice_detail' pk=line.invoice_id %}">{{ line.invoice_number }}</a> / {{ line.line_id }}<br>{{ line.description }}<br>{% trans "Captured VAT validation" %}: {% if line.vies_status == "not_recorded" %}{% trans "Not recorded" %}{% else %}{{ line.vies_status }}{% endif %}{% if line.consultation_reference %} · {{ line.consultation_reference }}{% endif %}</td>
+          <td class="p-3">{{ line.tax_point_date|date:"Y-m-d" }}</td>
+          <td class="p-3 text-right">{{ line.gross_cents }} / {{ line.discount_cents }} {{ line.currency }}</td>
+          <td class="p-3 text-right">{{ line.exchange_rate }} / {{ line.base_ron }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% elif not report.exceptions %}
+  <p class="bg-slate-800 rounded-lg p-6">{% trans "No candidate supplies in this period. No declaration will be generated." %}</p>
+  {% endif %}
+  {% if report.exceptions %}
+  <div class="bg-slate-800 border border-red-700 rounded-lg p-4">
+    <h2 class="font-semibold text-red-300">{% trans "XML blocked — review these exceptions" %}</h2>
+    <p class="mt-2 text-slate-300">{% trans "Missing tax-point dates appear in every month because their reporting period is unknown. Refunds require fiscal review and are never deducted as credit notes." %}</p>
+    <ul class="mt-4 space-y-3">
+      {% for exception in report.exceptions %}
+      <li><a class="text-blue-400" href="{% url 'billing:invoice_detail' pk=exception.invoice_id %}">{{ exception.invoice_number }}</a>{% if exception.line_id %} / {{ exception.line_id }}{% endif %}: {{ exception.detail }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+  <form method="post" class="bg-slate-800 rounded-lg p-4 space-y-4">
+    {% csrf_token %}
+    {{ export_form.month }}
+    {{ export_form.source_fingerprint }}
+    <div role="alert" class="text-red-300">{{ export_form.non_field_errors }}{{ export_form.action.errors }}{{ export_form.source_fingerprint.errors }}</div>
+    {% if supplier_error %}<p class="text-amber-300">{{ supplier_error }}</p>{% endif %}
+    <h2 class="font-semibold">{% trans "Accountant handoff" %}</h2>
+    <p class="text-slate-400">{% trans "CSV is available even when XML is blocked. XML passes local checks before download. Your accountant must review the draft and complete ANAF validation and filing." %}</p>
+    <div class="grid sm:grid-cols-3 gap-4">
+      <div>{{ export_form.surname.label_tag }}{{ export_form.surname }}<div class="text-red-300">{{ export_form.surname.errors }}</div></div>
+      <div>{{ export_form.given_name.label_tag }}{{ export_form.given_name }}<div class="text-red-300">{{ export_form.given_name.errors }}</div></div>
+      <div>{{ export_form.role.label_tag }}{{ export_form.role }}<div class="text-red-300">{{ export_form.role.errors }}</div></div>
+    </div>
+    <div class="flex gap-4">
+      {% trans "Download reconciliation CSV" as csv_label %}
+      {% button csv_label type="submit" variant="secondary" attrs="name=action value=csv" %}
+      {% trans "Download draft XML" as xml_label %}
+      {% if not report.can_export or supplier_error %}
+      {% button xml_label type="submit" attrs="name=action value=xml" disabled=True %}
+      {% else %}
+      {% button xml_label type="submit" attrs="name=action value=xml" %}
+      {% endif %}
+    </div>
+    <p class="text-xs text-slate-400 break-all">{% trans "Source fingerprint" %}: {{ report.source_fingerprint }}</p>
+    <p class="text-slate-400">{% trans "Goods, acquisitions, fiscal credit notes and rectificative declarations are outside this report. Have the accountant distinguish current-period adjustments from corrections of a previous declaration." %}</p>
+  </form>
+  {% endif %}
+</div>
+{% endblock %}

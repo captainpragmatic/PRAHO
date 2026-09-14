@@ -11,6 +11,8 @@ from typing import TYPE_CHECKING, Any, TypedDict
 
 from django.db import models, transaction
 
+from apps.common.localisation import normalize_country_code
+
 if TYPE_CHECKING:
     from django.db.models import QuerySet
 
@@ -206,7 +208,7 @@ class ContactService:
 
         # Validate postal code format for Romania
         if (
-            address.country in ("România", "Romania")
+            normalize_country_code(address.country) == "RO"
             and address.postal_code
             and (not address.postal_code.isdigit() or len(address.postal_code) != ROMANIAN_POSTAL_CODE_LENGTH)
         ):

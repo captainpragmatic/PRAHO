@@ -596,6 +596,10 @@ class PlatformAPIClient:
     # AUTHENTICATION API ENDPOINTS
     # ===============================================================================
 
+    def get_localisation_defaults(self) -> dict[str, Any]:
+        """Read the explicit, non-sensitive portal display contract."""
+        return self._make_request("POST", "/localisation/", data={})
+
     def authenticate_customer(self, email: str, password: str) -> dict[str, Any] | None:
         """Authenticate customer with email and password via platform API"""
         start_time = time.perf_counter()

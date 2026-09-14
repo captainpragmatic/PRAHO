@@ -1,4 +1,4 @@
-{% load ui_components %}
+{% load localisation_tags ui_components %}
 {% load i18n %}
 
 {% if accounts %}
@@ -10,7 +10,7 @@
                 {% trans "Hosting Accounts" %} ({{ accounts|length }})
             </h2>
             <div class="text-sm text-slate-400">
-                {% trans "Last updated:" %} <span id="last-updated">{{ last_updated|date:"H:i:s" }}</span>
+                {% trans "Last updated:" %} <span id="last-updated">{% localised_date last_updated "time_seconds" %}</span>
             </div>
         </div>
     </div>
@@ -95,7 +95,7 @@
                         {% endif %}
                     </td>
                     <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-400">
-                        {{ account.created_at|date:"M d, Y" }}
+                        {% localised_date account.created_at "date" %}
                     </td>
                     <td class="px-6 py-4 whitespace-nowrap text-right text-sm">
                         <div class="flex items-center justify-end space-x-2">

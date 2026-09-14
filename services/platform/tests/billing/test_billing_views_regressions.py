@@ -1564,7 +1564,12 @@ class ApiStripeConfigTest(BillingViewsTestBase):
 
     @patch("apps.settings.services.SettingsService")
     def test_stripe_config_exception(self, mock_settings_cls):
-        mock_settings_cls.get_setting.side_effect = Exception("Config error")
+        def setting_value(key, **kwargs):
+            if key.startswith("integrations.stripe_"):
+                raise Exception("Config error")
+            return kwargs.get("default")
+
+        mock_settings_cls.get_setting.side_effect = setting_value
         response = self.client.get("/billing/stripe-config/")
         self.assertEqual(response.status_code, 500)
 

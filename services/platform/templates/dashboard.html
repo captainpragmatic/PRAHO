@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% load ui_components %}
+{% load localisation_tags ui_components %}
 {% load i18n %}
 {% load formatting %}
 
@@ -266,12 +266,12 @@
                   {% if user.is_staff_user %}
                   {{ ticket.title|truncatechars:40 }}
                   {% else %}
-                  {{ ticket.created_at|date:"d.m.Y" }}
+                  {% localised_date ticket.created_at "date" %}
                   {% endif %}
                 </div>
                 <div class="text-slate-400 text-sm leading-4">
                   {% if user.is_staff_user %}
-                  {{ ticket.created_at|date:"d.m.Y" }}
+                  {% localised_date ticket.created_at "date" %}
                   {% else %}
                   #{{ ticket.ticket_number }}
                   {% endif %}
@@ -383,7 +383,7 @@
 
           <div class="flex items-center justify-between">
             <span class="text-slate-300">{% trans 'Customer Since' %}</span>
-            <span class="text-white">{{ user.primary_customer.created_at|date:"M Y" }}</span>
+            <span class="text-white">{% localised_date user.primary_customer.created_at "month_year" %}</span>
           </div>
           {% endif %}
         </div>

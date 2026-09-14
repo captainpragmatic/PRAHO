@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load i18n %}
+{% load localisation_tags i18n %}
 {% load ui_components %}
 {% load formatting %}
 
@@ -112,7 +112,7 @@
             <!-- Created Date -->
             <div>
               <dt class="text-sm font-medium text-slate-400">{% trans "Created Date" %}</dt>
-              <dd class="mt-1 text-sm text-white">{{ order.created_at|date:"F d, Y H:i" }}</dd>
+              <dd class="mt-1 text-sm text-white">{% localised_date order.created_at "datetime" %}</dd>
             </div>
 
             <!-- Currency -->
@@ -124,7 +124,7 @@
             <!-- Last Updated -->
             <div>
               <dt class="text-sm font-medium text-slate-400">{% trans "Last Updated" %}</dt>
-              <dd class="mt-1 text-sm text-white">{{ order.updated_at|date:"F d, Y H:i" }}</dd>
+              <dd class="mt-1 text-sm text-white">{% localised_date order.updated_at "datetime" %}</dd>
             </div>
           </dl>
 
@@ -249,7 +249,7 @@
                       {% endif %}
                     </div>
                     <div class="text-xs text-slate-400">
-                      {{ history.created_at|date:"M d, Y H:i" }}
+                      {% localised_date history.created_at "datetime" %}
                       {% if history.changed_by %}
                         • {{ history.changed_by.get_full_name|default:history.changed_by.email }}
                       {% endif %}
