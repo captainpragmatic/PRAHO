@@ -67,8 +67,15 @@ class HcloudService(CloudProviderGateway):
     Our database (NodeDeployment model) IS the state — no external state files needed.
     """
 
-    def __init__(self, token: str, **_kwargs: Any) -> None:
-        self.client = Client(token=token)
+    def __init__(
+        self, token: str, *, timeout: float | None = None, max_retries: int | None = None, **_kwargs: Any
+    ) -> None:
+        self.client = Client(token=token, timeout=timeout)
+        if max_retries is not None:
+            # hcloud exposes timeout publicly, but its HTTP retry budget only on
+            # ClientBase. Keep this isolated and covered by a real-SDK transport test.
+            # Ordinary deployment clients retain the SDK's default retry policy.
+            self.client._client._retry_max_retries = max_retries
 
     # =========================================================================
     # CloudProviderGateway implementation (unified interface)

@@ -9,7 +9,8 @@ auto-deploy is customer-ready.
 ## Prerequisites
 - A Hetzner Cloud API token (project-scoped) configured in PRAHO (provider token / vault).
 - PRAHO platform running with node-deployment settings configured.
-- (For public hostname resolution + Let's Encrypt) a Cloudflare API token + zone — note GAP 3 (imperative-pipeline DNS) is NOT implemented yet, so the node hostname will not auto-resolve; the LE cert step may skip. Not required to prove the credential seam.
+- Configure the Cloudflare API token, zone ID and deployment DNS zone. The deployment pipeline now creates and owns its public A/AAAA records. Run `panel_cert_preflight --provider-id <id>` before the paid drill.
+- Follow the canonical [panel-certificate drill guide](../../../../../docs/deployment/DEPLOYMENT.md#panel-certificate-preflight-and-activation-gate-436-drill-gated) for #436. This credential-seam checklist does not prove certificate issuance or authorize enabling fatal issuance. The current installer can make a production ACME request; prepare and verify the isolated staging path first.
 
 ## What it proves
 Given a Hetzner key, `deploy_node` produces an **active, credentialed** `VirtualminServer` with **zero manual steps**, onto which a customer domain can be provisioned.
@@ -39,9 +40,8 @@ Given a Hetzner key, `deploy_node` produces an **active, credentialed** `Virtual
    domain provisioning. Creating a real domain does:
    - `create_virtualmin_account` should succeed (a `VirtualminAccount`, status active) — this exercises
      `create-domain`, proving the ACL user has the create capability the flags are meant to grant.
-   - The domain should resolve (GAP 3 / DNS) and serve. Without GAP 3, resolve DNS manually to test.
-   Every auto-deploy runs the IDENTICAL `virtualmin.yml`, so proving the capability flags once here
-   proves them for all future deployments — this drill is the one-time capability acceptance.
+   - The customer domain should resolve publicly and serve; provision its DNS separately from the node hostname records.
+   Record the tested playbook SHA and installed versions. Repeat the capability drill when that contract changes.
 6. Record RTO (deploy start → active) and note any manual step you had to take — the goal is **zero**.
 
 ## Debugging aids

@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import logging
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Literal
 
 import requests
@@ -155,8 +155,18 @@ class CloudflareDnsGateway(DnsProviderGateway):
 
     provider = "cloudflare"
 
-    def __init__(self, token: str, **kwargs: Any) -> None:
+    def __init__(self, token: str, *, timeout: float | None = None, **kwargs: Any) -> None:
         self._token = token
+        self._policy = (
+            replace(
+                CLOUDFLARE_POLICY,
+                timeout_seconds=timeout,
+                connect_timeout_seconds=timeout,
+                retry_connection_errors=False,
+            )
+            if timeout is not None
+            else CLOUDFLARE_POLICY
+        )
 
     # -- HTTP helpers --------------------------------------------------------
 
@@ -171,7 +181,7 @@ class CloudflareDnsGateway(DnsProviderGateway):
         return safe_request(
             method,
             f"{CLOUDFLARE_API_BASE}{path}",
-            policy=CLOUDFLARE_POLICY,
+            policy=self._policy,
             headers=self._headers(),
             **kwargs,
         )
