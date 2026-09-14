@@ -151,7 +151,7 @@ def _parse_feed(content: bytes, requested: tuple[str, ...], today: date) -> BNRR
     header, body = root
     _require_children(header, ("Publisher", "PublishingDate", "MessageType"))
     _text(header[0])
-    _publication_date(_text(header[1]))
+    header_date = _publication_date(_text(header[1]))
     if _text(header[2]) != "DR":
         raise ValueError("Expected a BNR daily-rate message")
 
@@ -168,6 +168,11 @@ def _parse_feed(content: bytes, requested: tuple[str, ...], today: date) -> BNRR
     if set(cube.attrib) != {"date"}:
         raise ValueError("BNR Cube must have exactly one publication-date attribute")
     publication_date = _publication_date(str(cube.attrib["date"]))
+    if publication_date != header_date:
+        # A well-formed BNR feed carries the same date in the Header and the Cube; a mismatch
+        # is a corrupted/inconsistent publication — reject rather than stamp a legally
+        # significant tax-point date from an untrusted Cube value.
+        raise ValueError("BNR Header PublishingDate does not match the Cube date")
     if publication_date > today:
         raise ValueError("BNR publication date is in the future in Europe/Bucharest")
 

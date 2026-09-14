@@ -98,6 +98,11 @@ the manual command stays authoritative until an operator enables it.
   `ExchangeRateService.resolve` docstring. `FXRate.as_of`'s model `help_text` still reads
   "next banking day"; it is knowingly left stale to avoid a no-op schema migration and is
   not authoritative.
+- **`BILLING_DEFAULT_CURRENCY` is a validated forward-hook, not yet wired to defaulting.** The
+  `billing_currency` system check rejects an unsupported/unresolvable value at startup, but every
+  document-creation path still defaults to literal RON; making a non-RON default active touches
+  many money paths and is deliberate future work. Setting it to EUR/USD therefore validates but
+  does not (yet) change new documents' currency.
 - **Usage invoicing** (`usage_invoice_service`) is not given an explicit `assert_currency_issuable`
   admission guard here: it calls `issue()` directly, and issuance precedes collection, so an
   unresolvable rate fails the invoice loud *before* any money is taken (unbilled usage,

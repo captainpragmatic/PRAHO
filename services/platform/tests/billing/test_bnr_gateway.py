@@ -90,6 +90,17 @@ class BNRGatewayTests(TestCase):
         self.assertFalse(result.api_available)
 
     @patch("apps.billing.gateways.bnr_gateway.safe_request")
+    def test_header_cube_date_mismatch_is_rejected(self, mock_req: MagicMock) -> None:
+        # A corrupted feed whose Header PublishingDate differs from the Cube date must be
+        # rejected — never stamp a legally significant tax-point date from the untrusted Cube.
+        mismatched = BNR_XML.replace(
+            b"<PublishingDate>2026-09-11</PublishingDate>", b"<PublishingDate>2026-09-10</PublishingDate>"
+        )
+        mock_req.return_value = _response(mismatched)
+        result = BNRGateway.fetch_rates(["EUR", "USD"], now=_NOW)
+        self.assertFalse(result.api_available)
+
+    @patch("apps.billing.gateways.bnr_gateway.safe_request")
     def test_security_error_propagates_and_is_audited(self, mock_req: MagicMock) -> None:
         mock_req.side_effect = OutboundSecurityError("blocked")
         with self.assertRaises(OutboundSecurityError):

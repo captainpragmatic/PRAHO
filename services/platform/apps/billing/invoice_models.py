@@ -514,11 +514,14 @@ class Invoice(models.Model):
     def _freeze_fx(self) -> None:
         """Set — or CONSUME an already-frozen — RON FX snapshot for self.tax_point_date.
 
-        RON documents carry no snapshot. For a foreign currency, if a snapshot is already
-        frozen (``exchange_to_ron is not None``) it is consumed unchanged — this is how
-        ``issue()`` honours a rate frozen earlier at the reversible conversion moment, so
-        a later ``FXRate`` row can never change an issued invoice's RON VAT. Otherwise the
-        rate is resolved now at ``tax_point_date`` (the direct-issue path).
+        RON documents carry no snapshot. For a foreign currency, if a COMPLETE snapshot is
+        already frozen (rate + as_of + source all present) it is consumed unchanged — this
+        is how ``issue()`` honours a rate frozen earlier at the reversible conversion moment,
+        so a later ``FXRate`` row can never change an issued invoice's RON VAT. A partial
+        legacy value (a bare ``exchange_to_ron`` from before migration 0039 added the
+        provenance fields) is NOT complete evidence: it is discarded and a fresh provenanced
+        snapshot is resolved at ``tax_point_date`` (fail-closed if none resolves), so the
+        invoice never locks with legally incomplete FX evidence.
         """
         if self.currency_id == "RON":
             self.exchange_to_ron = None
@@ -526,8 +529,8 @@ class Invoice(models.Model):
             self.exchange_rate_source = ""
             self.exchange_rate_source_reference = ""
             return
-        if self.exchange_to_ron is not None:
-            return  # already frozen at the reversible moment — consume, never re-resolve
+        if self.exchange_to_ron is not None and self.exchange_rate_as_of is not None and self.exchange_rate_source:
+            return  # a COMPLETE snapshot frozen at the reversible moment — consume, never re-resolve
         assert self.tax_point_date is not None  # callers (issue / freeze_fx_snapshot) set it first
         from apps.billing.exchange_rate_service import ExchangeRateError, ExchangeRateService  # noqa: PLC0415
 

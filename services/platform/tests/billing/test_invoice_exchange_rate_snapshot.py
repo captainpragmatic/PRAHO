@@ -78,6 +78,38 @@ class InvoiceExchangeRateSnapshotTestCase(TestCase):
         self.assertEqual(invoice.exchange_rate_source_reference, expected.source_reference)
 
     @patch("apps.billing.invoice_models.timezone.now")
+    def test_partial_legacy_snapshot_is_not_consumed_and_fails_closed(self, now: object) -> None:
+        # A pre-migration-0039 invoice can carry a bare exchange_to_ron with blank provenance.
+        # issue() must NOT consume that partial value (locking legally incomplete FX evidence);
+        # with no resolvable rate it must fail closed instead.
+        now.return_value = self.issued_at
+        invoice = self._invoice(self.eur, "INV-EUR-PARTIAL-LEGACY")
+        invoice.exchange_to_ron = Decimal("4.90000000")  # legacy rate, but no as_of / source
+        invoice.save(update_fields=["exchange_to_ron"])
+
+        with self.assertRaises(ValidationError):  # no FXRate → resolution fails closed
+            invoice.issue()
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.status, "draft")  # never transitioned / locked
+
+    @patch("apps.billing.invoice_models.timezone.now")
+    def test_partial_legacy_snapshot_is_replaced_by_fresh_resolution(self, now: object) -> None:
+        # When a rate DOES resolve, a partial legacy value is discarded and overwritten with
+        # the complete provenanced snapshot — the stale legacy rate is never locked in.
+        now.return_value = self.issued_at
+        expected = self._rate()
+        invoice = self._invoice(self.eur, "INV-EUR-PARTIAL-REPLACE")
+        invoice.exchange_to_ron = Decimal("4.90000000")
+        invoice.save(update_fields=["exchange_to_ron"])
+
+        invoice.issue()
+        invoice.save()
+
+        self.assertEqual(invoice.exchange_to_ron, expected.rate)  # fresh, not the legacy 4.90
+        self.assertEqual(invoice.exchange_rate_as_of, expected.as_of)
+        self.assertEqual(invoice.exchange_rate_source, FXRate.Source.BNR)
+
+    @patch("apps.billing.invoice_models.timezone.now")
     def test_foreign_issue_without_provenanced_rate_fails_before_transition(self, now: object) -> None:
         now.return_value = self.issued_at
         invoice = self._invoice(self.eur, "INV-EUR-NO-RATE")
