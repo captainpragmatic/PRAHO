@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar
 
 import paramiko
+from cryptography import x509
 
 from apps.common.outbound_http import (
     OutboundPolicy,
@@ -575,6 +576,7 @@ class NodeValidationService:
                 result["tls_available"] = True
                 result["protocol"] = ssock.version()
                 result["cipher"] = ssock.cipher()
+                self._record_cert_identity(result, ssock)
         except ssl.SSLError as e:
             result["error"] = str(e)
             return result
@@ -618,6 +620,10 @@ class NodeValidationService:
             der = ssock.getpeercert(binary_form=True)
             if der:
                 result["cert_sha256"] = hashlib.sha256(der).hexdigest()
+                if not result["not_after"]:
+                    # CERT_NONE returns an empty parsed peer dict. This is an
+                    # observation, never a trust anchor or a verification verdict.
+                    result["not_after"] = x509.load_der_x509_certificate(der).not_valid_after_utc.isoformat()
         except (ValueError, OSError):  # identity is a bonus; never fail the probe over it
             pass
 

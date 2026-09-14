@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A read-only `panel_cert_preflight` command checks Hetzner credentials, Cloudflare zone access, authoritative A/AAAA and per-address HTTP routing, with separate panel-certificate observations and a staged operator drill guide. Fatal issuance and trusted activation remain pending the live #436 drill.
+
 - **D390 services review** — billing staff can reconcile monthly outgoing EU reverse-charge service supplies, inspect invoice contributions and whole-leu rounding, and download reconciliation CSV or a locally validated draft XML for accountant review. New billing documents preserve the original VAT decision and available VIES proof; incomplete historical evidence and unresolved fiscal adjustments block XML (#405).
 
 - **Localisation settings with working consumers** — staff can configure default language, country, display timezone, and separate staff/customer date presets. Both web services honor saved profile overrides or “Use system default”; customer address forms carry their configured country through creation. Financial documents and accounting date rules retain their existing conventions (#380).

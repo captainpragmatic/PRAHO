@@ -191,6 +191,8 @@ class SSLTrustReportingTests(SimpleTestCase):
         self.assertIn("NOT CA-trusted", result.message)
         self.assertTrue(result.details["trust_evaluated"], "a self-signed chain IS a verdict")
         self.assertIn("self-signed", result.details["trust_error"])
+        self.assertIsNotNone(result.details["not_after"])
+        self.assertRegex(result.details["cert_sha256"], r"^[0-9a-f]{64}$")
 
     def test_trusted_certificate_with_matching_name_is_reported_trusted(self) -> None:
         ca_pem, _, ca_cert, ca_key = _make_cert("Test CA")

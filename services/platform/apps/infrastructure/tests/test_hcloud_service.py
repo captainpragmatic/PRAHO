@@ -162,14 +162,15 @@ class TestDeleteServer(TestCase):
         action.wait_until_finished.assert_called_once()
 
     def test_delete_server_not_found(self):
-        """Deleting a nonexistent server returns Err."""
+        """Deleting an already absent server is idempotent success."""
         svc, client = _make_service()
         client.servers.get_by_id.side_effect = Exception("Server not found")
 
         result = svc.delete_server("999")
 
-        self.assertTrue(result.is_err())
-        self.assertIn("Server deletion failed", result.unwrap_err())
+        self.assertTrue(result.is_ok())
+        self.assertTrue(result.unwrap())
+        client.servers.delete.assert_not_called()
 
 
 class TestGetServer(TestCase):

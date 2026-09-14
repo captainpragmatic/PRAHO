@@ -87,37 +87,136 @@ unpinnable rows, and SSH-pinnable candidates):
 python manage.py pin_virtualmin_certificates --report
 ```
 
-### Trusted panel-certificate activation gate (#436, drill-gated)
+### Panel-certificate preflight and activation gate (#436, drill-gated)
 
-`infrastructure.require_trusted_panel_certificate` (default **off**) makes node
-activation require an affirmatively CA-trusted panel certificate; untrusted
-AND indeterminate probes refuse (fail-closed) and keep the server disabled
-without discarding the deployment. Before flipping it on:
+The read-only preflight prepares the **Hetzner / Virtualmin** drill. It does not
+issue certificates, provision servers, edit DNS, pin certificates, or change
+activation settings. Credential reads retain the vault's normal access audit.
+Run from `services/platform` with the platform environment and database settings:
 
-1. On a DISPOSABLE node against **Let's Encrypt staging**, validate the real
-   Virtualmin CLI contract used by `virtualmin.yml`. Current docs/source say the
-   playbook's invocation is wrong and must be corrected here first:
-   `generate-letsencrypt-cert` **requires `--domain <name>`** (the playbook passes
-   only `--host`, which errors "Missing --domain parameter"); `--renew` configures
-   auto-renewal, it does **not** trigger issuance; and a first-class **`--staging`**
-   flag exists for the staging CA. `--domain` names a Virtualmin virtual server, so
-   decide on the live node whether the node FQDN gets a virtual server or uses
-   Webmin's own LE flow. Also confirm `letsencrypt.cgi` exists at
-   `/usr/share/webmin/webmin/` and that the `/etc/webmin/letsencrypt-cert-<host>`
-   marker is the one **we** write (only after BOTH steps exit 0).
-2. **Exercise fatality without a code change**: the two Let's Encrypt steps are
-   now gated by a `letsencrypt_fatal` var (default **false** == today's non-fatal
-   behavior). Run the drill with `-e letsencrypt_fatal=true` so a failed cert step
-   aborts the play on the disposable node, and confirm a clean run still serves a
-   **CA-trusted** certificate for the fqdn on :10000 (one production-LE issuance is
-   needed to exercise the trust gate — staging certs chain to an untrusted root).
-   Grep the panel-stage output for `LETSENCRYPT_FAILED` banners.
-3. Only then, in production, enable the corrected command flags, wire
-   `letsencrypt_fatal=true` from the platform (or enable the
-   `infrastructure.require_trusted_panel_certificate` gate), and drop the now-inert
-   `default(false)` guards. Respect LE rate limits (5 authorization
-   failures/identifier/hour; 50 certs/domain/week) — use the staging CA for all
-   iteration.
+```bash
+python manage.py panel_cert_preflight --provider-id 1
+python manage.py panel_cert_preflight --deployment-id 42 --json > panel-cert-preflight.json
+```
+
+Choose exactly one existing database ID. Provider mode checks the controller's
+`ansible-playbook`, `ssh`, `ssh-keygen`, and `ssh-keyscan`, the provider credential,
+Cloudflare zone access, and `node_deployment.dns_default_zone` containment before
+spending money. The provider vault entry takes precedence; `HCLOUD_TOKEN` is used
+only when no vault identifier is configured. Cloudflare uses
+`node_deployment.dns_cloudflare_api_token` and
+`node_deployment.dns_cloudflare_zone_id`. Successful API reads establish neither
+write permissions nor available cloud capacity. Other providers are reported as
+unsupported for this drill.
+
+Deployment mode additionally checks the recorded server, the deployment's own
+DNS zone and FQDN, and authoritative A/AAAA answers against its recorded addresses.
+Nameservers are discovered through the controller resolver; each authority is
+queried directly over TCP port 53. A lookup failure remains unknown, including
+when another authority answers successfully. Empty AAAA is acceptable only when
+the deployment has no IPv6 address. Missing A, conflicting answers, stale AAAA,
+non-public addresses, and aliases require correction. DNS changes or resolver
+caches may require an operator to wait and rerun; the command does not poll.
+
+Every published address receives one port-80 GET with the node's `Host` header.
+The probe uses `/.well-known/acme-challenge/praho-preflight`, creates no file,
+reads no response body, and never follows redirects. An HTTP 200, redirect, 404,
+or error response establishes only that an HTTP listener answered. **It does
+not establish that an actual HTTP-01 nonce reaches the correct webroot.** A
+controller unable to reach a published IPv6 address reports an indeterminate
+check; do not discard the AAAA result to obtain a green report.
+
+JSON includes a schema version, stable check IDs, `pass`, `fail`, `unknown`, or
+`not_run`, and the individual authoritative answers. Any scoped prerequisite
+that is not `pass` produces a nonzero exit; JSON remains on stdout and the exit
+explanation goes to stderr. A zero exit means only the selected mode's observed
+prerequisites passed. Provider mode has no node DNS, HTTP, or TLS observations.
+API and socket operations use ten-second timeouts; the command adds no retry
+loops, disables Hetzner HTTP retries, and bounds DNS discovery lookups. Total
+runtime can exceed ten seconds because checks and authorities are independent.
+Tokens, authenticated request payloads, and raw API errors are omitted.
+
+The separate certificate observation connects to the **recorded IPv4 on port
+10000**, using the FQDN for SNI and ordinary CA/hostname verification. It reports
+`trusted`, `untrusted`, or `indeterminate`, plus observed SHA-256 and expiry when
+available. An observed fingerprint is not a trust anchor. A self-signed or
+staging certificate before issuance is expected and does not fail the scoped
+prerequisites. Probe failure does not mean the certificate was rejected.
+
+`letsencrypt_fatal` remains **false** by default. The
+`infrastructure.require_trusted_panel_certificate` setting remains **off** by
+default; when enabled it already refuses both untrusted and indeterminate
+certificates and leaves the server disabled. The preflight does not enable either
+control. **#436 stays open until the live evidence and rollout below are complete.**
+
+#### Future live drill: evidence required before fatal issuance rollout
+
+1. **Prepare one disposable node and a cost limit.** Validate provider and DNS
+   credentials, confirm a public domain under operator control, select available
+   capacity, name the cleanup owner and deadline, and record a maximum spend.
+   Capture the Git SHA, provider/deployment IDs and preflight JSON. Public DNS
+   provisioning is implemented; `/etc/hosts` cannot prove public ACME readiness.
+   Keep real credentials in the vault and the existing mode-0600 Ansible vars
+   file; never put them on argv, in a transcript, or in unredacted logs.
+2. **Establish the installed CLI contract before any ACME attempt.** Record the
+   installer artifact checksum, OS, Webmin/Virtualmin versions, installed help,
+   and relevant source/paths. The [Virtualmin command documentation](https://www.virtualmin.com/docs/development/api-programs/generate-letsencrypt-cert/)
+   requires `--domain` to identify a virtual server; `--host` alone is not that
+   argument. `--renew` configures renewal, and `--staging` selects the test CA.
+   Prove whether the panel hostname should use a Virtualmin virtual server or
+   Webmin's hostname-certificate workflow on the installed version. Do not ship
+   guessed replacement flags into the active playbook.
+3. **Prevent the installer's own production request.** The [automated installer](https://www.virtualmin.com/docs/installation/automated/)
+   requests a hostname certificate unless `--no-hostname-ssl` is used. Verify that
+   option in the selected installer and build an isolated staging drill path
+   before starting installation. The current deployment playbook is not a
+   staging-safe harness: setting `letsencrypt_fatal=true` alone does not select
+   staging or suppress installer issuance. Stop if production ACME calls cannot
+   be excluded. Record the staging directory actually used:
+   `https://acme-staging-v02.api.letsencrypt.org/directory`.
+4. **Prove challenge routing.** Run deployment preflight after DNS provisioning.
+   Compare all authorities, then serve an actual random HTTP-01 test nonce at the
+   chosen challenge webroot. Fetch and compare its exact content from an external
+   vantage point at every published A and AAAA address with the hostname `Host`
+   header. Inspect any redirects explicitly; neither an open port nor a generic
+   response is proof. Remove the test nonce afterward. Resolve DNS/firewall/webroot
+   failures before contacting ACME.
+5. **Exercise staging success and failure.** Prove staging issuance, installation
+   into the running panel, and the certificate served on :10000. Induce a failed
+   issuance and a separate installation failure; with the drill's fatal flag they
+   must abort before activation and produce useful redacted errors. Interrupt
+   between issuance and installation, recover without another unnecessary order,
+   and rerun successfully without replacing a usable certificate. Verify the
+   marker is written only after both steps succeed and reconciles with the
+   installed certificate; a marker alone must not conceal an interrupted install.
+   Demonstrate the configured renewal mechanism and a staging renewal, including
+   panel reload and a changed served certificate. Preserve order/attempt counts.
+6. **Prove ordinary trust once.** After staging passes and the rate budget permits,
+   make one deliberate production issuance. Verify FQDN/SAN, chain, expiry and
+   fingerprint from the platform, then exercise strict activation: a trusted
+   certificate permits the ordinary credential handshake; untrusted and
+   indeterminate probes refuse. [Staging roots](https://letsencrypt.org/docs/staging-environment/)
+   belong only in an isolated test client's trust store, never the controller's
+   ordinary trust store. Staging success cannot satisfy production CA trust.
+7. **Review rollout and clean up.** Ship the proven hostname workflow, recovery
+   behavior and fatal failure handling in a follow-up PR; then enable fatal
+   issuance and strict activation in the reviewed rollout. Destroy the disposable
+   server and owned firewall, DNS records and temporary challenge files. Verify
+   absence through provider/DNS read APIs and reconcile PRAHO state. Retain
+   redacted logs, timings, costs, DNS/HTTP evidence, certificate identities,
+   interruption/renewal results, attempt counts and cleanup receipts on #436.
+
+Before the paid drill, record a capacity model per registered domain: planned new
+nodes plus replacements and recovery headroom in each seven-day window. Current
+[Let's Encrypt rate limits](https://letsencrypt.org/docs/rate-limits/) include 50
+new certificates per registered domain per seven days, five per exact identifier
+set per seven days, and five failed authorizations per identifier/account/hour.
+Check current limits again at execution time and distinguish renewals from new
+orders. Keep all iteration on staging. Honor `Retry-After` and the reported
+cooldown; a failure must not trigger an automatic deploy retry or a replacement
+hostname to bypass the limit. If forecast demand exceeds the budget, obtain an
+approved limit override before rollout; creating subdomains does not provide a
+new registered-domain allowance.
 
 ---
 

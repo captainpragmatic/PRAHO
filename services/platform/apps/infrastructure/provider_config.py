@@ -417,7 +417,8 @@ def get_provider_token(provider: CloudProvider) -> Result[str, str]:
             _username, password, _metadata = result.unwrap()
             return Ok(password)
         # Vault is configured but lookup failed — this is an error, not a fallback scenario
-        logger.error(f"⚠️ [CredentialVault] Lookup failed for {provider.name}: {result.unwrap_err()}")
+        # Vault failures may wrap transport details; never log credential payloads.
+        logger.error("⚠️ [CredentialVault] Lookup failed for provider id=%s", provider.pk)
         return Err(f"Credential vault lookup failed for {provider.name}")
 
     # Fallback: environment variable (only for bootstrap / providers without vault credentials)
