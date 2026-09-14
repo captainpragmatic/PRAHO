@@ -76,11 +76,9 @@ CUIString = str  # Romanian CUI format: "RO12345678"
 VATString = str  # Romanian VAT format: "RO12345678"
 PhoneNumber = str  # Romanian phone: "+40721123456"
 
-# Money Type with Precision
-@dataclass(frozen=True)
-class Money:
-    amount: int  # Stored in cents/bani
-    currency: str = 'RON'
+# Monetary amounts: integer cents/bani on models (see ADR-0025). The standalone
+# `Money` value object was removed as unused (#103); use the model *_cents fields
+# and the CurrencyCode enum instead.
 
 # NOTE: VAT rates are dynamic — use TaxService.get_vat_rate() instead of constants.
 # See ADR-0015 (Configuration Resolution Order).

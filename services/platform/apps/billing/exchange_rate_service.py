@@ -53,10 +53,11 @@ class ExchangeRateService:
         """Select the latest provenanced rate legally valid on or before the date.
 
         ``FXRate.as_of`` stores the LEGAL VALIDITY date, not the publication
-        date: a BNR rate communicated on day D applies from the next banking
-        day (art. 290(2) methodological norms), and whoever records the row is
-        responsible for that translation. Selection is therefore a pure
-        ``as_of <= effective_date`` lookup with no publication-calendar logic.
+        date: a BNR rate communicated on day D applies from the next CALENDAR
+        day and continues until the next publication (art. 290(2) + Norme pct.
+        35; see ADR-0046), and whoever records the row performs that translation.
+        Selection is therefore a pure ``as_of <= effective_date`` lookup with no
+        publication-calendar logic.
         """
         base = base_code.strip().upper()
         quote = quote_code.strip().upper()

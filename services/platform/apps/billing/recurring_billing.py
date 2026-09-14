@@ -422,6 +422,13 @@ class RecurringBillingOrchestrator:
                     try:
                         with transaction.atomic():
                             first_subscription = grouped_items[0][0]
+                            # #103: fail closed if the subscription's currency has no
+                            # resolvable FX rate (per-group except records the error).
+                            from apps.billing.currency_service import (  # noqa: PLC0415  # ADR-0007
+                                assert_currency_issuable,
+                            )
+
+                            assert_currency_issuable(first_subscription.currency.code, timezone.localdate())
                             customer = first_subscription.customer
                             billing_address = customer.get_billing_address()
                             bill_to_country = billing_country_code(getattr(billing_address, "country", ""))

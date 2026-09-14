@@ -6,13 +6,16 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+from django.core.exceptions import ValidationError
 from django.core.management.base import BaseCommand, CommandError, CommandParser
-from django.db import transaction
-from django.utils import timezone
 
-from apps.audit.services import AuditService
 from apps.billing.currency_models import MAX_FX_RATE
-from apps.billing.fx_rate_ingestion import LegacyRatePromotionError, promote_legacy_rate
+from apps.billing.fx_rate_ingestion import (
+    FXRateConflictError,
+    LegacyRatePromotionError,
+    promote_legacy_rate,
+    record_fx_rate,
+)
 from apps.billing.models import Currency, FXRate
 
 
@@ -37,8 +40,9 @@ class Command(BaseCommand):
             dest="as_of",
             help=(
                 "Date the rate is legally valid for VAT (YYYY-MM-DD). A BNR rate "
-                "communicated on day D applies from the next banking day — enter "
-                "the validity date, not the publication date (art. 290(2) norms)."
+                "communicated on day D applies from the next CALENDAR day — enter "
+                "the validity date (publication + 1 day), not the publication date "
+                "(art. 290(2) + Norme pct. 35; see ADR-0046)."
             ),
         )
         parser.add_argument(
@@ -91,47 +95,15 @@ class Command(BaseCommand):
             self.stdout.write(self.style.SUCCESS(message))
             return
 
-        with transaction.atomic():
-            fx_rate, created = FXRate.objects.get_or_create(
-                base_code=base,
-                quote_code=quote,
-                as_of=as_of,
-                defaults={
-                    "rate": rate_value,
-                    "source": source,
-                    "source_reference": reference,
-                    "fetched_at": timezone.now(),
-                },
+        try:
+            _, created = record_fx_rate(base, quote, as_of, rate_value, source, reference, recorded_by)
+        except (FXRateConflictError, ValidationError) as exc:
+            raise CommandError(str(exc)) from exc
+
+        if not created:
+            self.stdout.write(
+                self.style.SUCCESS(f"Exchange rate {base_code}/{quote_code} for {as_of} already recorded")
             )
-            if not created:
-                if (
-                    fx_rate.rate == rate_value
-                    and fx_rate.source == source
-                    and fx_rate.source_reference == reference
-                    and fx_rate.fetched_at is not None
-                ):
-                    self.stdout.write(
-                        self.style.SUCCESS(f"Exchange rate {base_code}/{quote_code} for {as_of} already recorded")
-                    )
-                    return
-                if fx_rate.source == FXRate.Source.LEGACY_UNKNOWN and fx_rate.rate == rate_value:
-                    raise CommandError(
-                        f"{base_code}/{quote_code} for {as_of} lacks approved provenance; rerun with --promote-legacy"
-                    )
-                raise CommandError(
-                    f"{base_code}/{quote_code} for {as_of} already exists with different rate or provenance"
-                )
-            AuditService.log_simple_event(
-                "fx_rate_recorded",
-                content_object=fx_rate,
-                description=f"Recorded {base_code}/{quote_code} exchange rate for {as_of}",
-                new_values={
-                    "rate": str(rate_value),
-                    "source": source,
-                    "source_reference": reference,
-                },
-                metadata={"recorded_by": recorded_by, "as_of": as_of.isoformat()},
-                actor_type="system",
-            )
+            return
 
         self.stdout.write(self.style.SUCCESS(f"Recorded {base_code}/{quote_code}={rate_value} for {as_of}"))

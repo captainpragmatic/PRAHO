@@ -505,25 +505,68 @@ class Invoice(models.Model):
                 issued_at = timezone.make_aware(issued_at)
             self.tax_point_date = timezone.localdate(issued_at)
 
+        # #103: freeze the RON FX snapshot, or CONSUME one already frozen at the
+        # reversible conversion moment (freeze_fx_snapshot) so a later FXRate row can
+        # never flip an issued invoice's RON VAT total.
+        self._freeze_fx()
+        self.locked_at = timezone.now()
+
+    def _freeze_fx(self) -> None:
+        """Set — or CONSUME an already-frozen — RON FX snapshot for self.tax_point_date.
+
+        RON documents carry no snapshot. For a foreign currency, if a COMPLETE snapshot is
+        already frozen (rate + as_of + source all present) it is consumed unchanged — this
+        is how ``issue()`` honours a rate frozen earlier at the reversible conversion moment,
+        so a later ``FXRate`` row can never change an issued invoice's RON VAT. A partial
+        legacy value (a bare ``exchange_to_ron`` from before migration 0039 added the
+        provenance fields) is NOT complete evidence: it is discarded and a fresh provenanced
+        snapshot is resolved at ``tax_point_date`` (fail-closed if none resolves), so the
+        invoice never locks with legally incomplete FX evidence.
+        """
         if self.currency_id == "RON":
             self.exchange_to_ron = None
             self.exchange_rate_as_of = None
             self.exchange_rate_source = ""
             self.exchange_rate_source_reference = ""
-        else:
-            from apps.billing.exchange_rate_service import ExchangeRateError, ExchangeRateService  # noqa: PLC0415
+            return
+        if self.exchange_to_ron is not None and self.exchange_rate_as_of is not None and self.exchange_rate_source:
+            return  # a COMPLETE snapshot frozen at the reversible moment — consume, never re-resolve
+        assert self.tax_point_date is not None  # callers (issue / freeze_fx_snapshot) set it first
+        from apps.billing.exchange_rate_service import ExchangeRateError, ExchangeRateService  # noqa: PLC0415
 
-            try:
-                snapshot = ExchangeRateService.resolve(self.currency_id, "RON", self.tax_point_date)
-            except ExchangeRateError as exc:
-                raise ValidationError(
-                    {"exchange_to_ron": _("Cannot issue foreign-currency invoice: %(error)s") % {"error": str(exc)}}
-                ) from exc
-            self.exchange_to_ron = snapshot.rate
-            self.exchange_rate_as_of = snapshot.as_of
-            self.exchange_rate_source = snapshot.source
-            self.exchange_rate_source_reference = snapshot.source_reference
-        self.locked_at = timezone.now()
+        try:
+            snapshot = ExchangeRateService.resolve(self.currency_id, "RON", self.tax_point_date)
+        except ExchangeRateError as exc:
+            raise ValidationError(
+                {"exchange_to_ron": _("Cannot issue foreign-currency invoice: %(error)s") % {"error": str(exc)}}
+            ) from exc
+        self.exchange_to_ron = snapshot.rate
+        self.exchange_rate_as_of = snapshot.as_of
+        self.exchange_rate_source = snapshot.source
+        self.exchange_rate_source_reference = snapshot.source_reference
+
+    def freeze_fx_snapshot(self, tax_point_date: date | None = None) -> None:
+        """Freeze the tax point + RON FX snapshot at the reversible conversion moment,
+        BEFORE ``issue()`` (which then consumes it).
+
+        ``tax_point_date`` defaults to the RO-local date. The advance-receipt refinement
+        (Cod Fiscal art. 290(2) / Norme pct. 35 — freezing at the verified payment-receipt
+        date) needs a verified-receipt carrier that does not yet exist and is deferred (see
+        ADR-0041); passing reservation-time (``Payment.received_at``) would freeze the
+        wrong date, so the issue-date default is used until that carrier lands.
+
+        Persistence caveat: this sets the FX fields on the instance but does NOT save them,
+        and ``save()`` only auto-includes them once ``issue()`` has set status/locked_at
+        (see ``_ISSUE_TRANSITION_FIELDS``). The sole caller today freezes, issues, and saves
+        in one transaction, so this is safe. A future out-of-transaction freeze (the deferred
+        advance-receipt carrier) MUST persist the FX fields explicitly, or a later
+        ``save(update_fields=...)`` that omits them will silently drop the snapshot.
+        """
+        if tax_point_date is not None:
+            self.tax_point_date = tax_point_date
+        elif self.tax_point_date is None:
+            self.tax_point_date = timezone.localdate()
+        self._freeze_fx()
 
     @transition(field=status, source=["issued", "overdue"], target="paid")
     def mark_as_paid(self) -> None:

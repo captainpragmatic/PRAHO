@@ -803,12 +803,12 @@ class Command(BaseCommand):
         """Create Product objects and ProductPrice objects based on existing ServicePlans with new pricing model"""
         service_plans = ServicePlan.objects.all()
 
-        # Get RON currency (should exist from billing foundation)
-        try:
-            ron_currency = Currency.objects.get(code="RON")
-        except Currency.DoesNotExist:
-            # Create RON currency if it doesn't exist
-            ron_currency = Currency.objects.create(code="RON", name="Romanian Leu", symbol="RON", is_active=True)
+        # RON exists from migration 0046 (seed) / billing foundation; get_or_create is
+        # idempotent and avoids a PK collision with the seeded row.
+        ron_currency, created = Currency.objects.get_or_create(
+            code="RON", defaults={"name": "Romanian Leu", "symbol": "lei"}
+        )
+        if created:
             self.stdout.write("✓ Created RON currency")
 
         # Map ServicePlan types to Product types

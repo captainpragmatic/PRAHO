@@ -13,7 +13,7 @@ providing a historical record of why the system is built the way it is.
 ## How to Create a New ADR
 
 1. Create a new file: `ADR-XXXX-short-descriptive-title.md`
-2. Use the next available number (currently: **ADR-0046**)
+2. Use the next available number (currently: **ADR-0047**)
 3. Follow the standard format: Status, Date, Authors, Context, Decision, Consequences
 4. Set status to **Proposed** initially, then update to **Accepted** after team review
 
@@ -74,6 +74,7 @@ providing a historical record of why the system is built the way it is.
 | [ADR-0043](ADR-0043-audit-integrity-v2-retention-and-standalone-siem.md) | Audit Integrity v2, Retention Enforcement, and the Standalone-SIEM Contract | Accepted | 2026-07-23 |
 | [ADR-0044](ADR-0044-virtualmin-placement-policy.md) | Virtualmin Placement Policy | Accepted | 2026-09-08 |
 | [ADR-0045](ADR-0045-committed-side-effect-boundaries.md) | Committed Side-Effect Boundaries for Provider Mutations | Accepted | 2026-09-08 |
+| [ADR-0046](ADR-0046-automated-fx-ingestion.md) | Automated FX Ingestion, Freshness Surface, and Currency Admission | Accepted | 2026-09-14 |
 
 ### 🟡 Partially Superseded
 

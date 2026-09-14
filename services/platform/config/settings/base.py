@@ -456,8 +456,14 @@ ROMANIAN_BUSINESS_CONTEXT = {
 }
 
 # Currency settings
-DEFAULT_CURRENCY = "RON"
-SUPPORTED_CURRENCIES = ["RON", "EUR", "USD"]
+# BILLING_DEFAULT_CURRENCY is a VALIDATED forward-compatibility setting: the billing_currency
+# system check (#103) rejects an unsupported/unresolvable value at startup, and it is exposed
+# as apps.billing.config.DEFAULT_CURRENCY_CODE. It does NOT yet change the per-document default
+# — every creation path still defaults to literal RON (a non-RON default is deliberately not
+# wired: that touches many money paths and is future work). Setting this to EUR/USD validates
+# but does not (yet) make new documents non-RON. The former DEFAULT_CURRENCY / SUPPORTED_CURRENCIES
+# orphans were removed; supported codes live in the CurrencyCode enum.
+BILLING_DEFAULT_CURRENCY = os.environ.get("BILLING_DEFAULT_CURRENCY", "RON")
 
 # ===============================================================================
 # EXTERNAL INTEGRATIONS

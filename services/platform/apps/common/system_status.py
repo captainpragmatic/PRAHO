@@ -22,6 +22,32 @@ logger = logging.getLogger(__name__)
 CACHE_KEY = "system_status_results"
 CACHE_TIMEOUT = 86400 * 2  # 48 hours
 
+# #103 (H3): the most recent BNR fetch outcome, kept independently of rate age so a
+# failed ingestion stays visible even while last-good rates are still fresh. A successful
+# fetch clears it; a failure persists for a week (until the next good fetch or manual fix).
+_FX_FETCH_OUTCOME_KEY = "fx:last_fetch_outcome"
+_FX_FETCH_OUTCOME_TTL = 86400 * 7
+
+
+def record_fx_fetch_outcome(*, success: bool, detail: str) -> None:
+    """Persist the last BNR fetch outcome for the freshness surface (#103, H3).
+
+    Rate *age* alone cannot tell a failed daily fetch from a quiet weekend, so a failed
+    ingestion whose last-good rates are still fresh would otherwise read GREEN (and, if the
+    alert email also bounced, be entirely invisible). Recording the outcome here lets
+    ``_check_fx_freshness`` escalate to AMBER — which the daily task then alerts on.
+    """
+    from django.utils import timezone  # noqa: PLC0415
+
+    if success:
+        cache.delete(_FX_FETCH_OUTCOME_KEY)
+        return
+    cache.set(
+        _FX_FETCH_OUTCOME_KEY,
+        {"detail": detail, "at": timezone.now().isoformat()},
+        timeout=_FX_FETCH_OUTCOME_TTL,
+    )
+
 
 class StatusLevel(StrEnum):
     GREEN = "green"  # Configured and connected
@@ -363,6 +389,106 @@ def _check_backup() -> SubsystemStatus:
         )
 
 
+def _check_fx_freshness() -> SubsystemStatus:
+    """FX-rate freshness for foreign-currency issuance (#103), guarded so an unexpected
+    error cannot silently disable the daily FX pager.
+
+    ``check_all_subsystems`` does not wrap its members, so an uncaught raise here (e.g. a
+    transient ``OperationalError`` from the settings/FXRate queries below) would abort the
+    whole daily status task before it caches results or runs ``_alert_on_fx_freshness`` —
+    the very pager that surfaces a silently-failed fetch. On any such error we return RED,
+    never GREY: ``_alert_on_fx_freshness`` treats GREY as recovery and clears the dedup key,
+    so a GREY-on-error would convert "cannot verify FX" into "recovered".
+    """
+    try:
+        return _compute_fx_freshness()
+    except Exception as exc:  # a status check must degrade to RED, never take the task down
+        logger.warning("🔴 [SystemStatus] FX freshness check errored: %s", exc)
+        return SubsystemStatus(
+            name="FX rates",
+            level=StatusLevel.RED,
+            message="Freshness check errored",
+            detail=f"Could not verify FX freshness (treated as blocking): {exc}",
+        )
+
+
+def _compute_fx_freshness() -> SubsystemStatus:
+    """Resolver-accurate, computed LIVE (never trusts a cached level for its
+    date-sensitivity): for each configured foreign pair it attempts today's
+    currency->RON resolution with the same semantics ``Invoice.issue()`` uses.
+    RED  = a pair cannot resolve today (missing / unprovenanced) → foreign issuance
+           for it is blocked;
+    AMBER= resolves but the rate is older than the staleness window, or the last daily
+           fetch failed while last-good rates still resolve;
+    GREEN= every configured pair resolves and is fresh;
+    GREY = no foreign pairs configured.
+    """
+    from datetime import timedelta  # noqa: PLC0415
+
+    from django.utils import timezone  # noqa: PLC0415
+
+    from apps.billing.exchange_rate_service import ExchangeRateError, ExchangeRateService  # noqa: PLC0415
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    pairs = [str(c).strip().upper() for c in SettingsService.get_list_setting("billing.fx.pairs", ["EUR", "USD"])]
+    foreign = [c for c in pairs if c and c != "RON"]
+    if not foreign:
+        return SubsystemStatus(
+            name="FX rates",
+            level=StatusLevel.GREY,
+            message="No foreign currencies",
+            detail="billing.fx.pairs lists no non-RON currency",
+        )
+
+    today = timezone.localdate()
+    stale_after = SettingsService.get_integer_setting("billing.fx.stale_after_days", 4)
+    missing: list[str] = []
+    stale: list[str] = []
+    for code in foreign:
+        try:
+            snapshot = ExchangeRateService.resolve(code, "RON", today)
+        except ExchangeRateError:
+            missing.append(code)
+            continue
+        if snapshot.as_of < today - timedelta(days=stale_after):
+            stale.append(f"{code} (as of {snapshot.as_of})")
+
+    # H3: a failed daily fetch must stay visible even when last-good rates still resolve.
+    fetch_failure = cache.get(_FX_FETCH_OUTCOME_KEY)
+
+    if missing:
+        return SubsystemStatus(
+            name="FX rates",
+            level=StatusLevel.RED,
+            message=f"No usable rate today: {', '.join(missing)}",
+            detail="Foreign-currency issuance is blocked for these until a provenanced rate is provisioned.",
+        )
+    if stale:
+        return SubsystemStatus(
+            name="FX rates",
+            level=StatusLevel.AMBER,
+            message=f"Stale (> {stale_after}d): {', '.join(stale)}",
+            detail="Rates still resolve, but a fresher publication is overdue.",
+        )
+    if fetch_failure:
+        return SubsystemStatus(
+            name="FX rates",
+            level=StatusLevel.AMBER,
+            message="Last BNR fetch failed",
+            detail=(
+                f"All pairs still resolve on last-good rates, but the most recent ingestion "
+                f"failed ({fetch_failure.get('detail')} at {fetch_failure.get('at')}). "
+                f"Fix ingestion before the rates go stale."
+            ),
+        )
+    return SubsystemStatus(
+        name="FX rates",
+        level=StatusLevel.GREEN,
+        message="Fresh",
+        detail=f"Resolvable today: {', '.join(foreign)}",
+    )
+
+
 def check_all_subsystems() -> list[SubsystemStatus]:
     """
     Check all subsystems and return their status.
@@ -380,6 +506,7 @@ def check_all_subsystems() -> list[SubsystemStatus]:
         _check_credential_vault(),
         _check_sentry(),
         _check_backup(),
+        _check_fx_freshness(),
     ]
 
     # Log warnings for any non-green statuses

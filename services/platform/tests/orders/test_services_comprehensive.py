@@ -146,7 +146,7 @@ class TestOrderNumberingService:
             customer=customer,
             order_number=number1,
             status="draft",
-            currency=Currency.objects.create(code="RON", name="Romanian Leu", symbol="lei"),
+            currency=Currency.objects.get_or_create(code="RON", defaults={"name": "Romanian Leu", "symbol": "lei"})[0],
             customer_email=customer.primary_email,
             customer_name=customer.name,
             billing_address={},

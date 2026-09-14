@@ -9,7 +9,7 @@ from typing import Any
 from django.core.management.base import BaseCommand, CommandError, CommandParser
 
 from apps.audit.tasks import setup_audit_scheduled_tasks
-from apps.billing.tasks import setup_billing_scheduled_tasks
+from apps.billing.tasks import setup_billing_scheduled_tasks, setup_fx_scheduled_tasks
 from apps.common.tasks import setup_system_status_scheduled_tasks
 from apps.domains.tasks import setup_domain_scheduled_tasks
 from apps.orders.tasks import setup_order_scheduled_tasks
@@ -214,6 +214,11 @@ class Command(BaseCommand):
             # Set up Order Processing tasks
             if run_all or flags["orders_only"]:
                 self._setup_task_category("order processing", "📦", setup_order_scheduled_tasks, all_results)
+
+            # FX registration runs BEFORE billing so the billing auto-renew guard's
+            # RuntimeError cannot abort the command before the FX schedule is installed (#103).
+            if run_all or flags["billing_only"]:
+                self._setup_task_category("fx rates", "💱", setup_fx_scheduled_tasks, all_results)
 
             if run_all or flags["billing_only"]:
                 self._setup_task_category("billing", "💳", setup_billing_scheduled_tasks, all_results)

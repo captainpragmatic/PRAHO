@@ -32,6 +32,7 @@ from django.http import (
     HttpResponseForbidden,
     HttpResponseRedirect,
     JsonResponse,
+    QueryDict,
 )
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -689,8 +690,15 @@ def invoice_detail(request: HttpRequest, pk: int) -> HttpResponse:
     return render(request, "billing/invoice_detail.html", context)
 
 
-def _create_proforma_with_sequence(customer: Customer, valid_until: datetime) -> ProformaInvoice:
-    """Create a new proforma with proper sequence number."""
+def _create_proforma_with_sequence(
+    customer: Customer, valid_until: datetime, currency: Currency | None = None
+) -> ProformaInvoice:
+    """Create a new proforma with proper sequence number.
+
+    ``currency`` defaults to RON when not supplied. Callers that let staff choose a
+    currency (#103) validate + fail-closed-guard it first (see ``currency_service``)
+    and pass the resolved ``Currency`` here.
+    """
     from apps.billing.fiscal_identity import billing_country_code, get_customer_fiscal_identity  # noqa: PLC0415
 
     with transaction.atomic():
@@ -698,14 +706,15 @@ def _create_proforma_with_sequence(customer: Customer, valid_until: datetime) ->
         proforma_number = sequence.get_next_number("PRO")
 
         # Create proforma
-        ron_currency = Currency.objects.get(code="RON")
+        if currency is None:
+            currency = Currency.objects.get(code="RON")
         fiscal_identity = get_customer_fiscal_identity(customer)
         billing_address = customer.get_billing_address()
 
         return ProformaInvoice.objects.create(
             customer=customer,
             number=proforma_number,
-            currency=ron_currency,
+            currency=currency,
             valid_until=valid_until,
             # Copy customer billing info
             bill_to_name=customer.company_name or customer.name,
@@ -719,6 +728,58 @@ def _create_proforma_with_sequence(customer: Customer, valid_until: datetime) ->
             bill_to_postal=getattr(billing_address, "postal_code", "") or "",
             bill_to_country=billing_country_code(getattr(billing_address, "country", "")),
         )
+
+
+def _posted_proforma_lines(post: QueryDict) -> list[dict[str, Any]]:
+    """Reconstruct submitted line items from POST for a rejected-create re-render.
+
+    Django templates cannot index dynamic ``line_{n}_*`` keys, so the view rebuilds the
+    rows into objects shaped like the edit-mode ``lines`` (same attribute names, ``tax_rate``
+    as a Decimal fraction) — letting one template loop repopulate both edit and re-render.
+    """
+    from decimal import Decimal, InvalidOperation  # noqa: PLC0415
+
+    lines: list[dict[str, Any]] = []
+    index = 0
+    while f"line_{index}_description" in post:
+        try:
+            tax_rate = Decimal((post.get(f"line_{index}_vat_rate") or "21").strip()) / 100
+        except (InvalidOperation, ArithmeticError):
+            tax_rate = Decimal("0.21")
+        lines.append(
+            {
+                "description": post.get(f"line_{index}_description", ""),
+                "domain_name": post.get(f"line_{index}_domain_name", ""),
+                "quantity": post.get(f"line_{index}_quantity", ""),
+                "unit_price": post.get(f"line_{index}_unit_price", ""),
+                "tax_rate": tax_rate,
+                "line_total": "0.00",  # recomputed client-side on load
+            }
+        )
+        index += 1
+    return lines
+
+
+def _render_proforma_create_form(request: HttpRequest, *, error: str | None = None) -> HttpResponse:
+    """Render the proforma create form.
+
+    On a validation error (e.g. an unsupported or unresolvable currency, #103) the POST data
+    is echoed back — ``posted`` for scalar fields and rebuilt ``lines`` for the line items —
+    so the operator does not lose any of their input.
+    """
+    if not isinstance(request.user, User):
+        return redirect("users:login")
+    if error:
+        messages.error(request, _("❌ {error}").format(error=error))
+    posted = request.POST if request.method == "POST" else None
+    context = {
+        "customers": _get_customers_for_edit_form(request.user),
+        "vat_rate": TaxService.get_vat_rate("RO", as_decimal=False),
+        "document_type": "proforma",
+        "posted": posted,
+        "lines": _posted_proforma_lines(posted) if posted else None,
+    }
+    return render(request, "billing/proforma_form.html", context)
 
 
 def _handle_proforma_create_post(request: HttpRequest) -> HttpResponse:
@@ -736,12 +797,31 @@ def _handle_proforma_create_post(request: HttpRequest) -> HttpResponse:
     # Process valid_until date
     valid_until, validation_errors = _process_valid_until_date(request.POST)
 
+    # #103: honor the selected currency, and FAIL CLOSED before any write when it is
+    # unsupported or has no resolvable FX rate (a non-RON proforma with no rate would
+    # take money it can never issue an invoice for). Validate before creating anything.
+    from apps.billing.currency_service import (  # noqa: PLC0415
+        CurrencyNotIssuableError,
+        CurrencyValidationError,
+        assert_currency_issuable,
+        normalize_currency_code,
+    )
+
+    try:
+        # Absent/blank currency defaults to RON (the form's default + historical behavior);
+        # a PROVIDED value is validated, and any non-RON currency is fail-closed guarded.
+        currency_code = normalize_currency_code(request.POST.get("currency") or "RON")
+        assert_currency_issuable(currency_code, timezone.localdate())
+    except (CurrencyValidationError, CurrencyNotIssuableError) as exc:
+        return _render_proforma_create_form(request, error=str(exc))
+    currency = Currency.objects.get(code=currency_code)
+
     try:
         # Create proforma - customer is guaranteed to be not None here due to validation above
         if customer is None:
             messages.error(request, _("❌ Customer is required to create proforma."))
             return redirect("billing:proforma_list")
-        proforma = _create_proforma_with_sequence(customer, valid_until)
+        proforma = _create_proforma_with_sequence(customer, valid_until, currency)
 
         # Update billing info from POST data if provided
         bill_to_name = request.POST.get("bill_to_name")
@@ -779,17 +859,7 @@ def proforma_create(request: HttpRequest) -> HttpResponse:
         return _handle_proforma_create_post(request)
 
     # GET request - render form
-    # Type guard for authenticated user
-    if not isinstance(request.user, User):
-        return redirect("users:login")
-
-    customers = _get_customers_for_edit_form(request.user)
-    context = {
-        "customers": customers,
-        "vat_rate": TaxService.get_vat_rate("RO", as_decimal=False),
-        "document_type": "proforma",
-    }
-    return render(request, "billing/proforma_form.html", context)
+    return _render_proforma_create_form(request)
 
 
 @login_required

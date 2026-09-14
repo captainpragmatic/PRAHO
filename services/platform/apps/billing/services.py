@@ -370,6 +370,9 @@ class ProformaConversionService:
                     )
 
                 # Assemble all lines before issuance freezes the ledger.
+                # #103: freeze the FX snapshot at this reversible conversion moment so
+                # issue() consumes it — a later FXRate row cannot flip the invoice's RON VAT.
+                invoice.freeze_fx_snapshot()
                 invoice.issue()
                 invoice.save()
 
