@@ -11,6 +11,9 @@
 {% endblock %}
 
 {% block content %}
+{% comment %} #103: one currency used across the form — the stored currency on edit
+(immutable), the posted value on a rejected create re-render, else RON. {% endcomment %}
+{% if proforma %}{% firstof proforma.currency.code "RON" as selected_currency %}{% else %}{% firstof posted.currency "RON" as selected_currency %}{% endif %}
 <div class="px-4 sm:px-6 lg:px-8 max-w-6xl mx-auto">
   <!-- Header -->
   <div class="sm:flex sm:items-center mb-6">
@@ -79,7 +82,7 @@
                 id="proforma-customer-select">
                 <option value="">{% trans 'Choose a customer...' %}</option>
                 {% for customer in customers %}
-                <option value="{{ customer.id }}" {% if proforma and customer.id == proforma.customer.id %}selected{% endif %}
+                <option value="{{ customer.id }}" {% if proforma and customer.id == proforma.customer.id %}selected{% elif posted and posted.customer == customer.id|stringformat:"s" %}selected{% endif %}
                   data-company="{{ customer.company_name|default:customer.name }}"
                   data-vat="{{ customer.tax_profile.vat_number|default:'N/A' }}"
                   data-email="{{ customer.billing_profile.email|default:customer.primary_email|default:'N/A' }}"
@@ -137,7 +140,7 @@
                 {% trans 'Valid Until' %} <span class="text-red-500">*</span>
               </label>
               <input type="date" name="valid_until" required
-                {% if proforma %}value="{{ proforma.valid_until|date:'Y-m-d' }}"{% endif %}
+                {% if proforma %}value="{{ proforma.valid_until|date:'Y-m-d' }}"{% elif posted.valid_until %}value="{{ posted.valid_until }}"{% endif %}
                 class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:ring-2 focus:ring-blue-500">
             </div>
           </div>
@@ -147,9 +150,8 @@
               <label class="block text-sm font-medium text-slate-300 mb-2">
                 {% trans 'Currency' %} <span class="text-red-500">*</span>
               </label>
-              {% comment %} #103: preselect the stored currency on edit (immutable — disabled),
-              or the posted value on a create re-render, defaulting to RON on a fresh create. {% endcomment %}
-              {% if proforma %}{% firstof proforma.currency.code "RON" as selected_currency %}{% else %}{% firstof posted.currency "RON" as selected_currency %}{% endif %}
+              {% comment %} #103: currency is immutable on edit (disabled); selected_currency
+              is computed once at the top of the form. {% endcomment %}
               <select name="currency" required {% if proforma %}disabled{% endif %}
                 class="w-full rounded-md border border-slate-600 bg-slate-700 px-3 py-2 text-white focus:ring-2 focus:ring-blue-500 disabled:opacity-60">
                 <option value="RON" {% if selected_currency == "RON" %}selected{% endif %}>RON - Romanian Leu</option>
@@ -186,8 +188,8 @@
 
             <!-- Dynamic Line Items -->
             <div id="proforma-lines" class="space-y-3">
-              {% if proforma and lines %}
-                <!-- Existing lines for editing -->
+              {% if lines %}
+                <!-- Existing lines (edit) or re-hydrated submitted lines (rejected create) -->
                 {% for line in lines %}
                 <div class="proforma-line grid grid-cols-2 md:grid-cols-12 gap-3 items-center border border-slate-700 md:border-0 rounded-lg md:rounded-none p-3 md:p-0" data-line="{{ forloop.counter0 }}">
                   <div class="col-span-2 md:col-span-4">
@@ -213,7 +215,7 @@
                   </div>
                   <div class="col-span-1 md:col-span-1">
                     <label class="md:hidden text-xs text-slate-400 mb-1 block">{% trans 'Total' %}</label>
-                    <div class="line-total px-3 py-2 bg-slate-600 rounded-md text-white font-medium text-right">{{ line.line_total }} <span class="currency-label">RON</span></div>
+                    <div class="line-total px-3 py-2 bg-slate-600 rounded-md text-white font-medium text-right">{{ line.line_total }} <span class="currency-label">{{ selected_currency }}</span></div>
                   </div>
                   <div class="col-span-2 md:col-span-1 flex md:block justify-end">
                     <button type="button" class="remove-line bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-md font-medium transition-colors">{% icon "x" %}</button>
@@ -246,7 +248,7 @@
                   </div>
                   <div class="col-span-1 md:col-span-1">
                     <label class="md:hidden text-xs text-slate-400 mb-1 block">{% trans 'Total' %}</label>
-                    <div class="line-total px-3 py-2 bg-slate-600 rounded-md text-white font-medium text-right">0.00 <span class="currency-label">RON</span></div>
+                    <div class="line-total px-3 py-2 bg-slate-600 rounded-md text-white font-medium text-right">0.00 <span class="currency-label">{{ selected_currency }}</span></div>
                   </div>
                   <div class="col-span-2 md:col-span-1 flex md:block justify-end">
                     <button type="button" class="remove-line bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-md font-medium transition-colors opacity-50 cursor-not-allowed" disabled>{% icon "x" %}</button>
@@ -290,18 +292,18 @@
           <div class="space-y-3">
             <div class="flex justify-between text-slate-300">
               <span>{% trans 'Subtotal:' %}</span>
-              <span id="proforma-summary-subtotal" class="font-medium">0.00 RON</span>
+              <span id="proforma-summary-subtotal" class="font-medium">0.00 {{ selected_currency }}</span>
             </div>
 
             <div class="flex justify-between text-slate-300">
               <span id="proforma-summary-vat-label">{% trans 'VAT:' %}</span>
-              <span id="proforma-summary-vat" class="font-medium">0.00 RON</span>
+              <span id="proforma-summary-vat" class="font-medium">0.00 {{ selected_currency }}</span>
             </div>
 
             <div class="border-t border-slate-600 pt-3">
               <div class="flex justify-between text-lg font-bold text-white">
                 <span>{% trans 'Total:' %}</span>
-                <span id="proforma-summary-total">0.00 RON</span>
+                <span id="proforma-summary-total">0.00 {{ selected_currency }}</span>
               </div>
             </div>
 
@@ -363,17 +365,23 @@
 </div>
 
 <script nonce="{{ csp_nonce }}">
-  // Initialize lineCounter based on existing lines
-  {% if proforma and lines %}
+  // Initialize lineCounter based on existing / re-hydrated lines
+  {% if lines %}
   let lineCounter = {{ lines|length }};
   {% else %}
   let lineCounter = 1;
   {% endif %}
 
   // Enhanced calculation function
+  function currentCurrency() {
+    const sel = document.querySelector('select[name="currency"]');
+    return (sel && sel.value) || 'RON';
+  }
+
   function calculateTotals() {
     let subtotal = 0;
     let totalVat = 0;
+    const currency = currentCurrency();
 
     document.querySelectorAll('.proforma-line').forEach(function (line) {
       const quantity = parseFloat(line.querySelector('.line-quantity').value) || 0;
@@ -384,8 +392,8 @@
       const lineVat = lineSubtotal * (vatRate / 100);
       const lineTotal = lineSubtotal + lineVat;
 
-      // Update line total display
-      line.querySelector('.line-total').textContent = lineTotal.toFixed(2) + ' RON';
+      // Update line total display in the selected currency
+      line.querySelector('.line-total').textContent = lineTotal.toFixed(2) + ' ' + currency;
 
       subtotal += lineSubtotal;
       totalVat += lineVat;
@@ -393,10 +401,10 @@
 
     const grandTotal = subtotal + totalVat;
 
-    // Update summary
-    document.getElementById('proforma-summary-subtotal').textContent = subtotal.toFixed(2) + ' RON';
-    document.getElementById('proforma-summary-vat').textContent = totalVat.toFixed(2) + ' RON';
-    document.getElementById('proforma-summary-total').textContent = grandTotal.toFixed(2) + ' RON';
+    // Update summary in the selected currency
+    document.getElementById('proforma-summary-subtotal').textContent = subtotal.toFixed(2) + ' ' + currency;
+    document.getElementById('proforma-summary-vat').textContent = totalVat.toFixed(2) + ' ' + currency;
+    document.getElementById('proforma-summary-total').textContent = grandTotal.toFixed(2) + ' ' + currency;
 
     // Dynamic VAT label: show rate when uniform, "mixed" when lines differ
     const vatRates = new Set();
@@ -543,6 +551,8 @@
         document.querySelectorAll('.currency-label').forEach(el => {
           el.textContent = this.value;
         });
+        // Re-render line totals and the summary in the newly selected currency.
+        calculateTotals();
       });
     }
 

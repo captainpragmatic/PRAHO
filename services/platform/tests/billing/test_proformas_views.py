@@ -217,6 +217,49 @@ class ProformaViewsTestCase(TestCase):
         self.assertEqual(response.status_code, 200)  # re-rendered form, not a 302 redirect
         self.assertFalse(ProformaInvoice.objects.filter(customer=self.customer).exists())
 
+    def test_proforma_create_rejection_preserves_all_input_and_currency(self):
+        """#103 UX: a fail-closed re-render must preserve ALL submitted input (customer,
+        validity date, every line item) and render totals in the selected currency — not
+        only the currency dropdown, and never fall back to a hardcoded RON summary."""
+        Currency.objects.get_or_create(code='EUR', defaults={'symbol': '€', 'decimals': 2})
+        # Ensure the customer is in the staff form's dropdown so the "selected" check is robust.
+        CustomerMembership.objects.get_or_create(
+            user=self.staff_user, customer=self.customer, defaults={'role': 'admin'}
+        )
+        # No FXRate for EUR → fail-closed re-render.
+        post_data = {
+            'customer': str(self.customer.pk),
+            'valid_until': '2026-12-31',
+            'currency': 'EUR',
+            'line_0_description': 'Alpha hosting',
+            'line_0_quantity': '2',
+            'line_0_unit_price': '150.00',
+            'line_0_vat_rate': '21',
+            'line_1_description': 'Beta domain',
+            'line_1_quantity': '1',
+            'line_1_unit_price': '20.00',
+            'line_1_vat_rate': '11',
+        }
+        request = self.factory.post('/billing/proformas/create/', post_data)
+        request.user = self.staff_user
+        request = self.add_middleware_to_request(request)
+
+        response = _handle_proforma_create_post(request)
+        html = response.content.decode()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(ProformaInvoice.objects.filter(customer=self.customer).exists())
+        # Rehydration: currency, customer, validity date, and BOTH line items are preserved.
+        self.assertIn('value="EUR" selected', html)
+        self.assertIn(f'value="{self.customer.pk}" selected', html)
+        self.assertIn('value="2026-12-31"', html)
+        self.assertIn('value="Alpha hosting"', html)
+        self.assertIn('value="Beta domain"', html)
+        self.assertIn('value="150.00"', html)
+        # Currency display: the summary renders in the selected currency, not hardcoded RON.
+        self.assertIn('0.00 EUR', html)
+        self.assertNotIn('0.00 RON', html)
+
     def test_proforma_create_normalizes_lowercase_currency(self):
         """#103: a lowercase code is normalized to the case-sensitive PK (no DoesNotExist)."""
         eur, _ = Currency.objects.get_or_create(code='EUR', defaults={'symbol': '€', 'decimals': 2})

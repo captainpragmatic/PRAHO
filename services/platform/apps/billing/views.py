@@ -32,6 +32,7 @@ from django.http import (
     HttpResponseForbidden,
     HttpResponseRedirect,
     JsonResponse,
+    QueryDict,
 )
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -729,21 +730,54 @@ def _create_proforma_with_sequence(
         )
 
 
+def _posted_proforma_lines(post: QueryDict) -> list[dict[str, Any]]:
+    """Reconstruct submitted line items from POST for a rejected-create re-render.
+
+    Django templates cannot index dynamic ``line_{n}_*`` keys, so the view rebuilds the
+    rows into objects shaped like the edit-mode ``lines`` (same attribute names, ``tax_rate``
+    as a Decimal fraction) — letting one template loop repopulate both edit and re-render.
+    """
+    from decimal import Decimal, InvalidOperation  # noqa: PLC0415
+
+    lines: list[dict[str, Any]] = []
+    index = 0
+    while f"line_{index}_description" in post:
+        try:
+            tax_rate = Decimal((post.get(f"line_{index}_vat_rate") or "21").strip()) / 100
+        except (InvalidOperation, ArithmeticError):
+            tax_rate = Decimal("0.21")
+        lines.append(
+            {
+                "description": post.get(f"line_{index}_description", ""),
+                "domain_name": post.get(f"line_{index}_domain_name", ""),
+                "quantity": post.get(f"line_{index}_quantity", ""),
+                "unit_price": post.get(f"line_{index}_unit_price", ""),
+                "tax_rate": tax_rate,
+                "line_total": "0.00",  # recomputed client-side on load
+            }
+        )
+        index += 1
+    return lines
+
+
 def _render_proforma_create_form(request: HttpRequest, *, error: str | None = None) -> HttpResponse:
     """Render the proforma create form.
 
-    On a validation error (e.g. an unsupported or unresolvable currency, #103) the
-    POST data is echoed back via ``posted`` so the operator does not lose their input.
+    On a validation error (e.g. an unsupported or unresolvable currency, #103) the POST data
+    is echoed back — ``posted`` for scalar fields and rebuilt ``lines`` for the line items —
+    so the operator does not lose any of their input.
     """
     if not isinstance(request.user, User):
         return redirect("users:login")
     if error:
         messages.error(request, _("❌ {error}").format(error=error))
+    posted = request.POST if request.method == "POST" else None
     context = {
         "customers": _get_customers_for_edit_form(request.user),
         "vat_rate": TaxService.get_vat_rate("RO", as_decimal=False),
         "document_type": "proforma",
-        "posted": request.POST if request.method == "POST" else None,
+        "posted": posted,
+        "lines": _posted_proforma_lines(posted) if posted else None,
     }
     return render(request, "billing/proforma_form.html", context)
 
