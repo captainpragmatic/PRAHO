@@ -46,28 +46,58 @@ assumes. Romania ships as the reference implementation because the project origi
 it is a reference, not a default that fits every deployment. A pack provides:
 
 - supplier country and VAT identity;
-- per-product **service classification** — in particular whether a product is an
-  electronically supplied service, because that alone determines which B2C place-of-supply
-  rule applies. Classification is a per-product attribute, never inferred from the product
-  type enum;
-- the active **place-of-supply mode** (below);
+- per-product **place-of-supply classification** — not an ESS/non-ESS boolean, but which
+  rule governs the product: electronically supplied, customer-placed by category, or the
+  general rule. Whether a product is electronically supplied is the distinction the election
+  below turns on, but it is not the only one that matters, and other categories carry their
+  own rules. Classification is a per-product attribute, never inferred from the product type
+  enum;
+- the active **cross-border B2C election** (below) — the pack's only deployment-wide
+  place-of-supply choice;
 - the **evidence policy** for business-status determination and for customer-location
   determination;
 - registrations and special schemes, recorded as **reporting facts only** — never as
   rate-selection switches. A registration describes where a liability is *declared*, not
   where it *arises*.
 
-### 2. Four supported place-of-supply modes
+### 2. One deployment election; four per-supply outcomes
 
-The engine supports these modes, selectable per deployment with an effective date, and
-resolves them explicitly rather than by implicit country branching:
+These are two different things and must not be modelled as one. **Exactly one** choice is
+deployment-wide and effective-dated — the election governing **intra-EU** cross-border B2C
+supplies of electronically supplied services. It reaches nothing else: not B2B, not non-ESS
+products, and not customers outside the EU.
 
-| Mode | Effect |
+| Election | Effect on intra-EU cross-border B2C ESS |
 |---|---|
-| `SUPPLIER_COUNTRY` | Cross-border B2C supplies taxed where the supplier is established |
+| `SUPPLIER_COUNTRY` | Taxed where the supplier is established |
 | `DESTINATION` | Taxed in the customer's member state |
-| `REVERSE_CHARGE` | Cross-border B2B, conditional on recorded customer evidence |
-| `OUTSIDE_SCOPE` | Non-EU customers — an explicit category, not a zero rate |
+
+Every other outcome is **derived per supply** from that supply's own evidence — customer
+status, customer location, and product classification — because a single deployment serves
+all of them simultaneously:
+
+Each outcome is a function of three inputs — customer status, customer location, and the
+product's place-of-supply classification. None of them alone is sufficient:
+
+| Outcome | Derived when |
+|---|---|
+| Domestic | Customer is in the supplier's country |
+| Reverse charge | EU B2B, the product's classification places the supply with the customer, and the recorded customer evidence satisfies the evidence policy. A category whose rule places the supply elsewhere is taxed there instead, regardless of customer status |
+| Intra-EU B2C, **election applies** | EU consumer in another member state, product classified electronically supplied; the election decides where it is taxed |
+| Intra-EU B2C, **rule-governed** | EU consumer in another member state, product not electronically supplied; the product's own classification decides — the general rule places it at the supplier, a customer-placed category places it with the consumer. The election does not reach it |
+| Outside scope | Customer outside the EU **and** the product's classification places the supply there. A product that falls to the general rule is taxable at the supplier even when the consumer is abroad |
+
+The third input is the one most easily dropped. "EU consumer" does not by itself invoke the
+election, and "customer outside the EU" does not by itself put a supply outside scope; in
+both cases the product's classification decides. An implementation that reads only status and
+location will select the wrong jurisdiction for every product outside the electronically-
+supplied category.
+
+Modelling all four as one selectable mode would make a mixed customer population
+unrepresentable: a deployment that elected `DESTINATION` for its EU consumers must still
+apply reverse charge to an eligible EU business and outside-scope treatment to a non-EU
+customer, without any configuration change between orders. The election is policy; the rest
+is evidence.
 
 `OUTSIDE_SCOPE` is deliberately distinct from a zero rate. A supply outside the scope of a
 tax is not a taxable supply at a rate of zero, and the two are not interchangeable at the
@@ -89,15 +119,17 @@ the consequence of getting it wrong is not a bug but a disclosure.
 Two properties follow, and both are the point:
 
 - Changing fiscal policy is a configuration change with an audit trail, never a code change
-  and never a deploy. Advice, when it arrives, selects and dates a mode.
+  and never a deploy. Advice, when it arrives, selects and dates the election.
 - There is no syntactically valid place in the codebase for an operator's fiscal position to
   land, so the leak has no pressure behind it. The boundary is structural, not a matter of
   editorial discipline.
 
 Deployment-supplied, effective-dated facts include (non-exhaustive): supplier establishment(s);
-place-of-supply mode and its commencement date; election state and its binding window; threshold
-aggregates where a threshold governs a mode; registrations and scheme memberships; per-product
-service classification.
+the cross-border B2C election, its commencement date and its binding window; threshold
+aggregates where a threshold governs that election; registrations and scheme memberships;
+per-product service classification. There is exactly one deployment-wide place-of-supply
+setting — a schema carrying both an election and a separate four-valued "mode" would
+reintroduce the mixed-customer defect this ADR exists to prevent.
 
 ### 4. Typed decision result and snapshot provenance v2
 
