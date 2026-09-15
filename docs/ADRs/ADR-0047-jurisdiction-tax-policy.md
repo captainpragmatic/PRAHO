@@ -82,7 +82,7 @@ product's place-of-supply classification. None of them alone is sufficient:
 | Outcome | Derived when |
 |---|---|
 | Domestic | Customer is in the supplier's country |
-| Reverse charge | EU B2B, and the recorded customer evidence satisfies the evidence policy |
+| Reverse charge | EU B2B, the product's classification places the supply with the customer, and the recorded customer evidence satisfies the evidence policy. A category whose rule places the supply elsewhere is taxed there instead, regardless of customer status |
 | Intra-EU B2C, **election applies** | EU consumer in another member state, product classified electronically supplied; the election decides where it is taxed |
 | Intra-EU B2C, **rule-governed** | EU consumer in another member state, product not electronically supplied; the product's own classification decides — the general rule places it at the supplier, a customer-placed category places it with the consumer. The election does not reach it |
 | Outside scope | Customer outside the EU **and** the product's classification places the supply there. A product that falls to the general rule is taxable at the supplier even when the consumer is abroad |
