@@ -108,31 +108,27 @@ These log lines can be monitored to detect prolonged Platform outages affecting 
 
 ---
 
-## Addendum: Signed-Cookie Session Bug (March 2026)
+## Addendum: Session backend is load-bearing for session security
 
-**Discovery date:** 2026-03-14
-**Severity:** High — ADR-0017's safety net was silently disabled in production
+The safeguards described above are enforced by `SessionSecurityMiddleware`, which is only
+effective when the configured session backend produces a real server-side `session_key`.
+Deployments must pin a backend that does.
 
-### What happened
+### The trap
 
-Portal's `prod.py` used `SESSION_ENGINE = "django.contrib.sessions.backends.signed_cookies"`.
-Django's signed-cookie backend always returns `session_key = None` because there is no
-server-side session record. This caused `SessionSecurityMiddleware.process_request()` to
-exit early at line 100:
+`django.contrib.sessions.backends.signed_cookies` always returns `session_key = None`,
+because there is no server-side session record. Middleware that guards on that value exits
+before running any check:
 
 ```python
 if not request.session.session_key:  # Always None under signed_cookies
     return None  # Skips ALL security checks
 ```
 
-As a result, the following safeguards from this ADR were **silently bypassed in production**:
-- IP address fingerprinting and change detection
-- User-Agent fingerprint binding
-- 1-hour activity timeout enforcement
-- Session activity tracking
-
-The "Independent session security" safeguard in the table above was therefore **inoperative**
-since signed-cookie sessions were deployed to production.
+Under that backend the following safeguards are inert: IP address fingerprinting and change
+detection, User-Agent fingerprint binding, the 1-hour activity timeout, and session activity
+tracking. Nothing errors and nothing logs — the middleware simply stops doing its job, so the
+failure is invisible to anything that tests the checks rather than their activation.
 
 ### Root cause
 
@@ -142,21 +138,20 @@ For the `signed_cookies` backend, there is no server-side record, so `session_ke
 always `None`. Code that branches on `session_key` truthiness silently changes behavior
 when the session backend is switched.
 
-### Fix
+### Decision
 
-1. **Session backend**: Switched all environments (base, dev, prod) to
-   `django.contrib.sessions.backends.db` backed by the existing `portal.sqlite3` file.
-   This restores a real `session_key` for all security checks.
+1. **Session backend**: all environments (base, dev, prod) pin
+   `django.contrib.sessions.backends.db`, backed by the existing `portal.sqlite3` file,
+   so a real `session_key` exists for every security check.
 
-2. **Defensive guard**: Changed `SessionSecurityMiddleware` to guard on
-   `"user_id" not in request.session` instead of `not request.session.session_key`.
-   This makes the middleware backend-agnostic.
+2. **Defensive guard**: `SessionSecurityMiddleware` guards on
+   `"user_id" not in request.session` rather than on `session_key` truthiness, which makes
+   it backend-agnostic and removes the silent-bypass mode entirely.
 
-3. **Cart rate limiting**: Changed from `session_key` to `user_id` keying to prevent
-   the same silent bypass.
+3. **Cart rate limiting** and **order idempotency** key on `user_id`, not `session_key`,
+   for the same reason.
 
-4. **Order idempotency**: Changed from `session_key` to `user_id` in hash inputs.
-
-5. **Tests**: Added `tests/common/test_session_backend.py` with regression tests that
-   verify `session_key` is non-None after login and that `SessionSecurityMiddleware`
-   activates for authenticated sessions.
+4. **Tests**: `tests/common/test_session_backend.py` asserts that `session_key` is non-None
+   after login and that `SessionSecurityMiddleware` activates for authenticated sessions —
+   testing the control's *activation*, not just its correctness, which is what this class of
+   defect requires.
