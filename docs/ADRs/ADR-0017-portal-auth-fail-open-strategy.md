@@ -127,11 +127,13 @@ if not request.session.session_key:  # Always None under signed_cookies
     return None  # Skips ALL security checks
 ```
 
-With such a guard, every safeguard in the table above goes inert under that backend — IP
+With such a guard, the safeguards this middleware implements go inert under that backend — IP
 address fingerprinting and change detection, User-Agent fingerprint binding, the 1-hour
-activity timeout, and session activity tracking. Nothing errors and nothing logs: the
-middleware simply stops doing its job, so the failure is invisible to any test that exercises
-the checks rather than their activation.
+activity timeout, and session activity tracking. The rest of the table above is unaffected:
+the hard TTL, the validation error split, retry behaviour and the thundering-herd lock belong
+to portal authentication and keep working. Nothing errors and nothing logs: the middleware
+simply stops doing its job, so the failure is invisible to any test that exercises the checks
+rather than their activation.
 
 ### Root cause
 

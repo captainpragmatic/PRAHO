@@ -50,7 +50,8 @@ it is a reference, not a default that fits every deployment. A pack provides:
   electronically supplied service, because that alone determines which B2C place-of-supply
   rule applies. Classification is a per-product attribute, never inferred from the product
   type enum;
-- the active **place-of-supply mode** (below);
+- the active **cross-border B2C election** (below) — the pack's only deployment-wide
+  place-of-supply choice;
 - the **evidence policy** for business-status determination and for customer-location
   determination;
 - registrations and special schemes, recorded as **reporting facts only** — never as
@@ -76,8 +77,13 @@ all of them simultaneously:
 |---|---|
 | Domestic | Customer is in the supplier's country |
 | Reverse charge | EU B2B, and the recorded customer evidence satisfies the evidence policy |
-| Cross-border B2C | EU consumer; the election above decides where it is taxed |
-| Outside scope | Customer is outside the EU |
+| Cross-border B2C, **ESS** | EU consumer, product classified as electronically supplied; the election above decides where it is taxed |
+| Cross-border B2C, **non-ESS** | EU consumer, product not electronically supplied — taxed at the supplier's place under the general rule; the election does not reach it |
+| Outside scope | Customer outside the EU **and** the product's place-of-supply rule puts the supply there — an ESS, or a non-ESS service whose category is customer-placed. A non-ESS service outside that category falls to the supplier's place and is taxable there |
+
+Product classification is therefore load-bearing on two of these rows, not decorative: the
+election governs only electronically supplied services, and "customer is outside the EU" is
+not by itself sufficient to place a supply outside scope.
 
 Modelling all four as one selectable mode would make a mixed customer population
 unrepresentable: a deployment that elected `DESTINATION` for its EU consumers must still
@@ -105,15 +111,17 @@ the consequence of getting it wrong is not a bug but a disclosure.
 Two properties follow, and both are the point:
 
 - Changing fiscal policy is a configuration change with an audit trail, never a code change
-  and never a deploy. Advice, when it arrives, selects and dates a mode.
+  and never a deploy. Advice, when it arrives, selects and dates the election.
 - There is no syntactically valid place in the codebase for an operator's fiscal position to
   land, so the leak has no pressure behind it. The boundary is structural, not a matter of
   editorial discipline.
 
 Deployment-supplied, effective-dated facts include (non-exhaustive): supplier establishment(s);
-place-of-supply mode and its commencement date; election state and its binding window; threshold
-aggregates where a threshold governs a mode; registrations and scheme memberships; per-product
-service classification.
+the cross-border B2C election, its commencement date and its binding window; threshold
+aggregates where a threshold governs that election; registrations and scheme memberships;
+per-product service classification. There is exactly one deployment-wide place-of-supply
+setting — a schema carrying both an election and a separate four-valued "mode" would
+reintroduce the mixed-customer defect this ADR exists to prevent.
 
 ### 4. Typed decision result and snapshot provenance v2
 
