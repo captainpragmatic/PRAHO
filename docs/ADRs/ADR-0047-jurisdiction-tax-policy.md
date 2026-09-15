@@ -46,10 +46,12 @@ assumes. Romania ships as the reference implementation because the project origi
 it is a reference, not a default that fits every deployment. A pack provides:
 
 - supplier country and VAT identity;
-- per-product **service classification** — in particular whether a product is an
-  electronically supplied service, because that alone determines which B2C place-of-supply
-  rule applies. Classification is a per-product attribute, never inferred from the product
-  type enum;
+- per-product **place-of-supply classification** — not an ESS/non-ESS boolean, but which
+  rule governs the product: electronically supplied, customer-placed by category, or the
+  general rule. Whether a product is electronically supplied is the distinction the election
+  below turns on, but it is not the only one that matters, and other categories carry their
+  own rules. Classification is a per-product attribute, never inferred from the product type
+  enum;
 - the active **cross-border B2C election** (below) — the pack's only deployment-wide
   place-of-supply choice;
 - the **evidence policy** for business-status determination and for customer-location
@@ -61,10 +63,11 @@ it is a reference, not a default that fits every deployment. A pack provides:
 ### 2. One deployment election; four per-supply outcomes
 
 These are two different things and must not be modelled as one. **Exactly one** choice is
-deployment-wide and effective-dated — the election governing cross-border B2C supplies of
-electronically supplied services:
+deployment-wide and effective-dated — the election governing **intra-EU** cross-border B2C
+supplies of electronically supplied services. It reaches nothing else: not B2B, not non-ESS
+products, and not customers outside the EU.
 
-| Election | Effect on cross-border B2C ESS |
+| Election | Effect on intra-EU cross-border B2C ESS |
 |---|---|
 | `SUPPLIER_COUNTRY` | Taxed where the supplier is established |
 | `DESTINATION` | Taxed in the customer's member state |
@@ -73,17 +76,22 @@ Every other outcome is **derived per supply** from that supply's own evidence �
 status, customer location, and product classification — because a single deployment serves
 all of them simultaneously:
 
+Each outcome is a function of three inputs — customer status, customer location, and the
+product's place-of-supply classification. None of them alone is sufficient:
+
 | Outcome | Derived when |
 |---|---|
 | Domestic | Customer is in the supplier's country |
 | Reverse charge | EU B2B, and the recorded customer evidence satisfies the evidence policy |
-| Cross-border B2C, **ESS** | EU consumer, product classified as electronically supplied; the election above decides where it is taxed |
-| Cross-border B2C, **non-ESS** | EU consumer, product not electronically supplied — taxed at the supplier's place under the general rule; the election does not reach it |
-| Outside scope | Customer outside the EU **and** the product's place-of-supply rule puts the supply there — an ESS, or a non-ESS service whose category is customer-placed. A non-ESS service outside that category falls to the supplier's place and is taxable there |
+| Intra-EU B2C, **election applies** | EU consumer in another member state, product classified electronically supplied; the election decides where it is taxed |
+| Intra-EU B2C, **rule-governed** | EU consumer in another member state, product not electronically supplied; the product's own classification decides — the general rule places it at the supplier, a customer-placed category places it with the consumer. The election does not reach it |
+| Outside scope | Customer outside the EU **and** the product's classification places the supply there. A product that falls to the general rule is taxable at the supplier even when the consumer is abroad |
 
-Product classification is therefore load-bearing on two of these rows, not decorative: the
-election governs only electronically supplied services, and "customer is outside the EU" is
-not by itself sufficient to place a supply outside scope.
+The third input is the one most easily dropped. "EU consumer" does not by itself invoke the
+election, and "customer outside the EU" does not by itself put a supply outside scope; in
+both cases the product's classification decides. An implementation that reads only status and
+location will select the wrong jurisdiction for every product outside the electronically-
+supplied category.
 
 Modelling all four as one selectable mode would make a mixed customer population
 unrepresentable: a deployment that elected `DESTINATION` for its EU consumers must still
