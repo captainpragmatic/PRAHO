@@ -13,7 +13,7 @@ providing a historical record of why the system is built the way it is.
 ## How to Create a New ADR
 
 1. Create a new file: `ADR-XXXX-short-descriptive-title.md`
-2. Use the next available number (currently: **ADR-0047**)
+2. Use the next available number (currently: **ADR-0048**)
 3. Follow the standard format: Status, Date, Authors, Context, Decision, Consequences
 4. Set status to **Proposed** initially, then update to **Accepted** after team review
 
@@ -192,7 +192,7 @@ Billing Ownership
 
 ## Statistics
 
-- **Total ADRs**: 43 (ADR-0001 through ADR-0043)
+- **Total ADRs**: 47 (ADR-0001 through ADR-0047)
 - **Active**: 37 (Accepted + Implemented)
 - **Partially Superseded**: 1
 - **Superseded / Historical**: 5
