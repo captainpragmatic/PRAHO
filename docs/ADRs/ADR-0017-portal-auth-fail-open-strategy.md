@@ -108,11 +108,13 @@ These log lines can be monitored to detect prolonged Platform outages affecting 
 
 ---
 
-## Addendum: Session backend is load-bearing for session security
+## Addendum: the `session_key` trap
 
-The safeguards described above are enforced by `SessionSecurityMiddleware`, which is only
-effective when the configured session backend produces a real server-side `session_key`.
-Deployments must pin a backend that does.
+The safeguards described above are enforced by `SessionSecurityMiddleware`. An earlier
+version of that middleware guarded on `request.session.session_key`, which silently disabled
+every check under a session backend that keeps no server-side record. The guard is now
+backend-agnostic (see Decision below); this addendum records the failure mode so it is not
+reintroduced.
 
 ### The trap
 
@@ -125,10 +127,11 @@ if not request.session.session_key:  # Always None under signed_cookies
     return None  # Skips ALL security checks
 ```
 
-Under that backend the following safeguards are inert: IP address fingerprinting and change
-detection, User-Agent fingerprint binding, the 1-hour activity timeout, and session activity
-tracking. Nothing errors and nothing logs — the middleware simply stops doing its job, so the
-failure is invisible to anything that tests the checks rather than their activation.
+With such a guard, every safeguard in the table above goes inert under that backend — IP
+address fingerprinting and change detection, User-Agent fingerprint binding, the 1-hour
+activity timeout, and session activity tracking. Nothing errors and nothing logs: the
+middleware simply stops doing its job, so the failure is invisible to any test that exercises
+the checks rather than their activation.
 
 ### Root cause
 

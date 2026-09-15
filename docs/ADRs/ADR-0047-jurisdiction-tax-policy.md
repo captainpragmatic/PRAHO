@@ -57,17 +57,33 @@ it is a reference, not a default that fits every deployment. A pack provides:
   rate-selection switches. A registration describes where a liability is *declared*, not
   where it *arises*.
 
-### 2. Four supported place-of-supply modes
+### 2. One deployment election; four per-supply outcomes
 
-The engine supports these modes, selectable per deployment with an effective date, and
-resolves them explicitly rather than by implicit country branching:
+These are two different things and must not be modelled as one. **Exactly one** choice is
+deployment-wide and effective-dated — the election governing cross-border B2C supplies of
+electronically supplied services:
 
-| Mode | Effect |
+| Election | Effect on cross-border B2C ESS |
 |---|---|
-| `SUPPLIER_COUNTRY` | Cross-border B2C supplies taxed where the supplier is established |
+| `SUPPLIER_COUNTRY` | Taxed where the supplier is established |
 | `DESTINATION` | Taxed in the customer's member state |
-| `REVERSE_CHARGE` | Cross-border B2B, conditional on recorded customer evidence |
-| `OUTSIDE_SCOPE` | Non-EU customers — an explicit category, not a zero rate |
+
+Every other outcome is **derived per supply** from that supply's own evidence — customer
+status, customer location, and product classification — because a single deployment serves
+all of them simultaneously:
+
+| Outcome | Derived when |
+|---|---|
+| Domestic | Customer is in the supplier's country |
+| Reverse charge | EU B2B, and the recorded customer evidence satisfies the evidence policy |
+| Cross-border B2C | EU consumer; the election above decides where it is taxed |
+| Outside scope | Customer is outside the EU |
+
+Modelling all four as one selectable mode would make a mixed customer population
+unrepresentable: a deployment that elected `DESTINATION` for its EU consumers must still
+apply reverse charge to an eligible EU business and outside-scope treatment to a non-EU
+customer, without any configuration change between orders. The election is policy; the rest
+is evidence.
 
 `OUTSIDE_SCOPE` is deliberately distinct from a zero rate. A supply outside the scope of a
 tax is not a taxable supply at a rate of zero, and the two are not interchangeable at the
