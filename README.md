@@ -25,6 +25,8 @@
 
 **PRAHO** is a hosting provider management platform built for **Romanian business compliance**. It handles customer management, VAT-compliant invoicing, e-Factura integration, service provisioning, support tickets, and GDPR compliance - all in a single Django-based system.
 
+> **Not legal, tax, or accounting advice** - PRAHO implements tax and compliance *mechanisms*; it does not determine the correct treatment for your business. Tax rules change, differ by jurisdiction, and depend on facts specific to each operator - place of establishment, registrations, elections, thresholds, and the nature of the services supplied. Every deployer is solely responsible for obtaining qualified professional advice for its own jurisdiction and circumstances, and for verifying that configured rates, rules, and generated documents are correct before relying on them. Romanian rules ship as the reference implementation, not as a default that fits every deployment. See [NOTICE.md](NOTICE.md).
+
 ### Key Features
 
 - **Customer Management** - Multi-user accounts with role-based access and soft deletes
