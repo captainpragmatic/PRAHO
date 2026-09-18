@@ -1,188 +1,26 @@
 {% extends 'base.html' %}
-{% load i18n %}
-{% load ui_components %}
-
-{% block title %}{% trans 'Backup Codes' %} - PragmaticHost{% endblock %}
-
+{% load i18n ui_components %}
+{% block title %}{% trans 'Backup Codes' %}{% endblock %}
 {% block content %}
-<div class="px-4 max-w-4xl mx-auto">
-  {% trans 'Backup Codes' as ph_title %}{% trans 'Use these codes to access your account if you lose your phone or authenticator app' as ph_sub %}
-  {% page_header title=ph_title subtitle=ph_sub icon="lock" %}{% end_page_header %}
-
-  {% trans 'Your Recovery Codes' as sc_rc_title %}
-  {% section_card title=sc_rc_title icon="lock" css_class="mb-6" %}
-
-      {% if backup_codes %}
-      <div class="space-y-4">
-        <!-- Important Warning -->
-        <div class="bg-yellow-900/20 border border-yellow-700/50 rounded-lg p-4 mb-6">
-          <div class="flex items-start">
-            <span class="text-yellow-400 mr-3">{% icon "warning" size="lg" %}</span>
-            <div>
-              <h5 class="text-sm font-medium text-yellow-300">{% trans 'Important Security Information' %}</h5>
-              <ul class="text-xs text-yellow-200 mt-2 space-y-1">
-                <li>• {% trans 'Each code can only be used once' %}</li>
-                <li>• {% trans 'Store these codes in a safe place' %}</li>
-                <li>• {% trans 'Don\'t share these codes with anyone' %}</li>
-                <li>• {% trans 'Generate new codes if these are compromised' %}</li>
-              </ul>
-            </div>
-          </div>
-        </div>
-
-        <!-- Codes Grid -->
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {% for code in backup_codes %}
-          <div class="bg-slate-700 p-4 rounded-lg border border-slate-600 flex items-center justify-between">
-            <code class="text-green-400 font-mono text-lg">{{ code }}</code>
-            <button type="button" data-action="copy" data-copy-value="{{ code }}"
-                    class="ml-2 text-slate-400 hover:text-white transition-colors"
-                    title="{% trans 'Copy code' %}">
-              {% icon "clipboard" size="sm" %}
-            </button>
-          </div>
-          {% endfor %}
-        </div>
-
-        <!-- Actions -->
-        <div class="flex gap-4 mt-6">
-          <button type="button" data-action="copy"
-                  data-copy-value="{% for code in backup_codes %}{{ code }}{% if not forloop.last %}&#10;{% endif %}{% endfor %}"
-                  data-copy-feedback="{% trans 'All backup codes copied to clipboard!' %}"
-                  class="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-lg transition-colors">
-            {% icon "clipboard" size="sm" css_class="text-white" %} {% trans 'Copy All Codes' %}
-          </button>
-
-          <button type="button" data-action="print-codes"
-                  class="bg-gray-600 hover:bg-gray-700 text-white font-medium py-2 px-4 rounded-lg transition-colors">
-            {% icon "document" size="sm" css_class="text-white" %} {% trans 'Print Codes' %}
-          </button>
-        </div>
-      </div>
-      {% else %}
-      <div class="bg-red-900/20 border border-red-700/50 rounded-lg p-6">
-        <div class="flex items-center">
-          <span class="text-red-400 mr-3">{% icon "x" size="xl" %}</span>
-          <div>
-            <h5 class="text-lg font-medium text-red-300">{% trans 'No Backup Codes Available' %}</h5>
-            <p class="text-sm text-red-200 mt-1">
-              {% trans 'Unable to load your backup codes. Please try again or contact support if the problem persists.' %}
-            </p>
-          </div>
-        </div>
-      </div>
-      {% endif %}
-  {% end_section_card %}
-
-  {% trans 'Regenerate Codes' as sc_regen_title %}
-  {% section_card title=sc_regen_title icon="refresh" css_class="mb-6" %}
-
-      <div class="space-y-4">
-        <p class="text-sm text-slate-300">
-          {% trans 'If you\'ve used most of your codes or suspect they\'ve been compromised, you can generate new ones. This will invalidate all existing backup codes.' %}
-        </p>
-
-        <div class="bg-orange-900/20 border border-orange-700/50 rounded-lg p-4">
-          <div class="flex items-start">
-            <span class="text-orange-400 mr-3">{% icon "warning" size="lg" %}</span>
-            <div>
-              <h5 class="text-sm font-medium text-orange-300">{% trans 'Warning' %}</h5>
-              <p class="text-xs text-orange-200 mt-1">
-                {% trans 'Generating new codes will immediately invalidate all current backup codes. Make sure you have access to your authenticator app before proceeding.' %}
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <button type="button" data-action="regenerate-codes"
-                class="bg-orange-600 hover:bg-orange-700 text-white font-medium py-2 px-4 rounded-lg transition-colors">
-          {% icon "refresh" size="sm" css_class="text-white" %} {% trans 'Generate New Backup Codes' %}
-        </button>
-      </div>
-  {% end_section_card %}
-
-  {% trans 'How to Use Backup Codes' as sc_htubc_title %}
-  {% section_card title=sc_htubc_title icon="book" %}
-
-      <div class="space-y-3 text-sm text-slate-300">
-        <div class="flex items-start">
-          <span class="text-blue-400 mr-2">1.</span>
-          {% trans 'When logging in, if you can\'t access your authenticator app, click "Use backup code" on the MFA verification screen.' %}
-        </div>
-        <div class="flex items-start">
-          <span class="text-blue-400 mr-2">2.</span>
-          {% trans 'Enter one of these backup codes exactly as shown (including any dashes).' %}
-        </div>
-        <div class="flex items-start">
-          <span class="text-blue-400 mr-2">3.</span>
-          {% trans 'Each code can only be used once. Cross it off your list after use.' %}
-        </div>
-        <div class="flex items-start">
-          <span class="text-blue-400 mr-2">4.</span>
-          {% trans 'When you have only a few codes left, generate new ones to ensure continued access.' %}
-        </div>
-      </div>
-  {% end_section_card %}
-
-  <!-- Back Navigation -->
-  <div class="mt-6 text-center">
-    <a href="{% url 'users:mfa_management' %}"
-       class="text-blue-400 hover:text-blue-300 text-sm">
-      ← {% trans 'Back to MFA Management' %}
-    </a>
-  </div>
+<div class="max-w-2xl mx-auto space-y-6">
+  <h1 class="text-2xl text-white">{% trans 'Backup Codes' %}</h1>
+  {% if backup_codes %}
+    <p class="text-yellow-300">{% trans 'Save these codes now. They are shown only once. Each code can be used once.' %}</p>
+    <div class="grid grid-cols-2 gap-4">
+      {% for code in backup_codes %}<code class="bg-slate-800 p-4 text-green-400">{{ code }}</code>{% endfor %}
+    </div>
+  {% else %}
+    <p class="text-slate-300">{% trans 'Previously issued codes cannot be displayed again.' %} {{ remaining }} {% trans 'codes remaining' %}.</p>
+  {% endif %}
+  <h2 class="text-xl text-white">{% trans 'Generate New Backup Codes' %}</h2>
+  <p class="text-slate-300">{% trans 'This invalidates all previous recovery codes. Confirm your password and a current authenticator or recovery code.' %}</p>
+  <form method="post" class="space-y-4">
+    {% csrf_token %}
+    {% form_error_summary form %}
+    {% form_field form.password icon_left="lock" autocomplete="current-password" %}
+    {% form_field form.token icon_left="lock" autocomplete="one-time-code" %}
+    {% trans 'Generate New Backup Codes' as generate_label %}{% button generate_label type="submit" variant="primary" %}
+  </form>
+  <a href="{% url 'users:mfa_management' %}" class="text-blue-400">{% trans 'Back to MFA Management' %}</a>
 </div>
-
-<!-- JavaScript for copying and printing -->
-<script nonce="{{ csp_nonce }}">
-function printCodes() {
-  const printWindow = window.open('', '_blank');
-  const codes = [{% for code in backup_codes %}'{{ code|escapejs }}'{% if not forloop.last %}, {% endif %}{% endfor %}];
-
-  printWindow.document.write(`
-    <html>
-      <head>
-        <title>{% trans "MFA Backup Codes" %}</title>
-        <style nonce="{{ csp_nonce }}">
-          body { font-family: monospace; margin: 20px; }
-          h1 { color: #333; }
-          .code {
-            background: #f5f5f5;
-            padding: 10px;
-            margin: 5px 0;
-            border: 1px solid #ddd;
-            font-size: 14px;
-          }
-          .warning {
-            background: #fff3cd;
-            border: 1px solid #ffeaa7;
-            padding: 10px;
-            margin: 10px 0;
-          }
-        </style>
-      </head>
-      <body>
-        <h1>{% trans "PragmaticHost - MFA Backup Codes" %}</h1>
-        <p><strong>{% trans "Account:" %}</strong> {{ customer_email }}</p>
-        <div class="warning">
-          <strong>[!] {% trans "Important:" %}</strong>
-          {% trans "Store these codes safely. Each can only be used once." %}
-        </div>
-        ${codes.map(code => '<div class="code">' + code + '</div>').join('')}
-        <p><small>{% trans "Generated:" %} ${new Date().toLocaleString()}</small></p>
-      </body>
-    </html>
-  `);
-
-  printWindow.document.close();
-  printWindow.print();
-}
-
-function regenerateCodes() {
-  if (confirm('{% trans "Are you sure you want to generate new backup codes? This will invalidate all current codes." %}')) {
-    // This would typically be a form submission or AJAX call
-    window.location.href = '{% url "users:mfa_backup_codes" %}?regenerate=1';
-  }
-}
-</script>
 {% endblock %}

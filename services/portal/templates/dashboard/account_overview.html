@@ -39,10 +39,10 @@
         <p class="text-white">{{ account_info.company_name }}</p>
       </div>
       {% endif %}
-      {% if account_info.tax_id %}
+      {% if account_info.tax_profile.cui %}
       <div>
         <p class="text-sm text-slate-400">{% trans 'Tax ID' %}</p>
-        <p class="text-white">{{ account_info.tax_id }}</p>
+        <p class="text-white">{{ account_info.tax_profile.cui }}</p>
       </div>
       {% endif %}
     </div>

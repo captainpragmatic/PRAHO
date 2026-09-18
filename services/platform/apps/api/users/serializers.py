@@ -23,6 +23,7 @@ from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 
 from apps.common.localisation import DATE_FORMAT_CHOICES, LANGUAGE_CHOICES
+from apps.users.mfa import MFAService
 
 if TYPE_CHECKING:
     from apps.users.models import User
@@ -85,7 +86,7 @@ class MFASetupSerializer(serializers.Serializer):
         """
         Generate 2FA secret and QR code for user.
         """
-        user = self.context["request"].user
+        user = self.context["user"]
 
         # Generate new secret
         secret = pyotp.random_base32()
@@ -136,7 +137,7 @@ class MFAVerifySerializer(serializers.Serializer):
         """
         Verify 2FA token and enable 2FA for user.
         """
-        user = self.context["request"].user
+        user = self.context["user"]
         token = validated_data["token"]
 
         if not user.two_factor_secret:
@@ -187,7 +188,7 @@ class MFADisableSerializer(serializers.Serializer):
 
     def validate(self, data: dict[str, Any]) -> dict[str, Any]:
         """Validate password and 2FA token"""
-        user = self.context["request"].user
+        user = self.context["user"]
 
         # Verify password
         if not user.check_password(data["password"]):
@@ -199,11 +200,7 @@ class MFADisableSerializer(serializers.Serializer):
             raise serializers.ValidationError(_("2FA is not enabled for this account."))
 
         # Verify current token
-        totp = pyotp.TOTP(user.two_factor_secret)
-        if not totp.verify(token, valid_window=1) and (
-            (len(token) == BACKUP_CODE_LENGTH and not user.verify_backup_code(token))
-            or len(token) != BACKUP_CODE_LENGTH
-        ):
+        if not MFAService.verify_mfa_code(user, token, self.context.get("request"))["success"]:
             raise serializers.ValidationError(_("Invalid verification code."))
 
         return data
@@ -212,7 +209,7 @@ class MFADisableSerializer(serializers.Serializer):
         """
         Disable 2FA for user.
         """
-        user = self.context["request"].user
+        user = self.context["user"]
 
         # Disable 2FA
         user.two_factor_enabled = False

@@ -16,6 +16,8 @@ Security guidelines:
 import logging
 from typing import Any, cast
 
+from django.utils.dateparse import parse_datetime
+
 from apps.api_client.services import PlatformAPIClient, PlatformAPIError
 
 logger = logging.getLogger(__name__)
@@ -58,6 +60,14 @@ def _empty_services_summary() -> dict[str, Any]:
     }
 
 
+def _parse_service_dates(service: dict[str, Any]) -> None:
+    """Convert ISO API dates before date-aware template formatters receive them."""
+    for field in ("next_billing_date", "expires_at", "activated_at", "created_at", "updated_at"):
+        value = service.get(field)
+        if isinstance(value, str):
+            service[field] = parse_datetime(value)
+
+
 class ServicesAPIClient(PlatformAPIClient):
     """
     Customer hosting services API client for portal service.
@@ -69,8 +79,15 @@ class ServicesAPIClient(PlatformAPIClient):
     - Service management (limited customer actions)
     """
 
-    def get_customer_services(  # type: ignore[override]
-        self, customer_id: int, user_id: int, page: int = 1, status: str = "", service_type: str = ""
+    def get_customer_services(  # type: ignore[override]  # noqa: PLR0913 -- explicit filters preserve the existing client API
+        self,
+        customer_id: int,
+        user_id: int,
+        page: int = 1,
+        status: str = "",
+        service_type: str = "",
+        *,
+        search: str = "",
     ) -> dict[str, Any]:
         """
         Get paginated list of hosting services for a specific customer.
@@ -90,9 +107,11 @@ class ServicesAPIClient(PlatformAPIClient):
                 "customer_id": customer_id,
                 "user_id": user_id,
                 "page": page,
-                "page_size": 20,
+                "limit": 20,
             }
 
+            if search:
+                data["search"] = search
             if status:
                 data["status"] = status
             if service_type:
@@ -107,6 +126,7 @@ class ServicesAPIClient(PlatformAPIClient):
                 # Ensure currency_code defaults to RON for template rendering
                 for svc in services:
                     svc.setdefault("currency_code", "RON")
+                    _parse_service_dates(svc)
                 adapted_response = {
                     "results": services,
                     "count": platform_data.get("pagination", {}).get("total", 0),
@@ -146,6 +166,7 @@ class ServicesAPIClient(PlatformAPIClient):
             if response.get("success") and "data" in response and "service" in response["data"]:
                 service_data = response["data"]["service"]
                 service_data.setdefault("currency_code", "RON")
+                _parse_service_dates(service_data)
                 logger.info(f"✅ [Services API] Retrieved service {service_id} details for customer {customer_id}")
                 return cast(dict[str, Any], service_data)
             else:
@@ -322,7 +343,7 @@ class ServicesAPIClient(PlatformAPIClient):
             response = self._make_request("GET", "/services/plans/", params=params)
 
             logger.info(f"✅ [Services API] Retrieved available plans for customer {customer_id}")
-            return cast(list[dict[str, Any]], response.get("plans", []))
+            return cast(list[dict[str, Any]], response.get("data", {}).get("plans", []))
 
         except PlatformAPIError as e:
             if e.is_rate_limited:

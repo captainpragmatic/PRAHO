@@ -1,4 +1,3 @@
-
 """
 Verification tests for the TestUserManager system.
 
@@ -15,10 +14,13 @@ import django
 import pytest
 
 # Set up Django before importing TestUserManager
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings.test')
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.test")
 django.setup()
 
-from tests.e2e.helpers import TestUserManager, test_users  # noqa: E402
+from tests.e2e.helpers import TestUserManager  # noqa: E402
+from tests.e2e.helpers import (  # noqa: E402 -- Django environment must be configured first
+    test_users as managed_test_users,
+)
 
 
 @pytest.mark.django_db
@@ -31,28 +33,27 @@ def test_testusermanager_admin_creation():
         admin = user_mgr.create_admin_user()
 
         # Verify admin user properties
-        assert 'email' in admin
-        assert 'password' in admin
-        assert 'type' in admin
-        assert 'user_id' in admin
+        assert "email" in admin
+        assert "password" in admin
+        assert "type" in admin
+        assert "user_id" in admin
 
-        assert admin['type'] == 'admin'
-        assert '@test.praho.local' in admin['email']
-        assert len(admin['password']) >= 12  # Should be secure password
+        assert admin["type"] == "admin"
+        assert "@test.praho.local" in admin["email"]
+        assert len(admin["password"]) >= 12  # Should be secure password
 
         # Verify user exists in database
-        user_info = user_mgr.get_user_by_email(admin['email'])
+        user_info = user_mgr.get_user_by_email(admin["email"])
         assert user_info is not None
-        assert user_info['is_superuser'] == True
-        assert user_info['staff_role'] == 'admin'
+        assert user_info["is_superuser"]
+        assert user_info["staff_role"] == "admin"
 
         print(f"  ✅ Created admin: {admin['email']}")
 
     # After context exits, user should be cleaned up
     with TestUserManager() as user_mgr:
-        user_info = user_mgr.get_user_by_email(admin['email'])
-        # User should be cleaned up (None or not found)
-        # Note: In some cases the user might still exist briefly due to transaction timing
+        user_info = user_mgr.get_user_by_email(admin["email"])
+        assert user_info is None, "The context manager must remove its owned test account"
         print("  ✅ Admin user creation test completed")
 
 
@@ -63,27 +64,25 @@ def test_testusermanager_customer_creation():
 
     with TestUserManager() as user_mgr:
         # Create customer with organization
-        customer_user, customer_org = user_mgr.create_customer_with_org(
-            company_name="Test Verification Corp"
-        )
+        customer_user, customer_org = user_mgr.create_customer_with_org(company_name="Test Verification Corp")
 
         # Verify customer user properties
-        assert 'email' in customer_user
-        assert 'password' in customer_user
-        assert 'type' in customer_user
-        assert customer_user['type'] == 'customer'
+        assert "email" in customer_user
+        assert "password" in customer_user
+        assert "type" in customer_user
+        assert customer_user["type"] == "customer"
 
         # Verify organization properties
-        assert 'id' in customer_org
-        assert 'name' in customer_org
-        assert 'company_name' in customer_org
-        assert customer_org['company_name'] == "Test Verification Corp"
+        assert "id" in customer_org
+        assert "name" in customer_org
+        assert "company_name" in customer_org
+        assert customer_org["company_name"] == "Test Verification Corp"
 
         # Verify user exists in database
-        user_info = user_mgr.get_user_by_email(customer_user['email'])
+        user_info = user_mgr.get_user_by_email(customer_user["email"])
         assert user_info is not None
-        assert user_info['is_staff'] == False
-        assert user_info['staff_role'] == ''
+        assert not user_info["is_staff"]
+        assert user_info["staff_role"] == ""
 
         print(f"  ✅ Created customer: {customer_user['email']}")
         print(f"  ✅ Created organization: {customer_org['company_name']}")
@@ -98,20 +97,20 @@ def test_testusermanager_staff_creation():
 
     with TestUserManager() as user_mgr:
         # Test different staff roles
-        roles_to_test = ['support', 'billing', 'manager', 'admin']
+        roles_to_test = ["support", "billing", "manager", "admin"]
 
         for role in roles_to_test:
             staff_user = user_mgr.create_staff_user(role=role)
 
             # Verify staff user properties
-            assert staff_user['type'] == 'staff'
-            assert staff_user['role'] == role
+            assert staff_user["type"] == "staff"
+            assert staff_user["role"] == role
 
             # Verify user exists with correct role
-            user_info = user_mgr.get_user_by_email(staff_user['email'])
+            user_info = user_mgr.get_user_by_email(staff_user["email"])
             assert user_info is not None
-            assert user_info['is_staff'] == True
-            assert user_info['staff_role'] == role
+            assert user_info["is_staff"]
+            assert user_info["staff_role"] == role
 
             print(f"  ✅ Created {role} staff: {staff_user['email']}")
 
@@ -126,7 +125,7 @@ def test_testusermanager_duplicate_prevention():
     with TestUserManager() as user_mgr:
         # Create first user
         admin1 = user_mgr.create_admin_user(email="duplicate.test@test.praho.local")
-        assert admin1['email'] == "duplicate.test@test.praho.local"
+        assert admin1["email"] == "duplicate.test@test.praho.local"
 
         # Try to create duplicate - should raise ValueError
         try:
@@ -144,21 +143,18 @@ def test_test_users_convenience_helper():
     """Test the convenient test_users() context manager."""
     print("🧪 Testing test_users convenience helper")
 
-    with test_users(
-        ('admin',),
-        ('customer', {'company_name': 'Convenience Corp'}),
-        ('staff', {'role': 'billing'})
+    with managed_test_users(
+        ("admin",), ("customer", {"company_name": "Convenience Corp"}), ("staff", {"role": "billing"})
     ) as (admin, customer_data, billing_staff):
-
         # Unpack customer data
         customer_user, customer_org = customer_data
 
         # Verify all users were created correctly
-        assert admin['type'] == 'admin'
-        assert customer_user['type'] == 'customer'
-        assert customer_org['company_name'] == 'Convenience Corp'
-        assert billing_staff['type'] == 'staff'
-        assert billing_staff['role'] == 'billing'
+        assert admin["type"] == "admin"
+        assert customer_user["type"] == "customer"
+        assert customer_org["company_name"] == "Convenience Corp"
+        assert billing_staff["type"] == "staff"
+        assert billing_staff["role"] == "billing"
 
         print(f"  ✅ Admin: {admin['email']}")
         print(f"  ✅ Customer: {customer_user['email']} at {customer_org['company_name']}")
@@ -177,10 +173,10 @@ def test_user_lookup_functionality():
         admin = user_mgr.create_admin_user()
 
         # Test successful lookup
-        user_info = user_mgr.get_user_by_email(admin['email'])
+        user_info = user_mgr.get_user_by_email(admin["email"])
         assert user_info is not None
-        assert user_info['email'] == admin['email']
-        assert user_info['is_superuser'] == True
+        assert user_info["email"] == admin["email"]
+        assert user_info["is_superuser"]
 
         # Test lookup of non-existent user
         missing_user = user_mgr.get_user_by_email("nonexistent@test.praho.local")
@@ -207,11 +203,11 @@ def test_random_generation_uniqueness():
             customer_user, customer_org = user_mgr.create_customer_with_org()
 
             # Collect generated values
-            emails.add(admin['email'])
-            emails.add(customer_user['email'])
-            passwords.add(admin['password'])
-            passwords.add(customer_user['password'])
-            companies.add(customer_org['company_name'])
+            emails.add(admin["email"])
+            emails.add(customer_user["email"])
+            passwords.add(admin["password"])
+            passwords.add(customer_user["password"])
+            companies.add(customer_org["company_name"])
 
         # Verify all values are unique
         assert len(emails) == 10, "All emails should be unique"

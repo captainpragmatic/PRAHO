@@ -1,349 +1,152 @@
-# ===============================================================================
-# END-TO-END TESTS FOR SIGNUP WORKFLOW
-# ===============================================================================
-"""
-End-to-end tests for customer signup and onboarding workflow.
-Tests the complete flow from registration to profile completion.
-"""
+"""Registration and onboarding through public APIs/services, with persisted outcomes."""
 
-import os
-import sys
+import json
 
 import pytest
+from django.conf import settings
+from django.test import TestCase
 
-# Add platform to path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../services/platform'))
+from apps.customers.contact_service import AddressData, ContactService
+from apps.customers.models import Customer
+from apps.orders.services import OrderService
+from apps.users.models import CustomerMembership, User
+from services.platform.tests.helpers.hmac import hmac_headers
 
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings.test')
-
-import django
-
-django.setup()
-
-from django.contrib.auth import get_user_model  # noqa: E402
-from django.test import Client, TestCase  # noqa: E402
-
-from apps.customers.models import Customer, CustomerAddress, CustomerBillingProfile, CustomerTaxProfile  # noqa: E402
-
-User = get_user_model()
+pytestmark = pytest.mark.e2e
 
 
-@pytest.mark.e2e
-class TestSignupWorkflow(TestCase):
-    """End-to-end tests for complete signup workflow"""
+class RegistrationCase(TestCase):
+    def post_registration(self, payload):
+        path = "/api/customers/register/"
+        body = json.dumps(payload).encode()
+        headers = hmac_headers("POST", path, body, secret=settings.PLATFORM_API_SECRET)
+        return self.client.post(path, body, content_type="application/json", **headers)
 
-    def setUp(self):
-        """Set up test fixtures"""
-        self.client = Client()
+    def payload(self, *, individual=False):
+        return {
+            "user_data": {
+                "email": "owner@e2e.test",
+                "password": "Registration-pass123!",
+                "first_name": "Ana",
+                "last_name": "Pop",
+                "phone": "+40722123456",
+            },
+            "customer_data": {
+                "customer_type": "individual" if individual else "company",
+                "company_name": "Ana Pop" if individual else "E2E Registration SRL",
+                "vat_number": "" if individual else "RO14399847",
+                "address_line1": "Str. Victoriei nr. 10",
+                "city": "București",
+                "county": "București",
+                "postal_code": "010061",
+                "country": "România",
+                "data_processing_consent": True,
+            },
+        }
 
-        # Create admin for customer creation
-        self.admin = User.objects.create_user(
-            email='signup_admin@test.ro',
-            password='AdminPass123!',
-            is_staff=True,
-            is_superuser=True,
-            staff_role='admin',
-        )
+    def register(self, *, individual=False):
+        response = self.post_registration(self.payload(individual=individual))
+        self.assertEqual(response.status_code, 201, response.content)
+        user = User.objects.get(email="owner@e2e.test")
+        customer = CustomerMembership.objects.get(user=user, role="owner", is_primary=True).customer
+        self.assertTrue(user.check_password("Registration-pass123!"))
+        self.assertFalse(user.is_staff)
+        self.assertTrue(customer.data_processing_consent)
+        self.assertIsNotNone(user.gdpr_consent_date)
+        return user, customer
 
+
+class TestSignupWorkflow(RegistrationCase):
     def test_complete_company_signup_flow(self):
-        """Test complete company signup workflow"""
-        self.client.force_login(self.admin)
-
-        # Step 1: Create customer
-        customer = Customer.objects.create(
-            name='SC New Signup SRL',
-            customer_type='company',
-            company_name='SC New Signup SRL',
-            primary_email='newsignup@company.ro',
-            primary_phone='+40721234567',
-            data_processing_consent=True,
-            created_by=self.admin,
+        user, customer = self.register()
+        self.assertEqual(customer.company_name, "E2E Registration SRL")
+        self.assertEqual(customer.primary_email, user.email)
+        self.assertEqual(customer.tax_profile.vat_number, "RO14399847")
+        self.assertEqual(customer.billing_profile.preferred_currency, "RON")
+        address = customer.addresses.get(is_current=True, is_billing=True)
+        self.assertEqual(
+            (address.address_line1, address.city, address.postal_code), ("Str. Victoriei nr. 10", "București", "010061")
         )
-        assert customer.pk is not None
-        assert customer.status == 'prospect'
-
-        # Step 2: Create tax profile
-        tax_profile = CustomerTaxProfile.objects.create(
-            customer=customer,
-            cui='RO12345678',
-            vat_number='RO12345678',
-            registration_number='J40/1234/2024',
-            is_vat_payer=True,
-        )
-        assert tax_profile.pk is not None
-        assert customer.tax_profile is not None
-
-        # Step 3: Create billing profile
-        billing_profile = CustomerBillingProfile.objects.create(
-            customer=customer,
-            payment_terms=30,
-            preferred_currency='RON',
-        )
-        assert billing_profile.pk is not None
-        assert customer.billing_profile is not None
-
-        # Step 4: Create legal address
-        address = CustomerAddress.objects.create(
-            customer=customer,
-            is_primary=True,
-            address_line1='Str. Noua Nr. 10',
-            city='București',
-            county='Sector 1',
-            postal_code='010101',
-            country='România',
-            is_current=True,
-        )
-        assert address.pk is not None
-        assert customer.addresses.count() == 1
-
-        # Verify complete profile
-        customer.refresh_from_db()
-        assert customer.tax_profile is not None
-        assert customer.billing_profile is not None
-        assert customer.addresses.filter(is_current=True).exists()
 
     def test_complete_individual_signup_flow(self):
-        """Test complete individual customer signup"""
-        self.client.force_login(self.admin)
-
-        # Create individual customer
-        customer = Customer.objects.create(
-            name='Ion Popescu',
-            customer_type='individual',
-            primary_email='ion.popescu@email.ro',
-            primary_phone='+40722123456',
-            data_processing_consent=True,
-            created_by=self.admin,
-        )
-
-        # Create billing profile (no tax profile for individuals)
-        billing_profile = CustomerBillingProfile.objects.create(
-            customer=customer,
-            payment_terms=14,
-            preferred_currency='RON',
-        )
-
-        # Create billing address
-        address = CustomerAddress.objects.create(
-            customer=customer,
-            is_billing=True,
-            address_line1='Bd. Unirii Nr. 5, Ap. 10',
-            city='București',
-            county='Sector 3',
-            postal_code='030167',
-            country='România',
-            is_current=True,
-        )
-
-        assert customer.customer_type == 'individual'
-        assert customer.billing_profile is not None
-        assert customer.addresses.count() == 1
+        _, customer = self.register(individual=True)
+        self.assertEqual(customer.customer_type, "individual")
+        self.assertEqual(customer.billing_profile.preferred_currency, "RON")
+        self.assertTrue(customer.addresses.get().is_billing)
 
     def test_signup_requires_gdpr_consent(self):
-        """Signup should track GDPR consent"""
-        self.client.force_login(self.admin)
-
-        # Customer without consent
-        customer = Customer.objects.create(
-            name='SC No Consent SRL',
-            customer_type='company',
-            company_name='SC No Consent SRL',
-            primary_email='noconsent@company.ro',
-            data_processing_consent=False,
-            created_by=self.admin,
-        )
-
-        # Consent should be tracked
-        assert customer.data_processing_consent is False
+        payload = self.payload()
+        payload["customer_data"]["data_processing_consent"] = False
+        response = self.post_registration(payload)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("data_processing_consent", response.content.decode())
+        self.assertFalse(User.objects.exists())
+        self.assertFalse(Customer.objects.exists())
 
     def test_signup_with_multiple_addresses(self):
-        """Customer can have multiple addresses"""
-        self.client.force_login(self.admin)
-
-        customer = Customer.objects.create(
-            name='SC Multi Address SRL',
-            customer_type='company',
-            company_name='SC Multi Address SRL',
-            primary_email='multiaddr@company.ro',
-            data_processing_consent=True,
-            created_by=self.admin,
+        user, customer = self.register()
+        original = customer.addresses.get()
+        address = ContactService.create_address(
+            customer,
+            user,
+            AddressData(
+                address_line1="Str. Noua 20", city="Cluj-Napoca", county="Cluj", postal_code="400001", is_billing=True
+            ),
         )
-
-        # Legal address (primary)
-        CustomerAddress.objects.create(
-            customer=customer,
-            is_primary=True,
-            address_line1='Str. Legala Nr. 1',
-            city='București',
-            county='Sector 1',
-            postal_code='010101',
-            country='România',
-            is_current=True,
-        )
-
-        # Billing address
-        CustomerAddress.objects.create(
-            customer=customer,
-            is_billing=True,
-            address_line1='Str. Facturare Nr. 2',
-            city='Cluj-Napoca',
-            county='Cluj',
-            postal_code='400001',
-            country='România',
-            is_current=True,
-        )
-
-        # Shipping address
-        CustomerAddress.objects.create(
-            customer=customer,
-            address_line1='Str. Livrare Nr. 3',
-            city='Timișoara',
-            county='Timiș',
-            postal_code='300001',
-            country='România',
-            is_current=True,
-        )
-
-        assert customer.addresses.count() == 3
+        original.refresh_from_db()
+        self.assertFalse(original.is_current)
+        self.assertEqual(customer.addresses.filter(is_current=True, is_billing=True).get().pk, address.pk)
+        self.assertGreater(address.version, original.version)
 
 
-@pytest.mark.e2e
 class TestUserRegistrationFlow(TestCase):
-    """End-to-end tests for user registration"""
-
-    def setUp(self):
-        """Set up test fixtures"""
-        self.client = Client()
-
     def test_login_page_accessible(self):
-        """Login page should be accessible"""
-        response = self.client.get('/auth/login/')
-        assert response.status_code == 200
+        response = self.client.get("/auth/login/")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'name="password"')
 
     def test_successful_login(self):
-        """User should be able to login"""
         user = User.objects.create_user(
-            email='login@test.ro',
-            password='TestPass123!',
+            email="login@e2e.test", password="Login-pass123!", is_staff=True, staff_role="admin"
         )
-
-        response = self.client.post('/auth/login/', {
-            'email': 'login@test.ro',
-            'password': 'TestPass123!',
-        })
-
-        # Should redirect on success
-        assert response.status_code in [200, 302]
+        response = self.client.post("/auth/login/", {"email": user.email, "password": "Login-pass123!"})
+        self.assertRedirects(response, "/dashboard/", fetch_redirect_response=False)
+        self.assertEqual(self.client.session["_auth_user_id"], str(user.pk))
 
     def test_invalid_login_rejected(self):
-        """Invalid credentials should be rejected"""
-        response = self.client.post('/auth/login/', {
-            'email': 'nonexistent@test.ro',
-            'password': 'wrongpassword',
-        })
-
-        # Should show error or return 200 with form
-        assert response.status_code == 200
+        response = self.client.post("/auth/login/", {"email": "missing@e2e.test", "password": "wrongpassword"})
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("_auth_user_id", self.client.session)
+        self.assertContains(response, "Invalid")
 
     def test_logout_workflow(self):
-        """User should be able to logout"""
         user = User.objects.create_user(
-            email='logout@test.ro',
-            password='TestPass123!',
+            email="logout@e2e.test", password="Logout-pass123!", is_staff=True, staff_role="admin"
         )
-
         self.client.force_login(user)
-
-        response = self.client.post('/auth/logout/')
-        # Should redirect after logout
-        assert response.status_code in [200, 302]
-
-
-@pytest.mark.e2e
-class TestCustomerOnboardingFlow(TestCase):
-    """End-to-end tests for customer onboarding"""
-
-    def setUp(self):
-        """Set up test fixtures"""
-        self.client = Client()
-
-        self.admin = User.objects.create_user(
-            email='onboard_admin@test.ro',
-            password='AdminPass123!',
-            is_staff=True,
-            is_superuser=True,
-            staff_role='admin',
+        response = self.client.post("/auth/logout/")
+        self.assertEqual(response.status_code, 302)
+        self.assertNotIn("_auth_user_id", self.client.session)
+        self.assertRedirects(
+            self.client.get("/dashboard/"), "/auth/login/?next=/dashboard/", fetch_redirect_response=False
         )
 
+
+class TestCustomerOnboardingFlow(RegistrationCase):
     def test_new_customer_onboarding_steps(self):
-        """Test all steps of customer onboarding"""
-        self.client.force_login(self.admin)
+        user, customer = self.register()
 
-        # Create base customer
-        customer = Customer.objects.create(
-            name='SC Onboarding SRL',
-            customer_type='company',
-            company_name='SC Onboarding SRL',
-            primary_email='onboarding@company.ro',
-            data_processing_consent=True,
-            created_by=self.admin,
-        )
+        address = OrderService.build_billing_address_from_customer(customer)
+        self.assertEqual(address["company_name"], customer.company_name)
+        self.assertEqual(address["email"], user.email)
+        self.assertEqual(address["address_line1"], "Str. Victoriei nr. 10")
+        self.assertEqual(address["vat_number"], "RO14399847")
 
-        # Verify customer was created
-        assert customer.pk is not None
-
-        # Complete tax profile
-        CustomerTaxProfile.objects.create(
-            customer=customer,
-            cui='RO87654321',
-            vat_number='RO87654321',
-            registration_number='J40/5678/2024',
-            is_vat_payer=True,
-        )
-
-        # Complete billing profile
-        CustomerBillingProfile.objects.create(
-            customer=customer,
-            payment_terms=30,
-            preferred_currency='RON',
-        )
-
-        # Add legal address
-        CustomerAddress.objects.create(
-            customer=customer,
-            is_primary=True,
-            address_line1='Str. Onboarding Nr. 1',
-            city='București',
-            county='Sector 2',
-            postal_code='020101',
-            country='România',
-            is_current=True,
-        )
-
-        # Verify all components are present
-        customer.refresh_from_db()
-        assert hasattr(customer, 'tax_profile') and customer.tax_profile is not None
-        assert hasattr(customer, 'billing_profile') and customer.billing_profile is not None
-        assert customer.addresses.exists()
-
-    def test_customer_profile_completion_percentage(self):
-        """Test profile completion tracking"""
-        self.client.force_login(self.admin)
-
-        # Create minimal customer
-        customer = Customer.objects.create(
-            name='SC Incomplete SRL',
-            customer_type='company',
-            company_name='SC Incomplete SRL',
-            primary_email='incomplete@company.ro',
-            data_processing_consent=True,
-            created_by=self.admin,
-        )
-
-        # Check incomplete profile
-        has_tax = hasattr(customer, 'tax_profile') and customer.tax_profile is not None
-        has_billing = hasattr(customer, 'billing_profile') and customer.billing_profile is not None
-        has_address = customer.addresses.exists()
-
-        # Should be incomplete
-        assert not has_tax or not has_billing or not has_address
+    def test_registration_rejects_incomplete_billing_profile(self):
+        """Incomplete registration is rejected before any account or profile is persisted."""
+        payload = self.payload()
+        payload["customer_data"]["address_line1"] = ""
+        response = self.post_registration(payload)
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(User.objects.exists())
+        self.assertFalse(Customer.objects.exists())

@@ -1,441 +1,106 @@
-# ===============================================================================
-# END-TO-END TESTS FOR BILLING WORKFLOW
-# ===============================================================================
-"""
-End-to-end tests for complete billing workflow.
-Tests order to invoice to payment flow with Romanian VAT compliance.
-"""
+"""Order → proforma → actual payment → locked invoice, including refund settlement."""
 
-import os
-import sys
-from datetime import timedelta
 from decimal import Decimal
 
 import pytest
+from django.core.exceptions import ValidationError
 
-# Add platform to path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../services/platform'))
+from apps.billing.models import Invoice, Payment
+from apps.billing.proforma_service import ProformaPaymentService
+from apps.billing.refund_models import Refund
+from apps.billing.refund_service import RefundService
+from apps.billing.subscription_models import Subscription
+from tests.e2e.orm.workflow import WorkflowCase
 
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings.test')
-
-import django
-
-django.setup()
-
-from django.contrib.auth import get_user_model  # noqa: E402
-from django.test import Client, TestCase  # noqa: E402
-from django.utils import timezone  # noqa: E402
-
-from apps.billing.models import Currency, Invoice, InvoiceLine, Payment  # noqa: E402
-from apps.billing.proforma_models import ProformaInvoice  # noqa: E402
-from apps.billing.refund_models import Refund  # noqa: E402
-from apps.common.tax_service import TaxService  # noqa: E402
-from apps.customers.models import Customer, CustomerAddress, CustomerBillingProfile, CustomerTaxProfile  # noqa: E402
-from apps.orders.models import Order, OrderItem  # noqa: E402
-from apps.products.models import Product  # noqa: E402
-from tests.helpers.fsm_helpers import force_status  # noqa: E402
-
-User = get_user_model()
+pytestmark = pytest.mark.e2e
 
 
-@pytest.mark.e2e
-class TestOrderToBillingWorkflow(TestCase):
-    """End-to-end tests for order to billing workflow"""
-
-    def setUp(self):
-        """Set up test fixtures"""
-        self.client = Client()
-
-        self.admin = User.objects.create_user(
-            email='billing_admin@test.ro',
-            password='AdminPass123!',
-            is_staff=True,
-            is_superuser=True,
-            staff_role='admin',
-        )
-
-        self.currency, _ = Currency.objects.get_or_create(
-            code='RON',
-            defaults={'name': 'Romanian Leu', 'symbol': 'L', 'decimals': 2}
-        )
-
-        self.customer = Customer.objects.create(
-            name='SC Billing Test SRL',
-            customer_type='company',
-            company_name='SC Billing Test SRL',
-            primary_email='billing@company.ro',
-            primary_phone='+40721234567',
-            data_processing_consent=True,
-            created_by=self.admin,
-        )
-
-        CustomerTaxProfile.objects.create(
-            customer=self.customer,
-            cui='RO12345678',
-            vat_number='RO12345678',
-            registration_number='J40/1234/2024',
-            is_vat_payer=True,
-            vat_rate=TaxService.get_vat_rate("RO"),
-        )
-
-        CustomerBillingProfile.objects.create(
-            customer=self.customer,
-            payment_terms=30,
-            preferred_currency='RON',
-        )
-
-        CustomerAddress.objects.create(
-            customer=self.customer,
-            is_primary=True,
-            address_line1='Str. Billing Nr. 1',
-            city='București',
-            county='Sector 1',
-            postal_code='010101',
-            country='România',
-            is_current=True,
-        )
-
-        self.product = Product.objects.create(
-            name='Hosting Standard',
-            slug='wh-std-e2e',
-            description='Standard web hosting package',
-            product_type='shared_hosting',
-            is_active=True,
-        )
-
+class TestOrderToBillingWorkflow(WorkflowCase):
     def test_complete_order_to_invoice_flow(self):
-        """Test complete flow from order creation to invoice"""
-        self.client.force_login(self.admin)
-
-        # Step 1: Create order
-        order = Order.objects.create(
-            customer=self.customer,
-            order_number='ORD-E2E-001',
-            status='draft',
-            currency=self.currency,
-            subtotal_cents=9900,
-            tax_cents=1881,
-            total_cents=11781,
-            customer_email=self.customer.primary_email,
-            customer_name=self.customer.name,
-        )
-
-        OrderItem.objects.create(
-            order=order,
-            product=self.product,
-            product_name=self.product.name,
-            product_type=self.product.product_type,
-            quantity=1,
-            unit_price_cents=9900,
-            line_total_cents=9900,
-        )
-
-        assert order.pk is not None
-        assert order.items.count() == 1
-
-        # Step 2: Confirm order
-        force_status(order, 'confirmed')
-
-        # Step 3: Create invoice from order
-        invoice = Invoice.objects.create(
-            customer=self.customer,
-            currency=self.currency,
-            number='INV-E2E-001',
-            status='issued',
-            subtotal_cents=order.subtotal_cents,
-            tax_cents=order.tax_cents,
-            total_cents=order.total_cents,
-            due_at=timezone.now() + timedelta(days=30),
-        )
-
-        # Link order to invoice (Order has FK to Invoice)
-        order.invoice = invoice
-        order.save()
-
-        InvoiceLine.objects.create(
-            invoice=invoice,
-            description=self.product.name,
-            quantity=1,
-            unit_price_cents=9900,
-            line_total_cents=9900,
-        )
-
-        assert invoice.pk is not None
-        assert order.invoice == invoice
-        assert invoice.total_cents == order.total_cents
+        order = self.create_order()
+        self.assertEqual(order.status, "awaiting_payment")
+        self.assertIsNone(order.invoice_id)
+        self.assertFalse(Invoice.objects.exists())
+        self.assertEqual(order.proforma.total_cents, 15125)
+        invoice = self.pay(order)
+        self.assertEqual(order.status, "provisioning")
+        self.assertEqual(order.invoice_id, invoice.pk)
+        self.assertEqual(invoice.status, "paid")
+        self.assertIsNotNone(invoice.locked_at)
+        self.assertEqual(invoice.total_cents, 15125)
+        self.assertEqual(sum(line.line_total_cents for line in invoice.lines.all()), invoice.total_cents)
+        self.assertEqual(invoice.lines.get(description__startswith="Setup fee").unit_price_cents, 2500)
+        self.assertEqual(invoice.lines.get(description=self.product.name).unit_price_cents, 10000)
+        with self.assertRaises(ValidationError):
+            invoice.lines.update(unit_price_cents=1)
 
     def test_complete_invoice_to_payment_flow(self):
-        """Test complete flow from invoice to payment"""
-        self.client.force_login(self.admin)
-
-        # Create invoice
-        invoice = Invoice.objects.create(
-            customer=self.customer,
-            currency=self.currency,
-            number='INV-E2E-PAY-001',
-            status='issued',
-            subtotal_cents=8403,
-            tax_cents=1597,
-            total_cents=10000,
-            due_at=timezone.now() + timedelta(days=30),
-        )
-
-        InvoiceLine.objects.create(
-            invoice=invoice,
-            description='Web Hosting Standard',
-            quantity=1,
-            unit_price_cents=8403,
-            line_total_cents=8403,
-        )
-
-        # Create payment
-        payment = Payment.objects.create(
-            customer=self.customer,
-            invoice=invoice,
-            currency=self.currency,
-            amount_cents=10000,
-            payment_method='stripe',
-            status='succeeded',
-        )
-
-        assert payment.pk is not None
-        assert payment.invoice == invoice
-        assert payment.amount_cents == invoice.total_cents
+        order = self.create_order()
+        invoice = self.pay(order)
+        payment = Payment.objects.get(proforma=order.proforma, invoice=invoice)
+        self.assertEqual((payment.amount_cents, payment.status, payment.payment_method), (15125, "succeeded", "bank"))
+        self.assertEqual(payment.reference_number, "E2E-BANK-REFERENCE")
+        self.assertEqual(self.pay(order).pk, invoice.pk)
+        self.assertEqual(Payment.objects.count(), 1)
+        self.assertEqual(Invoice.objects.count(), 1)
+        self.assertEqual(Subscription.objects.count(), 1)
 
     def test_romanian_vat_applied(self):
-        """Verify Romanian VAT rate from TaxService is applied correctly"""
-        ro_vat_rate = TaxService.get_vat_rate("RO")
-        ro_vat_decimal = ro_vat_rate / Decimal("100")
-        subtotal_cents = 10000  # 100.00 RON
-        tax_cents = int(subtotal_cents * ro_vat_decimal)
-        total_cents = subtotal_cents + tax_cents
-
-        invoice = Invoice.objects.create(
-            customer=self.customer,
-            currency=self.currency,
-            number='INV-E2E-VAT-001',
-            status='issued',
-            subtotal_cents=subtotal_cents,
-            tax_cents=tax_cents,
-            total_cents=total_cents,
-            due_at=timezone.now() + timedelta(days=30),
-        )
-
-        # Verify VAT calculation matches TaxService rate
-        actual_vat_rate = (invoice.tax_cents / invoice.subtotal_cents) * 100
-        expected_rate = float(ro_vat_rate)
-        assert expected_rate - 0.1 < actual_vat_rate < expected_rate + 0.1
-        assert invoice.total_cents == invoice.subtotal_cents + invoice.tax_cents
+        invoice = self.pay(self.create_order())
+        self.assertEqual((invoice.subtotal_cents, invoice.tax_cents, invoice.total_cents), (12500, 2625, 15125))
+        self.assertEqual(set(invoice.lines.values_list("tax_rate", flat=True)), {Decimal("0.21")})
 
 
-@pytest.mark.e2e
-class TestProformaToInvoiceWorkflow(TestCase):
-    """End-to-end tests for proforma to invoice workflow"""
-
-    def setUp(self):
-        """Set up test fixtures"""
-        self.client = Client()
-
-        self.admin = User.objects.create_user(
-            email='proforma_admin@test.ro',
-            password='AdminPass123!',
-            is_staff=True,
-            is_superuser=True,
-            staff_role='admin',
-        )
-
-        self.currency, _ = Currency.objects.get_or_create(
-            code='RON',
-            defaults={'name': 'Romanian Leu', 'symbol': 'L', 'decimals': 2}
-        )
-
-        self.customer = Customer.objects.create(
-            name='SC Proforma Test SRL',
-            customer_type='company',
-            company_name='SC Proforma Test SRL',
-            primary_email='proforma@company.ro',
-            data_processing_consent=True,
-            created_by=self.admin,
-        )
-
-        CustomerTaxProfile.objects.create(
-            customer=self.customer,
-            cui='RO12345678',
-            vat_number='RO12345678',
-            is_vat_payer=True,
-        )
-
-        CustomerBillingProfile.objects.create(
-            customer=self.customer,
-            payment_terms=30,
-            preferred_currency='RON',
-        )
-
+class TestProformaToInvoiceWorkflow(WorkflowCase):
     def test_proforma_creation_and_conversion(self):
-        """Test proforma creation and conversion to invoice"""
-        self.client.force_login(self.admin)
-
-        # Create proforma
-        proforma = ProformaInvoice.objects.create(
-            customer=self.customer,
-            currency=self.currency,
-            number='PRO-E2E-001',
-            status='draft',
-            subtotal_cents=8403,
-            total_cents=10000,
-            valid_until=timezone.now() + timedelta(days=30),
-        )
-
-        assert proforma.pk is not None
-        assert proforma.status == 'draft'
-
-        # Convert to invoice
-        invoice = Invoice.objects.create(
-            customer=self.customer,
-            currency=self.currency,
-            number='INV-E2E-PRO-001',
-            status='issued',
-            subtotal_cents=proforma.subtotal_cents,
-            tax_cents=1597,
-            total_cents=proforma.total_cents,
-            due_at=timezone.now() + timedelta(days=30),
-        )
-
-        assert invoice.pk is not None
-        assert invoice.total_cents == proforma.total_cents
+        order = self.create_order()
+        rejected = ProformaPaymentService.record_payment_and_convert(str(order.proforma_id), 1, "bank")
+        self.assertTrue(rejected.is_err())
+        self.assertFalse(Invoice.objects.exists())
+        self.assertFalse(Payment.objects.exists())
+        invoice = self.pay(order)
+        order.proforma.refresh_from_db()
+        self.assertEqual(order.proforma.status, "converted")
+        self.assertEqual(invoice.converted_from_proforma_id, order.proforma_id)
+        self.assertEqual(order.proforma.total_cents, invoice.total_cents)
 
 
-@pytest.mark.e2e
-class TestRefundWorkflow(TestCase):
-    """End-to-end tests for refund workflow"""
-
-    def setUp(self):
-        """Set up test fixtures"""
-        self.client = Client()
-
-        self.admin = User.objects.create_user(
-            email='refund_admin@test.ro',
-            password='AdminPass123!',
-            is_staff=True,
-            is_superuser=True,
-            staff_role='admin',
-        )
-
-        self.currency, _ = Currency.objects.get_or_create(
-            code='RON',
-            defaults={'name': 'Romanian Leu', 'symbol': 'L', 'decimals': 2}
-        )
-
-        self.customer = Customer.objects.create(
-            name='SC Refund Test SRL',
-            customer_type='company',
-            company_name='SC Refund Test SRL',
-            primary_email='refund@company.ro',
-            data_processing_consent=True,
-            created_by=self.admin,
-        )
-
-        CustomerTaxProfile.objects.create(
-            customer=self.customer,
-            cui='RO12345678',
-            vat_number='RO12345678',
-            is_vat_payer=True,
-        )
-
-        CustomerBillingProfile.objects.create(
-            customer=self.customer,
-            payment_terms=30,
-            preferred_currency='RON',
-        )
+class TestRefundWorkflow(WorkflowCase):
+    def refund(self, amount, refund_type):
+        order = self.create_order()
+        invoice = self.pay(order)
+        payment = Payment.objects.get(invoice=invoice)
+        with self.captureOnCommitCallbacks(execute=True):
+            result = RefundService.refund_invoice(
+                invoice.pk,
+                {
+                    "amount_cents": amount,
+                    "refund_type": refund_type,
+                    "reason": "customer_request",
+                    "reference": f"E2E-{refund_type}",
+                    "user_id": str(self.admin.pk),
+                },
+            )
+        self.assertTrue(result.is_ok(), str(result))
+        invoice.refresh_from_db()
+        payment.refresh_from_db()
+        refund = Refund.objects.get(invoice=invoice, payment=payment)
+        self.assertEqual(refund.status, "completed")
+        self.assertEqual(refund.amount_cents, amount)
+        self.assertEqual(refund.customer_id, order.customer_id)
+        self.assertEqual(invoice.total_cents, 15125)
+        return invoice, payment
 
     def test_full_refund_workflow(self):
-        """Test full refund of paid invoice"""
-        self.client.force_login(self.admin)
-
-        # Create paid invoice
-        invoice = Invoice.objects.create(
-            customer=self.customer,
-            currency=self.currency,
-            number='INV-E2E-REFUND-001',
-            status='paid',
-            subtotal_cents=8403,
-            tax_cents=1597,
-            total_cents=10000,
-            due_at=timezone.now() + timedelta(days=30),
-        )
-
-        # Create payment
-        payment = Payment.objects.create(
-            customer=self.customer,
-            invoice=invoice,
-            currency=self.currency,
-            amount_cents=10000,
-            payment_method='stripe',
-            status='succeeded',
-        )
-
-        # Transition payment to refunded state via FSM helper
-        force_status(payment, 'refunded')
-        payment.refresh_from_db()
-
-        # Create a Refund record with positive amount
-        refund = Refund.objects.create(
-            customer=self.customer,
-            invoice=invoice,
-            payment=payment,
-            currency=self.currency,
-            amount_cents=10000,
-            original_amount_cents=10000,
-            refund_type='full',
-            reason='customer_request',
-            reference_number='REF-E2E-FULL-001',
-        )
-
-        assert refund.amount_cents == payment.amount_cents
+        invoice, payment = self.refund(15125, "full")
+        self.assertEqual((invoice.status, payment.status), ("refunded", "refunded"))
+        duplicate = RefundService.refund_invoice(invoice.pk, {"refund_type": "full", "reason": "customer_request"})
+        self.assertTrue(duplicate.is_err())
+        self.assertEqual(Refund.objects.count(), 1)
 
     def test_partial_refund_workflow(self):
-        """Test partial refund of paid invoice"""
-        self.client.force_login(self.admin)
-
-        # Create paid invoice
-        invoice = Invoice.objects.create(
-            customer=self.customer,
-            currency=self.currency,
-            number='INV-E2E-PARTIAL-001',
-            status='paid',
-            subtotal_cents=8403,
-            tax_cents=1597,
-            total_cents=10000,
-            due_at=timezone.now() + timedelta(days=30),
-        )
-
-        # Create payment
-        Payment.objects.create(
-            customer=self.customer,
-            invoice=invoice,
-            currency=self.currency,
-            amount_cents=10000,
-            payment_method='stripe',
-            status='succeeded',
-        )
-
-        # Retrieve the payment created above and transition to partially_refunded
-        payment = Payment.objects.get(invoice=invoice, amount_cents=10000)
-        force_status(payment, 'partially_refunded')
-        payment.refresh_from_db()
-
-        # Create a Refund record with positive partial amount
-        refund = Refund.objects.create(
-            customer=self.customer,
-            invoice=invoice,
-            payment=payment,
-            currency=self.currency,
-            amount_cents=5000,
-            original_amount_cents=10000,
-            refund_type='partial',
-            reason='customer_request',
-            reference_number='REF-E2E-PARTIAL-001',
-        )
-
-        assert refund.amount_cents == 5000
-        assert refund.amount_cents < invoice.total_cents
+        invoice, payment = self.refund(5000, "partial")
+        self.assertEqual((invoice.status, payment.status), ("partially_refunded", "partially_refunded"))
+        eligibility = RefundService.get_refund_eligibility("invoice", invoice.pk)
+        self.assertTrue(eligibility.is_ok(), str(eligibility))
+        self.assertEqual(eligibility.unwrap()["max_refund_amount_cents"], 10125)

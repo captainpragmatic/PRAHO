@@ -321,6 +321,7 @@ def _create_and_process_order(request: HttpRequest, ctx: CheckoutContext) -> Htt
                 ctx.notes,
                 auto_pending=True,
                 idempotency_key=ctx.idempotency_key or None,
+                payment_method=ctx.payment_method,
                 api_client_factory=PlatformAPIClient,
             )
 

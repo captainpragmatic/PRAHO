@@ -19,22 +19,33 @@ from apps.common.types import Err
 
 class RegistrationSerializerErrorPathTests(TestCase):
     def test_service_error_message_is_surfaced(self) -> None:
-        validated = {
+        data = {
             "user_data": {
                 "email": "e@example.com",
                 "password": "CorrectHorse12!",
                 "first_name": "Ana",
                 "last_name": "Pop",
             },
-            "customer_data": {"customer_type": "company", "company_name": "Acme"},
+            "customer_data": {
+                "customer_type": "company",
+                "company_name": "Acme",
+                "address_line1": "Str. Victoriei 10",
+                "city": "București",
+                "postal_code": "010061",
+                "data_processing_consent": True,
+            },
         }
-        serializer = CustomerRegistrationSerializer()
+        serializer = CustomerRegistrationSerializer(data=data)
+        self.assertTrue(serializer.is_valid(), serializer.errors)
 
-        with patch(
-            "apps.api.customers.serializers.SecureUserRegistrationService.register_new_customer_owner",
-            return_value=Err("Invalid characters detected"),
-        ), self.assertRaises(serializers.ValidationError) as ctx:
-            serializer.create(validated)
+        with (
+            patch(
+                "apps.api.customers.serializers.SecureUserRegistrationService.register_new_customer_owner",
+                return_value=Err("Invalid characters detected"),
+            ),
+            self.assertRaises(serializers.ValidationError) as ctx,
+        ):
+            serializer.save()
 
         detail = ctx.exception.detail
         flat = str(detail)

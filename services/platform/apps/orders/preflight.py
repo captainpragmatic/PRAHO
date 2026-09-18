@@ -79,6 +79,8 @@ class OrderPreflightValidationService:
 
                 # Price availability in catalog for the order currency
                 price = product.get_price_for_currency(order.currency.code)
+                if product.requires_domain and product.domain_required_at_signup and not item.domain_name.strip():
+                    errors.append(str(_("Item '{}': a domain is required before ordering").format(item.product_name)))
                 if price is None:
                     errors.append(
                         str(_("Item '{}': no current price for {}").format(item.product_name, order.currency.code))

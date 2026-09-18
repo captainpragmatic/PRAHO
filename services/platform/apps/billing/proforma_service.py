@@ -334,6 +334,22 @@ class ProformaPaymentService:
     """
 
     @staticmethod
+    def payment_block_reason(proforma: ProformaInvoice, *, manual: bool = False) -> str | None:
+        """Explain document eligibility; callers must recheck under the payment lock."""
+        from apps.billing.payment_models import Payment  # noqa: PLC0415
+
+        if proforma.status not in ("draft", "sent", "accepted"):
+            return _t("Proforma %(number)s cannot accept payment (status: %(status)s)") % {
+                "number": proforma.number,
+                "status": proforma.status,
+            }
+        if proforma.is_expired:
+            return _t("Proforma %(number)s has expired") % {"number": proforma.number}
+        if manual and Payment.objects.filter(proforma=proforma, payment_method="stripe", status="pending").exists():
+            return _t("Proforma has an unresolved automatic card payment")
+        return None
+
+    @staticmethod
     @transaction.atomic
     def record_payment_and_convert(  # noqa: PLR0913, PLR0911, PLR0912, PLR0915, C901  # Convergence point: all payment paths share 6 params; guards are intentional
         proforma_id: str,
@@ -391,13 +407,9 @@ class ProformaPaymentService:
                     return Ok(None)
             return Err(f"Proforma {proforma.number} already converted but no invoice_id in meta")
 
-        # Validate proforma is in a convertible state
-        if proforma.status not in ("draft", "sent", "accepted"):
-            return Err(f"Proforma {proforma.number} cannot accept payment (status: {proforma.status})")
-
-        # Validate proforma is not expired
-        if proforma.is_expired:
-            return Err(f"Proforma {proforma.number} has expired")
+        blocked = ProformaPaymentService.payment_block_reason(proforma, manual=existing_payment is None)
+        if blocked:
+            return Err(blocked)
 
         # Validate full payment only (partial payments not supported yet)
         if amount_cents != proforma.total_cents:
@@ -432,12 +444,6 @@ class ProformaPaymentService:
             payment.proforma = proforma
             payment.save(update_fields=["proforma", "updated_at"])
         else:
-            if Payment.objects.filter(
-                proforma=proforma,
-                payment_method="stripe",
-                status="pending",
-            ).exists():
-                return Err("Proforma has an unresolved automatic card payment")
             # Bank transfer / admin path: create payment record (status stays "pending" for now)
             payment = Payment.objects.create(
                 customer=proforma.customer,

@@ -34,6 +34,7 @@ from apps.users.forms import (
     CustomerLoginForm,
     CustomerProfileForm,
     CustomerRegistrationForm,
+    MFAReauthenticationForm,
     PasswordResetRequestForm,
 )
 
@@ -159,11 +160,13 @@ def _handle_totp_setup_post(request: HttpRequest, customer_id: str, token: str) 
 
     try:
         user_id = request.session.get("user_id")
-        success = api_client.verify_totp_mfa(customer_id, token, user_id=user_id)
-        if success:
+        result = api_client.verify_totp_mfa(customer_id, token, user_id=user_id)
+        if result:
+            request.session.cycle_key()
+            request.session["new_mfa_backup_codes"] = result["backup_codes"]
             logger.info(f"✅ [Portal 2FA] TOTP enabled successfully for customer {customer_id}")
             return _handle_mfa_success_redirect(
-                request, "users:mfa_management", _("Two-factor authentication has been enabled successfully!")
+                request, "users:mfa_backup_codes", _("Two-factor authentication has been enabled successfully!")
             )
         else:
             return _handle_mfa_error_redirect(
@@ -223,7 +226,12 @@ def login_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912, PL
 
             try:
                 # Validate credentials via Platform API
-                auth_response = api_client.authenticate_customer(email, password)
+                mfa_token = form.cleaned_data.get("mfa_token", "")
+                auth_response = (
+                    api_client.authenticate_customer(email, password, mfa_token=mfa_token)
+                    if mfa_token
+                    else api_client.authenticate_customer(email, password)
+                )
 
                 if auth_response and auth_response.get("valid"):
                     # Successful authentication - create Django session
@@ -282,7 +290,7 @@ def login_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912, PL
 
                     # Get customer name for personalized message
                     try:
-                        profile_data = api_client.get_customer_profile(int(user_id))  # type: ignore[arg-type]
+                        profile_data = api_client.get_customer_profile(int(request.session["user_id"]))
                         if profile_data and profile_data.get("first_name"):
                             customer_name = profile_data.get("first_name")
                             messages.success(request, _("Sign in confirmed, %(name)s!") % {"name": customer_name})
@@ -534,7 +542,7 @@ def profile_view(request: HttpRequest) -> HttpResponse:
     # Get profile data from Platform API for context
     profile_data = {}
     try:
-        profile_data = api_client.get_customer_profile(int(user_id)) or {}  # type: ignore[arg-type]
+        profile_data = api_client.get_customer_profile(int(request.session["user_id"])) or {}
     except Exception as e:
         logger.debug(f"Could not load profile data from Platform API: {e}")
 
@@ -627,79 +635,33 @@ def password_reset_view(request: HttpRequest) -> HttpResponse:
 @csrf_protect
 @require_http_methods(["GET", "POST"])
 def change_password_view(request: HttpRequest) -> HttpResponse:
-    """
-    Change password view for authenticated users.
-    Allows logged-in users to change their password by providing current password.
-    """
-
-    # Check authentication - redirect to login if not authenticated
-    if not request.session.get("customer_id"):
-        return redirect("/login/")
-
-    customer_id = request.session.get("customer_id")
-    user_id = request.session.get("user_id")
-    customer_email = request.session.get("email")
-
-    if request.method == "GET":
-        form = ChangePasswordForm()
-    else:  # POST
-        form = ChangePasswordForm(request.POST)
-
-        if form.is_valid():
-            current_password = form.cleaned_data["current_password"]
-            new_password = form.cleaned_data["new_password"]
-
-            try:
-                # First verify current password via Platform API
-                auth_response = api_client.authenticate_customer(str(customer_email), current_password)
-
-                if not auth_response or not auth_response.get("valid"):
-                    logger.warning(f"⚠️ [Portal Change Password] Invalid current password for {customer_email}")
-                    messages.error(request, _("Current password is incorrect."))
-                else:
-                    # Update password via Platform API
-                    update_result = api_client.update_customer_password(int(user_id), new_password)  # type: ignore[arg-type]
-
-                    if update_result:
-                        logger.info(
-                            f"✅ [Portal Change Password] Password changed successfully for customer {customer_id}"
-                        )
-                        messages.success(request, _("Password changed successfully!"))
-                        return redirect("users:profile")
-                    else:
-                        logger.error(
-                            f"🔥 [Portal Change Password] Failed to update password for customer {customer_id}"
-                        )
-                        messages.error(request, _("Error updating password. Please try again."))
-
-            except PlatformAPIError as e:  # rate-limit-aware — custom warning with retry_after countdown
-                if getattr(e, "is_rate_limited", False):
-                    retry_after = getattr(e, "retry_after", None) or 30
-                    logger.warning(
-                        f"⚠️ [Portal Change Password] Rate-limited for {customer_email} (retry_after={retry_after}s)"
-                    )
-                    messages.warning(
-                        request,
-                        _("Too many attempts. Please try again in %(seconds)s seconds.") % {"seconds": retry_after},
-                    )
-                else:
-                    logger.error(f"🔥 [Portal Change Password] Platform API error: {e}")
-                    messages.error(
-                        request, _("Authentication service is temporarily unavailable. Please try again later.")
-                    )
-
-            except Exception as e:
-                logger.error(f"🔥 [Portal Change Password] Unexpected error: {e}")
-                messages.error(request, _("An unexpected error occurred. Please try again."))
-
-    context = {
-        "form": form,
-        "customer_email": customer_email,
-        "page_title": _("Change Password"),
-        "brand_name": "PRAHO Portal",
-    }
-
-    return render(request, "users/change_password.html", context)
+    """The Platform validates the old password and second factor before mutation."""
+    if not request.session.get("user_id"):
+        return redirect("users:login")
+    form = ChangePasswordForm(request.POST or None)
+    if request.method == "POST" and form.is_valid():
+        try:
+            changed = api_client.update_customer_password(
+                int(request.session["user_id"]),
+                form.cleaned_data["new_password"],
+                form.cleaned_data["current_password"],
+                form.cleaned_data.get("token", ""),
+            )
+            if changed:
+                request.session.cycle_key()
+                messages.success(request, _("Password changed successfully!"))
+                return redirect("users:profile")
+            form.add_error(None, _("Password change failed. Check your current password and authentication code."))
+        except PlatformAPIError as exc:
+            if is_rate_limited_error(exc):
+                messages.warning(
+                    request,
+                    _("Too many attempts. Please try again in %(seconds)s seconds.")
+                    % {"seconds": exc.retry_after or 30},
+                )
+            else:
+                form.add_error(None, _("Password change failed. Please try again."))
+    return render(request, "users/change_password.html", {"form": form, "customer_email": request.session.get("email")})
 
 
 @never_cache
@@ -720,7 +682,7 @@ def privacy_dashboard_view(request: HttpRequest) -> HttpResponse:
     # Get customer profile data with privacy information
     profile_data = {}
     try:
-        profile_data = api_client.get_customer_profile(int(customer_id)) or {}  # type: ignore[arg-type]
+        profile_data = api_client.get_customer_profile(int(request.session["user_id"])) or {}
     except Exception as e:
         logger.debug(f"Could not load profile data from Platform API: {e}")
 
@@ -821,7 +783,7 @@ def consent_history_view(request: HttpRequest) -> HttpResponse:
     # Get customer profile data with consent information
     profile_data = {}
     try:
-        profile_data = api_client.get_customer_profile(int(customer_id)) or {}  # type: ignore[arg-type]
+        profile_data = api_client.get_customer_profile(int(request.session["user_id"])) or {}
     except Exception as e:
         logger.debug(f"Could not load profile data from Platform API: {e}")
 
@@ -869,7 +831,7 @@ def mfa_management_view(request: HttpRequest) -> HttpResponse:
     # Get customer profile data with 2FA status
     profile_data = {}
     try:
-        profile_data = api_client.get_customer_profile(int(customer_id)) or {}  # type: ignore[arg-type]
+        profile_data = api_client.get_customer_profile(int(request.session["user_id"])) or {}
     except Exception as e:
         logger.debug(f"Could not load profile data from Platform API: {e}")
 
@@ -911,75 +873,57 @@ def mfa_setup_totp_view(request: HttpRequest) -> HttpResponse:
 
 
 @never_cache
-@require_http_methods(["GET"])
+@require_http_methods(["GET", "POST"])
 def mfa_backup_codes_view(request: HttpRequest) -> HttpResponse:
-    """
-    View and regenerate backup codes for authenticated users.
-    """
-
-    # Check authentication - redirect to login if not authenticated
-    if not request.session.get("customer_id"):
-        return redirect("/login/")
-
-    customer_id = request.session.get("customer_id")
-    customer_email = request.session.get("email")
-
-    # Check if user has 2FA enabled
-    profile_data = {}
-    try:
-        profile_data = api_client.get_customer_profile(int(str(customer_id))) or {}
-    except Exception as e:
-        logger.debug(f"Could not load profile data from Platform API: {e}")
-
-    if not profile_data.get("mfa_enabled"):
+    """Show newly issued codes once; stored hashes cannot be downloaded later."""
+    if not request.session.get("user_id"):
+        return redirect("users:login")
+    user_id = int(request.session["user_id"])
+    profile = api_client.get_customer_profile(user_id) or {}
+    if not profile.get("mfa_enabled"):
         messages.warning(request, _("You need to enable 2FA first before accessing backup codes."))
         return redirect("users:mfa_management")
-
-    # Get backup codes
-    backup_codes = []
-    try:
-        backup_codes = api_client.get_backup_codes(str(customer_id)) or []
-    except Exception as e:
-        logger.error(f"🔥 [Portal 2FA] Error getting backup codes: {e}")
-        messages.error(request, _("Error loading backup codes."))
-
-    context = {
-        "backup_codes": backup_codes,
-        "customer_email": customer_email,
-        "customer_id": customer_id,
-        "page_title": _("Backup Codes"),
-        "brand_name": "PRAHO Portal",
-    }
-
-    return render(request, "users/mfa_backup_codes.html", context)
+    form = MFAReauthenticationForm(request.POST or None)
+    if request.method == "POST" and form.is_valid():
+        try:
+            result = api_client.regenerate_backup_codes(
+                user_id, form.cleaned_data["password"], form.cleaned_data["token"]
+            )
+            request.session.cycle_key()
+            request.session["new_mfa_backup_codes"] = result["backup_codes"]
+            return redirect("users:mfa_backup_codes")
+        except PlatformAPIError:
+            form.add_error(None, _("Could not regenerate codes. Check your password and authentication code."))
+    return render(
+        request,
+        "users/mfa_backup_codes.html",
+        {
+            "backup_codes": request.session.pop("new_mfa_backup_codes", []),
+            "remaining": profile.get("backup_codes_count", 0),
+            "form": form,
+        },
+    )
 
 
 @never_cache
-@require_http_methods(["POST"])
+@require_http_methods(["GET", "POST"])
 def mfa_disable_view(request: HttpRequest) -> HttpResponse:
-    """
-    Disable 2FA for authenticated users.
-    """
-
-    # Check authentication - redirect to login if not authenticated
-    if not request.session.get("customer_id"):
-        return redirect("/login/")
-
-    customer_id = request.session.get("customer_id")
-
-    try:
-        success = api_client.disable_mfa(str(customer_id))
-        if success:
-            logger.info(f"✅ [Portal 2FA] 2FA disabled successfully for customer {customer_id}")
-            messages.success(request, _("Two-factor authentication has been disabled."))
-        else:
-            messages.error(request, _("Failed to disable 2FA. Please try again."))
-
-    except Exception as e:
-        logger.error(f"🔥 [Portal 2FA] Error disabling 2FA: {e}")
-        messages.error(request, _("An error occurred. Please try again."))
-
-    return redirect("users:mfa_management")
+    """Require password and second factor before disabling account protection."""
+    if not request.session.get("user_id"):
+        return redirect("users:login")
+    form = MFAReauthenticationForm(request.POST or None)
+    if request.method == "POST" and form.is_valid():
+        try:
+            if api_client.disable_mfa(
+                int(request.session["user_id"]), form.cleaned_data["password"], form.cleaned_data["token"]
+            ):
+                request.session.cycle_key()
+                request.session.pop("new_mfa_backup_codes", None)
+                messages.success(request, _("Two-factor authentication has been disabled."))
+                return redirect("users:mfa_management")
+        except PlatformAPIError:
+            form.add_error(None, _("Could not disable MFA. Check your password and authentication code."))
+    return render(request, "users/mfa_disable.html", {"form": form})
 
 
 @never_cache
@@ -1026,7 +970,7 @@ def company_profile_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, P
 
         if response.get("success"):
             customer = response.get("customer", {})
-            tax_profile = customer.get("tax_profile", {})
+            tax_profile = customer.get("tax_profile") or {}
 
             # Fetch billing address from addresses endpoint (not billing_profile)
             billing_addr: dict[str, str] = {}
@@ -1141,7 +1085,7 @@ def company_profile_edit_view(request: HttpRequest) -> HttpResponse:  # noqa: C9
             if response.get("success"):
                 customer = response.get("customer", {})
                 billing_profile = customer.get("billing_profile", {})
-                tax_profile = customer.get("tax_profile", {})
+                tax_profile = customer.get("tax_profile") or {}
 
                 initial_data = {
                     "company_name": customer.get("company_name", ""),

@@ -17,22 +17,23 @@ Based on real customer onboarding workflows for PragmaticHost.
 import re
 import secrets
 import string
+from uuid import uuid4
 
+import pytest
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import Locator, Page, expect
 
 # Import shared utilities
 from tests.e2e.helpers import (
     BASE_URL,
-    CUSTOMER_EMAIL,
-    LOGIN_URL,
     REGISTER_URL,
     ComprehensivePageMonitor,
-    MobileTestContext,
     assert_responsive_results,
-    is_login_url,
+    ensure_fresh_session,
+    login_user,
     run_responsive_breakpoints_test,
 )
+from tests.e2e.helpers.orders import add_product, bank_checkout
 
 # ===============================================================================
 # TEST DATA GENERATORS
@@ -90,7 +91,8 @@ def test_signup_page_loads_correctly(page: Page) -> None:
         check_network=True,
         check_html=True,
         check_css=True,
-                                 check_accessibility=False):
+        check_accessibility=False,
+    ):
         # Navigate to signup page
         page.goto(f"{BASE_URL}{REGISTER_URL}")
         page.wait_for_load_state("networkidle")
@@ -100,7 +102,9 @@ def test_signup_page_loads_correctly(page: Page) -> None:
 
         # Verify page title
         title = page.title()
-        assert "Create Account" in title or "PragmaticHost" in title, f"Page title should contain 'Create Account', got: {title}"
+        assert "Create Account" in title or "PragmaticHost" in title, (
+            f"Page title should contain 'Create Account', got: {title}"
+        )
 
         # Verify main heading
         heading = page.locator("h1")
@@ -175,7 +179,8 @@ def test_signup_page_has_romanian_business_context(page: Page) -> None:
         check_network=True,
         check_html=False,  # May have minor HTML issues
         check_css=True,
-                                 check_accessibility=False):
+        check_accessibility=False,
+    ):
         # Navigate to signup page
         page.goto(f"{BASE_URL}{REGISTER_URL}")
         page.wait_for_load_state("networkidle")
@@ -222,56 +227,12 @@ def test_signup_page_has_romanian_business_context(page: Page) -> None:
 
 
 def test_signup_form_validation_required_fields(page: Page) -> None:
-    """
-    Test that the signup form validates required fields properly.
-
-    This test verifies:
-    1. Form cannot be submitted with empty required fields
-    2. Appropriate error messages are displayed
-    3. Form stays on page after validation failure
-    """
-    print("Testing signup form validation for required fields")
-
-    with ComprehensivePageMonitor(
-        page,
-        "signup form validation",
-        check_console=True,  # console verified clean under current CSP (favicon.svg 404 fixed)
-        check_network=True,
-        check_html=False,
-        check_css=True,
-                                 check_accessibility=False):
-        # Navigate to signup page
-        page.goto(f"{BASE_URL}{REGISTER_URL}")
-        page.wait_for_load_state("networkidle")
-
-        # Try to submit empty form
-        submit_button = page.locator('button:has-text("Create Account")')
-        submit_button.click()
-
-        # Wait for validation
-        page.wait_for_load_state("networkidle")
-
-        # Should still be on signup page
-        assert REGISTER_URL in page.url, "Should remain on signup page after validation failure"
-
-        # Check for HTML5 validation or error messages
-        # HTML5 required field validation should prevent submission
-        first_name_field = page.locator('input[name="first_name"]')
-
-        # Try to check if field has validation state
-        is_invalid = first_name_field.evaluate("el => !el.validity.valid") if first_name_field.is_visible() else False
-
-        if is_invalid:
-            print("    HTML5 validation prevents empty form submission")
-        else:
-            # Check for Django form errors
-            error_elements = page.locator(".text-red-400, .text-red-500, .text-red-600, .error, .invalid-feedback")
-            if error_elements.count() > 0:
-                print(f"    Form validation errors displayed: {error_elements.count()} errors")
-            else:
-                print("    Form validation active (may use browser-native validation)")
-
-        print("  Required field validation works correctly")
+    page.goto(f"{BASE_URL}{REGISTER_URL}")
+    page.get_by_role("button", name="Create Account", exact=True).click()
+    expect(page).to_have_url(f"{BASE_URL}{REGISTER_URL}")
+    assert page.locator('input[name="first_name"]').evaluate("el => el.validity.valueMissing")
+    for field in ("email", "password1", "password2", "data_processing_consent", "terms_accepted"):
+        expect(page.locator(f'input[name="{field}"]')).to_have_attribute("required", "")
 
 
 def test_signup_form_email_validation(page: Page) -> None:
@@ -291,7 +252,8 @@ def test_signup_form_email_validation(page: Page) -> None:
         check_network=True,
         check_html=False,
         check_css=True,
-                                 check_accessibility=False):
+        check_accessibility=False,
+    ):
         # Navigate to signup page
         page.goto(f"{BASE_URL}{REGISTER_URL}")
         page.wait_for_load_state("networkidle")
@@ -321,66 +283,11 @@ def test_signup_form_email_validation(page: Page) -> None:
 
 
 def test_signup_form_password_validation(page: Page) -> None:
-    """
-    Test that the signup form validates password requirements.
-
-    This test verifies:
-    1. Password fields match validation
-    2. Password strength requirements are enforced
-    """
-    print("Testing signup form password validation")
-
-    with ComprehensivePageMonitor(
-        page,
-        "signup password validation",
-        check_console=True,  # console verified clean under current CSP (favicon.svg 404 fixed)
-        check_network=True,
-        check_html=False,
-        check_css=True,
-                                 check_accessibility=False):
-        # Navigate to signup page
-        page.goto(f"{BASE_URL}{REGISTER_URL}")
-        page.wait_for_load_state("networkidle")
-
-        password1_field = page.locator('input[name="password1"]')
-        password2_field = page.locator('input[name="password2"]')
-
-        # Test password mismatch - fill all required fields first to allow form submission
-        test_password = generate_test_password()
-        password1_field.fill(test_password)
-        password2_field.fill(test_password + "mismatch")
-
-        # Fill other required fields minimally
-        page.locator('input[name="first_name"]').fill("Test")
-        page.locator('input[name="last_name"]').fill("User")
-        page.locator('input[name="email"]').fill(generate_test_email())
-        page.locator('input[name="company_name"]').fill("Test Company SRL")
-        page.locator('input[name="address_line1"]').fill("Test Street 123")
-        page.locator('input[name="city"]').fill("Bucharest")
-        page.locator('input[name="county"]').fill("Bucharest")
-        page.locator('input[name="postal_code"]').fill("010001")
-        page.locator('input[name="data_processing_consent"]').check()
-
-        # Submit form
-        submit_button = page.locator('button:has-text("Create Account")')
-        submit_button.click()
-        page.wait_for_load_state("networkidle")
-
-        # Should show error about password mismatch
-        # Check if still on register page (validation failed) or if error message shown
-        assert REGISTER_URL in page.url, "Password mismatch should prevent form submission"
-        print("    Password mismatch correctly prevented form submission")
-
-        # Look for password error message
-        password_errors = page.locator('p:has-text("password"), .error:has-text("password")')
-        if password_errors.count() > 0:
-            print("    Password mismatch error message displayed")
-
-        # Test matching passwords
-        password2_field.fill(test_password)
-        print("    Matching passwords set correctly")
-
-        print("  Password validation works correctly")
+    _fill_registration(page, generate_test_email(), "Mismatched Passwords SRL")
+    page.locator('[name="password2"]').fill("A-different-password123!")
+    page.get_by_role("button", name="Create Account", exact=True).click()
+    expect(page).to_have_url(f"{BASE_URL}{REGISTER_URL}")
+    expect(page.locator("body")).to_contain_text(re.compile("password.*match", re.I))
 
 
 # ===============================================================================
@@ -389,180 +296,21 @@ def test_signup_form_password_validation(page: Page) -> None:
 
 
 def test_signup_form_successful_submission(page: Page) -> None:
-    """
-    Test successful signup form submission with all required data.
-
-    This test verifies:
-    1. Form can be submitted with all required fields filled
-    2. After submission, user is redirected to confirmation page
-    3. The flow is enumeration-safe (same response for existing emails)
-    """
-    print("Testing successful signup form submission")
-
-    with ComprehensivePageMonitor(
-        page,
-        "signup form submission",
-        check_console=True,  # console verified clean under current CSP (favicon.svg 404 fixed)
-        check_network=True,
-        check_html=False,
-        check_css=True,
-                                 check_accessibility=False):
-        # Navigate to signup page
-        page.goto(f"{BASE_URL}{REGISTER_URL}")
-        page.wait_for_load_state("networkidle")
-
-        # Generate unique test data
-        test_email = generate_test_email()
-        test_password = generate_test_password()
-        test_company = generate_test_company_name()
-        test_phone = generate_test_phone()
-
-        print(f"    Using test email: {test_email}")
-        print(f"    Using test company: {test_company}")
-
-        # Fill personal information
-        page.locator('input[name="first_name"]').fill("Elena")
-        page.locator('input[name="last_name"]').fill("TestUser")
-        page.locator('input[name="email"]').fill(test_email)
-        page.locator('input[name="phone"]').fill(test_phone)
-        print("    Personal information filled")
-
-        # Fill business information
-        page.locator('select[name="customer_type"]').select_option("srl")
-        page.locator('input[name="company_name"]').fill(test_company)
-        # VAT number is optional, skip for this test
-        print("    Business information filled")
-
-        # Fill address information
-        page.locator('input[name="address_line1"]').fill("Strada Testelor Nr. 123")
-        page.locator('input[name="city"]').fill("Bucuresti")
-        page.locator('input[name="county"]').fill("Bucuresti")
-        page.locator('input[name="postal_code"]').fill("010001")
-        print("    Address information filled")
-
-        # Fill password
-        page.locator('input[name="password1"]').fill(test_password)
-        page.locator('input[name="password2"]').fill(test_password)
-        print("    Password set")
-
-        # Accept GDPR consent and the required terms
-        page.locator('input[name="data_processing_consent"]').check()
-        page.locator('input[name="terms_accepted"]').check()
-        print("    GDPR consent + terms accepted")
-
-        # Submit form
-        submit_button = page.locator('button:has-text("Create Account")')
-        submit_button.click()
-
-        # Wait for form processing
-        page.wait_for_load_state("networkidle")
-
-        # Check for successful submission
-        # Should redirect to register/submitted/ or show success message
-        current_url = page.url
-
-        # App may redirect to /register/submitted/ OR stay on /register/ with success message
-        page_content = page.content().lower()
-        confirmation_indicators = ["submitted", "check your email", "registration", "thank you", "success", "account created"]
-        on_submitted_page = "/submitted" in current_url
-        has_success_message = any(indicator in page_content for indicator in confirmation_indicators)
-
-        assert on_submitted_page or has_success_message or current_url != f"{BASE_URL}{REGISTER_URL}", (
-            f"Should show confirmation after signup, got: {current_url}"
-        )
-        if on_submitted_page:
-            print("    Successfully redirected to confirmation page")
-        else:
-            print("    [i] Signup processed (stayed on registration page with feedback)")
-
-        found_indicator = on_submitted_page or has_success_message
-
-        if found_indicator:
-            print("    Confirmation page shows appropriate message")
-        else:
-            print("    Confirmation page loaded (content may vary)")
-
-        print("  Signup form submission test completed")
+    """Registration creates a login-capable account with its own persisted company."""
+    account = _register_customer(page)
+    ensure_fresh_session(page)
+    assert login_user(page, account["email"], account["password"])
+    page.goto(f"{BASE_URL}/company/")
+    expect(page.locator("#main-content")).to_contain_text(account["company"])
 
 
 def test_signup_then_login_flow(page: Page) -> None:
-    """
-    Test the complete flow: signup -> confirmation -> login.
-
-    Note: This test may not complete the full flow if email verification is required.
-    It tests the UI flow as far as possible without email access.
-    """
-    print("Testing signup then login flow")
-
-    with ComprehensivePageMonitor(
-        page,
-        "signup then login flow",
-        check_console=True,  # console verified clean under current CSP (favicon.svg 404 fixed)
-        check_network=True,
-        check_html=False,
-        check_css=False,  # Page navigates during signup→login flow, destroying execution context
-        check_accessibility=False):
-        # Generate unique test data
-        test_email = generate_test_email()
-        test_password = generate_test_password()
-        test_company = generate_test_company_name()
-
-        print(f"    Test email: {test_email}")
-
-        # Complete signup
-        page.goto(f"{BASE_URL}{REGISTER_URL}")
-        page.wait_for_load_state("networkidle")
-
-        # Fill all required fields
-        page.locator('input[name="first_name"]').fill("Elena")
-        page.locator('input[name="last_name"]').fill("LoginTest")
-        page.locator('input[name="email"]').fill(test_email)
-        page.locator('select[name="customer_type"]').select_option("srl")
-        page.locator('input[name="company_name"]').fill(test_company)
-        page.locator('input[name="address_line1"]').fill("Test Street 1")
-        page.locator('input[name="city"]').fill("Bucuresti")
-        page.locator('input[name="county"]').fill("Bucuresti")
-        page.locator('input[name="postal_code"]').fill("010001")
-        page.locator('input[name="password1"]').fill(test_password)
-        page.locator('input[name="password2"]').fill(test_password)
-        page.locator('input[name="data_processing_consent"]').check()
-        page.locator('input[name="terms_accepted"]').check()
-
-        # Submit
-        page.locator('button:has-text("Create Account")').click()
-        page.wait_for_load_state("networkidle")
-
-        # After signup, navigate to login
-        page.goto(f"{BASE_URL}{LOGIN_URL}")
-        page.wait_for_load_state("networkidle")
-
-        # Verify we can access login page
-        assert is_login_url(page.url), "Should be able to access login page"
-        print("    Login page accessible after signup")
-
-        # Try to login with new credentials
-        # Note: This may fail if email verification is required
-        page.locator('input[name="email"]').fill(test_email)
-        page.locator('input[name="password"]').fill(test_password)
-        page.locator('button[type="submit"]').click()
-
-        page.wait_for_load_state("networkidle")
-
-        current_url = page.url
-        if "/dashboard/" in current_url:
-            print("    Successfully logged in with new account")
-        elif is_login_url(current_url):
-            # Check for error messages
-            error_msg = page.locator(".alert, .error, .text-red-500").first
-            if error_msg.is_visible():
-                error_text = error_msg.text_content()
-                print(f"    Login blocked (may require email verification): {error_text}")
-            else:
-                print("    Login form shown (credentials may need verification)")
-        else:
-            print(f"    Redirected to: {current_url}")
-
-        print("  Signup then login flow test completed")
+    """Registration creates a login-capable account with its own persisted company."""
+    account = _register_customer(page)
+    ensure_fresh_session(page)
+    assert login_user(page, account["email"], account["password"])
+    page.goto(f"{BASE_URL}/company/")
+    expect(page.locator("#main-content")).to_contain_text(account["company"])
 
 
 # ===============================================================================
@@ -570,108 +318,27 @@ def test_signup_then_login_flow(page: Page) -> None:
 # ===============================================================================
 
 
-def test_customer_can_view_orders_list(monitored_customer_page: Page) -> None:
-    """
-    Test that logged-in customers can view their orders list.
-
-    This test verifies:
-    1. Customer can access /order/ after login
-    2. Orders list page displays correctly
-    3. Customer sees appropriate order status filters
-    """
-    print("Testing customer order list viewing")
-
+def test_customer_can_view_product_catalog(monitored_customer_page: Page) -> None:
     page = monitored_customer_page
-
-
-
     page.goto(f"{BASE_URL}/order/")
-    page.wait_for_load_state("networkidle")
-
-    # Verify we're on orders page or allowed to access
-    current_url = page.url
-    assert "/order/" in current_url, f"Customer should be able to access orders page, got: {current_url}"
-    print("    Customer can access orders page")
-
-    # Check for orders list elements
-    # Look for table or list of orders, or "no orders" message
-    orders_content = page.locator("table, .order-list, .no-orders")
-
-    # Check for status filter buttons/tabs
-    status_filters = page.locator('a:has-text("All"), a:has-text("Pending"), a:has-text("Completed")')
-    if status_filters.count() > 0:
-        print(f"    Found {status_filters.count()} status filter options")
-
-    # Check page structure
-    page_heading = page.locator("h1, h2")
-    if page_heading.count() > 0:
-        heading_text = page_heading.first.text_content()
-        print(f"    Page heading: {heading_text}")
-
-    print("  Customer order viewing test completed")
+    expect(page.locator("#cart-form-e2e-hosting")).to_be_visible()
+    expect(page.locator('a[href="/order/products/e2e-hosting/"]').first).to_be_visible()
 
 
-def test_customer_order_list_shows_correct_data(monitored_customer_page: Page) -> None:
-    """
-    Test that the orders list shows correct data for the customer.
+@pytest.mark.expect_server_errors("API request failed: Order not found")
+def test_customer_order_confirmation_is_private(account_page, e2e_baseline) -> None:
 
-    This test verifies:
-    1. Only customer's own orders are displayed (multi-tenant security)
-    2. Order information is displayed correctly
-    3. Search and filter functionality works
-    """
-    print("Testing customer order list data accuracy")
-
-    page = monitored_customer_page
-
-
-
-    page.goto(f"{BASE_URL}/order/")
-    page.wait_for_load_state("networkidle")
-
-    if "/order/" not in page.url:
-        print("    Cannot access orders page - skipping data tests")
-        return
-
-    # Check if there are any orders displayed
-    order_rows = page.locator("table tbody tr")
-    order_count = order_rows.count()
-
-    print(f"    Found {order_count} orders in list")
-
-    if order_count > 0:
-        # Check first order has expected columns
-        first_row = order_rows.first
-        row_text = first_row.text_content()
-
-        # Orders typically show: order number, status, date, total
-        expected_patterns = [
-            r"ORD-\d+",  # Order number pattern
-        ]
-
-        for pattern in expected_patterns:
-            if re.search(pattern, row_text or ""):
-                print("    Order number pattern found")
-                break
-
-        # Check for order detail link
-        detail_link = first_row.locator("a")
-        if detail_link.count() > 0:
-            print("    Order detail links are present")
-    else:
-        # Check for "no orders" message
-        no_orders_msg = page.locator('text="No orders", text="no orders found"')
-        if no_orders_msg.count() > 0:
-            print("    'No orders' message displayed correctly")
-        else:
-            print("    Orders list is empty (new customer)")
-
-    # Test search functionality if available
-    search_input = page.locator('input[name="search"], input[placeholder*="search"]')
-    if search_input.is_visible():
-        print("    Search functionality is available")
-
-    print("  Customer order data accuracy test completed")
+    page, _ = account_page
+    add_product(page)
+    confirmation = bank_checkout(page)
+    order_number = re.search(r"ORD-\d+", page.locator("#main-content").inner_text()).group()
+    ensure_fresh_session(page)
+    assert login_user(page, e2e_baseline["customers"][1]["email"], "admin123")
+    response = page.goto(confirmation)
+    assert response.status < 500
+    expect(page.locator("#main-content")).not_to_contain_text(order_number)
+    expect(page.get_by_role("heading", name="Awaiting your bank transfer")).to_have_count(0)
+    assert page.url != confirmation or response.status in (403, 404)
 
 
 # ===============================================================================
@@ -704,92 +371,12 @@ def _journey_fill_registration_form(page: Page, test_email: str, test_password: 
     print("    Step 2: Registration form filled")
 
 
-def _journey_handle_post_login(page: Page, test_email: str, test_password: str, current_url: str) -> None:
-    """Steps 5-6: Handle login result — navigate to orders if successful, report otherwise."""
-    if "/dashboard/" in current_url:
-        print("    Step 5: Successfully logged in to dashboard")
-
-        page.goto(f"{BASE_URL}/order/")
-        page.wait_for_load_state("networkidle")
-
-        if "/order/" in page.url:
-            print("    Step 6: Successfully accessed orders section")
-            if "order" in page.content().lower():
-                print("    Complete journey successful - new customer can view orders")
-        else:
-            print(f"    Step 6: Orders page access result: {page.url}")
-        return
-
-    print(f"    Step 5: Login result: {current_url}")
-    if is_login_url(current_url):
-        error_msg = page.locator(".alert, .error, .text-red-500")
-        if error_msg.count() > 0:
-            print(f"      Login message: {error_msg.first.text_content()}")
-        print("      (Account may require email verification)")
-
-
 def test_complete_new_customer_journey(page: Page) -> None:
-    """
-    Test the complete new customer journey: signup -> login -> dashboard -> orders.
+    """Public registration supplies enough billing data to submit a real bank order."""
 
-    This comprehensive test simulates a real customer onboarding flow:
-    1. New user visits signup page
-    2. Fills registration form with Romanian business data
-    3. Submits registration
-    4. Attempts to login (may require email verification)
-    5. Views dashboard (if login succeeds)
-    6. Navigates to orders section
-
-    Note: Full flow completion depends on email verification settings.
-    """
-    print("Testing complete new customer journey")
-
-    with ComprehensivePageMonitor(
-        page,
-        "complete customer journey",
-        check_console=True,  # console verified clean under current CSP (favicon.svg 404 fixed)
-        check_network=True,
-        check_html=False,
-        check_css=False,  # Multi-page journey (signup→login→dashboard) destroys execution context
-        check_accessibility=False):
-        test_email = generate_test_email()
-        test_password = generate_test_password()
-        test_company = generate_test_company_name()
-
-        print(f"    Journey test email: {test_email}")
-        print(f"    Journey test company: {test_company}")
-
-        page.goto(f"{BASE_URL}{REGISTER_URL}")
-        page.wait_for_load_state("networkidle")
-        assert REGISTER_URL in page.url, "Should be on signup page"
-        print("    Step 1: Signup page accessed")
-
-        _journey_fill_registration_form(page, test_email, test_password, test_company)
-
-        page.locator('button:has-text("Create Account")').click()
-        page.wait_for_load_state("networkidle")
-
-        submitted_url = page.url
-        page_content = page.content().lower()
-        on_submitted = "/submitted" in submitted_url
-        has_feedback = any(w in page_content for w in ["success", "submitted", "thank you", "account created", "check your email"])
-        assert on_submitted or has_feedback or submitted_url != f"{BASE_URL}{REGISTER_URL}", (
-            f"Step 3: Registration should show confirmation, got: {submitted_url}"
-        )
-        print("    Step 3: Registration submitted successfully")
-
-        page.goto(f"{BASE_URL}{LOGIN_URL}")
-        page.wait_for_load_state("networkidle")
-        print("    Step 4: Navigated to login page")
-
-        page.locator('input[name="email"]').fill(test_email)
-        page.locator('input[name="password"]').fill(test_password)
-        page.locator('button[type="submit"]').click()
-        page.wait_for_load_state("networkidle")
-
-        _journey_handle_post_login(page, test_email, test_password, page.url)
-
-        print("  Complete new customer journey test finished")
+    _register_customer(page)
+    add_product(page)
+    bank_checkout(page)
 
 
 # ===============================================================================
@@ -798,70 +385,12 @@ def test_complete_new_customer_journey(page: Page) -> None:
 
 
 def test_signup_page_mobile_responsiveness(page: Page) -> None:
-    """
-    Test signup page mobile responsiveness.
-
-    This test verifies:
-    1. Signup form displays correctly on mobile viewports
-    2. All form fields are accessible and usable on mobile
-    3. Submit button is properly sized for touch interaction
-    4. No horizontal scrolling issues
-    """
-    print("Testing signup page mobile responsiveness")
-
-    with ComprehensivePageMonitor(
-        page,
-        "signup mobile responsiveness",
-        check_console=True,  # console verified clean under current CSP (favicon.svg 404 fixed)
-        check_network=True,
-        check_html=False,
-        check_css=True,
-                                 check_accessibility=False):
-        # Navigate to signup on desktop first
-        page.goto(f"{BASE_URL}{REGISTER_URL}")
-        page.wait_for_load_state("networkidle")
-
-        # Test mobile viewport
-        with MobileTestContext(page, "mobile_medium") as mobile:
-            print("    Testing on mobile viewport")
-
-            # Reload to ensure mobile layout
-            page.reload()
-            page.wait_for_load_state("networkidle")
-
-            # Check for horizontal scroll issues
-            layout_issues = mobile.check_responsive_layout()
-            horizontal_scroll_issues = [
-                issue for issue in layout_issues if "horizontal scroll" in issue.lower()
-            ]
-
-            if horizontal_scroll_issues:
-                print("      Horizontal scroll issue detected")
-            else:
-                print("      No horizontal scroll issues")
-
-            # Verify form fields are visible
-            form_fields = [
-                'input[name="first_name"]',
-                'input[name="email"]',
-                'input[name="password1"]',
-                'button:has-text("Create Account")',
-            ]
-
-            for selector in form_fields:
-                field = page.locator(selector)
-                if field.is_visible():
-                    # Check if field is properly sized
-                    box = field.bounding_box()
-                    if box and box["width"] >= 250:  # Reasonable mobile input width
-                        print(f"      {selector} properly sized for mobile")
-                    else:
-                        print(f"      {selector} may be too narrow for mobile")
-
-            # Test mobile navigation
-            mobile.test_mobile_navigation()
-
-        print("  Signup mobile responsiveness test completed")
+    page.set_viewport_size({"width": 375, "height": 812})
+    page.goto(f"{BASE_URL}{REGISTER_URL}")
+    for field in ("first_name", "email", "password1"):
+        expect(page.locator(f'input[name="{field}"]')).to_be_visible()
+    expect(page.get_by_role("button", name="Create Account", exact=True)).to_be_visible()
+    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
 
 
 def test_signup_across_responsive_breakpoints(page: Page) -> None:
@@ -882,7 +411,9 @@ def test_signup_across_responsive_breakpoints(page: Page) -> None:
         check_network=True,
         check_html=False,
         check_css=True,
-                                 check_accessibility=False):
+        check_accessibility=False,
+    ):
+
         def test_signup_form_visibility(test_page: Page, context: str = "") -> bool:
             """Test that signup form is visible and functional"""
             try:
@@ -920,119 +451,19 @@ def test_signup_across_responsive_breakpoints(page: Page) -> None:
 # ===============================================================================
 
 
-def test_signup_rate_limiting_indication(page: Page) -> None:
-    """
-    Test that the signup page handles rate limiting gracefully.
-
-    Note: This test checks for rate limiting UI elements, not actual rate limit triggering.
-    """
-    print("Testing signup rate limiting indication")
-
-    with ComprehensivePageMonitor(
-        page,
-        "signup rate limiting",
-        check_console=True,  # console verified clean under current CSP (favicon.svg 404 fixed)
-        check_network=True,
-        check_html=False,
-        check_css=True,
-                                 check_accessibility=False):
-        # Navigate to signup
-        page.goto(f"{BASE_URL}{REGISTER_URL}")
-        page.wait_for_load_state("networkidle")
-
-        # Check page content for rate limiting handling
-        # The system should have rate limiting in place but show user-friendly messages
-        page_content = page.content().lower()
-
-        # Rate limiting should not expose timing information
-        # Check that the form is normally accessible
-        submit_button = page.locator('button:has-text("Create Account")')
-        assert submit_button.is_visible(), "Submit button should be visible on normal access"
-
-        print("    Signup page accessible with normal request")
-        print("    Rate limiting UI check passed (not triggered)")
-
-        print("  Signup rate limiting indication test completed")
-
-
-def test_signup_enumeration_protection(page: Page) -> None:
-    """
-    Test that the signup process is enumeration-safe.
-
-    The system should respond identically whether or not an email exists,
-    to prevent attackers from discovering valid email addresses.
-    """
-    print("Testing signup enumeration protection")
-
-    with ComprehensivePageMonitor(
-        page,
-        "signup enumeration protection",
-        check_console=True,  # console verified clean under current CSP (favicon.svg 404 fixed)
-        check_network=True,
-        check_html=False,
-        check_css=True,
-                                 check_accessibility=False):
-        # Complete signup with a new email
-        new_email = generate_test_email()
-        test_password = generate_test_password()
-        test_company = generate_test_company_name()
-
-        # Fill and submit form with new email
-        page.goto(f"{BASE_URL}{REGISTER_URL}")
-        page.wait_for_load_state("networkidle")
-
-        page.locator('input[name="first_name"]').fill("Enum")
-        page.locator('input[name="last_name"]').fill("Test")
-        page.locator('input[name="email"]').fill(new_email)
-        page.locator('select[name="customer_type"]').select_option("srl")
-        page.locator('input[name="company_name"]').fill(test_company)
-        page.locator('input[name="address_line1"]').fill("Test St 1")
-        page.locator('input[name="city"]').fill("Bucuresti")
-        page.locator('input[name="county"]').fill("Bucuresti")
-        page.locator('input[name="postal_code"]').fill("010001")
-        page.locator('input[name="password1"]').fill(test_password)
-        page.locator('input[name="password2"]').fill(test_password)
-        page.locator('input[name="data_processing_consent"]').check()
-
-        page.locator('button:has-text("Create Account")').click()
-        page.wait_for_load_state("networkidle")
-
-        new_email_url = page.url
-
-        # Try to signup with existing customer email
-        page.goto(f"{BASE_URL}{REGISTER_URL}")
-        page.wait_for_load_state("networkidle")
-
-        page.locator('input[name="first_name"]').fill("Existing")
-        page.locator('input[name="last_name"]').fill("User")
-        page.locator('input[name="email"]').fill(CUSTOMER_EMAIL)  # Existing email
-        page.locator('select[name="customer_type"]').select_option("srl")
-        page.locator('input[name="company_name"]').fill("Existing Company SRL")
-        page.locator('input[name="address_line1"]').fill("Test St 2")
-        page.locator('input[name="city"]').fill("Bucuresti")
-        page.locator('input[name="county"]').fill("Bucuresti")
-        page.locator('input[name="postal_code"]').fill("010001")
-        page.locator('input[name="password1"]').fill(test_password)
-        page.locator('input[name="password2"]').fill(test_password)
-        page.locator('input[name="data_processing_consent"]').check()
-
-        page.locator('button:has-text("Create Account")').click()
-        page.wait_for_load_state("networkidle")
-
-        existing_email_url = page.url
-
-        # Both should result in similar behavior (enumeration-safe)
-        # The system should redirect to the same confirmation page
-        if "/submitted" in new_email_url and "/submitted" in existing_email_url:
-            print("    Both new and existing emails redirect to same page - enumeration safe")
-        elif new_email_url == existing_email_url:
-            print("    Same response for new and existing emails - enumeration safe")
-        else:
-            print(f"    New email result: {new_email_url}")
-            print(f"    Existing email result: {existing_email_url}")
-            # Note: Some difference may be acceptable if both are secure responses
-
-        print("  Signup enumeration protection test completed")
+def test_duplicate_registration_preserves_existing_account(page: Page, e2e_baseline) -> None:
+    """Registration reports failure generically; it does not promise indistinguishable success."""
+    customer = e2e_baseline["customers"][0]
+    _fill_registration(page, customer["email"], "Attempted replacement company")
+    page.get_by_role("button", name="Create Account", exact=True).click()
+    expect(page).to_have_url(f"{BASE_URL}{REGISTER_URL}")
+    expect(page.locator("body")).to_contain_text("Registration failed")
+    page.goto(f"{BASE_URL}/dashboard/")
+    expect(page).to_have_url(re.compile("/login/"))
+    assert login_user(page, customer["email"], "test123")
+    page.goto(f"{BASE_URL}/company/")
+    expect(page.locator("#main-content")).to_contain_text(customer["name"])
+    expect(page.locator("#main-content")).not_to_contain_text("Attempted replacement company")
 
 
 # ===============================================================================
@@ -1041,65 +472,8 @@ def test_signup_enumeration_protection(page: Page) -> None:
 
 
 def test_signup_with_special_characters_in_company_name(page: Page) -> None:
-    """
-    Test signup with special characters in company name.
-
-    Romanian company names may include special characters like:
-    - & (si)
-    - Diacritics (a, a, i, s, t)
-    - Quotes in legal names
-    """
-    print("Testing signup with special characters in company name")
-
-    with ComprehensivePageMonitor(
-        page,
-        "signup special characters",
-        check_console=True,  # console verified clean under current CSP (favicon.svg 404 fixed)
-        check_network=True,
-        check_html=False,
-        check_css=True,
-                                 check_accessibility=False):
-        page.goto(f"{BASE_URL}{REGISTER_URL}")
-        page.wait_for_load_state("networkidle")
-
-        # Use company name with Romanian diacritics
-        special_company = "Soluții & Servicii Românești SRL"
-        test_email = generate_test_email()
-        test_password = generate_test_password()
-
-        page.locator('input[name="first_name"]').fill("Ioan")
-        page.locator('input[name="last_name"]').fill("Popescu")
-        page.locator('input[name="email"]').fill(test_email)
-        page.locator('select[name="customer_type"]').select_option("srl")
-        page.locator('input[name="company_name"]').fill(special_company)
-        page.locator('input[name="address_line1"]').fill("Strada Victoriei Nr. 10")
-        page.locator('input[name="city"]').fill("București")  # With diacritics
-        page.locator('input[name="county"]').fill("București")
-        page.locator('input[name="postal_code"]').fill("010001")
-        page.locator('input[name="password1"]').fill(test_password)
-        page.locator('input[name="password2"]').fill(test_password)
-        page.locator('input[name="data_processing_consent"]').check()
-        page.locator('input[name="terms_accepted"]').check()
-
-        # Submit and check for success
-        page.locator('button:has-text("Create Account")').click()
-        page.wait_for_load_state("networkidle")
-
-        # Should succeed or show only valid errors (not encoding issues)
-        current_url = page.url
-        page_content = page.content()
-
-        # Check for encoding errors
-        encoding_errors = ["encoding", "unicode", "invalid character", "codec"]
-        has_encoding_error = any(err in page_content.lower() for err in encoding_errors)
-
-        assert not has_encoding_error, "Special characters should not cause encoding errors"
-        print("    Special characters handled correctly")
-
-        if "/submitted" in current_url:
-            print("    Form with special characters submitted successfully")
-
-        print("  Special characters test completed")
+    """Romanian diacritics survive registration, API transport and display."""
+    _register_customer(page, company_suffix="Știință și Tehnică")
 
 
 # ===============================================================================
@@ -1108,391 +482,72 @@ def test_signup_with_special_characters_in_company_name(page: Page) -> None:
 
 
 def test_customer_product_detail_page(monitored_customer_page: Page) -> None:
-    """
-    Test that a customer can view a product detail page from the catalog.
-
-    Navigates to the product catalog, clicks on a product, and verifies
-    the product detail page loads with name, description, pricing, and
-    an 'Add to Cart' button.
-    """
-    print("🧪 Testing customer product detail page")
-
     page = monitored_customer_page
-
-
-
-    print("  📦 Navigating to product catalog")
-    page.goto(f"{BASE_URL}/order/")
-    page.wait_for_load_state("networkidle")
-
-    # Verify catalog loaded
-    catalog_heading: Locator = page.locator("h1")
-    expect(catalog_heading.first).to_be_visible(timeout=5000)
-    print("  ✅ Product catalog loaded")
-
-    # Find and click a product link
-    product_links: Locator = page.locator('a[href*="/order/products/"]')
-    link_count: int = product_links.count()
-    print(f"  📊 Found {link_count} product links in catalog")
-
-    if link_count == 0:
-        print("  ⚠️ No product links found — skipping detail page test")
-        return
-
-    # Click the first product
-    first_product: Locator = product_links.first
-    first_product.click()
-    page.wait_for_load_state("networkidle")
-
-    # Verify we're on a product detail page
-    current_url: str = page.url
-    assert re.search(r"/order/products/[\w-]+/", current_url), \
-        f"Expected product detail URL, got: {current_url}"
-    print(f"  🔗 Navigated to: {current_url}")
-
-    # Verify product name heading
-    product_heading: Locator = page.locator("h1")
-    expect(product_heading.first).to_be_visible(timeout=5000)
-    product_name: str = product_heading.first.text_content() or ""
-    assert len(product_name.strip()) > 0, "Product name should not be empty"
-    print(f"  📝 Product name: {product_name.strip()}")
-
-    # Verify description is present
-    description: Locator = page.locator("p.text-slate-400")
-    expect(description.first).to_be_visible(timeout=3000)
-    print("  ✅ Product description visible")
-
-    # Verify Add to Cart button
-    add_to_cart_btn: Locator = page.locator('button[type="submit"]:has-text("Cart")')
-    expect(add_to_cart_btn.first).to_be_visible(timeout=3000)
-    print("  🛒 Add to Cart button visible")
-
-    # Verify pricing section (billing period selector)
-    billing_select: Locator = page.locator('select[name="billing_period"]')
-    expect(billing_select.first).to_be_visible(timeout=3000)
-    print("  💰 Billing period selector visible")
-
-    print("  ✅ Product detail page test completed")
+    page.goto(f"{BASE_URL}/order/products/e2e-hosting/")
+    expect(page.get_by_role("heading", name="E2E Hosting", exact=True)).to_be_visible()
+    expect(page.get_by_role("button", name="Add to Cart", exact=True)).to_be_visible()
+    expect(page.locator("#main-content")).to_contain_text("100,00 RON")
 
 
 def test_customer_cart_management(monitored_customer_page: Page) -> None:
-    """
-    Test that a customer can add a product to cart, view cart, and remove items.
-
-    Adds a product via the product detail page, navigates to cart review,
-    verifies cart contents, removes an item, and verifies cart updates.
-    """
-    print("🧪 Testing customer cart management")
 
     page = monitored_customer_page
-
-
-
-    print("  📦 Navigating to product catalog")
-    page.goto(f"{BASE_URL}/order/")
-    page.wait_for_load_state("networkidle")
-
-    product_links: Locator = page.locator('a[href*="/order/products/"]')
-    if product_links.count() == 0:
-        print("  ⚠️ No products found — skipping cart management test")
-        return
-
-    # Go to first product detail page
-    product_links.first.click()
-    page.wait_for_load_state("networkidle")
-    print("  ✅ Opened product detail page")
-
-    # Click Add to Cart
-    add_to_cart_btn: Locator = page.locator('button[type="submit"]:has-text("Cart")')
-    if add_to_cart_btn.count() > 0 and add_to_cart_btn.first.is_visible():
-        add_to_cart_btn.first.click()
-        page.wait_for_load_state("networkidle")
-        print("  🛒 Clicked Add to Cart")
-    else:
-        print("  ⚠️ Add to Cart button not found — skipping")
-        return
-
-    # Navigate to cart review page
-    print("  📋 Navigating to cart review")
+    add_product(page)
     page.goto(f"{BASE_URL}/order/cart/")
-    page.wait_for_load_state("networkidle")
-
-    # Verify cart page loaded
-    cart_heading: Locator = page.locator("h1")
-    expect(cart_heading.first).to_be_visible(timeout=5000)
-    print("  ✅ Cart review page loaded")
-
-    # Check for cart items
-    cart_content: str = page.content()
-    has_items: bool = "product" in cart_content.lower() or "cart" in cart_content.lower()
-    print(f"  📊 Cart has content: {has_items}")
-
-    # Try to find and click a remove button
-    remove_buttons: Locator = page.locator('button:has-text("Remove"), button:has-text("remove"), a:has-text("Remove")')
-    remove_count: int = remove_buttons.count()
-    print(f"  🗑️ Found {remove_count} remove buttons")
-
-    if remove_count > 0:
-        remove_buttons.first.click()
-        page.wait_for_load_state("networkidle")
-        print("  ✅ Clicked remove — cart updated")
-    else:
-        # Also check for HTMX remove forms
-        htmx_remove: Locator = page.locator('[hx-post*="cart/remove"]')
-        if htmx_remove.count() > 0:
-            htmx_remove.first.click()
-            page.wait_for_load_state("networkidle")
-            print("  ✅ Clicked HTMX remove — cart updated")
-        else:
-            print("  [info] No remove buttons found (cart may use different pattern)")
-
-    print("  ✅ Cart management test completed")
+    expect(page.locator("#main-content")).to_contain_text("E2E Hosting")
+    expect(page.locator("#cart-totals")).to_contain_text("121,00")
+    page.once("dialog", lambda dialog: dialog.accept())
+    page.locator('#cart-items button[aria-label="Remove from cart"]').click()
+    expect(page.locator("#main-content")).to_contain_text("Your cart is empty")
+    page.reload()
+    expect(page.locator("#main-content")).to_contain_text("Your cart is empty")
 
 
 def _add_product_to_cart(page: Page) -> bool:
-    """Navigate to catalog, open first product, and add it to cart. Returns True on success."""
-    page.goto(f"{BASE_URL}/order/")
-    page.wait_for_load_state("networkidle")
 
-    product_links: Locator = page.locator('a[href*="/order/products/"]')
-    if product_links.count() == 0:
-        print("  ⚠️ No products found in catalog")
-        return False
-
-    product_links.first.click()
-    page.wait_for_load_state("networkidle")
-
-    add_to_cart_btn: Locator = page.locator('button[type="submit"]:has-text("Cart")')
-    if add_to_cart_btn.count() > 0 and add_to_cart_btn.first.is_visible():
-        add_to_cart_btn.first.click()
-        page.wait_for_load_state("networkidle")
-        print("  🛒 Product added to cart")
-        return True
-
-    print("  ⚠️ Add to Cart button not available")
-    return False
+    return add_product(page)
 
 
 def test_customer_checkout_page(monitored_customer_page: Page) -> None:
-    """
-    Test that a customer can reach the checkout page with items in cart.
-
-    Adds a product to cart, navigates to checkout, and verifies the
-    checkout form loads with billing info section and order summary.
-    """
-    print("🧪 Testing customer checkout page")
-
     page = monitored_customer_page
-
-
-    print("  📦 Adding product to cart for checkout test")
-    if not _add_product_to_cart(page):
-        print("  ⚠️ Could not add product — skipping checkout test")
-        return
-
-    # Navigate to checkout
-    print("  💳 Navigating to checkout")
+    add_product(page)
     page.goto(f"{BASE_URL}/order/checkout/")
-    page.wait_for_load_state("networkidle")
-
-    current_url: str = page.url
-
-    # Checkout may redirect to cart if empty
-    if "/cart/" in current_url:
-        print("  [info] Redirected to cart — verifying cart page loads")
-        expect(page.locator("h1").first).to_be_visible(timeout=5000)
-        print("  ✅ Cart redirect page loaded correctly")
-        return
-
-    # Verify checkout page loaded
-    checkout_heading: Locator = page.locator("h1")
-    expect(checkout_heading.first).to_be_visible(timeout=5000)
-    print(f"  📝 Checkout heading: {(checkout_heading.first.text_content() or '').strip()}")
-
-    # Verify order form is present (target by action URL, not by exclusion)
-    checkout_form: Locator = page.locator('form[method="post"][action*="order"]')
-    if checkout_form.count() > 0:
-        expect(checkout_form.first).to_be_visible(timeout=3000)
-        print("  📝 Order form visible")
-    else:
-        print("  [info] No checkout form found (may need billing profile)")
-
-    # Check for order details / billing section
-    page_content: str = page.content().lower()
-    assert "order" in page_content or "checkout" in page_content, \
-        "Checkout page should contain order information"
-    print("  ✅ Order information present on checkout page")
-
-    # Check for submit / create order button
-    submit_btn: Locator = page.locator(
-        'button[type="submit"]:has-text("Order"), button[type="submit"]:has-text("Confirm")'
-    )
-    if submit_btn.count() > 0:
-        print("  ✅ Order submission button visible")
-    else:
-        print("  [info] No submit button found (profile may need completion)")
-
-    print("  ✅ Checkout page test completed")
+    expect(page).to_have_url(f"{BASE_URL}/order/checkout/")
+    expect(page.locator("#checkout-submit")).to_be_visible()
+    expect(page.locator('[name="agree_terms"]')).not_to_be_checked()
+    expect(page.locator('[name="payment_method"]')).to_have_count(2)
+    expect(page.locator("#main-content")).to_contain_text("E2E Hosting")
+    expect(page.locator("#main-content")).to_contain_text("121,00")
 
 
-def test_customer_order_creation_flow(monitored_customer_page: Page) -> None:
-    """
-    Test the order creation endpoint (/order/create/) and payment processing path.
+def test_customer_order_creation_flow(account_page) -> None:
 
-    Adds a product to cart, navigates to checkout, and attempts to submit the order.
-    Without Stripe configured, this should either:
-    - Redirect to a payment error page
-    - Show a validation error (incomplete profile)
-    - Redirect to process-payment which fails gracefully
-
-    This covers /order/create/ and /order/process-payment/ error paths.
-    """
-    print("🧪 Testing customer order creation flow")
-
-    page = monitored_customer_page
-
-
-    print("  📦 Adding product to cart")
-    if not _add_product_to_cart(page):
-        print("  ⚠️ Could not add product — skipping order creation test")
-        return
-
-    # Navigate to checkout
-    page.goto(f"{BASE_URL}/order/checkout/")
-    page.wait_for_load_state("networkidle")
-
-    current_url: str = page.url
-    if "/cart/" in current_url:
-        print("  [info] Redirected to cart — cart may be empty, skipping")
-        return
-
-    # Try to submit the order form (if present)
-    submit_btn: Locator = page.locator(
-        'button[type="submit"], input[type="submit"]'
-    ).first
-    if submit_btn.count() == 0 or not submit_btn.is_visible():
-        print("  [info] No submit button visible — profile may need completion")
-        # /order/create/ is POST-only — use fetch() instead of page.goto()
-        create_result: dict = page.evaluate("""
-            async () => {
-                const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value
-                    || document.cookie.match(/csrftoken=([^;]+)/)?.[1] || '';
-                const resp = await fetch('/order/create/', {
-                    method: 'POST',
-                    credentials: 'same-origin',
-                    headers: {
-                        'X-CSRFToken': csrfToken,
-                        'Content-Type': 'application/x-www-form-urlencoded',
-                    },
-                    body: 'cart_version=0',
-                    redirect: 'follow',
-                });
-                return { status: resp.status, url: resp.url };
-            }
-        """)
-        result_url: str = create_result.get("url", "")
-        status: int = create_result.get("status", 0)
-        # Should redirect somewhere (checkout, cart, or error page) or return error status
-        assert (
-            "/order/" in result_url or "/checkout/" in result_url
-            or "/cart/" in result_url or status in (302, 400, 403, 422)
-        ), f"Order create should redirect within order flow, got status={status} url={result_url}"
-        print(f"  ✅ /order/create/ POST → status={status}, url={result_url}")
-        return
-
-    # Click submit — expect either success redirect or payment error
-    submit_btn.click()
-    page.wait_for_load_state("networkidle")
-    result_url = page.url
-
-    # Valid outcomes: payment page, error page, or back to checkout with error
-    print(f"  📝 After submit, landed on: {result_url}")
-
-    # Check for error messages or payment redirect
-    error_msg: Locator = page.locator('.alert, .error, [role="alert"]')
-    if error_msg.count() > 0:
-        print("  ✅ Order form showed validation/payment error (expected without Stripe)")
-    elif "/confirmation/" in result_url:
-        print("  ✅ Order created successfully (unexpected but valid)")
-    else:
-        print(f"  ✅ Order creation flow completed — redirected to: {result_url}")
+    page, _ = account_page
+    add_product(page)
+    bank_checkout(page)
 
 
 def test_customer_mini_cart_partial(monitored_customer_page: Page) -> None:
-    """
-    Test the HTMX mini-cart partial endpoint (/order/partials/mini-cart/).
-
-    The mini-cart renders a dropdown widget showing cart items in the navigation.
-    This test verifies the endpoint returns valid HTML content.
-    """
-    print("🧪 Testing mini-cart HTMX partial endpoint")
-
     page = monitored_customer_page
-
-
-
-    page.goto(f"{BASE_URL}/order/")
-    page.wait_for_load_state("networkidle")
-
-    # Fetch mini-cart partial via page.evaluate
-    response_data: dict = page.evaluate("""
-        async () => {
-            const resp = await fetch('/order/partials/mini-cart/', {
-                credentials: 'same-origin',
-                headers: { 'HX-Request': 'true' },
-            });
-            return { status: resp.status, html: await resp.text() };
-        }
-    """)
-
-    status: int = response_data.get("status", 0)
-    html: str = response_data.get("html", "")
-
-    assert status == 200, f"Mini-cart partial should return 200, got: {status}"
-    assert len(html) > 0, "Mini-cart partial should return HTML content"
-    print(f"  ✅ Mini-cart partial returned {len(html)} chars of HTML (status {status})")
+    add_product(page)
+    response = page.request.get(f"{BASE_URL}/order/partials/mini-cart/", headers={"HX-Request": "true"})
+    assert response.status == 200
+    assert "E2E Hosting" in response.text()
+    assert '"product_slug": "e2e-hosting"' in response.text()
+    assert '"billing_period": "monthly"' in response.text()
+    assert "/order/cart/" in response.text()
 
 
 def test_customer_cart_calculate_totals(monitored_customer_page: Page) -> None:
-    """
-    Test the HTMX cart calculate totals endpoint (/order/cart/calculate/).
-
-    This endpoint recalculates cart totals with price change detection.
-    It's triggered during checkout to ensure prices are current.
-    """
-    print("🧪 Testing cart calculate totals HTMX endpoint")
-
     page = monitored_customer_page
-
-
-
-    if not _add_product_to_cart(page):
-        print("  ⚠️ Could not add product — testing calculate with empty cart")
-
-    # Fetch calculate totals via HTMX POST
-    response_data: dict = page.evaluate("""
-        async () => {
-            const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value
-                || document.cookie.match(/csrftoken=([^;]+)/)?.[1] || '';
-            const resp = await fetch('/order/cart/calculate/', {
-                method: 'POST',
-                credentials: 'same-origin',
-                headers: {
-                    'HX-Request': 'true',
-                    'X-CSRFToken': csrfToken,
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                },
-            });
-            return { status: resp.status, html: await resp.text() };
-        }
-    """)
-
-    status: int = response_data.get("status", 0)
-    html: str = response_data.get("html", "")
-
-    # Endpoint may return 200 (with totals HTML), 4xx (validation), or 500 (no Stripe config)
-    assert status in (200, 400, 403, 429, 500), f"Calculate endpoint returned unexpected status: {status}"
-    print(f"  ✅ Calculate totals endpoint responded: status={status}, {len(html)} chars")
+    add_product(page)
+    token = page.locator('[name="csrfmiddlewaretoken"]').first.input_value()
+    response = page.request.post(
+        f"{BASE_URL}/order/cart/calculate/", headers={"HX-Request": "true", "X-CSRFToken": token}
+    )
+    assert response.status == 200
+    for expected in ("100,00", "VAT (21%)", "21,00", "121,00"):
+        assert expected in response.text()
 
 
 # ===============================================================================
@@ -1523,8 +578,7 @@ def test_registration_form_has_terms_accepted_checkbox(page: Page) -> None:
 
         # The terms_accepted checkbox must be present in the form
         terms_checkbox: Locator = page.locator(
-            'input[name="terms_accepted"], input[name="terms"], '
-            'input[type="checkbox"][name*="terms"]'
+            'input[name="terms_accepted"], input[name="terms"], input[type="checkbox"][name*="terms"]'
         )
         assert terms_checkbox.count() > 0, (
             "Registration form must have a 'terms_accepted' checkbox — "
@@ -1541,8 +595,7 @@ def test_registration_form_has_terms_accepted_checkbox(page: Page) -> None:
         # The label should reference terms/privacy
         page_text: str = page.text_content("body") or ""
         has_terms_text: bool = any(
-            keyword in page_text.lower()
-            for keyword in ["terms", "privacy", "conditions", "termeni", "politica"]
+            keyword in page_text.lower() for keyword in ["terms", "privacy", "conditions", "termeni", "politica"]
         )
         assert has_terms_text, "Page should mention terms/conditions/privacy near the checkbox"
         print("    ✅ Terms/conditions text present on registration page")
@@ -1551,180 +604,99 @@ def test_registration_form_has_terms_accepted_checkbox(page: Page) -> None:
 
 
 def test_cart_order_summary_loads_without_error(monitored_customer_page: Page) -> None:
-    """C1: Cart order summary page loads without UUID error or server crash."""
     page = monitored_customer_page
-    print("🧪 Testing cart order summary loads cleanly")
-
-    # Navigate to cart page
+    add_product(page)
     page.goto(f"{BASE_URL}/order/cart/")
-    page.wait_for_load_state("networkidle")
-
-    current_url: str = page.url
-
-    # Must not redirect to login — customer is authenticated
-    assert "/login/" not in current_url, "Cart should not redirect authenticated customer to login"
-    print(f"    ✅ Cart page loaded: {current_url}")
-
-    page_content: str = page.content().lower()
-
-    # Must not show a Python traceback or server error
-    has_server_error: bool = any(
-        keyword in page_content
-        for keyword in [
-            "traceback", "exception", "server error", "erreur serveur",
-            "internal server error", "valueerror", "typeerror",
-        ]
-    )
-    assert not has_server_error, (
-        "Cart page must not show a server error or Python traceback. "
-        "Check UUID handling in cart views."
-    )
-    print("    ✅ No server error / traceback on cart page")
-
-    # Page must have some meaningful cart content (empty state or items)
-    has_cart_content: bool = any(
-        keyword in page_content
-        for keyword in [
-            "cart", "order", "coș", "total", "checkout",
-            "empty", "no items", "add", "produs",
-        ]
-    )
-    assert has_cart_content, (
-        "Cart page must show cart content or an empty-cart message, not a blank page"
-    )
-    print("    ✅ Cart page contains expected content")
-
-    # Verify the order summary partial also loads via HTMX fetch
-    print("  🔄 Testing mini-cart HTMX partial...")
-    response_data: dict = page.evaluate("""
-        async () => {
-            const resp = await fetch('/order/partials/mini-cart/', {
-                credentials: 'same-origin',
-                headers: { 'HX-Request': 'true' },
-            });
-            return { status: resp.status, html: await resp.text() };
-        }
-    """)
-
-    status: int = response_data.get("status", 0)
-    html: str = response_data.get("html", "")
-
-    # Mini-cart partial must return 200 without crashing
-    assert status == 200, f"Mini-cart HTMX partial must return 200, got: {status}"
-
-    # Must not contain Python traceback
-    assert "traceback" not in html.lower() and "exception" not in html.lower(), (
-        "Mini-cart partial returned a server error response"
-    )
-    print(f"    ✅ Mini-cart partial: status={status}, {len(html)} chars, no errors")
-
-    print("  ✅ Cart order summary loads cleanly test completed")
+    expect(page.locator("#cart-totals")).to_contain_text("121,00")
+    expect(page.locator("#cart-totals")).to_contain_text("VAT (21%)")
+    expect(page.get_by_role("link", name="Continue to checkout", exact=False)).to_be_visible()
 
 
 def test_cart_quantity_change_recalculates_totals_no_400(monitored_customer_page: Page) -> None:
-    """C1: Changing quantity in cart does not trigger a 400 UUID error."""
     page = monitored_customer_page
-    print("🧪 Testing cart quantity change works without 400")
-
-    if not _add_product_to_cart(page):
-        print("  ⚠️ Could not add product — skipping quantity change test")
-        return
-
+    _add_product_to_cart(page)
     page.goto(f"{BASE_URL}/order/cart/")
-    page.wait_for_load_state("networkidle")
-
-    # Look for quantity control — prefer visible <select> over hidden inputs
-    qty_select: Locator = page.locator('select[name*="quantity"]')
-    qty_number: Locator = page.locator('input[type="number"][name*="quantity"]')
-
-    if qty_select.count() > 0:
-        qty_select.first.select_option(value="2")
-    elif qty_number.count() > 0:
-        qty_number.first.fill("2")
-        qty_number.first.press("Tab")  # trigger change event
-    else:
-        print("  [i] No visible quantity control found on cart page — skipping")
-        return
-
-    # Wait for any HTMX recalculation
-    page.wait_for_timeout(1500)
-
-    page_content: str = page.content().lower()
-
-    # Must not show UUID error or server error
-    assert "must be a valid uuid" not in page_content, (
-        "Cart quantity change must not trigger UUID validation error"
-    )
-    assert "traceback" not in page_content, (
-        "Cart quantity change must not trigger server traceback"
-    )
-    print("  ✅ Cart quantity change completed without UUID/server error")
+    expect(page.locator("#cart-totals")).to_contain_text("121,00")
+    page.locator('select[name="quantity"]').select_option("2")
+    expect(page.locator("#cart-totals")).to_contain_text("242,00")
+    page.reload()
+    expect(page.locator('select[name="quantity"]')).to_have_value("2")
+    expect(page.locator("#cart-totals")).to_contain_text("242,00")
 
 
 def test_cart_remove_item_updates_summary_cleanly(monitored_customer_page: Page) -> None:
-    """C1: Removing an item from cart works without server error."""
     page = monitored_customer_page
-    print("🧪 Testing cart item removal works cleanly")
-
-    if not _add_product_to_cart(page):
-        print("  ⚠️ Could not add product — skipping remove test")
-        return
-
+    _add_product_to_cart(page)
     page.goto(f"{BASE_URL}/order/cart/")
-    page.wait_for_load_state("networkidle")
-
-    # Look for remove button
-    remove_btn: Locator = page.locator(
-        'button:has-text("Remove"), a:has-text("Remove"), '
-        'button:has-text("Șterge"), button:has-text("Elimină")'
-    )
-    if remove_btn.count() == 0:
-        print("  [i] No remove button found on cart page — skipping")
-        return
-
-    remove_btn.first.click()
-    page.wait_for_load_state("networkidle")
-
-    page_content: str = page.content().lower()
-
-    # Must not show server error
-    assert "traceback" not in page_content, (
-        "Cart item removal must not trigger server traceback"
-    )
-    assert "internal server error" not in page_content, (
-        "Cart item removal must not cause 500 error"
-    )
-    print("  ✅ Cart item removal completed cleanly")
+    page.on("dialog", lambda dialog: dialog.accept())
+    page.locator('#cart-items button[aria-label*="Remove"]').click()
+    expect(page.locator("#cart-items")).to_contain_text("Your cart is empty")
+    expect(page.locator('#cart-items select[name="quantity"]')).to_have_count(0)
+    page.reload()
+    expect(page.locator("#cart-count")).to_have_count(0)
 
 
 def test_checkout_preflight_slug_only_path_no_uuid_error(monitored_customer_page: Page) -> None:
-    """C1: Checkout preflight works with slug-only cart items (no UUID in payload)."""
     page = monitored_customer_page
-    print("🧪 Testing checkout preflight with slug-only items")
-
-    if not _add_product_to_cart(page):
-        print("  ⚠️ Could not add product — skipping preflight test")
-        return
-
-    # Navigate to checkout which triggers preflight
+    add_product(page)
     page.goto(f"{BASE_URL}/order/checkout/")
-    page.wait_for_load_state("networkidle")
+    expect(page).to_have_url(f"{BASE_URL}/order/checkout/")
+    expect(page.locator("#checkout-submit")).to_be_enabled()
+    expect(page.locator("#main-content")).to_contain_text("E2E Hosting")
+    expect(page.locator("#main-content")).to_contain_text("121,00")
 
-    page_content: str = page.content().lower()
 
-    # Must not show UUID validation error (the C1 bug symptom)
-    assert "must be a valid uuid" not in page_content, (
-        "Checkout preflight must not show UUID validation error — "
-        "the cart should use product_slug for product identification"
-    )
-    assert "traceback" not in page_content, (
-        "Checkout page must not show server traceback"
-    )
+def _register_customer(page: Page, *, company_suffix: str = "") -> dict[str, str]:
 
-    # Page should show checkout content or a graceful redirect
-    current_url: str = page.url
-    assert any(p in current_url for p in ["/checkout/", "/cart/", "/order/"]), (
-        f"After preflight, expected to be in order flow, got: {current_url}"
-    )
-    print(f"  ✅ Checkout preflight completed — on {current_url}")
-    print("  ✅ Checkout preflight slug-only test completed")
+    key = uuid4().hex[:12]
+    account = {
+        "email": f"signup-{key}@e2e.test",
+        "password": "Registration-E2E123!",
+        "company": f"E2E {key} {company_suffix} SRL",
+    }
+    ensure_fresh_session(page)
+    page.goto(f"{BASE_URL}{REGISTER_URL}")
+    for field, value in {
+        "email": account["email"],
+        "first_name": "Elena",
+        "last_name": "Pop",
+        "phone": "+40722123456",
+        "company_name": account["company"],
+        "address_line1": "Str. Victoriei nr. 10",
+        "city": "București",
+        "county": "București",
+        "postal_code": "010061",
+        "password1": account["password"],
+        "password2": account["password"],
+    }.items():
+        page.locator(f'input[name="{field}"]').fill(value)
+    page.locator('select[name="customer_type"]').select_option("srl")
+    page.locator('input[name="data_processing_consent"]').check()
+    page.locator('input[name="terms_accepted"]').check()
+    page.get_by_role("button", name="Create Account", exact=True).click()
+    expect(page).to_have_url(f"{BASE_URL}/login/")
+    assert login_user(page, account["email"], account["password"])
+    page.goto(f"{BASE_URL}/company/")
+    expect(page.locator("#main-content")).to_contain_text(account["company"])
+    return account
+
+
+def _fill_registration(page: Page, email: str, company: str) -> None:
+    ensure_fresh_session(page)
+    page.goto(f"{BASE_URL}{REGISTER_URL}")
+    for field, value in {
+        "first_name": "Test",
+        "last_name": "User",
+        "email": email,
+        "company_name": company,
+        "address_line1": "Str. Victoriei nr. 10",
+        "city": "București",
+        "county": "București",
+        "postal_code": "010061",
+        "password1": "Registration-E2E123!",
+        "password2": "Registration-E2E123!",
+    }.items():
+        page.locator(f'input[name="{field}"]').fill(value)
+    page.locator('[name="customer_type"]').select_option("srl")
+    page.locator('[name="data_processing_consent"]').check()
+    page.locator('[name="terms_accepted"]').check()

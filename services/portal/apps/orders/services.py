@@ -710,6 +710,7 @@ class OrderCreationService:
         auto_pending: bool = False,
         idempotency_key: str | None = None,
         api_client_factory: type[PlatformAPIClient] | None = None,
+        payment_method: str = "",
     ) -> dict[str, Any]:
         """Create draft order from cart items"""
 
@@ -728,6 +729,7 @@ class OrderCreationService:
                 "customer_id": customer_id,
                 "items": cart.get_api_items(),
                 "currency": cart.currency,
+                "payment_method": payment_method,
                 "notes": notes,
                 "meta": {"cart_created_at": cart.cart.get("created_at"), "portal_version": "v1"},
             }

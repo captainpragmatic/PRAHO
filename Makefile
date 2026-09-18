@@ -224,9 +224,9 @@ dev-platform: check-env check-venv-platform
 	@echo "🗄️ Running migrations..."
 	@$(PYTHON_PLATFORM_MANAGE) migrate --settings=config.settings.dev
 	@echo "🎯 Setting up initial data..."
-	@$(PYTHON_PLATFORM_MANAGE) setup_initial_data --settings=config.settings.dev || echo "⚠️ Initial data setup skipped"
+	@$(PYTHON_PLATFORM_MANAGE) setup_initial_data --settings=config.settings.dev
 	@echo "🔧 Loading dev sample data..."
-	@$(PYTHON_PLATFORM_MANAGE) generate_sample_data --customers 2 --users 3 --services-per-customer 2 --orders-per-customer 1 --invoices-per-customer 2 --proformas-per-customer 1 --tickets-per-customer 2 --settings=config.settings.dev || echo "⚠️ Sample data setup skipped"
+	@$(PYTHON_PLATFORM_MANAGE) generate_sample_data --customers 2 --users 3 --services-per-customer 2 --orders-per-customer 1 --invoices-per-customer 2 --proformas-per-customer 1 --tickets-per-customer 2 --settings=config.settings.dev
 	@$(PYTHON_PLATFORM_MANAGE) qcluster --settings=config.settings.dev > django_q.log 2>&1 & \
 	QCLUSTER_PID=$$!; \
 	echo "🚀 Django-Q2 workers started (PID: $$QCLUSTER_PID)"; \
@@ -239,6 +239,7 @@ dev-portal: check-env
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@echo "🔒 NO PYTHONPATH - portal cannot import platform code"
 	@echo "🔍 Validating portal configuration..."
+	@$(PYTHON_PORTAL_MANAGE) migrate --noinput
 	@$(PYTHON_PORTAL_MANAGE) check
 	@echo "✅ Portal configuration valid"
 	@echo "🌐 Starting portal server on :8701$(if $(NORELOAD), (no-reload),)..."
@@ -252,43 +253,24 @@ dev-all: check-venv-platform build-css
 dev:
 	@$(MAKE) dev-all
 
-dev-e2e: check-env
-	@echo "🎭 [E2E Dev] Starting services with rate limiting disabled (no auto-reload)..."
-	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@RATE_LIMITING_ENABLED=false $(MAKE) NORELOAD=1 dev-all
+# E2E uses dedicated settings/databases and an owned supervisor in both modes.
+dev-e2e: check-venv-platform build-css
+	@$(PYTHON_SHARED) scripts/e2e_stack.py serve
 
 dev-e2e-csp: CSP_PROFILE ?= phase2-target
-dev-e2e-csp: check-env
-	@[ "$(CSP_PROFILE)" = "phase2-target" ] || [ "$(CSP_PROFILE)" = "phase3-target" ] || { echo "❌ CSP_PROFILE must be phase2-target or phase3-target; got '$(CSP_PROFILE)'"; exit 2; }
-	@echo "🔒 [CSP E2E] Starting services with enforced $(CSP_PROFILE) portal CSP..."
-	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@RATE_LIMITING_ENABLED=false CSP_PROFILE="$(CSP_PROFILE)" CSP_REPORT_ONLY=false $(MAKE) PORTAL_DJANGO_SETTINGS_MODULE=config.settings.e2e NORELOAD=1 dev-all
+dev-e2e-csp: check-venv-platform build-css
+	@[ "$(CSP_PROFILE)" = "phase2-target" ] || [ "$(CSP_PROFILE)" = "phase3-target" ] || { echo "Invalid CSP_PROFILE"; exit 2; }
+	@CSP_PROFILE="$(CSP_PROFILE)" CSP_REPORT_ONLY=false $(PYTHON_SHARED) scripts/e2e_stack.py serve
 
-dev-e2e-bg: check-env build-css
-	@echo "🎭 [E2E Background] Starting services in background (no auto-reload)..."
-	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@mkdir -p logs
-	@# Kill stale processes on E2E ports
-	@-lsof -tiTCP:8700 -sTCP:LISTEN | xargs -r kill -9 >/dev/null 2>&1 || true
-	@-lsof -tiTCP:8701 -sTCP:LISTEN | xargs -r kill -9 >/dev/null 2>&1 || true
-	@sleep 1
-	@echo "🏗️  Starting platform (port :8700) in background..."
-	@RATE_LIMITING_ENABLED=false sh -c '$(MAKE) NORELOAD=1 dev-platform 2>&1 | tee logs/platform_e2e.log' &
-	@echo "🌐 Starting portal (port :8701) in background..."
-	@RATE_LIMITING_ENABLED=false sh -c '$(MAKE) NORELOAD=1 dev-portal 2>&1 | tee logs/portal_e2e.log' &
-	@echo "⏳ Waiting for services to be ready..."
-	@for i in $$(seq 1 30); do \
-		platform=$$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8700/auth/login/ 2>/dev/null); \
-		portal=$$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8701/login/ 2>/dev/null); \
-		if [ "$$platform" = "200" ] && [ "$$portal" = "200" ]; then \
-			echo "✅ Both services ready (platform=$$platform portal=$$portal)"; \
-			echo "📜 Logs: logs/platform_e2e.log, logs/portal_e2e.log"; \
-			exit 0; \
-		fi; \
-		sleep 2; \
-	done; \
-	echo "❌ Services failed to start within 60s. Check logs/"; \
-	exit 1
+dev-e2e-bg: check-venv-platform build-css
+	@$(PYTHON_SHARED) scripts/e2e_stack.py start
+
+.PHONY: stop-e2e check-e2e
+stop-e2e:
+	@$(PYTHON_SHARED) scripts/e2e_stack.py stop
+
+check-e2e:
+	@$(PYTHON_SHARED) scripts/e2e_stack.py check
 
 # Start both services and write logs to files via tee
 .PHONY: dev-with-logs
@@ -376,83 +358,35 @@ test-security:
 	@echo "🎉 All security isolation tests passed!"
 
 test-e2e:
-	@echo "🎭 [E2E] Running all end-to-end tests..."
-	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@echo "⚠️  Requires services running with rate limiting disabled (make dev-e2e)"
-	@echo "🧪 Checking if services are available..."
-	@curl -sf http://localhost:8700/auth/login/ > /dev/null 2>&1 || (echo "❌ Platform service not running on :8700. Run 'make dev-e2e' first." && exit 1)
-	@curl -sf http://localhost:8701/login/ > /dev/null 2>&1 || (echo "❌ Portal service not running on :8701. Run 'make dev-e2e' first." && exit 1)
-	@echo "✅ Both services are running"
-	@echo "🔍 Checking rate limiting is disabled..."
-	@RATE_LIMITED=false; \
-	for i in 1 2 3 4 5; do \
-		STATUS=$$(curl -so /dev/null -w "%{http_code}" http://localhost:8700/auth/login/ 2>/dev/null); \
-		if [ "$$STATUS" = "429" ]; then \
-			RATE_LIMITED=true; \
-			break; \
-		fi; \
-	done; \
-	if [ "$$RATE_LIMITED" = "true" ]; then \
-		echo "❌ Rate limiting is ACTIVE on platform service."; \
-		echo "   E2E tests make ~180 login requests and WILL fail with rate limiting enabled."; \
-		echo "   Restart services: make dev-e2e"; \
-		exit 1; \
-	fi
-	@echo "✅ Rate limiting check passed"
-	@echo "🧹 Clearing stale bytecode cache..."
-	@find tests/e2e/ -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
-	@echo "🎭 Running Playwright E2E tests..."
-	@DJANGO_SETTINGS_MODULE=config.settings.e2e PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/python -m pytest tests/e2e/ -v
-	@echo "✅ E2E tests completed!"
+	@$(PYTHON_SHARED) scripts/e2e_stack.py test
 
 test-with-e2e: test-e2e
 
 test-e2e-platform:
-	@echo "🎭 [E2E Platform] Running platform staff E2E tests..."
-	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@echo "⚠️  Requires platform service running with rate limiting disabled (make dev-e2e)"
-	@curl -sf http://localhost:8700/auth/login/ > /dev/null 2>&1 || (echo "❌ Platform service not running on :8700. Run 'make dev-e2e' first." && exit 1)
-	@find tests/e2e/ -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
-	@DJANGO_SETTINGS_MODULE=config.settings.e2e PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/python -m pytest tests/e2e/platform/ -v
-	@echo "✅ Platform E2E tests completed!"
+	@$(PYTHON_SHARED) scripts/e2e_stack.py test tests/e2e/platform/
 
 test-e2e-portal:
-	@echo "🎭 [E2E Portal] Running portal customer E2E tests..."
-	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@echo "⚠️  Requires portal service running with rate limiting disabled (make dev-e2e)"
-	@curl -sf http://localhost:8701/login/ > /dev/null 2>&1 || (echo "❌ Portal service not running on :8701. Run 'make dev-e2e' first." && exit 1)
-	@find tests/e2e/ -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
-	@DJANGO_SETTINGS_MODULE=config.settings.e2e PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/python -m pytest tests/e2e/portal/ -v
-	@echo "✅ Portal E2E tests completed!"
+	@$(PYTHON_SHARED) scripts/e2e_stack.py test tests/e2e/portal/
 
 test-e2e-file:
-	@echo "🎭 [E2E] Running $(FILE)..."
-	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 ifndef FILE
-	$(error FILE is required. Usage: make test-e2e-file FILE=tests/e2e/platform/test_x.py[::TestClass::test_name])
+	$(error FILE is required. Usage: make test-e2e-file FILE=tests/e2e/platform/test_x.py[::test_name])
 endif
-	@echo "⚠️  Requires services running with rate limiting disabled (make dev-e2e)"
-	@curl -sf http://localhost:8700/auth/login/ > /dev/null 2>&1 || (echo "❌ Platform service not running on :8700. Run 'make dev-e2e' first." && exit 1)
-	@curl -sf http://localhost:8701/login/ > /dev/null 2>&1 || (echo "❌ Portal service not running on :8701. Run 'make dev-e2e' first." && exit 1)
-	@find tests/e2e/ -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
-	@DJANGO_SETTINGS_MODULE=config.settings.e2e PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/python -m pytest $(FILE) -v
-	@echo "✅ E2E file completed!"
+	@$(PYTHON_SHARED) scripts/e2e_stack.py test $(FILE)
 
 test-e2e-csp: CSP_PROFILE ?= phase2-target
 test-e2e-csp:
 	@[ "$(CSP_PROFILE)" = "phase2-target" ] || [ "$(CSP_PROFILE)" = "phase3-target" ] || { echo "❌ CSP_PROFILE must be phase2-target or phase3-target; got '$(CSP_PROFILE)'"; exit 2; }
 	@echo "🔒 [CSP E2E] Verifying the $(CSP_PROFILE) browser violation oracle..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	@curl -sf http://localhost:8701/login/ > /dev/null 2>&1 || (echo "❌ Portal service not running on :8701. Run 'make dev-e2e-csp CSP_PROFILE=$(CSP_PROFILE)' first." && exit 1)
-	@find tests/e2e/ -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
-	@EXPECTED_CSP_PROFILE="$(CSP_PROFILE)" DJANGO_SETTINGS_MODULE=config.settings.e2e PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/python -m pytest tests/e2e/portal/csp_violation_oracle_gate.py tests/e2e/portal/csp_alpine_interactions_gate.py -v
+	@EXPECTED_CSP_PROFILE="$(CSP_PROFILE)" $(PYTHON_SHARED) scripts/e2e_stack.py test tests/e2e/portal/csp_violation_oracle_gate.py tests/e2e/portal/csp_alpine_interactions_gate.py
 	@echo "✅ Strict-CSP violation oracle verified!"
 
 test-e2e-orm:
 	@echo "🎭 [E2E ORM] Running ORM-based E2E tests (no server needed)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@find tests/e2e/ -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
-	@DJANGO_SETTINGS_MODULE=config.settings.e2e PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/python -m pytest tests/e2e/orm/ -v
+	@E2E_STRICT=1 DJANGO_SETTINGS_MODULE=config.settings.e2e PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/python -m pytest tests/e2e/orm/ -v
 	@echo "✅ ORM E2E tests completed!"
 
 test:

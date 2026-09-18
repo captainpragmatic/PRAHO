@@ -813,6 +813,11 @@ class UserListView(LoginRequiredMixin, ListView):
     context_object_name = "users"
     paginate_by = 50
 
+    def get_context_data(self, **kwargs: Any) -> dict[str, Any]:
+        context = super().get_context_data(**kwargs)
+        context["staff_roles"] = User.STAFF_ROLE_CHOICES
+        return context
+
     def dispatch(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
         if not request.user.is_authenticated or not getattr(request.user, "is_staff_user", False):
             messages.error(request, _("You do not have permission to access this page."))

@@ -21,6 +21,7 @@ from tests.e2e.helpers import (
     ensure_fresh_session,
     login_user,
 )
+from tests.e2e.helpers.orders import add_product
 
 CATALOG_URL = f"{BASE_URL}/order/"
 CART_URL = f"{BASE_URL}/order/cart/"
@@ -29,40 +30,12 @@ CART_URL = f"{BASE_URL}/order/cart/"
 def _login_customer(page: Page) -> None:
     ensure_fresh_session(page)
     if not login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD):
-        raise AssertionError(
-            "Customer login failed — is the E2E service running? (make dev-e2e)"
-        )
+        raise AssertionError("Customer login failed — is the E2E service running? (make dev-e2e)")
 
 
-def _add_domain_free_product_to_cart(page: Page) -> None:
-    """Add one catalog product that does NOT require a domain, and assert the
-    add actually persisted (the cart badge appears). Fails loudly — never
-    soft-skips — because a silent empty cart is exactly the kind of gap that let
-    these target bugs reach production. Domain-required products can't be added
-    without a domain, so they are skipped."""
-    page.goto(CATALOG_URL)
-    page.wait_for_load_state("networkidle")
+def _add_domain_free_product_to_cart(page: Page) -> bool:
 
-    forms = page.locator('form[id^="cart-form-"]')
-    form_count = forms.count()
-    assert form_count > 0, (
-        "No products in the catalog — the E2E fixtures must seed at least one "
-        "purchasable product for this regression to be meaningful."
-    )
-
-    added = False
-    for index in range(form_count):
-        form = forms.nth(index)
-        if form.locator('input[name="domain_name"]').count() == 0:
-            form.locator('button[type="submit"]').click()
-            added = True
-            break
-    assert added, "No domain-free product available to add to the cart."
-
-    page.wait_for_load_state("networkidle")
-    # The add must have persisted — the cart count badge is rendered only when
-    # the cart holds items. Otherwise cart review would redirect (empty cart).
-    expect(page.locator("#cart-count")).to_be_visible()
+    return add_product(page)
 
 
 def test_quantity_change_updates_order_summary_in_place(page: Page) -> None:
@@ -79,8 +52,11 @@ def test_quantity_change_updates_order_summary_in_place(page: Page) -> None:
 
     quantity = page.locator("select[name='quantity']").first
     expect(quantity).to_be_visible()
+    expect(page.locator("#cart-totals")).to_contain_text("121,00")
     quantity.select_option("2")
     page.wait_for_load_state("networkidle")
+
+    expect(page.locator("#cart-totals")).to_contain_text("242,00")
 
     # The Order Summary must survive the swap (the bug replaced it with a widget).
     expect(page.locator("#cart-totals")).to_be_visible()

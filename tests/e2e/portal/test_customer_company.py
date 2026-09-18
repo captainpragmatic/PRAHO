@@ -15,6 +15,7 @@ Routes under test:
 
 import re
 
+import pytest
 from playwright.sync_api import Page, expect
 
 from tests.e2e.helpers import BASE_URL, require_authentication
@@ -36,14 +37,16 @@ def test_company_profile_view(monitored_customer_page: Page) -> None:
     expect(page).to_have_url(re.compile(r"/company/$"))
 
     # Page heading — "Company Profile" (EN) or Romanian equivalent
-    heading = page.locator('h1, h2').filter(has_text=re.compile(r"Company Profile|Profil Companie", re.IGNORECASE)).first
+    heading = (
+        page.locator("h1, h2").filter(has_text=re.compile(r"Company Profile|Profil Companie", re.IGNORECASE)).first
+    )
     expect(heading).to_be_visible()
 
     # At least one section card for Company Information should be present.
     # Use filter() with regex so both EN and RO locales are handled correctly.
-    company_info_card = page.locator('h3').filter(
-        has_text=re.compile(r"Company Information|Informații Companie", re.IGNORECASE)
-    ).first
+    company_info_card = (
+        page.locator("h3").filter(has_text=re.compile(r"Company Information|Informații Companie", re.IGNORECASE)).first
+    )
     expect(company_info_card).to_be_visible()
 
     # Quick-links to sub-sections should be present (use :visible to skip hidden mobile nav links)
@@ -89,9 +92,9 @@ def test_company_edit_page(monitored_customer_page: Page) -> None:
     assert cui_field.count() == 0, "CUI field must not appear on company edit page"
 
 
-def test_company_edit_save(monitored_customer_page: Page) -> None:
+def test_company_edit_save(account_page) -> None:
     """Edit and save company name, then verify update and restore original value."""
-    page = monitored_customer_page
+    page, _ = account_page
 
     page.goto(f"{BASE_URL}/company/edit/")
     page.wait_for_load_state("networkidle")
@@ -107,9 +110,9 @@ def test_company_edit_save(monitored_customer_page: Page) -> None:
     company_name_field.fill(test_name)
 
     # Use the submit button scoped by its visible label to avoid matching the Logout button
-    save_btn = page.locator('button[type="submit"]').filter(
-        has_text=re.compile(r"Save Changes|Salvează", re.IGNORECASE)
-    ).first
+    save_btn = (
+        page.locator('button[type="submit"]').filter(has_text=re.compile(r"Save Changes|Salvează", re.IGNORECASE)).first
+    )
     expect(save_btn).to_be_visible()
     save_btn.click()
 
@@ -161,46 +164,17 @@ def test_tax_profile_view(monitored_customer_page: Page) -> None:
     expect(vat_payer_element).to_be_visible()
 
 
-def test_tax_profile_save(monitored_customer_page: Page) -> None:
-    """Edit and save tax CUI, then verify update and restore original value."""
-    page = monitored_customer_page
-
+def test_tax_profile_save(account_page) -> None:
+    page, _ = account_page
     page.goto(f"{BASE_URL}/company/tax/")
-    page.wait_for_load_state("networkidle")
-
-    cui_field = page.locator('input[name="cui"]')
-    # If the field is not present the user is read-only; skip edit assertions gracefully.
-    if cui_field.count() == 0:
-        print("  [i] Tax profile is read-only for this user — skipping save test")
-        return
-
-    expect(cui_field).to_be_visible()
-    original_cui = cui_field.input_value()
-    # A checksum-valid Romanian CUI (check digit 7); the endpoint rejects invalid
-    # check digits, so the save must use a real one for a genuine success assertion.
-    test_cui = "RO14399847"
-
-    def _save_cui(value: str) -> None:
-        field = page.locator('input[name="cui"]')
-        field.fill(value)
-        # Scope submit to the tax profile form to avoid the nav Logout button.
-        page.locator('button[type="submit"]').filter(
-            has_text=re.compile(r"Save Tax Profile|Salvează", re.IGNORECASE)
-        ).first.click()
-        page.wait_for_load_state("networkidle")
-
-    try:
-        _save_cui(test_cui)
-        expect(page).to_have_url(re.compile(r"/company/tax/"))
-        # Re-fetch the page to prove the value persisted (not merely echoed).
-        page.goto(f"{BASE_URL}/company/tax/")
-        page.wait_for_load_state("networkidle")
-        expect(page.locator('input[name="cui"]')).to_have_value(test_cui)
-        print("  ✅ Tax profile CUI updated and persisted")
-    finally:
-        # Always restore the original value, even if an assertion above fails.
-        if page.locator('input[name="cui"]').count() > 0:
-            _save_cui(original_cui)
+    page.locator('[name="cui"]').fill("RO14399847")
+    page.locator('[name="vat_number"]').fill("RO14399847")
+    page.locator('[name="is_vat_payer"]').check()
+    page.get_by_role("button", name="Save Tax Profile").click()
+    page.reload()
+    expect(page.locator('[name="cui"]')).to_have_value("RO14399847")
+    expect(page.locator('[name="vat_number"]')).to_have_value("RO14399847")
+    expect(page.locator('[name="is_vat_payer"]')).to_be_checked()
 
 
 # ===============================================================================
@@ -245,9 +219,9 @@ def test_my_account_dropdown(monitored_customer_page: Page) -> None:
 # ===============================================================================
 
 
-def test_profile_language_change(monitored_customer_page: Page) -> None:
+def test_profile_language_change(account_page) -> None:
     """Change preferred language to Romanian, verify Romanian UI, then switch back to English."""
-    page = monitored_customer_page
+    page, _ = account_page
 
     page.goto(f"{BASE_URL}/profile/")
     page.wait_for_load_state("networkidle")
@@ -256,7 +230,7 @@ def test_profile_language_change(monitored_customer_page: Page) -> None:
     lang_select = page.locator('select[name="preferred_language"], select#id_preferred_language')
     if lang_select.count() == 0:
         print("  [i] Language selector not present — skipping language switch test")
-        return
+        pytest.fail("Required E2E step unavailable: lang_select.count() == 0")
 
     expect(lang_select).to_be_visible()
 
@@ -282,7 +256,9 @@ def test_profile_language_change(monitored_customer_page: Page) -> None:
         # definitive and locale-string-independent.
         page.goto(f"{BASE_URL}/profile/")
         page.wait_for_load_state("networkidle")
-        expect(page.locator('select[name="preferred_language"], select#id_preferred_language').first).to_have_value("ro")
+        expect(page.locator('select[name="preferred_language"], select#id_preferred_language').first).to_have_value(
+            "ro"
+        )
         expect(page.locator("html")).to_have_attribute("lang", "ro")
         print("  ✅ Language switched to Romanian and persisted")
     finally:
@@ -305,11 +281,9 @@ def test_profile_form_uses_design_components(monitored_customer_page: Page) -> N
 
     # The company edit page wraps content in section-card-style containers.
     # These use bg-slate-800 / border-slate-700 Tailwind classes.
-    section_container = page.locator('.bg-slate-800, .bg-slate-900').first
+    section_container = page.locator(".bg-slate-800, .bg-slate-900").first
     expect(section_container).to_be_visible()
 
     # Form inputs use the project's standard Tailwind styling
-    styled_input = page.locator(
-        'input.bg-slate-700, input[class*="bg-slate"], input[class*="border-slate"]'
-    ).first
+    styled_input = page.locator('input.bg-slate-700, input[class*="bg-slate"], input[class*="border-slate"]').first
     expect(styled_input).to_be_visible()

@@ -126,6 +126,7 @@ cursor-instructions*
 # Services architecture specific
 services/platform/staticfiles/
 services/platform/*.sqlite3
+services/platform/e2e-*.sqlite3-*
 services/platform/media/
 services/platform/.coverage
 services/platform/htmlcov/
@@ -134,6 +135,7 @@ services/platform/__pycache__/
 services/platform/static/dist/
 services/portal/staticfiles/
 services/portal/*.sqlite3
+services/portal/e2e-*.sqlite3-*
 services/portal/media/
 services/portal/.coverage
 services/portal/htmlcov/
@@ -183,3 +185,7 @@ docs/plans/
 # Lint/CI generated artifacts
 test-layout-audit.json
 .cache/
+
+# Local browser traces, screenshots and run manifests
+output/playwright/
+output/e2e-media/

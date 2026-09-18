@@ -18,6 +18,10 @@
       </p>
     </div>
     <div class="mt-4 sm:mt-0 sm:ml-16 sm:flex-none space-x-3">
+      <a href="{% url 'billing:invoice_pdf' invoice.pk %}"
+         class="inline-flex items-center px-4 py-2 bg-slate-600 hover:bg-slate-700 text-white rounded-md font-medium">
+        {% icon "document" %} {% trans "Download PDF" %}
+      </a>
       <!-- Refund Button for Staff -->
       {% if user.is_staff_user and invoice.status == "paid" %}
         {% trans "Refund Invoice" as bt1 %}{% button bt1 data_action="invoke" data_invoke="showInvoiceRefundModal" variant="success" %}
