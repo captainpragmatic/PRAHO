@@ -124,11 +124,11 @@
         <!-- Next Billing -->
         {% trans 'Next Bill' as st2_label %}
         {% if service.next_billing_date %}
-          {% stat_tile st2_label service.next_billing_date|date:"M d" icon="clock" variant="primary" meta=service.billing_cycle_display %}
+          {% stat_tile st2_label service.next_billing_date|romanian_date icon="clock" variant="primary" meta=service.billing_cycle_display %}
         {% elif service.expires_at %}
-          {% stat_tile st2_label service.expires_at|date:"M d" icon="clock" variant="warning" meta=service.billing_cycle_display %}
+          {% stat_tile st2_label service.expires_at|romanian_date icon="clock" variant="warning" meta=service.billing_cycle_display %}
         {% else %}
-          {% trans 'Calculating...' as st2_val %}{% stat_tile st2_label st2_val icon="clock" variant="default" %}
+          {% trans 'Not scheduled' as st2_val %}{% stat_tile st2_label st2_val icon="clock" variant="default" %}
         {% endif %}
 
         <!-- Service Age -->
@@ -227,7 +227,7 @@
                             {% blocktrans count days=days %}{{ days }} day{% plural %}{{ days }} days{% endblocktrans %}
                           {% endwith %}
                         {% else %}
-                          <span class="text-slate-500">{% trans "Calculating..." %}</span>
+                          <span class="text-slate-500">{% trans "Unavailable" %}</span>
                         {% endif %}
                       </span>
                     </div>
@@ -664,7 +664,7 @@
                       <span class="text-slate-400">{% trans "Next Bill Date" %}</span>
                       <span class="text-white">
                         {% if service.next_billing_date %}
-                          {{ service.next_billing_date|date:"M d, Y" }}
+                          {{ service.next_billing_date|romanian_date }}
                         {% else %}
                           <span class="text-slate-500">{% trans "N/A" %}</span>
                         {% endif %}

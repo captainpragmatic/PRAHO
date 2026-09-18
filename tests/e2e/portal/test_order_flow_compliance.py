@@ -14,6 +14,7 @@ All tests are independent and perform a fresh customer login. No database access
 
 import re
 
+import pytest
 from playwright.sync_api import Page
 
 from tests.e2e.helpers import (
@@ -23,6 +24,7 @@ from tests.e2e.helpers import (
     ensure_fresh_session,
     login_user,
 )
+from tests.e2e.helpers.orders import add_product, bank_checkout
 
 # ===============================================================================
 # CONSTANTS
@@ -43,9 +45,7 @@ def _login_customer(page: Page) -> None:
     """Log in as the test customer with a fresh session."""
     ensure_fresh_session(page)
     if not login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD):
-        raise AssertionError(
-            "Customer login failed — is the E2E service running? (make dev-e2e-bg)"
-        )
+        raise AssertionError("Customer login failed — is the E2E service running? (make dev-e2e-bg)")
 
 
 # ===============================================================================
@@ -54,21 +54,8 @@ def _login_customer(page: Page) -> None:
 
 
 def _add_first_product_to_cart(page: Page) -> bool:
-    """
-    Navigate to the product catalog and add the first available product to the cart.
 
-    Returns True if a product was added, False if the catalog is empty.
-    """
-    page.goto(CATALOG_URL)
-    page.wait_for_load_state("networkidle")
-
-    add_buttons = page.locator('button[type="submit"]:has-text("Add to Cart")')
-    if add_buttons.count() == 0:
-        return False
-
-    add_buttons.first.click()
-    page.wait_for_load_state("networkidle")
-    return True
+    return add_product(page)
 
 
 # ===============================================================================
@@ -90,14 +77,14 @@ def test_vat_rate_displayed_correctly(page: Page) -> None:
     added = _add_first_product_to_cart(page)
     if not added:
         print("  SKIP: No products in catalog")
-        return
+        pytest.fail("Required E2E step unavailable: not added")
 
     page.goto(CART_URL)
     page.wait_for_load_state("networkidle")
 
     if "/order/cart/" not in page.url:
         print(f"  SKIP: Redirected from cart to {page.url}")
-        return
+        pytest.fail("Required E2E step unavailable: '/order/cart/' not in page.url")
 
     # Wait for HTMX cart totals to load (they load asynchronously via hx-post)
     page.wait_for_timeout(2000)
@@ -134,7 +121,7 @@ def test_prices_show_currency_symbol(page: Page) -> None:
     products = page.locator("div.grid div[class*='bg-slate-800']")
     if products.count() == 0:
         print("  SKIP: No products in catalog — cannot test price display")
-        return
+        pytest.fail("Required E2E step unavailable: products.count() == 0")
 
     # The product catalog uses {{ price.monthly_price|romanian_currency }} which
     # formats as "X,XX RON". Verify at least one price shows the RON symbol.
@@ -172,14 +159,14 @@ def test_terms_checkbox_required(page: Page) -> None:
     added = _add_first_product_to_cart(page)
     if not added:
         print("  SKIP: No products available — cannot test checkout form")
-        return
+        pytest.fail("Required E2E step unavailable: not added")
 
     page.goto(CHECKOUT_URL)
     page.wait_for_load_state("networkidle")
 
     if "/order/checkout/" not in page.url:
         print(f"  SKIP: Redirected from checkout to {page.url}")
-        return
+        pytest.fail("Required E2E step unavailable: '/order/checkout/' not in page.url")
 
     # Locate the terms checkbox
     terms_checkbox = page.locator('input[name="agree_terms"]')
@@ -216,14 +203,14 @@ def test_bank_transfer_shows_payment_method(page: Page) -> None:
     added = _add_first_product_to_cart(page)
     if not added:
         print("  SKIP: No products available — cannot test checkout payment options")
-        return
+        pytest.fail("Required E2E step unavailable: not added")
 
     page.goto(CHECKOUT_URL)
     page.wait_for_load_state("networkidle")
 
     if "/order/checkout/" not in page.url:
         print(f"  SKIP: Redirected from checkout to {page.url}")
-        return
+        pytest.fail("Required E2E step unavailable: '/order/checkout/' not in page.url")
 
     # The checkout template includes a bank_transfer radio option
     bank_transfer_radio = page.locator('input[type="radio"][value="bank_transfer"]')
@@ -238,96 +225,17 @@ def test_bank_transfer_shows_payment_method(page: Page) -> None:
         # Accept Romanian translation
         bank_transfer_label = page.locator("text=/Transfer|Virament/")
 
-    assert bank_transfer_label.count() > 0, (
-        "COMPLIANCE FAIL: Bank transfer option has no visible label text."
-    )
+    assert bank_transfer_label.count() > 0, "COMPLIANCE FAIL: Bank transfer option has no visible label text."
 
     print("  Bank transfer payment option visible with label — compliance test passes")
 
 
-def test_order_confirmation_shows_order_number(page: Page) -> None:
-    """Order confirmation page displays an order number after successful order creation.
+def test_order_confirmation_shows_order_number(account_page) -> None:
+    """A real bank order must persist and display its reference after reload."""
 
-    After a bank transfer order is created, the confirmation page must show
-    an order number. This is required for customer reference and is used in
-    bank transfer payment descriptions (Romanian banking practice).
-
-    Note: This test creates a real order via bank transfer, so it depends on the
-    platform API being available and the customer having a complete profile.
-    If profile validation fails, the test verifies the error is shown gracefully.
-    """
-    print("Testing compliance: order confirmation shows order number")
-
-    _login_customer(page)
-
-    added = _add_first_product_to_cart(page)
-    if not added:
-        print("  SKIP: No products available")
-        return
-
-    page.goto(CHECKOUT_URL)
-    page.wait_for_load_state("networkidle")
-
-    if "/order/checkout/" not in page.url:
-        print(f"  SKIP: Redirected from checkout to {page.url}")
-        return
-
-    # Select bank transfer (more likely to succeed in test env than Stripe)
-    bank_transfer_radio = page.locator('input[type="radio"][value="bank_transfer"]')
-    if bank_transfer_radio.count() > 0:
-        bank_transfer_radio.first.check()
-
-    # Accept terms
-    terms_checkbox = page.locator('input[name="agree_terms"]')
-    if terms_checkbox.count() > 0:
-        terms_checkbox.first.check()
-
-    # Submit the order
-    submit_button = page.locator('button[type="submit"], input[type="submit"]').first
-    submit_button.click()
-    page.wait_for_load_state("networkidle", timeout=20000)
-
-    page_text = page.locator("body").inner_text()
-
-    # If we reached a confirmation page, verify order number is present
-    if "/order/confirmation/" in page.url:
-        # Confirmation page should show an order number
-        # Order IDs are UUIDs in this system
-        has_order_id = (
-            page.locator("text=/order/i").count() > 0
-            and (
-                page.locator("[class*='font-mono']").count() > 0
-                or page.locator("text=/[0-9a-f-]{36}/").count() > 0
-            )
-        )
-        # Also acceptable: showing "Order" heading with any reference
-        has_order_heading = page.locator("h1, h2").filter(has_text="Order").count() > 0
-
-        assert has_order_id or has_order_heading, (
-            "COMPLIANCE FAIL: Order confirmation page does not display an order number. "
-            "Customers need the order number for bank transfer payment references."
-        )
-        print(f"  Order confirmation page reached at {page.url} — order number displayed")
-
-    elif "Internal Server Error" in page_text:
-        raise AssertionError(
-            "Order creation produced a 500 Internal Server Error. "
-            "This must be fixed before release."
-        )
-    else:
-        # Order may have failed validation (e.g. incomplete customer profile)
-        # Verify the failure is shown gracefully with an error message
-        has_error_message = (
-            page.locator("[class*='red'], [class*='error'], .alert, [role='alert']").count() > 0
-            or page.locator("text=/error|invalid|required|complete.*profile/i").count() > 0
-        )
-        assert has_error_message or "/order/" in page.url, (
-            f"Order creation redirected to unexpected page {page.url} without error message."
-        )
-        print(
-            f"  Order creation failed gracefully (validation/profile error) at {page.url} — "
-            "confirmation number test inconclusive but no crash"
-        )
+    page, _ = account_page
+    _add_first_product_to_cart(page)
+    bank_checkout(page)
 
 
 def test_i18n_no_untranslated_strings(page: Page) -> None:
@@ -346,6 +254,7 @@ def test_i18n_no_untranslated_strings(page: Page) -> None:
     print("Testing i18n: no untranslated placeholder strings on order pages")
 
     _login_customer(page)
+    _add_first_product_to_cart(page)
 
     order_pages = [
         (CATALOG_URL, "Product Catalog"),
@@ -364,33 +273,27 @@ def test_i18n_no_untranslated_strings(page: Page) -> None:
 
         # Pattern 1: Raw Django template variable that was not resolved
         if "{{" in body_text and "}}" in body_text:
-            failed_pages.append(
-                f"{page_name}: contains raw '{{{{ }}}}' template variables in rendered output"
-            )
+            failed_pages.append(f"{page_name}: contains raw '{{{{ }}}}' template variables in rendered output")
 
         # Pattern 2: Translation key that leaked through (e.g. "orders.catalog_title")
         # These look like dotted lowercase strings in rendered UI text
         # We check for the specific pattern "word.word.word" in visible text
-        raw_keys = re.findall(r'\b[a-z]+\.[a-z_]+\.[a-z_]+\b', body_text)
+        raw_keys = re.findall(r"\b[a-z]+\.[a-z_]+\.[a-z_]+\b", body_text)
         # Filter out legitimate dotted strings like version numbers, URLs in text
         suspicious_keys = [
-            k for k in raw_keys
-            if not any(skip in k for skip in ["localhost", "pragmatichost", "praho", "www."])
+            k for k in raw_keys if not any(skip in k for skip in ["localhost", "pragmatichost", "praho", "www."])
         ]
         if suspicious_keys:
             # Only flag if it looks like a translation key (all lowercase, underscores)
-            translation_key_pattern = re.compile(r'^[a-z][a-z_]+\.[a-z][a-z_]+\.[a-z][a-z_]+$')
+            translation_key_pattern = re.compile(r"^[a-z][a-z_]+\.[a-z][a-z_]+\.[a-z][a-z_]+$")
             actual_keys = [k for k in suspicious_keys if translation_key_pattern.match(k)]
             if actual_keys:
-                failed_pages.append(
-                    f"{page_name}: possible untranslated keys: {actual_keys[:3]}"
-                )
+                failed_pages.append(f"{page_name}: possible untranslated keys: {actual_keys[:3]}")
 
         print(f"  {page_name} ({url}): no untranslated patterns detected")
 
-    assert failed_pages == [], (
-        "i18n FAIL: Untranslated strings found on order pages:\n"
-        + "\n".join(f"  - {p}" for p in failed_pages)
+    assert failed_pages == [], "i18n FAIL: Untranslated strings found on order pages:\n" + "\n".join(
+        f"  - {p}" for p in failed_pages
     )
 
     print("  All order pages pass i18n untranslated string check")

@@ -172,6 +172,8 @@ def serialize_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
 
 
 if TYPE_CHECKING:
+    from apps.domains.models import Registrar
+    from apps.products.models import ProductPrice
     from apps.users.models import User
 else:
     User = get_user_model()
@@ -2224,7 +2226,7 @@ class OrdersAuditService:
                 "provisioning_notes": order_item.provisioning_notes,
                 "config": order_item.config,
                 "service_id": str(service.id) if service else None,
-                "service_type": service.service_type if service else None,
+                "service_type": service.service_plan.plan_type if service else None,
                 "customer_id": str(order_item.order.customer.id),
                 "customer_name": order_item.order.customer_name,
                 **event_data.context.metadata,
@@ -2234,10 +2236,10 @@ class OrdersAuditService:
             # Fallback to service-only metadata
             provisioning_metadata = {
                 "service_id": str(service.id) if service else None,
-                "service_type": service.service_type if service else "unknown",
+                "service_type": service.service_plan.plan_type if service else "unknown",
                 **event_data.context.metadata,
             }
-            product_name = service.service_type if service else "unknown service"
+            product_name = service.service_name if service else "unknown service"
 
         # Enhanced context with provisioning metadata
         enhanced_context = AuditContext(
@@ -5242,7 +5244,7 @@ class ProductsAuditService:
 
     @staticmethod
     def log_product_pricing_changed(  # audit trail fields  # noqa: PLR0913  # Business logic parameters
-        product_price: Any,
+        product_price: ProductPrice,
         change_type: str,
         changes: dict[str, Any],
         romanian_business_context: dict[str, Any] | None = None,
@@ -5263,6 +5265,9 @@ class ProductsAuditService:
         # Use default context if none provided
         if context is None:
             context = AuditContext(user=user)
+
+        # Accept the legacy key from older callers, but signals use the monthly model.
+        price_change = changes.get("monthly_price_changed", changes.get("price_changed", {}))
 
         # Build pricing change metadata
         pricing_metadata = {
@@ -5285,9 +5290,9 @@ class ProductsAuditService:
                 "annual_discount_percent": float(product_price.annual_discount_percent),
             },
             "business_impact": {
-                "significant_change": changes.get("price_changed", {}).get("significant", False),
-                "price_increased": changes.get("price_changed", {}).get("price_increased", False),
-                "grandfathered_protection": changes.get("price_changed", {}).get("price_increased", False),
+                "significant_change": price_change.get("significant", False),
+                "price_increased": price_change.get("price_increased", False),
+                "grandfathered_protection": price_change.get("price_increased", False),
             },
             "romanian_context": romanian_business_context or {},
             "changed_at": timezone.now().isoformat(),
@@ -5307,15 +5312,21 @@ class ProductsAuditService:
 
         # Determine description based on change type
         if change_type == "price_created":
-            description = f"New pricing created: {product_price.product.name} - {product_price.currency.code} {product_price.amount} ({product_price.billing_period})"
+            description = (
+                f"New pricing created: {product_price.product.name} - "
+                f"{product_price.currency.code} {product_price.monthly_price:.2f} (monthly)"
+            )
+        elif price_change:
+            old_amount = price_change.get("from_amount", 0)
+            new_amount = price_change.get("to_amount", 0)
+            percent_change = price_change.get("percent_change")
+            percentage = f" ({percent_change:.1f}%)" if percent_change is not None else ""
+            description = (
+                f"Pricing updated: {product_price.product.name} - "
+                f"{product_price.currency.code} {old_amount} → {new_amount}{percentage}"
+            )
         else:
-            price_change = changes.get("price_changed")
-            if price_change:
-                old_amount = price_change.get("from_amount", 0)
-                new_amount = price_change.get("to_amount", 0)
-                description = f"Pricing updated: {product_price.product.name} - {product_price.currency.code} {old_amount} → {new_amount} ({price_change.get('percent_change', 0):.1f}%)"
-            else:
-                description = f"Pricing updated: {product_price.product.name} - {', '.join(changes.keys())}"
+            description = f"Pricing updated: {product_price.product.name} - {', '.join(changes.keys())}"
 
         # Create audit event
         audit_event_data = AuditEventData(
@@ -5323,12 +5334,21 @@ class ProductsAuditService:
             content_object=product_price,
             description=description,
             old_values={
-                key: change.get("from_cents") or change.get("from_amount") or change.get("from_percent")
+                key: next(
+                    (
+                        change[field]
+                        for field in ("from_cents", "from_amount", "from_percent", "from")
+                        if field in change
+                    ),
+                    None,
+                )
                 for key, change in changes.items()
                 if isinstance(change, dict) and any(k.startswith("from_") for k in change)
             },
             new_values={
-                key: change.get("to_cents") or change.get("to_amount") or change.get("to_percent")
+                key: next(
+                    (change[field] for field in ("to_cents", "to_amount", "to_percent", "to") if field in change), None
+                )
                 for key, change in changes.items()
                 if isinstance(change, dict) and any(k.startswith("to_") for k in change)
             },
@@ -5500,7 +5520,7 @@ class DomainsAuditService:
     @staticmethod
     def log_registrar_event(  # Registrar audit requires multiple security parameters  # audit trail fields  # noqa: PLR0913  # Business logic parameters
         event_type: str,
-        registrar: Any,
+        registrar: Registrar,
         user: User | None = None,
         context: AuditContext | None = None,
         old_values: dict[str, Any] | None = None,
@@ -5529,11 +5549,9 @@ class DomainsAuditService:
         registrar_metadata = {
             "registrar_id": str(registrar.id),
             "registrar_name": registrar.name,
-            "api_url": registrar.api_url if not security_sensitive else "[REDACTED]",
-            "is_active": registrar.is_active,
-            "supported_tlds": [tld.extension for tld in registrar.supported_tlds.all()]
-            if hasattr(registrar, "supported_tlds")
-            else [],
+            "api_url": registrar.api_endpoint if not security_sensitive else "[REDACTED]",
+            "is_active": registrar.status == "active",
+            "supported_tlds": list(registrar.get_supported_tlds().values_list("extension", flat=True)),
             "security_event": security_sensitive,
             "old_values": old_values or {},
             "new_values": new_values or {},

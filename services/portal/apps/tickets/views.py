@@ -6,7 +6,7 @@ import base64
 import logging
 
 from django.contrib import messages
-from django.http import HttpRequest, HttpResponse, JsonResponse
+from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.utils.translation import gettext as _
 from django.utils.translation import gettext_lazy
@@ -19,6 +19,10 @@ from apps.common.rate_limit_feedback import handle_platform_error, is_rate_limit
 from apps.services.services import services_api
 
 from .services import PlatformAPIError, TicketCreateRequest, TicketFilters, tickets_api
+
+# Keep the JSON transport below the Platform request body limit.
+MAX_REPLY_ATTACHMENTS = 5
+MAX_REPLY_ATTACHMENT_BYTES = 1024 * 1024
 
 # Tab configuration for ticket status filtering.
 # Labels are lazy: module-level gettext would freeze them to the import-time locale.
@@ -359,6 +363,29 @@ def ticket_create(request: HttpRequest) -> HttpResponse:
     return render(request, "tickets/ticket_create.html", context)
 
 
+@require_http_methods(["GET"])
+def ticket_attachment_download(request: HttpRequest, ticket_id: int, attachment_id: int) -> HttpResponse:
+    """Proxy a customer-authorized download through the signed Platform client."""
+    customer_id = getattr(request, "customer_id", None) or request.session.get("customer_id")
+    user_id = request.session.get("user_id")
+    if not customer_id or not user_id:
+        return redirect("/login/")
+    try:
+        content, headers = tickets_api.download_ticket_attachment(customer_id, user_id, ticket_id, attachment_id)
+    except PlatformAPIError as exc:
+        if exc.status_code in (403, 404):
+            raise Http404("Attachment not found") from exc
+        if is_rate_limited_error(exc):
+            raise
+        return HttpResponse(_("Attachment temporarily unavailable."), status=503)
+    headers = {key.lower(): value for key, value in headers.items()}
+    response = HttpResponse(content, content_type=headers.get("content-type", "application/octet-stream"))
+    response["Content-Disposition"] = headers.get("content-disposition", "attachment")
+    response["Cache-Control"] = "private, no-store"
+    response["X-Content-Type-Options"] = "nosniff"
+    return response
+
+
 @require_http_methods(["POST"])
 def ticket_reply(request: HttpRequest, ticket_id: int) -> HttpResponse:
     """
@@ -379,6 +406,11 @@ def ticket_reply(request: HttpRequest, ticket_id: int) -> HttpResponse:
     # Handle file attachments
     attachments = []
     uploaded_files = request.FILES.getlist("attachments")
+    if (
+        len(uploaded_files) > MAX_REPLY_ATTACHMENTS
+        or sum(file.size or 0 for file in uploaded_files) > MAX_REPLY_ATTACHMENT_BYTES
+    ):
+        return _handle_ticket_error_response(request, ticket_id, _("Attach at most 5 files, totaling at most 1 MiB."))
     if uploaded_files:
         # Process uploaded files for API transmission
         for uploaded_file in uploaded_files:

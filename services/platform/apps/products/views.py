@@ -11,8 +11,9 @@ from django.core.paginator import Paginator
 from django.db import models, transaction
 from django.db.models import Count, Q
 from django.forms import modelform_factory
-from django.http import HttpRequest, HttpResponse, JsonResponse
+from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils.functional import Promise
 from django.utils.translation import gettext_lazy as _
 from django.views.decorators.http import require_http_methods, require_POST
 
@@ -331,9 +332,30 @@ def product_edit(request: HttpRequest, slug: str) -> HttpResponse:
 # ===============================================================================
 
 
+def _toggle_response(request: HttpRequest, product: Product, field: str, message: str | Promise) -> HttpResponse:
+    """HTMX swaps HTML into the button; JSON remains available to API callers."""
+    enabled = getattr(product, field)
+    if request.headers.get("HX-Request") == "true":
+        labels = {
+            "is_active": (_("Active"), _("Inactive")),
+            "is_public": (_("Public"), _("Private")),
+            "is_featured": (_("Featured"), _("Not Featured")),
+        }
+        return render(
+            request,
+            "products/partials/status_toggle.html",
+            {
+                "toggle_url": request.path,
+                "enabled": enabled,
+                "label": labels[field][0 if enabled else 1],
+            },
+        )
+    return json_success({field: enabled, "message": message})
+
+
 @admin_required
 @require_POST
-def product_toggle_active(request: HttpRequest, slug: str) -> JsonResponse:
+def product_toggle_active(request: HttpRequest, slug: str) -> HttpResponse:
     """🔄 Toggle product active status via HTMX"""
     try:
         product = get_object_or_404(Product, slug=slug)
@@ -345,7 +367,7 @@ def product_toggle_active(request: HttpRequest, slug: str) -> JsonResponse:
             event_type="product_status_changed", details={"product_slug": product.slug, "field": "is_active"}
         )
 
-        return json_success({"is_active": product.is_active, "message": _("Product status updated")})
+        return _toggle_response(request, product, "is_active", _("Product status updated"))
 
     except Exception as e:
         logger.error(f"🔥 [Products] Error toggling active status for slug {slug}: {e}")
@@ -354,7 +376,7 @@ def product_toggle_active(request: HttpRequest, slug: str) -> JsonResponse:
 
 @admin_required
 @require_POST
-def product_toggle_public(request: HttpRequest, slug: str) -> JsonResponse:
+def product_toggle_public(request: HttpRequest, slug: str) -> HttpResponse:
     """👁️ Toggle product public visibility via HTMX"""
     try:
         product = get_object_or_404(Product, slug=slug)
@@ -366,7 +388,7 @@ def product_toggle_public(request: HttpRequest, slug: str) -> JsonResponse:
             event_type="product_status_changed", details={"product_slug": product.slug, "field": "is_public"}
         )
 
-        return json_success({"is_public": product.is_public, "message": _("Product visibility updated")})
+        return _toggle_response(request, product, "is_public", _("Product visibility updated"))
 
     except Exception as e:
         logger.error(f"🔥 [Products] Error toggling public status for slug {slug}: {e}")
@@ -375,7 +397,7 @@ def product_toggle_public(request: HttpRequest, slug: str) -> JsonResponse:
 
 @admin_required
 @require_POST
-def product_toggle_featured(request: HttpRequest, slug: str) -> JsonResponse:
+def product_toggle_featured(request: HttpRequest, slug: str) -> HttpResponse:
     """⭐ Toggle product featured status via HTMX"""
     try:
         product = get_object_or_404(Product, slug=slug)
@@ -387,7 +409,7 @@ def product_toggle_featured(request: HttpRequest, slug: str) -> JsonResponse:
             event_type="product_status_changed", details={"product_slug": product.slug, "field": "is_featured"}
         )
 
-        return json_success({"is_featured": product.is_featured, "message": _("Product featured status updated")})
+        return _toggle_response(request, product, "is_featured", _("Product featured status updated"))
 
     except Exception as e:
         logger.error(f"🔥 [Products] Error toggling featured status for slug {slug}: {e}")

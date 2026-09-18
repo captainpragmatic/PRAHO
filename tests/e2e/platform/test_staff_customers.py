@@ -11,6 +11,7 @@ Tests the staff-facing customer management functionality including:
 
 import re
 
+import pytest
 from playwright.sync_api import Page, expect
 
 from tests.e2e.helpers import (
@@ -34,9 +35,7 @@ def _get_first_customer_id(page: Page) -> str | None:
     page.wait_for_load_state("networkidle")
 
     # Scope to table rows to avoid matching sidebar nav links
-    link = page.locator('table a[href*="/customers/"]').filter(
-        has_text=re.compile(r".+")
-    ).first
+    link = page.locator('table a[href*="/customers/"]').filter(has_text=re.compile(r".+")).first
     if link.count() == 0:
         return None
     href = link.get_attribute("href")
@@ -86,7 +85,7 @@ def test_customer_row_navigates_via_delegated_dispatcher(monitored_staff_page: P
     row = page.locator("tr[data-action='navigate']").first
     if row.count() == 0:
         print("  [i] No clickable customer rows seeded — skipping dispatcher navigation check")
-        return
+        pytest.fail("Required E2E step unavailable: row.count() == 0")
 
     expected = row.get_attribute("data-href")
     assert expected and "/customers/" in expected, f"row data-href unexpected: {expected}"
@@ -108,36 +107,21 @@ def test_customer_row_navigates_via_delegated_dispatcher(monitored_staff_page: P
     print(f"  ✅ Row navigated via dispatcher to {page.url}")
 
 
-def test_customer_list_search(monitored_staff_page: Page) -> None:
-    """Search for a customer name and verify results filter."""
+def test_customer_list_search(monitored_staff_page: Page, e2e_baseline) -> None:
     page = monitored_staff_page
-    print("🧪 Testing customer list search")
-
-    navigate_to_platform_page(page, "/customers/")
-    page.wait_for_load_state("networkidle")
-
-    search_field = page.locator('input[type="search"], input[name="search"], input[name="q"]')
-    if not search_field.is_visible():
-        print("  [i] Search field not found — skipping search test")
-        return
-
-    initial_rows = page.locator("table tbody tr").count()
-    print(f"  ✅ Initial row count: {initial_rows}")
-
-    search_field.fill("test")
-    search_field.press("Enter")
-    page.wait_for_load_state("networkidle")
-
-    filtered_rows = page.locator("table tbody tr").count()
-    print(f"  ✅ Filtered row count: {filtered_rows}")
-
-    # Clear search
-    search_field.clear()
-    search_field.press("Enter")
-    page.wait_for_load_state("networkidle")
-
-    restored_rows = page.locator("table tbody tr").count()
-    print(f"  ✅ Restored row count: {restored_rows}")
+    page.goto(f"{PLATFORM_BASE_URL}/customers/")
+    search = page.locator('input[name="q"]:visible')
+    search.fill(e2e_baseline["customers"][1]["name"])
+    search.press("Enter")
+    expect(page.locator("tbody tr[data-href]")).to_have_count(1)
+    expect(page.locator("tbody")).to_contain_text(e2e_baseline["customers"][1]["name"])
+    expect(page.locator("tbody")).not_to_contain_text(e2e_baseline["customers"][0]["name"])
+    search.fill("unmatched-company-name-zzzz")
+    search.press("Enter")
+    expect(page.locator("tbody tr[data-href]")).to_have_count(0)
+    search.fill("")
+    search.press("Enter")
+    expect(page.locator("tbody tr[data-href]").first).to_be_visible()
 
 
 # ===============================================================================
@@ -145,35 +129,13 @@ def test_customer_list_search(monitored_staff_page: Page) -> None:
 # ===============================================================================
 
 
-def test_customer_detail_view(monitored_staff_page: Page) -> None:
-    """Navigate to customer detail and verify info sections are present."""
+def test_customer_detail_view(monitored_staff_page: Page, e2e_baseline) -> None:
     page = monitored_staff_page
-    print("🧪 Testing customer detail view")
-
-    customer_id = _get_first_customer_id(page)
-    assert customer_id, "No customers found in list — fixtures may not be loaded"
-
-    navigate_to_platform_page(page, f"/customers/{customer_id}/")
-    page.wait_for_load_state("networkidle")
-
-    expect(page).to_have_url(re.compile(rf"/customers/{customer_id}/"))
-
-    heading = page.locator("h1").first
-    expect(heading).to_be_visible()
-    print(f"  ✅ Detail heading: {heading.inner_text()}")
-
-    # Verify key information sections exist on the page
-    page_content = page.locator("main, .content, body").first.inner_text()
-    assert len(page_content) > 50, "Detail page should have substantial content"
-    print("  ✅ Customer detail page has content")
-
-    # Check for edit/delete action links
-    action_links = page.locator(
-        f'a[href*="/customers/{customer_id}/edit/"], '
-        f'a[href*="/customers/{customer_id}/delete/"]'
-    )
-    if action_links.count() > 0:
-        print(f"  ✅ {action_links.count()} management action links found")
+    customer = e2e_baseline["customers"][0]
+    page.goto(f"{PLATFORM_BASE_URL}/customers/{customer['id']}/")
+    expect(page.locator("main")).to_contain_text(customer["name"])
+    expect(page.locator("main")).to_contain_text(customer["email"])
+    expect(page.locator(f'a[href="/customers/{customer["id"]}/edit/"]').first).to_be_visible()
 
 
 def test_customer_create_form_renders(monitored_staff_page: Page) -> None:
@@ -197,6 +159,12 @@ def test_customer_create_form_renders(monitored_staff_page: Page) -> None:
     expect(submit.first).to_be_attached()
     print("  ✅ Submit button present")
 
+    expect(page.locator('[name="company_name"]')).to_be_visible()
+
+    expect(page.locator('[name="email"]')).to_be_visible()
+
+    expect(page.locator('[name="address_line1"]')).to_be_visible()
+
 
 def test_customer_edit_form_renders(monitored_staff_page: Page) -> None:
     """Verify edit form loads for an existing customer."""
@@ -217,6 +185,12 @@ def test_customer_edit_form_renders(monitored_staff_page: Page) -> None:
     fields = page.locator("input, select, textarea").count()
     assert fields > 0, "Edit form should have input fields"
     print(f"  ✅ Edit form loaded with {fields} fields")
+
+    expect(page.locator('[name="name"]')).to_be_visible()
+
+    expect(page.locator('[name="company_name"]')).to_be_visible()
+
+    expect(page.locator('[name="primary_email"]')).to_be_visible()
 
 
 # ===============================================================================
@@ -244,6 +218,10 @@ def test_customer_tax_profile_form_renders(monitored_staff_page: Page) -> None:
     assert fields > 0, "Tax profile form should have input fields"
     print(f"  ✅ Tax profile form loaded with {fields} fields")
 
+    expect(page.locator('[name="cui"]')).to_be_visible()
+
+    expect(page.locator('[name="vat_number"]')).to_be_visible()
+
 
 def test_customer_billing_profile_form_renders(monitored_staff_page: Page) -> None:
     """Verify billing profile form loads (was previously returning 500)."""
@@ -264,6 +242,10 @@ def test_customer_billing_profile_form_renders(monitored_staff_page: Page) -> No
     fields = page.locator("input, select, textarea").count()
     assert fields > 0, "Billing profile form should have input fields"
     print(f"  ✅ Billing profile form loaded with {fields} fields")
+
+    expect(page.locator('[name="payment_terms"]')).to_be_visible()
+
+    expect(page.locator('[name="preferred_currency"]')).to_be_visible()
 
 
 def test_customer_address_form_renders(monitored_staff_page: Page) -> None:
@@ -286,6 +268,12 @@ def test_customer_address_form_renders(monitored_staff_page: Page) -> None:
     assert fields > 0, "Address form should have input fields"
     print(f"  ✅ Address form loaded with {fields} fields")
 
+    expect(page.locator('[name="address_line1"]')).to_be_visible()
+
+    expect(page.locator('[name="city"]')).to_be_visible()
+
+    expect(page.locator('[name="postal_code"]')).to_be_visible()
+
 
 def test_customer_note_form_renders(monitored_staff_page: Page) -> None:
     """Verify note add form loads (was previously returning 500)."""
@@ -306,6 +294,10 @@ def test_customer_note_form_renders(monitored_staff_page: Page) -> None:
     fields = page.locator("input, select, textarea").count()
     assert fields > 0, "Note form should have input fields"
     print(f"  ✅ Note form loaded with {fields} fields")
+
+    expect(page.locator('[name="title"]')).to_be_visible()
+
+    expect(page.locator('[name="content"]')).to_be_visible()
 
 
 # ===============================================================================

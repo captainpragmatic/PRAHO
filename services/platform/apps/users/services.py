@@ -341,8 +341,13 @@ class SecureUserRegistrationService:
 
             # Step 3: Create customer organization with validated data
             customer = Customer.objects.create(
+                name=customer_data["company_name"],
                 company_name=customer_data["company_name"],  # Sanitized
                 customer_type=customer_data.get("customer_type", "other"),
+                primary_email=user.email,
+                primary_phone=user.phone or "",
+                data_processing_consent=bool(user.gdpr_consent_date),
+                marketing_consent=user.accepts_marketing,
                 status="active",
                 created_by=user,
             )
@@ -392,7 +397,7 @@ class SecureUserRegistrationService:
                 address_line1=customer_data.get("billing_address", ""),  # Sanitized
                 city=customer_data.get("billing_city", ""),  # Sanitized
                 postal_code=customer_data.get("billing_postal_code", ""),  # Sanitized
-                county=detect_county(customer_data.get("billing_city", "")),
+                county=customer_data.get("county") or detect_county(customer_data.get("billing_city", "")),
                 country=customer_data.get("country") or country_name(get_localisation_defaults().default_country),
                 is_current=True,
             )

@@ -42,7 +42,7 @@ class D390ExportForm(D390PeriodForm):
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
-        self.fields["month"].widget = forms.HiddenInput()
+        self.fields["month"].widget = forms.HiddenInput(attrs={"id": "id_export_month"})
         _style_form_fields(self)
 
     def clean(self) -> dict[str, Any]:

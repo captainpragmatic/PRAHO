@@ -41,6 +41,8 @@
         {% trans "Enter your password" as password_placeholder %}
         {% form_field form.password icon_left="lock" placeholder=password_placeholder %}
 
+        {% form_field form.mfa_token icon_left="lock" %}
+
         <!-- Remember Me & Forgot Password -->
         <div class="flex items-center justify-between">
           {% form_checkbox form.remember_me %}

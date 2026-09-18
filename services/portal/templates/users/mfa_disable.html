@@ -1,0 +1,15 @@
+{% extends 'base.html' %}
+{% load i18n ui_components %}
+{% block title %}{% trans 'Disable MFA' %}{% endblock %}
+{% block content %}
+<div class="max-w-2xl mx-auto">
+  <h1 class="text-2xl text-white mb-4">{% trans 'Disable MFA' %}</h1>
+  <form method="post" class="space-y-4">
+    {% csrf_token %}
+    {% form_error_summary form %}
+    {% form_field form.password icon_left="lock" autocomplete="current-password" %}
+    {% form_field form.token icon_left="lock" autocomplete="one-time-code" %}
+    {% trans 'Disable MFA' as disable_label %}{% button disable_label type="submit" variant="danger" %}
+  </form>
+</div>
+{% endblock %}

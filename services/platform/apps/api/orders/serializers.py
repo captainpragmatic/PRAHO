@@ -153,6 +153,7 @@ class OrderItemSerializer(serializers.ModelSerializer):
             "subtotal",
             "line_total",
             "domain_name",
+            "billing_period",
             "config",
             "provisioning_status",
         )
@@ -193,6 +194,12 @@ class OrderDetailSerializer(serializers.ModelSerializer):
     total = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
     status_display = serializers.CharField(source="get_status_display", read_only=True)
     currency_code = serializers.CharField(source="currency.code", read_only=True)
+    vat_rate_percent = serializers.SerializerMethodField()
+
+    def get_vat_rate_percent(self, obj: Order) -> str | None:
+        """Show a single percentage only when all recorded lines use that rate."""
+        rates = {item.tax_rate for item in obj.items.all()}
+        return format((rates.pop() * 100).normalize(), "f") if len(rates) == 1 else None
 
     class Meta:
         model = Order
@@ -210,6 +217,7 @@ class OrderDetailSerializer(serializers.ModelSerializer):
             "customer_company",
             "billing_address",
             "payment_method",
+            "vat_rate_percent",
             "notes",
             "created_at",
             "updated_at",
@@ -275,6 +283,7 @@ class OrderCreateInputSerializer(serializers.Serializer):
     """Input serializer for order creation"""
 
     currency = serializers.CharField(max_length=3, default="RON")
+    payment_method = serializers.ChoiceField(choices=["card", "bank_transfer"], default="", allow_blank=True)
     items = CartItemInputSerializer(many=True)
     notes = serializers.CharField(max_length=500, required=False, allow_blank=True)
     meta = serializers.JSONField(default=dict, required=False)

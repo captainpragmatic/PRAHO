@@ -1,4 +1,3 @@
-
 """
 ===============================================================================
 STAFF INFRASTRUCTURE SYSTEM - END-TO-END TESTS
@@ -20,7 +19,7 @@ Created: 2025-12-25
 Framework: Playwright + pytest
 """
 
-from playwright.sync_api import Page
+from playwright.sync_api import Page, expect
 
 # Import shared utilities
 from tests.e2e.helpers import (
@@ -47,7 +46,8 @@ def test_staff_infrastructure_dashboard_access(monitored_staff_page: Page) -> No
     print("🔧 Testing staff infrastructure dashboard access")
 
     # Navigate to infrastructure dashboard
-    page.goto(INFRA_URL)
+    response = page.goto(INFRA_URL)
+    assert response.status == 200
     page.wait_for_load_state("networkidle")
 
     # Verify we're on infrastructure page
@@ -69,7 +69,8 @@ def test_infrastructure_dashboard_stats_display(monitored_staff_page: Page) -> N
     page = monitored_staff_page
     print("📊 Testing infrastructure dashboard stats display")
 
-    page.goto(INFRA_URL)
+    response = page.goto(INFRA_URL)
+    assert response.status == 200
     page.wait_for_load_state("networkidle")
 
     # Verify statistics cards are present
@@ -96,7 +97,8 @@ def test_deployment_list_page_loads(monitored_staff_page: Page) -> None:
     page = monitored_staff_page
     print("📋 Testing deployment list page")
 
-    page.goto(f"{INFRA_URL}deployments/")
+    response = page.goto(f"{INFRA_URL}deployments/")
+    assert response.status == 200
     page.wait_for_load_state("networkidle")
 
     # Verify page loaded
@@ -120,7 +122,8 @@ def test_deployment_create_page_loads(monitored_staff_page: Page) -> None:
     page = monitored_staff_page
     print("+ Testing deployment create page")
 
-    page.goto(f"{INFRA_URL}deployments/create/")
+    response = page.goto(f"{INFRA_URL}deployments/create/")
+    assert response.status == 200
     page.wait_for_load_state("networkidle")
 
     # Verify page loaded
@@ -135,8 +138,7 @@ def test_deployment_create_page_loads(monitored_staff_page: Page) -> None:
     environment_select = page.locator('select[name="environment"], [id*="environment"]')
 
     # At least one of these should be present
-    assert provider_select.count() > 0 or environment_select.count() > 0, \
-        "Form fields not found"
+    assert provider_select.count() > 0 or environment_select.count() > 0, "Form fields not found"
 
     print("  ✅ Deployment create page loaded with form")
 
@@ -153,7 +155,8 @@ def test_provider_list_page_loads(monitored_staff_page: Page) -> None:
     page = monitored_staff_page
     print("☁️ Testing provider list page")
 
-    page.goto(f"{INFRA_URL}providers/")
+    response = page.goto(f"{INFRA_URL}providers/")
+    assert response.status == 200
     page.wait_for_load_state("networkidle")
 
     # Verify page loaded
@@ -164,6 +167,7 @@ def test_provider_list_page_loads(monitored_staff_page: Page) -> None:
     assert content.count() > 0, "Page content not found"
 
     print("  ✅ Provider list page loaded")
+    expect(page.get_by_role("heading", name="Cloud Providers", exact=True)).to_be_visible()
 
 
 # =============================================================================
@@ -178,13 +182,15 @@ def test_size_list_page_loads(monitored_staff_page: Page) -> None:
     page = monitored_staff_page
     print("📐 Testing size list page")
 
-    page.goto(f"{INFRA_URL}sizes/")
+    response = page.goto(f"{INFRA_URL}sizes/")
+    assert response.status == 200
     page.wait_for_load_state("networkidle")
 
     # Verify page loaded
     assert "/sizes/" in page.url
 
     print("  ✅ Size list page loaded")
+    expect(page.get_by_role("heading", name="Node Sizes", exact=True)).to_be_visible()
 
 
 # =============================================================================
@@ -199,13 +205,15 @@ def test_region_list_page_loads(monitored_staff_page: Page) -> None:
     page = monitored_staff_page
     print("🌍 Testing region list page")
 
-    page.goto(f"{INFRA_URL}regions/")
+    response = page.goto(f"{INFRA_URL}regions/")
+    assert response.status == 200
     page.wait_for_load_state("networkidle")
 
     # Verify page loaded
     assert "/regions/" in page.url
 
     print("  ✅ Region list page loaded")
+    expect(page.get_by_role("heading", name="Node Regions", exact=True)).to_be_visible()
 
 
 # =============================================================================
@@ -220,7 +228,8 @@ def test_cost_dashboard_page_loads(monitored_staff_page: Page) -> None:
     page = monitored_staff_page
     print("💰 Testing cost dashboard page")
 
-    page.goto(f"{INFRA_URL}costs/")
+    response = page.goto(f"{INFRA_URL}costs/")
+    assert response.status == 200
     page.wait_for_load_state("networkidle")
 
     # Verify page loaded
@@ -228,8 +237,7 @@ def test_cost_dashboard_page_loads(monitored_staff_page: Page) -> None:
 
     # Check for cost-related content
     cost_heading = page.locator('h1:has-text("Cost"), h1:has-text("Infrastructure Costs")')
-    assert cost_heading.is_visible() or page.locator('text=EUR').count() > 0, \
-        "Cost heading or EUR amounts not found"
+    assert cost_heading.is_visible() or page.locator("text=EUR").count() > 0, "Cost heading or EUR amounts not found"
 
     print("  ✅ Cost dashboard page loaded")
 
@@ -241,13 +249,15 @@ def test_cost_history_page_loads(monitored_staff_page: Page) -> None:
     page = monitored_staff_page
     print("📈 Testing cost history page")
 
-    page.goto(f"{INFRA_URL}costs/history/")
+    response = page.goto(f"{INFRA_URL}costs/history/")
+    assert response.status == 200
     page.wait_for_load_state("networkidle")
 
     # Verify page loaded
     assert "/history/" in page.url
 
     print("  ✅ Cost history page loaded")
+    expect(page.get_by_role("heading", name="Cost History", exact=True)).to_be_visible()
 
 
 # =============================================================================
@@ -265,12 +275,14 @@ def test_unauthenticated_access_redirects_to_login(page: Page) -> None:
     ensure_fresh_platform_session(page)
 
     # Try to access infrastructure without logging in
-    page.goto(INFRA_URL)
+    response = page.goto(INFRA_URL)
+    assert response.status == 200
     page.wait_for_load_state("networkidle")
 
     # Should be redirected to login
-    assert "/login" in page.url or "/accounts/login" in page.url or "/auth/login" in page.url, \
+    assert "/login" in page.url or "/accounts/login" in page.url or "/auth/login" in page.url, (
         f"Expected redirect to login, got: {page.url}"
+    )
 
     print("  ✅ Unauthenticated access correctly redirected to login")
 
@@ -287,7 +299,8 @@ def test_infrastructure_dashboard_responsive(monitored_staff_page: Page) -> None
     page = monitored_staff_page
     print("📱 Testing infrastructure dashboard responsiveness")
 
-    page.goto(INFRA_URL)
+    response = page.goto(INFRA_URL)
+    assert response.status == 200
     page.wait_for_load_state("networkidle")
 
     # Test different viewport sizes
@@ -302,7 +315,8 @@ def test_infrastructure_dashboard_responsive(monitored_staff_page: Page) -> None
 
         # Verify content is still visible
         main_content = page.locator("main, [class*='container'], [class*='content']")
-        assert main_content.count() > 0, f"Content not visible at {bp['name']} breakpoint"
+        expect(page.locator("main h1")).to_contain_text("Infrastructure")
+        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
 
         print(f"    ✅ {bp['name']} ({bp['width']}px) - content visible")
 
@@ -321,7 +335,8 @@ def test_infrastructure_navigation_links(monitored_staff_page: Page) -> None:
     page = monitored_staff_page
     print("🔗 Testing infrastructure navigation links")
 
-    page.goto(INFRA_URL)
+    response = page.goto(INFRA_URL)
+    assert response.status == 200
     page.wait_for_load_state("networkidle")
 
     # Test navigation to different sections
@@ -334,7 +349,8 @@ def test_infrastructure_navigation_links(monitored_staff_page: Page) -> None:
     ]
 
     for path, name in nav_targets:
-        page.goto(f"{INFRA_URL}{path}")
+        response = page.goto(f"{INFRA_URL}{path}")
+        assert response.status == 200
         page.wait_for_load_state("networkidle")
 
         assert path in page.url, f"Failed to navigate to {name}"

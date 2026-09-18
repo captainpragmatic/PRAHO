@@ -37,8 +37,14 @@ def _get_status_text(page: Page) -> str:
     """Return the visible status badge text from the ticket detail page."""
     status_area = page.locator("#ticket-status-and-comments")
     for status in (
-        "Open", "In Progress", "Waiting on Customer", "Closed",
-        "Deschis", "In progres", "Așteaptă clientul", "Închis",
+        "Open",
+        "In Progress",
+        "Waiting on Customer",
+        "Closed",
+        "Deschis",
+        "In progres",
+        "Așteaptă clientul",
+        "Închis",
     ):
         badge = status_area.get_by_text(status, exact=True).first
         if badge.is_visible(timeout=500):
@@ -55,7 +61,10 @@ def _assert_status(page: Page, *expected: str, msg: str = "") -> str:
 
 
 def _submit_reply(
-    page: Page, text: str, action: str, resolution: str | None = None,
+    page: Page,
+    text: str,
+    action: str,
+    resolution: str | None = None,
 ) -> None:
     """Fill the reply form, choose an action, and submit via HTMX."""
     reply_box = page.locator("textarea[name='reply']")
@@ -72,7 +81,7 @@ def _submit_reply(
     _wait_for_htmx(page)
 
 
-def _create_ticket(page: Page, subject: str, priority: str = "high") -> str:
+def _create_ticket(page: Page, subject: str, customer_id: int, priority: str = "high") -> str:
     """Create a ticket and return the detail page URL."""
     navigate_to_platform_page(page, "/tickets/create/")
     page.wait_for_load_state("networkidle")
@@ -81,12 +90,10 @@ def _create_ticket(page: Page, subject: str, priority: str = "high") -> str:
     customer_select = page.locator("select[name='customer_id']")
     expect(customer_select).to_be_visible()
     assert customer_select.locator("option").count() > 1, "Need at least one customer in fixtures"
-    page.select_option("select[name='customer_id']", index=1)
+    page.select_option("select[name='customer_id']", str(customer_id))
 
     page.locator("input[name='subject'], input[name='title']").first.fill(subject)
-    page.locator("textarea[name='description']").fill(
-        "Automated E2E test — full lifecycle with badge verification."
-    )
+    page.locator("textarea[name='description']").fill("Automated E2E test — full lifecycle with badge verification.")
 
     priority_select = page.locator("select[name='priority']")
     if priority_select.is_visible():
@@ -95,9 +102,7 @@ def _create_ticket(page: Page, subject: str, priority: str = "high") -> str:
     page.locator("button:has-text('Create'), button:has-text('Submit')").first.click()
     page.wait_for_load_state("networkidle")
 
-    assert "/tickets/" in page.url and "/create/" not in page.url, (
-        f"Expected redirect to ticket detail, got {page.url}"
-    )
+    assert "/tickets/" in page.url and "/create/" not in page.url, f"Expected redirect to ticket detail, got {page.url}"
     assert re.search(r"/tickets/\d+/", page.url), f"URL should contain ticket ID: {page.url}"
     return page.url
 
@@ -114,20 +119,15 @@ def _verify_badge_in_list(page: Page, ticket_url: str, expected_text: str) -> No
 
     # Desktop table row: #284 migrated the row from onclick="...tickets/ID/..." to the
     # delegated data-action="navigate" dispatcher, so match data-href, not onclick.
-    row = page.locator(
-        f"tr[data-action='navigate'][data-href*='/tickets/{ticket_id}/']"
-    ).first
+    row = page.locator(f"tr[data-action='navigate'][data-href*='/tickets/{ticket_id}/']").first
     if row.is_visible(timeout=2000):
         badge = row.get_by_text(expected_text, exact=True).first
-        assert badge.is_visible(timeout=2000), (
-            f"Expected '{expected_text}' badge in list row for ticket {ticket_id}"
-        )
+        assert badge.is_visible(timeout=2000), f"Expected '{expected_text}' badge in list row for ticket {ticket_id}"
     else:
         # Mobile card fallback — also a delegated data-action element now, not an <a>.
-        card = page.locator(
-            f"[data-action='navigate'][data-href*='/tickets/{ticket_id}/']"
-        ).first
-        assert card.is_visible(timeout=2000), f"Ticket {ticket_id} not found in list"
+        card = page.locator(f"[data-action='navigate'][data-href*='/tickets/{ticket_id}/']").first
+        expect(card).to_be_visible()
+        expect(card.get_by_text(expected_text, exact=True)).to_be_visible()
 
 
 # ---------------------------------------------------------------------------
@@ -193,8 +193,10 @@ def _reply_transitions(page: Page) -> None:
 def _close_and_verify(page: Page, ticket_url: str) -> None:
     """Phase: close ticket, verify badges, verify reply form still visible for staff."""
     _submit_reply(
-        page, "Resolved by upgrading to VPS plan.",
-        "close_with_resolution", resolution="fixed",
+        page,
+        "Resolved by upgrading to VPS plan.",
+        "close_with_resolution",
+        resolution="fixed",
     )
     _assert_status(page, "Closed", "Închis", msg="Should be Closed after resolution")
 
@@ -226,7 +228,11 @@ def _reopen_and_wait(page: Page) -> None:
 
     assert "/tickets/" in page.url
     _assert_status(
-        page, "In Progress", "In progres", "Open", "Deschis",
+        page,
+        "In Progress",
+        "In progres",
+        "Open",
+        "Deschis",
         msg="Reopened ticket should be In Progress or Open",
     )
 
@@ -260,33 +266,16 @@ def test_ticket_list_and_navigation(monitored_staff_page: Page) -> None:
     assert "/tickets/" in page.url
 
     # Heading
-    heading = page.locator(
-        'h1:has-text("Support Tickets"), h1:has-text("Tichete de suport")'
-    ).first
+    heading = page.locator('h1:has-text("Support Tickets"), h1:has-text("Tichete de suport")').first
     expect(heading).to_be_visible()
 
     # New Ticket button
     new_ticket_btn = page.locator('a:has-text("New Ticket"), a:has-text("Tichet nou")').first
     expect(new_ticket_btn).to_be_visible()
 
-    # Stats section (open count, total count)
-    stats_area = page.locator(".text-amber-400, .text-white").first
-    assert stats_area.is_visible(timeout=2000), "Stats section should be visible"
-
-    # Status filter: the shared tab widget, with the All tab selected on a plain load
     expect(visible_tablist(page)).to_be_visible()
     assert_selection_state(page, "")
-
-    # HTMX search: type in search input, verify tickets container updates
-    search_input = page.locator("#search")
-    if search_input.is_visible(timeout=2000):
-        search_input.fill("test")
-        page.wait_for_timeout(700)  # debounce
-        _wait_for_htmx(page)
-        tickets_container = page.locator("#tickets-container")
-        expect(tickets_container).to_be_visible()
-        search_input.fill("")  # reset
-        _wait_for_htmx(page)
+    expect(page.locator("#list-filter-search")).to_be_visible()
 
     # Click New Ticket -> navigate to create form
     new_ticket_btn.click()
@@ -298,7 +287,7 @@ def test_ticket_list_and_navigation(monitored_staff_page: Page) -> None:
     expect(customer_select).to_be_visible()
 
 
-def test_ticket_full_lifecycle(monitored_staff_page: Page) -> None:
+def test_ticket_full_lifecycle(monitored_staff_page: Page, e2e_scenario) -> None:
     """
     Full ticket state machine test with badge verification at each step.
 
@@ -318,7 +307,12 @@ def test_ticket_full_lifecycle(monitored_staff_page: Page) -> None:
     """
     page = monitored_staff_page
 
-    ticket_url = _create_ticket(page, "E2E Lifecycle: full state machine test", priority="high")
+    ticket_url = _create_ticket(
+        page,
+        "E2E Lifecycle: full state machine test",
+        customer_id=e2e_scenario("account")["customer_id"],
+        priority="high",
+    )
     _verify_detail_after_create(page, ticket_url)
     _reply_transitions(page)
     _close_and_verify(page, ticket_url)
@@ -332,12 +326,8 @@ def test_ticket_mobile_responsiveness(monitored_staff_page: Page) -> None:
     def _check_tickets_page(pg: Page) -> dict:
         navigate_to_platform_page(pg, "/tickets/")
         pg.wait_for_load_state("networkidle")
-        heading = pg.locator(
-            'h1:has-text("Support Tickets"), h1:has-text("Tichete de suport")'
-        ).first
-        new_btn = pg.locator(
-            'a:has-text("New Ticket"), a:has-text("Tichet nou"), a[href*="/tickets/create/"]'
-        ).first
+        heading = pg.locator('h1:has-text("Support Tickets"), h1:has-text("Tichete de suport")').first
+        new_btn = pg.locator('a:has-text("New Ticket"), a:has-text("Tichet nou"), a[href*="/tickets/create/"]').first
         return {
             "heading_visible": heading.is_visible(timeout=3000),
             "new_ticket_visible": new_btn.is_visible(timeout=2000),
@@ -354,9 +344,7 @@ def test_ticket_access_control(monitored_staff_page: Page) -> None:
     # Ticket list loads
     navigate_to_platform_page(page, "/tickets/")
     page.wait_for_load_state("networkidle")
-    heading = page.locator(
-        'h1:has-text("Support Tickets"), h1:has-text("Tichete de suport")'
-    ).first
+    heading = page.locator('h1:has-text("Support Tickets"), h1:has-text("Tichete de suport")').first
     expect(heading).to_be_visible()
 
     # Create form accessible with customer select

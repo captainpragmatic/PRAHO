@@ -9,6 +9,7 @@ from django.db.models import Avg, Count, Prefetch, Q, QuerySet
 from django.http import Http404, HttpRequest, HttpResponse
 from rest_framework import status
 from rest_framework.decorators import api_view, authentication_classes, permission_classes
+from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
@@ -17,6 +18,7 @@ from apps.customers.models import Customer
 from apps.tickets.models import SupportCategory, Ticket, TicketAttachment, TicketComment
 from apps.tickets.services import TicketStatusService
 
+from .attachments import decode_attachments
 from .serializers import (
     CommentCreateSerializer,
     SupportCategorySerializer,
@@ -412,6 +414,11 @@ def _create_customer_ticket_reply(request: HttpRequest, customer: Customer, tick
     if not serializer.is_valid():
         return Response({"success": False, "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
+    try:
+        attachments = decode_attachments(request_data.get("attachments", []))
+    except ValidationError as exc:
+        return Response({"success": False, "errors": {"attachments": exc.detail}}, status=status.HTTP_400_BAD_REQUEST)
+
     comment = TicketComment.objects.create(
         ticket=ticket,
         content=serializer.validated_data["content"],
@@ -421,6 +428,28 @@ def _create_customer_ticket_reply(request: HttpRequest, customer: Customer, tick
         is_public=True,
     )
     TicketStatusService.handle_customer_reply(ticket)
+
+    # File storage is not transactional. Remove every written file if persistence
+    # fails; the enclosing transaction rolls back the comment and lifecycle change.
+    stored = []
+    try:
+        for uploaded in attachments:
+            attachment = TicketAttachment(
+                ticket=ticket,
+                comment=comment,
+                filename=uploaded.name,
+                file_size=uploaded.size,
+                content_type=uploaded.content_type,
+                uploaded_by_id=request_data.get("user_id"),
+                is_safe=True,
+            )
+            attachment.file.save(uploaded.name, uploaded, save=False)
+            stored.append(attachment.file)
+            attachment.save()
+    except Exception:
+        for file in stored:
+            file.delete(save=False)
+        raise
 
     return Response(
         {

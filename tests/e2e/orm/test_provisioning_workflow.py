@@ -1,470 +1,142 @@
-# ===============================================================================
-# END-TO-END TESTS FOR PROVISIONING WORKFLOW
-# ===============================================================================
-"""
-End-to-end tests for service provisioning workflow.
-Tests the complete flow from order confirmation to service activation.
-"""
-
-from datetime import timedelta
+"""Paid orders enter service enrollment; unpaid orders cannot provision."""
 
 import pytest
-from django.contrib.auth import get_user_model
-from django.test import Client, TestCase
-from django.utils import timezone
 
-from apps.billing.models import Currency, Invoice, Payment
-from apps.customers.models import Customer, CustomerBillingProfile, CustomerTaxProfile
-from apps.orders.models import Order, OrderItem
-from apps.products.models import Product
-from tests.helpers.fsm_helpers import force_status
+from apps.billing.subscription_models import Subscription
+from apps.orders.models import OrderStatusHistory
+from apps.orders.services import OrderService, OrderServiceCreationService, StatusChangeData
+from apps.products.models import Product, ProductPrice
+from apps.provisioning.models import Service
+from apps.provisioning.services import ProvisioningService
+from tests.e2e.orm.workflow import WorkflowCase
 
-User = get_user_model()
+pytestmark = pytest.mark.e2e
 
 
-@pytest.mark.e2e
-class TestServiceProvisioningWorkflow(TestCase):
-    """End-to-end tests for service provisioning"""
-
-    def setUp(self):
-        """Set up test fixtures"""
-        self.client = Client()
-
-        self.admin = User.objects.create_user(
-            email='provision_admin@test.ro',
-            password='AdminPass123!',
-            is_staff=True,
-            is_superuser=True,
-            staff_role='admin',
-        )
-
-        self.currency, _ = Currency.objects.get_or_create(
-            code='RON',
-            defaults={'name': 'Romanian Leu', 'symbol': 'L', 'decimals': 2}
-        )
-
-        self.customer = Customer.objects.create(
-            name='SC Provision Test SRL',
-            customer_type='company',
-            company_name='SC Provision Test SRL',
-            primary_email='provision@company.ro',
-            primary_phone='+40721234567',
-            data_processing_consent=True,
-            created_by=self.admin,
-        )
-
-        CustomerTaxProfile.objects.create(
-            customer=self.customer,
-            cui='RO12345678',
-            vat_number='RO12345678',
-            is_vat_payer=True,
-        )
-
-        CustomerBillingProfile.objects.create(
-            customer=self.customer,
-            payment_terms=30,
-            preferred_currency='RON',
-        )
-
-        self.hosting_product = Product.objects.create(
-            name='Web Hosting Standard',
-            slug='wh-std-prov',
-            description='Standard web hosting package',
-            product_type='shared_hosting',
-            is_active=True,
-        )
-
+class TestServiceProvisioningWorkflow(WorkflowCase):
     def test_order_to_provisioning_flow(self):
-        """Test complete flow from order to service provisioning"""
-        self.client.force_login(self.admin)
-
-        # Step 1: Create and confirm order
-        order = Order.objects.create(
-            customer=self.customer,
-            order_number='ORD-PROV-001',
-            status='draft',
-            currency=self.currency,
-            subtotal_cents=9900,
-            tax_cents=1881,
-            total_cents=11781,
-            customer_email=self.customer.primary_email,
-            customer_name=self.customer.name,
-        )
-
-        OrderItem.objects.create(
-            order=order,
-            product=self.hosting_product,
-            product_name=self.hosting_product.name,
-            product_type=self.hosting_product.product_type,
-            quantity=1,
-            unit_price_cents=9900,
-            line_total_cents=9900,
-        )
-
-        # Confirm order
-        force_status(order, 'confirmed')
-        assert order.status == 'confirmed'
-
-        # Step 2: Create invoice
-        invoice = Invoice.objects.create(
-            customer=self.customer,
-            currency=self.currency,
-            number='INV-PROV-001',
-            status='issued',
-            subtotal_cents=9900,
-            tax_cents=1881,
-            total_cents=11781,
-            due_at=timezone.now() + timedelta(days=30),
-        )
-
-        # Link order to invoice (Order has FK to Invoice)
-        order.invoice = invoice
-        order.save()
-
-        # Step 3: Process payment
-        payment = Payment.objects.create(
-            customer=self.customer,
-            invoice=invoice,
-            currency=self.currency,
-            amount_cents=11781,
-            payment_method='stripe',
-            status='succeeded',
-        )
-
-        assert payment.status == 'succeeded'
-
-        # Step 4: Update invoice status
-        force_status(invoice, 'paid')
-        assert invoice.status == 'paid'
-
-        # Step 5: Order ready for provisioning
-        force_status(order, 'processing')
-        assert order.status == 'processing'
+        order = self.create_order()
+        self.assertTrue(OrderServiceCreationService.update_service_status_on_payment(order).is_err())
+        self.assertFalse(Subscription.objects.exists())
+        self.pay(order)
+        service = order.items.get().service
+        self.assertIsNotNone(service)
+        self.assertEqual((service.customer_id, service.status), (self.customer.pk, "provisioning"))
+        self.assertEqual(service.service_plan_id, self.plan.pk)
+        self.assertEqual(Subscription.objects.get(service=service).unit_price_cents, 10000)
+        self.pay(order)
+        self.assertEqual(Service.objects.count(), 1)
+        self.assertEqual(Subscription.objects.count(), 1)
 
     def test_hosting_product_provisioning_requirements(self):
-        """Test that hosting products have required provisioning data"""
-        assert self.hosting_product.name is not None
-        assert self.hosting_product.slug is not None
-        assert self.hosting_product.product_type == 'shared_hosting'
+        self.product.requires_domain = True
+        self.product.domain_required_at_signup = True
+        self.product.save(update_fields=["requires_domain", "domain_required_at_signup"])
+        order = self.create_order(submit=False)
+        result = OrderService.update_order_status(order, StatusChangeData(new_status="awaiting_payment"))
+        self.assertTrue(result.is_err())
+        order.refresh_from_db()
+        self.assertEqual(order.status, "draft")
+        self.assertIsNone(order.proforma_id)
+        self.assertFalse(Service.objects.exists())
 
     def test_order_with_multiple_services(self):
-        """Test order with multiple services to provision"""
-        self.client.force_login(self.admin)
-
-        # Create additional products
-        vps_product = Product.objects.create(
-            name='VPS Basic',
-            slug='vps-basic-prov',
-            description='Basic VPS package',
-            product_type='vps',
-            is_active=True,
+        second = Product.objects.create(
+            name="Second Hosting",
+            slug="second-hosting",
+            requires_domain=False,
+            product_type="shared_hosting",
+            default_service_plan=self.plan,
         )
-
-        domain_product = Product.objects.create(
-            name='Domain .ro',
-            slug='dom-ro-prov',
-            description='.ro domain registration',
-            product_type='domain',
-            is_active=True,
+        ProductPrice.objects.create(product=second, currency=self.currency, monthly_price_cents=10000)
+        order = self.create_order(
+            items=[
+                {
+                    "product_id": product.pk,
+                    "quantity": 1,
+                    "unit_price_cents": 10000,
+                    "billing_period": "monthly",
+                    "description": product.name,
+                }
+                for product in (self.product, second)
+            ]
         )
-
-        # Create order with multiple items
-        order = Order.objects.create(
-            customer=self.customer,
-            order_number='ORD-MULTI-001',
-            status='draft',
-            currency=self.currency,
-            customer_email=self.customer.primary_email,
-            customer_name=self.customer.name,
-        )
-
-        # Add hosting
-        OrderItem.objects.create(
-            order=order,
-            product=self.hosting_product,
-            product_name=self.hosting_product.name,
-            product_type=self.hosting_product.product_type,
-            quantity=1,
-            unit_price_cents=9900,
-            line_total_cents=9900,
-        )
-
-        # Add VPS
-        OrderItem.objects.create(
-            order=order,
-            product=vps_product,
-            product_name=vps_product.name,
-            product_type=vps_product.product_type,
-            quantity=1,
-            unit_price_cents=29900,
-            line_total_cents=29900,
-        )
-
-        # Add domain
-        OrderItem.objects.create(
-            order=order,
-            product=domain_product,
-            product_name=domain_product.name,
-            product_type=domain_product.product_type,
-            quantity=1,
-            unit_price_cents=4500,
-            line_total_cents=4500,
-        )
-
-        assert order.items.count() == 3
-
-        # Calculate subtotal (pre-tax)
-        subtotal = sum(item.subtotal_cents for item in order.items.all())
-        assert subtotal == 44300  # 9900 + 29900 + 4500
+        self.pay(order)
+        self.assertEqual(order.total_cents, 24200)
+        services = list(order.items.values_list("service_id", flat=True))
+        self.assertEqual(len(set(services)), 2)
+        self.assertNotIn(None, services)
+        self.assertEqual(Subscription.objects.filter(service_id__in=services).count(), 2)
 
 
-@pytest.mark.e2e
-class TestProvisioningStatusWorkflow(TestCase):
-    """End-to-end tests for provisioning status changes"""
-
-    def setUp(self):
-        """Set up test fixtures"""
-        self.client = Client()
-
-        self.admin = User.objects.create_user(
-            email='status_prov_admin@test.ro',
-            password='AdminPass123!',
-            is_staff=True,
-            is_superuser=True,
-            staff_role='admin',
-        )
-
-        self.currency, _ = Currency.objects.get_or_create(
-            code='RON',
-            defaults={'name': 'Romanian Leu', 'symbol': 'L', 'decimals': 2}
-        )
-
-        self.customer = Customer.objects.create(
-            name='SC Status Test SRL',
-            customer_type='company',
-            company_name='SC Status Test SRL',
-            primary_email='status@company.ro',
-            data_processing_consent=True,
-            created_by=self.admin,
-        )
-
-        CustomerTaxProfile.objects.create(
-            customer=self.customer,
-            cui='RO12345678',
-            vat_number='RO12345678',
-            is_vat_payer=True,
-        )
-
-        CustomerBillingProfile.objects.create(
-            customer=self.customer,
-            payment_terms=30,
-            preferred_currency='RON',
-        )
-
+class TestProvisioningStatusWorkflow(WorkflowCase):
     def test_order_status_workflow(self):
-        """Test order status transitions for provisioning via FSM methods"""
-        product = Product.objects.create(
-            name='Hosting Status Test',
-            slug='wh-status-test',
-            product_type='shared_hosting',
-            is_active=True,
+        order = self.create_order()
+        self.pay(order)
+        item = order.items.get()
+        # Staff-completed manual provisioning, followed by the real completion signal.
+        self.assertTrue(ProvisioningService.activate_service(item.service).is_ok())
+        with self.captureOnCommitCallbacks(execute=True):
+            item.start_provisioning()
+            item.save()
+            item.complete_provisioning()
+            item.save()
+        order.refresh_from_db()
+        self.assertEqual(order.status, "completed")
+        self.assertIsNotNone(order.completed_at)
+        states = list(
+            OrderStatusHistory.objects.filter(order=order).order_by("created_at").values_list("new_status", flat=True)
         )
-        order = Order.objects.create(
-            customer=self.customer,
-            order_number='ORD-STATUS-001',
-            status='draft',
-            currency=self.currency,
-            customer_email=self.customer.primary_email,
-            customer_name=self.customer.name,
+        self.assertEqual(states, ["draft", "awaiting_payment", "paid", "provisioning", "completed"])
+
+
+class TestProvisioningWithDomain(WorkflowCase):
+    def test_hosting_order_retains_requested_domain(self):
+        self.product.requires_domain = True
+        self.product.domain_required_at_signup = True
+        self.product.save(update_fields=["requires_domain", "domain_required_at_signup"])
+        order = self.create_order(
+            items=[
+                {
+                    "product_id": self.product.pk,
+                    "quantity": 1,
+                    "unit_price_cents": 10000,
+                    "billing_period": "monthly",
+                    "description": self.product.name,
+                    "domain_name": "workflow.example",
+                }
+            ]
         )
-        OrderItem.objects.create(
-            order=order,
-            product=product,
-            product_name=product.name,
-            product_type=product.product_type,
-            quantity=1,
-            unit_price_cents=5000,
-            line_total_cents=5000,
+        self.pay(order)
+        item = order.items.get()
+        self.assertEqual(item.domain_name, "workflow.example")
+        self.assertEqual(item.service.domain, "workflow.example")
+        self.assertEqual(item.service.status, "provisioning")
+
+
+class TestBundleProvisioning(WorkflowCase):
+    def test_order_retains_bundle_configuration(self):
+        components = [
+            {"type": "hosting", "plan": "standard"},
+            {"type": "domain", "name": "bundle.example"},
+            {"type": "ssl", "plan": "standard"},
+        ]
+        order = self.create_order(
+            items=[
+                {
+                    "product_id": self.product.pk,
+                    "quantity": 1,
+                    "unit_price_cents": 14900,
+                    "billing_period": "monthly",
+                    "description": "Hosting bundle",
+                    "domain_name": "bundle.example",
+                    "meta": {"bundle_components": components},
+                }
+            ]
         )
-
-        # Draft -> Pending (submit requires items)
-        order.submit()
-        order.save()
-        assert order.status == 'pending'
-
-        # Pending -> Confirmed
-        order.confirm()
-        order.save()
-        assert order.status == 'confirmed'
-
-        # Confirmed -> Processing
-        order.start_processing()
-        order.save()
-        assert order.status == 'processing'
-
-        # Processing -> Completed
-        order.complete()
-        order.save()
-        assert order.status == 'completed'
-
-
-@pytest.mark.e2e
-class TestProvisioningWithDomain(TestCase):
-    """End-to-end tests for domain provisioning"""
-
-    def setUp(self):
-        """Set up test fixtures"""
-        self.client = Client()
-
-        self.admin = User.objects.create_user(
-            email='domain_prov_admin@test.ro',
-            password='AdminPass123!',
-            is_staff=True,
-            is_superuser=True,
-            staff_role='admin',
-        )
-
-        self.currency, _ = Currency.objects.get_or_create(
-            code='RON',
-            defaults={'name': 'Romanian Leu', 'symbol': 'L', 'decimals': 2}
-        )
-
-        self.customer = Customer.objects.create(
-            name='SC Domain Test SRL',
-            customer_type='company',
-            company_name='SC Domain Test SRL',
-            primary_email='domain@company.ro',
-            data_processing_consent=True,
-            created_by=self.admin,
-        )
-
-        CustomerTaxProfile.objects.create(
-            customer=self.customer,
-            cui='RO12345678',
-            vat_number='RO12345678',
-            is_vat_payer=True,
-        )
-
-        CustomerBillingProfile.objects.create(
-            customer=self.customer,
-            payment_terms=30,
-            preferred_currency='RON',
-        )
-
-    def test_domain_registration_order(self):
-        """Test domain registration order flow"""
-        domain_product = Product.objects.create(
-            name='Domain .ro',
-            slug='dom-ro-reg',
-            description='.ro domain registration - 1 year',
-            product_type='domain',
-            is_active=True,
-        )
-
-        order = Order.objects.create(
-            customer=self.customer,
-            order_number='ORD-DOM-001',
-            status='draft',
-            currency=self.currency,
-            customer_email=self.customer.primary_email,
-            customer_name=self.customer.name,
-        )
-
-        OrderItem.objects.create(
-            order=order,
-            product=domain_product,
-            product_name=domain_product.name,
-            product_type=domain_product.product_type,
-            quantity=1,
-            unit_price_cents=4500,
-            line_total_cents=4500,
-            config={'domain_name': 'test-domain.ro'},
-        )
-
-        assert order.items.count() == 1
-        item = order.items.first()
-        assert item.config.get('domain_name') == 'test-domain.ro'
-
-
-@pytest.mark.e2e
-class TestBundleProvisioning(TestCase):
-    """End-to-end tests for bundle/package provisioning"""
-
-    def setUp(self):
-        """Set up test fixtures"""
-        self.client = Client()
-
-        self.admin = User.objects.create_user(
-            email='bundle_prov_admin@test.ro',
-            password='AdminPass123!',
-            is_staff=True,
-            is_superuser=True,
-            staff_role='admin',
-        )
-
-        self.currency, _ = Currency.objects.get_or_create(
-            code='RON',
-            defaults={'name': 'Romanian Leu', 'symbol': 'L', 'decimals': 2}
-        )
-
-        self.customer = Customer.objects.create(
-            name='SC Bundle Test SRL',
-            customer_type='company',
-            company_name='SC Bundle Test SRL',
-            primary_email='bundle@company.ro',
-            data_processing_consent=True,
-            created_by=self.admin,
-        )
-
-        CustomerTaxProfile.objects.create(
-            customer=self.customer,
-            cui='RO12345678',
-            vat_number='RO12345678',
-            is_vat_payer=True,
-        )
-
-        CustomerBillingProfile.objects.create(
-            customer=self.customer,
-            payment_terms=30,
-            preferred_currency='RON',
-        )
-
-    def test_hosting_bundle_order(self):
-        """Test hosting bundle with multiple services"""
-        bundle_product = Product.objects.create(
-            name='Startup Bundle',
-            slug='bundle-startup',
-            description='Web hosting + Domain + SSL',
-            product_type='shared_hosting',
-            is_active=True,
-        )
-
-        order = Order.objects.create(
-            customer=self.customer,
-            order_number='ORD-BUNDLE-001',
-            status='draft',
-            currency=self.currency,
-            customer_email=self.customer.primary_email,
-            customer_name=self.customer.name,
-        )
-
-        OrderItem.objects.create(
-            order=order,
-            product=bundle_product,
-            product_name=bundle_product.name,
-            product_type=bundle_product.product_type,
-            quantity=1,
-            unit_price_cents=14900,
-            line_total_cents=14900,
-            config={
-                'bundle_components': [
-                    {'type': 'hosting', 'plan': 'standard'},
-                    {'type': 'domain', 'name': 'example.ro'},
-                    {'type': 'ssl', 'plan': 'standard'},
-                ],
-            },
-        )
-
-        assert order.items.count() == 1
-        item = order.items.first()
-        assert len(item.config.get('bundle_components', [])) == 3
+        invoice = self.pay(order)
+        item = order.items.get()
+        self.assertEqual(item.config["bundle_components"], components)
+        self.assertEqual(item.service.domain, "bundle.example")
+        self.assertEqual(invoice.total_cents, 18029)
+        self.assertEqual(Subscription.objects.get(service=item.service).unit_price_cents, 14900)

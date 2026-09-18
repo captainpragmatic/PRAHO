@@ -17,13 +17,6 @@ on:
   merge_group:
 
   workflow_dispatch:
-    inputs:
-      run_e2e:
-        description: 'Also run E2E tests?'
-        required: false
-        default: 'false'
-        type: choice
-        options: ['false', 'true']
 
   issue_comment:
     types: [created]

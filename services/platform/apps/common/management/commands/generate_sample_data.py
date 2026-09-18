@@ -16,7 +16,7 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ObjectDoesNotExist
 from django.core.management.base import BaseCommand, CommandError, CommandParser
-from django.db import transaction
+from django.db import models, transaction
 from django.db.models import (
     BigIntegerField,
     Count,
@@ -39,6 +39,7 @@ from apps.billing.payment_models import CreditLedger, Payment
 from apps.billing.proforma_models import ProformaSequence
 from apps.billing.refund_models import Refund
 from apps.billing.subscription_models import Subscription, SubscriptionItem
+from apps.common.financial_arithmetic import calculate_line_totals
 from apps.customers.models import (
     Customer,
     CustomerAddress,
@@ -138,6 +139,18 @@ def _purge_promotion_ledger(redemptions: Any, gift_card_transactions: Any) -> No
     redemptions.delete()
     gift_card_transactions.delete()
     _recount_promotion_aggregates(coupon_ids, campaign_ids, gift_card_ids)
+
+
+def _purge_sample_invoices(invoices: models.QuerySet[Invoice]) -> None:
+    """Development fixture teardown, restricted to explicitly owned synthetic rows.
+
+    Issued documents remain immutable in all application paths. Never clear their
+    lock or adopt historical documents merely because a customer's email matches.
+    The surrounding seed transaction restores the old dataset if rebuilding fails.
+    """
+    if not settings.DEBUG or any(invoice.meta.get("sample_data") is not True for invoice in invoices):
+        raise CommandError("Refusing to replace invoices not owned by generate_sample_data; use a fresh demo database.")
+    models.QuerySet.delete(invoices)
 
 
 def _recount_promotion_aggregates(
@@ -340,6 +353,7 @@ class Command(BaseCommand):
             return
         self.stdout.write("✅ [SampleData] Configured deployment DNS zone preserved")
 
+    @transaction.atomic
     def _generate(self, options: dict[str, Any]) -> None:
         fake = Faker("ro_RO")  # Romanian locale
         Faker.seed(42)  # Consistent data
@@ -742,7 +756,7 @@ class Command(BaseCommand):
 
         # Original models
         Order.objects.filter(**example_filter).delete()
-        Invoice.objects.filter(**example_filter).delete()
+        _purge_sample_invoices(Invoice.objects.filter(**example_filter))
         ProformaInvoice.objects.filter(**example_filter).delete()
         Ticket.objects.filter(**example_filter).delete()
         Service.objects.filter(**example_filter).delete()
@@ -904,6 +918,7 @@ class Command(BaseCommand):
 
         return users
 
+    @transaction.atomic
     def create_test_company_customer(self, fake: Faker, users: list[User], config: SampleDataConfig) -> Customer:
         """Create the guaranteed test company customer that should always have ID #1"""
 
@@ -968,7 +983,7 @@ class Command(BaseCommand):
             GiftCardTransaction.objects.filter(order__customer=customer),
         )
         Order.objects.filter(customer=customer).delete()
-        Invoice.objects.filter(customer=customer).delete()
+        _purge_sample_invoices(Invoice.objects.filter(customer=customer))
         ProformaInvoice.objects.filter(customer=customer).delete()
         Ticket.objects.filter(customer=customer).delete()
         CustomerAddress.all_objects.filter(customer=customer).delete()
@@ -1950,21 +1965,13 @@ class Command(BaseCommand):
             # Create status history reflecting the transitions that led to current status (#99)
             status_transitions: dict[str, list[str]] = {
                 "draft": ["draft"],
-                "pending": ["draft", "pending"],
-                "confirmed": ["draft", "pending", "confirmed"],
-                "processing": ["draft", "pending", "confirmed", "processing"],
-                "completed": ["draft", "pending", "confirmed", "processing", "completed"],
-                "cancelled": ["draft", "pending", "cancelled"],
-                "failed": ["draft", "pending", "confirmed", "processing", "failed"],
-                "refunded": ["draft", "pending", "confirmed", "processing", "completed", "refunded"],
-                "partially_refunded": [
-                    "draft",
-                    "pending",
-                    "confirmed",
-                    "processing",
-                    "completed",
-                    "partially_refunded",
-                ],
+                "awaiting_payment": ["draft", "awaiting_payment"],
+                "paid": ["draft", "awaiting_payment", "paid"],
+                "in_review": ["draft", "awaiting_payment", "paid", "in_review"],
+                "provisioning": ["draft", "awaiting_payment", "paid", "provisioning"],
+                "completed": ["draft", "awaiting_payment", "paid", "provisioning", "completed"],
+                "cancelled": ["draft", "awaiting_payment", "cancelled"],
+                "failed": ["draft", "awaiting_payment", "failed"],
             }
             transitions = status_transitions.get(status, ["draft", status])
             for idx in range(len(transitions) - 1):
@@ -2004,7 +2011,7 @@ class Command(BaseCommand):
                     # Provisioning status matches order status
                     prov_status = {
                         "completed": "completed",
-                        "processing": "in_progress",
+                        "provisioning": "in_progress",
                         "cancelled": "cancelled",
                         "failed": "failed",
                     }.get(status, "pending")
@@ -2028,6 +2035,8 @@ class Command(BaseCommand):
                         else None,
                     )
 
+            # Display fixtures still obey the same line/header arithmetic as real orders.
+            order.calculate_totals()
             orders.append(order)
 
         return orders
@@ -2038,7 +2047,6 @@ class Command(BaseCommand):
         """Create invoices for a customer with logical dates, multiple line items, and status-aware fields"""
         invoices = []
         currency = self._get_ron_currency()
-        tax_rule = self._get_ro_tax_rule()
         admin_user = self._get_admin_user()
         services = list(Service.objects.filter(customer=customer))
 
@@ -2071,16 +2079,10 @@ class Command(BaseCommand):
             order = random.choice(orders) if orders and random.random() < 0.5 else None
             if order:
                 base_amount = Decimal(order.subtotal_cents) / 100
-                tax_amount = Decimal(order.tax_cents) / 100
-                total_amount = Decimal(order.total_cents) / 100
             else:
                 base_amount = Decimal(str(random.uniform(100.0, 1000.0))).quantize(Decimal("0.01"))
-                tax_amount = base_amount * tax_rule.rate
-                total_amount = base_amount + tax_amount
 
             base_amount_cents = int(base_amount * 100)
-            tax_amount_cents = int(tax_amount * 100)
-            total_amount_cents = int(total_amount * 100)
 
             status = invoice_statuses[i % len(invoice_statuses)]
 
@@ -2089,15 +2091,15 @@ class Command(BaseCommand):
             issued_date = fake.date_between(start_date="-1y", end_date="today")
             issued_at = timezone.make_aware(datetime.combine(issued_date, datetime.min.time()))
             due_at = issued_at + timedelta(days=payment_terms_days)
+            if status == "overdue":
+                due_at = min(due_at, timezone.now() - timedelta(days=1))
+                issued_at = due_at - timedelta(days=payment_terms_days)
 
             invoice_data: dict[str, Any] = {
                 "customer": customer,
-                "status": status,
-                "issued_at": issued_at,
+                "status": "draft",
+                "issued_at": issued_at if status != "draft" else None,
                 "due_at": due_at,
-                "subtotal_cents": base_amount_cents,
-                "tax_cents": tax_amount_cents,
-                "total_cents": total_amount_cents,
                 "currency": currency,
                 "created_by": admin_user,
                 "bill_to_name": customer.get_display_name(),
@@ -2109,6 +2111,7 @@ class Command(BaseCommand):
                 "bill_to_country": "RO",
                 "bill_to_postal": billing_snapshot.get("postal_code", ""),
                 "bill_to_tax_id": bill_to_tax_id,
+                "meta": {"sample_data": True},
             }
 
             invoice = Invoice.objects.create(**invoice_data)
@@ -2117,17 +2120,21 @@ class Command(BaseCommand):
             invoice.number = InvoiceNumberingService.get_next_number()
             invoice.save()
 
-            # Set locked_at/paid_at via update() to bypass clean() validation on locked invoices
-            post_create_fields: dict[str, Any] = {}
-            if status == "paid":
-                post_create_fields["paid_at"] = issued_at + timedelta(days=random.randint(1, payment_terms_days))
-                post_create_fields["locked_at"] = post_create_fields["paid_at"]
-            elif status in ("issued", "overdue", "void"):
-                post_create_fields["locked_at"] = issued_at
-            if post_create_fields:
-                Invoice.objects.filter(pk=invoice.pk).update(**post_create_fields)
-
             self._create_invoice_lines(fake, invoice, i, base_amount_cents, services)
+            invoice.recalculate_totals()
+            if status != "draft":
+                invoice.issue()
+                invoice.save()
+                if status in ("paid", "refunded"):
+                    invoice.mark_as_paid()
+                    invoice.paid_at = min(issued_at + timedelta(days=payment_terms_days), timezone.now())
+                elif status == "overdue":
+                    invoice.mark_overdue()
+                elif status == "void":
+                    invoice.void()
+                if status == "refunded":
+                    invoice.refund_invoice()
+            invoice.save()
             invoices.append(invoice)
 
         return invoices
@@ -2139,7 +2146,7 @@ class Command(BaseCommand):
         result = []
         for i in range(num_lines):
             line_amount = base_amount + (1 if i < remainder else 0)
-            line_total = line_amount + int(line_amount * tax_rate)
+            line_total = calculate_line_totals(line_amount, tax_rate).line_total_cents
             result.append((line_amount, line_total))
         return result
 
@@ -2167,6 +2174,7 @@ class Command(BaseCommand):
                 quantity=Decimal("1.000"),
                 unit_price_cents=line_amount_cents,
                 tax_rate=tax_rate,
+                tax_cents=line_total_cents - line_amount_cents,
                 line_total_cents=line_total_cents,
                 service=linked_service,
                 domain_name=linked_service.domain if linked_service and linked_service.domain else "",
@@ -2217,12 +2225,12 @@ class Command(BaseCommand):
             if status == "expired":
                 valid_date = fake.date_between(start_date="-60d", end_date="-1d")
             else:
-                valid_date = fake.date_between(start_date="today", end_date="+30d")
+                valid_date = fake.date_between(start_date="+1d", end_date="+30d")
             valid_until = timezone.make_aware(datetime.combine(valid_date, datetime.min.time()))
 
             proforma_data: dict[str, Any] = {
                 "customer": customer,
-                "status": status,
+                "status": "draft",
                 "valid_until": valid_until,
                 "subtotal_cents": base_amount_cents,
                 "tax_cents": tax_amount_cents,
@@ -2268,11 +2276,21 @@ class Command(BaseCommand):
                     quantity=Decimal("1.000"),
                     unit_price_cents=line_amount_cents,
                     tax_rate=tax_rate,
+                    tax_cents=line_total_cents - line_amount_cents,
                     line_total_cents=line_total_cents,
                     service=linked_service,
                     domain_name=linked_service.domain if linked_service and linked_service.domain else "",
                 )
 
+            proforma.recalculate_totals()
+            if status in ("sent", "accepted"):
+                proforma.send_proforma()
+                if status == "accepted":
+                    proforma.accept()
+            elif status == "expired":
+                proforma.send_proforma()
+                proforma.expire()
+            proforma.save()
             proformas.append(proforma)
 
         return proformas
@@ -2757,7 +2775,7 @@ class Command(BaseCommand):
         now = timezone.now()
 
         # Payments for paid invoices
-        paid_invoices = [inv for inv in invoices if inv.status == "paid"]
+        paid_invoices = [inv for inv in invoices if inv.status in ("paid", "refunded")]
         for idx, invoice in enumerate(paid_invoices):
             method = _cycle(payment_methods, idx)
             payment_kwargs: dict[str, Any] = {
@@ -2767,7 +2785,7 @@ class Command(BaseCommand):
                 "payment_method": method,
                 "amount_cents": invoice.total_cents,
                 "currency": currency,
-                "received_at": now - timedelta(days=random.randint(1, 60)),
+                "received_at": invoice.paid_at or now,
                 "idempotency_key": Payment.generate_idempotency_key(),
                 "created_by": admin_user,
             }
@@ -2993,74 +3011,35 @@ class Command(BaseCommand):
         invoices: list[Invoice],
         payments: list[Payment],
     ) -> list[Refund]:
-        """Create 3-5 refunds per customer. XOR constraint: each gets EITHER order OR invoice."""
+        """Seed coherent refund examples against payments on the same invoice."""
         refunds = []
-        currency = self._get_ron_currency()
         admin_user = self._get_admin_user()
-
-        refund_statuses = ["pending", "processing", "approved", "completed", "rejected", "failed", "cancelled"]
-        refund_reasons = [
-            "customer_request",
-            "error_correction",
-            "dispute",
-            "service_failure",
-            "duplicate_payment",
-            "fraud",
-            "cancellation",
-            "downgrade",
-            "administrative",
-        ]
-
-        count = min(5, max(3, len(orders) + len(invoices)))
-        succeeded_payments = [p for p in payments if p.status == "succeeded"]
-
-        for i in range(count):
-            status = _cycle(refund_statuses, i)
-            reason = _cycle(refund_reasons, i)
-
-            # XOR constraint: odd index → order, even index → invoice
-            order = None
-            invoice = None
-            if i % 2 == 1 and orders:
-                order = _cycle(orders, i)
-                original_cents = order.total_cents
-            elif invoices:
-                invoice = _cycle(invoices, i)
-                original_cents = invoice.total_cents
-            elif orders:
-                order = _cycle(orders, i)
-                original_cents = order.total_cents
-            else:
-                continue  # No orders or invoices to refund
-
-            # Full or partial
-            refund_type = "full" if i % 2 == 0 else "partial"
-            amount_cents = original_cents if refund_type == "full" else max(1, original_cents // 2)
-
-            refund_kwargs: dict[str, Any] = {
-                "customer": customer,
-                "order": order,
-                "invoice": invoice,
-                "payment": _cycle(succeeded_payments, i) if succeeded_payments else None,
-                "status": status,
-                "refund_type": refund_type,
-                "reason": reason,
-                "amount_cents": amount_cents,
-                "original_amount_cents": original_cents,
-                "currency": currency,
-                "reason_description": f"Motiv rambursare: {reason.replace('_', ' ')}",
-                "created_by": admin_user,
-            }
-
-            if status in ("approved", "completed"):
-                refund_kwargs["approved_by"] = admin_user
-            if status == "completed":
-                refund_kwargs["processed_at"] = timezone.now() - timedelta(days=random.randint(1, 14))
-                refund_kwargs["processed_by"] = admin_user
-
-            refund = Refund.objects.create(**refund_kwargs)
+        eligible = [p for p in payments if p.invoice_id and p.status == "succeeded"]
+        for index, payment in enumerate(eligible):
+            invoice = next(inv for inv in invoices if inv.pk == payment.invoice_id)
+            settled = invoice.status == "refunded"
+            status = "completed" if settled else _cycle(["pending", "processing", "approved", "rejected"], index)
+            amount_cents = payment.amount_cents if settled else max(1, payment.amount_cents // 2)
+            refund = Refund.objects.create(
+                customer=customer,
+                invoice=invoice,
+                payment=payment,
+                currency=invoice.currency,
+                status=status,
+                refund_type="full" if settled else "partial",
+                reason="customer_request",
+                amount_cents=amount_cents,
+                original_amount_cents=payment.amount_cents,
+                reason_description="Sample refund of the linked invoice payment",
+                created_by=admin_user,
+                approved_by=admin_user if status in ("approved", "completed") else None,
+                processed_by=admin_user if settled else None,
+                processed_at=timezone.now() if settled else None,
+            )
+            if settled:
+                payment.refund_payment()
+                payment.save(update_fields=["status", "updated_at"])
             refunds.append(refund)
-
         return refunds
 
     # ===============================================================================

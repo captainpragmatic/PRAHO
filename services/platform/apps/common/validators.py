@@ -539,7 +539,7 @@ class SecureInputValidator:
 
         # Customer type validation
         if "customer_type" in customer_data:
-            allowed_types = ["individual", "srl", "pfa", "sa", "ngo", "other"]
+            allowed_types = ["individual", "company", "srl", "pfa", "sa", "ngo", "other"]
             customer_type = customer_data["customer_type"].lower()
             if customer_type not in allowed_types:
                 raise ValidationError(_("Invalid customer type"))

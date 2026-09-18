@@ -24,6 +24,8 @@ urlpatterns = [
     path("mfa/verify/", views.mfa_verify_api, name="mfa_verify"),
     path("mfa/disable/", views.mfa_disable_api, name="mfa_disable"),
     path("mfa/status/", views.mfa_status_api, name="mfa_status"),
+    path("mfa/regenerate-backup-codes/", views.mfa_regenerate_backup_codes_api, name="mfa_regenerate_backup_codes"),
+    path("change-password/", views.password_change_api, name="password_change"),
     # Password Reset endpoints
     path("password/reset/", views.password_reset_request_api, name="password_reset_request"),
     path("password/reset/confirm/", views.password_reset_confirm_api, name="password_reset_confirm"),
@@ -32,4 +34,5 @@ urlpatterns = [
     path("profile/", views.customer_profile_api, name="customer_profile"),
     # Accessible customers for user (HMAC-signed; identity from signed body)
     path("customers/", views.user_customers_api, name="user_customers"),
+    path("verify-customer-access/", views.verify_customer_access_api, name="verify_customer_access"),
 ]

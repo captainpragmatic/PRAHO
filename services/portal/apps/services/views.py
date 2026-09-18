@@ -115,27 +115,6 @@ def _get_session_identity(request: HttpRequest) -> tuple[int | None, int | None]
     return customer_id, user_id
 
 
-def _filter_services_by_query(services: list[dict], query: str) -> list[dict]:
-    """Client-side search filtering across all visible and detail fields."""
-    query_lower = query.lower()
-    return [
-        s
-        for s in services
-        if query_lower in str(s.get("service_name", "")).lower()
-        or query_lower in str(s.get("domain", "")).lower()
-        or query_lower in str(s.get("service_plan_name", "")).lower()
-        or query_lower in str(s.get("service_plan_type_display", "")).lower()
-        or query_lower in str(s.get("status", "")).lower()
-        or query_lower in str(s.get("monthly_price", "")).lower()
-        or query_lower in str(s.get("server_ip", "")).lower()
-        or query_lower in str(s.get("server_name", "")).lower()
-        or query_lower in str(s.get("username", "")).lower()
-        or query_lower in str(s.get("next_billing_date", "")).lower()
-        or query_lower in str(s.get("created_at", "")).lower()
-        or query_lower in str(s.get("billing_cycle", "")).lower()
-    ]
-
-
 def _services_base_context(
     status_filter: str = "",
     search_query: str = "",
@@ -190,16 +169,11 @@ def service_list(request: HttpRequest) -> HttpResponse:
 
     try:
         response = services_api.get_customer_services(
-            customer_id=customer_id, user_id=user_id, page=page, status=status_filter
+            customer_id=customer_id, user_id=user_id, page=page, status=status_filter, search=search_query
         )
 
         services = response.get("results", [])
         total_count = response.get("count", 0)
-
-        # Client-side search filtering across all visible and detail fields
-        if search_query:
-            services = _filter_services_by_query(services, search_query)
-            total_count = len(services)
 
         summary = services_api.get_services_summary(customer_id, user_id)
         active_count = summary.get("active_services", 0)
@@ -254,15 +228,11 @@ def service_search_api(request: HttpRequest) -> HttpResponse:
 
     try:
         response = services_api.get_customer_services(
-            customer_id=customer_id, user_id=user_id, page=1, status=status_filter
+            customer_id=customer_id, user_id=user_id, page=1, status=status_filter, search=search_query
         )
 
         services = response.get("results", [])
         total_count = response.get("count", 0)
-
-        if search_query:
-            services = _filter_services_by_query(services, search_query)
-            total_count = len(services)
 
         paginator_data = PaginatorData(total_count=total_count, current_page=1, page_size=20)
         pagination_params = build_pagination_params(status=status_filter, q=search_query)

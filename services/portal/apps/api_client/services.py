@@ -600,7 +600,7 @@ class PlatformAPIClient:
         """Read the explicit, non-sensitive portal display contract."""
         return self._make_request("POST", "/localisation/", data={})
 
-    def authenticate_customer(self, email: str, password: str) -> dict[str, Any] | None:
+    def authenticate_customer(self, email: str, password: str, mfa_token: str = "") -> dict[str, Any] | None:
         """Authenticate customer with email and password via platform API"""
         start_time = time.perf_counter()
         min_duration = float(getattr(settings, "PLATFORM_API_AUTH_MIN_DURATION_SECONDS", 0.0))
@@ -609,7 +609,7 @@ class PlatformAPIClient:
             data = self._make_request(
                 "POST",
                 "/users/login/",
-                data={"email": email, "password": password},
+                data={"email": email, "password": password, **({"mfa_token": mfa_token} if mfa_token else {})},
                 retry_on_status={503},
                 max_retries=1,
             )
@@ -740,7 +740,7 @@ class PlatformAPIClient:
             logger.warning(f"⚠️ [API Client] Failed to update customer profile: {e}")
             return False
 
-    def update_customer_password(self, user_id: int, new_password: str) -> bool:
+    def update_customer_password(self, user_id: int, new_password: str, current_password: str, token: str = "") -> bool:
         """Update customer password (requires user_id in signed body for HMAC validation)."""
         try:
             data = self._make_request(
@@ -750,6 +750,8 @@ class PlatformAPIClient:
                 data={
                     "user_id": user_id,
                     "new_password": new_password,
+                    "current_password": current_password,
+                    "token": token,
                 },
             )
 
@@ -765,16 +767,10 @@ class PlatformAPIClient:
     # MULTI-FACTOR AUTHENTICATION API ENDPOINTS
     # ===============================================================================
 
-    def get_mfa_status(self, customer_id: str) -> dict[str, Any] | None:
-        """Get MFA status and methods for customer"""
-        try:
-            data = self._make_request("GET", "/users/mfa/status/", data={"customer_id": customer_id})
-            return data if data.get("success") else None
-        except PlatformAPIError as e:
-            if e.is_rate_limited:
-                raise
-            logger.warning(f"⚠️ [API Client] Failed to get MFA status: {e}")
-            return None
+    def get_mfa_status(self, user_id: int) -> dict[str, Any]:
+        return self._make_request(
+            "POST", "/users/mfa/status/", user_id=user_id, data={"user_id": user_id}, idempotent=True
+        )
 
     def setup_totp_mfa(self, customer_id: str, user_id: int | None = None) -> dict[str, Any] | None:
         """Initialize TOTP MFA setup - returns QR code and secret"""
@@ -783,7 +779,7 @@ class PlatformAPIClient:
             if data.get("success") and "setup_data" in data:
                 setup_data = data["setup_data"]
                 return {
-                    "qr_code": setup_data.get("qr_code_svg"),
+                    "qr_code": base64.b64encode(setup_data["qr_code_svg"].encode()).decode(),
                     "secret": setup_data.get("manual_entry_key"),
                     "provisioning_uri": setup_data.get("provisioning_uri"),
                 }
@@ -794,18 +790,18 @@ class PlatformAPIClient:
             logger.warning(f"⚠️ [API Client] Failed to setup TOTP MFA: {e}")
             return None
 
-    def verify_totp_mfa(self, customer_id: str, token: str, user_id: int | None = None) -> bool:
+    def verify_totp_mfa(self, customer_id: str, token: str, user_id: int | None = None) -> dict[str, Any] | None:
         """Verify TOTP token and enable MFA"""
         try:
             data = self._make_request(
                 "POST", "/users/mfa/verify/", user_id=user_id, data={"customer_id": customer_id, "token": token}
             )
-            return bool(data.get("success", False))
+            return data if data.get("success") else None
         except PlatformAPIError as e:
             if e.is_rate_limited:
                 raise
             logger.warning(f"⚠️ [API Client] Failed to verify TOTP: {e}")
-            return False
+            return None
 
     def setup_webauthn_mfa(self, customer_id: str) -> dict[str, Any] | None:
         """Initialize WebAuthn/Passkey MFA setup"""
@@ -818,42 +814,22 @@ class PlatformAPIClient:
             logger.warning(f"⚠️ [API Client] Failed to setup WebAuthn MFA: {e}")
             return None
 
-    def get_backup_codes(self, customer_id: str) -> list[str] | None:
-        """Get backup codes for customer"""
-        try:
-            data = self._make_request("GET", "/users/mfa/backup-codes/", data={"customer_id": customer_id})
-            return data.get("backup_codes") if data.get("success") else None
-        except PlatformAPIError as e:
-            if e.is_rate_limited:
-                raise
-            logger.warning(f"⚠️ [API Client] Failed to get backup codes: {e}")
-            return None
+    def regenerate_backup_codes(self, user_id: int, password: str, token: str) -> dict[str, Any]:
+        return self._make_request(
+            "POST",
+            "/users/mfa/regenerate-backup-codes/",
+            user_id=user_id,
+            data={"user_id": user_id, "password": password, "token": token},
+        )
 
-    def regenerate_backup_codes(self, customer_id: str) -> list[str] | None:
-        """Regenerate backup codes for customer"""
-        try:
-            data = self._make_request("POST", "/users/mfa/regenerate-backup-codes/", data={"customer_id": customer_id})
-            return data.get("backup_codes") if data.get("success") else None
-        except PlatformAPIError as e:
-            if e.is_rate_limited:
-                raise
-            logger.warning(f"⚠️ [API Client] Failed to regenerate backup codes: {e}")
-            return None
-
-    def disable_mfa(self, customer_id: str, confirmation_token: str | None = None) -> bool:
-        """Disable MFA for customer"""
-        try:
-            request_data = {"customer_id": customer_id}
-            if confirmation_token:
-                request_data["confirmation_token"] = confirmation_token
-
-            data = self._make_request("POST", "/users/mfa/disable/", data=request_data)
-            return bool(data.get("success", False))
-        except PlatformAPIError as e:
-            if e.is_rate_limited:
-                raise
-            logger.warning(f"⚠️ [API Client] Failed to disable MFA: {e}")
-            return False
+    def disable_mfa(self, user_id: int, password: str, token: str) -> bool:
+        data = self._make_request(
+            "POST",
+            "/users/mfa/disable/",
+            user_id=user_id,
+            data={"user_id": user_id, "password": password, "token": token},
+        )
+        return bool(data.get("success", False))
 
     # ===============================================================================
     # GENERIC HTTP METHODS
@@ -1094,7 +1070,7 @@ class PlatformAPIClient:
 
     def download_ticket_attachment(
         self, customer_id: int, user_id: int, ticket_id: int, attachment_id: int
-    ) -> dict[str, Any]:
+    ) -> tuple[bytes, dict[str, str]]:
         """🔒 Download ticket attachment - SECURE HMAC BODY"""
         request_data = {
             "customer_id": customer_id,
@@ -1104,7 +1080,7 @@ class PlatformAPIClient:
             "action": "download_attachment",
             "timestamp": time.time(),
         }
-        return self._make_request(
+        return self._make_binary_request_with_headers(
             "POST", f"/tickets/{ticket_id}/attachments/{attachment_id}/download/", data=request_data
         )
 

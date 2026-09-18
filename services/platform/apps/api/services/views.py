@@ -90,6 +90,14 @@ def customer_services_api(request: HttpRequest, customer: Customer) -> Response:
                 Q(service_name__icontains=search_query)
                 | Q(domain__icontains=search_query)
                 | Q(username__icontains=search_query)
+                | Q(service_plan__name__icontains=search_query)
+                | Q(service_plan__plan_type__icontains=search_query)
+                | Q(status__icontains=search_query)
+                | Q(price__icontains=search_query)
+                | Q(server__hostname__icontains=search_query)
+                | Q(server__name__icontains=search_query)
+                | Q(server__primary_ip__icontains=search_query)
+                | Q(billing_cycle__icontains=search_query)
             )
 
         # Get stats for this customer's services
