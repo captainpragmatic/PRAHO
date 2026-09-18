@@ -1668,3 +1668,58 @@ class BROutsideScopeRulesTestCase(TestCase):
             customer_party.find(f".//{{{NAMESPACES['cac']}}}PartyTaxScheme/{{{NAMESPACES['cbc']}}}CompanyID"),
             "BR-O-04: BT-48 must not appear on a document containing an O item",
         )
+
+    def test_br_o_05_and_02_apply_to_credit_notes_too(self):
+        """Parallel-implementation check: the credit-note builder carries its own
+        copy of the line-rate logic. Fixing only the invoice path leaves an
+        out-of-scope credit note non-conformant."""
+        from unittest.mock import patch  # noqa: PLC0415
+
+        original = InvoiceFactory(
+            customer=self.customer,
+            currency=self.currency,
+            number="INV-BR-O-ORIG",
+            bill_to_country="US",
+            bill_to_tax_id="",
+            status="paid",
+            issued_at=timezone.now() - timezone.timedelta(days=5),
+        )
+        credit_note = InvoiceFactory(
+            customer=self.customer,
+            currency=self.currency,
+            number="CN-BR-O-001",
+            bill_to_name="Overseas Buyer Inc",
+            bill_to_country="US",
+            bill_to_tax_id="",
+            status="issued",
+            issued_at=timezone.now(),
+            subtotal_cents=50000,
+            tax_total_cents=0,
+            total_cents=50000,
+        )
+        InvoiceLineFactory(
+            invoice=credit_note,
+            description="Partial Refund",
+            unit_price_cents=50000,
+            quantity=1,
+            tax_rate=Decimal("0.1900"),
+        )
+
+        with patch("apps.billing.efactura.xml_builder.recorded_tax_category", return_value="O"):
+            doc = etree.fromstring(UBLCreditNoteBuilder(credit_note, original).build().encode())
+
+        lines = doc.findall(f".//{{{NAMESPACES['cac']}}}CreditNoteLine")
+        self.assertGreaterEqual(len(lines), 1)
+        for line in lines:
+            cat = line.find(f".//{{{NAMESPACES['cac']}}}ClassifiedTaxCategory")
+            self.assertEqual(cat.find(f"{{{NAMESPACES['cbc']}}}ID").text, "O")
+            self.assertIsNone(
+                cat.find(f"{{{NAMESPACES['cbc']}}}Percent"),
+                "BR-O-05: BT-152 must be absent on an out-of-scope credit-note line",
+            )
+
+        supplier = doc.find(f".//{{{NAMESPACES['cac']}}}AccountingSupplierParty/{{{NAMESPACES['cac']}}}Party")
+        self.assertIsNone(
+            supplier.find(f".//{{{NAMESPACES['cac']}}}PartyTaxScheme/{{{NAMESPACES['cbc']}}}CompanyID"),
+            "BR-O-02: BT-31 must not appear on an out-of-scope credit note",
+        )
