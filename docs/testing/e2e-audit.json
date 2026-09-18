@@ -6719,7 +6719,7 @@
       "bare_returns": 0,
       "disposition": "strengthened",
       "current_nodes": [
-        "tests/e2e/portal/test_rate_limit_ux.py::TestAuthenticatedRateLimitUX::test_catalog_page_accessible_without_rate_limit[chromium]"
+        "tests/e2e/portal/test_rate_limit_ux.py::test_catalog_page_accessible_without_rate_limit[chromium]"
       ],
       "review_note": "Normal-page and invalid-credential browser feedback; deterministic 429 handling is verified in Portal service/view tests with throttling enabled separately at the API layer.",
       "current_assertions": [
@@ -6742,7 +6742,7 @@
       "bare_returns": 0,
       "disposition": "strengthened",
       "current_nodes": [
-        "tests/e2e/portal/test_rate_limit_ux.py::TestAuthenticatedRateLimitUX::test_dashboard_loads_without_rate_limit_banner_normally[chromium]"
+        "tests/e2e/portal/test_rate_limit_ux.py::test_dashboard_loads_without_rate_limit_banner_normally[chromium]"
       ],
       "review_note": "Normal-page and invalid-credential browser feedback; deterministic 429 handling is verified in Portal service/view tests with throttling enabled separately at the API layer.",
       "current_assertions": [
