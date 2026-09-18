@@ -54,6 +54,8 @@ Each run writes `output/playwright/runs/<timestamp>/` containing `pytest.log`, J
 
 Acceptance requires two complete successful runs on the same unchanged stack and source, no unexpected skip/xfail, and no new unexpected browser/HTML/server errors. Expected errors are scoped to specific negative tests (for example, a missing Stripe key); a successful browser result does not mean a live card charge occurred.
 
+Keep the host awake during verification. On macOS, `caffeinate -is make test-e2e` prevents idle sleep only while the command runs, without changing power settings. Sleep can interrupt browser deadlines and expire staff sessions; preserve a disrupted run as failed evidence and repeat it. Saved-session fixtures validate a 200 response from the actual protected dashboard, rejecting missing pages and login redirects before falling back to real login.
+
 Run `make test`, `make lint`, `make check-types-platform`, `make check-types-portal`, and `make check-migrations`. The template component scan has pre-existing findings and its Make target is advisory: compare against baseline and compile all changed templates rather than interpreting its zero exit as a clean strict scan. `make lint` also prints advisory legacy results; inspect the actual no-new-Ruff-debt gate and typing output. A working-tree Ruff check must pass explicit changed paths until commits exist, since the default gate compares committed heads.
 
 The Platform API and query-performance directories are Python packages so Django discovers their tests in the default suite. A discovery regression check rejects test directories that lack `__init__.py`; previously these directories could pass focused runs while being silently omitted from `make test`.
