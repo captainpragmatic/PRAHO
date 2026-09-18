@@ -161,8 +161,10 @@ class CIUSROValidator:
 
     # EN16931 categories that must carry NEITHER an exemption code NOR reason text (BR-S/Z-10).
     _CATEGORIES_NO_EXEMPTION: ClassVar[set[str]] = {"S", "Z"}
-    # Non-standard categories whose breakdown rate must be 0 (BR-AE/Z/E/K/O/G-05).
-    _ZERO_RATE_CATEGORIES: ClassVar[set[str]] = {"Z", "E", "AE", "K", "G", "O"}
+    # Non-standard categories whose breakdown rate must be 0 (BR-AE/Z/E/K/G-05).
+    # "O" is deliberately absent: an out-of-scope supply is not taxable at zero, and
+    # BR-O-05/06/07 require the line and allowance rate elements to be ABSENT, not 0.
+    _ZERO_RATE_CATEGORIES: ClassVar[set[str]] = {"Z", "E", "AE", "K", "G"}
     # Allowed rounding tolerance for the multiply-based rule BR-CO-14 (tax = base * rate).
     _ROUNDING_TOLERANCE: ClassVar[Decimal] = Decimal("0.01")
     _MAX_ACCOUNTING_AMOUNT_DECIMALS: ClassVar[int] = 2
@@ -335,10 +337,19 @@ class CIUSROValidator:
             elif not self.CUI_PATTERN.match(seller_id):
                 result.add_error("BR-RO-010-FMT", f"Invalid Romanian CUI format: {seller_id}")
 
-        # BR-CO-26: Seller VAT identifier
-        vat_id = self._get_text(supplier, ".//cac:PartyTaxScheme/cbc:CompanyID")
-        if not vat_id:
-            result.add_warning("BR-CO-26", "Seller VAT identifier is recommended")
+        # BR-CO-26: the seller must be identifiable by BT-29, BT-30 OR BT-31 - any one
+        # suffices. BT-31 is legitimately absent on out-of-scope documents (BR-O-02),
+        # so keying this warning on BT-31 alone would fire on conformant XML.
+        seller_identified = any(
+            self._get_text(supplier, path)
+            for path in (
+                ".//cac:PartyTaxScheme/cbc:CompanyID",
+                ".//cac:PartyIdentification/cbc:ID",
+                ".//cac:PartyLegalEntity/cbc:CompanyID",
+            )
+        )
+        if not seller_identified:
+            result.add_warning("BR-CO-26", "Seller identifier (BT-29/BT-30/BT-31) is recommended")
 
     def _validate_customer_party(self, doc: etree._Element, result: ValidationResult) -> None:
         """Validate AccountingCustomerParty."""
