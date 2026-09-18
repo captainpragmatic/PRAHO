@@ -845,6 +845,15 @@ CATALOG: tuple[SettingDef, ...] = (
         help_text=_("Used in support-related email templates."),
     ),
     SettingDef(
+        key="company.email_finance",
+        data_type="string",
+        default="",
+        group="company",
+        section=_("Email addresses"),
+        label=_("Finance alert email"),
+        help_text=_("Receives large-refund alerts. Alerts are suppressed while this is empty."),
+    ),
+    SettingDef(
         key="company.legal_name",
         data_type="string",
         default="PragmaticHost SRL",

@@ -1563,3 +1563,188 @@ class UBLCreditNoteBuilderTestCase(TestCase):
             builder.build()
 
         self.assertIn("Original invoice reference is required", str(context.exception))
+
+
+@override_settings(
+    COMPANY_NAME="Test Company SRL",
+    EFACTURA_COMPANY_CUI="12345678",
+    COMPANY_REGISTRATION_NUMBER="J40/1234/2020",
+    COMPANY_STREET="Test Street 123",
+    COMPANY_CITY="Bucharest",
+    COMPANY_POSTAL_CODE="010101",
+    COMPANY_COUNTRY_CODE="RO",
+    COMPANY_EMAIL="test@example.com",
+)
+class BROutsideScopeRulesTestCase(TestCase):
+    """EN16931 BR-O: an out-of-scope supply is not a taxable supply at zero rate.
+
+    BR-O-05/06/07 require the VAT *rate* element (BT-152/96/103) to be ABSENT —
+    emitting 0.00 is itself the violation. BR-O-02/04 forbid the seller and buyer
+    VAT identifiers (BT-31/BT-48) on any document carrying an O item.
+
+    Reachable today: apps/billing/views.py generate_e_factura builds this XML with
+    no country gate, so a staff download can produce a non-conformant document.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.currency = CurrencyFactory(code="RON")
+        cls.customer = CustomerFactory()
+
+    def _outside_scope_invoice(self, *, bill_to_tax_id: str = "") -> etree._Element:
+        invoice = InvoiceFactory(
+            customer=self.customer,
+            currency=self.currency,
+            number="INV-BR-O-001",
+            bill_to_name="Overseas Buyer Inc",
+            bill_to_country="US",
+            bill_to_tax_id=bill_to_tax_id,
+            status="issued",
+            issued_at=timezone.now(),
+            due_at=timezone.now() + timezone.timedelta(days=30),
+            subtotal_cents=100000,
+            tax_total_cents=0,
+            total_cents=100000,
+        )
+        InvoiceLineFactory(
+            invoice=invoice,
+            description="Web Hosting Service",
+            unit_price_cents=100000,
+            quantity=1,
+            tax_rate=Decimal("0.1900"),
+            tax_category_code="S",
+        )
+        return etree.fromstring(UBLInvoiceBuilder(invoice).build().encode())
+
+    def _doc_category(self, doc) -> str | None:
+        cat = doc.find(
+            f".//{{{NAMESPACES['cac']}}}TaxTotal/{{{NAMESPACES['cac']}}}TaxSubtotal/{{{NAMESPACES['cac']}}}TaxCategory"
+        )
+        node = cat.find(f"{{{NAMESPACES['cbc']}}}ID") if cat is not None else None
+        return node.text if node is not None else None
+
+    def test_br_o_05_line_carries_no_vat_rate(self):
+        doc = self._outside_scope_invoice()
+        self.assertEqual(self._doc_category(doc), "O", "fixture must produce an O document")
+
+        lines = doc.findall(f".//{{{NAMESPACES['cac']}}}InvoiceLine")
+        self.assertGreaterEqual(len(lines), 1)
+        for line in lines:
+            cat = line.find(f".//{{{NAMESPACES['cac']}}}ClassifiedTaxCategory")
+            self.assertEqual(cat.find(f"{{{NAMESPACES['cbc']}}}ID").text, "O")
+            self.assertIsNone(
+                cat.find(f"{{{NAMESPACES['cbc']}}}Percent"),
+                "BR-O-05: BT-152 must be absent on an out-of-scope line, not 0.00",
+            )
+
+    def test_br_o_02_seller_vat_identifier_is_absent(self):
+        doc = self._outside_scope_invoice()
+        supplier = doc.find(
+            f".//{{{NAMESPACES['cac']}}}AccountingSupplierParty/{{{NAMESPACES['cac']}}}Party"
+        )
+        self.assertIsNotNone(supplier)
+        self.assertIsNone(
+            supplier.find(f".//{{{NAMESPACES['cac']}}}PartyTaxScheme/{{{NAMESPACES['cbc']}}}CompanyID"),
+            "BR-O-02: BT-31 must not appear on a document containing an O item",
+        )
+        # The seller's fiscal identity still travels as BT-29/BT-30.
+        self.assertIsNotNone(supplier.find(f".//{{{NAMESPACES['cac']}}}PartyLegalEntity"))
+
+    def test_br_o_04_buyer_vat_identifier_is_absent(self):
+        """The live case. A non-EU *business* reaches O through the recorded VAT
+        evidence (NON_EU_ZERO_VAT does not depend on is_business), and it has a
+        tax id — so the buyer VAT identifier would otherwise be emitted. The
+        legacy fallback branch can never produce that pairing, only evidence can.
+        """
+        from unittest.mock import patch  # noqa: PLC0415
+
+        with patch("apps.billing.efactura.xml_builder.recorded_tax_category", return_value="O"):
+            doc = self._outside_scope_invoice(bill_to_tax_id="US123456789")
+
+        self.assertEqual(self._doc_category(doc), "O")
+        customer_party = doc.find(f".//{{{NAMESPACES['cac']}}}AccountingCustomerParty/{{{NAMESPACES['cac']}}}Party")
+        self.assertIsNotNone(customer_party)
+        self.assertIsNone(
+            customer_party.find(f".//{{{NAMESPACES['cac']}}}PartyTaxScheme/{{{NAMESPACES['cbc']}}}CompanyID"),
+            "BR-O-04: BT-48 must not appear on a document containing an O item",
+        )
+
+    def test_br_o_05_and_02_apply_to_credit_notes_too(self):
+        """Parallel-implementation check: the credit-note builder carries its own
+        copy of the line-rate logic. Fixing only the invoice path leaves an
+        out-of-scope credit note non-conformant."""
+        from unittest.mock import patch  # noqa: PLC0415
+
+        original = InvoiceFactory(
+            customer=self.customer,
+            currency=self.currency,
+            number="INV-BR-O-ORIG",
+            bill_to_country="US",
+            bill_to_tax_id="",
+            status="paid",
+            issued_at=timezone.now() - timezone.timedelta(days=5),
+        )
+        credit_note = InvoiceFactory(
+            customer=self.customer,
+            currency=self.currency,
+            number="CN-BR-O-001",
+            bill_to_name="Overseas Buyer Inc",
+            bill_to_country="US",
+            bill_to_tax_id="",
+            status="issued",
+            issued_at=timezone.now(),
+            subtotal_cents=50000,
+            tax_total_cents=0,
+            total_cents=50000,
+        )
+        InvoiceLineFactory(
+            invoice=credit_note,
+            description="Partial Refund",
+            unit_price_cents=50000,
+            quantity=1,
+            tax_rate=Decimal("0.1900"),
+        )
+
+        with patch("apps.billing.efactura.xml_builder.recorded_tax_category", return_value="O"):
+            doc = etree.fromstring(UBLCreditNoteBuilder(credit_note, original).build().encode())
+
+        lines = doc.findall(f".//{{{NAMESPACES['cac']}}}CreditNoteLine")
+        self.assertGreaterEqual(len(lines), 1)
+        for line in lines:
+            cat = line.find(f".//{{{NAMESPACES['cac']}}}ClassifiedTaxCategory")
+            self.assertEqual(cat.find(f"{{{NAMESPACES['cbc']}}}ID").text, "O")
+            self.assertIsNone(
+                cat.find(f"{{{NAMESPACES['cbc']}}}Percent"),
+                "BR-O-05: BT-152 must be absent on an out-of-scope credit-note line",
+            )
+
+        supplier = doc.find(f".//{{{NAMESPACES['cac']}}}AccountingSupplierParty/{{{NAMESPACES['cac']}}}Party")
+        self.assertIsNone(
+            supplier.find(f".//{{{NAMESPACES['cac']}}}PartyTaxScheme/{{{NAMESPACES['cbc']}}}CompanyID"),
+            "BR-O-02: BT-31 must not appear on an out-of-scope credit note",
+        )
+
+    def test_non_romanian_operator_is_refused_rather_than_misdescribed(self):
+        """e-Factura is a Romanian statutory format — the CIUS-RO profile, the RO:CUI
+        identifier scheme and the ANAF endpoints all presuppose a Romanian supplier.
+        A German operator must be refused, not described as both German and Romanian
+        in different fields of the same document."""
+        invoice = InvoiceFactory(
+            customer=self.customer,
+            currency=self.currency,
+            number="INV-DE-OPERATOR-001",
+            bill_to_name="Domestic Buyer GmbH",
+            bill_to_country="DE",
+            status="issued",
+            issued_at=timezone.now(),
+            due_at=timezone.now() + timezone.timedelta(days=30),
+            subtotal_cents=100000,
+            tax_total_cents=19000,
+            total_cents=119000,
+        )
+        InvoiceLineFactory(invoice=invoice, unit_price_cents=100000, quantity=1, tax_rate=Decimal("0.1900"))
+
+        with override_settings(COMPANY_COUNTRY_CODE="DE"), self.assertRaises(XMLBuilderError) as ctx:
+            UBLInvoiceBuilder(invoice).build()
+
+        self.assertIn("Romanian statutory format", str(ctx.exception))

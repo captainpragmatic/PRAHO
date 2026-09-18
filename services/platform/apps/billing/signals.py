@@ -1672,16 +1672,30 @@ def _send_retry_success_email(retry_attempt: PaymentRetryAttempt) -> None:
 def _notify_finance_team_large_refund(invoice: Invoice) -> None:
     """Notify finance team about large refunds"""
     try:
+        from apps.billing.config import get_large_refund_threshold_cents
         from apps.notifications.services import EmailService
+        from apps.settings.services import SettingsService
+
+        # An unconfigured deployment must send nothing rather than fall back to a
+        # recipient it did not choose — the alert carries customer data.
+        finance_recipient = str(SettingsService.get_setting("company.email_finance", ""))
+        if not finance_recipient:
+            logger.warning("⚠️ [Finance] Large refund alert suppressed — no finance recipient configured")
+            return
+
+        # Same source as the decision in _handle_invoice_refund_completion, so the
+        # stated threshold cannot drift from the one that actually fired.
+        threshold_major = Decimal(get_large_refund_threshold_cents()) / 100
 
         EmailService.send_template_email(
             template_key="finance_large_refund_alert",
-            recipient="finance@pragmatichost.com",
+            recipient=finance_recipient,
             context={
-                "invoice": invoice,
-                "customer": invoice.customer,
+                "invoice_number": invoice.number,
+                "customer_name": invoice.customer.get_display_name(),
                 "refund_amount": invoice.total,
-                "threshold": 500,  # EUR threshold
+                "currency": invoice.currency.code,
+                "threshold": threshold_major,
             },
             priority="high",
         )

@@ -91,6 +91,7 @@ from apps.billing.signals import (
     _update_customer_vat_status,
 )
 from apps.customers.models import CustomerPaymentMethod
+from apps.settings.services import SettingsService
 from tests.factories.billing_factories import (
     CustomerFactory,
     InvoiceFactory,
@@ -1775,11 +1776,15 @@ class TestEmailFunctions(TestCase):
         _send_retry_success_email(retry)
         mock_es.send_template_email.assert_called_once()
 
+    @patch("apps.settings.services.SettingsService.get_setting", return_value="finance@example.test")
     @patch("apps.notifications.services.EmailService")
-    def test_notify_finance_team_large_refund(self, mock_es):
+    def test_notify_finance_team_large_refund(self, mock_es, _mock_setting):
+        # Recipient is configuration (#518) — with none set the alert is suppressed,
+        # which TestLargeRefundFinanceAlert covers. Here we pin the send path.
         invoice = MagicMock()
         _notify_finance_team_large_refund(invoice)
         mock_es.send_template_email.assert_called_once()
+        self.assertEqual(mock_es.send_template_email.call_args.kwargs["recipient"], "finance@example.test")
 
     @patch("apps.notifications.services.EmailService")
     def test_email_exception_handling(self, mock_es):
@@ -2531,3 +2536,73 @@ class ProformaLinkedOrderSkippedBySyncTest(TestCase):
                 f"confirm_order was called {mock_confirm.call_count} time(s) for proforma-linked "
                 f"order(s) — these must be skipped. Called with orders: {called_orders}",
             )
+
+
+# ===============================================================================
+# LARGE-REFUND FINANCE ALERT — RECIPIENT, THRESHOLD UNITS, TEMPLATE CONTEXT (#518)
+# ===============================================================================
+
+
+class TestLargeRefundFinanceAlert(TestCase):
+    """The alert must not mail a hardcoded external address, and what it says
+    must match what actually triggered it."""
+
+    def setUp(self) -> None:
+        SettingsService.clear_all_cache()
+
+    def tearDown(self) -> None:
+        SettingsService.clear_all_cache()
+
+    def _invoice(self):
+        invoice = MagicMock()
+        invoice.number = "INV-2026-000123"
+        invoice.total = Decimal("1250.00")
+        invoice.customer.get_display_name.return_value = "Test Company SRL"
+        invoice.currency.code = "RON"
+        return invoice
+
+    @patch("apps.notifications.services.EmailService")
+    def test_no_alert_when_recipient_unconfigured(self, mock_es):
+        """Unconfigured deployments must send nothing, not fall back to someone else's mailbox."""
+        _notify_finance_team_large_refund(self._invoice())
+        mock_es.send_template_email.assert_not_called()
+
+    @patch("apps.notifications.services.EmailService")
+    def test_alert_uses_configured_recipient(self, mock_es):
+        result = SettingsService.update_setting(
+            key="company.email_finance", value="finance@example.test", reason="test"
+        )
+        self.assertTrue(result.is_ok(), result)
+
+        _notify_finance_team_large_refund(self._invoice())
+
+        mock_es.send_template_email.assert_called_once()
+        self.assertEqual(mock_es.send_template_email.call_args.kwargs["recipient"], "finance@example.test")
+
+    @patch("apps.notifications.services.EmailService")
+    def test_context_threshold_tracks_the_configured_decision_threshold(self, mock_es):
+        """The email states the threshold that actually fired. Setting is cents; the
+        template renders 'EUR', so a literal 500 silently lies once the setting moves."""
+        SettingsService.update_setting(key="company.email_finance", value="finance@example.test", reason="test")
+        SettingsService.update_setting(
+            key="billing.large_refund_notification_threshold_cents", value=250000, reason="test"
+        )
+
+        _notify_finance_team_large_refund(self._invoice())
+
+        context = mock_es.send_template_email.call_args.kwargs["context"]
+        self.assertEqual(Decimal(str(context["threshold"])), Decimal("2500"))
+
+    @patch("apps.notifications.services.EmailService")
+    def test_context_supplies_every_template_variable(self, mock_es):
+        """The seeded template renders invoice_number, customer_name, refund_amount,
+        currency and threshold — missing keys render empty in the alert."""
+        SettingsService.update_setting(key="company.email_finance", value="finance@example.test", reason="test")
+
+        _notify_finance_team_large_refund(self._invoice())
+
+        context = mock_es.send_template_email.call_args.kwargs["context"]
+        for key in ("invoice_number", "customer_name", "refund_amount", "currency", "threshold"):
+            self.assertIn(key, context, f"template variable {key!r} missing from alert context")
+        self.assertEqual(context["invoice_number"], "INV-2026-000123")
+        self.assertEqual(context["currency"], "RON")

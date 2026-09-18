@@ -367,3 +367,109 @@ class TaxServiceScenarioTests(TestCase):
         # Romania is always charged Romanian VAT — reverse charge doesn't apply
         self.assertNotEqual(result.scenario, VATScenario.EU_B2B_REVERSE_CHARGE)
         self.assertEqual(result.vat_rate, Decimal("21.0"))
+
+
+@override_settings(CACHES=LOCMEM_TEST_CACHE, COMPANY_COUNTRY_CODE="DE")
+class SupplierCountryParameterisationTests(TestCase):
+    """The cross-border test must compare the customer against the SUPPLIER's
+    country, not a literal "RO" (#519).
+
+    For a German-established deployment the literal produces wrong tax in both
+    directions, silently: a domestic DE sale satisfies `country != "RO"` and
+    takes the reverse-charge branch, while an RO customer takes the home branch
+    and is charged Romanian VAT. Nothing errors and no existing test fails.
+    """
+
+    def setUp(self) -> None:
+        cache.clear()
+
+    def test_domestic_business_sale_is_not_reverse_charge(self) -> None:
+        info: CustomerVATInfo = {
+            "country": "DE",
+            "is_business": True,
+            "vat_number": "DE123456789",
+            "is_vat_payer": True,
+        }
+        result = TaxService.calculate_vat_for_document(10000, info)
+
+        self.assertNotEqual(
+            result.scenario,
+            VATScenario.EU_B2B_REVERSE_CHARGE,
+            "a domestic business sale is not a cross-border reverse charge",
+        )
+        self.assertEqual(result.vat_rate, Decimal("19.0"), "domestic sale takes the supplier's own rate")
+        self.assertEqual(result.vat_cents, 1900)
+
+    def test_foreign_business_sale_is_reverse_charge(self) -> None:
+        """The mirror: RO is now foreign, so it IS cross-border."""
+        info: CustomerVATInfo = {
+            "country": "RO",
+            "is_business": True,
+            "vat_number": "RO12345678",
+            "is_vat_payer": True,
+        }
+        result = TaxService.calculate_vat_for_document(10000, info)
+
+        self.assertEqual(result.scenario, VATScenario.EU_B2B_REVERSE_CHARGE)
+        self.assertEqual(result.vat_cents, 0)
+
+    def test_domestic_consumer_sale_takes_the_supplier_rate(self) -> None:
+        info: CustomerVATInfo = {"country": "DE", "is_business": False}
+        result = TaxService.calculate_vat_for_document(10000, info)
+        self.assertEqual(result.vat_rate, Decimal("19.0"))
+
+    def test_unknown_country_fails_safe_to_the_supplier_rate(self) -> None:
+        """The fail-safe must charge the supplier's own rate, not Romania's —
+        it is taken precisely when the data is already bad.
+
+        Uses an invalid-LENGTH code: an empty country is replaced by the supplier
+        country before scenario selection, so it takes the domestic path and would
+        never reach the branch under test.
+        """
+        info: CustomerVATInfo = {"country": "ZZZ", "is_business": False}
+        result = TaxService.calculate_vat_for_document(10000, info)
+        self.assertEqual(result.vat_rate, Decimal("19.0"))
+
+    def test_omitted_country_argument_is_not_an_explicit_romanian_customer(self) -> None:
+        """calculate_vat's signature default must not hardcode a country: an
+        omitted argument means "the supplier's own", not "a Romanian customer"."""
+        result = TaxService.calculate_vat(10000)
+        self.assertEqual(result["vat_rate_percent"], Decimal("19.0"))
+
+    def test_domestic_reasoning_names_the_supplier_country_and_applied_rate(self) -> None:
+        """The reasoning string is persisted as audit evidence — it must not claim
+        a jurisdiction and rate the invoice never used."""
+        info: CustomerVATInfo = {"country": "DE", "is_business": True, "vat_number": None}
+        result = TaxService.calculate_vat_for_document(10000, info)
+
+        reasoning = result.audit_data["reasoning"]
+        self.assertNotIn("Romanian", reasoning)
+        self.assertIn("DE", reasoning)
+        self.assertIn("19", reasoning)
+
+    def test_calculate_vat_entry_point_also_uses_the_supplier_country(self) -> None:
+        """calculate_vat() is a SECOND entry point carrying its own copy of the
+        cross-border test, reached from the order flow via OrderVATCalculator.
+        Fixing only the scenario resolver would leave this one wrong."""
+        result = TaxService.calculate_vat(10000, country_code="DE", is_business=True, vat_number="DE123456789")
+
+        self.assertEqual(result["vat_rate_percent"], Decimal("19.0"), "domestic B2B is taxed, not zero-rated")
+        self.assertEqual(result["vat_cents"], 1900)
+        self.assertEqual(result["total_cents"], 11900)
+
+    def test_calculate_vat_entry_point_still_reverse_charges_abroad(self) -> None:
+        """The mirror, so the fix is not just 'never reverse charge'."""
+        result = TaxService.calculate_vat(10000, country_code="FR", is_business=True, vat_number="FR12345678901")
+
+        self.assertEqual(result["vat_cents"], 0)
+        self.assertEqual(result["vat_rate_percent"], Decimal("0.0"))
+
+    def test_supplier_fallback_is_not_cached_under_the_customer_code(self) -> None:
+        """A rate borrowed from the supplier must not be cached under the customer's
+        code: a later supplier TaxRule change invalidates only the supplier key, and
+        the alias would keep serving a superseded rate for the cache lifetime."""
+        self.assertEqual(TaxService.get_vat_rate("ZZ"), Decimal("19.0"))
+        self.assertIsNone(
+            cache.get(f"{TaxService.CACHE_KEY_PREFIX}:ZZ"),
+            "the borrowed supplier rate must not be cached under the unknown customer code",
+        )

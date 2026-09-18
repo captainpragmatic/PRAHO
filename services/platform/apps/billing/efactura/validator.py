@@ -161,8 +161,10 @@ class CIUSROValidator:
 
     # EN16931 categories that must carry NEITHER an exemption code NOR reason text (BR-S/Z-10).
     _CATEGORIES_NO_EXEMPTION: ClassVar[set[str]] = {"S", "Z"}
-    # Non-standard categories whose breakdown rate must be 0 (BR-AE/Z/E/K/O/G-05).
-    _ZERO_RATE_CATEGORIES: ClassVar[set[str]] = {"Z", "E", "AE", "K", "G", "O"}
+    # Non-standard categories whose breakdown rate must be 0 (BR-AE/Z/E/K/G-05).
+    # "O" is deliberately absent: an out-of-scope supply is not taxable at zero, and
+    # BR-O-05/06/07 require the line and allowance rate elements to be ABSENT, not 0.
+    _ZERO_RATE_CATEGORIES: ClassVar[set[str]] = {"Z", "E", "AE", "K", "G"}
     # Allowed rounding tolerance for the multiply-based rule BR-CO-14 (tax = base * rate).
     _ROUNDING_TOLERANCE: ClassVar[Decimal] = Decimal("0.01")
     _MAX_ACCOUNTING_AMOUNT_DECIMALS: ClassVar[int] = 2
@@ -218,6 +220,7 @@ class CIUSROValidator:
         # Schematron enforces — the native subset most likely to catch a rejection.
         self._validate_monetary_reconciliation(doc, result, is_credit_note)
         self._validate_tax_category_rules(doc, result)
+        self._validate_outside_scope_absence_rules(doc, result)
 
         return result
 
@@ -335,10 +338,19 @@ class CIUSROValidator:
             elif not self.CUI_PATTERN.match(seller_id):
                 result.add_error("BR-RO-010-FMT", f"Invalid Romanian CUI format: {seller_id}")
 
-        # BR-CO-26: Seller VAT identifier
-        vat_id = self._get_text(supplier, ".//cac:PartyTaxScheme/cbc:CompanyID")
-        if not vat_id:
-            result.add_warning("BR-CO-26", "Seller VAT identifier is recommended")
+        # BR-CO-26: the seller must be identifiable by BT-29, BT-30 OR BT-31 - any one
+        # suffices. BT-31 is legitimately absent on out-of-scope documents (BR-O-02),
+        # so keying this warning on BT-31 alone would fire on conformant XML.
+        seller_identified = any(
+            self._get_text(supplier, path)
+            for path in (
+                ".//cac:PartyTaxScheme/cbc:CompanyID",
+                ".//cac:PartyIdentification/cbc:ID",
+                ".//cac:PartyLegalEntity/cbc:CompanyID",
+            )
+        )
+        if not seller_identified:
+            result.add_warning("BR-CO-26", "Seller identifier (BT-29/BT-30/BT-31) is recommended")
 
     def _validate_customer_party(self, doc: etree._Element, result: ValidationResult) -> None:
         """Validate AccountingCustomerParty."""
@@ -702,6 +714,47 @@ class CIUSROValidator:
             result.add_error(
                 "BR-CO-14-SUM", f"Document TaxTotal {tax_amount} != sum of TaxSubtotal amounts {subtotal_taxes}"
             )
+
+    def _validate_outside_scope_absence_rules(self, doc: etree._Element, result: ValidationResult) -> None:
+        """BR-O-02/04/05/06: an out-of-scope document omits VAT rates and VAT identifiers.
+
+        These are presence rules, not value rules - 0.00 is itself the violation - so
+        they cannot fold into the zero-rate checks, which ignore a missing Percent and
+        would let a regression through silently.
+        """
+        line_tag = "CreditNoteLine" if doc.tag.endswith("CreditNote") else "InvoiceLine"
+
+        for line in self._find_all(doc, f".//cac:{line_tag}"):
+            if self._get_text(line, ".//cac:Item/cac:ClassifiedTaxCategory/cbc:ID") != "O":
+                continue
+            if self._get_text(line, ".//cac:Item/cac:ClassifiedTaxCategory/cbc:Percent"):
+                result.add_error("BR-O-05", "Out-of-scope line must omit the VAT rate (BT-152 absent, not 0.00)")
+
+        for allowance in self._find_all(doc, ".//cac:AllowanceCharge"):
+            if self._get_text(allowance, ".//cac:TaxCategory/cbc:ID") != "O":
+                continue
+            if self._get_text(allowance, ".//cac:TaxCategory/cbc:Percent"):
+                result.add_error("BR-O-06", "Out-of-scope allowance must omit the VAT rate (BT-96 absent)")
+
+        # Derive from the LINES as well as the breakdown. Externally supplied XML can
+        # carry an out-of-scope line with a missing or mis-categorised breakdown, and
+        # keying only on the breakdown lets exactly those documents evade these rules.
+        document_is_out_of_scope = any(
+            self._get_text(subtotal, "./cac:TaxCategory/cbc:ID") == "O"
+            for subtotal in self._find_all(doc, ".//cac:TaxSubtotal")
+        ) or any(
+            self._get_text(line, ".//cac:Item/cac:ClassifiedTaxCategory/cbc:ID") == "O"
+            for line in self._find_all(doc, f".//cac:{line_tag}")
+        )
+        if not document_is_out_of_scope:
+            return
+        for path, rule, who in (
+            (".//cac:AccountingSupplierParty", "BR-O-02", "Seller"),
+            (".//cac:AccountingCustomerParty", "BR-O-04", "Buyer"),
+        ):
+            party = self._find(doc, path)
+            if party is not None and self._get_text(party, ".//cac:PartyTaxScheme/cbc:CompanyID"):
+                result.add_error(rule, f"{who} VAT identifier must be absent on an out-of-scope document")
 
     def _validate_tax_category_rules(self, doc: etree._Element, result: ValidationResult) -> None:
         """Validate per-category tax rules at the document breakdown level: BR-CO-14 (standard

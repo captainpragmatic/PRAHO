@@ -31,6 +31,7 @@ from apps.billing.efactura.settings import ro_local_date
 from apps.billing.exchange_rate_service import ExchangeRateService
 from apps.billing.fiscal_identity import normalize_business_tax_id, normalize_country_code, validated_cnp_or_empty
 from apps.billing.tax_evidence import REVERSE_CHARGE_LEGAL_BASIS, recorded_tax_category
+from apps.common.operator import REFERENCE_OPERATOR_COUNTRY, operator_country
 from apps.common.tax_service import TaxService
 
 # UBL 2.1 Namespaces
@@ -142,7 +143,7 @@ def get_supplier_info() -> CompanyInfo:
         street=getattr(settings, "COMPANY_STREET", ""),
         city=getattr(settings, "COMPANY_CITY", ""),
         postal_code=getattr(settings, "COMPANY_POSTAL_CODE", ""),
-        country_code=getattr(settings, "COMPANY_COUNTRY_CODE", "RO"),
+        country_code=operator_country(),
         country_name=getattr(settings, "COMPANY_COUNTRY_NAME", "Romania"),
         email=getattr(settings, "COMPANY_EMAIL", ""),
         phone=getattr(settings, "COMPANY_PHONE", ""),
@@ -289,6 +290,13 @@ class BaseUBLBuilder:
         """Get UN/ECE unit code from the line model field (BT-130)."""
         return line.unit_code if line.unit_code else UNIT_CODE_PIECE
 
+    def _omits_vat_rate(self) -> bool:
+        """BR-O-05/06/07: an out-of-scope supply is not a taxable supply at a zero
+        rate, so BT-152/96/103 must be ABSENT. Emitting 0.00 is itself the violation.
+        Every other non-standard category (AE/E/Z/K) does require Percent=0.
+        """
+        return self._get_tax_category() == TAX_CATEGORY_NOT_SUBJECT
+
     def _get_tax_category(self) -> str:
         """Use recorded decisions on new documents, retaining legacy presentation."""
         explicit = recorded_tax_category(self.invoice)
@@ -302,13 +310,18 @@ class BaseUBLBuilder:
         if tax_total_cents is None:
             tax_total_cents = getattr(self.invoice, "tax_cents", 0)
 
+        # Cross-border is relative to the SUPPLIER, not a literal (#519). On a
+        # non-RO deployment the literal would classify a domestic zero-tax document
+        # as reverse charge or outside-scope, and then strip the wrong elements.
+        supplier_country = operator_country()
+
         if tax_total_cents == 0:
             # EU cross-border B2B with a VAT ID → reverse charge (taxare inversa, AE),
             # detected BEFORE the domestic zero-rated fallback.
-            if country != "RO" and customer.tax_id and is_eu_country(country):
+            if country != supplier_country and customer.tax_id and is_eu_country(country):
                 return TAX_CATEGORY_REVERSE_CHARGE
-            # Non-RO customer without a VAT ID → outside the Romanian VAT system.
-            if not customer.tax_id and country != "RO":
+            # Foreign customer without a VAT ID → outside the supplier's VAT system.
+            if not customer.tax_id and country != supplier_country:
                 return TAX_CATEGORY_NOT_SUBJECT
             # Domestic (RO) zero VAT → zero-rated.
             return TAX_CATEGORY_ZERO
@@ -370,8 +383,9 @@ class BaseUBLBuilder:
         tax_cat = self._add_cac(ac, "TaxCategory")
         category = self._get_tax_category()
         self._add_cbc(tax_cat, "ID", category)
-        rate = Decimal(0) if category != TAX_CATEGORY_STANDARD else self._get_tax_rate()
-        self._add_cbc(tax_cat, "Percent", self._format_percent(rate))
+        if category != TAX_CATEGORY_NOT_SUBJECT:  # BR-O-06: BT-96 absent for out-of-scope
+            rate = Decimal(0) if category != TAX_CATEGORY_STANDARD else self._get_tax_rate()
+            self._add_cbc(tax_cat, "Percent", self._format_percent(rate))
         scheme = self._add_cac(tax_cat, "TaxScheme")
         self._add_cbc(scheme, "ID", "VAT")
 
@@ -560,6 +574,16 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
             )
 
         supplier = self._get_supplier_info()
+        # RO e-Factura is a Romanian statutory format: the CIUS-RO profile, the RO:CUI
+        # identifier scheme and the ANAF endpoints all presuppose a Romanian supplier.
+        # A non-RO operator must be refused rather than described as both German and
+        # Romanian in different fields of the same document. Mirrors validate_supplier
+        # in d390.py, the other RO-specific statutory export.
+        if supplier.country_code != REFERENCE_OPERATOR_COUNTRY:
+            errors.append(
+                f"e-Factura is a Romanian statutory format but the operator is established in "
+                f"{supplier.country_code or 'an unconfigured country'}; it cannot represent this supplier"
+            )
         if not supplier.name:
             errors.append("Supplier company name not configured (COMPANY_NAME setting)")
 
@@ -660,8 +684,10 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
         # PostalAddress - Mandatory
         self._add_postal_address(party, supplier)
 
-        # Mandatory VAT tax scheme details.
-        self._add_party_tax_scheme(party, supplier.vat_number)
+        # BR-O-02: BT-31 is forbidden on a document carrying an out-of-scope item.
+        # The seller fiscal identity still travels as BT-29 and BT-30 below.
+        if not self._omits_vat_rate():
+            self._add_party_tax_scheme(party, supplier.vat_number)
 
         # PartyLegalEntity - Mandatory
         self._add_party_legal_entity(party, supplier.name, supplier.registration_number)
@@ -685,8 +711,8 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
         # PostalAddress - Mandatory
         self._add_postal_address(party, customer)
 
-        # PartyTaxScheme - Mandatory if VAT registered
-        if customer.tax_id:
+        # PartyTaxScheme - Mandatory if VAT registered; BR-O-04 forbids BT-48 out of scope.
+        if customer.tax_id and not self._omits_vat_rate():
             self._add_party_tax_scheme(party, customer.vat_number)
 
         # PartyLegalEntity - Mandatory
@@ -803,8 +829,9 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
         tax_category = self._add_cac(tax_subtotal, "TaxCategory")
         category_code = self._get_tax_category()
         self._add_cbc(tax_category, "ID", category_code)
-        # EN16931 BR-AE-05/BR-E-05/BR-Z-05/BR-K-05/BR-O-05 require Percent=0 for
-        # any non-standard category — ANAF Schematron rejects otherwise.
+        # BT-119 (breakdown rate). BR-AE/E/Z/K-05 require 0 for those categories.
+        # Note these are the *breakdown* rate, not BT-152/96/103 — the BR-O-05/06/07
+        # absence rules apply to the line and allowance rates, handled at those sites.
         rate = Decimal(0) if category_code != TAX_CATEGORY_STANDARD else self._get_tax_rate()
         self._add_cbc(tax_category, "Percent", self._format_percent(rate))
 
@@ -937,12 +964,14 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
         self._add_cbc(tax_category, "ID", category_id)
 
         # Line VAT rate, clamped to 0 for non-standard categories (BR-AE-05/Z-05/...).
-        if category_id != TAX_CATEGORY_STANDARD:
-            percent = Decimal(0)
-        else:
-            tax_rate = getattr(line, "tax_rate", None)
-            percent = Decimal(str(tax_rate)) * 100 if tax_rate is not None else self._get_tax_rate()
-        self._add_cbc(tax_category, "Percent", self._format_percent(percent))
+        # Out-of-scope is the exception: BR-O-05 requires BT-152 to be absent entirely.
+        if category_id != TAX_CATEGORY_NOT_SUBJECT:
+            if category_id != TAX_CATEGORY_STANDARD:
+                percent = Decimal(0)
+            else:
+                tax_rate = getattr(line, "tax_rate", None)
+                percent = Decimal(str(tax_rate)) * 100 if tax_rate is not None else self._get_tax_rate()
+            self._add_cbc(tax_category, "Percent", self._format_percent(percent))
 
         tax_scheme = self._add_cac(tax_category, "TaxScheme")
         self._add_cbc(tax_scheme, "ID", "VAT")
@@ -1076,7 +1105,8 @@ class UBLCreditNoteBuilder(BaseUBLBuilder):
         self._add_cbc(party_name, "Name", supplier.name)
 
         self._add_postal_address(party, supplier)
-        self._add_party_tax_scheme(party, supplier.vat_number)
+        if not self._omits_vat_rate():  # BR-O-02
+            self._add_party_tax_scheme(party, supplier.vat_number)
         self._add_party_legal_entity(party, supplier.name, supplier.registration_number)
 
     def _add_customer_party(self) -> None:
@@ -1092,7 +1122,7 @@ class UBLCreditNoteBuilder(BaseUBLBuilder):
 
         self._add_postal_address(party, customer)
 
-        if customer.tax_id:
+        if customer.tax_id and not self._omits_vat_rate():  # BR-O-04
             self._add_party_tax_scheme(party, customer.vat_number)
 
         self._add_party_legal_entity(party, customer.name, self._customer_legal_identifier(customer))
@@ -1117,8 +1147,9 @@ class UBLCreditNoteBuilder(BaseUBLBuilder):
         tax_category = self._add_cac(tax_subtotal, "TaxCategory")
         category_code = self._get_tax_category()
         self._add_cbc(tax_category, "ID", category_code)
-        # EN16931 BR-AE-05/BR-E-05/BR-Z-05/BR-K-05/BR-O-05 require Percent=0 for
-        # any non-standard category — ANAF Schematron rejects otherwise.
+        # BT-119 (breakdown rate). BR-AE/E/Z/K-05 require 0 for those categories.
+        # Note these are the *breakdown* rate, not BT-152/96/103 — the BR-O-05/06/07
+        # absence rules apply to the line and allowance rates, handled at those sites.
         rate = Decimal(0) if category_code != TAX_CATEGORY_STANDARD else self._get_tax_rate()
         self._add_cbc(tax_category, "Percent", self._format_percent(rate))
 
@@ -1187,8 +1218,9 @@ class UBLCreditNoteBuilder(BaseUBLBuilder):
         cn_category = self._get_tax_category()
         tax_category = self._add_cac(item, "ClassifiedTaxCategory")
         self._add_cbc(tax_category, "ID", cn_category)
-        cn_rate = Decimal(0) if cn_category != TAX_CATEGORY_STANDARD else self._get_tax_rate()
-        self._add_cbc(tax_category, "Percent", self._format_percent(cn_rate))
+        if cn_category != TAX_CATEGORY_NOT_SUBJECT:  # BR-O-05: BT-152 absent for out-of-scope
+            cn_rate = Decimal(0) if cn_category != TAX_CATEGORY_STANDARD else self._get_tax_rate()
+            self._add_cbc(tax_category, "Percent", self._format_percent(cn_rate))
         tax_scheme = self._add_cac(tax_category, "TaxScheme")
         self._add_cbc(tax_scheme, "ID", "VAT")
 

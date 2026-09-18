@@ -291,3 +291,77 @@ class DedupLedgerRetentionLockInTestCase(TestCase):
         # policy horizon is acceptable - a years-old note re-analysis is a no-op.
         self.assertEqual(policy.action, "delete")
         self.assertGreaterEqual(policy.retention_days, 1096)
+
+
+class RetentionJurisdictionGateTestCase(TestCase):
+    """A national statutory period must not install itself as a mandatory,
+    executing delete on a deployment established somewhere else (#517).
+
+    The bite is asymmetric: once seeded mandatory, the DB constraint and the
+    model guards make the policy harder to back out than it was to install.
+    """
+
+    def test_seed_skips_the_foreign_policy_but_still_installs_the_shared_ones(self) -> None:
+        """Skipped, not aborted. The jurisdiction-neutral entries rest on EU-wide
+        obligations, so a foreign deployment that ended up with NO retention at all
+        would be worse off than before the guard existed."""
+        out = StringIO()
+        with patch("apps.audit.management.commands.setup_audit_retention_policies.operator_country", return_value="DE"):
+            call_command("setup_audit_retention_policies", stdout=out)
+
+        self.assertFalse(
+            AuditRetentionPolicy.objects.filter(category="business_operation").exists(),
+            "the RO-derived policy must not install on a DE deployment",
+        )
+        for neutral in ("authentication", "security_event", "privacy", "compliance"):
+            self.assertTrue(
+                AuditRetentionPolicy.objects.filter(category=neutral, is_active=True).exists(),
+                f"jurisdiction-neutral policy {neutral!r} must still install",
+            )
+        self.assertIn("skipped", out.getvalue())
+
+    def test_force_installs_despite_jurisdiction_mismatch(self) -> None:
+        with patch("apps.audit.management.commands.setup_audit_retention_policies.operator_country", return_value="DE"):
+            call_command("setup_audit_retention_policies", "--force", stdout=StringIO())
+
+        business = AuditRetentionPolicy.objects.get(category="business_operation", is_active=True)
+        self.assertTrue(business.is_mandatory)
+
+    def test_reference_jurisdiction_seeds_unchanged(self) -> None:
+        """Behaviour preservation: an RO deployment is unaffected."""
+        with patch("apps.audit.management.commands.setup_audit_retention_policies.operator_country", return_value="RO"):
+            call_command("setup_audit_retention_policies", stdout=StringIO())
+
+        business = AuditRetentionPolicy.objects.get(category="business_operation", is_active=True)
+        self.assertTrue(business.is_mandatory)
+        self.assertEqual(business.action, "delete")
+        self.assertGreaterEqual(business.retention_days, 3653)
+
+    def test_no_seeded_policy_cites_gdpr_article_7(self) -> None:
+        """Art. 7(1) governs the conditions for consent; it prescribes no
+        retention period, so it cannot be the basis for a 5-year value."""
+        with patch("apps.audit.management.commands.setup_audit_retention_policies.operator_country", return_value="RO"):
+            call_command("setup_audit_retention_policies", stdout=StringIO())
+
+        bases = AuditRetentionPolicy.objects.values_list("legal_basis", flat=True)
+        offenders = [basis for basis in bases if "Art. 7" in basis]
+        self.assertEqual(offenders, [], f"GDPR Art. 7 cited as a retention basis: {offenders}")
+
+    def test_upgrade_retires_a_previously_seeded_foreign_policy(self) -> None:
+        """The P1 case: a deployment that already ran the old seeder has the foreign
+        mandatory row ACTIVE and executing. Refusing to create is not enough —
+        the existing row must stop deleting."""
+        with patch("apps.audit.management.commands.setup_audit_retention_policies.operator_country", return_value="RO"):
+            call_command("setup_audit_retention_policies", stdout=StringIO())
+        business = AuditRetentionPolicy.objects.get(category="business_operation", is_active=True)
+        self.assertTrue(business.is_mandatory)
+
+        # Operator turns out to be established elsewhere.
+        with patch("apps.audit.management.commands.setup_audit_retention_policies.operator_country", return_value="DE"):
+            call_command("setup_audit_retention_policies", stdout=StringIO())
+
+        business.refresh_from_db()
+        self.assertFalse(
+            business.is_active,
+            "the foreign mandatory policy must be retired, not left executing behind a refusal",
+        )
