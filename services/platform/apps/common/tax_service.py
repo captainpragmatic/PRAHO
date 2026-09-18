@@ -18,6 +18,8 @@ from django.core.cache import cache
 from django.db import models
 from django.utils import timezone
 
+from apps.common.localisation import operator_country
+
 logger = logging.getLogger(__name__)
 
 
@@ -143,6 +145,16 @@ class TaxConfiguration:
     }
 
     @classmethod
+    def get_supplier_country(cls) -> str:
+        """The country the deploying operator is established in.
+
+        Every cross-border test compares the CUSTOMER against this, never a
+        literal. Romania is the reference default (ADR-0047), not an assumption
+        baked into the decision tree.
+        """
+        return operator_country()
+
+    @classmethod
     def get_vat_rate(cls, country_code: str, as_decimal: bool = False) -> Decimal:
         """
         Get VAT rate for a country.
@@ -154,8 +166,8 @@ class TaxConfiguration:
         Returns:
             VAT rate as Decimal
         """
-        # Normalize country code
-        country_code = country_code.upper().strip() if country_code else "RO"
+        # Normalize country code; a missing country means the supplier's own.
+        country_code = country_code.upper().strip() if country_code else cls.get_supplier_country()
 
         # Special handling for Romanian variations
         if country_code in ["ROMANIA", "ROMÂNIA"]:
@@ -185,8 +197,12 @@ class TaxConfiguration:
         # DEFAULT_VAT_RATES entry, it's safest to charge Romanian VAT. This avoids
         # tax leakage from typos like "R0" or "ZZ" silently getting 0%.
         if rate is None:
-            logger.warning(f"⚠️ [TaxService] No rate found for {country_code!r}, defaulting to Romanian VAT (fail-safe)")
-            rate = cls.DEFAULT_VAT_RATES["RO"]
+            supplier_country = cls.get_supplier_country()
+            logger.warning(
+                f"⚠️ [TaxService] No rate found for {country_code!r}, "
+                f"defaulting to the supplier rate for {supplier_country} (fail-safe)"
+            )
+            rate = cls.DEFAULT_VAT_RATES.get(supplier_country, cls.DEFAULT_VAT_RATES["RO"])
 
         # Cache the rate
         cache.set(cache_key, str(rate), cls.CACHE_TIMEOUT)
@@ -265,11 +281,12 @@ class TaxConfiguration:
         Returns:
             VATResult with vat_cents, total_cents, and vat_rate_percent
         """
-        country_code = country_code.upper().strip() if country_code else "RO"
+        supplier_country = cls.get_supplier_country()
+        country_code = country_code.upper().strip() if country_code else supplier_country
 
-        # EU B2B reverse charge: 0% VAT when business has valid VAT number
-        # and is in an EU country other than Romania (provider's home country)
-        if is_business and vat_number and cls.is_eu_country(country_code) and country_code != "RO":
+        # EU B2B reverse charge: 0% VAT when the business customer is in an EU
+        # country other than the supplier's own — a domestic sale is not cross-border.
+        if is_business and vat_number and cls.is_eu_country(country_code) and country_code != supplier_country:
             logger.info(f"💰 [TaxService] EU B2B reverse charge: {country_code} VAT {vat_number} → 0% VAT")
             return VATResult(
                 vat_cents=0,
@@ -341,7 +358,7 @@ class TaxConfiguration:
             VATCalculationResult with full audit trail
         """
         # Extract customer information
-        country_raw = customer_info.get("country") or "RO"
+        country_raw = customer_info.get("country") or cls.get_supplier_country()
         country_code = country_raw.upper()
         is_business = customer_info.get("is_business", False)
         vat_number = customer_info.get("vat_number")
@@ -427,7 +444,7 @@ class TaxConfiguration:
         """
 
         # Normalize and validate country code
-        country_code = country_code.upper().strip() if country_code else "RO"
+        country_code = country_code.upper().strip() if country_code else cls.get_supplier_country()
 
         # ── Per-customer overrides (checked BEFORE country-based logic) ──
 
@@ -459,15 +476,22 @@ class TaxConfiguration:
                     and customer_info.get("reverse_charge_eligible")
                     and vat_number
                     and country_code in cls.get_eu_countries()
-                    and country_code != "RO"
+                    and country_code != cls.get_supplier_country()
                 ):
                     return VATScenario.EU_B2B_REVERSE_CHARGE, Decimal("0.0"), is_business, vat_number
 
         # ── Standard country-based logic ──
 
-        # Romania (home country) - always apply Romanian VAT
-        if country_code == "RO" or country_code in ["ROMANIA", "ROMÂNIA"]:
-            vat_rate = cls.get_vat_rate("RO")
+        # Domestic - the customer is in the supplier's own country.
+        # The ROMANIA_* scenario values are a persisted contract (they are written
+        # into vat_evidence snapshots and read back), so the names stay; they mean
+        # "domestic" and are only emitted for the supplier's own country.
+        supplier_country = cls.get_supplier_country()
+        is_domestic = country_code == supplier_country or (
+            supplier_country == "RO" and country_code in ["ROMANIA", "ROMÂNIA"]
+        )
+        if is_domestic:
+            vat_rate = cls.get_vat_rate(supplier_country)
             if is_business:
                 return VATScenario.ROMANIA_B2B, vat_rate, is_business, vat_number
             else:
@@ -483,10 +507,11 @@ class TaxConfiguration:
                 vat_rate = cls.get_vat_rate(country_code)
                 return VATScenario.EU_B2C, vat_rate, is_business, vat_number
 
-        # Unknown/Invalid country codes - DEFAULT TO ROMANIAN VAT for compliance
+        # Unknown/Invalid country codes - fail safe to the supplier's own rate.
+        # This branch is taken precisely when the data is already bad, so charging
+        # some other country's rate here compounds the error.
         elif not country_code or len(country_code) != cls.COUNTRY_CODE_LENGTH:
-            # Apply Romanian VAT when country is unclear
-            vat_rate = cls.get_vat_rate("RO")
+            vat_rate = cls.get_vat_rate(supplier_country)
             return VATScenario.ROMANIA_B2C, vat_rate, is_business, vat_number
 
         # Non-EU countries — delegate to TaxService for the rate.

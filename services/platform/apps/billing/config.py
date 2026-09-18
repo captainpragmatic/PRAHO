@@ -12,6 +12,7 @@ from decimal import Decimal
 from django.conf import settings
 from django.utils import timezone
 
+from apps.common.localisation import operator_country
 from apps.common.tax_service import TaxService
 from apps.settings.services import SettingsService
 
@@ -38,8 +39,10 @@ def _get_positive_int(setting_name: str, default: int) -> int:
 # COMPANY & LOCALE DEFAULTS
 # ===============================================================================
 
-# Default country for billing (Romania)
-DEFAULT_COUNTRY_CODE = getattr(settings, "BILLING_DEFAULT_COUNTRY", "RO") or "RO"
+# Country assumed when a customer's own is unknown. It feeds bill_to_country and
+# therefore the VAT decision, so it defaults to the operator's own jurisdiction
+# rather than a literal (#519) — a domestic-by-default assumption, not a Romanian one.
+DEFAULT_COUNTRY_CODE = getattr(settings, "BILLING_DEFAULT_COUNTRY", "") or operator_country()
 
 # Default currency
 DEFAULT_CURRENCY_CODE = getattr(settings, "BILLING_DEFAULT_CURRENCY", "RON") or "RON"
