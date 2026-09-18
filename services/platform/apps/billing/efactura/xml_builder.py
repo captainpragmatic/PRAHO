@@ -31,7 +31,7 @@ from apps.billing.efactura.settings import ro_local_date
 from apps.billing.exchange_rate_service import ExchangeRateService
 from apps.billing.fiscal_identity import normalize_business_tax_id, normalize_country_code, validated_cnp_or_empty
 from apps.billing.tax_evidence import REVERSE_CHARGE_LEGAL_BASIS, recorded_tax_category
-from apps.common.operator import operator_country
+from apps.common.operator import REFERENCE_OPERATOR_COUNTRY, operator_country
 from apps.common.tax_service import TaxService
 
 # UBL 2.1 Namespaces
@@ -574,6 +574,16 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
             )
 
         supplier = self._get_supplier_info()
+        # RO e-Factura is a Romanian statutory format: the CIUS-RO profile, the RO:CUI
+        # identifier scheme and the ANAF endpoints all presuppose a Romanian supplier.
+        # A non-RO operator must be refused rather than described as both German and
+        # Romanian in different fields of the same document. Mirrors validate_supplier
+        # in d390.py, the other RO-specific statutory export.
+        if supplier.country_code != REFERENCE_OPERATOR_COUNTRY:
+            errors.append(
+                f"e-Factura is a Romanian statutory format but the operator is established in "
+                f"{supplier.country_code or 'an unconfigured country'}; it cannot represent this supplier"
+            )
         if not supplier.name:
             errors.append("Supplier company name not configured (COMPANY_NAME setting)")
 

@@ -301,20 +301,24 @@ class RetentionJurisdictionGateTestCase(TestCase):
     model guards make the policy harder to back out than it was to install.
     """
 
-    def test_seed_refuses_foreign_jurisdiction_mandatory_policy(self) -> None:
-        with (
-            patch("apps.audit.management.commands.setup_audit_retention_policies.operator_country", return_value="DE"),
-            self.assertRaises(CommandError) as ctx,
-        ):
-            call_command("setup_audit_retention_policies", stdout=StringIO())
+    def test_seed_skips_the_foreign_policy_but_still_installs_the_shared_ones(self) -> None:
+        """Skipped, not aborted. The jurisdiction-neutral entries rest on EU-wide
+        obligations, so a foreign deployment that ended up with NO retention at all
+        would be worse off than before the guard existed."""
+        out = StringIO()
+        with patch("apps.audit.management.commands.setup_audit_retention_policies.operator_country", return_value="DE"):
+            call_command("setup_audit_retention_policies", stdout=out)
 
-        message = str(ctx.exception)
-        self.assertIn("RO", message)
-        self.assertIn("DE", message)
         self.assertFalse(
             AuditRetentionPolicy.objects.filter(category="business_operation").exists(),
-            "a refused seed must install nothing — the transaction rolls back",
+            "the RO-derived policy must not install on a DE deployment",
         )
+        for neutral in ("authentication", "security_event", "privacy", "compliance"):
+            self.assertTrue(
+                AuditRetentionPolicy.objects.filter(category=neutral, is_active=True).exists(),
+                f"jurisdiction-neutral policy {neutral!r} must still install",
+            )
+        self.assertIn("skipped", out.getvalue())
 
     def test_force_installs_despite_jurisdiction_mismatch(self) -> None:
         with patch("apps.audit.management.commands.setup_audit_retention_policies.operator_country", return_value="DE"):
@@ -353,10 +357,7 @@ class RetentionJurisdictionGateTestCase(TestCase):
         self.assertTrue(business.is_mandatory)
 
         # Operator turns out to be established elsewhere.
-        with (
-            patch("apps.audit.management.commands.setup_audit_retention_policies.operator_country", return_value="DE"),
-            self.assertRaises(CommandError),
-        ):
+        with patch("apps.audit.management.commands.setup_audit_retention_policies.operator_country", return_value="DE"):
             call_command("setup_audit_retention_policies", stdout=StringIO())
 
         business.refresh_from_db()

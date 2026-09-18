@@ -169,24 +169,28 @@ class Command(BaseCommand):
         return retired
 
     def handle(self, *args: Any, **options: Any) -> None:
-        created = updated = skipped = 0
+        created = updated = skipped = declined = 0
         established_in = operator_country()
         force = bool(options.get("force", False))
 
-        if not force:
-            retired = self._retire_foreign_policies(established_in)
-            for spec in RETENTION_POLICY_SEED:
-                jurisdiction = spec.get("jurisdiction")
-                if jurisdiction and spec["is_mandatory"] and jurisdiction != established_in:
-                    suffix = f" Retired {len(retired)} already-active foreign policy row(s)." if retired else ""
-                    raise CommandError(
-                        f"Refusing to seed {spec['name']!r}: it derives from {jurisdiction} national law "
-                        f"but this deployment is established in {established_in}. The policy is mandatory "
-                        f"and its action executes. Set COMPANY_COUNTRY_CODE, or pass --force to install it.{suffix}"
-                    )
+        # A foreign policy is SKIPPED, never a reason to abort: the jurisdiction-neutral
+        # entries rest on EU-wide obligations and must still install, or a fresh foreign
+        # deployment ends up with no retention at all - worse than the bug being fixed.
+        retired = [] if force else self._retire_foreign_policies(established_in)
 
         with transaction.atomic():
             for spec in RETENTION_POLICY_SEED:
+                jurisdiction = spec.get("jurisdiction")
+                if jurisdiction and jurisdiction != established_in and not force:
+                    declined += 1
+                    self.stdout.write(
+                        self.style.WARNING(
+                            f"  skipped {spec['name']!r}: derives from {jurisdiction} national law, "
+                            f"operator is established in {established_in} (--force installs it anyway)"
+                        )
+                    )
+                    continue
+
                 # The model has no jurisdiction field - it is seed metadata only.
                 model_spec = {key: value for key, value in spec.items() if key != "jurisdiction"}
                 conflict = (
@@ -237,5 +241,8 @@ class Command(BaseCommand):
                     skipped += 1
 
         self.stdout.write(
-            self.style.SUCCESS(f"Retention policies: {created} created, {updated} reconciled, {skipped} unchanged")
+            self.style.SUCCESS(
+                f"Retention policies: {created} created, {updated} reconciled, {skipped} unchanged, "
+                f"{declined} skipped (other jurisdiction), {len(retired)} retired"
+            )
         )

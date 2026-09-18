@@ -1723,3 +1723,28 @@ class BROutsideScopeRulesTestCase(TestCase):
             supplier.find(f".//{{{NAMESPACES['cac']}}}PartyTaxScheme/{{{NAMESPACES['cbc']}}}CompanyID"),
             "BR-O-02: BT-31 must not appear on an out-of-scope credit note",
         )
+
+    def test_non_romanian_operator_is_refused_rather_than_misdescribed(self):
+        """e-Factura is a Romanian statutory format — the CIUS-RO profile, the RO:CUI
+        identifier scheme and the ANAF endpoints all presuppose a Romanian supplier.
+        A German operator must be refused, not described as both German and Romanian
+        in different fields of the same document."""
+        invoice = InvoiceFactory(
+            customer=self.customer,
+            currency=self.currency,
+            number="INV-DE-OPERATOR-001",
+            bill_to_name="Domestic Buyer GmbH",
+            bill_to_country="DE",
+            status="issued",
+            issued_at=timezone.now(),
+            due_at=timezone.now() + timezone.timedelta(days=30),
+            subtotal_cents=100000,
+            tax_total_cents=19000,
+            total_cents=119000,
+        )
+        InvoiceLineFactory(invoice=invoice, unit_price_cents=100000, quantity=1, tax_rate=Decimal("0.1900"))
+
+        with override_settings(COMPANY_COUNTRY_CODE="DE"), self.assertRaises(XMLBuilderError) as ctx:
+            UBLInvoiceBuilder(invoice).build()
+
+        self.assertIn("Romanian statutory format", str(ctx.exception))
