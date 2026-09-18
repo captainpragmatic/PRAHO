@@ -819,7 +819,7 @@ class Command(BaseCommand):
                 "subject": "🚨 Alertă: Rambursare mare - Factura {{invoice_number}}",
                 "body_html": """
                 <h2>🚨 Alertă rambursare mare</h2>
-                <p>O rambursare ce depășește pragul de <strong>{{threshold}} EUR</strong> a fost procesată:</p>
+                <p>O rambursare ce depășește pragul de <strong>{{threshold}} {{currency}}</strong> a fost procesată:</p>
                 <div style="background-color: #f8d7da; padding: 15px; border-left: 4px solid #dc3545; margin: 15px 0;">
                     <ul>
                         <li><strong>Factură:</strong> {{invoice_number}}</li>
@@ -845,7 +845,7 @@ class Command(BaseCommand):
                 "subject": "🚨 Alert: Large refund - Invoice {{invoice_number}}",
                 "body_html": """
                 <h2>🚨 Large Refund Alert</h2>
-                <p>A refund exceeding the <strong>{{threshold}} EUR</strong> threshold has been processed:</p>
+                <p>A refund exceeding the <strong>{{threshold}} {{currency}}</strong> threshold has been processed:</p>
                 <div style="background-color: #f8d7da; padding: 15px; border-left: 4px solid #dc3545; margin: 15px 0;">
                     <ul>
                         <li><strong>Invoice:</strong> {{invoice_number}}</li>

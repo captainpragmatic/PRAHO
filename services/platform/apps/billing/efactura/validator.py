@@ -220,6 +220,7 @@ class CIUSROValidator:
         # Schematron enforces — the native subset most likely to catch a rejection.
         self._validate_monetary_reconciliation(doc, result, is_credit_note)
         self._validate_tax_category_rules(doc, result)
+        self._validate_outside_scope_absence_rules(doc, result)
 
         return result
 
@@ -713,6 +714,41 @@ class CIUSROValidator:
             result.add_error(
                 "BR-CO-14-SUM", f"Document TaxTotal {tax_amount} != sum of TaxSubtotal amounts {subtotal_taxes}"
             )
+
+    def _validate_outside_scope_absence_rules(self, doc: etree._Element, result: ValidationResult) -> None:
+        """BR-O-02/04/05/06: an out-of-scope document omits VAT rates and VAT identifiers.
+
+        These are presence rules, not value rules - 0.00 is itself the violation - so
+        they cannot fold into the zero-rate checks, which ignore a missing Percent and
+        would let a regression through silently.
+        """
+        line_tag = "CreditNoteLine" if doc.tag.endswith("CreditNote") else "InvoiceLine"
+
+        for line in self._find_all(doc, f".//cac:{line_tag}"):
+            if self._get_text(line, ".//cac:Item/cac:ClassifiedTaxCategory/cbc:ID") != "O":
+                continue
+            if self._get_text(line, ".//cac:Item/cac:ClassifiedTaxCategory/cbc:Percent"):
+                result.add_error("BR-O-05", "Out-of-scope line must omit the VAT rate (BT-152 absent, not 0.00)")
+
+        for allowance in self._find_all(doc, ".//cac:AllowanceCharge"):
+            if self._get_text(allowance, ".//cac:TaxCategory/cbc:ID") != "O":
+                continue
+            if self._get_text(allowance, ".//cac:TaxCategory/cbc:Percent"):
+                result.add_error("BR-O-06", "Out-of-scope allowance must omit the VAT rate (BT-96 absent)")
+
+        document_is_out_of_scope = any(
+            self._get_text(subtotal, "./cac:TaxCategory/cbc:ID") == "O"
+            for subtotal in self._find_all(doc, ".//cac:TaxSubtotal")
+        )
+        if not document_is_out_of_scope:
+            return
+        for path, rule, who in (
+            (".//cac:AccountingSupplierParty", "BR-O-02", "Seller"),
+            (".//cac:AccountingCustomerParty", "BR-O-04", "Buyer"),
+        ):
+            party = self._find(doc, path)
+            if party is not None and self._get_text(party, ".//cac:PartyTaxScheme/cbc:CompanyID"):
+                result.add_error(rule, f"{who} VAT identifier must be absent on an out-of-scope document")
 
     def _validate_tax_category_rules(self, doc: etree._Element, result: ValidationResult) -> None:
         """Validate per-category tax rules at the document breakdown level: BR-CO-14 (standard

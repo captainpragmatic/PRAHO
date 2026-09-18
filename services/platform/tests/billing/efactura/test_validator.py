@@ -529,3 +529,52 @@ class CIUSROValidatorTestCase(TestCase):
 
 # Use the same constant for the test
 CIUS_RO_CUSTOMIZATION_ID = "urn:cen.eu:en16931:2017#compliant#urn:efactura.mfinante.ro:CIUS-RO:1.0.1"
+
+
+class OutsideScopeAbsenceRuleTestCase(TestCase):
+    """The validator must REJECT a rate or VAT identifier on an out-of-scope
+    document — these are presence rules, so a value-based check passes a
+    regression silently (#523)."""
+
+    def setUp(self):
+        self.validator = CIUSROValidator()
+
+    def _out_of_scope_xml(self, *, line_percent: str = "", seller_vat: str = "") -> str:
+        percent = f"<cbc:Percent>{line_percent}</cbc:Percent>" if line_percent else ""
+        seller_scheme = (
+            f"<cac:PartyTaxScheme><cbc:CompanyID>{seller_vat}</cbc:CompanyID>"
+            f"<cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme></cac:PartyTaxScheme>"
+            if seller_vat
+            else ""
+        )
+        return f"""<?xml version="1.0" encoding="UTF-8"?>
+<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
+         xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
+         xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">
+    <cbc:ID>INV-O-001</cbc:ID>
+    <cac:AccountingSupplierParty><cac:Party>{seller_scheme}</cac:Party></cac:AccountingSupplierParty>
+    <cac:TaxTotal>
+        <cac:TaxSubtotal>
+            <cac:TaxCategory><cbc:ID>O</cbc:ID></cac:TaxCategory>
+        </cac:TaxSubtotal>
+    </cac:TaxTotal>
+    <cac:InvoiceLine>
+        <cbc:ID>1</cbc:ID>
+        <cac:Item><cac:ClassifiedTaxCategory><cbc:ID>O</cbc:ID>{percent}</cac:ClassifiedTaxCategory></cac:Item>
+    </cac:InvoiceLine>
+</Invoice>"""
+
+    def _rule_ids(self, xml: str) -> set[str]:
+        result = ValidationResult(is_valid=True)
+        self.validator._validate_outside_scope_absence_rules(etree.fromstring(xml.encode()), result)
+        return {getattr(e, "rule", getattr(e, "code", "")) for e in result.errors}
+
+    def test_zero_percent_on_an_out_of_scope_line_is_rejected(self):
+        """0.00 is the violation, not the fix."""
+        self.assertIn("BR-O-05", self._rule_ids(self._out_of_scope_xml(line_percent="0.00")))
+
+    def test_seller_vat_identifier_on_an_out_of_scope_document_is_rejected(self):
+        self.assertIn("BR-O-02", self._rule_ids(self._out_of_scope_xml(seller_vat="RO12345678")))
+
+    def test_conformant_out_of_scope_document_passes(self):
+        self.assertEqual(self._rule_ids(self._out_of_scope_xml()), set())

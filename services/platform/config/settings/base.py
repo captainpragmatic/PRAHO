@@ -558,7 +558,10 @@ COMPANY_COUNTRY = os.environ.get("COMPANY_COUNTRY", "România")  # Display name 
 # The operator's jurisdiction as an ISO-3166-1 alpha-2 code. Read by
 # apps.common.localisation.operator_country and by the e-Factura supplier block.
 # Romania is the reference jurisdiction, not a claim that it fits any deployment (ADR-0047).
-COMPANY_COUNTRY_CODE = os.environ.get("COMPANY_COUNTRY_CODE", "RO")
+# Empty default on purpose: an upgraded deployment that set only the legacy
+# COMPANY_COUNTRY display name must still resolve to its own country rather
+# than being silently treated as Romanian. operator_country() falls back.
+COMPANY_COUNTRY_CODE = os.environ.get("COMPANY_COUNTRY_CODE", "")
 COMPANY_CUI = os.environ.get("COMPANY_CUI", "RO12345678")  # Romanian tax ID
 COMPANY_EMAIL = os.environ.get("COMPANY_EMAIL", "contact@praho.ro")
 COMPANY_PHONE = os.environ.get("COMPANY_PHONE", "+40 21 000 0000")

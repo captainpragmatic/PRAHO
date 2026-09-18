@@ -31,6 +31,7 @@ from apps.billing.efactura.settings import ro_local_date
 from apps.billing.exchange_rate_service import ExchangeRateService
 from apps.billing.fiscal_identity import normalize_business_tax_id, normalize_country_code, validated_cnp_or_empty
 from apps.billing.tax_evidence import REVERSE_CHARGE_LEGAL_BASIS, recorded_tax_category
+from apps.common.operator import operator_country
 from apps.common.tax_service import TaxService
 
 # UBL 2.1 Namespaces
@@ -142,7 +143,7 @@ def get_supplier_info() -> CompanyInfo:
         street=getattr(settings, "COMPANY_STREET", ""),
         city=getattr(settings, "COMPANY_CITY", ""),
         postal_code=getattr(settings, "COMPANY_POSTAL_CODE", ""),
-        country_code=getattr(settings, "COMPANY_COUNTRY_CODE", "RO"),
+        country_code=operator_country(),
         country_name=getattr(settings, "COMPANY_COUNTRY_NAME", "Romania"),
         email=getattr(settings, "COMPANY_EMAIL", ""),
         phone=getattr(settings, "COMPANY_PHONE", ""),
@@ -309,13 +310,18 @@ class BaseUBLBuilder:
         if tax_total_cents is None:
             tax_total_cents = getattr(self.invoice, "tax_cents", 0)
 
+        # Cross-border is relative to the SUPPLIER, not a literal (#519). On a
+        # non-RO deployment the literal would classify a domestic zero-tax document
+        # as reverse charge or outside-scope, and then strip the wrong elements.
+        supplier_country = operator_country()
+
         if tax_total_cents == 0:
             # EU cross-border B2B with a VAT ID → reverse charge (taxare inversa, AE),
             # detected BEFORE the domestic zero-rated fallback.
-            if country != "RO" and customer.tax_id and is_eu_country(country):
+            if country != supplier_country and customer.tax_id and is_eu_country(country):
                 return TAX_CATEGORY_REVERSE_CHARGE
-            # Non-RO customer without a VAT ID → outside the Romanian VAT system.
-            if not customer.tax_id and country != "RO":
+            # Foreign customer without a VAT ID → outside the supplier's VAT system.
+            if not customer.tax_id and country != supplier_country:
                 return TAX_CATEGORY_NOT_SUBJECT
             # Domestic (RO) zero VAT → zero-rated.
             return TAX_CATEGORY_ZERO

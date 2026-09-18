@@ -18,7 +18,7 @@ from django.core.cache import cache
 from django.db import models
 from django.utils import timezone
 
-from apps.common.localisation import operator_country
+from apps.common.operator import operator_country
 
 logger = logging.getLogger(__name__)
 
@@ -202,7 +202,15 @@ class TaxConfiguration:
                 f"⚠️ [TaxService] No rate found for {country_code!r}, "
                 f"defaulting to the supplier rate for {supplier_country} (fail-safe)"
             )
-            rate = cls.DEFAULT_VAT_RATES.get(supplier_country, cls.DEFAULT_VAT_RATES["RO"])
+            if supplier_country != country_code:
+                # Same lookup chain as above - a runtime-configured supplier rate must
+                # win over the hardcoded table. Decimal(0) is falsy, so test for None.
+                for source in (cls._get_rate_from_database, cls._get_rate_from_settings):
+                    if (candidate := source(supplier_country)) is not None:
+                        rate = candidate
+                        break
+            if rate is None:
+                rate = cls.DEFAULT_VAT_RATES.get(supplier_country, cls.DEFAULT_VAT_RATES["RO"])
 
         # Cache the rate
         cache.set(cache_key, str(rate), cls.CACHE_TIMEOUT)
@@ -267,7 +275,7 @@ class TaxConfiguration:
 
     @classmethod
     def calculate_vat(
-        cls, amount_cents: int, country_code: str = "RO", is_business: bool = False, vat_number: str | None = None
+        cls, amount_cents: int, country_code: str = "", is_business: bool = False, vat_number: str | None = None
     ) -> VATResult:
         """
         Calculate VAT for an amount using proper rounding.
@@ -539,14 +547,21 @@ class TaxConfiguration:
         if scenario == VATScenario.CUSTOM_RATE_OVERRIDE:
             return f"Per-customer rate override: {vat_rate}% applied"
 
+        # The ROMANIA_* values are a persisted contract and now mean "domestic".
+        # Render the supplier's actual country and the rate that was applied, or
+        # the audit trail claims a jurisdiction and rate the invoice never used.
+        supplier_country = cls.get_supplier_country()
+
         if scenario == VATScenario.ROMANIA_B2C:
-            if country_code in ["RO", "ROMANIA", "ROMÂNIA"]:
-                return f"Romanian consumer - apply Romanian VAT {cls.get_vat_rate('RO')}%"
-            else:
-                return f"Unknown/Invalid country ({country_code}) - default to Romanian VAT {cls.get_vat_rate('RO')}% for compliance"
+            if country_code in ["RO", "ROMANIA", "ROMÂNIA"] or country_code == supplier_country:
+                return f"Domestic consumer ({supplier_country}) - apply {supplier_country} VAT {vat_rate}%"
+            return (
+                f"Unknown/Invalid country ({country_code}) - "
+                f"fail safe to {supplier_country} VAT {vat_rate}% for compliance"
+            )
 
         if scenario == VATScenario.ROMANIA_B2B:
-            return f"Romanian business - apply Romanian VAT {cls.get_vat_rate('RO')}%"
+            return f"Domestic business ({supplier_country}) - apply {supplier_country} VAT {vat_rate}%"
 
         if scenario == VATScenario.EU_B2C:
             eu_rate = cls.get_vat_rate(country_code)

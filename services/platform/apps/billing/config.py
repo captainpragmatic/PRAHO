@@ -12,7 +12,7 @@ from decimal import Decimal
 from django.conf import settings
 from django.utils import timezone
 
-from apps.common.localisation import operator_country
+from apps.common.operator import operator_country
 from apps.common.tax_service import TaxService
 from apps.settings.services import SettingsService
 

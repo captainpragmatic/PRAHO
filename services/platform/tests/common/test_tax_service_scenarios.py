@@ -420,10 +420,32 @@ class SupplierCountryParameterisationTests(TestCase):
 
     def test_unknown_country_fails_safe_to_the_supplier_rate(self) -> None:
         """The fail-safe must charge the supplier's own rate, not Romania's —
-        it is taken precisely when the data is already bad."""
-        info: CustomerVATInfo = {"country": "", "is_business": False}
+        it is taken precisely when the data is already bad.
+
+        Uses an invalid-LENGTH code: an empty country is replaced by the supplier
+        country before scenario selection, so it takes the domestic path and would
+        never reach the branch under test.
+        """
+        info: CustomerVATInfo = {"country": "ZZZ", "is_business": False}
         result = TaxService.calculate_vat_for_document(10000, info)
         self.assertEqual(result.vat_rate, Decimal("19.0"))
+
+    def test_omitted_country_argument_is_not_an_explicit_romanian_customer(self) -> None:
+        """calculate_vat's signature default must not hardcode a country: an
+        omitted argument means "the supplier's own", not "a Romanian customer"."""
+        result = TaxService.calculate_vat(10000)
+        self.assertEqual(result["vat_rate_percent"], Decimal("19.0"))
+
+    def test_domestic_reasoning_names_the_supplier_country_and_applied_rate(self) -> None:
+        """The reasoning string is persisted as audit evidence — it must not claim
+        a jurisdiction and rate the invoice never used."""
+        info: CustomerVATInfo = {"country": "DE", "is_business": True, "vat_number": None}
+        result = TaxService.calculate_vat_for_document(10000, info)
+
+        reasoning = result.audit_data["reasoning"]
+        self.assertNotIn("Romanian", reasoning)
+        self.assertIn("DE", reasoning)
+        self.assertIn("19", reasoning)
 
     def test_calculate_vat_entry_point_also_uses_the_supplier_country(self) -> None:
         """calculate_vat() is a SECOND entry point carrying its own copy of the

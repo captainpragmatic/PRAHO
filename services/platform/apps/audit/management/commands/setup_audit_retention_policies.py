@@ -17,7 +17,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
 from apps.audit.models import AuditRetentionPolicy, audit_mutation_allowed
-from apps.common.localisation import operator_country
+from apps.common.operator import operator_country
 
 # One entry per category slot (severity="" means the whole category).
 #
@@ -190,6 +190,7 @@ class Command(BaseCommand):
                     existing.retention_days != spec["retention_days"]
                     or existing.action != spec["action"]
                     or existing.is_mandatory != spec["is_mandatory"]
+                    or existing.legal_basis != spec["legal_basis"]
                     or not existing.is_active
                 ):
                     # Reconciling a drifted seed row may touch mandatory flags - that is
