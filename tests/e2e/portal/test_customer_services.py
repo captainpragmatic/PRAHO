@@ -106,7 +106,7 @@ def test_services_list_page_structure(monitored_customer_page: Page) -> None:
     page = monitored_customer_page
     page.goto(f"{BASE_URL}/services/")
     expect(page.get_by_role("heading", name="My Services", exact=True)).to_be_visible()
-    expect(page.locator("button[role=tab]")).to_have_count(8)
+    expect(page.get_by_role("tab")).to_have_count(8)
     expect(page.locator("#list-filter-search")).to_be_visible()
     expect(page.locator("tr[data-href]")).to_have_count(20)
 
