@@ -60,7 +60,7 @@ help:
 	@echo "  make test-e2e-platform - Platform staff E2E tests (:8700)"
 	@echo "  make test-e2e-portal   - Portal customer E2E tests (:8701)"
 	@echo "  make test-e2e-csp      - Verify the strict-CSP browser violation oracle (needs make dev-e2e-csp)"
-	@echo "  make test-e2e-orm      - ORM E2E tests (no server needed)"
+	@echo "  make test-e2e-orm      - ORM E2E subset (requires the healthy owned stack)"
 	@echo "  make test-security     - Validate service isolation"
 	@echo "  make show-test-deps    - Print the test dependency graph"
 	@echo ""

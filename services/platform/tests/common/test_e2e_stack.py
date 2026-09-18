@@ -188,6 +188,20 @@ class E2EStackContractTests(TestCase):
             self.assertEqual(stack.source_fingerprint(), unstaged)
             (repository / "new.py").write_text("new\n")
             self.assertNotEqual(stack.source_fingerprint(), unstaged)
+            git("add", "new.py")
+            git(
+                "-c",
+                "user.name=Test Runner",
+                "-c",
+                "user.email=test@example.com",
+                "commit",
+                "-qm",
+                "test: changed fixture",
+                "--signoff",
+            )
+            committed = stack.source_fingerprint()
+            self.assertFalse(committed["dirty"])
+            self.assertNotEqual(committed["source_sha256"], clean["source_sha256"])
 
     def test_strict_policy_rejects_skip_and_xfail_in_a_real_pytest_session(self):
 

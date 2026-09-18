@@ -326,9 +326,10 @@ def test(paths: list[str]) -> int:
 
 def source_fingerprint() -> dict[str, str | bool]:
     """Include staged, unstaged and untracked source, without copying its contents."""
+    tree = subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], cwd=ROOT)
     diff = subprocess.check_output(["git", "diff", "HEAD", "--binary"], cwd=ROOT)
     untracked = subprocess.check_output(["git", "ls-files", "--others", "--exclude-standard", "-z"], cwd=ROOT)
-    digest = hashlib.sha256(diff)
+    digest = hashlib.sha256(tree + b"\0" + diff)
     for raw_name in sorted(untracked.split(b"\0")):
         if raw_name:
             digest.update(raw_name + b"\0")
