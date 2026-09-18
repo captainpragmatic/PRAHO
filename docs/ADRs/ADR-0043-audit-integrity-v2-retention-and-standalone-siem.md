@@ -81,9 +81,23 @@ that failed to run as non-compliant (ISO 27001 A.12.4.2).
 One engine (`AuditRetentionService`), policy rows seeded by
 `setup_audit_retention_policies` (10y mandatory delete for business
 operations per Legea contabilității; 5y mandatory anonymize for
-privacy/data_protection per GDPR Art. 7 accountability — note this bounds
-settings-change history at its category's policy; 2–3y elsewhere), scheduled
-weekly by the consolidated scheduler.
+privacy/data_protection on GDPR Art. 5(1)(e) storage limitation with Art. 5(2)
+accountability — note this bounds settings-change history at its category's
+policy; 2–3y elsewhere), scheduled weekly by the consolidated scheduler.
+
+**Amended (#517).** Two corrections to the above. First, the privacy and
+data-protection periods were originally justified by GDPR Art. 7(1); that
+article governs the conditions for demonstrating consent and prescribes no
+retention period, so it could not support a five-year value. They are
+operator-configurable reference periods, not statutory terms. Second, a period
+derived from one country's national law is now tagged with its jurisdiction and
+seeds as mandatory only where the operator is actually established
+(`COMPANY_COUNTRY_CODE`, resolved by `apps.common.localisation.operator_country`);
+`--force` installs it anyway. The Romanian accounting minimum previously
+installed itself as a mandatory executing delete on every deployment, and
+because the action executes and mandatory rows resist deactivation, that was
+harder to undo than to do. Romania remains the reference jurisdiction, not a
+default that fits every deployment (ADR-0047).
 
 - `archive` is **removed**, not implemented: a no-op that claims cold storage
   is worse than absence. Real cold-storage archive is future work.

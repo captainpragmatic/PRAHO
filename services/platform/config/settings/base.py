@@ -554,7 +554,11 @@ def validate_production_secret_key(secret_key: str | None) -> None:
 COMPANY_NAME = os.environ.get("COMPANY_NAME", "PRAHO Platform")
 COMPANY_ADDRESS = os.environ.get("COMPANY_ADDRESS", "Str. Exemplu Nr. 1")
 COMPANY_CITY = os.environ.get("COMPANY_CITY", "București")
-COMPANY_COUNTRY = os.environ.get("COMPANY_COUNTRY", "România")
+COMPANY_COUNTRY = os.environ.get("COMPANY_COUNTRY", "România")  # Display name — see COMPANY_COUNTRY_CODE for the code
+# The operator's jurisdiction as an ISO-3166-1 alpha-2 code. Read by
+# apps.common.localisation.operator_country and by the e-Factura supplier block.
+# Romania is the reference jurisdiction, not a claim that it fits any deployment (ADR-0047).
+COMPANY_COUNTRY_CODE = os.environ.get("COMPANY_COUNTRY_CODE", "RO")
 COMPANY_CUI = os.environ.get("COMPANY_CUI", "RO12345678")  # Romanian tax ID
 COMPANY_EMAIL = os.environ.get("COMPANY_EMAIL", "contact@praho.ro")
 COMPANY_PHONE = os.environ.get("COMPANY_PHONE", "+40 21 000 0000")

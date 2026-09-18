@@ -291,3 +291,54 @@ class DedupLedgerRetentionLockInTestCase(TestCase):
         # policy horizon is acceptable - a years-old note re-analysis is a no-op.
         self.assertEqual(policy.action, "delete")
         self.assertGreaterEqual(policy.retention_days, 1096)
+
+
+class RetentionJurisdictionGateTestCase(TestCase):
+    """A national statutory period must not install itself as a mandatory,
+    executing delete on a deployment established somewhere else (#517).
+
+    The bite is asymmetric: once seeded mandatory, the DB constraint and the
+    model guards make the policy harder to back out than it was to install.
+    """
+
+    def test_seed_refuses_foreign_jurisdiction_mandatory_policy(self) -> None:
+        with (
+            patch("apps.audit.management.commands.setup_audit_retention_policies.operator_country", return_value="DE"),
+            self.assertRaises(CommandError) as ctx,
+        ):
+            call_command("setup_audit_retention_policies", stdout=StringIO())
+
+        message = str(ctx.exception)
+        self.assertIn("RO", message)
+        self.assertIn("DE", message)
+        self.assertFalse(
+            AuditRetentionPolicy.objects.filter(category="business_operation").exists(),
+            "a refused seed must install nothing — the transaction rolls back",
+        )
+
+    def test_force_installs_despite_jurisdiction_mismatch(self) -> None:
+        with patch("apps.audit.management.commands.setup_audit_retention_policies.operator_country", return_value="DE"):
+            call_command("setup_audit_retention_policies", "--force", stdout=StringIO())
+
+        business = AuditRetentionPolicy.objects.get(category="business_operation", is_active=True)
+        self.assertTrue(business.is_mandatory)
+
+    def test_reference_jurisdiction_seeds_unchanged(self) -> None:
+        """Behaviour preservation: an RO deployment is unaffected."""
+        with patch("apps.audit.management.commands.setup_audit_retention_policies.operator_country", return_value="RO"):
+            call_command("setup_audit_retention_policies", stdout=StringIO())
+
+        business = AuditRetentionPolicy.objects.get(category="business_operation", is_active=True)
+        self.assertTrue(business.is_mandatory)
+        self.assertEqual(business.action, "delete")
+        self.assertGreaterEqual(business.retention_days, 3653)
+
+    def test_no_seeded_policy_cites_gdpr_article_7(self) -> None:
+        """Art. 7(1) governs the conditions for consent; it prescribes no
+        retention period, so it cannot be the basis for a 5-year value."""
+        with patch("apps.audit.management.commands.setup_audit_retention_policies.operator_country", return_value="RO"):
+            call_command("setup_audit_retention_policies", stdout=StringIO())
+
+        bases = AuditRetentionPolicy.objects.values_list("legal_basis", flat=True)
+        offenders = [basis for basis in bases if "Art. 7" in basis]
+        self.assertEqual(offenders, [], f"GDPR Art. 7 cited as a retention basis: {offenders}")

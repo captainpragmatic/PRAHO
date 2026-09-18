@@ -17,16 +17,20 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
 from apps.audit.models import AuditRetentionPolicy, audit_mutation_allowed
+from apps.common.localisation import operator_country
 
 # One entry per category slot (severity="" means the whole category).
-# business_operation keeps the Romanian accounting minimum and is mandatory;
-# privacy/data_protection are mandatory anonymize (GDPR Art. 7 accountability -
-# consent evidence must survive, identity must not).
+#
+# A "jurisdiction" key marks a period derived from one country's national law.
+# Those install as mandatory only where the operator is actually established —
+# the action EXECUTES, and a mandatory row is harder to back out than to add.
+# Entries without the key rest on EU-wide obligations and seed everywhere.
 RETENTION_POLICY_SEED: tuple[dict[str, Any], ...] = (
     {
         "name": "Business operations - Romanian accounting retention",
         "category": "business_operation",
         "severity": "",
+        "jurisdiction": "RO",
         "retention_days": 3653,  # 10 years, Legea contabilitatii
         "action": "delete",
         "legal_basis": "Legea contabilitatii nr. 82/1991 (10-year financial records)",
@@ -56,7 +60,10 @@ RETENTION_POLICY_SEED: tuple[dict[str, Any], ...] = (
         "severity": "",
         "retention_days": 1827,  # 5 years
         "action": "anonymize",
-        "legal_basis": "GDPR Art. 7(1) consent accountability",
+        "legal_basis": (
+            "GDPR Art. 5(1)(e) storage limitation with Art. 5(2) accountability "
+            "(operator-configurable reference period, not a prescribed statutory term)"
+        ),
         "is_mandatory": True,
     },
     {
@@ -65,7 +72,10 @@ RETENTION_POLICY_SEED: tuple[dict[str, Any], ...] = (
         "severity": "",
         "retention_days": 1827,
         "action": "anonymize",
-        "legal_basis": "GDPR Art. 7(1) consent accountability",
+        "legal_basis": (
+            "GDPR Art. 5(1)(e) storage limitation with Art. 5(2) accountability "
+            "(operator-configurable reference period, not a prescribed statutory term)"
+        ),
         "is_mandatory": True,
     },
     {
@@ -125,12 +135,29 @@ class Command(BaseCommand):
             action="store_true",
             help="Deactivate non-mandatory policies that conflict with the seed set",
         )
+        parser.add_argument(
+            "--force",
+            action="store_true",
+            help="Install jurisdiction-specific mandatory policies even when the operator jurisdiction differs",
+        )
 
     def handle(self, *args: Any, **options: Any) -> None:
         created = updated = skipped = 0
+        established_in = operator_country()
+        force = bool(options.get("force", False))
 
         with transaction.atomic():
             for spec in RETENTION_POLICY_SEED:
+                jurisdiction = spec.get("jurisdiction")
+                if jurisdiction and spec["is_mandatory"] and jurisdiction != established_in and not force:
+                    raise CommandError(
+                        f"Refusing to seed {spec['name']!r}: it derives from {jurisdiction} national law "
+                        f"but this deployment is established in {established_in}. The policy is mandatory "
+                        "and its action executes. Set COMPANY_COUNTRY_CODE, or pass --force to install it."
+                    )
+
+                # The model has no jurisdiction field - it is seed metadata only.
+                model_spec = {key: value for key, value in spec.items() if key != "jurisdiction"}
                 conflict = (
                     AuditRetentionPolicy.objects.filter(
                         category=spec["category"], severity=spec["severity"], is_active=True
@@ -156,7 +183,7 @@ class Command(BaseCommand):
 
                 existing = AuditRetentionPolicy.objects.filter(name=spec["name"]).first()
                 if existing is None:
-                    AuditRetentionPolicy.objects.create(**spec, is_active=True)
+                    AuditRetentionPolicy.objects.create(**model_spec, is_active=True)
                     created += 1
                     self.stdout.write(self.style.SUCCESS(f"  created: {spec['name']}"))
                 elif (
@@ -169,7 +196,7 @@ class Command(BaseCommand):
                     # exactly what the escape hatch exists to make explicit.
                     with audit_mutation_allowed("retention_policy_seed"):
                         for field_name in ("retention_days", "action", "legal_basis", "is_mandatory"):
-                            setattr(existing, field_name, spec[field_name])
+                            setattr(existing, field_name, model_spec[field_name])
                         existing.is_active = True
                         existing.save()
                     updated += 1

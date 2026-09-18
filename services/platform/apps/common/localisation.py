@@ -17,6 +17,10 @@ from django.utils.translation import gettext_lazy as _
 
 COUNTRY_CODE_LENGTH = 2
 
+# Reference jurisdiction only — the project originated in Romania (ADR-0047).
+# Not an assertion that RO fits any given deployment.
+REFERENCE_OPERATOR_COUNTRY = "RO"
+
 DATE_FORMAT_CHOICES = (
     ("%d.%m.%Y", _("DD.MM.YYYY — 23.11.2026")),
     ("%Y-%m-%d", _("YYYY-MM-DD — 2026-11-23")),
@@ -64,6 +68,25 @@ def _localized_country_codes() -> dict[str, str]:
 
 def normalize_country_code(value: object) -> str:
     return _localized_country_codes().get(str(value or "").strip().casefold(), "")
+
+
+def operator_country() -> str:
+    """ISO-3166-1 alpha-2 country the deploying operator is established in.
+
+    This is the *supplier's* jurisdiction, never a customer's. Romania ships as
+    the reference default (ADR-0047); a deployment established elsewhere sets
+    COMPANY_COUNTRY_CODE. The legacy COMPANY_COUNTRY holds a display name
+    ("România"), so it is normalized rather than trusted as a code.
+    """
+    from django.conf import settings  # noqa: PLC0415  # avoids import-time settings access
+
+    for candidate in (
+        getattr(settings, "COMPANY_COUNTRY_CODE", ""),
+        getattr(settings, "COMPANY_COUNTRY", ""),
+    ):
+        if normalized := normalize_country_code(candidate):
+            return normalized
+    return REFERENCE_OPERATOR_COUNTRY
 
 
 def country_name(code: str, language: str | None = None) -> str:
