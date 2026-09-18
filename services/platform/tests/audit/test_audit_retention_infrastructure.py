@@ -342,3 +342,25 @@ class RetentionJurisdictionGateTestCase(TestCase):
         bases = AuditRetentionPolicy.objects.values_list("legal_basis", flat=True)
         offenders = [basis for basis in bases if "Art. 7" in basis]
         self.assertEqual(offenders, [], f"GDPR Art. 7 cited as a retention basis: {offenders}")
+
+    def test_upgrade_retires_a_previously_seeded_foreign_policy(self) -> None:
+        """The P1 case: a deployment that already ran the old seeder has the foreign
+        mandatory row ACTIVE and executing. Refusing to create is not enough —
+        the existing row must stop deleting."""
+        with patch("apps.audit.management.commands.setup_audit_retention_policies.operator_country", return_value="RO"):
+            call_command("setup_audit_retention_policies", stdout=StringIO())
+        business = AuditRetentionPolicy.objects.get(category="business_operation", is_active=True)
+        self.assertTrue(business.is_mandatory)
+
+        # Operator turns out to be established elsewhere.
+        with (
+            patch("apps.audit.management.commands.setup_audit_retention_policies.operator_country", return_value="DE"),
+            self.assertRaises(CommandError),
+        ):
+            call_command("setup_audit_retention_policies", stdout=StringIO())
+
+        business.refresh_from_db()
+        self.assertFalse(
+            business.is_active,
+            "the foreign mandatory policy must be retired, not left executing behind a refusal",
+        )

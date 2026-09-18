@@ -463,3 +463,13 @@ class SupplierCountryParameterisationTests(TestCase):
 
         self.assertEqual(result["vat_cents"], 0)
         self.assertEqual(result["vat_rate_percent"], Decimal("0.0"))
+
+    def test_supplier_fallback_is_not_cached_under_the_customer_code(self) -> None:
+        """A rate borrowed from the supplier must not be cached under the customer's
+        code: a later supplier TaxRule change invalidates only the supplier key, and
+        the alias would keep serving a superseded rate for the cache lifetime."""
+        self.assertEqual(TaxService.get_vat_rate("ZZ"), Decimal("19.0"))
+        self.assertIsNone(
+            cache.get(f"{TaxService.CACHE_KEY_PREFIX}:ZZ"),
+            "the borrowed supplier rate must not be cached under the unknown customer code",
+        )

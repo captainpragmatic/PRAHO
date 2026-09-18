@@ -141,21 +141,52 @@ class Command(BaseCommand):
             help="Install jurisdiction-specific mandatory policies even when the operator jurisdiction differs",
         )
 
+    def _retire_foreign_policies(self, established_in: str) -> list[str]:
+        """Deactivate already-seeded policies belonging to another jurisdiction.
+
+        Refusing to *create* is not enough on an upgrade: a deployment that ran the
+        earlier seeder already has the foreign mandatory row active, and the weekly
+        engine keeps executing it. Retiring happens in its own committed
+        transaction, before the seeding block, so that raising afterwards cannot
+        roll the retirement back and leave the policy still deleting.
+        """
+        retired: list[str] = []
+        for spec in RETENTION_POLICY_SEED:
+            jurisdiction = spec.get("jurisdiction")
+            if not jurisdiction or jurisdiction == established_in:
+                continue
+            existing = AuditRetentionPolicy.objects.filter(name=spec["name"], is_active=True).first()
+            if existing is None:
+                continue
+            with transaction.atomic(), audit_mutation_allowed("retention_policy_foreign_jurisdiction_retire"):
+                existing.is_active = False
+                existing.is_mandatory = False  # the constraint forbids mandatory AND inactive
+                existing.save(update_fields=["is_active", "is_mandatory", "updated_at"])
+            retired.append(existing.name)
+            self.stdout.write(
+                self.style.WARNING(f"  retired {existing.name!r} ({jurisdiction} policy, operator is {established_in})")
+            )
+        return retired
+
     def handle(self, *args: Any, **options: Any) -> None:
         created = updated = skipped = 0
         established_in = operator_country()
         force = bool(options.get("force", False))
 
-        with transaction.atomic():
+        if not force:
+            retired = self._retire_foreign_policies(established_in)
             for spec in RETENTION_POLICY_SEED:
                 jurisdiction = spec.get("jurisdiction")
-                if jurisdiction and spec["is_mandatory"] and jurisdiction != established_in and not force:
+                if jurisdiction and spec["is_mandatory"] and jurisdiction != established_in:
+                    suffix = f" Retired {len(retired)} already-active foreign policy row(s)." if retired else ""
                     raise CommandError(
                         f"Refusing to seed {spec['name']!r}: it derives from {jurisdiction} national law "
                         f"but this deployment is established in {established_in}. The policy is mandatory "
-                        "and its action executes. Set COMPANY_COUNTRY_CODE, or pass --force to install it."
+                        f"and its action executes. Set COMPANY_COUNTRY_CODE, or pass --force to install it.{suffix}"
                     )
 
+        with transaction.atomic():
+            for spec in RETENTION_POLICY_SEED:
                 # The model has no jurisdiction field - it is seed metadata only.
                 model_spec = {key: value for key, value in spec.items() if key != "jurisdiction"}
                 conflict = (

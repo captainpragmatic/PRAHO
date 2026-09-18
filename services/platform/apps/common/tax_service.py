@@ -196,7 +196,9 @@ class TaxConfiguration:
         # via setup_tax_rules. If a country has no TaxRule, no settings entry, and no
         # DEFAULT_VAT_RATES entry, it's safest to charge Romanian VAT. This avoids
         # tax leakage from typos like "R0" or "ZZ" silently getting 0%.
+        used_supplier_fallback = False
         if rate is None:
+            used_supplier_fallback = True
             supplier_country = cls.get_supplier_country()
             logger.warning(
                 f"⚠️ [TaxService] No rate found for {country_code!r}, "
@@ -212,8 +214,11 @@ class TaxConfiguration:
             if rate is None:
                 rate = cls.DEFAULT_VAT_RATES.get(supplier_country, cls.DEFAULT_VAT_RATES["RO"])
 
-        # Cache the rate
-        cache.set(cache_key, str(rate), cls.CACHE_TIMEOUT)
+        # Cache the rate. A rate borrowed from the supplier as a fail-safe is NOT
+        # cached under the customer's code: a later TaxRule change invalidates only
+        # the supplier's key, which would leave the alias serving a superseded rate.
+        if not used_supplier_fallback:
+            cache.set(cache_key, str(rate), cls.CACHE_TIMEOUT)
         logger.info(f"💰 [TaxService] Loaded rate for {country_code}: {rate}%")
 
         return rate / 100 if as_decimal else rate

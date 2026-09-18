@@ -3,7 +3,7 @@ Management command to set up email templates for Romanian hosting provider.
 Creates essential templates for billing, provisioning, and customer communication.
 """
 
-from typing import Any
+from typing import Any, ClassVar
 
 from django.core.management.base import BaseCommand
 
@@ -19,6 +19,24 @@ class Command(BaseCommand):
             action="store_true",
             help="Overwrite existing templates",
         )
+
+    # Corrections to already-seeded bodies that must reach upgrades, not only fresh
+    # databases. Keyed on the exact stale text, so an operator's own edit is never
+    # touched — only a body still carrying the original seeded wording is repaired.
+    STALE_SEEDED_TEXT: ClassVar[tuple[tuple[str, str], ...]] = (("{{threshold}} EUR", "{{threshold}} {{currency}}"),)
+
+    def _repair_stale_seeded_body(self, template: Any) -> bool:
+        """Correct known-stale seeded wording in place. Returns True if changed."""
+        original = template.body_html or ""
+        repaired = original
+        for stale, corrected in self.STALE_SEEDED_TEXT:
+            repaired = repaired.replace(stale, corrected)
+        if repaired == original:
+            return False
+        template.body_html = repaired
+        template.version += 1
+        template.save(update_fields=["body_html", "version"])
+        return True
 
     def handle(self, *args: Any, **options: Any) -> None:
         """Create email templates for Romanian hosting provider"""
@@ -1417,6 +1435,9 @@ class Command(BaseCommand):
                     template.save()
                     updated_count += 1
                     self.stdout.write(f"📝 Updated: {key} ({locale})")
+                elif self._repair_stale_seeded_body(template):
+                    updated_count += 1
+                    self.stdout.write(f"🔧 Repaired: {key} ({locale}) - stale seeded text corrected")
                 else:
                     self.stdout.write(f"⏭️  Skipped: {key} ({locale}) - already exists")
             except EmailTemplate.DoesNotExist:

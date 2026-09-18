@@ -736,9 +736,15 @@ class CIUSROValidator:
             if self._get_text(allowance, ".//cac:TaxCategory/cbc:Percent"):
                 result.add_error("BR-O-06", "Out-of-scope allowance must omit the VAT rate (BT-96 absent)")
 
+        # Derive from the LINES as well as the breakdown. Externally supplied XML can
+        # carry an out-of-scope line with a missing or mis-categorised breakdown, and
+        # keying only on the breakdown lets exactly those documents evade these rules.
         document_is_out_of_scope = any(
             self._get_text(subtotal, "./cac:TaxCategory/cbc:ID") == "O"
             for subtotal in self._find_all(doc, ".//cac:TaxSubtotal")
+        ) or any(
+            self._get_text(line, ".//cac:Item/cac:ClassifiedTaxCategory/cbc:ID") == "O"
+            for line in self._find_all(doc, f".//cac:{line_tag}")
         )
         if not document_is_out_of_scope:
             return
