@@ -1179,7 +1179,88 @@ class InvoiceRefundViewTest(BillingViewsTestBase):
         invoice = self._create_invoice(customer=other_customer)
         self.client.force_login(self.regular_user)
         response = self.client.post(f"/billing/invoices/{invoice.id}/refund/")
-        self.assertEqual(response.status_code, 302)
+        # #104 [M11]: the denial is now a JSON 403, not a redirect. The client parses JSON
+        # unconditionally, so a 302 to an HTML dashboard was never usable here.
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response["Content-Type"], "application/json")
+
+
+class InvoiceRefundAuthorizationTests(BillingViewsTestBase):
+    """#104 [M11] — refunds are a financial operation, not a general staff one.
+
+    ``invoice_refund`` was the only view in ``apps/billing/views.py`` gated by
+    ``@staff_required`` while its 19 siblings used ``@billing_staff_required``. Both of its
+    gates reduced to ``is_staff_user`` — the in-view ``can_access_customer`` check returns
+    True unconditionally for any staff user — so a support agent could issue a full refund
+    on any invoice for any customer. ADR-0024 assigns financial operations to the billing
+    role.
+
+    The denial must be JSON: the client at ``templates/billing/invoice_detail.html``
+    calls ``response.json()`` unconditionally, so an HTML redirect or a plain-text 403
+    both break it silently.
+    """
+
+    REFUND_SERVICE = "apps.billing.refund_service.RefundService.refund_invoice"
+
+    def setUp(self):
+        super().setUp()
+        self.manager_user = User.objects.create_user(
+            email="manager@test.ro", password="testpass123", is_staff=True, staff_role="manager"
+        )
+        self.support_user = User.objects.create_user(
+            email="support@test.ro", password="testpass123", is_staff=True, staff_role="support"
+        )
+        # Bare is_staff with no role: passes is_staff_user, so it passed the old gate too.
+        self.bare_staff_user = User.objects.create_user(
+            email="barestaff@test.ro", password="testpass123", is_staff=True
+        )
+        self.invoice = self._create_invoice()
+
+    def _post_refund(self, user=None):
+        """POST a *valid* payload so authorization, not form validation, is what blocks."""
+        if user is not None:
+            self.client.force_login(user)
+        else:
+            self.client.logout()
+        return self.client.post(
+            f"/billing/invoices/{self.invoice.id}/refund/",
+            {
+                "refund_type": "full",
+                "refund_reason": "customer_request",
+                "refund_notes": "Authorization matrix probe",
+            },
+        )
+
+    def test_financial_roles_may_reach_the_refund_service(self):
+        for user in (self.admin_user, self.staff_user, self.manager_user):
+            with self.subTest(role=user.staff_role), patch(self.REFUND_SERVICE) as refund:
+                refund.return_value = MagicMock(is_ok=lambda: False, unwrap_err=lambda: "stub")
+                response = self._post_refund(user)
+                self.assertNotIn(response.status_code, (401, 403))
+                refund.assert_called_once()
+
+    def test_non_financial_staff_are_denied_and_never_reach_the_service(self):
+        for user in (self.support_user, self.bare_staff_user):
+            with self.subTest(role=user.staff_role or "<bare is_staff>"), patch(self.REFUND_SERVICE) as refund:
+                response = self._post_refund(user)
+                self.assertEqual(response.status_code, 403)
+                self.assertEqual(response["Content-Type"], "application/json")
+                self.assertFalse(response.json()["success"])
+                refund.assert_not_called()
+
+    def test_authenticated_customer_is_denied_in_json(self):
+        with patch(self.REFUND_SERVICE) as refund:
+            response = self._post_refund(self.regular_user)
+            self.assertEqual(response.status_code, 403)
+            self.assertEqual(response["Content-Type"], "application/json")
+            refund.assert_not_called()
+
+    def test_anonymous_is_denied_in_json_not_redirected_to_login(self):
+        with patch(self.REFUND_SERVICE) as refund:
+            response = self._post_refund(None)
+            self.assertEqual(response.status_code, 401)
+            self.assertEqual(response["Content-Type"], "application/json")
+            refund.assert_not_called()
 
 
 class InvoiceRefundRequestViewTest(BillingViewsTestBase):
@@ -1494,6 +1575,13 @@ class ApiConfirmPaymentTest(BillingViewsTestBase):
 class ApiProcessRefundTest(BillingViewsTestBase):
     """Tests for api_process_refund."""
 
+    def setUp(self):
+        super().setUp()
+        # #104 [M11]: the endpoint now requires an owner/billing customer principal, so these
+        # payload-validation cases must supply one to reach the code they are exercising.
+        self.api_actor = User.objects.create_user(email="apiactor@test.ro", password="testpass123")
+        CustomerMembership.objects.create(user=self.api_actor, customer=self.customer, role="owner")
+
     def _post_json(self, url, data):
         return self.client.post(url, json.dumps(data), content_type="application/json")
 
@@ -1501,7 +1589,13 @@ class ApiProcessRefundTest(BillingViewsTestBase):
         """Refund with invalid payment ID format returns 400"""
         response = self._post_json(
             "/billing/process-refund/",
-            {"payment_id": "pay_123", "customer_id": self.customer.pk, "amount_cents": 1000, "reason": "Test"},
+            {
+                "payment_id": "pay_123",
+                "customer_id": self.customer.pk,
+                "user_id": self.api_actor.pk,
+                "amount_cents": 1000,
+                "reason": "Test",
+            },
         )
         self.assertEqual(response.status_code, 400)
 
@@ -1529,6 +1623,71 @@ class ApiProcessRefundTest(BillingViewsTestBase):
             content_type="application/json",
         )
         self.assertEqual(response.status_code, 400)
+
+
+class ApiProcessRefundRoleTests(BillingViewsTestBase):
+    """#104 [M11]: customer membership is not authority to move money.
+
+    ``api_process_refund`` reaches ``RefundService.refund_invoice`` after HMAC plus
+    ``_validate_user_membership``, which filters on user/customer/is_active and never on
+    ``role``. A read-only ``viewer`` member therefore qualified. The endpoint is currently
+    unreachable in practice (the portal sends ``invoice_id`` while this view requires
+    ``payment_id``), so this closes the gap *before* anyone repairs that wire contract and
+    activates it.
+    """
+
+    REFUND_SERVICE = "apps.billing.refund_service.RefundService.refund_invoice"
+
+    def setUp(self):
+        super().setUp()
+        self.viewer_user = User.objects.create_user(email="viewer@test.ro", password="testpass123")
+        CustomerMembership.objects.create(user=self.viewer_user, customer=self.customer, role="viewer")
+        self.tech_user = User.objects.create_user(email="tech@test.ro", password="testpass123")
+        CustomerMembership.objects.create(user=self.tech_user, customer=self.customer, role="tech")
+        self.owner_user = User.objects.create_user(email="owner@test.ro", password="testpass123")
+        CustomerMembership.objects.create(user=self.owner_user, customer=self.customer, role="owner")
+        self.cust_billing_user = User.objects.create_user(email="custbilling@test.ro", password="testpass123")
+        CustomerMembership.objects.create(user=self.cust_billing_user, customer=self.customer, role="billing")
+
+    def _post_refund(self, user):
+        return self.client.post(
+            "/billing/process-refund/",
+            json.dumps(
+                {
+                    "payment_id": str(uuid.uuid4()),
+                    "customer_id": self.customer.pk,
+                    "user_id": user.pk,
+                    "amount_cents": 1000,
+                    "reason": "Test",
+                }
+            ),
+            content_type="application/json",
+        )
+
+    def test_read_only_members_cannot_process_a_refund(self):
+        for user in (self.viewer_user, self.tech_user):
+            with self.subTest(role=user.customer_memberships.first().role), patch(self.REFUND_SERVICE) as refund:
+                response = self._post_refund(user)
+                self.assertEqual(response.status_code, 403)
+                self.assertFalse(response.json()["success"])
+                refund.assert_not_called()
+
+    def test_financial_members_pass_the_role_gate(self):
+        """owner/billing clear authorization; the request then fails later on its own merits."""
+        for user in (self.owner_user, self.cust_billing_user):
+            with self.subTest(role=user.customer_memberships.first().role):
+                response = self._post_refund(user)
+                self.assertNotEqual(response.status_code, 403)
+
+    def test_absent_user_id_is_refused(self):
+        with patch(self.REFUND_SERVICE) as refund:
+            response = self.client.post(
+                "/billing/process-refund/",
+                json.dumps({"payment_id": str(uuid.uuid4()), "customer_id": self.customer.pk}),
+                content_type="application/json",
+            )
+            self.assertEqual(response.status_code, 403)
+            refund.assert_not_called()
 
 
 class ApiStripeConfigTest(BillingViewsTestBase):

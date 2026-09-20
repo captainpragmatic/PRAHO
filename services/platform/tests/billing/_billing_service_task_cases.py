@@ -374,12 +374,22 @@ class InvoiceRefundViewTests(TestCase):
 class ApiRefundViewTests(TestCase):
     """D5: API refund processing"""
 
+    @patch("apps.users.models.CustomerMembership")
     @patch("apps.billing.refund_service.RefundService.refund_invoice")
     @patch("apps.billing.views.Payment")
     @patch("apps.billing.views._require_customer_auth_for_portal_api")
-    def test_processes_refund(self, mock_auth, mock_pay_cls, mock_refund):
+    def test_processes_refund(
+        self,
+        mock_auth: MagicMock,
+        mock_pay_cls: MagicMock,
+        mock_refund: MagicMock,
+        mock_membership_cls: MagicMock,
+    ) -> None:
         mock_customer = MagicMock(id=1)
         mock_auth.return_value = (mock_customer, None)
+
+        # #104 [M11]: refunds require an owner/billing customer principal, not bare membership.
+        mock_membership_cls.objects.filter.return_value.first.return_value = MagicMock(role="owner")
 
         mock_payment = MagicMock(id="p1", amount_cents=5000, customer_id=1, invoice=MagicMock(id="i1"))
         mock_pay_cls.objects.filter.return_value.select_related.return_value.first.return_value = mock_payment
@@ -392,7 +402,7 @@ class ApiRefundViewTests(TestCase):
         factory = RequestFactory()
         request = factory.post(
             "/billing/api/refund/",
-            json.dumps({"payment_id": "p1", "reason": "Test"}),
+            json.dumps({"payment_id": "p1", "reason": "Test", "user_id": 1}),
             content_type="application/json",
         )
         request.user = MagicMock()

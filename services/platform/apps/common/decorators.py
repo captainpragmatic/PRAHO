@@ -116,6 +116,42 @@ def billing_staff_required(view_func: Callable[..., HttpResponse]) -> Callable[.
     return wrapper
 
 
+def billing_staff_api_required(view_func: Callable[..., HttpResponse]) -> Callable[..., HttpResponse]:
+    """Require financial-operations privileges on a JSON endpoint, denying in JSON.
+
+    The JSON sibling of :func:`billing_staff_required`. Refund endpoints return
+    ``JsonResponse`` to clients that call ``response.json()`` unconditionally, so neither a
+    302 redirect to the dashboard (``billing_staff_required``) nor a plain-text
+    ``HttpResponseForbidden`` (``billing_configuration_required``) is a usable denial — both
+    leave the caller parsing HTML. Deliberately not wrapped in ``@login_required`` for the
+    same reason: anonymous callers get a JSON 401 rather than a redirect to the login page.
+
+    The predicate is :func:`can_manage_financial_data`, reused rather than restated, so the
+    admin/billing/manager role set has exactly one definition (#104 [M11]).
+    """
+
+    @wraps(view_func)
+    def wrapper(request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
+        from apps.common.utils import json_error  # noqa: PLC0415  # Deferred: avoids circular import
+
+        user = request.user
+        if not user.is_authenticated:
+            return json_error(str(_("Authentication required")), code="UNAUTHENTICATED", status=401)
+
+        if not can_manage_financial_data(user):
+            logger.warning(
+                "⚠️ [Auth] Refused financial operation for %s (staff_role=%r) on %s",
+                getattr(user, "email", "<unknown>"),
+                getattr(user, "staff_role", ""),
+                request.path,
+            )
+            return json_error(str(_("Billing staff privileges required")), code="FORBIDDEN", status=403)
+
+        return view_func(request, *args, **kwargs)
+
+    return wrapper
+
+
 def billing_configuration_required(view_func: Callable[..., HttpResponse]) -> Callable[..., HttpResponse]:
     """Require the narrow admin/billing role set for billing policy mutations."""
 
@@ -213,16 +249,10 @@ def can_manage_financial_data(user: User) -> bool:
     Only billing staff and admins can manage financial data.
     Must be staff AND have appropriate role (or be superuser).
     """
-    if user.is_superuser:
-        return True
-
-    # getattr guard: is_staff_user is a property on the custom User model that AnonymousUser
-    # lacks; a direct access would raise AttributeError where the old is_staff returned False.
-    if not getattr(user, "is_staff_user", False):
-        return False
-
-    allowed_roles = ["admin", "billing", "manager"]
-    return getattr(user, "staff_role", "") in allowed_roles
+    # Delegates to User.can_manage_financial_data so the role set has exactly one
+    # definition, shared with the template layer. getattr guard: AnonymousUser lacks the
+    # property, and must read as False rather than raising.
+    return bool(getattr(user, "can_manage_financial_data", False))
 
 
 def can_access_admin_functions(user: User) -> bool:
