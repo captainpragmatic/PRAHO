@@ -1245,7 +1245,12 @@ class InvoiceRefundAuthorizationTests(BillingViewsTestBase):
                 response = self._post_refund(user)
                 self.assertEqual(response.status_code, 403)
                 self.assertEqual(response["Content-Type"], "application/json")
-                self.assertFalse(response.json()["success"])
+                payload = response.json()
+                self.assertFalse(payload["success"])
+                # Both refund clients render `data.error` directly, so the denial reason must
+                # live there as text. A boolean renders as the useless "Error: true".
+                self.assertIsInstance(payload["error"], str)
+                self.assertIn("privileges", payload["error"].lower())
                 refund.assert_not_called()
 
     def test_authenticated_customer_is_denied_in_json(self):

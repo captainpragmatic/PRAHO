@@ -11,7 +11,7 @@ from typing import Any
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.cache import cache
-from django.http import HttpRequest, HttpResponse, HttpResponseForbidden, HttpResponseRedirect
+from django.http import HttpRequest, HttpResponse, HttpResponseForbidden, HttpResponseRedirect, JsonResponse
 from django.shortcuts import redirect
 from django.utils.translation import gettext_lazy as _
 
@@ -132,11 +132,15 @@ def billing_staff_api_required(view_func: Callable[..., HttpResponse]) -> Callab
 
     @wraps(view_func)
     def wrapper(request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
-        from apps.common.utils import json_error  # noqa: PLC0415  # Deferred: avoids circular import
+        # The refund clients render `data.error` directly, so the denial reason must be the
+        # string under `error`. `json_error` puts a boolean there and the text under
+        # `message`, which those handlers would display as the useless "Error: true".
+        def _deny(message: str, status: int) -> JsonResponse:
+            return JsonResponse({"success": False, "error": message}, status=status)
 
         user = request.user
         if not user.is_authenticated:
-            return json_error(str(_("Authentication required")), code="UNAUTHENTICATED", status=401)
+            return _deny(str(_("Authentication required")), 401)
 
         if not can_manage_financial_data(user):
             logger.warning(
@@ -145,7 +149,7 @@ def billing_staff_api_required(view_func: Callable[..., HttpResponse]) -> Callab
                 getattr(user, "staff_role", ""),
                 request.path,
             )
-            return json_error(str(_("Billing staff privileges required")), code="FORBIDDEN", status=403)
+            return _deny(str(_("Billing staff privileges required")), 403)
 
         return view_func(request, *args, **kwargs)
 
