@@ -11,7 +11,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Any, ClassVar, Optional, cast
 
 from django.core.validators import MinValueValidator
-from django.db import IntegrityError, NotSupportedError, connection, models, transaction
+from django.db import DatabaseError, IntegrityError, NotSupportedError, connection, models, transaction
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from django_fsm import ConcurrentTransitionMixin, FSMField, transition
@@ -508,7 +508,19 @@ class Order(ConcurrentTransitionMixin, models.Model):
                     _apply(self.discount_cents, persist=False)
                 else:
                     _apply(committed_discount, persist=True)
-        except NotSupportedError:
+        except (NotSupportedError, DatabaseError):
+            # Deliberately BROADER than the sibling fallback in `_locked_latest_order_number`,
+            # and the difference is the caller, not the risk. That helper propagates into
+            # `Order.save()`, where a real DatabaseError surfaces to the request or task — so
+            # narrowing it makes distress visible. This method's only item-path caller is the
+            # OrderItem post_save/post_delete signal, which wraps everything in a blanket
+            # `except Exception` (orders/signals.py:534, :589). Narrowing here would not
+            # surface anything: the error would be logged and dropped while the OrderItem
+            # INSERT still committed, leaving totals that omit the item entirely. Recomputing
+            # from the in-memory discount keeps totals consistent with items; the stale
+            # discount it risks is the lesser error. Narrowing this site requires the signal
+            # handlers to stop swallowing first (#104 [M12]).
+            #
             # Backend without row locking (or select_for_update outside a usable transaction):
             # recompute from the in-memory discount. Log on non-sqlite, where this is a real
             # TOCTOU exposure rather than an expected limitation.

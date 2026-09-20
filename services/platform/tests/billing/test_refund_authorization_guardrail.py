@@ -71,7 +71,7 @@ def _decorator_name(node: ast.expr) -> str:
     return "<unknown>"
 
 
-def _calls_refund_service(func: ast.FunctionDef) -> int | None:
+def _calls_refund_service(func: ast.FunctionDef | ast.AsyncFunctionDef) -> int | None:
     """Return the line of a direct ``RefundService.refund_*`` call, else None."""
     for node in ast.walk(func):
         if (
@@ -94,7 +94,7 @@ def _find_refund_call_sites() -> list[RefundCallSite]:
         tree = ast.parse(source, filename=str(path))
         relative = path.relative_to(PLATFORM_ROOT).as_posix()
         for node in ast.walk(tree):
-            if not isinstance(node, ast.FunctionDef):
+            if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
                 continue
             line = _calls_refund_service(node)
             if line is None:

@@ -1686,7 +1686,9 @@ class ApiProcessRefundRoleTests(BillingViewsTestBase):
 
     def test_malformed_user_id_is_refused_not_a_server_error(self):
         """A non-integer actor id must deny, not raise through the view."""
-        for bad in ("not-an-int", {"nested": 1}, [1, 2]):
+        # 10**20 coerces cleanly but is outside the PK domain; on SQLite an uncoerced value
+        # reaches the ORM and raises OverflowError into the broad handler as a 500.
+        for bad in ("not-an-int", {"nested": 1}, [1, 2], 10**20, 0, -5):
             with self.subTest(user_id=bad), patch(self.REFUND_SERVICE) as refund:
                 response = self.client.post(
                     "/billing/process-refund/",

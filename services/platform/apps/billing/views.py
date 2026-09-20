@@ -110,6 +110,9 @@ def _get_max_payment_amount_cents() -> int:
 # "tech" and "viewer" are deliberately excluded (CustomerMembership.CUSTOMER_ROLE_CHOICES).
 REFUND_CUSTOMER_ROLES = frozenset({"owner", "billing"})
 
+# Widest signed integer any supported backend will accept as a primary key.
+_MAX_DB_INTEGER = 2**63 - 1
+
 
 def _refund_actor_is_authorized(raw_user_id: object, customer: Customer) -> bool:
     """Whether the signed body's actor may initiate a refund for this customer.
@@ -122,17 +125,22 @@ def _refund_actor_is_authorized(raw_user_id: object, customer: Customer) -> bool
 
     try:
         actor_user_id = int(raw_user_id)  # type: ignore[call-overload]  # coercion IS the validation
+        if not 0 < actor_user_id <= _MAX_DB_INTEGER:
+            # Outside the primary-key domain. An unbounded value coerces cleanly here and
+            # then overflows inside the ORM, which the broad handler below turns into a 500.
+            raise ValueError(actor_user_id)
     except (TypeError, ValueError):
         # A malformed actor id is a denial, not a server error: an uncoerced value reaches
         # the ORM as an invalid lookup and surfaces as a 500.
-        logger.warning("⚠️ [API] Refused refund for customer %s — unusable actor id", customer.id)
+        logger.warning("⚠️ [API] Refused refund for customer %s — unusable actor id %r", customer.id, raw_user_id)
         return False
 
     membership = CustomerMembership.objects.filter(user_id=actor_user_id, customer=customer, is_active=True).first()
     if membership is None or membership.role not in REFUND_CUSTOMER_ROLES:
         logger.warning(
-            "⚠️ [API] Refused refund for customer %s — actor role %r lacks financial standing",
+            "⚠️ [API] Refused refund for customer %s — actor %r role %r lacks financial standing",
             customer.id,
+            actor_user_id,
             getattr(membership, "role", None),
         )
         return False

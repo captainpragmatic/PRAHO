@@ -448,7 +448,7 @@ document.getElementById('invoiceRefundForm').addEventListener('submit', function
             // Reload page to show updated status
             window.location.reload();
         } else {
-            alert('Error: ' + data.error);
+            alert('Error: ' + (data.message || data.error));
             // Re-enable button
             submitBtn.disabled = false;
             submitBtn.innerHTML = '{% trans "Process Refund" %}';
@@ -595,7 +595,7 @@ document.getElementById('invoiceRefundRequestForm').addEventListener('submit', f
             alert('{{ refund_success_msg|escapejs }}');
             window.location.reload();
         } else {
-            alert('Error: ' + data.error);
+            alert('Error: ' + (data.message || data.error));
             // Re-enable button
             submitBtn.disabled = false;
             submitBtn.innerHTML = '{% trans "Submit Request" %}';

@@ -760,7 +760,7 @@ document.getElementById('refundForm').addEventListener('submit', function(e) {
             // Reload page to show updated status
             window.location.reload();
         } else {
-            alert('Error: ' + data.error);
+            alert('Error: ' + (data.message || data.error));
             // Re-enable button
             submitBtn.disabled = false;
             submitBtn.innerHTML = '{% trans "Process Refund" %}';
@@ -907,7 +907,7 @@ document.getElementById('orderRefundRequestForm').addEventListener('submit', fun
             alert('{{ refund_success_msg|escapejs }}');
             window.location.reload();
         } else {
-            alert('Error: ' + data.error);
+            alert('Error: ' + (data.message || data.error));
             // Re-enable button
             submitBtn.disabled = false;
             submitBtn.innerHTML = '{% trans "Submit Request" %}';

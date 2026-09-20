@@ -14,6 +14,7 @@ the only arm that should degrade.
 
 from __future__ import annotations
 
+from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
 from django.db import DatabaseError, NotSupportedError
@@ -21,7 +22,8 @@ from django.test import TestCase
 
 from apps.billing.currency_models import Currency
 from apps.customers.models import Customer
-from apps.orders.models import Order
+from apps.orders.models import Order, OrderItem
+from apps.products.models import Product
 
 
 class LockedLatestOrderNumberErrorHandlingTests(TestCase):
@@ -47,31 +49,62 @@ class LockedLatestOrderNumberErrorHandlingTests(TestCase):
         qs.values_list.return_value.first.assert_not_called()
 
 
-class CalculateTotalsErrorHandlingTests(TestCase):
-    """``Order.calculate_totals`` — the same defect guarding money totals."""
+class CalculateTotalsDatabaseErrorTests(TestCase):
+    """``Order.calculate_totals`` keeps the BROAD catch, and the reason is its caller.
+
+    Narrowing here would surface nothing. This method's item-path caller is the OrderItem
+    post_save/post_delete signal, which wraps everything in a blanket ``except Exception``
+    (``orders/signals.py:534``, ``:589``). A propagating ``DatabaseError`` would be logged
+    and dropped while the OrderItem INSERT still committed — leaving an order whose total
+    omits the item entirely. That is money wrong in the direction the narrowing was meant to
+    protect, so this site degrades to a consistent recompute instead.
+
+    The test drives the real path (``OrderItem.objects.create`` → signal → calculate_totals),
+    because a direct call bypasses the swallowing layer that makes the difference.
+    """
 
     def setUp(self) -> None:
         self.currency, _ = Currency.objects.get_or_create(
             code="RON", defaults={"name": "Romanian Leu", "symbol": "lei", "decimals": 2}
         )
         self.customer = Customer.objects.create(
-            name="Lock Probe SRL", customer_type="company", status="active", primary_email="lock@test.ro"
+            name="Totals Probe SRL", customer_type="company", status="active", primary_email="totals@test.ro"
+        )
+        self.product = Product.objects.create(
+            slug="totals-probe", name="Totals Probe", product_type="shared_hosting", is_active=True
         )
         self.order = Order.objects.create(
-            customer=self.customer,
-            currency=self.currency,
-            status="draft",
-            subtotal_cents=10000,
-            tax_cents=1900,
-            total_cents=11900,
+            customer=self.customer, currency=self.currency, status="draft", total_cents=0
         )
 
-    def test_genuine_database_error_propagates(self) -> None:
-        with (
-            patch.object(Order.objects, "select_for_update", side_effect=DatabaseError("lock timeout")),
-            self.assertRaises(DatabaseError),
-        ):
-            self.order.calculate_totals()
+    def _add_item(self, unit_price_cents: int) -> None:
+        OrderItem.objects.create(
+            order=self.order,
+            product=self.product,
+            product_name=self.product.name,
+            product_type=self.product.product_type,
+            quantity=1,
+            unit_price_cents=unit_price_cents,
+            tax_rate=Decimal("0.0000"),
+            tax_cents=0,
+            line_total_cents=unit_price_cents,
+        )
+
+    def test_totals_still_include_the_item_when_the_row_lock_fails(self) -> None:
+        """A DatabaseError must not leave a committed item missing from the order total."""
+        self._add_item(10000)
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.total_cents, 10000)
+
+        with patch.object(Order.objects, "select_for_update", side_effect=DatabaseError("deadlock detected")):
+            self._add_item(2500)
+
+        self.order.refresh_from_db()
+        self.assertEqual(
+            self.order.total_cents,
+            12500,
+            msg="The second item committed but its value never reached the order total.",
+        )
 
     def test_unsupported_backend_still_degrades(self) -> None:
         with patch.object(Order.objects, "select_for_update", side_effect=NotSupportedError("sqlite")):
