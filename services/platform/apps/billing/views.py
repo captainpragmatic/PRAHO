@@ -111,6 +111,34 @@ def _get_max_payment_amount_cents() -> int:
 REFUND_CUSTOMER_ROLES = frozenset({"owner", "billing"})
 
 
+def _refund_actor_is_authorized(raw_user_id: object, customer: Customer) -> bool:
+    """Whether the signed body's actor may initiate a refund for this customer.
+
+    #104 [M11]: membership alone is not authority to move money. The shared
+    `_validate_user_membership` gate filters on user/customer/is_active and never on role,
+    so a read-only "viewer" or a "tech" member reached RefundService.
+    """
+    from apps.users.models import CustomerMembership  # noqa: PLC0415  # Deferred: avoids circular import
+
+    try:
+        actor_user_id = int(raw_user_id)  # type: ignore[call-overload]  # coercion IS the validation
+    except (TypeError, ValueError):
+        # A malformed actor id is a denial, not a server error: an uncoerced value reaches
+        # the ORM as an invalid lookup and surfaces as a 500.
+        logger.warning("⚠️ [API] Refused refund for customer %s — unusable actor id", customer.id)
+        return False
+
+    membership = CustomerMembership.objects.filter(user_id=actor_user_id, customer=customer, is_active=True).first()
+    if membership is None or membership.role not in REFUND_CUSTOMER_ROLES:
+        logger.warning(
+            "⚠️ [API] Refused refund for customer %s — actor role %r lacks financial standing",
+            customer.id,
+            getattr(membership, "role", None),
+        )
+        return False
+    return True
+
+
 def _require_customer_auth_for_portal_api(request: HttpRequest) -> tuple[Customer | None, JsonResponse | None]:
     """Validate portal HMAC + customer membership and return JsonResponse on failure."""
     # Test runner compatibility: PORTAL_HMAC_BYPASS=True is set only in test.py
@@ -1997,23 +2025,7 @@ def api_process_refund(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911  
         if customer_id_int != customer.id:
             return JsonResponse({"success": False, "error": "customer_id mismatch"}, status=403)
 
-        # #104 [M11]: membership alone is not authority to move money. The shared
-        # `_validate_user_membership` gate filters on user/customer/is_active and never on
-        # role, so a read-only "viewer" or a "tech" member reached RefundService. Refunds
-        # require a customer principal with financial standing.
-        from apps.users.models import (  # noqa: PLC0415  # Deferred: avoids circular import
-            CustomerMembership,
-        )
-
-        actor_membership = CustomerMembership.objects.filter(
-            user_id=data.get("user_id"), customer=customer, is_active=True
-        ).first()
-        if actor_membership is None or actor_membership.role not in REFUND_CUSTOMER_ROLES:
-            logger.warning(
-                "⚠️ [API] Refused refund for customer %s — actor role %r lacks financial standing",
-                customer.id,
-                getattr(actor_membership, "role", None),
-            )
+        if not _refund_actor_is_authorized(data.get("user_id"), customer):
             return JsonResponse({"success": False, "error": "Refund requires an owner or billing role"}, status=403)
 
         # Look up payment and validate it has a linked invoice

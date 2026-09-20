@@ -1679,6 +1679,20 @@ class ApiProcessRefundRoleTests(BillingViewsTestBase):
                 response = self._post_refund(user)
                 self.assertNotEqual(response.status_code, 403)
 
+    def test_malformed_user_id_is_refused_not_a_server_error(self):
+        """A non-integer actor id must deny, not raise through the view."""
+        for bad in ("not-an-int", {"nested": 1}, [1, 2]):
+            with self.subTest(user_id=bad), patch(self.REFUND_SERVICE) as refund:
+                response = self.client.post(
+                    "/billing/process-refund/",
+                    json.dumps(
+                        {"payment_id": str(uuid.uuid4()), "customer_id": self.customer.pk, "user_id": bad}
+                    ),
+                    content_type="application/json",
+                )
+                self.assertEqual(response.status_code, 403)
+                refund.assert_not_called()
+
     def test_absent_user_id_is_refused(self):
         with patch(self.REFUND_SERVICE) as refund:
             response = self.client.post(

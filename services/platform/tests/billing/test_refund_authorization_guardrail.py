@@ -36,7 +36,7 @@ REFUND_METHODS = frozenset({"refund_invoice", "refund_order"})
 EXPECTED_REFUND_ENTRY_POINTS: dict[str, str] = {
     "apps/billing/views.py:invoice_refund": "billing_staff_api_required",
     "apps/orders/views.py:order_refund": "billing_staff_api_required",
-    "apps/billing/views.py:api_process_refund": "REFUND_CUSTOMER_ROLES",
+    "apps/billing/views.py:api_process_refund": "_refund_actor_is_authorized",
 }
 
 # Canary: the most recently classified entry point. A scan that drifts off it is broken.
