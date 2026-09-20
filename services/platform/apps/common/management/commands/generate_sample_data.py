@@ -37,6 +37,7 @@ from apps.billing.models import Currency, Invoice, InvoiceLine, ProformaInvoice,
 from apps.billing.numbering_service import InvoiceNumberingService
 from apps.billing.payment_models import CreditLedger, Payment
 from apps.billing.proforma_models import ProformaSequence
+from apps.billing.recurring_billing import unmanaged_auto_renew_service_count
 from apps.billing.refund_models import Refund
 from apps.billing.subscription_models import Subscription, SubscriptionItem
 from apps.common.financial_arithmetic import calculate_line_totals
@@ -229,6 +230,16 @@ def _recount_promotion_aggregates(
     )
 
 
+# Service and Subscription spell the 12-month cycle differently ("annual" vs "yearly"),
+# so a service-derived subscription has to translate rather than copy the value.
+_SERVICE_TO_SUBSCRIPTION_CYCLE: dict[str, str] = {
+    "monthly": "monthly",
+    "quarterly": "quarterly",
+    "semi_annual": "semi_annual",
+    "annual": "yearly",
+}
+
+
 class Command(BaseCommand):
     help = "Generate sample data for Romanian hosting provider"
 
@@ -417,6 +428,8 @@ class Command(BaseCommand):
         # Create webhook events (not tied to specific customers)
         self.create_webhook_events()
 
+        self._assert_every_auto_renew_service_is_subscription_owned()
+
         total_customers = len(customers)
         self.stdout.write(
             self.style.SUCCESS(
@@ -437,6 +450,22 @@ class Command(BaseCommand):
 
         self._ensure_credential_passwords()
         self._print_credentials()
+
+    @staticmethod
+    def _assert_every_auto_renew_service_is_subscription_owned() -> None:
+        """Fail the seed if it left a service the PRAHO renewal engine cannot bill.
+
+        This asserts against the exact counter setup_billing_scheduled_tasks guards on.
+        Without it, unlinked sample services do not break the run that creates them —
+        they break the next `make dev-platform`, where setup_initial_data aborts before
+        this command gets a chance to reseed.
+        """
+        unmanaged = unmanaged_auto_renew_service_count()
+        if unmanaged:
+            raise CommandError(
+                f"Sample data left {unmanaged} active auto-renew service(s) with no PRAHO "
+                "subscription; setup_scheduled_tasks would refuse the next dev bootstrap"
+            )
 
     def _ensure_credential_passwords(self) -> None:
         """Force every advertised dev account's password to match DEV_USER_CREDENTIALS.
@@ -1867,6 +1896,20 @@ class Command(BaseCommand):
             activated = now - timedelta(days=random.randint(30, 365)) if status in ("active", "suspended") else None
             suspended_at = now - timedelta(days=random.randint(1, 30)) if status == "suspended" else None
 
+            # PRAHO bills renewals through Subscription, so an auto-renew service is only
+            # coherent when a subscription owns it. setup_billing_scheduled_tasks refuses to
+            # install the renewal schedules while any active auto-renew service has none,
+            # which means an unlinked service here breaks the NEXT dev bootstrap, not this run.
+            product = self._product_for_service_plan(plan) if status == "active" else None
+            auto_renew = status == "active" and product is not None
+            if status == "active" and product is None:
+                self.stdout.write(
+                    self.style.WARNING(
+                        f"  ⚠ No product mirrors plan '{plan.name}' — creating the service without "
+                        "auto-renew so it stays billable by hand instead of silently unmanaged"
+                    )
+                )
+
             service_data: dict[str, Any] = {
                 "customer": customer,
                 "service_plan": plan,
@@ -1878,7 +1921,7 @@ class Command(BaseCommand):
                 "billing_cycle": ["monthly", "quarterly", "semi_annual", "annual"][i % 4],
                 "price": plan.price_monthly,
                 "status": status,
-                "auto_renew": status == "active",
+                "auto_renew": auto_renew,
                 "activated_at": activated,
                 "expires_at": activated + timedelta(days=365) if activated else None,
                 "suspended_at": suspended_at,
@@ -1896,9 +1939,50 @@ class Command(BaseCommand):
                 )
 
             service = Service.objects.create(**service_data)
+            if auto_renew and product is not None:
+                self._create_service_subscription(customer, service, product)
             services.append(service)
 
         return services
+
+    @staticmethod
+    def _product_for_service_plan(plan: ServicePlan) -> Product | None:
+        """Find the Product that create_products_from_service_plans mirrors for this plan."""
+        product = Product.objects.filter(slug=f"product-{plan.id}").first()
+        if product is not None:
+            return product
+        # A plan without its mirrored product is a seeding-order bug; any active product
+        # still lets the service be subscription-owned, which is what the guard checks.
+        return Product.objects.filter(is_active=True).first()
+
+    def _create_service_subscription(self, customer: Customer, service: Service, product: Product) -> Subscription:
+        """Give an auto-renew service the PRAHO subscription that owns its recurring charges.
+
+        Timing is deliberately coarse. RecurringBillingOrchestrator derives the real
+        next_proforma_at from current_period_end on its first pass and writes the
+        correction back, so the seed only has to leave a non-null value behind for the
+        subscription to enter the candidate queryset at all.
+        """
+        now = timezone.now()
+        period_start = now - timedelta(days=15)
+        period_end = now + timedelta(days=15)
+
+        return Subscription.objects.create(
+            customer=customer,
+            product=product,
+            service=service,
+            status="active",
+            billing_cycle=_SERVICE_TO_SUBSCRIPTION_CYCLE.get(service.billing_cycle, "monthly"),
+            currency=self._get_ron_currency(),
+            unit_price_cents=int(service.price * 100),
+            current_period_start=period_start,
+            current_period_end=period_end,
+            next_billing_date=period_end,
+            next_proforma_at=period_end,
+            next_charge_at=period_end,
+            started_at=service.activated_at or now,
+            created_by=self._get_admin_user(),
+        )
 
     def create_customer_orders(self, fake: Faker, customer: Customer, count: int) -> list[Order]:
         """Create orders for a customer with diverse statuses and full billing data"""
