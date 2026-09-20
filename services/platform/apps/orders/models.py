@@ -11,7 +11,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Any, ClassVar, Optional, cast
 
 from django.core.validators import MinValueValidator
-from django.db import DatabaseError, IntegrityError, NotSupportedError, connection, models, transaction
+from django.db import IntegrityError, NotSupportedError, connection, models, transaction
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from django_fsm import ConcurrentTransitionMixin, FSMField, transition
@@ -400,7 +400,7 @@ class Order(ConcurrentTransitionMixin, models.Model):
         try:
             with transaction.atomic():
                 return qs.select_for_update(of=("self",)).values_list("order_number", flat=True).first()
-        except (NotSupportedError, DatabaseError):
+        except NotSupportedError:
             if connection.vendor != "sqlite":
                 logger.error(
                     "⚠️ [Order] select_for_update failed on %s — TOCTOU race possible",
@@ -508,7 +508,7 @@ class Order(ConcurrentTransitionMixin, models.Model):
                     _apply(self.discount_cents, persist=False)
                 else:
                     _apply(committed_discount, persist=True)
-        except (NotSupportedError, DatabaseError):
+        except NotSupportedError:
             # Backend without row locking (or select_for_update outside a usable transaction):
             # recompute from the in-memory discount. Log on non-sqlite, where this is a real
             # TOCTOU exposure rather than an expected limitation.
