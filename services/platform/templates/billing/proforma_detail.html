@@ -40,19 +40,12 @@
           </span>
         {% endif %}
 
-        {% if can_convert and proforma.status != "accepted" %}
+        {% if can_record_payment %}
           {# Payment triggers automatic conversion to invoice (Romanian proforma-first flow) #}
-          {% if proforma.status == "converted" %}
-          <button type="button" disabled
-             class="inline-flex items-center px-4 py-2 bg-slate-600 text-slate-400 rounded-md font-medium cursor-not-allowed opacity-60">
-            {% icon "check" %} {% trans 'Payment Recorded' %}
-          </button>
-          {% else %}
           <button type="button" data-action="show" data-target="paymentModal"
              class="inline-flex items-center px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-md font-medium transition-colors">
             {% icon "currency" %} {% trans 'Record Payment' %}
           </button>
-          {% endif %}
         {% endif %}
 
         <a href="{% url 'billing:proforma_pdf' proforma.pk %}"
@@ -391,11 +384,13 @@
         </h3>
 
         <div class="space-y-3">
-          {% if can_convert and proforma.status != "converted" and proforma.status != "accepted" %}
+          {% if can_record_payment %}
             <button type="button" data-action="show" data-target="paymentModal"
                class="block w-full text-center px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-md font-medium transition-colors">
               {% icon "currency" %} {% trans 'Record Payment' %}
             </button>
+          {% elif payment_block_reason and proforma.status != "converted" %}
+            <p class="text-sm text-slate-400">{{ payment_block_reason }}</p>
           {% endif %}
 
           <a href="{% url 'billing:proforma_pdf' proforma.pk %}"
@@ -457,6 +452,7 @@ function sendProforma(proformaId) {
 }
 </script>
 
+{% if can_record_payment %}
 <!-- Record Payment Modal -->
 <div id="paymentModal" class="hidden fixed inset-0 z-50 overflow-y-auto">
   <div class="fixed inset-0 bg-slate-900 opacity-75" data-action="hide" data-target="paymentModal"></div>
@@ -483,7 +479,6 @@ function sendProforma(proformaId) {
             <select name="payment_method" id="payment_method" required
                     class="w-full bg-slate-700 border-slate-600 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500">
               <option value="bank_transfer">{% trans "Bank Transfer" %}</option>
-              <option value="card">{% trans "Credit/Debit Card" %}</option>
               <option value="cash">{% trans "Cash" %}</option>
             </select>
           </div>
@@ -497,7 +492,7 @@ function sendProforma(proformaId) {
           <div class="bg-yellow-900/30 border border-yellow-700/50 rounded-lg p-3 text-sm text-yellow-300">
             {% icon "warning" %}
             {% if proforma.meta.order_id %}
-              {% trans "This will record full payment, convert the proforma to an invoice, and advance the linked order to Paid status." %}
+              {% trans "This will record full payment, issue an invoice, and advance the linked order to provisioning or staff review." %}
             {% else %}
               {% trans "This will record full payment and automatically convert this proforma into an invoice." %}
             {% endif %}
@@ -518,4 +513,5 @@ function sendProforma(proformaId) {
     </div>
   </div>
 </div>
+{% endif %}
 {% endblock %}

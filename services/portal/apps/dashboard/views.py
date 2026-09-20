@@ -305,8 +305,9 @@ def account_overview_view(request: HttpRequest) -> HttpResponse:
     try:
         # Get customer information directly from API
         customer_details = api_client.get_customer_details(int(customer_id), int(request.user.id))  # type: ignore[union-attr, arg-type]
-        context["account_info"] = customer_details
-        context["customers"] = [customer_details]  # Single customer view
+        customer = customer_details.get("customer", {})
+        context["account_info"] = customer
+        context["customers"] = [customer]  # Single customer view
 
         logger.debug(f"✅ [Account] Loaded details for customer {customer_id}")
 

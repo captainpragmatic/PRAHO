@@ -327,6 +327,12 @@ class SecureUserRegistrationService:
             # Step 1: Additional business logic validation
             # (Company uniqueness check is done in decorator with proper locking)
 
+            # Both registration entry points record affirmative consent; the onboarding
+            # form carries the checkbox in customer_data instead of a user timestamp.
+            consent_date = user_data.get("gdpr_consent_date")
+            if consent_date is None and customer_data.get("data_processing_consent") is True:
+                consent_date = timezone.now()
+
             # Step 2: Create the user account with security measures
             user = User.objects.create_user(
                 email=user_data["email"],  # Validated email
@@ -335,14 +341,19 @@ class SecureUserRegistrationService:
                 last_name=user_data["last_name"],  # XSS-safe
                 phone=user_data.get("phone", ""),  # Romanian format validated
                 accepts_marketing=user_data.get("accepts_marketing", False),
-                gdpr_consent_date=user_data.get("gdpr_consent_date"),
+                gdpr_consent_date=consent_date,
                 # Security: No admin fields can be injected due to validation
             )
 
             # Step 3: Create customer organization with validated data
             customer = Customer.objects.create(
+                name=customer_data["company_name"],
                 company_name=customer_data["company_name"],  # Sanitized
                 customer_type=customer_data.get("customer_type", "other"),
+                primary_email=user.email,
+                primary_phone=user.phone or "",
+                data_processing_consent=bool(user.gdpr_consent_date),
+                marketing_consent=user.accepts_marketing,
                 status="active",
                 created_by=user,
             )
@@ -392,7 +403,7 @@ class SecureUserRegistrationService:
                 address_line1=customer_data.get("billing_address", ""),  # Sanitized
                 city=customer_data.get("billing_city", ""),  # Sanitized
                 postal_code=customer_data.get("billing_postal_code", ""),  # Sanitized
-                county=detect_county(customer_data.get("billing_city", "")),
+                county=customer_data.get("county") or detect_county(customer_data.get("billing_city", "")),
                 country=customer_data.get("country") or country_name(get_localisation_defaults().default_country),
                 is_current=True,
             )

@@ -136,6 +136,7 @@ class OrderItemData(TypedDict, total=False):
     setup_cents: int
     billing_period: str
     description: str
+    domain_name: str
     meta: dict[str, Any]
 
 
@@ -168,6 +169,7 @@ class OrderCreateData:
     notes: str = ""
     meta: dict[str, Any] = field(default_factory=dict)
     idempotency_key: str = ""
+    payment_method: str = ""
 
 
 @dataclass
@@ -438,6 +440,7 @@ class OrderService:
                 notes=data.notes,
                 meta=data.meta,
                 idempotency_key=data.idempotency_key,
+                payment_method=data.payment_method,
                 # Customer snapshot fields
                 customer_email=data.customer.primary_email,
                 # The snapshot is what invoices bill from now on: capture the LEGAL billing
@@ -455,6 +458,10 @@ class OrderService:
                 **totals,
             )
 
+            # Resolve product snapshots once for the whole cart, including repeated products.
+            products = Product.objects.only("id", "name", "slug", "product_type").in_bulk(
+                [item["product_id"] for item in data.items if item.get("product_id") is not None]
+            )
             # Create order items
             for item_data in data.items:
                 # Calculate line totals (include setup fee if provided) with VAT rules
@@ -535,9 +542,12 @@ class OrderService:
                 # with the validated top-level field so the amount and persisted period cannot diverge.
                 item_config = dict(item_data.get("meta") or {})
                 item_config["billing_period"] = billing_period
+                product = products.get(uuid.UUID(str(product_id)))
+                if product is None:
+                    raise ValueError(f"Order item references an unknown product: {product_id}")
                 OrderItem.objects.create(
                     order=order,
-                    product_id=product_id,
+                    product=product,
                     service_id=str(service_id) if service_id else None,
                     quantity=item_data["quantity"],
                     unit_price_cents=item_data["unit_price_cents"],
@@ -546,7 +556,8 @@ class OrderService:
                     tax_cents=tax_cents,
                     line_total_cents=line_total_cents,
                     product_name=item_data["description"],
-                    product_type="hosting",  # Default type
+                    product_type=product.product_type,
+                    domain_name=item_data.get("domain_name", ""),
                     config=item_config,
                 )
 

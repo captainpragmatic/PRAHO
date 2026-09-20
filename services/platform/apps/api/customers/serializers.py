@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 from django.contrib.auth import get_user_model
 from django.db import transaction
+from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 
@@ -84,9 +85,10 @@ class UserRegistrationDataSerializer(serializers.Serializer):
 
     def validate_phone(self, value: str) -> str:
         """Validate Romanian phone format"""
-        if value and not re.match(r"^(\+40[\s\.]?[0-9][\s\.0-9]{8,11}[0-9]|0[0-9]{9})$", value):
+        normalized = re.sub(r"[\s.]", "", value)
+        if normalized and not re.fullmatch(r"(?:\+40|0)[0-9]{9}", normalized):
             raise serializers.ValidationError(_("Invalid Romanian phone number format."))
-        return value
+        return normalized
 
 
 class CustomerRegistrationDataSerializer(serializers.Serializer):
@@ -149,8 +151,18 @@ class CustomerRegistrationSerializer(serializers.Serializer):
         """
         Create new customer owner using secure registration service.
         """
-        user_data = validated_data["user_data"]
-        customer_data = validated_data["customer_data"]
+        customer_data = dict(validated_data["customer_data"])
+        user_data = {
+            **validated_data["user_data"],
+            "accepts_marketing": customer_data["marketing_consent"],
+            # Consent was required by the nested serializer; its time is server-owned.
+            "gdpr_consent_date": timezone.now(),
+        }
+        customer_data.update(
+            billing_address=customer_data.pop("address_line1"),
+            billing_city=customer_data.pop("city"),
+            billing_postal_code=customer_data.pop("postal_code"),
+        )
 
         # Get request context for IP tracking
         request = self.context.get("request")

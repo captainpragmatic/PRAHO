@@ -10,6 +10,9 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
 from django.contrib.auth import authenticate
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import transaction
 from django.http import HttpRequest, JsonResponse
 from django.views.decorators.cache import never_cache
 from django.views.decorators.csrf import csrf_exempt
@@ -41,6 +44,7 @@ from apps.common.performance.rate_limiting import (
 from apps.common.request_ip import get_safe_client_ip
 from apps.customers.models import Customer
 from apps.users.forms import UserRegistrationForm
+from apps.users.mfa import MFAService
 from apps.users.models import APIToken, CustomerMembership, User, UserProfile
 from apps.users.services import APITokenService, SessionSecurityService
 
@@ -76,7 +80,7 @@ def _mask_email(email: str) -> str:
 @csrf_exempt  # nosemgrep: no-csrf-exempt — HMAC-authenticated inter-service endpoint
 @require_http_methods(["POST"])
 @require_portal_authentication
-def portal_login_api(request: HttpRequest) -> JsonResponse:
+def portal_login_api(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911 -- distinct authentication failures
     """
     Authentication endpoint for portal service.
     Validates user credentials and returns user data for session creation.
@@ -115,6 +119,15 @@ def portal_login_api(request: HttpRequest) -> JsonResponse:
             reason = "locked" if user.is_account_locked() else "inactive"
             logger.warning("[Portal API Auth] Login rejected (%s) — ip=%s", reason, client_ip)
             return JsonResponse({"success": False, "error": "Invalid email or password"}, status=401)
+
+        # A password alone must never establish a session for an enrolled user.
+        if user.two_factor_enabled:
+            with transaction.atomic():
+                user = User.objects.select_for_update().get(pk=user.pk)
+                token = str(data.get("mfa_token", ""))
+                if not token or not MFAService.verify_mfa_code(user, token, request)["success"]:
+                    user.increment_failed_login_attempts()
+                    return JsonResponse({"success": False, "error": "Invalid authentication code"}, status=401)
 
         # Success: reset lockout counter
         user.failed_login_attempts = 0
@@ -543,64 +556,17 @@ def _uniform_session_error(headers: dict[str, Any]) -> Response:
 @api_view(["POST"])
 @authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])  # HMAC auth handled by secure_auth
-@require_customer_authentication
-def mfa_setup_api(request: HttpRequest, customer: Customer) -> Response:
-    """
-    📱 Initialize MFA Setup
-
-    POST /api/users/mfa/setup/
-
-    Generates QR code and secret for authenticator app setup.
-    User must verify with a token to complete setup.
-
-    Response:
-    {
-        "secret": "JBSWY3DPEHPK3PXP",
-        "qr_code_svg": "<svg>...</svg>",
-        "provisioning_uri": "otpauth://totp/PRAHO...",
-        "manual_entry_key": "JBSWY3DPEHPK3PXP"
-    }
-    """
-
-    # Get the user from the customer context (since this is a customer-authenticated endpoint)
-    # The customer parameter comes from @require_customer_authentication
-    # We need to get the associated user from the customer membership
-    membership = CustomerMembership.objects.filter(customer=customer).first()
-    if not membership:
-        return Response(
-            {"success": False, "error": "No user associated with this customer"}, status=status.HTTP_400_BAD_REQUEST
-        )
-
-    user = membership.user
-
-    if user.mfa_enabled:
-        return Response(
-            {"success": False, "error": "MFA is already enabled for this account"}, status=status.HTTP_400_BAD_REQUEST
-        )
-
-    serializer = MFASetupSerializer(context={"request": request})
-
-    try:
+@require_user_authentication
+def mfa_setup_api(request: HttpRequest, user: User) -> Response:
+    """Initialize only the signed user's TOTP secret; enrollment requires verification."""
+    with transaction.atomic():
+        user = User.objects.select_for_update().get(pk=user.pk)
+        if user.mfa_enabled:
+            return Response({"success": False, "error": "MFA is already enabled"}, status=400)
+        serializer = MFASetupSerializer(data={}, context={"request": request, "user": user})
+        serializer.is_valid(raise_exception=True)
         result = serializer.save()
-
-        return Response(
-            {
-                "success": True,
-                "message": "Scan the QR code with your authenticator app",
-                "setup_data": {
-                    "qr_code_svg": result["qr_code_svg"],
-                    "manual_entry_key": result["manual_entry_key"],
-                    "provisioning_uri": result["provisioning_uri"],
-                },
-            }
-        )
-
-    except Exception as e:
-        logger.error(f"🔥 [MFA Setup] Setup failed for user {user.email}: {e}")
-        return Response(
-            {"success": False, "error": "MFA setup failed. Please try again."},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        )
+    return Response({"success": True, "setup_data": result})
 
 
 @api_view(["POST"])
@@ -608,134 +574,41 @@ def mfa_setup_api(request: HttpRequest, customer: Customer) -> Response:
 @permission_classes([AllowAny])  # HMAC auth handled by secure_auth
 @require_user_authentication
 def mfa_verify_api(request: HttpRequest, user: User) -> Response:
-    """
-    🔐 Verify MFA Token and Enable
-
-    POST /api/users/mfa/verify/
-    {
-        "token": "123456"
-    }
-
-    Verifies the token from authenticator app and enables MFA.
-    Returns backup codes on successful verification.
-
-    Response:
-    {
-        "success": true,
-        "message": "MFA enabled successfully",
-        "backup_codes": ["12345678", "87654321", ...]
-    }
-    """
-
-    if user.mfa_enabled:
-        return Response(
-            {"success": False, "error": "MFA is already enabled for this account"}, status=status.HTTP_400_BAD_REQUEST
-        )
-
-    serializer = MFAVerifySerializer(data=request.data, context={"request": request})
-
-    if serializer.is_valid():
-        try:
-            result = serializer.save()
-
-            # Rotate session for security after enabling MFA
-            SessionSecurityService.rotate_session_on_mfa_change(request)
-
-            return Response(result)
-
-        except Exception as e:
-            logger.error(f"🔥 [MFA Verify] Verification failed for user {user.email}: {e}")
-            return Response(
-                {"success": False, "error": "MFA verification failed. Please try again."},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            )
-    else:
-        return Response(
-            {"success": False, "error": "Validation failed", "errors": serializer.errors},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
+    """Complete enrollment and return plaintext recovery codes exactly once."""
+    with transaction.atomic():
+        user = User.objects.select_for_update().get(pk=user.pk)
+        if user.mfa_enabled:
+            return Response({"success": False, "error": "MFA is already enabled"}, status=400)
+        serializer = MFAVerifySerializer(data=request.data, context={"request": request, "user": user})
+        serializer.is_valid(raise_exception=True)
+        result = serializer.save()
+    return Response(result)
 
 
 @api_view(["POST"])
-@permission_classes([IsAuthenticated])
-@throttle_classes([AuthThrottle])
-def mfa_disable_api(request: HttpRequest) -> Response:
-    """
-    🚫 Disable MFA
-
-    POST /api/users/mfa/disable/
-    {
-        "token": "123456",
-        "password": "current_password"
-    }
-
-    Disables MFA after verifying current password and MFA token.
-    """
-
-    user = cast(User, request.user)
-
-    if not user.mfa_enabled:
-        return Response(
-            {"success": False, "error": "MFA is not enabled for this account"}, status=status.HTTP_400_BAD_REQUEST
-        )
-
-    serializer = MFADisableSerializer(data=request.data, context={"request": request})
-
-    if serializer.is_valid():
-        try:
-            result = serializer.save()
-
-            # Rotate session for security after disabling MFA
-            SessionSecurityService.rotate_session_on_mfa_change(request)
-
-            return Response(result)
-
-        except Exception as e:
-            logger.error(f"🔥 [MFA Disable] Disable failed for user {user.email}: {e}")
-            return Response(
-                {"success": False, "error": "MFA disable failed. Please try again."},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            )
-    else:
-        return Response(
-            {"success": False, "error": "Validation failed", "errors": serializer.errors},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
+@authentication_classes([])
+@permission_classes([AllowAny])
+@require_user_authentication
+def mfa_disable_api(request: HttpRequest, user: User) -> Response:
+    """Require current password and a second factor before removing MFA."""
+    with transaction.atomic():
+        user = User.objects.select_for_update().get(pk=user.pk)
+        serializer = MFADisableSerializer(data=request.data, context={"request": request, "user": user})
+        serializer.is_valid(raise_exception=True)
+        return Response(serializer.save())
 
 
-@api_view(["GET"])
-@authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
-@permission_classes([AllowAny])  # HMAC auth handled by secure_auth
-@require_customer_authentication
-def mfa_status_api(request: HttpRequest, customer: Customer) -> Response:
-    """
-    📊 Get MFA Status
-
-    GET /api/users/mfa/status/
-    Requires customer authentication via HMAC.
-
-    Returns current MFA status and backup codes count.
-
-    Response:
-    {
-        "enabled": true,
-        "backup_codes_remaining": 5
-    }
-    """
-    # Get the user from the customer context (since this is a customer-authenticated endpoint)
-    membership = CustomerMembership.objects.filter(customer=customer).first()
-    if not membership:
-        return Response(
-            {"success": False, "error": "No user associated with this customer"}, status=status.HTTP_400_BAD_REQUEST
-        )
-
-    user = membership.user
-
+@api_view(["POST"])
+@authentication_classes([])
+@permission_classes([AllowAny])
+@require_user_authentication
+def mfa_status_api(request: HttpRequest, user: User) -> Response:
+    """Return status for the signed user without exposing recovery secrets."""
     return Response(
         {
+            "success": True,
             "enabled": user.mfa_enabled,
             "backup_codes_remaining": len(user.backup_tokens) if user.mfa_enabled else 0,
-            "has_backup_codes": user.has_backup_codes() if user.mfa_enabled else False,
         }
     )
 
@@ -962,6 +835,7 @@ def customer_profile_api(request: HttpRequest, user: User) -> Response:
                 "last_name": user.last_name,
                 "phone": user.phone or "",
                 "mfa_enabled": user.mfa_enabled,
+                "backup_codes_count": len(user.backup_tokens),
                 "date_joined": user.date_joined.isoformat() if user.date_joined else None,
             }
 
@@ -1053,3 +927,69 @@ def user_customers_api(request: HttpRequest, user: User) -> Response:
     except Exception as e:
         logger.error(f"🔥 [User Customers API] Error fetching customers for {getattr(user, 'email', 'unknown')}: {e}")
         return Response({"success": False, "error": "Unable to fetch customers"}, status=500)
+
+
+@api_view(["POST"])
+@authentication_classes([])
+@permission_classes([AllowAny])
+@require_user_authentication
+def verify_customer_access_api(request: HttpRequest, user: User) -> Response:
+    """Verify current membership before the Portal changes its selected customer."""
+    try:
+        customer_id = int(request.data.get("customer_id", ""))
+    except (TypeError, ValueError):
+        return Response({"success": False, "error": "Invalid customer ID"}, status=400)
+    membership = (
+        CustomerMembership.objects.filter(user=user, customer_id=customer_id, is_active=True, customer__status="active")
+        .select_related("customer")
+        .first()
+    )
+    data: dict[str, Any] = {"has_access": False}
+    if membership:
+        data = {"has_access": True, "customer_name": membership.customer.name, "role": membership.role}
+    return Response({"success": True, "data": data})
+
+
+@api_view(["PUT"])
+@authentication_classes([])
+@permission_classes([AllowAny])
+@require_user_authentication
+def password_change_api(request: HttpRequest, user: User) -> Response:
+    """Change the signed user's password after reauthentication on the Platform."""
+    current = request.data.get("current_password")
+    new_password = request.data.get("new_password")
+    if not isinstance(current, str) or not isinstance(new_password, str):
+        return Response({"success": False, "error": "Current and new passwords are required"}, status=400)
+    with transaction.atomic():
+        user = User.objects.select_for_update().get(pk=user.pk)
+        if user.is_account_locked() or not user.check_password(current):
+            user.increment_failed_login_attempts()
+            return Response({"success": False, "error": "Current password is incorrect"}, status=400)
+        try:
+            validate_password(new_password, user=user)
+        except DjangoValidationError as exc:
+            return Response({"success": False, "errors": exc.messages}, status=400)
+        if (
+            user.mfa_enabled
+            and not MFAService.verify_mfa_code(user, str(request.data.get("token", "")), request)["success"]
+        ):
+            return Response({"success": False, "error": "Invalid authentication code"}, status=400)
+        user.set_password(new_password)
+        user.save(update_fields=["password"])
+        SessionSecurityService.rotate_session_on_password_change(request, user)
+    return Response({"success": True})
+
+
+@api_view(["POST"])
+@authentication_classes([])
+@permission_classes([AllowAny])
+@require_user_authentication
+def mfa_regenerate_backup_codes_api(request: HttpRequest, user: User) -> Response:
+    """Replace recovery codes only after password and second-factor verification."""
+    with transaction.atomic():
+        user = User.objects.select_for_update().get(pk=user.pk)
+        # Reuse the credential validation, without executing the disable operation.
+        serializer = MFADisableSerializer(data=request.data, context={"request": request, "user": user})
+        serializer.is_valid(raise_exception=True)
+        codes = user.generate_backup_codes()
+    return Response({"success": True, "backup_codes": codes})

@@ -31,7 +31,7 @@ def staff_page(page: Page, _staff_storage_state: str | None):
     full login if auth state is missing or expired.
     """
     if apply_storage_state(page, _staff_storage_state,
-                           f"{PLATFORM_BASE_URL}/app/dashboard/",
+                           f"{PLATFORM_BASE_URL}/dashboard/",
                            "/auth/login/"):
         return page
     # Fallback: full login
@@ -61,7 +61,7 @@ def monitored_staff_page(page: Page, request: pytest.FixtureRequest, _staff_stor
         for marker in markers:
             monitor.add_expected_error_patterns(list(marker.args))
         if not apply_storage_state(page, _staff_storage_state,
-                                   f"{PLATFORM_BASE_URL}/app/dashboard/",
+                                   f"{PLATFORM_BASE_URL}/dashboard/",
                                    "/auth/login/"):
             ensure_fresh_platform_session(page)
             if not login_platform_user(page):

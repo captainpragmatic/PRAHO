@@ -7,7 +7,7 @@ Platform (:8700) and Portal (:8701) authentication helpers.
 import json
 import time
 from collections.abc import Generator
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 import pytest
 from playwright.sync_api import Page
@@ -561,10 +561,12 @@ def apply_storage_state(
         return False
 
     page.context.add_cookies(cookies)
-    page.goto(validation_url, timeout=10000)
+    response = page.goto(validation_url, timeout=10000)
     page.wait_for_load_state("networkidle", timeout=5000)
 
-    if login_url_fragment in page.url:
+    expected = urlsplit(validation_url)._replace(query="", fragment="")
+    actual = urlsplit(page.url)._replace(query="", fragment="")
+    if response is None or response.status != 200 or actual != expected or login_url_fragment in actual.path:
         page.context.clear_cookies()
         return False
 

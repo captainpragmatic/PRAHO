@@ -7,7 +7,21 @@
 {% block content %}
 <div class="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
   <h1 class="text-2xl font-bold text-white mb-4">{% trans 'Users' %}</h1>
-  <div class="bg-slate-800 rounded-lg text-slate-200 overflow-hidden">
+  <form method="get" class="flex flex-wrap gap-3 mb-4">
+    <label class="text-slate-200">{% trans "Search" %}
+      <input type="search" name="search" value="{{ request.GET.search }}" class="rounded bg-slate-700 text-white px-3 py-2">
+    </label>
+    <label class="text-slate-200">{% trans "Staff role" %}
+      <select name="staff_role" class="rounded bg-slate-700 text-white px-3 py-2">
+        <option value="">{% trans "All roles" %}</option>
+        {% for value, label in staff_roles %}
+          <option value="{{ value }}" {% if request.GET.staff_role == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    {% trans "Filter" as filter_label %}{% button filter_label type="submit" variant="primary" %}
+  </form>
+  <div class="bg-slate-800 rounded-lg text-slate-200 overflow-x-auto">
     {% if users %}
       <table class="w-full">
         <thead class="bg-slate-700">
@@ -62,5 +76,12 @@
       <p class="p-4">{% trans 'No users found.' %}</p>
     {% endif %}
   </div>
+  {% if is_paginated %}
+    <nav aria-label="{% trans 'User pages' %}" class="flex justify-between mt-4 text-blue-400">
+      {% if page_obj.has_previous %}<a href="{% querystring page=page_obj.previous_page_number %}">{% trans "Previous" %}</a>{% endif %}
+      <span>{{ page_obj.number }} / {{ paginator.num_pages }}</span>
+      {% if page_obj.has_next %}<a href="{% querystring page=page_obj.next_page_number %}">{% trans "Next" %}</a>{% endif %}
+    </nav>
+  {% endif %}
 </div>
 {% endblock %}

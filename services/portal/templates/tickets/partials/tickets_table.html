@@ -63,8 +63,8 @@
 <div class="md:hidden divide-y divide-slate-700">
   {% for ticket in tickets %}
   <div class="min-h-[72px] flex flex-col justify-center p-4 hover:bg-slate-700 transition-colors cursor-pointer" data-action="navigate" data-href="{% url 'tickets:detail' ticket_id=ticket.id %}">
-    <div class="flex items-center justify-between mb-2">
-      <div class="flex items-center space-x-2">
+    <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+      <div class="flex min-w-0 items-center space-x-2">
         <span class="text-white font-medium text-sm font-mono truncate">
           {% if ticket.ticket_number %}
           #{{ ticket.ticket_number }}
@@ -73,7 +73,7 @@
           {% endif %}
         </span>
       </div>
-      <div class="text-right flex items-center space-x-2">
+      <div class="text-right flex flex-wrap items-center gap-2">
         {% badge ticket.status|status_label variant=ticket.status|status_variant icon=ticket.status|status_icon size="xs" rounded="full" css_class="w-32 justify-center" %}
         {% if ticket.status == 'closed' and ticket.resolution_code %}
           {% badge ticket.resolution_code|title variant="default" size="xs" rounded="full" %}

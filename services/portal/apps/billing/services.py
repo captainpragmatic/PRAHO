@@ -490,22 +490,40 @@ class BillingDataSyncService:
         self.api_client = PlatformAPIClient()
 
     def sync_customer_invoices(self, customer_id: int, user_id: int) -> list[Invoice]:
-        """
-        'Sync' invoices by fetching fresh data from Platform API
-        No local storage - just returns fresh API data
-        """
-        try:
-            # In API-only mode, 'sync' just means fetching fresh data
-            invoice_service = InvoiceViewService()
-            invoices = invoice_service.get_customer_invoices(customer_id, user_id, force_sync=True)
-
-            logger.info(f"✅ [Billing Sync] Fetched {len(invoices)} fresh invoices for customer {customer_id}")
-            return invoices
-
-        except Exception as e:
-            logger.error(f"🔥 [Billing Sync] Sync error for customer {customer_id}: {e}")
-            _raise_if_rate_limited(e)
-            return []
+        """Fetch every invoice page; a partial/failed refresh is never success."""
+        invoices: list[Invoice] = []
+        page = 1
+        while True:
+            response = self.api_client.post(
+                "/billing/invoices/",
+                data={
+                    "customer_id": customer_id,
+                    "user_id": user_id,
+                    "action": "get_invoices",
+                    "page": page,
+                    "limit": 100,
+                    "force_sync": True,
+                },
+            )
+            if response.get("success") is not True:
+                raise PlatformAPIError("Unable to refresh invoices")
+            rows = response.get("invoices")
+            pagination = response.get("pagination")
+            if (
+                not isinstance(rows, list)
+                or not isinstance(pagination, dict)
+                or type(pagination.get("current_page")) is not int
+                or not isinstance(pagination.get("has_next"), bool)
+            ):
+                raise PlatformAPIError("Incomplete invoice refresh metadata")
+            if pagination["current_page"] != page:
+                raise PlatformAPIError("Unexpected invoice page during refresh")
+            invoices.extend(create_invoice_from_api(row) for row in rows)
+            if not pagination["has_next"]:
+                return invoices
+            if not rows:
+                raise PlatformAPIError("Incomplete invoice refresh")
+            page += 1
 
     def get_currencies(self) -> list[Currency]:
         """Get available currencies from Platform API"""

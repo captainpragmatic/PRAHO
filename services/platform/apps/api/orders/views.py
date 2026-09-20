@@ -765,6 +765,7 @@ def create_order(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-
                     "billing_period": billing_period,
                     "description": product.name,
                     "meta": item_meta,  # Include price snapshot
+                    "domain_name": item_data.get("domain_name", ""),
                 }
             )
 
@@ -776,6 +777,7 @@ def create_order(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Complexity: multi-
             notes=validated_data.get("notes", ""),
             meta=validated_data.get("meta", {}),
             idempotency_key=idempotency_key,
+            payment_method=validated_data.get("payment_method", ""),
         )
 
         # Create order using platform service (idempotency_key set atomically in create_order)

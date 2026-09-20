@@ -48,7 +48,7 @@
                 {% for attachment in reply.attachments %}
                 <div class="flex items-center space-x-2 text-sm text-slate-400">
                     {% icon "paperclip" size="sm" %}
-                    <a href="/api/tickets/{{ reply.ticket_id|default:ticket.id }}/attachments/{{ attachment.id }}/download/" class="text-blue-400 hover:text-blue-300">
+                    <a href="{% url 'tickets:attachment_download' ticket_id=ticket.id attachment_id=attachment.id %}" class="text-blue-400 hover:text-blue-300">
                         {{ attachment.filename }} ({{ attachment.file_size_display }})
                     </a>
                 </div>

@@ -8,9 +8,10 @@ and Romanian VAT display compliance.
 All tests are independent and perform a fresh login. No database access is used.
 """
 
-import contextlib
+import re
 
-from playwright.sync_api import Page
+import pytest
+from playwright.sync_api import Page, expect
 
 from tests.e2e.helpers import (
     BASE_URL,
@@ -19,6 +20,7 @@ from tests.e2e.helpers import (
     ensure_fresh_session,
     login_user,
 )
+from tests.e2e.helpers.orders import add_product
 
 # ===============================================================================
 # CONSTANTS
@@ -39,9 +41,7 @@ def _login_customer(page: Page) -> None:
     """Log in as the test customer with a fresh session."""
     ensure_fresh_session(page)
     if not login_user(page, CUSTOMER_EMAIL, CUSTOMER_PASSWORD):
-        raise AssertionError(
-            "Customer login failed — is the E2E service running? (make dev-e2e-bg)"
-        )
+        raise AssertionError("Customer login failed — is the E2E service running? (make dev-e2e-bg)")
 
 
 # ===============================================================================
@@ -50,30 +50,8 @@ def _login_customer(page: Page) -> None:
 
 
 def _add_first_product_to_cart(page: Page) -> bool:
-    """
-    Navigate to the product catalog and add the first available product to the cart.
 
-    Returns True if a product was found and added, False if the catalog is empty.
-    """
-    page.goto(CATALOG_URL)
-    page.wait_for_load_state("networkidle")
-
-    add_buttons = page.locator('button[type="submit"]:has-text("Add to Cart")')
-    if add_buttons.count() == 0:
-        print("  No products in catalog — test cannot proceed")
-        return False
-
-    # Click the first Add to Cart button and wait for HTMX response to complete.
-    # The form uses hx-post with hx-target="#cart-widget" — wait for the cart widget
-    # to update (HTMX swaps outerHTML) as confirmation the server persisted the item.
-    with page.expect_response(lambda r: "cart/add" in r.url) as response_info:
-        add_buttons.first.click()
-    response = response_info.value
-    if response.status != 200:
-        print(f"  Add to cart returned status {response.status}")
-        return False
-    page.wait_for_timeout(500)  # Allow HTMX swap to settle
-    return True
+    return add_product(page)
 
 
 # ===============================================================================
@@ -82,45 +60,13 @@ def _add_first_product_to_cart(page: Page) -> bool:
 
 
 def test_bug2_product_type_in_cart_items(page: Page) -> None:
-    """BUG-2: Product type must be stored in cart session items.
-
-    When a product is added to the cart, the `product_type` field must be preserved
-    in the cart session so the cart review page can render the product type badge.
-    Without this fix the badge was absent, losing context about what type of product
-    was ordered (e.g. hosting, domain, SSL).
-    """
-    print("Testing BUG-2: product_type stored in cart items")
-
     _login_customer(page)
-
-    added = _add_first_product_to_cart(page)
-    if not added:
-        print("  SKIP: No products available in catalog")
-        return
-
-    # Go to cart review page
+    _add_first_product_to_cart(page)
     page.goto(CART_URL)
-    page.wait_for_load_state("networkidle")
-
-    # Wait for cart items to render (HTMX may load async)
-    cart_items = page.locator('[id^="cart-item-"]')
-    with contextlib.suppress(Exception):
-        cart_items.first.wait_for(state="attached", timeout=5000)
-
-    assert cart_items.count() > 0, "Cart should have at least one item"
-
-    # Each cart item should display a product type badge
-    # The template renders: {% if item.product_type %}{% badge item.product_type|title ... %}{% endif %}
-    # The badge renders a <span> element with the product type text
-    first_item = cart_items.first
-    # Look for badge elements within the first cart item (span with badge styling)
-    badges = first_item.locator("span.inline-flex, span.badge, [class*='badge']")
-    assert badges.count() > 0, (
-        "BUG-2 REGRESSION: Cart item should show at least one badge "
-        "(product_type badge is missing — product_type not stored in cart session)"
-    )
-
-    print("  product_type badge visible on cart item — BUG-2 not regressed")
+    expect(page.locator("#cart-items")).to_contain_text("E2E Hosting")
+    expect(page.locator("#cart-items")).to_contain_text("Shared_Hosting")
+    page.reload()
+    expect(page.locator("#cart-items")).to_contain_text("Shared_Hosting")
 
 
 def test_bug5_duplicate_html_ids_product_catalog(page: Page) -> None:
@@ -164,116 +110,40 @@ def test_bug5_duplicate_html_ids_product_catalog(page: Page) -> None:
     print("  No duplicate HTML IDs found in catalog — BUG-5 not regressed")
 
 
-def test_backend3_cart_version_mismatch_ajax(page: Page) -> None:
-    """BACKEND-3: AJAX request with stale cart version returns 400 JSON.
-
-    The cart uses a version token to detect concurrent modifications. When the
-    client sends an outdated `cart_version`, the server must reject the request
-    with a 400 response (not a silent 200 that leaves the cart in an inconsistent
-    state). This prevents double-add and race-condition bugs.
-    """
-    print("Testing BACKEND-3: stale cart_version returns 400")
-
-    _login_customer(page)
-
-    added = _add_first_product_to_cart(page)
-    if not added:
-        print("  SKIP: No products available — cannot test version mismatch")
-        return
-
-    # Navigate to cart review to have a page context with a valid CSRF token
-    page.goto(CART_URL)
-    page.wait_for_load_state("networkidle")
-
-    # POST to the update endpoint with a deliberately wrong cart_version
-    # The endpoint is /order/cart/update/ and requires cart_version + product_slug
-    response_data: dict = page.evaluate("""
-        async () => {
-            const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value
-                || document.cookie.match(/csrftoken=([^;]+)/)?.[1] || '';
-            const body = new URLSearchParams();
-            body.append('product_slug', 'nonexistent-slug-for-version-test');
-            body.append('billing_period', 'monthly');
-            body.append('quantity', '1');
-            body.append('cart_version', 'stale-invalid-version-xyz-123');
-            const resp = await fetch('/order/cart/update/', {
-                method: 'POST',
-                credentials: 'same-origin',
-                headers: {
-                    'X-CSRFToken': csrfToken,
-                    'HX-Request': 'true',
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                },
-                body: body.toString(),
-            });
-            const text = await resp.text();
-            return { status: resp.status, body: text };
-        }
-    """)
-
-    status = response_data.get("status", 0)
-    # The server should return 400 for stale cart_version, or 404 for unknown slug.
-    # Both indicate proper rejection rather than a silent 200.
-    assert status in (400, 404, 409, 422), (
-        f"BACKEND-3 REGRESSION: Expected 400/404/409/422 for stale cart_version, got {status}. "
-        "Server must reject stale cart versions to prevent concurrent modification bugs."
-    )
-
-    print(f"  Stale cart_version correctly rejected with HTTP {status} — BACKEND-3 not regressed")
-
-
-def test_backend4_stripe_payment_creates_no_500(page: Page) -> None:
-    """BACKEND-4: Stripe payment method submission must not produce a 500 error.
-
-    When the customer selects Stripe as payment method and submits the checkout form,
-    the server must handle the case where Stripe is not configured gracefully —
-    returning a proper error page or redirect, not an unhandled 500.
-    """
-    print("Testing BACKEND-4: Stripe payment submission does not 500")
-
-    _login_customer(page)
-
-    added = _add_first_product_to_cart(page)
-    if not added:
-        print("  SKIP: No products available — cannot test checkout")
-        return
-
+def test_checkout_rejects_stale_cart_version(account_page) -> None:
+    page, _ = account_page
+    _add_first_product_to_cart(page)
     page.goto(CHECKOUT_URL)
-    page.wait_for_load_state("networkidle")
-
-    # If redirected away (e.g. empty cart redirect), checkout is not reachable
-    if "/order/checkout/" not in page.url:
-        print(f"  SKIP: Redirected from checkout to {page.url} — cart may be empty post-navigation")
-        return
-
-    # Select Stripe payment method (it should be the default radio, but make explicit)
-    stripe_radio = page.locator('input[type="radio"][value="stripe"]')
-    if stripe_radio.count() > 0:
-        stripe_radio.first.check()
-
-    # Accept terms and conditions if the checkbox is present
-    terms_checkbox = page.locator('input[name="agree_terms"]')
-    if terms_checkbox.count() > 0:
-        terms_checkbox.first.check()
-
-    # Submit the form
-    submit_button = page.locator('button[type="submit"], input[type="submit"]').first
-    submit_button.click()
-    page.wait_for_load_state("networkidle", timeout=15000)
-
-    # Verify no Django error page (yellow debug page or 500)
-    page_text = page.locator("body").inner_text()
-    assert "Internal Server Error" not in page_text, (
-        "BACKEND-4 REGRESSION: Django 500 error on Stripe payment submission. "
-        "Server must handle missing Stripe config gracefully."
+    token = page.locator('input[name="csrfmiddlewaretoken"]').first.input_value()
+    response = page.request.post(
+        f"{BASE_URL}/order/create/",
+        form={
+            "csrfmiddlewaretoken": token,
+            "cart_version": "stale-version",
+            "payment_method": "bank_transfer",
+            "agree_terms": "on",
+        },
+        headers={"HX-Request": "true", "Referer": CHECKOUT_URL},
     )
-    assert "DoesNotExist" not in page_text, (
-        "BACKEND-4 REGRESSION: Unhandled DoesNotExist exception on Stripe payment."
-    )
+    assert response.status == 400
+    assert "Cart version mismatch" in response.json()["error"]
+    page.goto(CART_URL)
+    expect(page.locator("#cart-items")).to_contain_text("E2E Hosting")
 
-    # The response should be a redirect to confirmation, an error message, or a
-    # Stripe redirect — any of these is acceptable; only a 500 is not.
-    print(f"  No 500 error after Stripe payment submission — BACKEND-4 not regressed (url={page.url})")
+
+@pytest.mark.expect_server_errors("Stripe secret key not configured in settings system")
+def test_unconfigured_card_payment_reports_pending_order(account_page) -> None:
+    """No provider key exists in E2E: a failed setup must never report the order paid."""
+    page, _ = account_page
+    _add_first_product_to_cart(page)
+    page.goto(CHECKOUT_URL)
+    page.locator('input[name="payment_method"][value="card"]').check()
+    page.locator('input[name="agree_terms"]').check()
+    page.locator("#checkout-submit").click()
+    expect(page).to_have_url(re.compile(r"/order/confirmation/[^/]+/$"))
+    expect(page.locator("body")).to_contain_text("payment processing is temporarily unavailable")
+    expect(page.locator("#main-content")).to_contain_text(re.compile(r"ORD-\d+"))
+    expect(page.locator("#main-content")).not_to_contain_text("Payment completed")
 
 
 def test_ds1_vat_rate_displayed_on_checkout(page: Page) -> None:
@@ -290,7 +160,7 @@ def test_ds1_vat_rate_displayed_on_checkout(page: Page) -> None:
     added = _add_first_product_to_cart(page)
     if not added:
         print("  SKIP: No products available — cannot test checkout VAT display")
-        return
+        pytest.fail("Required E2E step unavailable: not added")
 
     # First go to cart review which always shows the totals partial
     page.goto(CART_URL)
@@ -298,29 +168,7 @@ def test_ds1_vat_rate_displayed_on_checkout(page: Page) -> None:
 
     if "/order/cart/" not in page.url:
         print(f"  SKIP: Redirected from cart to {page.url}")
-        return
+        pytest.fail("Required E2E step unavailable: '/order/cart/' not in page.url")
 
-    # Wait for HTMX to load cart totals (hx-trigger="load" fires async POST to calculate_totals).
-    # The response replaces #cart-totals with the rendered partial containing VAT info.
-    # Wait for the HTMX response to arrive, not just a fixed timeout.
-    try:
-        page.wait_for_response(lambda r: "cart/calculate" in r.url, timeout=15000)
-        page.wait_for_timeout(500)  # Allow HTMX swap to settle
-    except Exception:
-        # If the response never comes, the assertion below will catch it
-        page.wait_for_timeout(3000)
-
-    # Look for VAT display — the cart_totals.html partial shows "{% trans 'VAT' %} (21%)"
-    # which renders as "VAT (21%)" in English or "TVA (21%)" in Romanian locale.
-    cart_totals = page.locator("#cart-totals")
-    vat_visible = cart_totals.locator("text=/(?:VAT|TVA).*21%/").count() > 0
-    if not vat_visible:
-        # Also check for percentage alone (some layouts may split the text)
-        vat_visible = cart_totals.locator("text=/21\\s*%/").count() > 0
-
-    assert vat_visible, (
-        "DS-1 REGRESSION: VAT rate not visible on cart review page. "
-        "Romanian compliance requires '21%' (or 'TVA 21%') to appear in the order summary."
-    )
-
-    print("  VAT rate (21%) is visible on cart review — DS-1 not regressed")
+    expect(page.locator("#cart-totals")).to_contain_text("VAT (21%)")
+    expect(page.locator("#cart-totals")).to_contain_text("121,00")

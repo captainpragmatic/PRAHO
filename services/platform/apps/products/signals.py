@@ -202,7 +202,9 @@ def log_price_changes(sender: type[ProductPrice], instance: ProductPrice, create
                     "currency": instance.currency.code,
                     "billing_model": "simplified_monthly",
                     "vat_compliance_verified": True,
-                    "grandfathered_customers_affected": pricing_changes.get("price_increased", False),
+                    "grandfathered_customers_affected": pricing_changes.get("monthly_price_changed", {}).get(
+                        "price_increased", False
+                    ),
                     "promotional_pricing_active": instance.promo_price_cents is not None,
                     "discount_adjustments": {
                         "semiannual": float(instance.semiannual_discount_percent),
@@ -280,20 +282,21 @@ def _check_pricing_changes(instance: ProductPrice) -> dict[str, Any] | None:
     if (
         hasattr(instance, "_old_monthly_price_cents")
         and instance._old_monthly_price_cents != instance.monthly_price_cents
-        and instance._old_monthly_price_cents
+        and instance._old_monthly_price_cents is not None
     ):
         old_amount = Decimal(instance._old_monthly_price_cents) / 100
         new_amount = Decimal(instance.monthly_price_cents) / 100
-        percent_change = abs((new_amount - old_amount) / old_amount * 100)
+        # A free-to-paid change is significant, but has no finite percentage.
+        percent_change = abs((new_amount - old_amount) / old_amount * 100) if old_amount else None
 
         # Only log if change is significant
-        if percent_change >= PRICING_THRESHOLDS["significant_change_percent"]:
+        if percent_change is None or percent_change >= PRICING_THRESHOLDS["significant_change_percent"]:
             changes["monthly_price_changed"] = {
                 "from_cents": instance._old_monthly_price_cents,
                 "to_cents": instance.monthly_price_cents,
                 "from_amount": float(old_amount),
                 "to_amount": float(new_amount),
-                "percent_change": float(percent_change),
+                "percent_change": float(percent_change) if percent_change is not None else None,
                 "price_increased": new_amount > old_amount,
                 "significant": True,
             }

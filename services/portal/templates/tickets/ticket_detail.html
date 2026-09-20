@@ -113,10 +113,15 @@ document.addEventListener('DOMContentLoaded', function() {
         Array.from(files).forEach((file, index) => {
             const fileItem = document.createElement('div');
             fileItem.className = 'flex items-center space-x-2 text-xs text-slate-400 bg-slate-700 px-2 py-1 rounded';
-            fileItem.innerHTML = `
-                <span>${file.name} (${formatFileSize(file.size)})</span>
-                <button type="button" data-action="remove-file" data-index="${index}" class="text-slate-400 hover:text-red-400 ml-2">×</button>
-            `;
+            const label = document.createElement('span');
+            label.textContent = `${file.name} (${formatFileSize(file.size)})`;
+            const remove = document.createElement('button');
+            remove.type = 'button';
+            remove.dataset.action = 'remove-file';
+            remove.dataset.index = index;
+            remove.className = 'text-slate-400 hover:text-red-400 ml-2';
+            remove.textContent = '×';
+            fileItem.append(label, remove);
             currentFileList.appendChild(fileItem);
         });
     };

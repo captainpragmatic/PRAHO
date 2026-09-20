@@ -19,11 +19,11 @@ Routes under test:
 import re
 import uuid
 
+import pytest
 from playwright.sync_api import Page, expect
 
 from tests.e2e.helpers import (
     BASE_URL,
-    require_authentication,
 )
 
 # ===============================================================================
@@ -32,33 +32,13 @@ from tests.e2e.helpers import (
 
 
 def test_addresses_list(monitored_customer_page: Page) -> None:
-    """View addresses at /company/addresses/ — page loads and address cards present."""
     page = monitored_customer_page
-
-    require_authentication(page)
-
     page.goto(f"{BASE_URL}/company/addresses/")
-    page.wait_for_load_state("networkidle")
-
-    expect(page).to_have_url(re.compile(r"/company/addresses/$"))
-
-    # Page heading — "Addresses" or Romanian equivalent
-    heading = page.locator('h1, h2').filter(
-        has_text=re.compile(r"Address|Adrese", re.IGNORECASE)
-    ).first
-    expect(heading).to_be_visible()
-
-    # Either addresses are listed (with Primary/Billing badges) or the empty state is shown
-    has_addresses = page.locator('.bg-slate-800 .text-white').count() > 0
-    has_empty_state = page.locator('text=No addresses yet, text=Nicio adresă').count() > 0
-    assert has_addresses or has_empty_state, "Address list should show addresses or empty state"
-
-    # If addresses are present, Primary or Billing badge should be visible on at least one
-    if has_addresses:
-        badge = page.locator('text=Primary, text=Billing, text=Primar, text=Facturare').first
-        # Badges are optional — only assert their presence if address cards exist
-        if badge.count() > 0:
-            expect(badge).to_be_visible()
+    expect(page.get_by_role("heading", name="Addresses", exact=True)).to_be_visible()
+    address = page.locator("div.rounded-xl").filter(has_text="Str. Victoriei nr. 10")
+    expect(address).to_contain_text("Primary")
+    expect(address).to_contain_text("Billing")
+    expect(address).to_contain_text("010061")
 
 
 # ===============================================================================
@@ -66,9 +46,9 @@ def test_addresses_list(monitored_customer_page: Page) -> None:
 # ===============================================================================
 
 
-def test_address_add(monitored_customer_page: Page) -> None:
+def test_address_add(account_page) -> None:
     """Add a new address and verify it appears in the address list."""
-    page = monitored_customer_page
+    page, _ = account_page
 
     page.goto(f"{BASE_URL}/company/addresses/")
     page.wait_for_load_state("networkidle")
@@ -77,7 +57,7 @@ def test_address_add(monitored_customer_page: Page) -> None:
     add_btn = page.locator('a[href*="/company/addresses/add/"], a:has-text("Add Address")').first
     if add_btn.count() == 0:
         print("  [i] 'Add Address' button not present — user may not have owner role")
-        return
+        pytest.fail("Required E2E step unavailable: add_btn.count() == 0")
     expect(add_btn).to_be_visible()
     add_btn.click()
     page.wait_for_load_state("networkidle")
@@ -96,9 +76,9 @@ def test_address_add(monitored_customer_page: Page) -> None:
 
     # Submit without marking is_primary or is_billing so it is safe to delete later.
     # Scope to the address form submit button by label to avoid the nav Logout button.
-    save_btn = page.locator('button[type="submit"]').filter(
-        has_text=re.compile(r"Save Address|Salvează", re.IGNORECASE)
-    ).first
+    save_btn = (
+        page.locator('button[type="submit"]').filter(has_text=re.compile(r"Save Address|Salvează", re.IGNORECASE)).first
+    )
     save_btn.click()
     page.wait_for_load_state("networkidle")
 
@@ -120,33 +100,17 @@ def test_address_add(monitored_customer_page: Page) -> None:
 # ===============================================================================
 
 
-def test_address_make_primary(monitored_customer_page: Page) -> None:
-    """Make a non-primary address primary — Primary badge moves to that address."""
-    page = monitored_customer_page
-
+def test_address_make_primary(account_page) -> None:
+    """Move the designation to a different address and verify it survives reload."""
+    page, _account = account_page
     page.goto(f"{BASE_URL}/company/addresses/")
-    page.wait_for_load_state("networkidle")
-
-    # Look for a "Make Primary" button (only present on non-primary addresses)
-    make_primary_btn = page.locator(
-        'button:has-text("Make Primary"), button:has-text("Setează Principal")'
-    ).first
-    if make_primary_btn.count() == 0:
-        print("  [i] No 'Make Primary' button found — only one address or already all primary")
-        return
-
-    expect(make_primary_btn).to_be_visible()
-    make_primary_btn.click()
-    page.wait_for_load_state("networkidle")
-
-    # After the POST redirect we should still be on the addresses page
-    expect(page).to_have_url(re.compile(r"/company/addresses/$"))
-
-    # "Primary" badge should be visible (may have been there before — just verify page is intact)
-    page_content = page.content()
-    assert "Primary" in page_content or "Primar" in page_content, (
-        "A Primary badge should be visible on the addresses page after Make Primary"
-    )
+    target = page.locator("div.rounded-xl").filter(has_text="Str. Noua 20")
+    target.get_by_role("button", name="Make Primary", exact=True).click()
+    page.reload()
+    expect(target).to_contain_text("Primary")
+    expect(target.get_by_role("button", name="Make Primary", exact=True)).to_have_count(0)
+    previous = page.locator("div.rounded-xl").filter(has_text="Str. Victoriei nr. 10")
+    expect(previous.get_by_role("button", name="Make Primary", exact=True)).to_be_visible()
 
 
 # ===============================================================================
@@ -154,30 +118,17 @@ def test_address_make_primary(monitored_customer_page: Page) -> None:
 # ===============================================================================
 
 
-def test_address_make_billing(monitored_customer_page: Page) -> None:
-    """Make a non-billing address billing — Billing badge moves to that address."""
-    page = monitored_customer_page
-
+def test_address_make_billing(account_page) -> None:
+    """Move the designation to a different address and verify it survives reload."""
+    page, _account = account_page
     page.goto(f"{BASE_URL}/company/addresses/")
-    page.wait_for_load_state("networkidle")
-
-    make_billing_btn = page.locator(
-        'button:has-text("Make Billing"), button:has-text("Setează Facturare")'
-    ).first
-    if make_billing_btn.count() == 0:
-        print("  [i] No 'Make Billing' button found — only one address or already marked billing")
-        return
-
-    expect(make_billing_btn).to_be_visible()
-    make_billing_btn.click()
-    page.wait_for_load_state("networkidle")
-
-    expect(page).to_have_url(re.compile(r"/company/addresses/$"))
-
-    page_content = page.content()
-    assert "Billing" in page_content or "Facturare" in page_content, (
-        "A Billing badge should be visible on the addresses page after Make Billing"
-    )
+    target = page.locator("div.rounded-xl").filter(has_text="Str. Noua 20")
+    target.get_by_role("button", name="Make Billing", exact=True).click()
+    page.reload()
+    expect(target).to_contain_text("Billing")
+    expect(target.get_by_role("button", name="Make Billing", exact=True)).to_have_count(0)
+    previous = page.locator("div.rounded-xl").filter(has_text="Str. Victoriei nr. 10")
+    expect(previous.get_by_role("button", name="Make Billing", exact=True)).to_be_visible()
 
 
 # ===============================================================================
@@ -185,9 +136,9 @@ def test_address_make_billing(monitored_customer_page: Page) -> None:
 # ===============================================================================
 
 
-def test_address_delete_undesignated(monitored_customer_page: Page) -> None:
+def test_address_delete_undesignated(account_page) -> None:
     """Delete an address that is neither primary nor billing — address removed from list."""
-    page = monitored_customer_page
+    page, _ = account_page
 
     page.goto(f"{BASE_URL}/company/addresses/")
     page.wait_for_load_state("networkidle")
@@ -195,7 +146,7 @@ def test_address_delete_undesignated(monitored_customer_page: Page) -> None:
     add_btn = page.locator('a[href*="/company/addresses/add/"]').first
     if add_btn.count() == 0:
         print("  [i] Add Address not accessible — user may not have owner role")
-        return
+        pytest.fail("Required E2E step unavailable: add_btn.count() == 0")
 
     # Create a temporary address without designating it primary or billing
     unique_label = f"DEL-{uuid.uuid4().hex[:6]}"
@@ -240,21 +191,15 @@ def test_address_delete_primary_blocked(monitored_customer_page: Page) -> None:
 
     # Find address cards that contain a "Primary" badge.
     # Use :has-text() (Playwright CSS extension) — NOT :has(text="...") which is invalid CSS.
-    primary_cards = page.locator(
-        'div.bg-slate-800:has-text("Primary"), div.bg-slate-800:has-text("Primar")'
-    )
+    primary_cards = page.locator('div.bg-slate-800:has-text("Primary"), div.bg-slate-800:has-text("Primar")')
     if primary_cards.count() == 0:
         print("  [i] No primary address found on the page — skipping delete-blocked check")
-        return
+        pytest.fail("Required E2E step unavailable: primary_cards.count() == 0")
 
     # Within the primary card, no Delete button should exist
     primary_card = primary_cards.first
-    delete_btn_in_primary = primary_card.locator(
-        'button:has-text("Delete"), button:has-text("Șterge")'
-    )
-    assert delete_btn_in_primary.count() == 0, (
-        "Primary address must not have a Delete button visible"
-    )
+    delete_btn_in_primary = primary_card.locator('button:has-text("Delete"), button:has-text("Șterge")')
+    assert delete_btn_in_primary.count() == 0, "Primary address must not have a Delete button visible"
 
 
 # ===============================================================================
@@ -279,34 +224,13 @@ def test_address_no_current_badge(monitored_customer_page: Page) -> None:
 # ===============================================================================
 
 
-def test_team_members_list(monitored_customer_page: Page) -> None:
-    """View team at /company/team/ — page loads with member list or empty state."""
+def test_team_members_list(monitored_customer_page: Page, e2e_baseline) -> None:
     page = monitored_customer_page
-
     page.goto(f"{BASE_URL}/company/team/")
-    page.wait_for_load_state("networkidle")
-
-    expect(page).to_have_url(re.compile(r"/company/team/$"))
-
-    # Page heading
-    heading = page.locator('h1, h2').filter(
-        has_text=re.compile(r"Team Members|Membri Echipă", re.IGNORECASE)
-    ).first
-    expect(heading).to_be_visible()
-
-    # Either members are listed or empty state is shown
-    has_members = page.locator('.bg-slate-800 .text-white').count() > 0
-    has_empty_state = page.locator('text=No team members yet, text=Niciun membru').count() > 0
-    assert has_members or has_empty_state, "Team page should show members or empty state"
-
-    # If members are present, role badges should be visible
-    if has_members:
-        role_badge = page.locator(
-            'text=owner, text=viewer, text=tech, text=billing, '
-            'text=Owner, text=Viewer, text=Technical, text=Billing'
-        ).first
-        if role_badge.count() > 0:
-            expect(role_badge).to_be_visible()
+    expect(page.get_by_role("heading", name="Team Members", exact=True)).to_be_visible()
+    expect(page.locator("#main-content")).to_contain_text(e2e_baseline["customers"][0]["email"])
+    expect(page.locator("#main-content")).to_contain_text("Owner")
+    expect(page.locator("#main-content")).not_to_contain_text(e2e_baseline["customers"][1]["email"])
 
 
 # ===============================================================================
@@ -314,19 +238,17 @@ def test_team_members_list(monitored_customer_page: Page) -> None:
 # ===============================================================================
 
 
-def test_team_invite_member(monitored_customer_page: Page) -> None:
+def test_team_invite_member(account_page) -> None:
     """Invite a new team member then clean up by removing them."""
-    page = monitored_customer_page
+    page, _ = account_page
 
     page.goto(f"{BASE_URL}/company/team/")
     page.wait_for_load_state("networkidle")
 
-    invite_btn = page.locator(
-        'a[href*="/company/team/invite/"], a:has-text("Invite Member")'
-    ).first
+    invite_btn = page.locator('a[href*="/company/team/invite/"], a:has-text("Invite Member")').first
     if invite_btn.count() == 0:
         print("  [i] Invite Member button not present — user may not have owner role")
-        return
+        pytest.fail("Required E2E step unavailable: invite_btn.count() == 0")
 
     expect(invite_btn).to_be_visible()
     invite_btn.click()
@@ -356,12 +278,14 @@ def test_team_invite_member(monitored_customer_page: Page) -> None:
 
     # The invited member should appear in the list
     page_content = page.content()
-    assert invite_email in page_content or invite_first in page_content, (
+    assert invite_email in page_content and invite_first in page_content, (
         "Invited member should appear in the team list after invitation"
     )
 
     # --- Clean up: remove the invited member ---
-    _remove_team_member_by_email(page, invite_email)
+    page.reload()
+    expect(page.locator("#main-content")).to_contain_text(invite_email)
+    expect(page.locator("#main-content")).to_contain_text("Viewer")
 
 
 # ===============================================================================
@@ -370,56 +294,10 @@ def test_team_invite_member(monitored_customer_page: Page) -> None:
 
 
 def _delete_address_by_label(page: Page, label: str) -> None:
-    """Find the address card matching *label* and submit its Delete form.
-
-    No-ops gracefully if the address is not found or has no Delete button.
-    Uses page.on("dialog") to auto-accept the confirm() dialog on the Delete form.
-    """
     page.goto(f"{BASE_URL}/company/addresses/")
-    page.wait_for_load_state("networkidle")
-
-    # Dismiss the browser confirm() dialog automatically
-    page.on("dialog", lambda d: d.accept())
-
-    # Locate the specific address card that contains our label text
-    address_cards = page.locator("div.bg-slate-800")
-    card_count = address_cards.count()
-    for i in range(card_count):
-        card = address_cards.nth(i)
-        if label in card.inner_text():
-            delete_form = card.locator('form[action*="delete"]')
-            if delete_form.count() > 0:
-                delete_btn = delete_form.locator('button[type="submit"]')
-                if delete_btn.count() > 0:
-                    delete_btn.click()
-                    page.wait_for_load_state("networkidle")
-            return
-
-    print(f"  [i] Address with label '{label}' not found for deletion — already gone?")
-
-
-def _remove_team_member_by_email(page: Page, email: str) -> None:
-    """Find the team member card for *email* and submit their Remove form.
-
-    No-ops gracefully if the member is not found.
-    Uses page.on("dialog") to auto-accept the confirm() dialog on Remove.
-    """
-    page.goto(f"{BASE_URL}/company/team/")
-    page.wait_for_load_state("networkidle")
-
-    page.on("dialog", lambda d: d.accept())
-
-    member_cards = page.locator("div.bg-slate-800, section")
-    card_count = member_cards.count()
-    for i in range(card_count):
-        card = member_cards.nth(i)
-        if email in card.inner_text():
-            remove_form = card.locator('form[action*="remove"]')
-            if remove_form.count() > 0:
-                remove_btn = remove_form.locator('button[type="submit"]')
-                if remove_btn.count() > 0:
-                    remove_btn.click()
-                    page.wait_for_load_state("networkidle")
-            return
-
-    print(f"  [i] Team member '{email}' not found for removal — already gone?")
+    page.once("dialog", lambda dialog: dialog.accept())
+    card = page.locator("div.rounded-xl").filter(has_text=label)
+    expect(card).to_have_count(1)
+    card.locator('form[action*="delete"] button[type="submit"]').click()
+    page.reload()
+    expect(page.locator("#main-content")).not_to_contain_text(label)

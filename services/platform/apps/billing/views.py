@@ -50,6 +50,7 @@ from apps.common.decorators import (
     billing_configuration_required,
     billing_staff_required,
     can_edit_proforma,
+    can_manage_financial_data,
     staff_rate_limit,
     staff_required,
 )
@@ -73,6 +74,7 @@ from .models import (
     ProformaSequence,
 )
 from .payment_service import PaymentService
+from .proforma_service import ProformaPaymentService
 from .services import log_security_event
 
 logger = logging.getLogger(__name__)
@@ -876,11 +878,14 @@ def proforma_detail(request: HttpRequest, pk: int) -> HttpResponse:
     # Get proforma lines
     lines = proforma.lines.all()
 
+    payment_block_reason = ProformaPaymentService.payment_block_reason(proforma, manual=True)
+    can_manage_payments = can_manage_financial_data(cast(User, request.user))
     context = {
         "proforma": proforma,
         "lines": lines,
         "can_edit": can_edit_proforma(request.user, proforma),  # type: ignore[arg-type]
-        "can_convert": can_edit_proforma(request.user, proforma),  # type: ignore[arg-type]
+        "can_record_payment": can_manage_payments and payment_block_reason is None,
+        "payment_block_reason": payment_block_reason if can_manage_payments else None,
         "is_staff_user": getattr(request.user, "is_staff_user", False),
         "document_type": "proforma",
     }

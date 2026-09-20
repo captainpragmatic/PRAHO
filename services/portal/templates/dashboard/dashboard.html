@@ -52,8 +52,12 @@
     {% trans 'My Open Tickets' as lbl_tickets %}
     {% stat_tile label=lbl_tickets value=dashboard_data.stats.open_tickets icon="tickets" variant="warning" %}
     {% trans 'Account Status' as lbl_status %}
-    {% trans 'Active' as val_active %}
-    {% stat_tile label=lbl_status value=val_active icon="check" variant="success" %}
+    {% if dashboard_data.customers.0.status %}
+      {% stat_tile label=lbl_status value=dashboard_data.customers.0.status|status_label icon="user" variant="default" %}
+    {% else %}
+      {% trans 'Unavailable' as val_status %}
+      {% stat_tile label=lbl_status value=val_status icon="warning" variant="default" %}
+    {% endif %}
     {% trans 'Next Billing' as lbl_billing %}
     {% trans 'End of Month' as val_billing %}
     {% stat_tile label=lbl_billing value=val_billing icon="clipboard" variant="info" %}

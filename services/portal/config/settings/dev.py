@@ -37,7 +37,7 @@ def _strip_comment_polluted_env(env_path: Path) -> list[str]:
 # Dev-only: load project-root .env. Prod/staging must set env vars
 # via deployment platform (Docker, systemd, secrets manager).
 _env_path = Path(__file__).resolve().parents[4] / ".env"
-if _env_path.exists():
+if _env_path.exists() and not os.environ.get("PRAHO_SKIP_DOTENV"):
     load_dotenv(_env_path)
     _polluted = _strip_comment_polluted_env(_env_path)
     if _polluted:

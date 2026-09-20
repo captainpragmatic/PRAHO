@@ -54,6 +54,9 @@ from apps.audit.services import (
     TwoFactorAuditRequest,
     serialize_metadata,
 )
+from apps.billing.models import Currency
+from apps.domains.models import Registrar
+from apps.products.models import Product, ProductPrice
 
 User = get_user_model()
 
@@ -1425,46 +1428,18 @@ class TestProductsAuditService(TestCase):
         self.assertEqual(event.action, "product_availability_changed")
 
     def test_log_product_pricing_changed_created(self):
-        product = self._make_product()
-        price = _make_mock_with_pk(self._user.pk)
-        price.id = uuid.uuid4()
-        price.product = product
-        price.currency = Mock(code="RON")
-        price.billing_period = "monthly"
-        price.amount_cents = 5000
-        price.amount = Decimal("50.00")
-        price.monthly_price_cents = 5000
-        price.monthly_price = Decimal("50.00")
-        price.setup_cents = 0
-        price.setup_fee = Decimal("0.00")
-        price.is_active = True
-        price.promo_price_cents = None
-        price.discount_percent = Decimal("0.00")
-        price.semiannual_discount_percent = Decimal("0.00")
-        price.annual_discount_percent = Decimal("0.00")
+        product = Product.objects.create(name="Audit hosting", slug="audit-hosting")
+        currency, _ = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei"})
+        price = ProductPrice.objects.create(product=product, currency=currency, monthly_price_cents=5000)
 
         event = ProductsAuditService.log_product_pricing_changed(price, "price_created", {})
         self.assertEqual(event.action, "product_pricing_changed")
         self.assertIn("New pricing created", event.description)
 
     def test_log_product_pricing_changed_updated(self):
-        product = self._make_product()
-        price = _make_mock_with_pk(self._user.pk)
-        price.id = uuid.uuid4()
-        price.product = product
-        price.currency = Mock(code="RON")
-        price.billing_period = "monthly"
-        price.amount_cents = 6000
-        price.amount = Decimal("60.00")
-        price.monthly_price_cents = 6000
-        price.monthly_price = Decimal("60.00")
-        price.setup_cents = 0
-        price.setup_fee = Decimal("0.00")
-        price.is_active = True
-        price.promo_price_cents = None
-        price.discount_percent = Decimal("0.00")
-        price.semiannual_discount_percent = Decimal("0.00")
-        price.annual_discount_percent = Decimal("0.00")
+        product = Product.objects.create(name="Audit hosting", slug="audit-hosting")
+        currency, _ = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei"})
+        price = ProductPrice.objects.create(product=product, currency=currency, monthly_price_cents=5000)
 
         changes = {
             "price_changed": {
@@ -1479,23 +1454,9 @@ class TestProductsAuditService(TestCase):
         self.assertIn("Pricing updated", event.description)
 
     def test_log_product_pricing_changed_updated_no_price_change(self):
-        product = self._make_product()
-        price = _make_mock_with_pk(self._user.pk)
-        price.id = uuid.uuid4()
-        price.product = product
-        price.currency = Mock(code="RON")
-        price.billing_period = "monthly"
-        price.amount_cents = 5000
-        price.amount = Decimal("50.00")
-        price.monthly_price_cents = 5000
-        price.monthly_price = Decimal("50.00")
-        price.setup_cents = 0
-        price.setup_fee = Decimal("0.00")
-        price.is_active = True
-        price.promo_price_cents = None
-        price.discount_percent = Decimal("0.00")
-        price.semiannual_discount_percent = Decimal("0.00")
-        price.annual_discount_percent = Decimal("0.00")
+        product = Product.objects.create(name="Audit hosting", slug="audit-hosting")
+        currency, _ = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei"})
+        price = ProductPrice.objects.create(product=product, currency=currency, monthly_price_cents=5000)
 
         changes = {"status_changed": {"from": "active", "to": "inactive"}}
         event = ProductsAuditService.log_product_pricing_changed(price, "price_updated", changes)
@@ -1549,24 +1510,22 @@ class TestDomainsAuditService(TestCase):
         self.assertEqual(event.action, "tld_created")
 
     def test_log_registrar_event(self):
-        registrar = _make_mock_with_pk(self._user.pk)
-        registrar.id = uuid.uuid4()
-        registrar.name = "ROTLD"
-        registrar.api_url = "https://api.rotld.ro"
-        registrar.is_active = True
-        registrar.supported_tlds = Mock()
-        registrar.supported_tlds.all.return_value = []
+        registrar = Registrar.objects.create(
+            name="audit-registrar",
+            display_name="Audit Registrar",
+            api_endpoint="https://api.example.test",
+            website_url="https://example.test",
+        )
         event = DomainsAuditService.log_registrar_event("registrar_created", registrar)
         self.assertEqual(event.action, "registrar_created")
 
     def test_log_registrar_event_security_sensitive(self):
-        registrar = _make_mock_with_pk(self._user.pk)
-        registrar.id = uuid.uuid4()
-        registrar.name = "ROTLD"
-        registrar.api_url = "https://api.rotld.ro"
-        registrar.is_active = True
-        registrar.supported_tlds = Mock()
-        registrar.supported_tlds.all.return_value = []
+        registrar = Registrar.objects.create(
+            name="audit-registrar",
+            display_name="Audit Registrar",
+            api_endpoint="https://api.example.test",
+            website_url="https://example.test",
+        )
         event = DomainsAuditService.log_registrar_event("api_credentials_updated", registrar, security_sensitive=True)
         self.assertIn("[SECURITY]", event.description)
         self.assertEqual(event.metadata["api_url"], "[REDACTED]")

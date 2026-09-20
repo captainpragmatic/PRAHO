@@ -91,7 +91,7 @@
         </h3>
         {% if qr_code %}
         <div class="bg-white p-4 rounded-lg inline-block">
-          <img src="data:image/png;base64,{{ qr_code }}" alt="{% trans 'MFA QR Code' %}" class="max-w-xs">
+          <img src="data:image/svg+xml;base64,{{ qr_code }}" alt="{% trans 'MFA QR Code' %}" class="max-w-xs">
         </div>
         <p class="text-sm text-slate-400 mt-4">
           {% trans 'Scan this QR code with your authenticator app' %}

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from django.test import SimpleTestCase, override_settings
 
@@ -111,15 +111,11 @@ class BillingDataSyncServiceRateLimitTests(SimpleTestCase):
         self.assertEqual(result, [])
 
     def test_sync_customer_invoices_reraises_rate_limited(self) -> None:
-        with patch("apps.billing.services.InvoiceViewService") as mock_cls:
-            mock_instance = mock_cls.return_value
-            mock_instance.get_customer_invoices.side_effect = _rate_limited_error()
-            with self.assertRaises(PlatformAPIError):
-                self.service.sync_customer_invoices(1, 1)
+        self.service.api_client.post.side_effect = _rate_limited_error()
+        with self.assertRaises(PlatformAPIError):
+            self.service.sync_customer_invoices(1, 1)
 
-    def test_sync_customer_invoices_returns_empty_on_server_error(self) -> None:
-        with patch("apps.billing.services.InvoiceViewService") as mock_cls:
-            mock_instance = mock_cls.return_value
-            mock_instance.get_customer_invoices.side_effect = _server_error()
-            result = self.service.sync_customer_invoices(1, 1)
-            self.assertEqual(result, [])
+    def test_sync_customer_invoices_fails_on_server_error(self) -> None:
+        self.service.api_client.post.side_effect = _server_error()
+        with self.assertRaises(PlatformAPIError):
+            self.service.sync_customer_invoices(1, 1)

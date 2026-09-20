@@ -128,7 +128,7 @@
         {% elif service.expires_at %}
           {% stat_tile st2_label service.expires_at|date:"M d" icon="clock" variant="warning" meta=service.billing_cycle_display %}
         {% else %}
-          {% trans 'Calculating...' as st2_val %}{% stat_tile st2_label st2_val icon="clock" variant="default" %}
+          {% trans 'Not scheduled' as st2_val %}{% stat_tile st2_label st2_val icon="clock" variant="default" %}
         {% endif %}
 
         <!-- Service Age -->
@@ -227,7 +227,7 @@
                             {% blocktrans count days=days %}{{ days }} day{% plural %}{{ days }} days{% endblocktrans %}
                           {% endwith %}
                         {% else %}
-                          <span class="text-slate-500">{% trans "Calculating..." %}</span>
+                          <span class="text-slate-500">{% trans "Unavailable" %}</span>
                         {% endif %}
                       </span>
                     </div>

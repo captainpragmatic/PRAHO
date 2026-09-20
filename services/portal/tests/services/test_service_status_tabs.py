@@ -6,6 +6,7 @@ Covers:
 - The HTMX search/filter endpoint threads status_filter into the partial so the
   empty state can render a status-specific message.
 """
+
 from __future__ import annotations
 
 from unittest.mock import patch
@@ -196,12 +197,8 @@ class ServiceSearchStatusEmptyStateTests(TestCase):
         status-tab-empty heading ('No <Status> services'), which is misleading —
         the tab does have services, the query just matched none.
         """
-        # API returns a real service for the "active" tab; the search term below
-        # matches none of its fields, so _filter_services_by_query empties the list.
-        mock_get.return_value = {
-            "results": [{"service_name": "Web Hosting", "status": "active", "domain": "example.com"}],
-            "count": 1,
-        }
+        # The Platform filters the entire customer queryset before pagination.
+        mock_get.return_value = {"results": [], "count": 0}
 
         resp = self.client.get(
             reverse("services:search_api"),
@@ -213,6 +210,9 @@ class ServiceSearchStatusEmptyStateTests(TestCase):
         self.assertNotIn("No Active services", body)
         self.assertIn("No services match", body)
         self.assertIn("zzz-no-such-service", body)
+        mock_get.assert_called_once_with(
+            customer_id=1, user_id=2, page=1, status="active", search="zzz-no-such-service"
+        )
 
     @patch("apps.services.views.services_api.get_customer_services")
     def test_search_empty_state_escapes_query(self, mock_get: object) -> None:

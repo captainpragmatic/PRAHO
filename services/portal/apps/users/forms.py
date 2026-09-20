@@ -60,6 +60,14 @@ class CustomerLoginForm(forms.Form):
         ),
     )
 
+    mfa_token = forms.CharField(
+        label=_("Authenticator or recovery code"),
+        required=False,
+        max_length=8,
+        help_text=_("Required only when two-factor authentication is enabled."),
+        widget=forms.TextInput(attrs={"autocomplete": "one-time-code", "inputmode": "numeric"}),
+    )
+
     remember_me = forms.BooleanField(
         label=_("Remember me for 30 days"),
         required=False,
@@ -308,9 +316,9 @@ class CustomerRegistrationForm(CountryDefaultsMixin, forms.Form):
 
     def clean_phone(self) -> str:
         """Validate Romanian phone number format"""
-        phone = str(self.cleaned_data.get("phone", "")).strip()
+        phone = re.sub(r"[\s.]", "", str(self.cleaned_data.get("phone", "")))
         # Romanian phone patterns: +40.XX.XXX.XXXX, +40 XXX XXX XXX, 07XXXXXXXX
-        if phone and not re.match(r"^(\+40[\.\s]*[0-9][\.\s0-9]{8,11}[0-9]|0[0-9]{9})$", phone):
+        if phone and not re.fullmatch(r"(?:\+40|0)[0-9]{9}", phone):
             raise ValidationError(_("Invalid phone number format. Use Romanian format: +40.XX.XXX.XXXX"))
         return phone
 
@@ -495,8 +503,8 @@ class CustomerProfileForm(forms.Form):
 
     def clean_phone(self) -> str:
         """Validate Romanian phone number format"""
-        phone = str(self.cleaned_data.get("phone", "")).strip()
-        if phone and not re.match(r"^(\+40[\.\s]*[0-9][\.\s0-9]{8,11}[0-9]|0[0-9]{9})$", phone):
+        phone = re.sub(r"[\s.]", "", str(self.cleaned_data.get("phone", "")))
+        if phone and not re.fullmatch(r"(?:\+40|0)[0-9]{9}", phone):
             raise ValidationError(_("Invalid phone number format. Use Romanian format: +40.XX.XXX.XXXX"))
         return phone
 
@@ -572,6 +580,13 @@ class PasswordResetRequestForm(forms.Form):
 
 class ChangePasswordForm(forms.Form):
     """Change password form for authenticated users"""
+
+    token = forms.CharField(
+        label=_("Authenticator or recovery code"),
+        required=False,
+        max_length=8,
+        help_text=_("Required only when two-factor authentication is enabled."),
+    )
 
     current_password = forms.CharField(
         label=_("Current Password"),
@@ -717,8 +732,8 @@ class CompanyProfileForm(forms.Form):
 
     def clean_primary_phone(self) -> str:
         """Validate Romanian phone number format"""
-        phone = str(self.cleaned_data.get("primary_phone", "")).strip()
-        if phone and not re.match(r"^(\+40[\.\s]*[0-9][\.\s0-9]{8,11}[0-9]|0[0-9]{9})$", phone):
+        phone = re.sub(r"[\s.]", "", str(self.cleaned_data.get("primary_phone", "")))
+        if phone and not re.fullmatch(r"(?:\+40|0)[0-9]{9}", phone):
             raise ValidationError(_("Invalid phone number format. Use Romanian format: +40.XX.XXX.XXXX"))
         return phone
 
@@ -978,3 +993,9 @@ class CompanyCreationForm(CountryDefaultsMixin, forms.Form):
             )
 
         return cleaned_data
+
+
+class MFAReauthenticationForm(TwoFactorVerifyForm):
+    """Step-up credentials for MFA removal and recovery-code regeneration."""
+
+    password = forms.CharField(label=_("Current password"), widget=forms.PasswordInput)

@@ -16,27 +16,25 @@ Based on real user workflows identified during manual testing.
 """
 
 import re
+from uuid import uuid4
 
-import pytest
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import Page, expect
 
 # Import shared utilities
 from tests.e2e.helpers import (
     PLATFORM_BASE_URL,
-    MobileTestContext,
     assert_responsive_results,
     ensure_fresh_platform_session,
-    is_login_url,
     navigate_to_platform_page,
     require_authentication,
     run_responsive_breakpoints_test,
-    run_standard_mobile_test,
 )
 
 # ===============================================================================
 # PRODUCT CATALOG ACCESS AND NAVIGATION TESTS
 # ===============================================================================
+
 
 def test_product_catalog_access_via_navigation(monitored_staff_page: Page) -> None:
     """
@@ -104,7 +102,7 @@ def test_product_catalog_dashboard_display(monitored_staff_page: Page) -> None:
         ("Total Products", "should show total product count"),
         ("Active Products", "should show active product count"),
         ("Public Products", "should show public product count"),
-        ("Featured Products", "should show featured product count")
+        ("Featured Products", "should show featured product count"),
     ]
 
     for card_name, description in stats_cards:
@@ -133,11 +131,11 @@ def test_product_catalog_dashboard_display(monitored_staff_page: Page) -> None:
     expect(product_type_filter).to_be_visible()
 
     # Verify product table is present
-    products_table = page.locator('table')
+    products_table = page.locator("table")
     expect(products_table.first).to_be_attached()
 
     # Verify table has product rows (more important than specific headers)
-    product_rows = page.locator('table tbody tr')
+    product_rows = page.locator("table tbody tr")
     row_count = product_rows.count()
     assert row_count > 0, f"Product table should have product rows, found {row_count}"
 
@@ -160,51 +158,10 @@ def test_product_catalog_dashboard_display(monitored_staff_page: Page) -> None:
 
 
 def _verify_product_created(page: Page, product_data: dict) -> None:
-    """Verify that a product was successfully created after form submission.
-
-    Checks the current URL first (redirect-based confirmation), and falls back
-    to a product list search when the redirect did not occur as expected.
-    """
-    page.wait_for_load_state("networkidle")
-
-    if f"/products/{product_data['slug']}/" in page.url:
-        print("      ✅ Product creation succeeded - redirected to product detail")
-    else:
-        error_messages = page.locator('div.text-red-600, .text-red-500, [class*="error"]')
-        if error_messages.count() > 0:
-            error_text = error_messages.first.inner_text()
-            print(f"      ❌ Form validation error: {error_text}")
-        print(f"      Current URL: {page.url}")
-        print("      Form may have validation issues - checking if product was created anyway")
-
-        navigate_to_platform_page(page, "/products/")
-        page.wait_for_load_state("networkidle")
-
-        search_input = page.locator('input[placeholder*="Product name"]')
-        if search_input.is_visible():
-            search_input.fill(product_data['name'])
-            page.locator('button:has-text("Filter")').click()
-            page.wait_for_load_state("networkidle")
-
-            product_found = page.locator(f'text="{product_data["name"]}"').first
-            if product_found.is_visible():
-                print("      ✅ Product was created successfully despite redirect issue")
-            else:
-                raise AssertionError("Product creation failed - not found in product list")
-        else:
-            raise AssertionError("Could not verify product creation - no search available")
-
-    if f"/products/{product_data['slug']}/" in page.url:
-        product_title = page.locator(f'h1:has-text("{product_data["name"]}")')
-        expect(product_title).to_be_visible()
-
-        vat_display = page.locator('text="Prices Include VAT"')
-        if vat_display.is_visible():
-            print("      ✅ VAT inclusion setting displayed on product detail page")
-        else:
-            print("      [i] VAT setting not displayed on detail page (may be in admin only)")
-    else:
-        print("      [i] Product verification completed via search - detail page not tested")
+    expect(page).to_have_url(f"{PLATFORM_BASE_URL}/products/{product_data['slug']}/")
+    expect(page.locator("main h1")).to_contain_text(product_data["name"])
+    page.reload()
+    expect(page.locator("main h1")).to_contain_text(product_data["name"])
 
 
 def test_product_creation_full_workflow(monitored_staff_page: Page) -> None:
@@ -240,24 +197,24 @@ def test_product_creation_full_workflow(monitored_staff_page: Page) -> None:
 
     # Fill in product creation form
     test_product_data = {
-        'name': 'E2E Test VPS Server',
-        'slug': 'e2e-test-vps-server',
-        'type': 'vps',
-        'short_description': 'High-performance VPS hosting for Romanian businesses with SSD storage and 24/7 support',
+        "name": "E2E Test VPS Server",
+        "slug": "e2e-test-vps-" + uuid4().hex[:12],
+        "type": "vps",
+        "short_description": "High-performance VPS hosting for Romanian businesses with SSD storage and 24/7 support",
     }
 
     # Fill basic information
-    page.fill('input[name="name"]', test_product_data['name'])
-    page.fill('input[name="slug"]', test_product_data['slug'])
+    page.fill('input[name="name"]', test_product_data["name"])
+    page.fill('input[name="slug"]', test_product_data["slug"])
 
     # Select product type - use the value, not display text
-    page.select_option('select[name="product_type"]', 'vps')
+    page.select_option('select[name="product_type"]', "vps")
 
     # Fill short description - could be input or textarea depending on field length
     try:
-        page.fill('input[name="short_description"]', test_product_data['short_description'])
+        page.fill('input[name="short_description"]', test_product_data["short_description"])
     except (TimeoutError, PlaywrightError):
-        page.fill('textarea[name="short_description"]', test_product_data['short_description'])
+        page.fill('textarea[name="short_description"]', test_product_data["short_description"])
 
     # Verify default status settings (Active and Public should be checked)
     active_checkbox = page.locator('input[name="is_active"]')
@@ -283,191 +240,40 @@ def test_product_creation_full_workflow(monitored_staff_page: Page) -> None:
 
 
 def _submit_and_verify_pricing(page: Page) -> None:
-    """Submit the pricing form and verify the price is saved.
-
-    Clicks the submit button, waits for the redirect, and confirms RON pricing
-    appears in the pricing list. Navigates back to the pricing page if needed.
-    """
-    add_price_submit = page.locator('button:has-text("Add Price")')
-    expect(add_price_submit).to_be_visible()
-    add_price_submit.click()
-
-    page.wait_for_load_state("networkidle")
-
-    if "/prices/create/" not in page.url:
-        print("      ✅ Pricing form submitted successfully - redirected from create page")
-    else:
-        error_messages = page.locator('div.text-red-600, .text-red-500, [class*="error"]')
-        if error_messages.count() > 0:
-            error_text = error_messages.first.inner_text()
-            print(f"      ❌ Pricing form validation error: {error_text}")
-        else:
-            print("      [i] Form submitted but still on create page - may be validation issue")
-
-    if "/prices/" not in page.url:
-        page.go_back() if "/prices/create/" in page.url else None
-        page.wait_for_load_state("networkidle")
-
-    ron_pricing = page.locator('text="RON", text="LEI"')
-    if ron_pricing.count() > 0:
-        print("      ✅ RON pricing found in pricing list")
-    else:
-        print("      ⚠️ RON pricing not immediately visible - form may need validation fixes")
+    page.get_by_role("button", name="Add Price", exact=True).click()
+    expect(page).to_have_url(re.compile(r"/prices/$"))
+    expect(page.locator("main")).to_contain_text("RON")
+    expect(page.locator("main")).to_contain_text("29.99")
+    page.reload()
+    expect(page.locator("main")).to_contain_text("29.99")
 
 
-def test_product_pricing_management(monitored_staff_page: Page) -> None:  # noqa: PLR0912, PLR0915
-    """
-    Test product pricing management including RON currency and Romanian business context.
-
-    This test covers:
-    1. Navigate to pricing management for a product
-    2. Add RON pricing with monthly billing
-    3. Verify pricing is saved and displayed correctly
-    4. Test cents-based pricing precision
-    """
+def test_product_pricing_management(monitored_staff_page: Page, e2e_scenario) -> None:
+    """Add an exact RON price to this test's previously unpriced product."""
     page = monitored_staff_page
-    print("🧪 Testing product pricing management with Romanian business context")
-
-    # Navigate to an existing product's pricing (use first product in list)
-    navigate_to_platform_page(page, "/products/")
-    page.wait_for_load_state("networkidle")
-
-    # Find first product pricing link (icon)
-    first_pricing_link = page.locator('a[href*="/prices/"]').first
-    expect(first_pricing_link).to_be_visible()
-
-    pricing_url = first_pricing_link.get_attribute('href')
-    page.goto(f"{PLATFORM_BASE_URL}{pricing_url}")
-    page.wait_for_load_state("networkidle")
-
-    # Verify we're on pricing management page
-    expect(page).to_have_url(re.compile(r"/prices/"))
-    pricing_heading = page.locator('h1:has-text("Pricing Management")')
-    expect(pricing_heading).to_be_visible()
-
-    # Optional UI element — presence depends on product configuration
-    romanian_context = page.locator('div.bg-blue-900:has-text("🇷🇴"), div:has-text("Romanian"), div:has-text("RON")').first
-    if romanian_context.count() > 0:
-        print("      ✅ Romanian business pricing context visible")
-
-    # Check which currencies already have prices — works with both table and card layouts
-    used_currencies: set[str] = set()
-    # Try table layout first, fall back to card layout
-    existing_rows = page.locator("table tbody tr").all()
-    if existing_rows:
-        for row in existing_rows:
-            row_text = row.text_content() or ""
-            for cur in ["RON", "EUR", "USD"]:
-                if cur in row_text:
-                    used_currencies.add(cur)
-    else:
-        # Card-based layout: look for currency indicators in headings or badges
-        page_text = page.locator("main").text_content() or ""
-        for cur in ["RON", "EUR", "USD"]:
-            if cur in page_text:
-                used_currencies.add(cur)
-
-    # Click "Add Price" button
-    add_price_button = page.locator('a:has-text("Add Price"), a:has-text("Add First Price")').first
-    expect(add_price_button).to_be_visible()
-    add_price_button.click()
-
-    # Wait for pricing form page
-    page.wait_for_load_state("networkidle")
-    expect(page).to_have_url(re.compile(r"/prices/create/"))
-
-    # Optional UI element — presence depends on product configuration
-    simplified_notice = page.locator('text="Simplified Pricing Model"')
-    if simplified_notice.count() > 0:
-        print("      ✅ Simplified pricing model notice visible")
-
-    # Check what currencies are actually available in the dropdown (depends on DB state)
-    currency_select = page.locator('select[name="currency"]')
-    available_options = currency_select.locator("option").all()
-    dropdown_currencies = [
-        opt.get_attribute("value") for opt in available_options
-        if opt.get_attribute("value") and opt.get_attribute("value") != ""
-    ]
-    unused = [c for c in dropdown_currencies if c not in used_currencies]
-    if not unused:
-        pytest.skip("All available currencies already have prices — add-price flow not tested (TODO: add fixture with partial pricing)")
-
-    # Select the first unused currency from the dropdown
-    currency = unused[0]
-    page.select_option('select[name="currency"]', currency)
-
-    # Enter monthly price in cents (2999 cents = 29.99 RON)
-    # The simplified form uses monthly_price_cents, not amount_cents + billing_period
+    fixture = e2e_scenario("pricing")
+    page.goto(f"{PLATFORM_BASE_URL}/products/{fixture['product_slug']}/prices/")
+    page.get_by_role("link", name=re.compile("Add (First )?Price")).first.click()
+    page.select_option('select[name="currency"]', "RON")
     page.fill('input[name="monthly_price_cents"]', "2999")
-
-    # Optional UI element — presence depends on product configuration
-    price_helper = page.locator('#monthly_price_helper')
-    if price_helper.count() > 0:
-        helper_text = price_helper.text_content() or ""
-        if "29.99" in helper_text:
-            print("      ✅ Price calculation helper shows correct RON amount")
-        else:
-            print(f"      [i] Price helper shows: {helper_text}")
-
-    # Submit pricing form and verify RON pricing is saved
     _submit_and_verify_pricing(page)
 
-    print("  ✅ Product pricing management completed with Romanian business context")
 
-
-def test_product_status_toggles(monitored_staff_page: Page) -> None:
-    """
-    Test product status toggle functionality (Active, Public, Featured).
-
-    This test verifies:
-    1. Status toggle buttons are present and clickable
-    2. HTMX status updates work correctly (after fix)
-    3. Status changes are reflected in the UI
-    4. No console errors during toggle operations
-    """
+def test_product_status_toggles(monitored_staff_page: Page, e2e_scenario) -> None:
     page = monitored_staff_page
-    print("🧪 Testing product status toggle functionality")
-
-    # Navigate to first product detail page
-    navigate_to_platform_page(page, "/products/")
-    page.wait_for_load_state("networkidle")
-
-    # Click on first product name link
-    first_product_link = page.locator('table a[href*="/products/"]').first
-    expect(first_product_link).to_be_visible()
-    first_product_link.click()
-
-    page.wait_for_load_state("networkidle")
-    # Compound condition: on products detail page but not list page
-    assert "/products/" in page.url and page.url != f"{PLATFORM_BASE_URL}/products/"
-
-    # Verify status toggle section is present
-    status_section = page.locator('h2:has-text("Status & Settings")')
-    expect(status_section).to_be_visible()
-
-    # Verify status toggle buttons are present
-    active_toggle = page.locator('button:has-text("Active"), button:has-text("Inactive")')
-    public_toggle = page.locator('button:has-text("Public"), button:has-text("Private")')
-    featured_toggle = page.locator('button:has-text("Featured"), button:has-text("Not Featured")')
-
-    expect(active_toggle.first).to_be_attached()
-    expect(public_toggle.first).to_be_attached()
-    expect(featured_toggle.first).to_be_attached()
-
-    # Test clicking status toggles (after fix, these should work)
-    original_active_text = active_toggle.first.inner_text()
-    print(f"    Original active status: {original_active_text}")
-
-    # Note: The toggle functionality was fixed by adding proper decorators
-    # This test verifies the UI elements are present and clickable
-    # The actual HTMX toggle behavior would require a running server with the fix
-
-    # Verify toggle buttons are interactive (enabled and clickable)
-    expect(active_toggle.first).to_be_enabled()
-    expect(public_toggle.first).to_be_enabled()
-    expect(featured_toggle.first).to_be_enabled()
-
-    print("  ✅ Product status toggle interface is properly implemented")
+    product = e2e_scenario("pricing")
+    page.goto(f"{PLATFORM_BASE_URL}/products/{product['product_slug']}/")
+    for suffix, before, after in (
+        ("active", "Active", "Inactive"),
+        ("public", "Public", "Private"),
+        ("featured", "Not Featured", "Featured"),
+    ):
+        button = page.locator(f'button[hx-post*="toggle-{suffix}"]')
+        expect(button).to_have_text(before)
+        button.click()
+        expect(button).to_have_text(after)
+        page.reload()
+        expect(button).to_have_text(after)
 
 
 # ===============================================================================
@@ -485,238 +291,54 @@ def _clear_product_filters(page: Page) -> None:
     page.wait_for_load_state("networkidle")
 
 
-def test_product_search_and_filtering(monitored_staff_page: Page) -> None:
-    """
-    Test product search and filtering functionality.
-
-    This test covers:
-    1. Text search functionality
-    2. Product type filtering
-    3. Status filtering (Active/Inactive, Public/Private)
-    4. Filter combinations
-    5. Clear filters functionality
-    """
+def test_product_search_and_filtering(monitored_staff_page: Page, e2e_scenario) -> None:
     page = monitored_staff_page
-    print("🧪 Testing product search and filtering functionality")
-
-    # Navigate to products
-    navigate_to_platform_page(page, "/products/")
-    page.wait_for_load_state("networkidle")
-
-    # Get initial product count
-    initial_count_text = page.locator('h3:has-text("Products")').inner_text()
-    print(f"    Initial product count: {initial_count_text}")
-
-    # Test text search
-    search_input = page.locator('input[placeholder*="Product name"]')
-    expect(search_input).to_be_visible()
-
-    # Search for "VPS" products
-    search_input.fill("VPS")
-    filter_button = page.locator('button:has-text("Filter")')
-    filter_button.click()
-
-    page.wait_for_load_state("networkidle")
-
-    # Verify search results contain VPS products
-    search_results_count = page.locator('h3:has-text("Products")').inner_text()
-    print(f"    Search results count: {search_results_count}")
-
-    # Check that VPS products are visible in results
-    vps_products = page.locator('table tbody tr:has-text("VPS")')
-    vps_count = vps_products.count()
-    if vps_count > 0:
-        print(f"    ✅ Found {vps_count} VPS products in search results")
-    else:
-        print("    ⚠️ No VPS products found, but search interface works")
-
-    # Test product type filter - find clear button
-    _clear_product_filters(page)
-
-    # Select VPS from product type filter
-    product_type_filter = page.locator('select[name="product_type"]')
-    product_type_filter.select_option("vps")
-    filter_button.click()
-
-    page.wait_for_load_state("networkidle")
-
-    # Verify filter worked
-    type_filter_count = page.locator('h3:has-text("Products")').inner_text()
-    print(f"    Type filter results: {type_filter_count}")
-
-    # Test status filters
-    _clear_product_filters(page)
-
-    # Test active status filter
-    active_status_filter = page.locator('select:has-text("All Status")')
-    active_status_filter.select_option("Active Only")
-    filter_button.click()
-
-    page.wait_for_load_state("networkidle")
-
-    active_filter_count = page.locator('h3:has-text("Products")').inner_text()
-    print(f"    Active filter results: {active_filter_count}")
-
-    # Verify that active products are shown with active status badges
-    active_badges = page.locator('button:has-text("Active")')
-    active_badge_count = active_badges.count()
-    print(f"    ✅ Found {active_badge_count} active status badges in filtered results")
-
-    # Test clear filters
-    _clear_product_filters(page)
-
-    cleared_count = page.locator('h3:has-text("Products")').inner_text()
-    print(f"    After clearing filters: {cleared_count}")
-
-    print("  ✅ Product search and filtering functionality works correctly")
+    product = e2e_scenario("pricing")
+    page.goto(f"{PLATFORM_BASE_URL}/products/")
+    search = page.locator('input[name="search"]')
+    search.fill(product["name"])
+    page.get_by_role("button", name="Filter", exact=True).click()
+    expect(page.locator("table tbody tr")).to_have_count(1)
+    expect(page.locator("table tbody tr")).to_contain_text(product["name"])
+    page.locator('select[name="product_type"]').select_option("vps")
+    page.get_by_role("button", name="Filter", exact=True).click()
+    expect(page.locator("table tbody tr")).to_have_count(0)
+    page.locator('select[name="product_type"]').select_option("shared_hosting")
+    page.get_by_role("button", name="Filter", exact=True).click()
+    expect(page.locator("table tbody tr")).to_have_count(1)
+    page.locator('select[name="is_active"]').select_option("false")
+    page.get_by_role("button", name="Filter", exact=True).click()
+    expect(page.locator("table tbody tr")).to_have_count(0)
 
 
 # ===============================================================================
 # ROLE-BASED ACCESS CONTROL TESTS
 # ===============================================================================
 
+
 def test_product_catalog_staff_access_control(monitored_staff_page: Page) -> None:
-    """
-    Test that only staff users can access product catalog management.
-
-    This test verifies:
-    1. Staff users can access product catalog
-    2. Customer users cannot access product catalog
-    3. Appropriate error handling for unauthorized access
-    """
     page = monitored_staff_page
-    print("🧪 Testing product catalog access control")
-
-    # Test 1: Verify staff user has access
-    print("    Testing staff user access...")
-
-    # Navigate directly to products URL
-    navigate_to_platform_page(page, "/products/")
-    page.wait_for_load_state("networkidle")
-
-    # Should successfully load product catalog
-    expect(page).to_have_url(re.compile(r"/products/"))
-    catalog_heading = page.locator('h1:has-text("Product Catalog")')
-    expect(catalog_heading).to_be_visible()
-
-    # Verify Business dropdown shows Products link
-    navigate_to_platform_page(page, "/")
-    business_dropdown = page.locator('button:has-text("Business")')
-    expect(business_dropdown.first).to_be_attached()
-    business_dropdown.click()
-    page.wait_for_load_state("networkidle")
-
-    products_link = page.locator('a:has-text("Products"), menuitem:has-text("Products"), a[href*="/products/"]')
-    expect(products_link.first).to_be_attached()
-
-    print("    ✅ Staff user has proper access to product catalog")
-
-    # Test 2: Verify customer user does NOT have access to platform
-    print("    Testing customer user access restrictions...")
-    ensure_fresh_platform_session(page)
-    # Customers cannot log into the platform (staff-only service)
-    # login_user targets portal (:8701), not platform (:8700)
-    # Instead, verify that unauthenticated access to products redirects to login
     page.goto(f"{PLATFORM_BASE_URL}/products/")
-    page.wait_for_load_state("networkidle")
-
-    # Should redirect to login page since no staff session exists
-    current_url = page.url
-    if is_login_url(current_url):
-        print("    ✅ Unauthenticated user redirected to login when accessing product catalog")
-    elif "/products/" in current_url:
-        # If URL is accessible without login, check for permission error
-        error_message = page.locator('text="permission", text="unauthorized", text="access denied"')
-        if error_message.count() > 0:
-            print("    ✅ Unauthenticated user sees proper permission error message")
-        else:
-            print("    ⚠️ Products URL accessible without authentication")
-    else:
-        print(f"    ✅ Unauthenticated user appropriately blocked from product catalog (redirected to {current_url})")
-
-    print("  ✅ Product catalog access control working correctly")
+    expect(page.get_by_role("heading", name="Product Catalog", exact=True)).to_be_visible()
+    ensure_fresh_platform_session(page)
+    page.goto(f"{PLATFORM_BASE_URL}/products/")
+    expect(page).to_have_url(re.compile(r"/auth/login/"))
+    expect(page.get_by_role("heading", name="Product Catalog", exact=True)).to_have_count(0)
 
 
 # ===============================================================================
 # MOBILE RESPONSIVENESS TESTS
 # ===============================================================================
 
+
 def test_product_catalog_mobile_responsiveness(monitored_staff_page: Page) -> None:
-    """
-    Test product catalog mobile responsiveness and touch interactions.
-
-    This test verifies:
-    1. Product catalog displays correctly on mobile viewports
-    2. Touch interactions work properly
-    3. Mobile navigation elements function correctly
-    4. Tables and forms are mobile-friendly
-    """
     page = monitored_staff_page
-    print("🧪 Testing product catalog mobile responsiveness")
-
-    # Navigate to products
-    navigate_to_platform_page(page, "/products/")
-    page.wait_for_load_state("networkidle")
-
-    # Test mobile viewport
-    with MobileTestContext(page, 'mobile_medium') as mobile:
-        print("    📱 Testing product catalog on mobile viewport")
-
-        run_standard_mobile_test(page, mobile, context_label="product catalog")
-
-        # Optional UI element — presence depends on product configuration
-        # Product cards/table should be scrollable/accessible; table may be hidden on mobile
-        products_table = page.locator('table')
-        if products_table.is_visible():
-            print("      ✅ Products table visible on mobile")
-        else:
-            print("      ⚠️ Products table may not be visible on mobile")
-
-        # Test mobile-specific interactions
-        # Check if action buttons are properly sized for touch
-        action_buttons = page.locator('table a[href*="/products/"]')
-        button_count = action_buttons.count()
-        if button_count > 0:
-            # Try clicking first action button
-            try:
-                first_button = action_buttons.first
-                if first_button.is_visible():
-                    first_button.click()
-                    page.wait_for_load_state("networkidle")
-                    if "/products/" in page.url and page.url != f"{PLATFORM_BASE_URL}/products/":
-                        print("      ✅ Product action buttons work on mobile")
-                        # Navigate back
-                        navigate_to_platform_page(page, "/products/")
-                    else:
-                        print("      ⚠️ Product action button click may not have worked")
-            except (TimeoutError, PlaywrightError):
-                print("      ⚠️ Unable to test product action buttons on mobile")
-
-    # Test tablet landscape view
-    with MobileTestContext(page, 'tablet_landscape') as tablet:
-        print("    📱 Testing product catalog on tablet landscape")
-
-        page.reload()
-        page.wait_for_load_state("networkidle")
-
-        # Check layout on tablet
-        tablet_layout_issues = tablet.check_responsive_layout()
-        tablet_critical = [issue for issue in tablet_layout_issues
-                         if 'horizontal scroll' in issue.lower()]
-
-        if tablet_critical:
-            print("      ⚠️ Tablet has horizontal scroll issues")
-        else:
-            print("      ✅ Tablet layout looks good")
-
-        # Test tablet navigation
-        tablet_nav_count = tablet.test_mobile_navigation()
-        if tablet_nav_count > 0:
-            print(f"      ✅ Tablet navigation working ({tablet_nav_count} elements)")
-        else:
-            print("      ✅ Tablet uses desktop navigation (expected)")
-
-    print("  ✅ Product catalog mobile responsiveness testing completed")
+    for width in (375, 768):
+        page.set_viewport_size({"width": width, "height": 812})
+        page.goto(f"{PLATFORM_BASE_URL}/products/")
+        expect(page.get_by_role("heading", name="Product Catalog", exact=True)).to_be_visible()
+        expect(page.locator('main a[href*="/products/"]:visible').first).to_be_visible()
+        assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
 
 
 # ===============================================================================
@@ -747,13 +369,14 @@ def test_product_catalog_responsive_breakpoints(monitored_staff_page: Page) -> N
             require_authentication(test_page)
 
             # Check core elements are present - find any visible h1
-            all_h1s = test_page.locator('h1').all()
+            all_h1s = test_page.locator("h1").all()
             heading_visible = any(
-                h1.is_visible() and ("product" in (h1.text_content() or "").lower() or "catalog" in (h1.text_content() or "").lower())
+                h1.is_visible()
+                and ("product" in (h1.text_content() or "").lower() or "catalog" in (h1.text_content() or "").lower())
                 for h1 in all_h1s
             )
             # Table may be hidden on mobile, check for any product content
-            products_table = test_page.locator('table')
+            products_table = test_page.locator("table")
             product_cards = test_page.locator('[class*="product"], [data-product], tr:has-text("Product")')
             has_products = products_table.is_visible() or product_cards.count() > 0
 
@@ -761,7 +384,7 @@ def test_product_catalog_responsive_breakpoints(monitored_staff_page: Page) -> N
 
             if elements_present:
                 # Count products shown
-                product_rows = test_page.locator('table tbody tr')
+                product_rows = test_page.locator("table tbody tr")
                 row_count = product_rows.count()
                 print(f"      ✅ Catalog functional: {row_count} products visible")
                 return True
@@ -780,10 +403,10 @@ def test_product_catalog_responsive_breakpoints(monitored_staff_page: Page) -> N
     assert_responsive_results(results, "Product catalog")
 
     # Report mobile-specific findings
-    mobile_extras = results.get('mobile_extras', {})
+    mobile_extras = results.get("mobile_extras", {})
     if mobile_extras:
-        layout_issues = mobile_extras.get('layout_issues', [])
-        touch_works = mobile_extras.get('touch_works', False)
+        layout_issues = mobile_extras.get("layout_issues", [])
+        touch_works = mobile_extras.get("touch_works", False)
 
         print("\n  📊 Mobile catalog summary:")
         print(f"    - Layout issues: {len(layout_issues)}")
@@ -888,7 +511,7 @@ def test_product_htmx_status_toggle_has_csrf(monitored_staff_page: Page) -> None
     page.wait_for_load_state("networkidle")
 
     # Find all HTMX toggle buttons (they use hx-post for status changes)
-    toggle_buttons = page.locator('button[hx-post]')
+    toggle_buttons = page.locator("button[hx-post]")
     toggle_count = toggle_buttons.count()
     assert toggle_count > 0, "Product detail should have HTMX toggle buttons"
 
