@@ -358,9 +358,10 @@ class ProfileUpdateSerializer(serializers.Serializer):
 
     def validate_phone(self, value: str) -> str:
         """Keep the same phone contract across both profile endpoints."""
-        if value and not re.match(r"^(\+40[\s\.]?[0-9][\s\.0-9]{8,11}[0-9]|0[0-9]{9})$", value):
+        normalized = re.sub(r"[\s.]", "", value)
+        if normalized and not re.fullmatch(r"(?:\+40|0)[0-9]{9}", normalized):
             raise serializers.ValidationError(_("Invalid Romanian phone number format."))
-        return value
+        return normalized
 
     def validate_timezone(self, value: str) -> str:
         from apps.common.localisation import validate_timezone  # noqa: PLC0415

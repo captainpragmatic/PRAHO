@@ -5577,9 +5577,12 @@
       "current_nodes": [
         "tests/e2e/portal/test_customer_users.py::test_customer_profile_editing[chromium]"
       ],
-      "review_note": "Private account profile, password and MFA mutations with reauthentication, one-use recovery codes and reload; forged foreign identity and customer switch denied without changing ownership. Reset UI and GDPR request cover only currently implemented request surfaces.",
-      "current_assertions": [],
+      "review_note": "Private account profile, password and MFA mutations with reauthentication, one-use recovery codes and reload; forged foreign identity and customer switch denied without changing ownership. Reset UI and GDPR request cover only currently implemented request surfaces. Requires the successful save response and confirmation before reloading; verifies exact persisted name and phone values. Signed API tests reject invalid phone lengths atomically.",
+      "current_assertions": [
+        "saved.value.status == 302"
+      ],
       "current_expectations": [
+        "expect(page.locator('body')).to_contain_text('Profile updated successfully!')",
         "expect(page.locator(f'input[name=\"{field}\"]')).to_have_value(value)"
       ]
     },

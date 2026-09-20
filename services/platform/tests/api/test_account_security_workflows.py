@@ -32,6 +32,42 @@ class AccountSecurityWorkflows(HMACTestMixin, TestCase):
             "/api/users/" + suffix, {"user_id": self.user.pk, "customer_id": self.customer.pk, **data}
         )
 
+    def update_profile(self, **data):
+        path = "/api/users/profile/"
+        body = json.dumps({"user_id": self.user.pk, "timestamp": time.time(), **data}).encode()
+        return self.client.put(path, body, content_type="application/json", **hmac_headers("PUT", path, body))
+
+    def test_profile_phone_formats_are_normalized_and_persisted_for_only_the_authenticated_user(self):
+        for phone, expected in (
+            ("+40711223344", "+40711223344"),
+            ("+40.722.123.456", "+40722123456"),
+            ("0722 123 456", "0722123456"),
+            ("", ""),
+        ):
+            with self.subTest(phone=phone):
+                response = self.update_profile(first_name="CustomerTest", last_name="UserTest", phone=phone)
+                self.assertEqual(response.status_code, 200, response.content)
+                self.assertTrue(response.json()["success"])
+                profile = self.request_security("profile/").json()["profile"]
+                self.assertEqual(profile["first_name"], "CustomerTest")
+                self.assertEqual(profile["last_name"], "UserTest")
+                self.assertEqual(profile["phone"], expected)
+                self.user.refresh_from_db()
+                self.assertEqual(self.user.phone, expected)
+                self.other.refresh_from_db()
+                self.assertEqual(self.other.first_name, "")
+                self.assertFalse(self.other.phone)
+
+    def test_invalid_phone_cannot_partially_update_the_profile(self):
+        for phone in ("+4071122334", "+407112233445", "071122334", "07112233445", "+40711223344junk"):
+            with self.subTest(phone=phone):
+                response = self.update_profile(first_name="Do not save", phone=phone)
+                self.assertEqual(response.status_code, 400, response.content)
+                self.assertIn("phone", response.json()["errors"])
+                self.user.refresh_from_db()
+                self.assertEqual(self.user.first_name, "")
+                self.assertFalse(self.user.phone)
+
     def test_customer_switch_requires_current_active_membership(self):
         path = "verify-customer-access/"
         response = self.request_security(path)

@@ -115,7 +115,12 @@ def test_customer_profile_editing(account_page) -> None:
     page.goto(f"{BASE_URL}/profile/")
     for field, value in {"first_name": "CustomerTest", "last_name": "UserTest", "phone": "+40711223344"}.items():
         page.locator(f'input[name="{field}"]').fill(value)
-    page.get_by_role("button", name=re.compile("Save|Update")).click()
+    with page.expect_response(
+        lambda response: response.url == f"{BASE_URL}/profile/" and response.request.method == "POST"
+    ) as saved:
+        page.get_by_role("button", name=re.compile("Save|Update")).click()
+    assert saved.value.status == 302
+    expect(page.locator("body")).to_contain_text("Profile updated successfully!")
     page.reload()
     for field, value in {"first_name": "CustomerTest", "last_name": "UserTest", "phone": "+40711223344"}.items():
         expect(page.locator(f'input[name="{field}"]')).to_have_value(value)

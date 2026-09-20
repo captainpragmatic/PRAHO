@@ -32,7 +32,9 @@ class LocalisationAPITests(TestCase):
 
     @override_settings(
         RATE_LIMITING_ENABLED=True,
-        CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache", "LOCATION": "localisation-throttle"}},
+        CACHES={
+            "default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache", "LOCATION": "localisation-throttle"}
+        },
     )
     def test_unsigned_traffic_is_ip_throttled_without_blocking_verified_portal(self):
         with patch.object(BurstRateThrottle, "get_rate", return_value="1/minute"):
@@ -72,10 +74,22 @@ class LocalisationAPITests(TestCase):
 
     def test_both_profile_serializers_enforce_the_same_phone_contract(self):
         for serializer_class in (ProfileUpdateSerializer, CustomerProfileSerializer):
-            for phone, valid in (("", True), ("+40 721 123 456", True), ("invalid phone", False)):
+            for phone, valid in (
+                ("", True),
+                ("+40 721 123 456", True),
+                ("+40.721.123.456", True),
+                ("+40721123456", True),
+                ("0721 123 456", True),
+                ("+4072112345", False),
+                ("+407211234567", False),
+                ("+40721123456junk", False),
+                ("invalid phone", False),
+            ):
                 with self.subTest(serializer=serializer_class.__name__, phone=phone):
                     serializer = serializer_class(data={"phone": phone}, partial=True)
                     self.assertEqual(serializer.is_valid(), valid, serializer.errors)
+                    if valid:
+                        self.assertEqual(serializer.validated_data["phone"], phone.replace(" ", "").replace(".", ""))
 
     def test_profile_partial_update_and_effective_legacy_fields(self) -> None:
         user = create_staff_user(username="api_localisation", staff_role="support")
