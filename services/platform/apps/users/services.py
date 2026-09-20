@@ -327,6 +327,12 @@ class SecureUserRegistrationService:
             # Step 1: Additional business logic validation
             # (Company uniqueness check is done in decorator with proper locking)
 
+            # Both registration entry points record affirmative consent; the onboarding
+            # form carries the checkbox in customer_data instead of a user timestamp.
+            consent_date = user_data.get("gdpr_consent_date")
+            if consent_date is None and customer_data.get("data_processing_consent") is True:
+                consent_date = timezone.now()
+
             # Step 2: Create the user account with security measures
             user = User.objects.create_user(
                 email=user_data["email"],  # Validated email
@@ -335,7 +341,7 @@ class SecureUserRegistrationService:
                 last_name=user_data["last_name"],  # XSS-safe
                 phone=user_data.get("phone", ""),  # Romanian format validated
                 accepts_marketing=user_data.get("accepts_marketing", False),
-                gdpr_consent_date=user_data.get("gdpr_consent_date"),
+                gdpr_consent_date=consent_date,
                 # Security: No admin fields can be injected due to validation
             )
 

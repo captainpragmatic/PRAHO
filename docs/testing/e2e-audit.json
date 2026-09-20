@@ -4703,7 +4703,7 @@
       "current_nodes": [
         "tests/e2e/portal/test_customer_services.py::test_service_detail_shows_actual_dates_not_calculating[chromium]"
       ],
-      "review_note": "Known service/plan, actual recorded usage and renewal date, status/search filtering before pagination, cross-customer denial, and implemented action form. Provider submission/history graphs are not claimed.",
+      "review_note": "Known service/plan, actual recorded usage and renewal date, status/search filtering before pagination, cross-customer denial, and implemented action form. Provider submission/history graphs are not claimed. The billing schedule assertion requires the exact recorded month, day and year in the documented fixed date format.",
       "current_assertions": [],
       "current_expectations": [
         "expect(page.locator('#main-content')).to_contain_text(expected_date)",

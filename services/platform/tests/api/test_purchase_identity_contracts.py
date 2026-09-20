@@ -13,6 +13,7 @@ from apps.orders.models import Order
 from apps.orders.services import OrderService, StatusChangeData
 from apps.products.models import Product, ProductPrice
 from apps.users.models import CustomerMembership, User
+from apps.users.services import SecureUserRegistrationService
 from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin
 
 
@@ -68,6 +69,26 @@ class PurchaseIdentityContracts(HMACTestMixin, TestCase):
         self.assertEqual(address["address_line1"], "Str. Victoriei nr. 10")
         self.assertEqual(address["city"], "București")
         self.assertEqual(address["postal_code"], "010061")
+
+    def test_onboarding_checkbox_consent_is_preserved_without_a_user_timestamp(self):
+        data = self.registration()
+        result = SecureUserRegistrationService.register_new_customer_owner(**data)
+        self.assertTrue(result.is_ok(), str(result))
+        user, customer = result.unwrap()
+        user.refresh_from_db()
+        customer.refresh_from_db()
+        self.assertIsNotNone(user.gdpr_consent_date)
+        self.assertTrue(customer.data_processing_consent)
+
+    def test_absent_or_negative_checkbox_cannot_fabricate_consent(self):
+        for index, consent in enumerate((False, None, "false", "true")):
+            data = self.registration(email=f"consent{index}@example.com")
+            data["customer_data"].update(company_name=f"Consent Company {index}", data_processing_consent=consent)
+            result = SecureUserRegistrationService.register_new_customer_owner(**data)
+            self.assertTrue(result.is_ok(), str(result))
+            user, customer = result.unwrap()
+            self.assertIsNone(user.gdpr_consent_date)
+            self.assertFalse(customer.data_processing_consent)
 
     def test_romanian_phones_are_normalized_and_invalid_lengths_rejected(self):
         for index, phone in enumerate(("+40.722.123.456", "0722 123 456")):

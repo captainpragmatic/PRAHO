@@ -16,7 +16,7 @@ Security guidelines:
 import logging
 from typing import Any, cast
 
-from django.utils.dateparse import parse_datetime
+from django.utils.dateparse import parse_date, parse_datetime
 
 from apps.api_client.services import PlatformAPIClient, PlatformAPIError
 
@@ -65,7 +65,13 @@ def _parse_service_dates(service: dict[str, Any]) -> None:
     for field in ("next_billing_date", "expires_at", "activated_at", "created_at", "updated_at"):
         value = service.get(field)
         if isinstance(value, str):
-            service[field] = parse_datetime(value)
+            try:
+                parsed = parse_date(value) or parse_datetime(value)
+            except ValueError as exc:
+                raise PlatformAPIError(f"Invalid service date: {field}") from exc
+            if parsed is None:
+                raise PlatformAPIError(f"Invalid service date: {field}")
+            service[field] = parsed
 
 
 class ServicesAPIClient(PlatformAPIClient):

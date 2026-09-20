@@ -9,7 +9,9 @@ from decimal import Decimal
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.db import connection
 from django.test import TestCase
+from django.test.utils import CaptureQueriesContext
 
 from apps.billing.models import BillingCycle, Currency, Subscription
 from apps.customers.models import Customer, CustomerTaxProfile
@@ -170,6 +172,47 @@ class OrderServiceTestCase(TestCase):
         )
 
         self.user = User.objects.create_user(email="admin@pragmatichost.com", password="testpass123", is_staff=True)
+
+    def test_multi_item_order_snapshots_products_without_per_line_queries(self):
+        other = Product.objects.create(name="VPS", slug="cart-vps", product_type="vps")
+        products = [self.product, other, self.product]
+        data = OrderCreateData(
+            customer=self.customer,
+            currency=self.currency.code,
+            billing_address={"country": "RO"},
+            items=[
+                {"product_id": product.pk, "quantity": 1, "unit_price_cents": 10000, "description": product.name}
+                for product in products
+            ],
+        )
+        with CaptureQueriesContext(connection) as queries:
+            result = OrderService.create_order(data, self.user)
+        self.assertTrue(result.is_ok(), str(result))
+        order = result.unwrap()
+        self.assertEqual(order.items.count(), 3)
+        self.assertEqual(order.total_cents, 36300)
+        self.assertCountEqual(
+            list(order.items.values_list("product_id", "product_type", "product_slug")),
+            [(product.pk, product.product_type, product.slug) for product in products],
+        )
+        product_reads = [query["sql"] for query in queries if f'FROM "{Product._meta.db_table}"' in query["sql"]]
+        self.assertEqual(len(product_reads), 1, product_reads)
+
+    def test_unknown_product_rolls_back_all_order_lines(self):
+        data = OrderCreateData(
+            customer=self.customer,
+            currency=self.currency.code,
+            billing_address={"country": "RO"},
+            items=[
+                {"product_id": pk, "quantity": 1, "unit_price_cents": 10000, "description": "Cart item"}
+                for pk in (self.product.pk, uuid.uuid4())
+            ],
+        )
+        result = OrderService.create_order(data, self.user)
+        self.assertTrue(result.is_err())
+        self.assertIn("unknown product", result.unwrap_err())
+        self.assertFalse(Order.objects.exists())
+        self.assertFalse(OrderItem.objects.exists())
 
     def test_successful_order_creation(self):
         """Test successful order creation with all components"""

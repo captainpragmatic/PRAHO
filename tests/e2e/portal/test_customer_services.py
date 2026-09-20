@@ -6,6 +6,7 @@ success assertion. Usage history charts are not implemented; current usage is.
 """
 
 import re
+from datetime import date
 
 from playwright.sync_api import Page, expect
 
@@ -154,8 +155,8 @@ def test_services_pagination(monitored_customer_page: Page) -> None:
 def test_service_detail_shows_actual_dates_not_calculating(monitored_customer_page: Page, e2e_baseline) -> None:
     page = monitored_customer_page
     own = _detail(page, e2e_baseline)
-    day, _, year = own["service_renewal_date"].split(".")
-    expected_date = re.compile(rf"{int(day)} \w+\.? {year}")
+    day, month, year = map(int, own["service_renewal_date"].split("."))
+    expected_date = date(year, month, day).strftime("%b %d, %Y")
     expect(page.locator("#main-content")).to_contain_text(expected_date)
     expect(page.locator("#main-content")).not_to_contain_text("Calculating")
     page.get_by_role("button", name="Billing", exact=True).click()

@@ -23,6 +23,7 @@ class E2EStackContractTests(TestCase):
         self.addCleanup(directory.cleanup)
         self.logs = Path(directory.name)
         self.state = self.logs / "e2e-stack.json"
+        self.source = stack.source_version()
         for name, value in [("LOGS", self.logs), ("STATE", self.state), ("FIXTURES", self.logs / "fixtures.json")]:
             override = patch.object(stack, name, value)
             override.start()
@@ -71,7 +72,7 @@ class E2EStackContractTests(TestCase):
 
     def test_missing_logs_block_before_fixture_or_browser_execution(self):
         with (
-            patch.object(stack, "read_state", return_value={"ready": True}),
+            patch.object(stack, "read_state", return_value={"ready": True, "source": self.source}),
             patch.object(stack, "manage") as manage,
             self.assertRaisesRegex(RuntimeError, "log is missing or empty"),
         ):
@@ -82,7 +83,7 @@ class E2EStackContractTests(TestCase):
         for service in stack.SERVICES:
             (self.logs / f"{service}_e2e.log").write_text("server started")
         with (
-            patch.object(stack, "read_state", return_value={"ready": True}),
+            patch.object(stack, "read_state", return_value={"ready": True, "source": self.source}),
             patch.object(stack, "manage", side_effect=subprocess.CalledProcessError(1, "validate_e2e")),
             patch.object(stack, "login") as login,
             self.assertRaises(subprocess.CalledProcessError),
@@ -108,6 +109,7 @@ class E2EStackContractTests(TestCase):
         failed.poll.return_value = 1
         with (
             patch.object(stack, "require_free_ports"),
+            patch.object(stack, "source_version", return_value=self.source),
             patch.object(stack.signal, "signal"),
             patch.object(stack.subprocess, "Popen", return_value=failed) as launch,
             self.assertRaises(subprocess.CalledProcessError),
@@ -127,6 +129,7 @@ class E2EStackContractTests(TestCase):
         child.poll.side_effect = poll
         with (
             patch.object(stack, "require_free_ports"),
+            patch.object(stack, "source_version", return_value=self.source),
             patch.object(stack.signal, "signal", side_effect=lambda sig, handler: handlers.update({sig: handler})),
             patch.object(stack.subprocess, "Popen", return_value=child) as launch,
             self.assertRaisesRegex(RuntimeError, "setup cancelled"),
@@ -178,14 +181,20 @@ class E2EStackContractTests(TestCase):
             "--signoff",
         )
         with patch.object(stack, "ROOT", repository):
+            startup = {"source": stack.source_version()}
+            self.assertEqual(stack.require_stack_source(startup), startup["source"])
             clean = stack.source_fingerprint()
             self.assertFalse(clean["dirty"])
             source.write_text("changed\n")
             unstaged = stack.source_fingerprint()
             self.assertTrue(unstaged["dirty"])
             self.assertNotEqual(clean, unstaged)
+            with self.assertRaisesRegex(RuntimeError, "stack source differs"):
+                stack.require_stack_source(startup)
             git("add", "source.py")
             self.assertEqual(stack.source_fingerprint(), unstaged)
+            with self.assertRaisesRegex(RuntimeError, "stack source differs"):
+                stack.require_stack_source(startup)
             (repository / "new.py").write_text("new\n")
             self.assertNotEqual(stack.source_fingerprint(), unstaged)
             git("add", "new.py")
@@ -202,6 +211,54 @@ class E2EStackContractTests(TestCase):
             committed = stack.source_fingerprint()
             self.assertFalse(committed["dirty"])
             self.assertNotEqual(committed["source_sha256"], clean["source_sha256"])
+            with self.assertRaisesRegex(RuntimeError, "stack source differs"):
+                stack.require_stack_source(startup)
+            restarted = {"source": stack.source_version()}
+            self.assertEqual(stack.require_stack_source(restarted), restarted["source"])
+            git(
+                "-c",
+                "user.name=Test Runner",
+                "-c",
+                "user.email=test@example.com",
+                "commit",
+                "--allow-empty",
+                "-qm",
+                "test: same tree new head",
+                "--signoff",
+            )
+            self.assertEqual(stack.source_fingerprint(), committed)
+            with self.assertRaisesRegex(RuntimeError, "stack source differs"):
+                stack.require_stack_source(restarted)
+
+    def test_old_or_changed_stack_blocks_before_fixture_and_browser_execution(self):
+        for source in (None, {**self.source, "source_sha256": "old-source"}):
+            with (
+                self.subTest(source=source),
+                patch.object(stack, "read_state", return_value={"ready": True, "source": source}),
+                patch.object(stack, "manage") as manage,
+                self.assertRaisesRegex(RuntimeError, "make stop-e2e"),
+            ):
+                stack.test([])
+            manage.assert_not_called()
+
+    def test_source_changed_during_passing_pytest_is_a_failed_run(self):
+        for service in stack.SERVICES:
+            (self.logs / f"{service}_e2e.log").write_text("server started")
+        stack.FIXTURES.write_text("{}")
+        process = Mock(stdout=["1 passed\n"])
+        process.wait.return_value = 0
+        with (
+            patch.object(stack, "ROOT", self.logs),
+            patch.object(stack, "check", return_value={"source": self.source}),
+            patch.object(stack, "source_version", side_effect=[self.source, {**self.source, "head": "new-head"}]),
+            patch.object(stack.subprocess, "Popen", return_value=process),
+        ):
+            self.assertEqual(stack.test([]), 1)
+        evidence = json.loads(next((self.logs / "output/playwright/runs").glob("*/run.json")).read_text())
+        self.assertEqual(evidence["pytest_exit_code"], 0)
+        self.assertEqual(evidence["exit_code"], 1)
+        self.assertTrue(evidence["source_changed_during_run"])
+        self.assertEqual(evidence["stack"]["source"], self.source)
 
     def test_strict_policy_rejects_skip_and_xfail_in_a_real_pytest_session(self):
 

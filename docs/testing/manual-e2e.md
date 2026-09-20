@@ -21,7 +21,7 @@ The servers listen only on loopback: Platform `localhost:8700`, Portal `localhos
 
 The server databases are `services/platform/e2e-platform-<sys.platform>.sqlite3` and `services/portal/e2e-portal-<sys.platform>.sqlite3`. ORM tests use a separate test database. Do not point these settings at development/customer data. The management commands reject non-E2E settings and the wrong database path. Stopping verifies the recorded supervisor's command and instance nonce; occupied ports are reported, never cleared by killing an unknown process.
 
-Setup fails on migration/seed errors. Before testing, the runner checks log availability, fixture ownership, both independent customer memberships, real logins, persisted sessions, and a signed Portal-to-Platform company read. A missing prerequisite fails the run. Under the runner, any skip or xfail makes the session fail; no smaller passing declaration of coverage is accepted.
+Setup fails on migration/seed errors. The supervisor records the startup commit and source fingerprint before loading either application. Before testing, the runner requires that same source and checks log availability, fixture ownership, both independent customer memberships, real logins, persisted sessions, and a signed Portal-to-Platform company read. After editing, committing or rebasing, stop and restart the stack: the servers use `--noreload`. A missing prerequisite fails the run. Under the runner, any skip or xfail makes the session fail; no smaller passing declaration of coverage is accepted.
 
 ## Fixtures and isolation
 
@@ -50,7 +50,7 @@ Production fixes include sample-data integrity and real-model audit fields; elig
 
 ## Evidence and acceptance
 
-Each run writes `output/playwright/runs/<timestamp>/` containing `pytest.log`, JUnit, failure traces/screenshots, copied server logs, fixture manifest and `run.json`. Metadata records the Git head, staged/unstaged/untracked source fingerprint, dirty status, stack identity, command, exit status, and whether source changed during the run. Treat an exploratory run with changing source as diagnostic only.
+Each run writes `output/playwright/runs/<timestamp>/` containing `pytest.log`, JUnit, failure traces/screenshots, copied server logs, fixture manifest and `run.json`. Metadata records the Git head, staged/unstaged/untracked source fingerprint, dirty status, stack identity and startup source, command, pytest and final exit statuses, and whether source changed during the run. Source changes during execution fail the command even if pytest passed; those artifacts are diagnostic only.
 
 Acceptance requires two complete successful runs on the same unchanged stack and source, no unexpected skip/xfail, and no new unexpected browser/HTML/server errors. Expected errors are scoped to specific negative tests (for example, a missing Stripe key); a successful browser result does not mean a live card charge occurred.
 

@@ -732,7 +732,7 @@ class CompanyProfileForm(forms.Form):
 
     def clean_primary_phone(self) -> str:
         """Validate Romanian phone number format"""
-        phone = str(self.cleaned_data.get("primary_phone", "")).strip()
+        phone = re.sub(r"[\s.]", "", str(self.cleaned_data.get("primary_phone", "")))
         if phone and not re.fullmatch(r"(?:\+40|0)[0-9]{9}", phone):
             raise ValidationError(_("Invalid phone number format. Use Romanian format: +40.XX.XXX.XXXX"))
         return phone

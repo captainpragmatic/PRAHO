@@ -117,6 +117,7 @@ def check(*, during_startup: bool = False) -> dict:
     state = read_state()
     if not during_startup and not state.get("ready"):
         raise RuntimeError("E2E setup is still running. Wait for the ready message.")
+    require_stack_source(state)
     for service in SERVICES:
         path = LOGS / f"{service}_e2e.log"
         if not path.is_file() or path.stat().st_size == 0:
@@ -155,7 +156,14 @@ def serve(instance: str) -> None:
     signal.signal(signal.SIGINT, stop)
     with contextlib.ExitStack() as files:
         try:
-            STATE.write_text(json.dumps({"pid": os.getpid(), "instance": instance, "root": str(ROOT), "ready": False}))
+            state = {
+                "pid": os.getpid(),
+                "instance": instance,
+                "root": str(ROOT),
+                "ready": False,
+                "source": source_version(),
+            }
+            STATE.write_text(json.dumps(state))
             for service, port in SERVICES.items():
                 log = files.enter_context((LOGS / f"{service}_e2e.log").open("w"))
                 commands = [["migrate", "--noinput"]]
@@ -190,16 +198,8 @@ def serve(instance: str) -> None:
                         stderr=subprocess.STDOUT,
                     )
                 )
-            STATE.write_text(
-                json.dumps(
-                    {
-                        "pid": os.getpid(),
-                        "instance": instance,
-                        "root": str(ROOT),
-                        "children": [child.pid for child in children],
-                    }
-                )
-            )
+            state["children"] = [child.pid for child in children]
+            STATE.write_text(json.dumps(state))
             for _ in range(60):
                 if stopping or any(child.poll() is not None for child in children):
                     raise RuntimeError("E2E server exited during startup. See logs/*_e2e.log.")
@@ -278,10 +278,10 @@ def stop() -> None:
 
 def test(paths: list[str]) -> int:
     state = check()
+    # Recheck after health probes: runserver --noreload must still be executing this source.
+    source = require_stack_source(state)
     artifact = ROOT / "output/playwright/runs" / time.strftime("%Y%m%d-%H%M%S")
     artifact.mkdir(parents=True, exist_ok=False)
-    head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
-    fingerprint = source_fingerprint()
     command = [
         sys.executable,
         "-m",
@@ -302,16 +302,20 @@ def test(paths: list[str]) -> int:
         for line in process.stdout:
             print(line, end="", flush=True)
             log.write(line)
-        code = process.wait()
+        pytest_code = process.wait()
+    source_changed = source != source_version()
+    code = pytest_code or int(source_changed)
+    if source_changed:
+        print("E2E source changed during the run; results are diagnostic only. Restart the stack and repeat.")
     for service in SERVICES:
         shutil.copy2(LOGS / f"{service}_e2e.log", artifact)
     shutil.copy2(FIXTURES, artifact)
     (artifact / "run.json").write_text(
         json.dumps(
             {
-                "head": head,
-                **fingerprint,
-                "source_changed_during_run": fingerprint != source_fingerprint(),
+                **source,
+                "source_changed_during_run": source_changed,
+                "pytest_exit_code": pytest_code,
                 "exit_code": code,
                 "command": command,
                 "stack": state,
@@ -322,6 +326,22 @@ def test(paths: list[str]) -> int:
     )
     print(f"E2E evidence: {artifact}")
     return code
+
+
+def source_version() -> dict[str, str | bool]:
+    """Bind the source tree to its commit, including commits with identical trees."""
+    head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+    return {"head": head, **source_fingerprint()}
+
+
+def require_stack_source(state: dict) -> dict[str, str | bool]:
+    source = source_version()
+    if state.get("source") != source:
+        raise RuntimeError(
+            "E2E stack source differs from the current checkout or has no startup fingerprint. "
+            "Run make stop-e2e, then make dev-e2e before testing."
+        )
+    return source
 
 
 def source_fingerprint() -> dict[str, str | bool]:

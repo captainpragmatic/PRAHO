@@ -507,12 +507,19 @@ class BillingDataSyncService:
             )
             if response.get("success") is not True:
                 raise PlatformAPIError("Unable to refresh invoices")
-            rows = response.get("invoices", [])
-            invoices.extend(create_invoice_from_api(row) for row in rows)
-            pagination = response.get("pagination", {})
-            if pagination.get("current_page", page) != page:
+            rows = response.get("invoices")
+            pagination = response.get("pagination")
+            if (
+                not isinstance(rows, list)
+                or not isinstance(pagination, dict)
+                or type(pagination.get("current_page")) is not int
+                or not isinstance(pagination.get("has_next"), bool)
+            ):
+                raise PlatformAPIError("Incomplete invoice refresh metadata")
+            if pagination["current_page"] != page:
                 raise PlatformAPIError("Unexpected invoice page during refresh")
-            if not pagination.get("has_next", False):
+            invoices.extend(create_invoice_from_api(row) for row in rows)
+            if not pagination["has_next"]:
                 return invoices
             if not rows:
                 raise PlatformAPIError("Incomplete invoice refresh")

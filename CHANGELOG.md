@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- A manual E2E stack with guarded fixtures, signed API/session health checks, owned workflow scenarios and source-stamped run evidence. All 317 original cases have a coverage disposition; missing prerequisites and unexpected skips now fail the runner. Browser execution remains local/manual.
+- A manual E2E stack with guarded fixtures, signed API/session health checks, owned workflow scenarios and source-stamped run evidence. All 317 original cases have a coverage disposition; missing prerequisites, stale server source and unexpected skips now fail the runner. Browser execution remains local/manual.
 
 - A read-only `panel_cert_preflight` command checks Hetzner credentials, Cloudflare zone access, authoritative A/AAAA and per-address HTTP routing, with separate panel-certificate observations and a staged operator drill guide. Fatal issuance and trusted activation remain pending the live #436 drill.
 

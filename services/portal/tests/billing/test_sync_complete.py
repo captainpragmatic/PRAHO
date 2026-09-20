@@ -43,3 +43,31 @@ class InvoiceSyncContracts(SimpleTestCase):
                 self.assertRaises(PlatformAPIError),
             ):
                 service.sync_customer_invoices(101, 7)
+
+    def test_missing_or_malformed_metadata_cannot_truncate_a_refresh(self):
+        service = BillingDataSyncService()
+        first = {"success": True, "invoices": [row(1)], "pagination": {"has_next": True, "current_page": 1}}
+        for pagination in (
+            None,
+            {},
+            [],
+            {"current_page": 2},
+            {"has_next": False},
+            {"current_page": 2, "has_next": "false"},
+        ):
+            with self.subTest(pagination=pagination):
+                last = {"success": True, "invoices": [row(2)], "pagination": pagination}
+                with (
+                    patch.object(service.api_client, "post", side_effect=[first, last]) as post,
+                    self.assertRaises(PlatformAPIError),
+                ):
+                    service.sync_customer_invoices(101, 7)
+                self.assertEqual(post.call_count, 2)
+
+    def test_empty_terminal_page_is_distinct_from_missing_invoice_data(self):
+        service = BillingDataSyncService()
+        response = {"success": True, "pagination": {"has_next": False, "current_page": 1}}
+        with patch.object(service.api_client, "post", return_value={**response, "invoices": []}):
+            self.assertEqual(service.sync_customer_invoices(101, 7), [])
+        with patch.object(service.api_client, "post", return_value=response), self.assertRaises(PlatformAPIError):
+            service.sync_customer_invoices(101, 7)

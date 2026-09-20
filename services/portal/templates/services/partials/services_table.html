@@ -47,7 +47,7 @@
             {% badge service.status|status_label variant=service.status|status_variant icon=service.status|status_icon size="xs" rounded="full" css_class="w-28 justify-center" %}
           </td>
           <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-400">
-            {{ service.next_billing_date|romanian_date|default:"N/A" }}
+            {{ service.next_billing_date|date:"M d, Y"|default:"N/A" }}
           </td>
         </tr>
         {% endfor %}
