@@ -23,7 +23,7 @@
         {% icon "document" %} {% trans "Download PDF" %}
       </a>
       <!-- Refund Button for Staff -->
-      {% if user.is_staff_user and invoice.status == "paid" %}
+      {% if user.can_manage_financial_data and invoice.status == "paid" %}
         {% trans "Refund Invoice" as bt1 %}{% button bt1 data_action="invoke" data_invoke="showInvoiceRefundModal" variant="success" %}
       {% elif not user.is_staff_user and invoice.status == "paid" %}
         <!-- Refund Request Button for Customers -->
@@ -292,7 +292,7 @@
 </div>
 
 <!-- Invoice Refund Modal (for staff) -->
-{% if user.is_staff_user and invoice.status == "paid" %}
+{% if user.can_manage_financial_data and invoice.status == "paid" %}
 <div id="invoiceRefundModal" class="hidden fixed inset-0 z-50 overflow-y-auto">
   <div class="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
     <div class="fixed inset-0 transition-opacity" aria-hidden="true">
@@ -448,7 +448,7 @@ document.getElementById('invoiceRefundForm').addEventListener('submit', function
             // Reload page to show updated status
             window.location.reload();
         } else {
-            alert('Error: ' + data.error);
+            alert('Error: ' + (data.message || data.error));
             // Re-enable button
             submitBtn.disabled = false;
             submitBtn.innerHTML = '{% trans "Process Refund" %}';
@@ -595,7 +595,7 @@ document.getElementById('invoiceRefundRequestForm').addEventListener('submit', f
             alert('{{ refund_success_msg|escapejs }}');
             window.location.reload();
         } else {
-            alert('Error: ' + data.error);
+            alert('Error: ' + (data.message || data.error));
             // Re-enable button
             submitBtn.disabled = false;
             submitBtn.innerHTML = '{% trans "Submit Request" %}';

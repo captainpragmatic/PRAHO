@@ -37,7 +37,9 @@
         {% endif %}
 
         {% if order.status == "completed" %}
-          {% trans "Refund Order" as bt3 %}{% button bt3 data_action="invoke" data_invoke="showRefundModal" variant="success" %}
+          {% if user.can_manage_financial_data %}
+            {% trans "Refund Order" as bt3 %}{% button bt3 data_action="invoke" data_invoke="showRefundModal" variant="success" %}
+          {% endif %}
         {% endif %}
 
         {% if order.status != "cancelled" and order.status != "completed" %}
@@ -600,7 +602,7 @@ document.addEventListener('DOMContentLoaded', function() {
 {% endif %}
 
 <!-- Refund Modal (for staff) -->
-{% if is_staff and order.status == "completed" %}
+{% if user.can_manage_financial_data and order.status == "completed" %}
 <div id="refundModal" class="hidden fixed inset-0 z-50 overflow-y-auto">
   <div class="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
     <div class="fixed inset-0 transition-opacity" aria-hidden="true">
@@ -758,7 +760,7 @@ document.getElementById('refundForm').addEventListener('submit', function(e) {
             // Reload page to show updated status
             window.location.reload();
         } else {
-            alert('Error: ' + data.error);
+            alert('Error: ' + (data.message || data.error));
             // Re-enable button
             submitBtn.disabled = false;
             submitBtn.innerHTML = '{% trans "Process Refund" %}';
@@ -905,7 +907,7 @@ document.getElementById('orderRefundRequestForm').addEventListener('submit', fun
             alert('{{ refund_success_msg|escapejs }}');
             window.location.reload();
         } else {
-            alert('Error: ' + data.error);
+            alert('Error: ' + (data.message || data.error));
             // Re-enable button
             submitBtn.disabled = false;
             submitBtn.innerHTML = '{% trans "Submit Request" %}';

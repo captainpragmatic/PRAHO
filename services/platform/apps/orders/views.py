@@ -31,7 +31,7 @@ from django.views.decorators.http import require_POST
 from apps.billing.fiscal_identity import billing_country_code
 from apps.billing.models import Currency
 from apps.billing.refund_service import RefundData, RefundService
-from apps.common.decorators import staff_required_strict
+from apps.common.decorators import billing_staff_api_required, staff_required_strict
 from apps.common.mixins import get_search_context
 from apps.common.utils import json_error, json_success
 from apps.common.validators import log_security_event
@@ -995,7 +995,7 @@ def order_cancel(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
     return redirect("orders:order_detail", pk=pk)
 
 
-@staff_required_strict
+@billing_staff_api_required
 @require_POST
 def order_refund(request: HttpRequest, pk: uuid.UUID) -> JsonResponse:
     """

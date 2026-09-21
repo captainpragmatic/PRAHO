@@ -110,14 +110,19 @@ class InvoiceDetailViewTestCase(TestCase):
         self.assertContains(response, 'INV-DETAIL-001')
         self.assertContains(response, 'Test Service')
 
-    def test_invoice_detail_refund_button_gated_on_is_staff_user(self):
-        """Refund UI in invoice_detail.html must gate on user.is_staff_user.
+    def test_invoice_detail_refund_button_gated_on_financial_capability(self):
+        """Refund UI in invoice_detail.html gates on user.can_manage_financial_data.
 
-        Regression guard: the template previously gated on an undefined `is_staff`
-        context variable, so the staff "Refund Invoice" button rendered for NOBODY
-        (fail-closed) while the customer "Request Refund" branch rendered for everyone.
-        A support agent (is_staff=False, staff_role="support") has is_staff_user=True
-        and must see the staff button; a customer must see the request-refund button.
+        Two regressions are pinned here at once.
+
+        The original one: the template gated on an undefined `is_staff` context variable,
+        so the staff "Refund Invoice" button rendered for NOBODY (fail-closed) while the
+        customer "Request Refund" branch rendered for everyone. The billing-agent case below
+        still proves the staff button renders at all.
+
+        The second (#104 [M11]): the gate was then `is_staff_user`, which admits a support
+        agent — who the refund endpoint now refuses. Offering a control that always 403s is
+        its own defect, so support must see neither the operator control nor the customer one.
         """
         paid_invoice = Invoice.objects.create(
             customer=self.customer,
@@ -127,25 +132,34 @@ class InvoiceDetailViewTestCase(TestCase):
             status='paid',
         )
 
-        # Support agent: Django is_staff flag is False, but staff_role grants is_staff_user
+        def _render_for(user):
+            request = self.factory.get(f'/app/billing/invoices/{paid_invoice.pk}/')
+            request.user = user
+            request = self.add_middleware_to_request(request)
+            return invoice_detail(request, paid_invoice.pk)
+
+        # Billing agent: has financial capability, sees the operator control.
+        billing_user = User.objects.create_user(email='billing-refund@test.ro', password='testpass')
+        billing_user.is_staff = False
+        billing_user.staff_role = 'billing'
+        billing_user.save()
+        billing_response = _render_for(billing_user)
+        self.assertEqual(billing_response.status_code, 200)
+        self.assertContains(billing_response, 'Refund Invoice')
+        self.assertNotContains(billing_response, 'Request Refund')
+
+        # Support agent: staff, but without financial capability — neither control.
         support_user = User.objects.create_user(email='support-refund@test.ro', password='testpass')
         support_user.is_staff = False
         support_user.staff_role = 'support'
         support_user.save()
-
-        request = self.factory.get(f'/app/billing/invoices/{paid_invoice.pk}/')
-        request.user = support_user
-        request = self.add_middleware_to_request(request)
-        staff_response = invoice_detail(request, paid_invoice.pk)
-        self.assertEqual(staff_response.status_code, 200)
-        self.assertContains(staff_response, 'Refund Invoice')
-        self.assertNotContains(staff_response, 'Request Refund')
+        support_response = _render_for(support_user)
+        self.assertEqual(support_response.status_code, 200)
+        self.assertNotContains(support_response, 'Refund Invoice')
+        self.assertNotContains(support_response, 'Request Refund')
 
         # Customer (membership only) sees the request-refund variant, never the staff button
-        request = self.factory.get(f'/app/billing/invoices/{paid_invoice.pk}/')
-        request.user = self.user
-        request = self.add_middleware_to_request(request)
-        customer_response = invoice_detail(request, paid_invoice.pk)
+        customer_response = _render_for(self.user)
         self.assertEqual(customer_response.status_code, 200)
         self.assertContains(customer_response, 'Request Refund')
         self.assertNotContains(customer_response, 'Refund Invoice')

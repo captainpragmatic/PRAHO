@@ -48,11 +48,11 @@ from apps.billing.pdf_generators import RomanianInvoicePDFGenerator, RomanianPro
 from apps.common.constants import DEFAULT_PAGE_SIZE
 from apps.common.decorators import (
     billing_configuration_required,
+    billing_staff_api_required,
     billing_staff_required,
     can_edit_proforma,
     can_manage_financial_data,
     staff_rate_limit,
-    staff_required,
 )
 from apps.common.mixins import get_search_context
 from apps.common.tax_service import TaxService
@@ -104,6 +104,47 @@ def _get_max_payment_amount_cents() -> int:
     from apps.settings.services import SettingsService  # noqa: PLC0415  # Deferred: avoids circular import
 
     return SettingsService.get_integer_setting("billing.max_payment_amount_cents", _DEFAULT_MAX_PAYMENT_AMOUNT_CENTS)
+
+
+# #104 [M11]: customer-side roles permitted to initiate a refund through the portal API.
+# "tech" and "viewer" are deliberately excluded (CustomerMembership.CUSTOMER_ROLE_CHOICES).
+REFUND_CUSTOMER_ROLES = frozenset({"owner", "billing"})
+
+# Widest signed integer any supported backend will accept as a primary key.
+_MAX_DB_INTEGER = 2**63 - 1
+
+
+def _refund_actor_is_authorized(raw_user_id: object, customer: Customer) -> bool:
+    """Whether the signed body's actor may initiate a refund for this customer.
+
+    #104 [M11]: membership alone is not authority to move money. The shared
+    `_validate_user_membership` gate filters on user/customer/is_active and never on role,
+    so a read-only "viewer" or a "tech" member reached RefundService.
+    """
+    from apps.users.models import CustomerMembership  # noqa: PLC0415  # Deferred: avoids circular import
+
+    try:
+        actor_user_id = int(raw_user_id)  # type: ignore[call-overload]  # coercion IS the validation
+        if not 0 < actor_user_id <= _MAX_DB_INTEGER:
+            # Outside the primary-key domain. An unbounded value coerces cleanly here and
+            # then overflows inside the ORM, which the broad handler below turns into a 500.
+            raise ValueError(actor_user_id)
+    except (TypeError, ValueError):
+        # A malformed actor id is a denial, not a server error: an uncoerced value reaches
+        # the ORM as an invalid lookup and surfaces as a 500.
+        logger.warning("⚠️ [API] Refused refund for customer %s — unusable actor id %r", customer.id, raw_user_id)
+        return False
+
+    membership = CustomerMembership.objects.filter(user_id=actor_user_id, customer=customer, is_active=True).first()
+    if membership is None or membership.role not in REFUND_CUSTOMER_ROLES:
+        logger.warning(
+            "⚠️ [API] Refused refund for customer %s — actor %r role %r lacks financial standing",
+            customer.id,
+            actor_user_id,
+            getattr(membership, "role", None),
+        )
+        return False
+    return True
 
 
 def _require_customer_auth_for_portal_api(request: HttpRequest) -> tuple[Customer | None, JsonResponse | None]:
@@ -1616,7 +1657,7 @@ def vat_report(request: HttpRequest) -> HttpResponse:
     return render(request, "billing/vat_report.html", context)
 
 
-@staff_required
+@billing_staff_api_required
 @require_POST
 def invoice_refund(request: HttpRequest, pk: uuid.UUID) -> JsonResponse:
     """
@@ -1991,6 +2032,9 @@ def api_process_refund(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911  
             return JsonResponse({"success": False, "error": "customer_id must be a valid integer"}, status=400)
         if customer_id_int != customer.id:
             return JsonResponse({"success": False, "error": "customer_id mismatch"}, status=403)
+
+        if not _refund_actor_is_authorized(data.get("user_id"), customer):
+            return JsonResponse({"success": False, "error": "Refund requires an owner or billing role"}, status=403)
 
         # Look up payment and validate it has a linked invoice
         try:

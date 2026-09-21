@@ -400,7 +400,7 @@ class Order(ConcurrentTransitionMixin, models.Model):
         try:
             with transaction.atomic():
                 return qs.select_for_update(of=("self",)).values_list("order_number", flat=True).first()
-        except (NotSupportedError, DatabaseError):
+        except NotSupportedError:
             if connection.vendor != "sqlite":
                 logger.error(
                     "⚠️ [Order] select_for_update failed on %s — TOCTOU race possible",
@@ -509,6 +509,18 @@ class Order(ConcurrentTransitionMixin, models.Model):
                 else:
                     _apply(committed_discount, persist=True)
         except (NotSupportedError, DatabaseError):
+            # Deliberately BROADER than the sibling fallback in `_locked_latest_order_number`,
+            # and the difference is the caller, not the risk. That helper propagates into
+            # `Order.save()`, where a real DatabaseError surfaces to the request or task — so
+            # narrowing it makes distress visible. This method's only item-path caller is the
+            # OrderItem post_save/post_delete signal, which wraps everything in a blanket
+            # `except Exception` (orders/signals.py:534, :589). Narrowing here would not
+            # surface anything: the error would be logged and dropped while the OrderItem
+            # INSERT still committed, leaving totals that omit the item entirely. Recomputing
+            # from the in-memory discount keeps totals consistent with items; the stale
+            # discount it risks is the lesser error. Narrowing this site requires the signal
+            # handlers to stop swallowing first (#104 [M12]).
+            #
             # Backend without row locking (or select_for_update outside a usable transaction):
             # recompute from the in-memory discount. Log on non-sqlite, where this is a real
             # TOCTOU exposure rather than an expected limitation.

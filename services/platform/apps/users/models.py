@@ -170,11 +170,29 @@ class User(AbstractUser):
         return full_name if full_name.strip() else self.email
 
     VALID_STAFF_ROLES: ClassVar[frozenset[str]] = frozenset(role for role, _ in STAFF_ROLE_CHOICES)
+    # Roles permitted to perform financial operations (ADR-0024). "support" is excluded.
+    FINANCIAL_STAFF_ROLES: ClassVar[frozenset[str]] = frozenset({"admin", "billing", "manager"})
 
     @property
     def is_staff_user(self) -> bool:
         """Check if user is internal staff (by role, Django flag, or superuser status)"""
         return bool(self.staff_role) or self.is_staff or self.is_superuser
+
+    @property
+    def can_manage_financial_data(self) -> bool:
+        """Whether this user may perform financial operations (refunds, payments, pricing).
+
+        The single definition of the financial-operations role set. ADR-0024 assigns
+        financial operations to the billing role; ``support`` is deliberately excluded.
+        ``apps.common.decorators.can_manage_financial_data`` and the
+        ``billing_staff_api_required`` gate both resolve through here, and templates read it
+        directly so a control is never offered to a user the endpoint will refuse (#104 [M11]).
+        """
+        if self.is_superuser:
+            return True
+        if not self.is_staff_user:
+            return False
+        return self.staff_role in self.FINANCIAL_STAFF_ROLES
 
     @property
     def is_customer_user(self) -> bool:
