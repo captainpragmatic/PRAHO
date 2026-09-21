@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+_No unreleased changes._
+
+---
+
+## [0.29.0] - 2026-09-21
+
 ### Added
 
 - A manual E2E stack with guarded fixtures, signed API/session health checks, owned workflow scenarios and source-stamped run evidence. All 317 original cases have a coverage disposition; missing prerequisites, stale server source and unexpected skips now fail the runner. Browser execution remains local/manual.

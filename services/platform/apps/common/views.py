@@ -107,7 +107,7 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:
         "recent_tickets": recent_tickets,
         "system_status": system_status,
         "current_time": timezone.now(),
-        "app_version": "1.0.0",
+        "app_version": "0.29.0",
         "current_year": timezone.now().year,
     }
 
