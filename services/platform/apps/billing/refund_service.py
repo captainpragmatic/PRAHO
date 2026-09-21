@@ -31,6 +31,8 @@ _FALLBACK_ORDER_TOTAL_CENTS = 15_000  # 150 EUR — safe fallback for missing or
 _FALLBACK_INVOICE_TOTAL_CENTS = 11_900  # 119 EUR — safe fallback for missing invoice total
 _REFUND_RESERVING_STATUSES = ("pending", "processing", "approved", "completed")
 _REFUND_IDEMPOTENCY_RETRY_WINDOW = timedelta(hours=23)
+# Derived, not restated: the column is the authority on what it accepts.
+_REFUND_TYPE_VALUES = frozenset(value for value, _label in Refund.TYPE_CHOICES)
 
 
 class RefundType(enum.Enum):
@@ -60,7 +62,9 @@ class RefundReason(enum.Enum):
     OTHER = "other"
 
 
-def _choice_value(raw: object, default: str, *, enum_type: type[enum.Enum]) -> str:
+def _choice_value(
+    raw: object, default: str, *, enum_type: type[enum.Enum], allowed: frozenset[str] | None = None
+) -> str:
     """Canonicalize a choices-field value that may arrive as an enum member.
 
     ``RefundType`` and ``RefundReason`` are plain ``enum.Enum``, so ``str(RefundType.FULL)``
@@ -84,7 +88,14 @@ def _choice_value(raw: object, default: str, *, enum_type: type[enum.Enum]) -> s
         # wrong answer. Refuse it rather than launder it into the column.
         logger.warning("⚠️ [Billing] Ignored %r written to a %s column", raw, enum_type.__name__)
         return default
-    return str(raw)
+    value = str(raw)
+    if allowed is not None and value not in allowed:
+        # Only passed for closed sets. `reason` deliberately omits it: the portal forwards
+        # customer free text, and collapsing that to a default would destroy what the
+        # customer actually said.
+        logger.warning("⚠️ [Billing] Ignored unknown %s value %r", enum_type.__name__, value)
+        return default
+    return value
 
 
 class RefundData(TypedDict, total=False):
@@ -258,7 +269,9 @@ class RefundService:
         refund_data: RefundData,
     ) -> Result[Refund | None, str]:
         """Find the one in-flight command that represents a repeated request."""
-        refund_type = _choice_value(refund_data.get("refund_type"), "full", enum_type=RefundType)
+        refund_type = _choice_value(
+            refund_data.get("refund_type"), "full", enum_type=RefundType, allowed=_REFUND_TYPE_VALUES
+        )
         candidates = Refund.objects.select_for_update(of=("self",)).filter(
             payment=payment,
             order=order,
@@ -293,7 +306,9 @@ class RefundService:
         amount_cents = amount_result.unwrap()
         effective_data = refund_data.copy()
         effective_data["amount_cents"] = amount_cents
-        effective_data["refund_type"] = _choice_value(effective_data.get("refund_type"), "full", enum_type=RefundType)
+        effective_data["refund_type"] = _choice_value(
+            effective_data.get("refund_type"), "full", enum_type=RefundType, allowed=_REFUND_TYPE_VALUES
+        )
         return RefundService._create_refund_record(
             RefundRecordParams(
                 refund_id=uuid.uuid4(),
@@ -1264,7 +1279,10 @@ class RefundService:
                 currency=currency,
                 original_amount_cents=original_cents,
                 refund_type=_choice_value(
-                    refund_data.get("refund_type") if refund_data else None, "full", enum_type=RefundType
+                    refund_data.get("refund_type") if refund_data else None,
+                    "full",
+                    enum_type=RefundType,
+                    allowed=_REFUND_TYPE_VALUES,
                 ),
                 reason=_choice_value(
                     refund_data.get("reason") if refund_data else None,

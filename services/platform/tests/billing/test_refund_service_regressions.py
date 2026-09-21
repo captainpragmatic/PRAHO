@@ -2407,6 +2407,21 @@ class TestRefundRecordProvenance(TestCase):
             msg="The retry did not see the in-flight refund — it would reserve a second one.",
         )
 
+    def test_an_unknown_refund_type_is_refused_rather_than_stored(self) -> None:
+        """``refund_type`` is a closed two-value set, unlike ``reason``.
+
+        ``billing/views.py:1683`` takes it straight from POST and only checks it is non-empty,
+        so an arbitrary string reached a choices column. It is validated against the column's
+        own choices; ``reason`` deliberately is not, because the portal forwards customer free
+        text and collapsing that would destroy what the customer said.
+        """
+        params = self._params(refund_data={"refund_type": "sideways", "reason": "customer_request"})
+
+        result = RefundService._create_refund_record(params)
+
+        self.assertTrue(result.is_ok())
+        self.assertEqual(Refund.objects.get().refund_type, "full")
+
     def test_an_enum_from_the_wrong_column_is_refused_rather_than_laundered(self) -> None:
         """``RefundType.FULL`` as a *reason* would canonicalize to ``"full"``.
 

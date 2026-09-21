@@ -113,3 +113,53 @@ class OrderRefundAuthorizationTests(TestCase):
             self.assertEqual(response.status_code, 401)
             self.assertEqual(response["Content-Type"], "application/json")
             refund.assert_not_called()
+
+
+class OrderRefundReasonIsHonouredTests(TestCase):
+    """The staff modal's reason selection must reach the service.
+
+    ``order_detail.html:654`` posts ``name="refund_reason"``; the view read
+    ``request.POST.get("reason", "")`` and so received an empty string on every staff refund.
+    The operator's selection had never been recorded — and once the service began folding an
+    empty reason to its default, that silence became an affirmative "customer_request",
+    which is a false claim on an audit record rather than a missing one.
+    """
+
+    def setUp(self) -> None:
+        self.client = Client()
+        self.currency, _ = Currency.objects.get_or_create(
+            code="RON", defaults={"name": "Romanian Leu", "symbol": "lei", "decimals": 2}
+        )
+        self.customer = Customer.objects.create(
+            name="Reason Honoured SRL",
+            customer_type="company",
+            status="active",
+            primary_email="reason-honoured@test.ro",
+        )
+        self.billing_user = User.objects.create_user(
+            email="rh-billing@test.ro", password="TestPass123!", is_staff=True, staff_role="billing"
+        )
+        self.order = Order.objects.create(
+            customer=self.customer, currency=self.currency, status="completed", total_cents=11900
+        )
+        self.url = reverse("orders:order_refund", kwargs={"pk": self.order.id})
+
+    def _post(self, payload: dict[str, str]) -> dict[str, object]:
+        self.client.force_login(self.billing_user)
+        with patch(REFUND_SERVICE) as refund:
+            refund.return_value.is_ok.return_value = False
+            refund.return_value.unwrap_err.return_value = "stub"
+            self.client.post(self.url, payload)
+            refund.assert_called_once()
+            return refund.call_args[0][1]
+
+    def test_the_selected_reason_reaches_the_service(self) -> None:
+        refund_data = self._post({"refund_type": "full", "refund_reason": "dispute"})
+
+        self.assertEqual(refund_data["reason"], "dispute")
+
+    def test_a_non_form_caller_may_still_use_the_plain_key(self) -> None:
+        """API callers and existing tests post `reason`; that contract is preserved."""
+        refund_data = self._post({"refund_type": "full", "reason": "fraud"})
+
+        self.assertEqual(refund_data["reason"], "fraud")
