@@ -98,8 +98,6 @@ class TestEFacturaAuditServiceLogXmlGenerated(TestCase):
         doc = _make_mock_document()
         mocks = _patch_audit_imports()
         with (
-            patch("apps.audit.services.BusinessEventData", mocks["BusinessEventData"]),
-            patch("apps.audit.services.AuditContext", mocks["AuditContext"]),
             patch("apps.audit.services.BillingAuditService", mocks["BillingAuditService"]),
         ):
             EFacturaAuditService.log_xml_generated(invoice, doc, xml_hash="custom_hash")
@@ -111,8 +109,6 @@ class TestEFacturaAuditServiceLogXmlGenerated(TestCase):
         invoice = _make_mock_invoice()
         doc = _make_mock_document()
         with (
-            patch("apps.audit.services.BusinessEventData", MagicMock()),
-            patch("apps.audit.services.AuditContext", MagicMock()),
             patch("apps.audit.services.BillingAuditService") as mock_bas,
         ):
             mock_bas.log_invoice_event.side_effect = RuntimeError("boom")
@@ -125,8 +121,6 @@ class TestEFacturaAuditServiceLogXmlGenerated(TestCase):
         invoice = _make_mock_invoice()
         doc = _make_mock_document(xml_hash="doc_hash_value")
         with (
-            patch("apps.audit.services.BusinessEventData", MagicMock()),
-            patch("apps.audit.services.AuditContext", MagicMock()),
             patch("apps.audit.services.BillingAuditService"),
         ):
             EFacturaAuditService.log_xml_generated(invoice, doc, xml_hash="")
@@ -178,8 +172,6 @@ class TestEFacturaAuditServiceLogSubmission(TestCase):
     @contextmanager
     def _patches(self):
         with ExitStack() as stack:
-            stack.enter_context(patch("apps.audit.services.BusinessEventData", MagicMock()))
-            stack.enter_context(patch("apps.audit.services.AuditContext", MagicMock()))
             stack.enter_context(patch("apps.audit.services.BillingAuditService"))
             stack.enter_context(patch("apps.audit.services.AuditService"))
             stack.enter_context(patch("apps.audit.services.ComplianceEventRequest", MagicMock()))
@@ -209,8 +201,6 @@ class TestEFacturaAuditServiceLogSubmission(TestCase):
         invoice = _make_mock_invoice()
         doc = _make_mock_document()
         with (
-            patch("apps.audit.services.BusinessEventData", MagicMock()),
-            patch("apps.audit.services.AuditContext", MagicMock()),
             patch("apps.audit.services.BillingAuditService") as mock_bas,
             patch("apps.audit.services.AuditService"),
             patch("apps.audit.services.ComplianceEventRequest", MagicMock()),
@@ -226,8 +216,6 @@ class TestEFacturaAuditServiceLogStatusChange(TestCase):
         invoice = _make_mock_invoice()
         doc = _make_mock_document()
         with (
-            patch("apps.audit.services.BusinessEventData", MagicMock()),
-            patch("apps.audit.services.AuditContext", MagicMock()),
             patch("apps.audit.services.BillingAuditService") as mock_bas,
         ):
             EFacturaAuditService.log_status_change(invoice, doc, "submitted", "accepted")
@@ -239,8 +227,6 @@ class TestEFacturaAuditServiceLogStatusChange(TestCase):
         invoice = _make_mock_invoice()
         doc = _make_mock_document()
         with (
-            patch("apps.audit.services.BusinessEventData", MagicMock()),
-            patch("apps.audit.services.AuditContext", MagicMock()),
             patch("apps.audit.services.BillingAuditService") as mock_bas,
         ):
             mock_bas.log_invoice_event.side_effect = RuntimeError("boom")
@@ -251,8 +237,6 @@ class TestEFacturaAuditServiceLogAccepted(TestCase):
     @contextmanager
     def _patches(self):
         with ExitStack() as stack:
-            stack.enter_context(patch("apps.audit.services.BusinessEventData", MagicMock()))
-            stack.enter_context(patch("apps.audit.services.AuditContext", MagicMock()))
             stack.enter_context(patch("apps.audit.services.BillingAuditService"))
             stack.enter_context(patch("apps.audit.services.AuditService"))
             stack.enter_context(patch("apps.audit.services.ComplianceEventRequest", MagicMock()))
@@ -288,8 +272,6 @@ class TestEFacturaAuditServiceLogAccepted(TestCase):
         invoice = _make_mock_invoice()
         doc = _make_mock_document()
         with (
-            patch("apps.audit.services.BusinessEventData", MagicMock()),
-            patch("apps.audit.services.AuditContext", MagicMock()),
             patch("apps.audit.services.BillingAuditService") as mock_bas,
             patch("apps.audit.services.AuditService"),
             patch("apps.audit.services.ComplianceEventRequest", MagicMock()),
@@ -303,8 +285,6 @@ class TestEFacturaAuditServiceLogRejected(TestCase):
     @contextmanager
     def _patches(self):
         with ExitStack() as stack:
-            stack.enter_context(patch("apps.audit.services.BusinessEventData", MagicMock()))
-            stack.enter_context(patch("apps.audit.services.AuditContext", MagicMock()))
             stack.enter_context(patch("apps.audit.services.BillingAuditService"))
             stack.enter_context(patch("apps.audit.services.AuditService"))
             stack.enter_context(patch("apps.audit.services.ComplianceEventRequest", MagicMock()))
@@ -326,8 +306,6 @@ class TestEFacturaAuditServiceLogRejected(TestCase):
         invoice = _make_mock_invoice()
         doc = _make_mock_document()
         with (
-            patch("apps.audit.services.BusinessEventData", MagicMock()),
-            patch("apps.audit.services.AuditContext", MagicMock()),
             patch("apps.audit.services.BillingAuditService") as mock_bas,
         ):
             mock_bas.log_invoice_event.side_effect = RuntimeError("boom")
@@ -338,8 +316,6 @@ class TestEFacturaAuditServiceLogRetry(TestCase):
     @contextmanager
     def _patches(self):
         with ExitStack() as stack:
-            stack.enter_context(patch("apps.audit.services.BusinessEventData", MagicMock()))
-            stack.enter_context(patch("apps.audit.services.AuditContext", MagicMock()))
             stack.enter_context(patch("apps.audit.services.BillingAuditService"))
             yield
 
@@ -366,8 +342,6 @@ class TestEFacturaAuditServiceLogRetry(TestCase):
         invoice = _make_mock_invoice()
         doc = _make_mock_document()
         with (
-            patch("apps.audit.services.BusinessEventData", MagicMock()),
-            patch("apps.audit.services.AuditContext", MagicMock()),
             patch("apps.audit.services.BillingAuditService") as mock_bas,
         ):
             mock_bas.log_invoice_event.side_effect = RuntimeError("boom")
@@ -428,8 +402,6 @@ class TestEFacturaAuditServiceLogDownload(TestCase):
         invoice = _make_mock_invoice()
         doc = _make_mock_document()
         with (
-            patch("apps.audit.services.BusinessEventData", MagicMock()),
-            patch("apps.audit.services.AuditContext", MagicMock()),
             patch("apps.audit.services.BillingAuditService") as mock_bas,
         ):
             EFacturaAuditService.log_download_completed(invoice, doc, file_path="/tmp/inv.pdf")  # noqa: S108
@@ -441,8 +413,6 @@ class TestEFacturaAuditServiceLogDownload(TestCase):
         invoice = _make_mock_invoice()
         doc = _make_mock_document()
         with (
-            patch("apps.audit.services.BusinessEventData", MagicMock()),
-            patch("apps.audit.services.AuditContext", MagicMock()),
             patch("apps.audit.services.BillingAuditService") as mock_bas,
         ):
             mock_bas.log_invoice_event.side_effect = RuntimeError("boom")
@@ -1106,3 +1076,60 @@ class TestRegisterScheduledTasks(TestCase):
             mock_schedule.HOURLY = 2
             register_scheduled_tasks()
         assert mock_schedule.objects.update_or_create.call_count == 5
+
+
+class TestEFacturaAuditPayloadReachesTheAuditService(TestCase):
+    """The e-Factura audit calls constructed ``BusinessEventData(metadata=...)`` — a kwarg that
+    dataclass does not declare — so every one of them raised ``TypeError`` into a surrounding
+    ``except Exception`` and ``log_invoice_event`` was never reached.
+
+    Nine ``# type: ignore[call-arg]`` comments suppressed exactly that diagnostic, and the tests
+    patched ``BusinessEventData``/``AuditContext`` with ``MagicMock``s that accept any kwarg — so
+    the suite proved the call happened while the real constructor would have rejected it.
+
+    ``AuditContext.metadata`` is the established channel: ``audit/services.py:1848`` merges
+    ``**event_data.context.metadata`` into the event, and ``:664`` reads ``severity`` out of it.
+    These assertions check the payload *arrives*, not merely that a mock was called.
+    """
+
+    def _capture(self, call):
+        from apps.billing.efactura.audit import EFacturaAuditService  # noqa: PLC0415
+
+        with patch("apps.audit.services.BillingAuditService") as mock_bas:
+            call(EFacturaAuditService)
+        mock_bas.log_invoice_event.assert_called_once()
+        return mock_bas.log_invoice_event.call_args[0][0]
+
+    def test_xml_generation_metadata_reaches_the_audit_context(self) -> None:
+        doc = _make_mock_document()
+        event = self._capture(
+            lambda svc: svc.log_xml_generated(_make_mock_invoice(), doc, xml_hash="custom_hash")
+        )
+
+        self.assertEqual(event.event_type, "invoice_xml_generated")
+        self.assertEqual(event.context.actor_type, "system")
+        self.assertEqual(event.context.metadata["xml_hash"], "custom_hash")
+        self.assertEqual(event.context.metadata["efactura_document_id"], str(doc.id))
+
+    def test_submission_failure_carries_its_severity_through_metadata(self) -> None:
+        """``severity`` was passed to ``AuditContext``, which has no such field. It belongs in
+        metadata, which is where ``AuditService.log_event`` reads it from."""
+        doc = _make_mock_document()
+        event = self._capture(
+            lambda svc: svc.log_submission_attempt(
+                _make_mock_invoice(), doc, success=False, error_message="ANAF rejected the upload"
+            )
+        )
+
+        self.assertEqual(event.event_type, "efactura_submission_failed")
+        self.assertEqual(event.context.metadata["severity"], "high")
+        self.assertEqual(event.context.metadata["error_message"], "ANAF rejected the upload")
+
+    def test_a_successful_submission_is_medium_severity(self) -> None:
+        """The conditional expression behind the severity must survive the move intact."""
+        event = self._capture(
+            lambda svc: svc.log_submission_attempt(_make_mock_invoice(), _make_mock_document(), success=True)
+        )
+
+        self.assertEqual(event.event_type, "efactura_submitted")
+        self.assertEqual(event.context.metadata["severity"], "medium")

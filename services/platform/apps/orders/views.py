@@ -1019,7 +1019,7 @@ def order_refund(request: HttpRequest, pk: uuid.UUID) -> JsonResponse:
     refund_data["user_id"] = str(request.user.id)
     refund_data["user_email"] = request.user.email
 
-    result = RefundService.refund_order(str(order.id), refund_data)
+    result = RefundService.refund_order(str(order.id), refund_data, actor=request.user)
 
     if result.is_ok():
         log_security_event(

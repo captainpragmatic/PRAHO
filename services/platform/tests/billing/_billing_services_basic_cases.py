@@ -100,7 +100,6 @@ class RefundServiceComprehensiveTestCase(TestCase):
             'amount_cents': 0,
             'reason': RefundReason.CUSTOMER_REQUEST,
             'notes': 'Test refund',
-            'initiated_by': self.user,
             'external_refund_id': None,
             'process_payment_refund': False,
         }
@@ -138,7 +137,6 @@ class RefundServiceComprehensiveTestCase(TestCase):
             'amount_cents': 0,
             'reason': RefundReason.CUSTOMER_REQUEST,
             'notes': 'Test refund',
-            'initiated_by': self.user,
             'external_refund_id': None,
             'process_payment_refund': False,
         }
@@ -158,7 +156,6 @@ class RefundServiceComprehensiveTestCase(TestCase):
             'amount_cents': 0,
             'reason': RefundReason.CUSTOMER_REQUEST,
             'notes': 'Test refund',
-            'initiated_by': self.user,
             'external_refund_id': None,
             'process_payment_refund': False,
         }
@@ -252,7 +249,6 @@ class RefundServiceErrorHandlingTestCase(TestCase):
                 'amount_cents': 0,
                 'reason': RefundReason.CUSTOMER_REQUEST,
                 'notes': 'Test refund',
-                'initiated_by': None,
                 'external_refund_id': None,
                 'process_payment_refund': False,
             }

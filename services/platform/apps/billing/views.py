@@ -13,7 +13,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
-    pass
+    from apps.users.models import User
 
 from django.conf import settings
 from django.contrib import messages
@@ -114,8 +114,11 @@ REFUND_CUSTOMER_ROLES = frozenset({"owner", "billing"})
 _MAX_DB_INTEGER = 2**63 - 1
 
 
-def _refund_actor_is_authorized(raw_user_id: object, customer: Customer) -> bool:
-    """Whether the signed body's actor may initiate a refund for this customer.
+def _resolve_authorized_refund_actor(raw_user_id: object, customer: Customer) -> User | None:
+    """The signed body's actor, if they may initiate a refund for this customer, else None.
+
+    Returns the resolved user rather than a bare bool so the caller can record *who* issued
+    the refund. The authorization decision is unchanged — membership plus role, nothing else.
 
     #104 [M11]: membership alone is not authority to move money. The shared
     `_validate_user_membership` gate filters on user/customer/is_active and never on role,
@@ -133,9 +136,13 @@ def _refund_actor_is_authorized(raw_user_id: object, customer: Customer) -> bool
         # A malformed actor id is a denial, not a server error: an uncoerced value reaches
         # the ORM as an invalid lookup and surfaces as a 500.
         logger.warning("⚠️ [API] Refused refund for customer %s — unusable actor id %r", customer.id, raw_user_id)
-        return False
+        return None
 
-    membership = CustomerMembership.objects.filter(user_id=actor_user_id, customer=customer, is_active=True).first()
+    membership = (
+        CustomerMembership.objects.filter(user_id=actor_user_id, customer=customer, is_active=True)
+        .select_related("user")
+        .first()
+    )
     if membership is None or membership.role not in REFUND_CUSTOMER_ROLES:
         logger.warning(
             "⚠️ [API] Refused refund for customer %s — actor %r role %r lacks financial standing",
@@ -143,8 +150,8 @@ def _refund_actor_is_authorized(raw_user_id: object, customer: Customer) -> bool
             actor_user_id,
             getattr(membership, "role", None),
         )
-        return False
-    return True
+        return None
+    return membership.user
 
 
 def _require_customer_auth_for_portal_api(request: HttpRequest) -> tuple[Customer | None, JsonResponse | None]:
@@ -1707,7 +1714,7 @@ def invoice_refund(request: HttpRequest, pk: uuid.UUID) -> JsonResponse:
             "user_email": request.user.email,
         }
 
-        result = RefundService.refund_invoice(invoice.id, refund_data)
+        result = RefundService.refund_invoice(invoice.id, refund_data, actor=request.user)
         if result.is_ok():
             refund_result = result.unwrap()
             refund_id = refund_result.get("refund_id")
@@ -2020,8 +2027,6 @@ def api_process_refund(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911  
         data = json.loads(request.body)
         payment_id = data.get("payment_id")
         customer_id = data.get("customer_id")
-        data.get("amount_cents")
-        data.get("reason", "API refund request")
 
         # Validate required fields
         if not payment_id:
@@ -2033,7 +2038,8 @@ def api_process_refund(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911  
         if customer_id_int != customer.id:
             return JsonResponse({"success": False, "error": "customer_id mismatch"}, status=403)
 
-        if not _refund_actor_is_authorized(data.get("user_id"), customer):
+        actor = _resolve_authorized_refund_actor(data.get("user_id"), customer)
+        if actor is None:
             return JsonResponse({"success": False, "error": "Refund requires an owner or billing role"}, status=403)
 
         # Look up payment and validate it has a linked invoice
@@ -2050,7 +2056,9 @@ def api_process_refund(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911  
             return JsonResponse({"success": False, "error": "Payment does not belong to this customer"}, status=403)
 
         amount_cents = data.get("amount_cents")
-        reason = data.get("reason", "API refund request")
+        # "API refund request" was never a REASON_CHOICES value, so every API refund that
+        # omitted a reason persisted an invalid one (migration 0048 repairs those rows).
+        reason = data.get("reason", "customer_request")
 
         payment_invoice = payment.invoice
         assert payment_invoice is not None  # narrowing: guaranteed by linked-invoice check above
@@ -2066,7 +2074,7 @@ def api_process_refund(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911  
             "notes": f"API refund for payment {payment_id}",
         }
 
-        result = RefundService.refund_invoice(payment_invoice.id, refund_data)
+        result = RefundService.refund_invoice(payment_invoice.id, refund_data, actor=actor)
         if result.is_ok():
             refund_result = result.unwrap()
             logger.info(f"✅ API: Refund processed for payment {payment_id}")

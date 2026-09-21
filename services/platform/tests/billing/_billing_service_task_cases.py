@@ -389,7 +389,10 @@ class ApiRefundViewTests(TestCase):
         mock_auth.return_value = (mock_customer, None)
 
         # #104 [M11]: refunds require an owner/billing customer principal, not bare membership.
-        mock_membership_cls.objects.filter.return_value.first.return_value = MagicMock(role="owner")
+        # The gate now resolves the membership's user too, so the refund can record who issued
+        # it — hence select_related("user") in the chain being mocked here.
+        membership = MagicMock(role="owner")
+        mock_membership_cls.objects.filter.return_value.select_related.return_value.first.return_value = membership
 
         mock_payment = MagicMock(id="p1", amount_cents=5000, customer_id=1, invoice=MagicMock(id="i1"))
         mock_pay_cls.objects.filter.return_value.select_related.return_value.first.return_value = mock_payment

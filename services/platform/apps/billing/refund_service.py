@@ -10,7 +10,7 @@ import logging
 import uuid
 from datetime import timedelta
 from decimal import Decimal
-from typing import Any, TypedDict
+from typing import TYPE_CHECKING, Any, TypedDict
 
 from django.db import DatabaseError, IntegrityError, InterfaceError, OperationalError, transaction
 from django.db.models import Count, Q, Sum
@@ -21,6 +21,9 @@ from apps.billing.gateways.base import GATEWAY_PAYMENT_METHODS, PaymentGatewayFa
 from apps.billing.models import Invoice, Payment, Refund, RefundStatusHistory, log_security_event
 from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 from apps.orders.models import Order
+
+if TYPE_CHECKING:
+    from apps.users.models import User
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +52,39 @@ class RefundReason(enum.Enum):
     CANCELLATION = "cancellation"
     DOWNGRADE = "downgrade"
     ADMINISTRATIVE = "administrative"
+    QUALITY_ISSUE = "quality_issue"
+    TECHNICAL_ISSUE = "technical_issue"
+    BILLING_ERROR = "billing_error"
+    POLICY_VIOLATION = "policy_violation"
+    UNSATISFIED_SERVICE = "unsatisfied_service"
+    OTHER = "other"
+
+
+def _choice_value(raw: object, default: str, *, enum_type: type[enum.Enum]) -> str:
+    """Canonicalize a choices-field value that may arrive as an enum member.
+
+    ``RefundType`` and ``RefundReason`` are plain ``enum.Enum``, so ``str(RefundType.FULL)``
+    is ``"RefundType.FULL"`` — short enough to fit the column, and therefore persisted in
+    silence. A row holding that is invisible to the dedup probe, which searches for
+    ``"full"``, so a retried request would create a *second* refund.
+
+    This is the single definition. It replaced three separate copies of the same isinstance
+    dance that had already drifted into three different treatments of one value.
+    """
+    if raw is None or raw == "":
+        # An absent key and an empty one mean the same thing. The portal's refund client
+        # declares `reason: str = ""`, so without this an empty string reaches a choices
+        # column as a value nothing can display — the case migration 0048 has to repair.
+        return default
+    if isinstance(raw, enum_type):
+        return str(raw.value)
+    if isinstance(raw, enum.Enum):
+        # A member of the wrong enum for this column. RefundType.FULL would canonicalize to
+        # "full", which `reason` would accept and no constraint would reject — a valid-looking
+        # wrong answer. Refuse it rather than launder it into the column.
+        logger.warning("⚠️ [Billing] Ignored %r written to a %s column", raw, enum_type.__name__)
+        return default
+    return str(raw)
 
 
 class RefundData(TypedDict, total=False):
@@ -100,6 +136,7 @@ class RefundRecordParams(TypedDict, total=False):
     refund_data: RefundData | None
     payment: Payment
     gateway_refund_id: str
+    actor: User | None
 
 
 class RefundGatewayFacts(TypedDict, total=False):
@@ -132,7 +169,9 @@ class RefundService:
     """RefundService implementation with Result pattern"""
 
     @staticmethod
-    def refund_order(order_id: Any, refund_data: RefundData) -> Result[RefundResult, str]:  # noqa: PLR0911
+    def refund_order(  # noqa: PLR0911
+        order_id: Any, refund_data: RefundData, *, actor: User | None = None
+    ) -> Result[RefundResult, str]:
         """Refund an order with comprehensive validation.
 
         Uses select_for_update to prevent TOCTTOU race conditions where
@@ -191,6 +230,7 @@ class RefundService:
                         invoice=None,
                         payment=payment,
                         refund_data=refund_data,
+                        actor=actor,
                     )
                     if reservation.is_err():
                         return Err(f"Failed to process refund: {reservation.unwrap_err()}")
@@ -218,8 +258,7 @@ class RefundService:
         refund_data: RefundData,
     ) -> Result[Refund | None, str]:
         """Find the one in-flight command that represents a repeated request."""
-        raw_refund_type = refund_data.get("refund_type", "full")
-        refund_type = raw_refund_type.value if isinstance(raw_refund_type, RefundType) else str(raw_refund_type)
+        refund_type = _choice_value(refund_data.get("refund_type"), "full", enum_type=RefundType)
         candidates = Refund.objects.select_for_update(of=("self",)).filter(
             payment=payment,
             order=order,
@@ -245,6 +284,7 @@ class RefundService:
         invoice: Invoice | None,
         payment: Payment,
         refund_data: RefundData,
+        actor: User | None = None,
     ) -> Result[Refund, str]:
         """Reserve one exact amount before making the external gateway request."""
         amount_result = RefundService._resolve_effective_refund_amount(payment, refund_data, None)
@@ -253,10 +293,7 @@ class RefundService:
         amount_cents = amount_result.unwrap()
         effective_data = refund_data.copy()
         effective_data["amount_cents"] = amount_cents
-        raw_refund_type = effective_data.get("refund_type", "full")
-        effective_data["refund_type"] = (
-            raw_refund_type.value if isinstance(raw_refund_type, RefundType) else str(raw_refund_type)
-        )
+        effective_data["refund_type"] = _choice_value(effective_data.get("refund_type"), "full", enum_type=RefundType)
         return RefundService._create_refund_record(
             RefundRecordParams(
                 refund_id=uuid.uuid4(),
@@ -267,6 +304,7 @@ class RefundService:
                 refund_data=effective_data,
                 payment=payment,
                 gateway_refund_id="",
+                actor=actor,
             )
         )
 
@@ -527,7 +565,9 @@ class RefundService:
             return refund_data.get("amount_cents", refund_data.get("amount", 0))
 
     @staticmethod
-    def refund_invoice(invoice_id: Any, refund_data: RefundData) -> Result[RefundResult, str]:  # noqa: PLR0911
+    def refund_invoice(  # noqa: PLR0911
+        invoice_id: Any, refund_data: RefundData, *, actor: User | None = None
+    ) -> Result[RefundResult, str]:
         """Refund an invoice with comprehensive validation.
 
         Uses select_for_update to prevent TOCTTOU race conditions where
@@ -579,6 +619,7 @@ class RefundService:
                         invoice=invoice,
                         payment=payment,
                         refund_data=refund_data,
+                        actor=actor,
                     )
                     if reservation.is_err():
                         return Err(f"Failed to process refund: {reservation.unwrap_err()}")
@@ -1203,6 +1244,11 @@ class RefundService:
             refund_data = params["refund_data"]
             payment = params.get("payment")
             gateway_refund_id = params.get("gateway_refund_id", "")
+            # The actor arrives as execution context, never inside refund_data: on the API
+            # path that dict is built from the request body, and an audit field must not be
+            # readable from caller-shaped data. A gateway-initiated refund has no human
+            # actor, so None here is correct rather than a gap to fill.
+            actor = params.get("actor")
 
             # The refund is denominated in the currency of the monetary
             # operation, not an assumed platform default.
@@ -1217,15 +1263,21 @@ class RefundService:
                 amount_cents=refund_amount_cents,
                 currency=currency,
                 original_amount_cents=original_cents,
-                refund_type=refund_data.get("refund_type", "full") if refund_data else "full",
-                reason=str(refund_data.get("reason", "customer_request")) if refund_data else "customer_request",
+                refund_type=_choice_value(
+                    refund_data.get("refund_type") if refund_data else None, "full", enum_type=RefundType
+                ),
+                reason=_choice_value(
+                    refund_data.get("reason") if refund_data else None,
+                    "customer_request",
+                    enum_type=RefundReason,
+                ),
                 reason_description=str(refund_data.get("notes", "")) if refund_data else "",
                 reference_number=refund_data.get("reference", f"REF-{refund_id}")
                 if refund_data
                 else f"REF-{refund_id}",
                 status="pending",
                 gateway_refund_id=gateway_refund_id,
-                created_by=refund_data.get("initiated_by") if refund_data else None,  # type: ignore[misc]
+                created_by=actor,
             )
 
             # Create status history (ADR-0016: audit trail must not be silently dropped).
@@ -1234,7 +1286,11 @@ class RefundService:
             try:
                 with transaction.atomic():
                     RefundStatusHistory.objects.create(
-                        refund=refund, previous_status="", new_status="pending", change_reason="Refund initiated"
+                        refund=refund,
+                        previous_status="",
+                        new_status="pending",
+                        change_reason="Refund initiated",
+                        changed_by=actor,
                     )
             except DatabaseError:
                 logger.warning(
@@ -1305,6 +1361,12 @@ class RefundService:
                 new_status=str(refund.status),
                 change_reason=f"Gateway reported {normalized}",
                 metadata={"gateway_status": normalized},
+                # changed_by stays NULL deliberately. Both callers of _advance_refund_status
+                # are gateway-driven (_process_bidirectional_refund, converge_gateway_refund),
+                # so no person made this transition — the change_reason says who did. Stamping
+                # the refund's initiator here would read as "they approved it", which is a
+                # false attribution on an audit record. The initial "" -> pending row in
+                # _create_refund_record does name a person, because a person caused it.
             )
 
         transition_paths: dict[str, dict[str, tuple[str, ...]]] = {

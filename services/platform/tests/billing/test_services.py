@@ -167,7 +167,6 @@ class RefundServiceComprehensiveCoverageTestCase(TestCase):
             'amount_cents': amount_cents,
             'reason': reason,
             'notes': 'Test refund',
-            'initiated_by': self.staff_user,
             'external_refund_id': None,
             'process_payment_refund': process_payment
         }
