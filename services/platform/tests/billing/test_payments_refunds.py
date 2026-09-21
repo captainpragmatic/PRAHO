@@ -86,7 +86,6 @@ class RefundServiceTestCase(TestCase):
             "amount_cents": refund_amount,
             "reason": RefundReason.SERVICE_FAILURE,
             "notes": "Partial service failure compensation",
-            "initiated_by": self.user,
             "external_refund_id": None,
             "process_payment_refund": False,
         }
@@ -117,7 +116,6 @@ class RefundServiceTestCase(TestCase):
             "amount_cents": 0,
             "reason": RefundReason.CUSTOMER_REQUEST,
             "notes": "Test",
-            "initiated_by": self.user,
             "external_refund_id": None,
             "process_payment_refund": False,
         }
@@ -143,7 +141,6 @@ class RefundServiceTestCase(TestCase):
             "amount_cents": 0,
             "reason": RefundReason.CUSTOMER_REQUEST,
             "notes": "Test",
-            "initiated_by": self.user,
             "external_refund_id": None,
             "process_payment_refund": False,
         }
@@ -161,7 +158,6 @@ class RefundServiceTestCase(TestCase):
             "amount_cents": 20000,  # More than order total of 12100
             "reason": RefundReason.CUSTOMER_REQUEST,
             "notes": "Invalid amount",
-            "initiated_by": self.user,
             "external_refund_id": None,
             "process_payment_refund": False,
         }
@@ -178,7 +174,6 @@ class RefundServiceTestCase(TestCase):
             "amount_cents": 0,
             "reason": RefundReason.CUSTOMER_REQUEST,
             "notes": "Zero refund",
-            "initiated_by": self.user,
             "external_refund_id": None,
             "process_payment_refund": False,
         }
@@ -196,7 +191,6 @@ class RefundServiceTestCase(TestCase):
             "amount_cents": 4000,
             "reason": RefundReason.SERVICE_FAILURE,
             "notes": "First partial refund",
-            "initiated_by": self.user,
             "external_refund_id": None,
             "process_payment_refund": False,
         }
@@ -253,7 +247,6 @@ class RefundServiceTestCase(TestCase):
             "amount_cents": 99999999,  # Way more than order total
             "reason": RefundReason.CUSTOMER_REQUEST,
             "notes": "Should fail due to excessive amount",
-            "initiated_by": self.user,
             "external_refund_id": None,
             "process_payment_refund": False,
         }
@@ -361,7 +354,6 @@ class TestRefundServiceWithFixtures:
             "amount_cents": 10000,
             "reason": RefundReason.CUSTOMER_REQUEST,
             "notes": "Concurrent test",
-            "initiated_by": data["user"],
             "external_refund_id": None,
             "process_payment_refund": False,
         }

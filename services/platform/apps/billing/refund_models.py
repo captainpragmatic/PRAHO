@@ -54,6 +54,15 @@ class Refund(models.Model):
         ("cancellation", _("Cancellation")),
         ("downgrade", _("Downgrade")),
         ("administrative", _("Administrative")),
+        # Added to match the vocabulary the refund forms have always offered. Django does
+        # not validate choices on objects.create(), so eight of the eleven selectable
+        # reasons had been persisting as invalid values in silence.
+        ("quality_issue", _("Quality Issue")),
+        ("technical_issue", _("Technical Issue")),
+        ("billing_error", _("Billing Error")),
+        ("policy_violation", _("Policy Violation")),
+        ("unsatisfied_service", _("Unsatisfied Service")),
+        ("other", _("Other")),
     )
 
     # Primary key

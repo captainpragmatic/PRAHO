@@ -1008,7 +1008,11 @@ def order_refund(request: HttpRequest, pk: uuid.UUID) -> JsonResponse:
 
     refund_data: RefundData = {
         "refund_type": request.POST.get("refund_type", "full"),
-        "reason": request.POST.get("reason", ""),
+        # The staff modal posts `refund_reason` (templates/orders/order_detail.html:654).
+        # Reading only `reason` discarded every selection and handed the service an empty
+        # string, so no order refund has ever recorded the reason the operator chose.
+        # `reason` stays accepted for non-form callers.
+        "reason": (request.POST.get("refund_reason") or request.POST.get("reason") or "").strip(),
     }
     amount_cents = request.POST.get("amount_cents")
     if amount_cents:
@@ -1019,7 +1023,7 @@ def order_refund(request: HttpRequest, pk: uuid.UUID) -> JsonResponse:
     refund_data["user_id"] = str(request.user.id)
     refund_data["user_email"] = request.user.email
 
-    result = RefundService.refund_order(str(order.id), refund_data)
+    result = RefundService.refund_order(str(order.id), refund_data, actor=request.user)
 
     if result.is_ok():
         log_security_event(

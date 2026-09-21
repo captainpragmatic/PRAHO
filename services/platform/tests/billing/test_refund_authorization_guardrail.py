@@ -36,7 +36,7 @@ REFUND_METHODS = frozenset({"refund_invoice", "refund_order"})
 EXPECTED_REFUND_ENTRY_POINTS: dict[str, str] = {
     "apps/billing/views.py:invoice_refund": "billing_staff_api_required",
     "apps/orders/views.py:order_refund": "billing_staff_api_required",
-    "apps/billing/views.py:api_process_refund": "_refund_actor_is_authorized",
+    "apps/billing/views.py:api_process_refund": "_resolve_authorized_refund_actor",
 }
 
 # Canary: the most recently classified entry point. A scan that drifts off it is broken.
@@ -152,3 +152,52 @@ class RefundAuthorizationGuardrailTests(SimpleTestCase):
             if decorator in bare_staff_decorators
         ]
         self.assertEqual(offenders, [], msg="A refund is gated by a bare is_staff_user predicate (#104 [M11]).")
+
+
+class RefundProvenanceGuardrailTests(SimpleTestCase):
+    """Every refund a human initiates must name that human on the row.
+
+    ``Refund.created_by`` was NULL on every path for the repository's entire history because
+    the service read an undeclared key. The actor now travels as an explicit ``actor=``
+    argument rather than inside ``refund_data`` — on the API path that dict is built from the
+    request body, and an audit field must not be readable from caller-shaped data.
+
+    This is enforced structurally rather than by a runtime check. A service-side "reject a
+    refund with no actor" guard would put an audit field in a position to fail a money
+    operation; asserting it at the call sites costs nothing at runtime and cannot.
+    """
+
+    def test_every_view_entry_point_passes_an_actor(self) -> None:
+        offenders = [
+            site.identifier
+            for site in _find_refund_call_sites()
+            if not _passes_actor(site)
+        ]
+        self.assertEqual(
+            offenders,
+            [],
+            msg=(
+                "A refund entry point calls RefundService without naming who issued it. That is "
+                "how created_by stayed NULL since the first architecture commit."
+            ),
+        )
+
+
+def _passes_actor(site: RefundCallSite) -> bool:
+    """Whether this site's ``RefundService.refund_*`` call carries an ``actor=`` keyword."""
+    path = PLATFORM_ROOT / site.identifier.split(":")[0]
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    target = site.identifier.split(":")[1]
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) or node.name != target:
+            continue
+        for call in ast.walk(node):
+            if (
+                isinstance(call, ast.Call)
+                and isinstance(call.func, ast.Attribute)
+                and call.func.attr in REFUND_METHODS
+                and isinstance(call.func.value, ast.Name)
+                and call.func.value.id == "RefundService"
+            ):
+                return any(kw.arg == "actor" for kw in call.keywords)
+    return False

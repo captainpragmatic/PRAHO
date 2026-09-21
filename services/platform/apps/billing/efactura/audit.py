@@ -50,18 +50,20 @@ class EFacturaAuditService:
                 BusinessEventData,
             )
 
-            event_data = BusinessEventData(  # type: ignore[call-arg]
+            event_data = BusinessEventData(
                 event_type="invoice_xml_generated",
                 business_object=invoice,
                 user=None,
-                context=AuditContext(actor_type="system"),
+                context=AuditContext(
+                    actor_type="system",
+                    metadata={
+                        "efactura_document_id": str(document.id),
+                        "xml_hash": xml_hash or document.xml_hash,
+                        "document_type": document.document_type,
+                        "environment": document.environment,
+                    },
+                ),
                 description=f"e-Factura XML generated for invoice {invoice.number}",
-                metadata={
-                    "efactura_document_id": str(document.id),
-                    "xml_hash": xml_hash or document.xml_hash,
-                    "document_type": document.document_type,
-                    "environment": document.environment,
-                },
             )
             BillingAuditService.log_invoice_event(event_data)
             logger.debug(f"Audit: XML generated for {invoice.number}")
@@ -130,19 +132,22 @@ class EFacturaAuditService:
             event_type = "efactura_submitted" if success else "efactura_submission_failed"
 
             # Log as business event
-            event_data = BusinessEventData(  # type: ignore[call-arg]
+            event_data = BusinessEventData(
                 event_type=event_type,
                 business_object=invoice,
                 user=None,
-                context=AuditContext(actor_type="system", severity="medium" if success else "high"),  # type: ignore[call-arg]
+                context=AuditContext(
+                    actor_type="system",
+                    metadata={
+                        "severity": "medium" if success else "high",
+                        "document_id": str(document.id),
+                        "upload_index": upload_index,
+                        "environment": document.environment,
+                        "retry_count": document.retry_count,
+                        "error_message": error_message if not success else "",
+                    },
+                ),
                 description=f"e-Factura {'submitted' if success else 'submission failed'}: {invoice.number}",
-                metadata={
-                    "document_id": str(document.id),
-                    "upload_index": upload_index,
-                    "environment": document.environment,
-                    "retry_count": document.retry_count,
-                    "error_message": error_message if not success else "",
-                },
             )
             BillingAuditService.log_invoice_event(event_data)
 
@@ -183,18 +188,20 @@ class EFacturaAuditService:
                 BusinessEventData,
             )
 
-            event_data = BusinessEventData(  # type: ignore[call-arg]
+            event_data = BusinessEventData(
                 event_type="invoice_status_changed",
                 business_object=invoice,
                 user=None,
-                context=AuditContext(actor_type="system"),
+                context=AuditContext(
+                    actor_type="system",
+                    metadata={
+                        "document_id": str(document.id),
+                        "upload_index": document.anaf_upload_index,
+                    },
+                ),
                 old_values={"efactura_status": old_status},
                 new_values={"efactura_status": new_status},
                 description=f"e-Factura status: {old_status} → {new_status}",
-                metadata={
-                    "document_id": str(document.id),
-                    "upload_index": document.anaf_upload_index,
-                },
             )
             BillingAuditService.log_invoice_event(event_data)
 
@@ -218,23 +225,25 @@ class EFacturaAuditService:
             )
 
             # Log as business event
-            event_data = BusinessEventData(  # type: ignore[call-arg]
+            event_data = BusinessEventData(
                 event_type="efactura_accepted",
                 business_object=invoice,
                 user=None,
-                context=AuditContext(actor_type="system"),
+                context=AuditContext(
+                    actor_type="system",
+                    metadata={
+                        "document_id": str(document.id),
+                        "upload_index": document.anaf_upload_index,
+                        "download_id": download_id or document.anaf_download_id,
+                        "environment": document.environment,
+                        "processing_time_seconds": (
+                            (document.response_at - document.submitted_at).total_seconds()
+                            if document.response_at and document.submitted_at
+                            else None
+                        ),
+                    },
+                ),
                 description=f"e-Factura accepted by ANAF: {invoice.number}",
-                metadata={
-                    "document_id": str(document.id),
-                    "upload_index": document.anaf_upload_index,
-                    "download_id": download_id or document.anaf_download_id,
-                    "environment": document.environment,
-                    "processing_time_seconds": (
-                        (document.response_at - document.submitted_at).total_seconds()
-                        if document.response_at and document.submitted_at
-                        else None
-                    ),
-                },
             )
             BillingAuditService.log_invoice_event(event_data)
 
@@ -277,19 +286,22 @@ class EFacturaAuditService:
             )
 
             # Log as business event with high severity
-            event_data = BusinessEventData(  # type: ignore[call-arg]
+            event_data = BusinessEventData(
                 event_type="efactura_rejected",
                 business_object=invoice,
                 user=None,
-                context=AuditContext(actor_type="system", severity="high"),  # type: ignore[call-arg]
+                context=AuditContext(
+                    actor_type="system",
+                    metadata={
+                        "severity": "high",
+                        "document_id": str(document.id),
+                        "upload_index": document.anaf_upload_index,
+                        "environment": document.environment,
+                        "error_count": len(errors),
+                        "errors": errors[:10],  # Limit to 10 errors
+                    },
+                ),
                 description=f"e-Factura rejected by ANAF: {invoice.number} - {len(errors)} errors",
-                metadata={
-                    "document_id": str(document.id),
-                    "upload_index": document.anaf_upload_index,
-                    "environment": document.environment,
-                    "error_count": len(errors),
-                    "errors": errors[:10],  # Limit to 10 errors
-                },
             )
             BillingAuditService.log_invoice_event(event_data)
 
@@ -338,18 +350,20 @@ class EFacturaAuditService:
                 BusinessEventData,
             )
 
-            event_data = BusinessEventData(  # type: ignore[call-arg]
+            event_data = BusinessEventData(
                 event_type="efactura_submitted",  # Reuse existing event type
                 business_object=invoice,
                 user=None,
-                context=AuditContext(actor_type="system"),
+                context=AuditContext(
+                    actor_type="system",
+                    metadata={
+                        "document_id": str(document.id),
+                        "retry_count": retry_count,
+                        "next_retry_at": next_retry_at.isoformat() if next_retry_at else None,
+                        "last_error": document.last_error[:500] if document.last_error else "",
+                    },
+                ),
                 description=f"e-Factura retry scheduled: {invoice.number} (attempt {retry_count})",
-                metadata={
-                    "document_id": str(document.id),
-                    "retry_count": retry_count,
-                    "next_retry_at": next_retry_at.isoformat() if next_retry_at else None,
-                    "last_error": document.last_error[:500] if document.last_error else "",
-                },
             )
             BillingAuditService.log_invoice_event(event_data)
 
@@ -417,17 +431,19 @@ class EFacturaAuditService:
                 BusinessEventData,
             )
 
-            event_data = BusinessEventData(  # type: ignore[call-arg]
+            event_data = BusinessEventData(
                 event_type="invoice_pdf_generated",  # Reuse existing type
                 business_object=invoice,
                 user=None,
-                context=AuditContext(actor_type="system"),
+                context=AuditContext(
+                    actor_type="system",
+                    metadata={
+                        "document_id": str(document.id),
+                        "file_path": file_path,
+                        "download_id": document.anaf_download_id,
+                    },
+                ),
                 description=f"e-Factura PDF downloaded: {invoice.number}",
-                metadata={
-                    "document_id": str(document.id),
-                    "file_path": file_path,
-                    "download_id": document.anaf_download_id,
-                },
             )
             BillingAuditService.log_invoice_event(event_data)
 

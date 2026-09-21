@@ -2259,3 +2259,263 @@ class TestOrderRefundInvoiceLinkage(TestCase):
         self.assertEqual(order_invoice.status, "paid")
         self.assertEqual(other_invoice.status, "paid")
         self.assertEqual(payment.status, "succeeded")
+
+
+# ===========================================================================
+# Refund provenance — who issued the refund must survive onto the row
+# ===========================================================================
+class TestRefundRecordProvenance(TestCase):
+    """``Refund.created_by`` has been NULL for the repository's entire history.
+
+    ``_create_refund_record`` read ``refund_data["initiated_by"]`` — a key that is not
+    declared on ``RefundData`` and that nothing in the refund subsystem ever writes. The
+    views pass the actor under ``user_id``. A ``# type: ignore[misc]`` on that line
+    suppressed the exact mypy error that named the problem, so the wire never connected.
+
+    The actor now arrives as an explicit ``actor`` parameter rather than inside
+    ``refund_data``: on the API path that dict is built from the request body, and an
+    audit field must not be readable from caller-shaped data.
+    """
+
+    def setUp(self):
+        from tests.factories.core_factories import create_staff_user  # noqa: PLC0415
+
+        self.customer = _make_customer()
+        self.currency = _make_currency()
+        self.actor = create_staff_user(username="refund_actor", staff_role="billing")
+
+    def _params(self, **overrides):
+        from apps.billing.refund_service import RefundRecordParams  # noqa: PLC0415
+
+        order = _make_order(self.customer, self.currency, status="completed", total_cents=10000)
+        _make_bank_payment(self.customer, self.currency, order=order)
+        params = {
+            "refund_id": uuid.uuid4(),
+            "order": order,
+            "invoice": None,
+            "refund_amount_cents": 5000,
+            "original_cents": 10000,
+            "refund_data": {"refund_type": "partial", "reason": "customer_request"},
+        }
+        params.update(overrides)
+        return RefundRecordParams(**params)
+
+    def test_the_acting_user_is_recorded_on_the_refund(self):
+        result = RefundService._create_refund_record(self._params(actor=self.actor))
+
+        self.assertTrue(result.is_ok())
+        refund = Refund.objects.get()
+        self.assertEqual(
+            refund.created_by,
+            self.actor,
+            msg="The refund records nobody. Provenance on a money record is the whole point of the field.",
+        )
+
+    def test_the_acting_user_is_recorded_on_the_opening_status_history_row(self):
+        """``RefundStatusHistory.changed_by`` is declared and set nowhere — eight lines below
+        the ``created_by`` write, in the same function, with the same actor in scope."""
+        RefundService._create_refund_record(self._params(actor=self.actor))
+
+        history = RefundStatusHistory.objects.get()
+        self.assertEqual(history.new_status, "pending")
+        self.assertEqual(history.changed_by, self.actor)
+
+    def test_a_gateway_initiated_refund_records_no_actor(self):
+        """Stripe convergence has no human actor. NULL is correct there, not a bug to fix."""
+        result = RefundService._create_refund_record(self._params())
+
+        self.assertTrue(result.is_ok())
+        self.assertIsNone(Refund.objects.get().created_by)
+
+    def test_an_enum_refund_type_is_canonicalized_at_the_write(self):
+        """``RefundType`` is a plain ``enum.Enum``, so ``str(RefundType.FULL)`` is
+        ``"RefundType.FULL"`` — which fits ``max_length=20`` and so persists silently.
+
+        The dedup probe searches for ``"full"``, so a row holding ``"RefundType.FULL"`` is
+        invisible to it and a retried request creates a *second* refund. Driven at this seam
+        deliberately: ``_create_refund_intent`` already canonicalizes, so a full-service test
+        would be green on the unfixed code and prove nothing.
+        """
+        params = self._params(refund_data={"refund_type": RefundType.FULL, "reason": "customer_request"})
+
+        result = RefundService._create_refund_record(params)
+
+        self.assertTrue(result.is_ok())
+        self.assertEqual(Refund.objects.get().refund_type, "full")
+
+    def test_an_enum_reason_is_canonicalized_at_the_write(self):
+        """Same shape as the refund_type case, made worse by an explicit ``str()`` call."""
+        params = self._params(refund_data={"refund_type": "full", "reason": RefundReason.DISPUTE})
+
+        result = RefundService._create_refund_record(params)
+
+        self.assertTrue(result.is_ok())
+        self.assertEqual(Refund.objects.get().reason, "dispute")
+
+    def test_an_empty_reason_falls_back_to_a_valid_choice(self) -> None:
+        """The portal's refund client declares ``reason: str = ""``.
+
+        Without folding empty to the default, that empty string reaches a choices column as a
+        value nothing can display — the case migration 0048 exists to repair.
+        """
+        params = self._params(refund_data={"refund_type": "", "reason": ""})
+
+        result = RefundService._create_refund_record(params)
+
+        self.assertTrue(result.is_ok())
+        refund = Refund.objects.get()
+        self.assertEqual(refund.reason, "customer_request")
+        self.assertEqual(refund.refund_type, "full")
+
+    def test_a_canonicalized_row_is_visible_to_the_idempotency_probe(self) -> None:
+        """The money-safety half: storing the enum verbatim would permit a double refund.
+
+        ``_find_matching_active_intent`` filters on ``refund_type="full"``. A row holding
+        ``"RefundType.FULL"`` is invisible to it, so a retried request finds no in-flight
+        intent and reserves a *second* refund against the same payment. Asserting the stored
+        string alone would only prove cosmetics; this asserts the probe can still find it.
+        """
+        from apps.billing.refund_service import RefundRecordParams  # noqa: PLC0415
+
+        order = _make_order(self.customer, self.currency, status="completed", total_cents=10000)
+        payment = _make_bank_payment(self.customer, self.currency, order=order)
+        refund_data = {"refund_type": RefundType.FULL, "reason": "customer_request"}
+
+        created = RefundService._create_refund_record(
+            RefundRecordParams(
+                refund_id=uuid.uuid4(),
+                order=order,
+                invoice=None,
+                refund_amount_cents=10000,
+                original_cents=10000,
+                refund_data=refund_data,
+                payment=payment,
+                actor=self.actor,
+            )
+        )
+        self.assertTrue(created.is_ok())
+
+        # The same request arriving again must find the intent it already reserved.
+        probe = RefundService._find_matching_active_intent(
+            payment, order=order, invoice=None, refund_data=refund_data
+        )
+
+        self.assertTrue(probe.is_ok())
+        self.assertEqual(
+            probe.unwrap(),
+            created.unwrap(),
+            msg="The retry did not see the in-flight refund — it would reserve a second one.",
+        )
+
+    def test_an_unknown_refund_type_is_refused_rather_than_stored(self) -> None:
+        """``refund_type`` is a closed two-value set, unlike ``reason``.
+
+        ``billing/views.py:1683`` takes it straight from POST and only checks it is non-empty,
+        so an arbitrary string reached a choices column. It is validated against the column's
+        own choices; ``reason`` deliberately is not, because the portal forwards customer free
+        text and collapsing that would destroy what the customer said.
+        """
+        params = self._params(refund_data={"refund_type": "sideways", "reason": "customer_request"})
+
+        result = RefundService._create_refund_record(params)
+
+        self.assertTrue(result.is_ok())
+        self.assertEqual(Refund.objects.get().refund_type, "full")
+
+    def test_an_enum_from_the_wrong_column_is_refused_rather_than_laundered(self) -> None:
+        """``RefundType.FULL`` as a *reason* would canonicalize to ``"full"``.
+
+        ``reason`` would accept that — no constraint rejects it — so the row would carry a
+        valid-looking wrong answer that no report could explain. The canonicalizer is told
+        which enum belongs to which column so it can refuse the other one instead of
+        quietly taking its ``.value``.
+        """
+        params = self._params(refund_data={"refund_type": "full", "reason": RefundType.FULL})
+
+        result = RefundService._create_refund_record(params)
+
+        self.assertTrue(result.is_ok())
+        refund = Refund.objects.get()
+        self.assertNotEqual(refund.reason, "full")
+        self.assertEqual(refund.reason, "customer_request")
+
+
+class TestLegacyRefundTypeCrossesTheDeployment(TestCase):
+    """A pending refund written before canonicalization must stay findable after it.
+
+    The service now folds an absent or empty ``refund_type`` to ``"full"`` on both sides of
+    the idempotency probe. Before that, an empty POST field was probed *and* written as
+    ``""`` — reachable from ``orders/views.py`` (``request.POST.get("refund_type", "full")``)
+    and ``billing/views.py`` (``(request.POST.get("refund_type") or "").strip()``).
+
+    So a row left in ``pending`` across this deployment can hold ``""`` while the new probe
+    searches ``"full"``. The retry finds nothing, reserves a second intent, and issues a
+    second gateway refund against the same payment. Migration 0048 canonicalizes the stored
+    values rather than teaching the probe to match both spellings.
+    """
+
+    def setUp(self):
+        self.customer = _make_customer()
+        self.currency = _make_currency()
+        self.order = _make_order(self.customer, self.currency, status="completed", total_cents=10000)
+        self.payment = _make_bank_payment(self.customer, self.currency, order=self.order)
+
+    def _legacy_intent(self, refund_type: str) -> Refund:
+        """An in-flight intent as the pre-canonicalization code would have written it."""
+        return Refund.objects.create(
+            id=uuid.uuid4(),
+            customer=self.customer,
+            order=self.order,
+            payment=self.payment,
+            amount_cents=10000,
+            currency=self.currency,
+            original_amount_cents=10000,
+            refund_type=refund_type,
+            reason="customer_request",
+            reference_number=f"REF-{uuid.uuid4()}",
+            status="pending",
+            gateway_refund_id="",
+        )
+
+    def _probe(self):
+        return RefundService._find_matching_active_intent(
+            self.payment, order=self.order, invoice=None, refund_data={"refund_type": "full"}
+        )
+
+    def test_an_uncanonicalized_pending_intent_is_invisible_to_the_probe(self) -> None:
+        """The risk, stated as a test: this is the double-refund window."""
+        self._legacy_intent("")
+
+        self.assertIsNone(
+            self._probe().unwrap(),
+            msg="If this ever passes, the premise of migration 0048's refund_type backfill is gone.",
+        )
+
+    def test_the_migration_backfill_restores_visibility(self) -> None:
+        import importlib  # noqa: PLC0415
+
+        migration = importlib.import_module("apps.billing.migrations.0048_alter_refund_reason")
+        legacy = self._legacy_intent("")
+        self.assertIsNone(self._probe().unwrap())
+
+        migration._canonicalize(Refund, "refund_type", migration.REFUND_TYPE_ALIASES)
+
+        legacy.refresh_from_db()
+        self.assertEqual(legacy.refund_type, "full")
+        self.assertEqual(
+            self._probe().unwrap(),
+            legacy,
+            msg="The retry still cannot see the in-flight refund — it would reserve a second one.",
+        )
+
+    def test_every_alias_maps_a_non_canonical_value_onto_a_real_choice(self) -> None:
+        import importlib  # noqa: PLC0415
+
+        migration = importlib.import_module("apps.billing.migrations.0048_alter_refund_reason")
+        valid = {value for value, _label in Refund.TYPE_CHOICES}
+
+        self.assertTrue(migration.REFUND_TYPE_ALIASES)
+        for stored, canonical in migration.REFUND_TYPE_ALIASES.items():
+            with self.subTest(stored=stored):
+                self.assertNotIn(stored, valid, msg=f"{stored!r} is valid — the backfill would corrupt it.")
+                self.assertIn(canonical, valid)
