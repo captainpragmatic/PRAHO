@@ -1,20 +1,20 @@
-"""A template may not reference a static asset the repository does not contain.
+"""A template may not reference a static asset its own service cannot serve.
 
 `.gitignore` carries a blanket image block — `*.png`, `*.jpg`, `*.svg` and friends — added
 to keep ad-hoc Playwright failure captures and debug screenshots out of the repository. It
 does that, but it cannot tell a throwaway screenshot from a hand-authored source asset, so
-it silently swallowed the portal's payment-brand icons too. `services/portal/templates/
-orders/checkout.html` has been rendering two broken images at the point of payment, and
-nothing failed: `git add` refuses an ignored file without an error loud enough to notice,
-CI never renders the page, and a missing image is not a server error.
+it silently swallowed the portal's payment-brand icons. `services/portal/templates/orders/
+checkout.html` rendered two broken images at the point of payment and nothing failed:
+`git add` declines an ignored path quietly, CI never renders the page, and a missing image
+is not a server error.
 
-The fix negates the block for source assets under `static/` directories. The negations are
-safe by construction because the directories holding build output and third-party files —
-`staticfiles/`, `static/dist/`, `node_modules/`, `.venv-*/` — are excluded at the *directory*
-level, and a file-pattern negation cannot re-include anything inside an excluded directory.
-
-This test is the durable half. A `.gitignore` rule that strands an asset is invisible until
-someone loads the page; this makes it a build failure instead.
+Resolution is **per service**, mirroring `STATICFILES_DIRS` in each service's settings
+(`platform/config/settings/base.py:211`, `portal/config/settings/base.py:180`). Both are
+`[<own>/static, shared/ui/static]`, plus each app's own `static/` dir via the default
+`AppDirectoriesFinder`. The two services deploy independently and neither can serve the
+other's static tree, so merging them would let a platform template reference a portal-only
+asset and still pass — which is exactly what the first version of this test did. Templates under `shared/ui/` are rendered by both services,
+so their assets must resolve in every service.
 """
 
 from __future__ import annotations
@@ -25,75 +25,102 @@ from pathlib import Path
 from django.test import SimpleTestCase
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
+SHARED_STATIC = REPO_ROOT / "shared" / "ui" / "static"
 
-# Both services, because the stranded assets were the portal's while the suite runs here.
-TEMPLATE_ROOTS = (
-    REPO_ROOT / "services" / "platform" / "templates",
-    REPO_ROOT / "services" / "portal" / "templates",
-    REPO_ROOT / "shared",
-)
-STATIC_ROOTS = (
-    REPO_ROOT / "services" / "platform" / "static",
-    REPO_ROOT / "services" / "portal" / "static",
-    REPO_ROOT / "shared",
-)
+def _static_roots(service: str) -> tuple[Path, ...]:
+    """Every directory the service can actually serve a static file from.
+
+    Django resolves through two finders and both are active — neither service overrides
+    ``STATICFILES_FINDERS``, so the default ``FileSystemFinder`` + ``AppDirectoriesFinder``
+    pair applies. Modelling only ``STATICFILES_DIRS`` misses ``<app>/static/``, where the
+    platform keeps its favicon; the app dirs are globbed rather than listed so a new app
+    needs no change here.
+    """
+    base = REPO_ROOT / "services" / service
+    app_static = sorted((base / "apps").glob("*/static"))
+    return (base / "static", SHARED_STATIC, *app_static)
+
+
+# Each service's own template tree and the static roots it can actually serve.
+SERVICES: dict[str, tuple[Path, tuple[Path, ...]]] = {
+    service: (REPO_ROOT / "services" / service / "templates", _static_roots(service))
+    for service in ("platform", "portal")
+}
+
+# Rendered by whichever service includes them, so their assets must resolve in all of them.
+SHARED_TEMPLATES = REPO_ROOT / "shared" / "ui" / "templates"
 
 ASSET_SUFFIXES = ("svg", "png", "jpg", "jpeg", "gif", "ico", "webp")
 _EXT = "|".join(ASSET_SUFFIXES)
-
-# `{% static 'images/visa.svg' %}` and a bare `/static/images/visa.svg`.
 _STATIC_TAG = re.compile(r"\{%\s*static\s+['\"]([^'\"]+\.(?:" + _EXT + r"))['\"]", re.IGNORECASE)
 _ABSOLUTE = re.compile(r"/static/([A-Za-z0-9_./-]+\.(?:" + _EXT + r"))", re.IGNORECASE)
 
 # Canary: the reference that exposed the defect. A scan that stops seeing it is broken.
-KNOWN_REFERENCE = "images/visa.svg"
+KNOWN_REFERENCE = ("portal", "images/visa.svg")
 
 
-def _referenced_assets() -> dict[str, list[str]]:
-    """Every static asset referenced by a template, mapped to the files referencing it."""
-    found: dict[str, list[str]] = {}
-    for root in TEMPLATE_ROOTS:
-        if not root.exists():
-            continue
-        for path in root.rglob("*.html"):
-            text = path.read_text(encoding="utf-8", errors="ignore")
-            for pattern in (_STATIC_TAG, _ABSOLUTE):
-                for match in pattern.findall(text):
-                    relative = match[0] if isinstance(match, tuple) else match
-                    found.setdefault(relative, []).append(str(path.relative_to(REPO_ROOT)))
+def _references(root: Path) -> dict[str, set[str]]:
+    """Static assets referenced under a template tree, mapped to the referencing files."""
+    found: dict[str, set[str]] = {}
+    if not root.exists():
+        return found
+    for path in root.rglob("*.html"):
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        for pattern in (_STATIC_TAG, _ABSOLUTE):
+            for asset in pattern.findall(text):
+                found.setdefault(asset, set()).add(str(path.relative_to(REPO_ROOT)))
     return found
 
 
-def _exists(relative: str) -> bool:
-    return any((root / relative).exists() for root in STATIC_ROOTS if root.exists())
+def _unresolvable(references: dict[str, set[str]], roots: tuple[Path, ...]) -> dict[str, list[str]]:
+    return {
+        asset: sorted(users)
+        for asset, users in references.items()
+        if not any((root / asset).exists() for root in roots)
+    }
 
 
 class StaticAssetReferencesResolveTests(SimpleTestCase):
-    """Every referenced asset is in the repository."""
+    """Every referenced asset is servable by the service that renders it."""
 
-    def test_no_template_references_a_missing_static_asset(self) -> None:
-        referenced = _referenced_assets()
-
-        missing = {asset: sorted(set(users)) for asset, users in referenced.items() if not _exists(asset)}
+    def test_each_service_can_serve_every_asset_its_templates_reference(self) -> None:
+        offending: dict[str, dict[str, list[str]]] = {}
+        for service, (templates, static_roots) in SERVICES.items():
+            if missing := _unresolvable(_references(templates), static_roots):
+                offending[service] = missing
 
         self.assertEqual(
-            missing,
+            offending,
             {},
             msg=(
-                "A template references a static asset the repository does not contain. If the file "
+                "A template references a static asset its own service cannot serve. If the file "
                 "exists locally but `git add` will not take it, the blanket image block in "
                 ".gitignore is swallowing it — add a negation for source assets under static/, "
                 "rather than committing with --force."
             ),
         )
 
+    def test_shared_component_assets_resolve_in_every_service(self) -> None:
+        """A shared template is rendered by both services, so one-sided is not good enough."""
+        shared_refs = _references(SHARED_TEMPLATES)
+        offending = {
+            service: missing
+            for service, (_templates, static_roots) in SERVICES.items()
+            if (missing := _unresolvable(shared_refs, static_roots))
+        }
+
+        self.assertEqual(
+            offending,
+            {},
+            msg="A shared component references an asset that only one service can serve.",
+        )
+
     def test_the_scan_still_sees_the_reference_that_exposed_this(self) -> None:
         """Structural-Helper Integrity: a scan matching nothing must fail, not pass."""
-        referenced = _referenced_assets()
+        service, asset = KNOWN_REFERENCE
+        templates, _roots = SERVICES[service]
+        references = _references(templates)
 
-        self.assertGreaterEqual(len(referenced), 3)
-        self.assertIn(KNOWN_REFERENCE, referenced)
-        self.assertTrue(
-            any("checkout.html" in user for user in referenced[KNOWN_REFERENCE]),
-            msg="The payment-brand icons are no longer scanned from the checkout template.",
-        )
+        self.assertIn(asset, references)
+        self.assertTrue(any("checkout.html" in user for user in references[asset]))
+        self.assertGreaterEqual(sum(len(_references(t)) for t, _r in SERVICES.values()), 3)
