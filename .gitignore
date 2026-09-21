@@ -96,7 +96,7 @@ backup/
 temp/
 temp/*
 
-# Screenshots and Images
+# Screenshots and Images — ad-hoc captures (Playwright failures, debug screenshots)
 *.png
 *.jpg
 *.jpeg
@@ -106,6 +106,19 @@ temp/*
 *.svg
 login_failure_*.png
 screenshot_*.png
+# ...but keep hand-authored SOURCE assets that templates reference (brand and
+# payment icons, logos, favicons). The blanket block above cannot tell a throwaway
+# screenshot from a checked-in asset, and silently stranded the portal's payment
+# icons — checkout.html rendered two broken images with nothing failing.
+# Safe by construction: build output and third-party files live in directories
+# excluded at the DIRECTORY level (staticfiles/, static/dist/, node_modules/,
+# .venv-*/), and a file-pattern negation cannot re-include anything inside those.
+!**/static/**/*.svg
+!**/static/**/*.png
+!**/static/**/*.jpg
+!**/static/**/*.jpeg
+!**/static/**/*.gif
+!**/static/**/*.ico
 
 # LLM Assistant Files
 CLAUDE.md
