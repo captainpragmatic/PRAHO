@@ -17,6 +17,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   exist in the SmartBill account, rather than only checking that credentials authenticate.
 - A full refund of a SmartBill invoice issues a storno automatically, recorded as a credit
   note with its own legal number so VAT and revenue reporting net the correction.
+- A storno is refused unless exactly one settled refund accounts for exactly the invoice
+  total. An invoice refunded in instalments is corrected by hand instead, because
+  SmartBill's reversal carries no amount and would credit the whole document — crediting
+  the customer twice for any part already corrected manually.
+- An invoice issuer that is not recognised is now refused when the setting is saved,
+  rather than quietly resolving to the built-in issuer. Quietly resolving it meant a typo
+  had PRAHO mint legal Romanian invoice numbers from its own sequence for an operator who
+  was trying to hand exactly that responsibility to SmartBill.
+
+### Fixed
+
+- An interrupted storno no longer makes an invoice permanently un-reversible. A credit
+  note that exists but was never submitted is resumed rather than treated as proof the
+  reversal already happened.
+- Credit notes now carry the original's lines, negated, so line-based VAT and EC-Sales
+  reporting can attribute the correction instead of seeing a total with no composition.
+- Invoice dates sent to SmartBill use the Romanian calendar day rather than UTC's. An
+  invoice issued late in the evening was dated to the previous day, and one issued late
+  on the last day of a month was filed under a VAT period that had already closed.
 
 ### Changed
 

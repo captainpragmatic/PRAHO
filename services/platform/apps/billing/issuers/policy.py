@@ -15,6 +15,7 @@ already loaded an invoice cannot have the answer change underneath it.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -25,6 +26,8 @@ from .base import InvoiceIssuerGateway, get_invoice_issuer, get_registered_issue
 
 if TYPE_CHECKING:
     from apps.billing.invoice_models import Invoice
+
+logger = logging.getLogger(__name__)
 
 
 class EFacturaProviderConflictError(RuntimeError):
@@ -78,14 +81,41 @@ def default_issuer_provider() -> str:
     document that does not exist yet. Once stamped it is frozen, so flipping this
     never reaches a document already created.
 
-    An unrecognised value falls back to the built-in issuer rather than raising:
-    a typo in configuration should not stop invoicing, and the built-in path is
-    always available.
+    An unrecognised value falls back to the built-in issuer rather than raising,
+    because this runs inside the transaction that converges a customer payment: a
+    mistyped setting must not turn someone's payment into a 500. The fallback is
+    therefore not the defence. The defence is that the settings write path refuses
+    to persist a value that is not a registered issuer, so reaching this line with
+    an unknown provider means the value arrived out of band (a direct database
+    write, or a Django-settings override) and warrants the alarm it raises.
     """
     from apps.settings.services import SettingsService  # noqa: PLC0415
 
-    provider = str(SettingsService.get_setting("billing.invoice_issuer", ISSUER_BUILTIN) or ISSUER_BUILTIN)
-    return provider if provider in get_registered_issuers() else ISSUER_BUILTIN
+    configured = str(SettingsService.get_setting("billing.invoice_issuer", ISSUER_BUILTIN) or ISSUER_BUILTIN)
+    if configured in get_registered_issuers():
+        return configured
+
+    logger.error(
+        f"🔥 [Issuer] Configured invoice issuer {configured!r} is not registered; "
+        f"stamping {ISSUER_BUILTIN!r} instead. New documents are being numbered by "
+        f"PRAHO's own sequence, which is a fiscal act - check billing.invoice_issuer."
+    )
+    return ISSUER_BUILTIN
+
+
+def operator_safe_detail(error: object) -> str:
+    """A provider error reduced to something safe to show an operator.
+
+    Provider errors reach staff-facing responses, and SmartBill's carry HTML aimed
+    at its own web UI plus occasional internals from an HTML 500. Cutting at the
+    first tag keeps the human cause and drops the markup; the length cap stops a
+    stack trace or an error page from being rendered as a message.
+    """
+    from .smartbill.responses import first_sentence  # noqa: PLC0415
+
+    cleaned = first_sentence(str(error))
+    limit = 300
+    return cleaned[: limit - 1] + "\u2026" if len(cleaned) > limit else cleaned
 
 
 def issues_externally(provider: str) -> bool:
@@ -173,7 +203,7 @@ def can_switch_invoice_issuer(target: str) -> Result[None, tuple[SwitchBlocker, 
             blockers.append(
                 SwitchBlocker(
                     reason=f"{target} is not usable yet",
-                    detail=str(report.error),
+                    detail=operator_safe_detail(report.error),
                 )
             )
 

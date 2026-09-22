@@ -18,6 +18,7 @@ from apps.billing.issuers.models import IssuanceState, ProviderIssuance
 from apps.billing.issuers.policy import can_switch_invoice_issuer, default_issuer_provider
 from apps.common.types import Err, Ok
 from apps.settings.catalog import CATALOG_BY_KEY
+from apps.settings.services import SettingsService
 from tests.factories.billing_factories import CustomerFactory
 
 GREEN = Ok(ConfigurationReport(provider=ISSUER_SMARTBILL, ok=True))
@@ -160,3 +161,79 @@ class PreflightTests(TestCase):
             result = can_switch_invoice_issuer(ISSUER_SMARTBILL)
 
         self.assertGreaterEqual(len(result.error), 3)
+
+
+class PreflightIsEnforcedTests(TestCase):
+    """The preflight only counts if something calls it.
+
+    It was written first and wired second, and in between it was a function nobody
+    invoked — every switch succeeded regardless of what it would have said. These
+    tests assert the wiring, not the logic: they go through the settings write path
+    the way an operator, the admin, a management command or a data migration does.
+    """
+
+    def setUp(self) -> None:
+        self.customer = CustomerFactory()
+        self.currency = _currency()
+
+    def _write(self, value: str) -> object:
+        return SettingsService.update_setting("billing.invoice_issuer", value, reason="test")
+
+    def test_an_unknown_issuer_never_reaches_storage(self) -> None:
+        """A typo must not be silently resolved to whichever issuer we felt like.
+
+        Falling back to built-in would have PRAHO mint legal Romanian invoice
+        numbers from its own sequence — a fiscal act — for an operator who was
+        trying to hand exactly that responsibility to someone else.
+        """
+        result = self._write("smartbil")
+
+        self.assertTrue(result.is_err())
+        self.assertEqual(result.error.code, "unknown_issuer")
+        self.assertEqual(default_issuer_provider(), ISSUER_BUILTIN)
+
+    def test_a_blocked_switch_is_refused_at_the_write_path(self) -> None:
+        invoice = Invoice.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            number="INV-ENF-0001",
+            status="issued",
+            subtotal_cents=10000,
+            tax_cents=2100,
+            total_cents=12100,
+            bill_to_name="Test Company SRL",
+        )
+        ProviderIssuance.objects.create(
+            invoice=invoice, provider=ISSUER_SMARTBILL, state=IssuanceState.OUTCOME_UNKNOWN.value
+        )
+
+        with patch(
+            "apps.billing.issuers.smartbill.issuer.SmartBillIssuer.validate_configuration",
+            return_value=GREEN,
+        ):
+            result = self._write(ISSUER_SMARTBILL)
+
+        self.assertTrue(result.is_err())
+        self.assertEqual(result.error.code, "switch_blocked")
+        self.assertIn("unresolved", result.error.message)
+        self.assertEqual(
+            default_issuer_provider(),
+            ISSUER_BUILTIN,
+            "a refused switch must leave the issuer where it was",
+        )
+
+    def test_a_clean_switch_is_allowed_through(self) -> None:
+        with patch(
+            "apps.billing.issuers.smartbill.issuer.SmartBillIssuer.validate_configuration",
+            return_value=GREEN,
+        ):
+            result = self._write(ISSUER_SMARTBILL)
+
+        self.assertTrue(result.is_ok(), msg=getattr(result, "error", ""))
+        self.assertEqual(default_issuer_provider(), ISSUER_SMARTBILL)
+
+    def test_resaving_the_current_value_is_not_treated_as_a_switch(self) -> None:
+        """Otherwise unrelated in-flight work would block unrelated settings saves."""
+        result = self._write(ISSUER_BUILTIN)
+
+        self.assertTrue(result.is_ok(), msg=getattr(result, "error", ""))

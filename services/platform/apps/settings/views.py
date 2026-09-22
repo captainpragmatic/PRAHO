@@ -814,6 +814,7 @@ def integration_test(request: HttpRequest, integration: str) -> JsonResponse:
                     _("Virtualmin authentication healthy") if ok else _("No Virtualmin authentication method succeeded")
                 )
         elif integration == "smartbill":
+            from apps.billing.issuers.policy import operator_safe_detail  # noqa: PLC0415
             from apps.billing.issuers.smartbill.issuer import SmartBillIssuer  # noqa: PLC0415
 
             # Real work, not a ping: it proves the configured series and every mapped
@@ -823,7 +824,7 @@ def integration_test(request: HttpRequest, integration: str) -> JsonResponse:
             report = SmartBillIssuer().validate_configuration()
             if isinstance(report, Err):
                 ok = False
-                message = _("SmartBill check failed: %(detail)s") % {"detail": str(report.error)}
+                message = _("SmartBill check failed: %(detail)s") % {"detail": operator_safe_detail(report.error)}
             else:
                 ok = True
                 message = _("SmartBill credentials, series and VAT names verified")

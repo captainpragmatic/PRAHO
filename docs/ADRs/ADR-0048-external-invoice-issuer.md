@@ -83,6 +83,50 @@ cost the estimate assumed, and the operator accepted SPV blindness knowingly.
    the provider's own PDF, archived on first access. Rendering our own would be a
    second, unofficial copy of a legal document.
 
+9. **A reversal is decided by durable state, never by the existence of a row.**
+   Eligibility, the credit note and the claim are settled under one row lock on the
+   original, and a credit note that exists but was never submitted is *resumed*.
+   Treating row existence as proof of reversal makes any interruption permanent: a
+   refund the customer can never be issued, recoverable only by editing the
+   database. A uniqueness constraint on `reverses_invoice` backs the lock, so
+   concurrent callers converge on one credit note instead of minting two.
+
+   A whole-document reversal is refused unless exactly one *settled* refund accounts
+   for exactly the invoice total. `/invoice/reverse` carries no amount, so an
+   invoice refunded in instalments — where an earlier part may already have been
+   corrected by hand in SmartBill's own interface — would be credited twice, and
+   nothing downstream would notice. Settled refunds are counted rather than
+   attempted ones; counting attempts would let a failed refund wedge the invoice in
+   the same way row existence did.
+
+   Credit-note lines are the original's, negated. EC-Sales reconciles partner totals
+   against `InvoiceLine` rows, so a line-less correction cannot balance against a
+   negative header. The three non-negative line constraints therefore became one
+   sign-consistency constraint: the invariant worth keeping was that the parts of a
+   line agree with each other, and which direction is legitimate is settled one
+   level up by the document-kind constraints on `Invoice`.
+
+10. **The switch preflight lives at the settings write chokepoint.** It runs inside
+    `_write_setting_locked`, which every writer reaches — the settings view, a
+    change set, the admin, a management command, a data migration, a direct service
+    call — so it cannot be bypassed, and it runs immediately before the row lock so
+    two operators racing the same switch cannot both be told yes. A value that is
+    not a registered issuer is refused there and never stored.
+
+    That refusal is what lets `default_issuer_provider()` stay non-raising: it is
+    read inside the transaction that converges a customer payment, where a mistyped
+    setting must not become a 500. Reaching it with an unknown provider now means
+    the value arrived out of band, and it alarms rather than quietly stamping
+    built-in — quietly stamping built-in would have PRAHO mint legal Romanian
+    invoice numbers from its own sequence for an operator trying to hand exactly
+    that responsibility elsewhere.
+
+    The residual race — a document created in the window between the check and the
+    write — is deliberately not coded around. Provenance is stamped at creation and
+    frozen, so such a document gets *an* internally consistent issuer, never a
+    corrupt one. That is the same reasoning that made a provider-generation lease
+    unnecessary in decision 1.
+
 ## Consequences
 
 - EU B2B and non-EU customers cannot be billed through SmartBill until a generated

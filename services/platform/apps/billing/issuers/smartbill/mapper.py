@@ -28,7 +28,8 @@ from apps.common.types import Err, Ok, Result
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from apps.billing.invoice_models import Invoice
+from apps.billing.efactura.settings import ro_local_date
+from apps.billing.invoice_models import Invoice
 
 # Only a plain positive rate can be expressed unambiguously through an API that
 # carries no category and no exemption reason.
@@ -279,9 +280,9 @@ def build_invoice_payload(  # noqa: C901  # Payload assembly plus the pre-POST c
         "sendEmail": False,
     }
     if invoice.issued_at:
-        payload["issueDate"] = invoice.issued_at.date().isoformat()
+        payload["issueDate"] = ro_local_date(invoice.issued_at).isoformat()
     if invoice.due_at:
-        payload["dueDate"] = invoice.due_at.date().isoformat()
+        payload["dueDate"] = ro_local_date(invoice.due_at).isoformat()
     if invoice.currency_id != "RON":
         frozen_rate = invoice.exchange_to_ron
         if frozen_rate is None:  # already refused above; keeps the guarantee local and checkable

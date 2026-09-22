@@ -8,6 +8,7 @@ fiscal meaning cannot be carried is refused rather than approximated.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from django.test import TestCase
@@ -404,3 +405,33 @@ class PrecisionTests(MapperTestBase):
 
         self.assertTrue(result.is_err())
         self.assertTrue(any("precision" in e for e in result.error))
+
+
+class FiscalDateTests(MapperTestBase):
+    """The legal date of a Romanian invoice is its Romanian calendar date.
+
+    With USE_TZ=True a datetime is stored in UTC, so `.date()` on anything issued
+    after 21:00 or 22:00 Bucharest time yields the previous day. That is the wrong
+    fiscal day, and for an invoice issued late on the last day of a month it is the
+    wrong VAT period — filed under a month that had already closed. The repo fixed
+    this class of bug once already (issue #220) and `ro_local_date` exists for it.
+    """
+
+    def test_an_invoice_issued_late_in_the_evening_keeps_its_romanian_date(self) -> None:
+        # 23:30 on 31 January in Bucharest is still 21:30 UTC on the 31st in winter,
+        # so pick an instant that genuinely straddles: 22:30 UTC = 00:30 on 1 Feb RO.
+        invoice = self._invoice(issued_at=datetime(2026, 1, 31, 22, 30, tzinfo=UTC))
+        self._line(invoice)
+
+        payload = build_invoice_payload(invoice, CONFIG).unwrap().payload
+
+        self.assertEqual(payload["issueDate"], "2026-02-01")
+
+    def test_a_summer_evening_invoice_also_uses_the_romanian_day(self) -> None:
+        """Bucharest is UTC+3 in summer, so the window is an hour wider."""
+        invoice = self._invoice(issued_at=datetime(2026, 7, 15, 21, 30, tzinfo=UTC))
+        self._line(invoice)
+
+        payload = build_invoice_payload(invoice, CONFIG).unwrap().payload
+
+        self.assertEqual(payload["issueDate"], "2026-07-16")

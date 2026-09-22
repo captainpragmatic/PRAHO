@@ -304,6 +304,11 @@ class Invoice(models.Model):
                 condition=~models.Q(reverses_invoice=models.F("id")),
                 name="invoice_credit_note_not_self_referential",
             ),
+            models.UniqueConstraint(
+                fields=["reverses_invoice"],
+                condition=models.Q(reverses_invoice__isnull=False),
+                name="invoice_one_reversal_per_original",
+            ),
             models.CheckConstraint(
                 condition=models.Q(discount_cents__gte=0),
                 name="invoice_discount_non_negative",
@@ -828,17 +833,26 @@ class InvoiceLine(models.Model):
             models.Index(fields=["invoice", "kind"]),
         )
         constraints: ClassVar[list[models.BaseConstraint]] = [
+            # A credit note is a negative document, so its lines are negative too:
+            # EC-Sales reconciles partner totals against these rows and a line-less or
+            # positive-lined correction fails to balance against a negative header.
+            #
+            # The invariant these replace was never really "money is positive" - it was
+            # "the parts of one line agree with each other". A line quoting a positive
+            # price against negative tax is corrupt in either direction, and that is
+            # what is still refused here. Which of the two directions is legitimate is
+            # settled one level up, by the document-kind sign constraints on Invoice.
+            #
+            # `discount_amount_cents` is deliberately not in here: it is a magnitude, not
+            # a signed amount, and stays positive on a credit-note line. The e-Factura
+            # builder rejects a negative one before serialisation and has a test that
+            # constructs exactly that state to prove it.
             models.CheckConstraint(
-                condition=models.Q(unit_price_cents__gte=0),
-                name="invoiceline_unit_price_non_negative",
-            ),
-            models.CheckConstraint(
-                condition=models.Q(tax_cents__gte=0),
-                name="invoiceline_tax_non_negative",
-            ),
-            models.CheckConstraint(
-                condition=models.Q(line_total_cents__gte=0),
-                name="invoiceline_line_total_non_negative",
+                condition=(
+                    models.Q(unit_price_cents__gte=0, tax_cents__gte=0, line_total_cents__gte=0)
+                    | models.Q(unit_price_cents__lte=0, tax_cents__lte=0, line_total_cents__lte=0)
+                ),
+                name="invoiceline_amounts_share_one_sign",
             ),
         ]
 
