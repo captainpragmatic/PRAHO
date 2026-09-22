@@ -214,3 +214,59 @@ class WriteSafetyTests(SimpleTestCase):
         """Caution must not swallow the ordinary case, or every typo needs a human."""
         body = json.dumps({"errorText": "Seria nu a fost gasita!", "number": ""})
         self.assertIs(_classify(200, body, is_write=True).verdict, Verdict.REJECTED)
+
+
+class UnrecognisedRefusalNeverLicensesAReplayTests(SimpleTestCase):
+    """The contract this module states about itself, applied to two stragglers.
+
+    `classify`'s own docstring: a write earns REJECTED only from a *recognised*
+    refusal envelope; everything else unknown is AMBIGUOUS. Six branches honour that.
+    Two did not, and both are exactly the shape where the server may have acted: a
+    status with no refusal envelope to read. REJECTED on a write is a licence to send
+    the same POST again, and SmartBill has no idempotency key, so the cost of being
+    wrong is a second legally numbered invoice that cannot be deleted - only reversed,
+    possibly after it has already reached SPV.
+    """
+
+    def test_a_timeout_on_a_write_is_not_proof_of_refusal(self) -> None:
+        """408 is the clearest case: the server timed out, possibly after writing."""
+        self.assertIs(
+            _classify(408, json.dumps({}), is_write=True).verdict,
+            Verdict.AMBIGUOUS,
+        )
+
+    def test_a_conflict_on_a_write_is_not_proof_of_refusal(self) -> None:
+        self.assertIs(
+            _classify(409, json.dumps({}), is_write=True).verdict,
+            Verdict.AMBIGUOUS,
+        )
+
+    def test_throttling_on_a_write_is_not_proof_of_refusal(self) -> None:
+        """The module's own comment calls this an assumption, not an established fact.
+
+        Our rate gate defers before sending, so a 429 reaching us means pacing already
+        failed - a rare, alarming event. Requiring a human to confirm what happened
+        there is the cheap side of the trade; replaying the POST is not.
+        """
+        self.assertIs(
+            _classify(429, json.dumps({}), is_write=True).verdict,
+            Verdict.AMBIGUOUS,
+        )
+
+    def test_the_same_statuses_stay_cheap_on_a_read(self) -> None:
+        """The other direction. A wrong verdict on a GET costs one repeated GET."""
+        for status in (408, 409, 429):
+            with self.subTest(status=status):
+                self.assertIs(
+                    _classify(status, json.dumps({}), is_write=False).verdict,
+                    Verdict.REJECTED,
+                )
+
+    def test_a_recognised_refusal_still_earns_rejected_on_a_write(self) -> None:
+        """The regression guard: this must not turn every write failure ambiguous.
+
+        `errorText` is the documented V1 refusal envelope, so it keeps its licence to
+        retry - that is what makes an ordinary validation failure cheap to correct.
+        """
+        body = json.dumps({"errorText": "Seria nu a fost gasita!", "number": ""})
+        self.assertIs(_classify(400, body, is_write=True).verdict, Verdict.REJECTED)

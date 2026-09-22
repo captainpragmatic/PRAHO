@@ -103,13 +103,21 @@ def classify(reply: RawReply) -> SmartBillResponse:  # noqa: C901, PLR0911  # A 
             error_text="No usable reply from SmartBill; the document may or may not exist.",
         )
 
-    # A rate limiter refuses before the request reaches invoicing logic, so nothing
-    # was created. ASSUMPTION, not established fact: SmartBill has not confirmed it
-    # for write endpoints, and it is question 5 in the outstanding support email. If
-    # they contradict it, this branch must become AMBIGUOUS for writes.
+    # A rate limiter conventionally refuses before the request reaches invoicing
+    # logic, so nothing would have been created - but SmartBill has not confirmed
+    # that for write endpoints (question 5 in the outstanding support email), and
+    # their limit is an account-level policy rather than an obvious edge throttle.
+    # An unconfirmed assumption is not a recognised refusal envelope, so a write does
+    # not get to replay on it. Our own gate defers before sending, so a 429 arriving
+    # at all means pacing has already failed: a rare event, and cheap to reconcile by
+    # hand compared with a duplicate fiscal invoice. Reads keep the cheap verdict.
+    #
+    # `error_codes` and `retry_after_seconds` are preserved deliberately - the client
+    # keys throttle recording off the code, not the verdict, so the token is still
+    # blocked for every worker either way.
     if status == HTTPStatus.TOO_MANY_REQUESTS:
         return SmartBillResponse(
-            verdict=Verdict.REJECTED,
+            verdict=Verdict.AMBIGUOUS if is_write else Verdict.REJECTED,
             status=status,
             payload=parsed or {},
             error_text="Rate limit exceeded",
@@ -188,9 +196,14 @@ def classify(reply: RawReply) -> SmartBillResponse:  # noqa: C901, PLR0911  # A 
             raw_body=body,
         )
 
+    # A 4xx carrying no refusal envelope is the ABSENCE of evidence, not evidence of
+    # absence. 408 is the plainest case - the server timed out, possibly after writing
+    # the document - and 409 and the intermediary-generated 4xx behave the same way.
+    # Everything above this point that could name a reason has already returned, so
+    # reaching here on a write means we cannot say what happened.
     if status >= HTTPStatus.BAD_REQUEST:
         return SmartBillResponse(
-            verdict=Verdict.REJECTED,
+            verdict=Verdict.AMBIGUOUS if is_write else Verdict.REJECTED,
             status=status,
             payload=parsed,
             error_text=f"SmartBill returned {status} with no errorText",
