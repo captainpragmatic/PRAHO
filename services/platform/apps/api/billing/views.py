@@ -654,6 +654,14 @@ def customer_invoice_detail_api(request: HttpRequest, customer: Customer, invoic
     """
     try:
         # Find invoice for the authenticated customer
+        # A blank identifier would become `WHERE number IS NULL`, which can match
+        # several unissued documents and raise MultipleObjectsReturned as a 500.
+        if not (invoice_number or "").strip():
+            return Response(
+                {"success": False, "error": "Invoice number is required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         try:
             invoice = (
                 Invoice.objects.select_related("currency", "customer")
@@ -1032,6 +1040,14 @@ def invoice_pdf_export(request: HttpRequest, customer: Customer, invoice_number:
     """
     try:
         # Find invoice for the authenticated customer
+        # A blank identifier would become `WHERE number IS NULL`, which can match
+        # several unissued documents and raise MultipleObjectsReturned as a 500.
+        if not (invoice_number or "").strip():
+            return Response(
+                {"success": False, "error": "Invoice number is required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         try:
             invoice = (
                 Invoice.objects.select_related("currency", "customer")

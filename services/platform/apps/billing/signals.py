@@ -496,7 +496,7 @@ def handle_invoice_created_or_updated(sender: type[Invoice], instance: Invoice, 
         if created:
             # New invoice created
             _handle_new_invoice_creation(instance)
-            logger.info(f"📋 [Invoice] Created {instance.number} for {instance.customer}")
+            logger.info(f"📋 [Invoice] Created {instance.display_number} for {instance.customer}")
 
         else:
             # Invoice updated - check for status changes
@@ -551,32 +551,53 @@ def handle_invoice_number_generation(sender: type[Invoice], instance: Invoice, *
 
     The number must be assigned before locked_at reaches the database. It then
     participates in the same fiscal snapshot as the evidence and issue timestamp.
+
+    Only the built-in issuer allocates here. An externally issued document receives
+    its number from the provider, so reaching `issued` without one is a bug in the
+    issuance protocol rather than something to paper over with a local sequence
+    number that would diverge from the document the customer and ANAF received.
     """
+    from .invoice_models import ISSUER_BUILTIN
+    from .numbering_service import InvoiceNumberingService
+
     try:
-        if not instance._state.adding and instance.status == "issued" and instance.number.startswith("TMP-"):
-            if Invoice.objects.filter(pk=instance.pk, locked_at__isnull=False).exists():
-                return  # Existing locked history cannot be renumbered by a later save.
-            # Generate proper invoice number
-            from .numbering_service import InvoiceNumberingService
+        if instance._state.adding or instance.status != "issued":
+            return
 
-            new_number = InvoiceNumberingService.get_next_number()
+        # None is the provisional state for a document awaiting issuance. Blank and
+        # whitespace strings are the same thing arriving through a path that skipped
+        # normalisation; "TMP-" is the legacy placeholder form.
+        raw_number = instance.number or ""
+        needs_number = not raw_number.strip() or raw_number.startswith("TMP-")
+        if not needs_number:
+            return
 
-            old_number = instance.number
-            instance.number = new_number
-            if instance.issued_at is None:
-                instance.issued_at = timezone.now()
-
-            logger.info(f"📋 [Invoice] Generated number {new_number} for invoice {instance.pk}")
-
-            # Log the numbering event for Romanian compliance
-            compliance_request = ComplianceEventRequest(
-                compliance_type="efactura_submission",
-                reference_id=new_number,
-                description=f"Invoice number generated: {new_number}",
-                status="success",
-                evidence={"old_number": old_number, "new_number": new_number},
+        if instance.issuer_provider != ISSUER_BUILTIN:
+            raise ValueError(
+                f"Invoice {instance.pk} is issued by {instance.issuer_provider!r} but reached "
+                f"'issued' without a provider number; refusing to allocate a local number."
             )
-            AuditService.log_compliance_event(compliance_request)
+
+        if Invoice.objects.filter(pk=instance.pk, locked_at__isnull=False).exists():
+            return  # Existing locked history cannot be renumbered by a later save.
+
+        old_number = instance.number
+        new_number = InvoiceNumberingService.get_next_number()
+        instance.number = new_number
+        if instance.issued_at is None:
+            instance.issued_at = timezone.now()
+
+        logger.info(f"📋 [Invoice] Generated number {new_number} for invoice {instance.pk}")
+
+        # Log the numbering event for Romanian compliance
+        compliance_request = ComplianceEventRequest(
+            compliance_type="efactura_submission",
+            reference_id=new_number,
+            description=f"Invoice number generated: {new_number}",
+            status="success",
+            evidence={"old_number": old_number, "new_number": new_number},
+        )
+        AuditService.log_compliance_event(compliance_request)
 
     except Exception as e:
         logger.exception(f"🔥 [Invoice Signal] Failed to generate invoice number: {e}")
@@ -1323,7 +1344,7 @@ def _handle_invoice_issued(invoice: Invoice) -> None:
 
         compliance_request = ComplianceEventRequest(
             compliance_type="efactura_submission",
-            reference_id=invoice.number,
+            reference_id=invoice.audit_reference,
             description=f"Invoice issued: {invoice.number} for {invoice.customer}",
             status="success",
             evidence={
@@ -1377,7 +1398,7 @@ def _handle_invoice_voided(invoice: Invoice) -> None:
 
         compliance_request = ComplianceEventRequest(
             compliance_type="efactura_submission",
-            reference_id=invoice.number,
+            reference_id=invoice.audit_reference,
             description=f"Invoice voided: {invoice.number}",
             status="voided",
             evidence={"void_date": timezone.now().isoformat()},
@@ -1487,7 +1508,7 @@ def _update_billing_analytics(invoice: Invoice, created: bool) -> None:
         # Invalidate related dashboard caches
         _invalidate_billing_dashboard_cache(invoice.customer.id)
 
-        logger.info(f"📊 [Analytics] Updated billing metrics for {invoice.number}")
+        logger.info(f"📊 [Analytics] Updated billing metrics for {invoice.display_number}")
 
     except Exception as e:
         logger.exception(f"🔥 [Billing Signal] Analytics update failed: {e}")
@@ -1950,7 +1971,7 @@ def _handle_efactura_refund_reporting(invoice: Invoice) -> None:
                     # Log compliance event
                     compliance_request = ComplianceEventRequest(
                         compliance_type="efactura_submission",
-                        reference_id=invoice.number,
+                        reference_id=invoice.audit_reference,
                         description=f"Invoice {invoice.number} refunded - credit note pending",
                         status="pending",
                         evidence={

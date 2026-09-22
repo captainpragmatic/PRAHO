@@ -15,7 +15,7 @@
         </a>
       </div>
       <h1 class="text-3xl font-bold text-white mt-4">
-        {% icon "receipt" %} {% if invoice %}{% trans "Edit Invoice" %} #{{ invoice.number }}{% else %}{% trans "Create New Invoice" %}{% endif %}
+        {% icon "receipt" %} {% if invoice %}{% trans "Edit Invoice" %} #{{ invoice.display_number }}{% else %}{% trans "Create New Invoice" %}{% endif %}
       </h1>
       <p class="mt-2 text-slate-400">
         {% if invoice %}

@@ -684,8 +684,8 @@ class EFacturaService:
 
             compliance_request = ComplianceEventRequest(
                 compliance_type="efactura_submission",
-                reference_id=invoice.number,
-                description=f"e-Factura {event_type.replace('efactura_', '')}: {invoice.number}",
+                reference_id=invoice.audit_reference,
+                description=f"e-Factura {event_type.replace('efactura_', '')}: {invoice.display_number}",
                 status=status_map.get(event_type, "unknown"),
                 evidence={
                     "invoice_id": str(invoice.id),

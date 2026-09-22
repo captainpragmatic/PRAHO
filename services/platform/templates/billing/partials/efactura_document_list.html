@@ -18,7 +18,7 @@
     <tr class="hover:bg-slate-700/50">
       <td class="px-4 py-3 text-sm">
         <a href="{% url 'billing:efactura_document_detail' pk=doc.pk %}" class="text-blue-400 hover:text-blue-300">
-          {{ doc.invoice.number }}
+          {{ doc.invoice.display_number }}
         </a>
       </td>
       <td class="px-4 py-3 text-sm">

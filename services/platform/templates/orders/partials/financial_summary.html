@@ -76,7 +76,7 @@
         <div class="flex justify-between text-sm mt-1">
           <span class="text-slate-400">{% trans "Invoice:" %}</span>
           <a href="{% url 'billing:invoice_detail' pk=order.invoice.pk %}" class="text-blue-400 hover:text-blue-300">
-            {{ order.invoice.number }}
+            {{ order.invoice.display_number }}
           </a>
         </div>
       {% endif %}

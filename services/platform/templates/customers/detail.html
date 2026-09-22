@@ -561,7 +561,7 @@
                         <div>
                             <h3 class="font-medium text-white">
                                 {% if invoice.type == 'proforma' %}{% icon "clipboard" %} {% trans 'Proforma' %}{% else %}{% icon "document" %} {% trans 'Invoice' %}{% endif %}
-                                {{ invoice.number }}
+                                {{ invoice.display_number }}
                             </h3>
                             <p class="text-sm text-slate-400">
                                 {{ invoice.created_at|date:"d M Y" }} •
