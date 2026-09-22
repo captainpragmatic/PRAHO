@@ -81,7 +81,7 @@ class RawReply:
     is_write: bool = False
 
 
-def classify(reply: RawReply) -> SmartBillResponse:  # noqa: C901, PLR0911  # A decision table: one branch per reply shape, one return per verdict. Splitting it scatters the money-safety reasoning across functions.
+def classify(reply: RawReply) -> SmartBillResponse:  # noqa: C901, PLR0911, PLR0912  # A decision table: one branch per reply shape, one return per verdict. Splitting it scatters the money-safety reasoning across functions.
     """Decide what a reply proves, erring towards AMBIGUOUS whenever unsure.
 
     `is_write` is the important argument. On a read, a wrong verdict costs a retry
@@ -116,6 +116,23 @@ def classify(reply: RawReply) -> SmartBillResponse:  # noqa: C901, PLR0911  # A 
     # keys throttle recording off the code, not the verdict, so the token is still
     # blocked for every worker either way.
     if status == HTTPStatus.TOO_MANY_REQUESTS:
+        # This branch runs before the V1 envelope check below, so it has to apply the
+        # same rule itself: `errorText` is the verdict whatever the status says. A
+        # documented refusal that merely arrives with a throttle status is still a
+        # recognised refusal, and answering "we cannot say" to one would send an
+        # ordinary, correctable validation failure into manual reconciliation.
+        throttled_reason = str((parsed or {}).get("errorText") or "").strip()
+        contradictory = is_write and bool(str((parsed or {}).get("number") or "").strip())
+        if throttled_reason and not contradictory:
+            return SmartBillResponse(
+                verdict=Verdict.REJECTED,
+                status=status,
+                payload=parsed or {},
+                error_text=first_sentence(throttled_reason),
+                error_codes=("rate_limit_exceeded",),
+                retry_after_seconds=retry_after,
+                raw_body=body,
+            )
         return SmartBillResponse(
             verdict=Verdict.AMBIGUOUS if is_write else Verdict.REJECTED,
             status=status,

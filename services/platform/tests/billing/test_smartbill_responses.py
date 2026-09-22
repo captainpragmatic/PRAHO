@@ -262,6 +262,31 @@ class UnrecognisedRefusalNeverLicensesAReplayTests(SimpleTestCase):
                     Verdict.REJECTED,
                 )
 
+    def test_a_recognised_refusal_survives_arriving_with_a_throttle_status(self) -> None:
+        """Branch ORDER, not branch logic.
+
+        The V1 rule is that `errorText` is the verdict whatever the status says. The
+        429 check runs first, so a documented refusal that happens to arrive with a
+        throttle status was being answered "we cannot say" - sending a provably
+        correctable validation failure into manual reconciliation instead.
+        """
+        body = json.dumps({"errorText": "Seria nu a fost gasita!", "number": ""})
+        result = _classify(429, body, is_write=True)
+
+        self.assertIs(result.verdict, Verdict.REJECTED)
+        self.assertIn("Seria nu a fost gasita", result.error_text)
+        self.assertIn(
+            "rate_limit_exceeded",
+            result.error_codes,
+            "the throttle must still be recorded: the client blocks the token off this code",
+        )
+
+    def test_a_throttled_reply_that_contradicts_itself_stays_ambiguous(self) -> None:
+        """An envelope plus a document number is contradictory, at any status."""
+        body = json.dumps({"errorText": "Seria nu a fost gasita!", "number": "3593"})
+
+        self.assertIs(_classify(429, body, is_write=True).verdict, Verdict.AMBIGUOUS)
+
     def test_a_recognised_refusal_still_earns_rejected_on_a_write(self) -> None:
         """The regression guard: this must not turn every write failure ambiguous.
 
