@@ -101,3 +101,4 @@ infrastructure.PanelType        # static panel type definitions (reference data,
 notifications.EmailCampaign     # campaign management (future: will get signals when campaign service is built)
 notifications.UnsubscribeToken  # short-lived HMAC token for email unsubscribe (no business state, rotated frequently)
 promotions.LoyaltyTier          # tier definitions (changes audited via LoyaltyProgram parent)
+billing.SmartBillRateGate       # outbound call scheduler: one timestamp per API token, no business/financial/customer data. Issuance itself stays fully audited.
