@@ -15,6 +15,7 @@ from django.core.exceptions import ValidationError
 from django.db import models, transaction
 from django.db.models import F
 from django.utils import timezone
+from django.utils.translation import gettext
 from django.utils.translation import gettext_lazy as _
 from django_fsm import FSMField, TransitionNotAllowed, transition
 
@@ -99,6 +100,25 @@ class InvoiceSequence(models.Model):
 
 
 # ===============================================================================
+# DOCUMENT PROVENANCE
+# ===============================================================================
+
+ISSUER_BUILTIN = "builtin"
+ISSUER_SMARTBILL = "smartbill"
+ISSUER_CHOICES: tuple[tuple[str, Any], ...] = (
+    (ISSUER_BUILTIN, _("Built-in")),
+    (ISSUER_SMARTBILL, _("SmartBill")),
+)
+
+DOCUMENT_KIND_INVOICE = "invoice"
+DOCUMENT_KIND_CREDIT_NOTE = "credit_note"
+DOCUMENT_KIND_CHOICES: tuple[tuple[str, Any], ...] = (
+    (DOCUMENT_KIND_INVOICE, _("Invoice")),
+    (DOCUMENT_KIND_CREDIT_NOTE, _("Credit note")),
+)
+
+
+# ===============================================================================
 # INVOICE MODELS (IMMUTABLE LEDGER)
 # ===============================================================================
 
@@ -126,8 +146,37 @@ class Invoice(models.Model):
         on_delete=models.RESTRICT,  # Cannot delete customer with invoices
         related_name="invoices",
     )
-    number = models.CharField(max_length=50, unique=True, default="TMP-000")  # From InvoiceSequence
+    number = models.CharField(
+        max_length=50,
+        unique=True,
+        null=True,
+        blank=True,
+        default=None,
+        help_text=_("Legal number. None until issued; assigned by the issuing provider."),
+    )
     status = FSMField(max_length=20, choices=STATUS_CHOICES, default="draft", protected=True)
+
+    # Provenance: stamped at creation, immutable once locked. Nothing renders or
+    # reconciles by reading a global "current provider" setting.
+    issuer_provider = models.CharField(
+        max_length=20,
+        choices=ISSUER_CHOICES,
+        default=ISSUER_BUILTIN,
+        help_text=_("Which system issued this document and owns its e-Factura submission"),
+    )
+    document_kind = models.CharField(
+        max_length=20,
+        choices=DOCUMENT_KIND_CHOICES,
+        default=DOCUMENT_KIND_INVOICE,
+    )
+    reverses_invoice = models.ForeignKey(
+        "self",
+        on_delete=models.RESTRICT,
+        null=True,
+        blank=True,
+        related_name="reversals",
+        help_text=_("For a credit note: the invoice it reverses"),
+    )
 
     # Currency and amounts (cents for precision)
     currency = models.ForeignKey(Currency, on_delete=models.PROTECT)
@@ -220,16 +269,45 @@ class Invoice(models.Model):
         )
         constraints: ClassVar[list[models.BaseConstraint]] = [
             models.CheckConstraint(
-                condition=models.Q(subtotal_cents__gte=0),
-                name="invoice_subtotal_non_negative",
+                condition=(
+                    models.Q(document_kind=DOCUMENT_KIND_INVOICE, subtotal_cents__gte=0)
+                    | models.Q(document_kind=DOCUMENT_KIND_CREDIT_NOTE, subtotal_cents__lte=0)
+                ),
+                name="invoice_subtotal_sign_matches_kind",
             ),
             models.CheckConstraint(
-                condition=models.Q(tax_cents__gte=0),
-                name="invoice_tax_non_negative",
+                condition=(
+                    models.Q(document_kind=DOCUMENT_KIND_INVOICE, tax_cents__gte=0)
+                    | models.Q(document_kind=DOCUMENT_KIND_CREDIT_NOTE, tax_cents__lte=0)
+                ),
+                name="invoice_tax_sign_matches_kind",
             ),
             models.CheckConstraint(
-                condition=models.Q(total_cents__gte=0),
-                name="invoice_total_non_negative",
+                condition=(
+                    models.Q(document_kind=DOCUMENT_KIND_INVOICE, total_cents__gte=0)
+                    | models.Q(document_kind=DOCUMENT_KIND_CREDIT_NOTE, total_cents__lte=0)
+                ),
+                name="invoice_total_sign_matches_kind",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(document_kind=DOCUMENT_KIND_INVOICE, reverses_invoice__isnull=True)
+                    | models.Q(document_kind=DOCUMENT_KIND_CREDIT_NOTE, reverses_invoice__isnull=False)
+                ),
+                name="invoice_credit_note_reverses_an_invoice",
+            ),
+            models.CheckConstraint(
+                condition=(models.Q(locked_at__isnull=True) | (models.Q(number__isnull=False) & ~models.Q(number=""))),
+                name="invoice_locked_requires_number",
+            ),
+            models.CheckConstraint(
+                condition=~models.Q(reverses_invoice=models.F("id")),
+                name="invoice_credit_note_not_self_referential",
+            ),
+            models.UniqueConstraint(
+                fields=["reverses_invoice"],
+                condition=models.Q(reverses_invoice__isnull=False),
+                name="invoice_one_reversal_per_original",
             ),
             models.CheckConstraint(
                 condition=models.Q(discount_cents__gte=0),
@@ -248,7 +326,7 @@ class Invoice(models.Model):
         ]
 
     def __str__(self) -> str:
-        return f"{self.number} - {self.customer}"
+        return f"{self.display_number} - {self.customer}"
 
     # Fields frozen once invoice is locked (issued).
     _FINANCIAL_FIELDS: ClassVar[frozenset[str]] = frozenset(
@@ -277,6 +355,9 @@ class Invoice(models.Model):
     _FISCAL_SNAPSHOT_FIELDS: ClassVar[frozenset[str]] = frozenset(
         {
             "number",
+            "issuer_provider",
+            "document_kind",
+            "reverses_invoice_id",
             "customer_id",
             "vat_evidence",
             "locked_at",
@@ -306,6 +387,12 @@ class Invoice(models.Model):
 
     def save(self, *args: Any, **kwargs: Any) -> None:
         """Calculate subtotal from total and tax on save with validation"""
+        # A document either has a legal number or it has none. Empty and whitespace
+        # strings are a third state that silently defeats both the allocation guard
+        # and the locked-requires-number constraint, so collapse them to NULL here.
+        if self.number is not None and not self.number.strip():
+            self.number = None
+
         update_fields = kwargs.get("update_fields")
         if update_fields and self.status == "issued" and "status" in update_fields:
             # A status-only save after issue() must not create an issued row without
@@ -412,6 +499,28 @@ class Invoice(models.Model):
                 "validation_passed": True,
             },
         )
+
+    @property
+    def display_number(self) -> str:
+        """Human-facing identifier that is safe before a number exists.
+
+        A document awaiting issuance has `number is None`. Rendering that as the
+        string "None" in templates, logs and exports is worse than useless, so every
+        user-visible surface goes through here instead of the raw field.
+        """
+        if self.number:
+            return self.number
+        return gettext("Pending issuance")
+
+    @property
+    def audit_reference(self) -> str:
+        """Stable machine identifier for audit and compliance records.
+
+        Never localized and never empty: an audit row that cannot be traced back to
+        its document is worse than no audit row. Before issuance there is no legal
+        number, so the primary key stands in.
+        """
+        return self.number or f"invoice:{self.pk}"
 
     @property
     def subtotal(self) -> Decimal:
@@ -724,17 +833,26 @@ class InvoiceLine(models.Model):
             models.Index(fields=["invoice", "kind"]),
         )
         constraints: ClassVar[list[models.BaseConstraint]] = [
+            # A credit note is a negative document, so its lines are negative too:
+            # EC-Sales reconciles partner totals against these rows and a line-less or
+            # positive-lined correction fails to balance against a negative header.
+            #
+            # The invariant these replace was never really "money is positive" - it was
+            # "the parts of one line agree with each other". A line quoting a positive
+            # price against negative tax is corrupt in either direction, and that is
+            # what is still refused here. Which of the two directions is legitimate is
+            # settled one level up, by the document-kind sign constraints on Invoice.
+            #
+            # `discount_amount_cents` is deliberately not in here: it is a magnitude, not
+            # a signed amount, and stays positive on a credit-note line. The e-Factura
+            # builder rejects a negative one before serialisation and has a test that
+            # constructs exactly that state to prove it.
             models.CheckConstraint(
-                condition=models.Q(unit_price_cents__gte=0),
-                name="invoiceline_unit_price_non_negative",
-            ),
-            models.CheckConstraint(
-                condition=models.Q(tax_cents__gte=0),
-                name="invoiceline_tax_non_negative",
-            ),
-            models.CheckConstraint(
-                condition=models.Q(line_total_cents__gte=0),
-                name="invoiceline_line_total_non_negative",
+                condition=(
+                    models.Q(unit_price_cents__gte=0, tax_cents__gte=0, line_total_cents__gte=0)
+                    | models.Q(unit_price_cents__lte=0, tax_cents__lte=0, line_total_cents__lte=0)
+                ),
+                name="invoiceline_amounts_share_one_sign",
             ),
         ]
 

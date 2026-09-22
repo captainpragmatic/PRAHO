@@ -609,7 +609,7 @@ class RomanianInvoicePDFGenerator(RomanianDocumentPDFGenerator):
         return _t("FISCAL INVOICE")
 
     def _get_filename(self) -> str:
-        return f"factura_{self.invoice.number}.pdf"
+        return f"factura_{self.invoice.display_number}.pdf"
 
     def _get_legal_disclaimer(self) -> str:
         return _t("Factură fiscală emisă conform art. 319 din Legea nr. 227/2015 privind Codul fiscal.")

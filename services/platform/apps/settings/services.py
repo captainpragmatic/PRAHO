@@ -291,6 +291,58 @@ class SettingsService:
         return SettingValidationError(key=key, field="value", message=message, code="validation_error")
 
     @classmethod
+    def _semantic_guard(cls, key: str, value: Any) -> SettingValidationError | None:
+        """Refusals that depend on live system state, not on the value's shape.
+
+        Catalog rules answer "is this well-formed for this key". A few keys also
+        depend on what the system is currently doing — whether work is in flight,
+        whether the integration being selected is even usable. That question can
+        only be asked against live state, so it is asked here.
+
+        Here specifically, and not in a view: this is the one write chokepoint every
+        caller reaches, single-key and change-set alike, so the guard cannot be
+        sidestepped by the admin, a management command, a data migration or a direct
+        service call. It runs inside the caller's transaction, immediately before the
+        row lock, so two operators racing the same switch cannot both be told yes.
+        """
+        if key != "billing.invoice_issuer":
+            return None
+
+        from apps.billing.issuers.base import get_registered_issuers  # noqa: PLC0415  # ADR-0007
+        from apps.billing.issuers.policy import can_switch_invoice_issuer  # noqa: PLC0415  # ADR-0007
+
+        target = str(value or "").strip()
+        registered = get_registered_issuers()
+        if target not in registered:
+            # Refusing here is what lets `default_issuer_provider()` stay non-raising
+            # inside the payment-convergence transaction: an unknown issuer never
+            # reaches storage, so it never has to be survived at read time.
+            return SettingValidationError(
+                key=key,
+                field="value",
+                message=f"Unknown invoice issuer '{target}'. Available: {', '.join(sorted(registered))}.",
+                code="unknown_issuer",
+            )
+
+        if target == str(cls.get_setting(key, "") or "").strip():
+            # Re-saving the current value is not a switch. Running the preflight on it
+            # would let unrelated in-flight work block an unrelated settings save.
+            return None
+
+        # `probe_provider=False` is load-bearing: this runs inside `update_setting`'s
+        # retrying atomic block, and a credential probe here would hold row locks
+        # across a SmartBill HTTP call and re-issue it on every retry.
+        outcome = can_switch_invoice_issuer(target, probe_provider=False)
+        if isinstance(outcome, Err):
+            return SettingValidationError(
+                key=key,
+                field="value",
+                message=" ".join(f"{blocker.reason}: {blocker.detail}" for blocker in outcome.error),
+                code="switch_blocked",
+            )
+        return None
+
+    @classmethod
     def _write_setting_locked(  # noqa: PLR0911, PLR0913  # Distinct validation/conflict outcomes; keyword-only write context
         cls,
         key: str,
@@ -308,6 +360,10 @@ class SettingsService:
         retry and rollback policy. Creation happens inside a savepoint so a lost
         create race cannot poison the caller's transaction.
         """
+        guard = cls._semantic_guard(key, value)
+        if guard is not None:
+            return Err(guard)
+
         try:
             setting = SystemSetting.objects.select_for_update(of=("self",)).get(key=key)
         except SystemSetting.DoesNotExist:

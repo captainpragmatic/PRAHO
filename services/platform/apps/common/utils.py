@@ -153,28 +153,6 @@ def format_romanian_datetime(dt: datetime) -> str:
 # ===============================================================================
 
 
-def generate_invoice_number(year: int | None = None) -> str:
-    """Generate Romanian invoice number format"""
-    if year is None:
-        year = get_romanian_now().year
-
-    # Format: YYYY-000001 (sequential per year)
-    from apps.billing.models import (  # noqa: PLC0415  # Deferred: avoids circular import
-        Invoice,  # Cross-app import to avoid circular dependencies  # Circular: cross-app
-    )
-
-    # Get next invoice number for this year
-    last_invoice = Invoice.objects.filter(number__startswith=f"{year}-").order_by("number").last()
-
-    if last_invoice:
-        last_num = int(last_invoice.number.split("-")[1])
-        next_num = last_num + 1
-    else:
-        next_num = 1
-
-    return f"{year}-{next_num:06d}"
-
-
 def calculate_due_date(invoice_date: datetime, payment_terms: int = 30) -> datetime:
     """Calculate invoice due date"""
     return invoice_date + timedelta(days=payment_terms)

@@ -335,11 +335,25 @@ def _discount_allocations(lines: list[InvoiceLine], discount: int) -> dict[int, 
     return allocated
 
 
+def _require_legal_number(invoice: Invoice) -> str:
+    """Return the invoice's legal number, refusing to report a document without one.
+
+    A statutory declaration must identify every document it reports. An unissued or
+    malformed row reaching this point is a data-integrity fault, not something to
+    paper over with a placeholder, and `assert` is not adequate here because it
+    disappears under `python -O`.
+    """
+    number = (invoice.number or "").strip()
+    if not number:
+        raise ValueError(f"Invoice pk={invoice.pk} has no legal number and cannot be reported in EC Sales.")
+    return number
+
+
 def _exception(invoice: Invoice, line: InvoiceLine | None, problems: list[str]) -> ReviewException:
     distinct = list(dict.fromkeys(problems))
     return ReviewException(
         invoice.pk,
-        invoice.number,
+        _require_legal_number(invoice),
         line.pk if line else None,
         tuple(problem.split(":", 1)[0] for problem in distinct),
         " ".join(problem.partition(": ")[2] or problem for problem in distinct),
@@ -421,11 +435,12 @@ def aggregate_ec_services(period: ReportingPeriod) -> ECSalesReport:
             country, body = vat_identity(invoice.bill_to_tax_id, invoice.bill_to_country)
             rate = Decimal(1) if invoice.currency_id == "RON" else invoice.exchange_to_ron
             assert rate is not None and invoice.tax_point_date is not None
+            invoice_number = _require_legal_number(invoice)
             discount = allocations[line.pk]
             included.append(
                 SupplyContribution(
                     invoice.pk,
-                    invoice.number,
+                    invoice_number,
                     line.pk,
                     line.description,
                     invoice.tax_point_date,

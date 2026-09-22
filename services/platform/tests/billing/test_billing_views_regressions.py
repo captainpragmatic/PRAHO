@@ -29,6 +29,7 @@ from apps.billing.models import (
     ProformaLine,
     ProformaSequence,
 )
+from apps.common.types import Ok
 from apps.customers.models import Customer
 from apps.users.models import CustomerMembership
 
@@ -325,15 +326,24 @@ class InvoiceEditViewTest(BillingViewsTestBase):
 class InvoicePdfViewTest(BillingViewsTestBase):
     """Tests for invoice_pdf view."""
 
-    @patch("apps.billing.views.RomanianInvoicePDFGenerator")
-    def test_invoice_pdf_success(self, mock_gen_cls):
-        mock_gen = MagicMock()
-        mock_gen.generate_response.return_value = HttpResponse(b"%PDF", content_type="application/pdf")
-        mock_gen_cls.return_value = mock_gen
+    @patch("apps.billing.issuers.documents.get_invoice_pdf_bytes")
+    def test_invoice_pdf_success(self, mock_get_bytes):
+        """Staff download goes through the issuer chokepoint, not the renderer.
+
+        Rendering here directly would hand staff a second, unofficial copy of a
+        provider-issued legal document - one that differs from what the customer
+        received and what ANAF holds.
+        """
+        mock_get_bytes.return_value = Ok(b"%PDF")
         invoice = self._create_invoice()
         self.client.force_login(self.staff_user)
+
         response = self.client.get(f"/billing/invoices/{invoice.pk}/pdf/")
+
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/pdf")
+        mock_get_bytes.assert_called_once()
+        self.assertEqual(mock_get_bytes.call_args.args[0].pk, invoice.pk)
 
     def test_invoice_pdf_not_found(self):
         self.client.force_login(self.staff_user)
@@ -863,8 +873,11 @@ class GenerateEFacturaViewTest(BillingViewsTestBase):
         from tests.factories import InvoiceLineFactory  # noqa: PLC0415
 
         InvoiceLineFactory(
-            invoice=invoice, description="Service", unit_price_cents=8403,
-            quantity=1, tax_rate=Decimal("0.19"),
+            invoice=invoice,
+            description="Service",
+            unit_price_cents=8403,
+            quantity=1,
+            tax_rate=Decimal("0.19"),
         )
         self.client.force_login(self.staff_user)
         response = self.client.get(f"/billing/invoices/{invoice.pk}/e-factura/")
@@ -1692,9 +1705,7 @@ class ApiProcessRefundRoleTests(BillingViewsTestBase):
             with self.subTest(user_id=bad), patch(self.REFUND_SERVICE) as refund:
                 response = self.client.post(
                     "/billing/process-refund/",
-                    json.dumps(
-                        {"payment_id": str(uuid.uuid4()), "customer_id": self.customer.pk, "user_id": bad}
-                    ),
+                    json.dumps({"payment_id": str(uuid.uuid4()), "customer_id": self.customer.pk, "user_id": bad}),
                     content_type="application/json",
                 )
                 self.assertEqual(response.status_code, 403)
@@ -1993,9 +2004,7 @@ class ProcessProformaPaymentAllowlistTest(BillingViewsTestBase):
         """The service must NOT be called when payment_method is not allowed."""
         proforma = self._create_proforma()
         self.client.force_login(self.staff_user)
-        with patch(
-            "apps.billing.proforma_service.ProformaPaymentService.record_payment_and_convert"
-        ) as mock_service:
+        with patch("apps.billing.proforma_service.ProformaPaymentService.record_payment_and_convert") as mock_service:
             response = self.client.post(
                 f"/billing/proformas/{proforma.pk}/pay/",
                 {"payment_method": "evil_method"},

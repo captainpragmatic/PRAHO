@@ -13,7 +13,7 @@ providing a historical record of why the system is built the way it is.
 ## How to Create a New ADR
 
 1. Create a new file: `ADR-XXXX-short-descriptive-title.md`
-2. Use the next available number (currently: **ADR-0048**)
+2. Use the next available number (currently: **ADR-0049**)
 3. Follow the standard format: Status, Date, Authors, Context, Decision, Consequences
 4. Set status to **Proposed** initially, then update to **Accepted** after team review
 
@@ -76,6 +76,7 @@ providing a historical record of why the system is built the way it is.
 | [ADR-0045](ADR-0045-committed-side-effect-boundaries.md) | Committed Side-Effect Boundaries for Provider Mutations | Accepted | 2026-09-08 |
 | [ADR-0046](ADR-0046-automated-fx-ingestion.md) | Automated FX Ingestion, Freshness Surface, and Currency Admission | Accepted | 2026-09-14 |
 | [ADR-0047](ADR-0047-jurisdiction-tax-policy.md) | Jurisdiction-Parameterised Tax Policy and the Fiscal-Data Boundary | Accepted | 2026-09-15 |
+| [ADR-0048](ADR-0048-external-invoice-issuer.md) | External Invoice Issuer (SmartBill) | Accepted | 2026-09-22 |
 
 ### 🟡 Partially Superseded
 
@@ -192,8 +193,8 @@ Billing Ownership
 
 ## Statistics
 
-- **Total ADRs**: 47 (ADR-0001 through ADR-0047)
+- **Total ADRs**: 48 (ADR-0001 through ADR-0048)
 - **Active**: 37 (Accepted + Implemented)
 - **Partially Superseded**: 1
 - **Superseded / Historical**: 5
-- **Next available**: ADR-0048
+- **Next available**: ADR-0049

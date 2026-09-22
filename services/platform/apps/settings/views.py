@@ -30,7 +30,7 @@ from django_q.models import OrmQ, Schedule, Task
 
 from apps.common.decorators import admin_required
 from apps.common.security_decorators import log_security_event
-from apps.common.types import Ok
+from apps.common.types import Err, Ok
 
 from .catalog import (
     CATALOG,
@@ -482,13 +482,19 @@ def import_settings(request: HttpRequest) -> JsonResponse:
 # SETTINGS UI (three-surface IA: Business / Integrations / Platform — ADR-0042)
 # ===============================================================================
 
-INTEGRATION_GROUPS = ("stripe", "virtualmin", "efactura", "node-deployment", "backup")
+INTEGRATION_GROUPS = ("stripe", "smartbill", "virtualmin", "efactura", "node-deployment", "backup")
 
 SEARCH_MIN_QUERY_LENGTH = 2
 SEARCH_MAX_RESULTS = 30
 
 # Integration pages annotate where their configuration really lives
 INTEGRATION_SOURCE_NOTES: dict[str, Any] = {
+    "smartbill": _(
+        "Switching the issuer affects NEW invoices only. Provenance is stamped on each "
+        "document and frozen, so anything already issued keeps its own issuer, its number, "
+        "and its e-Factura owner forever — and SmartBill credentials stay needed for "
+        "reversing or re-downloading those documents even after switching away."
+    ),
     "virtualmin": _(
         "Server credentials are vault-managed per server (ADR-0033) and are not edited here — "
         "these settings tune connection and provisioning behavior."
@@ -807,6 +813,21 @@ def integration_test(request: HttpRequest, integration: str) -> JsonResponse:
                 message = (
                     _("Virtualmin authentication healthy") if ok else _("No Virtualmin authentication method succeeded")
                 )
+        elif integration == "smartbill":
+            from apps.billing.issuers.policy import operator_safe_detail  # noqa: PLC0415
+            from apps.billing.issuers.smartbill.issuer import SmartBillIssuer  # noqa: PLC0415
+
+            # Real work, not a ping: it proves the configured series and every mapped
+            # VAT-rate name actually exist in the account. Those are account-coupled
+            # strings, and a mismatch is otherwise only discovered when a document
+            # fails — or worse, succeeds against the wrong rate.
+            report = SmartBillIssuer().validate_configuration()
+            if isinstance(report, Err):
+                ok = False
+                message = _("SmartBill check failed: %(detail)s") % {"detail": operator_safe_detail(report.error)}
+            else:
+                ok = True
+                message = _("SmartBill credentials, series and VAT names verified")
         elif integration == "efactura":
             from apps.billing.efactura.settings import efactura_settings  # noqa: PLC0415  # ADR-0007
             from apps.billing.efactura.token_storage import OAuthToken  # noqa: PLC0415  # ADR-0007

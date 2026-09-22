@@ -637,7 +637,13 @@ def _get_campaign_recipients(campaign: object) -> list[tuple[str, dict[str, Any]
             Invoice,  # Circular: cross-app  # Deferred: avoids circular import
         )
 
-        overdue_customer_ids = Invoice.objects.filter(status="overdue").values_list("customer_id", flat=True).distinct()
+        # document_kind filter: a credit note can reach `overdue` like any other
+        # issued document, and would then recruit its customer into a chase list.
+        overdue_customer_ids = (
+            Invoice.objects.filter(status="overdue", document_kind="invoice")
+            .values_list("customer_id", flat=True)
+            .distinct()
+        )
         customers = customers.filter(id__in=overdue_customer_ids)
     elif audience == "trial_expiring":
         # The model exposes this future audience, but no expiry window has been

@@ -161,6 +161,14 @@ class BillingScheduleContractTestCase(TestCase):
         refund_schedule = Schedule.objects.get(name="billing-refund-reconciliation")
         self.assertEqual(refund_schedule.func, "apps.billing.tasks.reconcile_stripe_refunds")
         self.assertEqual(refund_schedule.cron, "45 2 * * *")
+        # Both sweeps recover work whose on_commit enqueue was lost. Unregistered
+        # they never run, and the loss they exist to catch becomes permanent.
+        issuance_sweep = Schedule.objects.get(name="billing-issuance-sweep")
+        self.assertEqual(issuance_sweep.func, "apps.billing.issuers.tasks.sweep_pending_issuances")
+        self.assertEqual(issuance_sweep.cron, "*/10 * * * *")
+        reversal_sweep = Schedule.objects.get(name="billing-owed-reversals")
+        self.assertEqual(reversal_sweep.func, "apps.billing.issuers.tasks.sweep_owed_reversals")
+        self.assertEqual(reversal_sweep.cron, "25 * * * *")
         vies_schedule = Schedule.objects.get(name="billing-vies-reverification")
         self.assertEqual(vies_schedule.func, "apps.billing.tasks.reverify_expired_vat_validations")
         self.assertEqual(vies_schedule.cron, "15 2 * * *")
@@ -170,5 +178,5 @@ class BillingScheduleContractTestCase(TestCase):
             "apps.billing.tasks.reconcile_recurring_payment_submissions",
         )
         self.assertEqual(recurring_reconciliation.cron, "*/10 * * * *")
-        self.assertEqual(len(result), 8)
+        self.assertEqual(len(result), 10)
         register_usage.assert_called_once_with()

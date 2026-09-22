@@ -241,14 +241,26 @@ class BillingAnalyticsService:
 
 
 def generate_invoice_pdf(invoice: Invoice) -> bytes:
-    """Generate an invoice PDF through the canonical Romanian document renderer.
+    """Return the authoritative PDF for this invoice.
 
-    PDF generation errors intentionally propagate so callers cannot replace a
-    legally significant invoice with an unvalidated placeholder attachment.
+    Routed through the issuer chokepoint rather than straight to the renderer,
+    because an externally-issued invoice already HAS an authoritative rendering —
+    the provider's, which is what the customer and the accountant see and what sits
+    behind whatever reached ANAF. Rendering our own version of that document would
+    produce a second, unofficial copy that can differ in layout or rounding.
+
+    Errors intentionally propagate so callers cannot replace a legally significant
+    invoice with an unvalidated placeholder attachment.
     """
-    from apps.billing.pdf_generators import generate_invoice_pdf as generate_canonical_pdf  # noqa: PLC0415
+    from apps.billing.issuers.documents import get_invoice_pdf_bytes  # noqa: PLC0415
+    from apps.common.types import Err  # noqa: PLC0415
 
-    return generate_canonical_pdf(invoice)
+    # DocumentDeferred deliberately propagates: a queued email job should be retried
+    # by the queue, not turned into a send with no attachment or a hard failure.
+    result = get_invoice_pdf_bytes(invoice)
+    if isinstance(result, Err):
+        raise RuntimeError(f"Could not obtain the PDF for invoice {invoice.display_number}: {result.error}")
+    return result.unwrap()
 
 
 def generate_e_factura_xml(invoice: Invoice) -> str:

@@ -14,6 +14,7 @@ from django.db import transaction
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
+from apps.billing.invoice_models import ISSUER_BUILTIN
 from apps.billing.models import (
     CreditLedger,
     Currency,
@@ -1844,6 +1845,9 @@ class TestTriggerEfacturaSubmission(TestCase):
         mock_queue.return_value = "task-123"
         invoice = MagicMock()
         invoice.id = uuid.uuid4()
+        # The guard fails closed on unknown provenance, so a bare MagicMock is
+        # (correctly) refused. The double has to state which system issued it.
+        invoice.issuer_provider = ISSUER_BUILTIN
         with self.captureOnCommitCallbacks(execute=True) as callbacks:
             _trigger_efactura_submission(invoice)
             mock_queue.assert_not_called()
@@ -2076,6 +2080,7 @@ class TestHandleEfacturaRefundReporting(TestCase):
         invoice = MagicMock()
         invoice.bill_to_country = "RO"
         invoice.number = "INV-001"
+        invoice.issuer_provider = ISSUER_BUILTIN
         efactura_doc = MagicMock()
         efactura_doc.status = "accepted"
         invoice.efactura_document = efactura_doc

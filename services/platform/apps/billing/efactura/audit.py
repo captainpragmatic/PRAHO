@@ -90,7 +90,7 @@ class EFacturaAuditService:
 
             compliance_request = ComplianceEventRequest(
                 compliance_type="efactura_submission",
-                reference_id=invoice.number,
+                reference_id=invoice.audit_reference,
                 description=(
                     f"e-Factura XML validation: {invoice.number} - "
                     f"{'Valid' if validation_result.is_valid else f'{error_count} errors'}"
@@ -154,7 +154,7 @@ class EFacturaAuditService:
             # Log as compliance event
             compliance_request = ComplianceEventRequest(
                 compliance_type="efactura_submission",
-                reference_id=invoice.number,
+                reference_id=invoice.audit_reference,
                 description=f"e-Factura submission {'successful' if success else 'failed'}: {invoice.number}",
                 status="success" if success else "failed",
                 evidence={
@@ -250,7 +250,7 @@ class EFacturaAuditService:
             # Log as compliance event
             compliance_request = ComplianceEventRequest(
                 compliance_type="efactura_submission",
-                reference_id=invoice.number,
+                reference_id=invoice.audit_reference,
                 description=f"e-Factura accepted: {invoice.number}",
                 status="success",
                 evidence={
@@ -308,7 +308,7 @@ class EFacturaAuditService:
             # Log as compliance event
             compliance_request = ComplianceEventRequest(
                 compliance_type="efactura_submission",
-                reference_id=invoice.number,
+                reference_id=invoice.audit_reference,
                 description=f"e-Factura rejected: {invoice.number}",
                 status="failed",
                 evidence={
@@ -387,7 +387,7 @@ class EFacturaAuditService:
             # Log as compliance event
             compliance_request = ComplianceEventRequest(
                 compliance_type="efactura_submission",
-                reference_id=invoice.number,
+                reference_id=invoice.audit_reference,
                 description=f"e-Factura deadline approaching: {invoice.number} ({hours_remaining:.1f}h remaining)",
                 status="warning",
                 evidence={

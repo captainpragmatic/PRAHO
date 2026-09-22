@@ -16,7 +16,7 @@ from datetime import datetime
 from decimal import Decimal
 from enum import Enum
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from django.conf import settings
 from django.core.cache import cache
@@ -37,6 +37,7 @@ from apps.audit.services import (
 from apps.common.validators import log_security_event
 
 from .fiscal_identity import normalize_country_code
+from .issuers.models import IssuanceState, ProviderIssuance
 from .models import (
     CreditLedger,
     Invoice,
@@ -489,14 +490,14 @@ def handle_invoice_created_or_updated(sender: type[Invoice], instance: Invoice, 
                 context=AuditContext(actor_type="system"),
                 old_values=old_values,
                 new_values=new_values,
-                description=f"Invoice {instance.number} {'created' if created else 'updated'}",
+                description=f"Invoice {instance.audit_reference} {'created' if created else 'updated'}",
             )
             BillingAuditService.log_invoice_event(event_data)
 
         if created:
             # New invoice created
             _handle_new_invoice_creation(instance)
-            logger.info(f"📋 [Invoice] Created {instance.number} for {instance.customer}")
+            logger.info(f"📋 [Invoice] Created {instance.display_number} for {instance.customer}")
 
         else:
             # Invoice updated - check for status changes
@@ -510,6 +511,9 @@ def handle_invoice_created_or_updated(sender: type[Invoice], instance: Invoice, 
                 # REFUND: Post-refund side effects
                 if instance.status == "refunded" and old_status != "refunded":
                     _handle_invoice_refund_completion(instance)
+                elif instance.status == "partially_refunded" and old_status != "partially_refunded":
+                    # A provider that reverses whole documents cannot express this.
+                    _warn_partial_refund_cannot_be_reversed(instance)
 
         # An existing invoice's transition to issued is handled above by
         # _handle_invoice_status_change(). Only cover invoices created directly
@@ -551,32 +555,64 @@ def handle_invoice_number_generation(sender: type[Invoice], instance: Invoice, *
 
     The number must be assigned before locked_at reaches the database. It then
     participates in the same fiscal snapshot as the evidence and issue timestamp.
+
+    Only the built-in issuer allocates here. An externally issued document receives
+    its number from the provider, so reaching `issued` without one is a bug in the
+    issuance protocol rather than something to paper over with a local sequence
+    number that would diverge from the document the customer and ANAF received.
     """
+    from .invoice_models import ISSUER_BUILTIN
+    from .issuers.base import Issued
+    from .issuers.policy import resolve_issuer
+
     try:
-        if not instance._state.adding and instance.status == "issued" and instance.number.startswith("TMP-"):
-            if Invoice.objects.filter(pk=instance.pk, locked_at__isnull=False).exists():
-                return  # Existing locked history cannot be renumbered by a later save.
-            # Generate proper invoice number
-            from .numbering_service import InvoiceNumberingService
+        if instance._state.adding or instance.status != "issued":
+            return
 
-            new_number = InvoiceNumberingService.get_next_number()
+        # None is the provisional state for a document awaiting issuance. Blank and
+        # whitespace strings are the same thing arriving through a path that skipped
+        # normalisation; "TMP-" is the legacy placeholder form.
+        raw_number = instance.number or ""
+        needs_number = not raw_number.strip() or raw_number.startswith("TMP-")
+        if not needs_number:
+            return
 
-            old_number = instance.number
-            instance.number = new_number
-            if instance.issued_at is None:
-                instance.issued_at = timezone.now()
-
-            logger.info(f"📋 [Invoice] Generated number {new_number} for invoice {instance.pk}")
-
-            # Log the numbering event for Romanian compliance
-            compliance_request = ComplianceEventRequest(
-                compliance_type="efactura_submission",
-                reference_id=new_number,
-                description=f"Invoice number generated: {new_number}",
-                status="success",
-                evidence={"old_number": old_number, "new_number": new_number},
+        if instance.issuer_provider != ISSUER_BUILTIN:
+            raise ValueError(
+                f"Invoice {instance.pk} is issued by {instance.issuer_provider!r} but reached "
+                f"'issued' without a provider number; refusing to allocate a local number."
             )
-            AuditService.log_compliance_event(compliance_request)
+
+        if Invoice.objects.filter(pk=instance.pk, locked_at__isnull=False).exists():
+            return  # Existing locked history cannot be renumbered by a later save.
+
+        old_number = instance.number
+
+        # Through the gateway rather than the numbering service directly. Behaviour is
+        # identical for the built-in issuer. Note the limit of what this achieves: the
+        # three invoice-creation services still allocate inline at Invoice.objects.create,
+        # before a row exists, so they cannot use this interface yet. Consolidating them
+        # into a shared issuance workflow is Phase 6 work.
+        outcome = resolve_issuer(instance).issue_invoice(instance, attempt_id=uuid4())
+        if not isinstance(outcome, Issued):
+            raise ValueError(f"Issuer {instance.issuer_provider!r} did not assign a number: {outcome}")
+
+        new_number = outcome.legal_number
+        instance.number = new_number
+        if instance.issued_at is None:
+            instance.issued_at = timezone.now()
+
+        logger.info(f"📋 [Invoice] Generated number {new_number} for invoice {instance.pk}")
+
+        # Log the numbering event for Romanian compliance
+        compliance_request = ComplianceEventRequest(
+            compliance_type="efactura_submission",
+            reference_id=new_number,
+            description=f"Invoice number generated: {new_number}",
+            status="success",
+            evidence={"old_number": old_number, "new_number": new_number},
+        )
+        AuditService.log_compliance_event(compliance_request)
 
     except Exception as e:
         logger.exception(f"🔥 [Invoice Signal] Failed to generate invoice number: {e}")
@@ -1159,6 +1195,7 @@ def _remove_payment_credit_adjustment(payment: Payment, event_type: str) -> None
 
 def _handle_invoice_refund_completion(invoice: Invoice) -> None:
     """Handle side effects when invoice refund is completed"""
+    _queue_provider_storno(invoice)
     try:
         # H5 fix: Send email via on_commit to prevent ghost emails on rollback.
         # If an outer transaction rolls back, the email would have already been sent.
@@ -1323,7 +1360,7 @@ def _handle_invoice_issued(invoice: Invoice) -> None:
 
         compliance_request = ComplianceEventRequest(
             compliance_type="efactura_submission",
-            reference_id=invoice.number,
+            reference_id=invoice.audit_reference,
             description=f"Invoice issued: {invoice.number} for {invoice.customer}",
             status="success",
             evidence={
@@ -1377,7 +1414,7 @@ def _handle_invoice_voided(invoice: Invoice) -> None:
 
         compliance_request = ComplianceEventRequest(
             compliance_type="efactura_submission",
-            reference_id=invoice.number,
+            reference_id=invoice.audit_reference,
             description=f"Invoice voided: {invoice.number}",
             status="voided",
             evidence={"void_date": timezone.now().isoformat()},
@@ -1487,7 +1524,7 @@ def _update_billing_analytics(invoice: Invoice, created: bool) -> None:
         # Invalidate related dashboard caches
         _invalidate_billing_dashboard_cache(invoice.customer.id)
 
-        logger.info(f"📊 [Analytics] Updated billing metrics for {invoice.number}")
+        logger.info(f"📊 [Analytics] Updated billing metrics for {invoice.display_number}")
 
     except Exception as e:
         logger.exception(f"🔥 [Billing Signal] Analytics update failed: {e}")
@@ -1718,8 +1755,15 @@ def _requires_efactura_submission(invoice: Invoice) -> bool:
 
 def _trigger_efactura_submission(invoice: Invoice) -> None:
     """Queue Romanian e-Factura submission only after the invoice commit succeeds."""
+    from apps.billing.issuers.policy import efactura_submission_denied_reason
+
+    denied = efactura_submission_denied_reason(invoice)
+    if denied is not None:
+        logger.info(f"⏭️ [e-Factura] Not queueing {invoice.display_number}: {denied}")
+        return
+
     invoice_id = str(invoice.id)
-    invoice_number = invoice.number
+    invoice_number = invoice.display_number
 
     def _queue_after_commit() -> None:
         try:
@@ -1921,6 +1965,13 @@ def _cancel_payment_retries(payment: Payment) -> None:
 
 def _handle_efactura_refund_reporting(invoice: Invoice) -> None:
     """Handle e-Factura refund reporting for Romanian compliance"""
+    from apps.billing.issuers.policy import efactura_submission_denied_reason
+
+    denied = efactura_submission_denied_reason(invoice)
+    if denied is not None:
+        logger.info(f"⏭️ [e-Factura] No credit note for {invoice.display_number}: {denied}")
+        return
+
     try:
         # Check if this invoice has an e-Factura document that was accepted
         if normalize_country_code(invoice.bill_to_country) == "RO":
@@ -1950,7 +2001,7 @@ def _handle_efactura_refund_reporting(invoice: Invoice) -> None:
                     # Log compliance event
                     compliance_request = ComplianceEventRequest(
                         compliance_type="efactura_submission",
-                        reference_id=invoice.number,
+                        reference_id=invoice.audit_reference,
                         description=f"Invoice {invoice.number} refunded - credit note pending",
                         status="pending",
                         evidence={
@@ -2145,3 +2196,144 @@ def _trigger_virtualmin_provisioning_on_payment(invoice: Invoice) -> None:
 
     except Exception as e:
         logger.error(f"🔥 [CrossApp] Failed to trigger Virtualmin provisioning on payment: {e}")
+
+
+# ===============================================================================
+# PROVIDER ISSUANCE AUDIT (ADR-0016)
+# ===============================================================================
+#
+# An invoice issued through an external provider must leave the same audit trail as
+# one issued locally. Provenance changes who assigns the number; it does not change
+# what the business is obliged to be able to reconstruct afterwards.
+#
+# The Invoice receivers already cover the document itself. These cover the ATTEMPT,
+# which is the part that has no local equivalent: which payload was sent, what came
+# back, and — for an ambiguous outcome — the evidence a human will need.
+
+
+@receiver(pre_save, sender=ProviderIssuance)
+def store_original_issuance_values(sender: type[ProviderIssuance], instance: ProviderIssuance, **kwargs: Any) -> None:
+    """Capture the before-state so the audit event can show a real transition."""
+    try:
+        if instance.pk:
+            try:
+                original = ProviderIssuance.objects.get(pk=instance.pk)
+                instance._original_issuance_values = {
+                    "state": original.state,
+                    "attempts": original.attempts,
+                    "provider_number": original.provider_number,
+                }
+            except ProviderIssuance.DoesNotExist:
+                instance._original_issuance_values = {}
+    except Exception as e:
+        logger.exception(f"🔥 [Issuance Signal] Failed to store original values: {e}")
+
+
+@receiver(post_save, sender=ProviderIssuance)
+def handle_issuance_audit(
+    sender: type[ProviderIssuance], instance: ProviderIssuance, created: bool, **kwargs: Any
+) -> None:
+    """Record every state change of an external issuance attempt."""
+    try:
+        old_values = getattr(instance, "_original_issuance_values", {}) or {}
+        new_values = {
+            "state": instance.state,
+            "attempts": instance.attempts,
+            "provider_number": instance.provider_number,
+        }
+        event_type = "invoice_provider_issue_attempted" if created else _issuance_event_type(instance.state)
+
+        AuditService.log_simple_event(
+            event_type=event_type,
+            content_object=instance,
+            description=(f"Provider issuance {instance.provider} for invoice {instance.invoice_id}: {instance.state}"),
+            old_values=old_values,
+            new_values=new_values,
+            # str()-forced: a lazy proxy here would poison the audit JSON and can
+            # silently roll the surrounding transaction back.
+            metadata={
+                "provider": str(instance.provider),
+                "request_hash": str(instance.request_hash),
+                "needs_human_reconciliation": instance.needs_human_reconciliation,
+            },
+            actor_type="system",
+        )
+    except Exception as e:
+        logger.exception(f"🔥 [Issuance Signal] Failed to log issuance audit event: {e}")
+
+
+@receiver(post_delete, sender=ProviderIssuance)
+def handle_issuance_deletion(sender: type[ProviderIssuance], instance: ProviderIssuance, **kwargs: Any) -> None:
+    """Deleting the record of a provider call destroys the only evidence it happened."""
+    try:
+        log_security_event(
+            event_type="provider_issuance_deleted",
+            details={
+                "provider": str(instance.provider),
+                "invoice_id": str(instance.invoice_id),
+                "state": str(instance.state),
+                "provider_number": str(instance.provider_number),
+            },
+        )
+    except Exception as e:
+        logger.exception(f"🔥 [Issuance Signal] Failed to log issuance deletion: {e}")
+
+
+def _issuance_event_type(state: str) -> str:
+    return {
+        IssuanceState.ISSUED.value: "invoice_provider_issued",
+        IssuanceState.FAILED.value: "invoice_provider_issue_failed",
+        IssuanceState.OUTCOME_UNKNOWN.value: "invoice_provider_outcome_unknown",
+    }.get(state, "invoice_provider_issue_attempted")
+
+
+def _queue_provider_storno(invoice: Invoice) -> None:
+    """A provider-issued invoice is corrected by a document, not by a status change.
+
+    Locally issued invoices already produce an e-Factura credit note on refund. Their
+    provider-issued counterparts need the equivalent at the provider, or the customer
+    holds a full invoice with nothing reversing it and the accountant's books show
+    revenue that was returned.
+
+    Fired only for a FULL refund, which is the only kind `/invoice/reverse` can
+    express: it carries no amounts and reverses the whole document or nothing.
+    """
+    from apps.billing.invoice_models import ISSUER_BUILTIN
+
+    if invoice.issuer_provider == ISSUER_BUILTIN:
+        return
+    if invoice.document_kind != "invoice":
+        return  # a credit note is not itself reversible
+
+    from apps.billing.issuers.tasks import queue_invoice_storno
+
+    transaction.on_commit(lambda inv=invoice: queue_invoice_storno(inv.pk))
+    logger.info(f"↩️ [Storno] Queued provider reversal for invoice {invoice.display_number}")
+
+
+def _warn_partial_refund_cannot_be_reversed(invoice: Invoice) -> None:
+    """A partial refund of a provider-issued invoice needs a human.
+
+    SmartBill's storno takes no amounts, so there is no way to credit part of a
+    document. Reversing the whole thing would credit the customer money they were
+    never refunded, so the correction is left to an operator and made loud rather
+    than attempted.
+    """
+    from apps.billing.invoice_models import ISSUER_BUILTIN
+
+    if invoice.issuer_provider == ISSUER_BUILTIN or invoice.document_kind != "invoice":
+        return
+
+    logger.error(
+        f"🔥 [Storno] Invoice {invoice.display_number} was partially refunded but its "
+        f"provider cannot reverse part of a document. A correcting document must be "
+        f"issued manually."
+    )
+    log_security_event(
+        event_type="provider_partial_refund_needs_manual_correction",
+        details={
+            "invoice_number": str(invoice.display_number),
+            "issuer_provider": str(invoice.issuer_provider),
+            "customer_id": str(invoice.customer_id),
+        },
+    )

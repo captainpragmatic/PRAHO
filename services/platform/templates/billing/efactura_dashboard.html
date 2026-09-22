@@ -66,7 +66,7 @@
           {% for doc in pending_submissions %}
           <li class="flex items-center justify-between">
             <a href="{% url 'billing:efactura_document_detail' pk=doc.pk %}" class="text-sm text-slate-300 hover:text-white truncate">
-              {{ doc.invoice.number }}
+              {{ doc.invoice.display_number }}
             </a>
             <span class="text-xs text-blue-400">{% trans "queued" %}</span>
           </li>
@@ -89,7 +89,7 @@
           {% for doc in awaiting_response %}
           <li class="flex items-center justify-between">
             <a href="{% url 'billing:efactura_document_detail' pk=doc.pk %}" class="text-sm text-slate-300 hover:text-white truncate">
-              {{ doc.invoice.number }}
+              {{ doc.invoice.display_number }}
             </a>
             <span class="text-xs text-indigo-400">{{ doc.status }}</span>
           </li>
@@ -112,7 +112,7 @@
           {% for doc in retry_queue %}
           <li class="flex items-center justify-between">
             <a href="{% url 'billing:efactura_document_detail' pk=doc.pk %}" class="text-sm text-slate-300 hover:text-white truncate">
-              {{ doc.invoice.number }}
+              {{ doc.invoice.display_number }}
             </a>
             <span class="text-xs text-orange-400">{% trans "retry" %} #{{ doc.retry_count }}</span>
           </li>

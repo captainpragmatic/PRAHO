@@ -2,7 +2,7 @@
 {% load i18n %}
 {% load ui_components %}
 
-{% block title %}{% trans "e-Factura" %} {{ document.invoice.number }} - PRAHO Platform{% endblock %}
+{% block title %}{% trans "e-Factura" %} {{ document.invoice.display_number }} - PRAHO Platform{% endblock %}
 
 {% block content %}
 <div class="px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
@@ -10,7 +10,7 @@
   <div class="sm:flex sm:items-center mb-6">
     <div class="sm:flex-auto">
       <h1 class="text-3xl font-bold text-white">
-        {% icon "document" %} {% trans "e-Factura" %}: {{ document.invoice.number }}
+        {% icon "document" %} {% trans "e-Factura" %}: {{ document.invoice.display_number }}
       </h1>
       <p class="mt-2 text-slate-400">
         {% trans "Document ID" %}: {{ document.id }}

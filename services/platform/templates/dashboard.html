@@ -168,7 +168,7 @@
                   {% else %}
                   <p class="text-white font-medium group-hover:text-blue-400 transition-colors leading-5">
                     {% if document.document_type == 'invoice' %}
-                    {% trans 'Invoice' %} #{{ document.number }}
+                    {% trans 'Invoice' %} #{{ document.display_number }}
                     {% else %}
                     {% trans 'Proforma' %} #{{ document.number }}
                     {% endif %}
@@ -191,7 +191,7 @@
                 <div class="text-slate-400 text-sm leading-4">
                   {% if user.is_staff_user %}
                     {% if document.document_type == 'invoice' %}
-                    {% trans 'Invoice' %} #{{ document.number }} - {{ document.created_at|date:"d.m.Y" }}
+                    {% trans 'Invoice' %} #{{ document.display_number }} - {{ document.created_at|date:"d.m.Y" }}
                     {% else %}
                     {% trans 'Proforma' %} #{{ document.number }} - {{ document.created_at|date:"d.m.Y" }}
                     {% endif %}

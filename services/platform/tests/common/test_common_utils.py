@@ -10,14 +10,12 @@ from unittest.mock import patch
 import pytz
 from django.http import JsonResponse
 from django.test import TestCase
-from django.utils import timezone
 
 from apps.common.tax_service import calculate_romanian_vat
 from apps.common.utils import (
     calculate_due_date,
     format_romanian_date,
     format_romanian_datetime,
-    generate_invoice_number,
     generate_secure_token,
     get_romanian_now,
     hash_sensitive_data,
@@ -101,41 +99,6 @@ class TestRomanianDateFormatting(TestCase):
         naive = datetime(2025, 12, 31, 22, 30)
 
         self.assertEqual(format_romanian_date(naive), '31.12.2025')
-
-
-class TestInvoiceNumberGeneration(TestCase):
-    """Test invoice number generation"""
-
-    def test_invoice_number_current_year(self):
-        """Test invoice number generation for current year"""
-        from datetime import datetime
-        result = generate_invoice_number()
-        current_year = str(datetime.now().year)
-
-        # Should start with current year
-        self.assertTrue(result.startswith(current_year))
-        # Should have the expected format: YYYY-NNNNNN
-        self.assertRegex(result, rf'{current_year}-\d{{6}}')
-
-    def test_invoice_number_specific_year(self):
-        """Test invoice number generation for specific year"""
-        result = generate_invoice_number(year=2024)
-
-        # Should start with specified year
-        self.assertTrue(result.startswith('2024'))
-        self.assertRegex(result, r'2024-\d{6}')
-
-    def test_invoice_number_uniqueness(self):
-        """Test that invoice numbers have expected format"""
-        from datetime import datetime
-        current_year = str(datetime.now().year)
-        # Generate multiple invoice numbers - they might not be unique due to implementation
-        numbers = [generate_invoice_number() for _ in range(3)]
-
-        # All should have the current year prefix
-        for number in numbers:
-            self.assertTrue(number.startswith(f'{current_year}-'))
-            self.assertRegex(number, rf'{current_year}-\d{{6}}')
 
 
 class TestDueDateCalculation(TestCase):

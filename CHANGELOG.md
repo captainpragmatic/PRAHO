@@ -7,7 +7,67 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_No unreleased changes._
+### Added
+
+- SmartBill can now be selected as the invoice issuer, from Settings → Integrations. It
+  numbers the invoice, supplies the PDF customers receive, and files e-Factura with ANAF
+  in PRAHO's place. Proformas, payments, refunds, dunning, recurring billing, VAT
+  decisions and reporting all stay in PRAHO.
+- Test connection verifies the configured series and every mapped VAT-rate name actually
+  exist in the SmartBill account, rather than only checking that credentials authenticate.
+- A full refund of a SmartBill invoice issues a storno automatically, recorded as a credit
+  note with its own legal number so VAT and revenue reporting net the correction.
+- A storno is refused unless exactly one settled refund accounts for exactly the invoice
+  total. An invoice refunded in instalments is corrected by hand instead, because
+  SmartBill's reversal carries no amount and would credit the whole document — crediting
+  the customer twice for any part already corrected manually.
+- An invoice issuer that is not recognised is now refused when the setting is saved,
+  rather than quietly resolving to the built-in issuer. Quietly resolving it meant a typo
+  had PRAHO mint legal Romanian invoice numbers from its own sequence for an operator who
+  was trying to hand exactly that responsibility to SmartBill.
+
+### Fixed
+
+- An interrupted storno no longer makes an invoice permanently un-reversible. A credit
+  note that exists but was never submitted is resumed rather than treated as proof the
+  reversal already happened.
+- Credit notes now carry the original's lines, negated, so line-based VAT and EC-Sales
+  reporting can attribute the correction instead of seeing a total with no composition.
+- Invoice dates sent to SmartBill use the Romanian calendar day rather than UTC's. An
+  invoice issued late in the evening was dated to the previous day, and one issued late
+  on the last day of a month was filed under a VAT period that had already closed.
+- Order-created and usage-billing invoices now honour the selected issuer. Both allocated
+  a PRAHO fiscal number inline regardless of configuration, so choosing SmartBill left
+  those documents numbered by PRAHO and permanently marked as its responsibility to file
+  with ANAF, while everything else went to SmartBill.
+- A reversal whose enqueue fails is recovered. A refund has already moved money by then,
+  so losing it left the customer holding a full invoice with nothing reversing it; an
+  hourly sweep now finds refunded provider invoices that have no credit note.
+- The issuance and reversal sweeps are actually scheduled. Both existed but were
+  registered nowhere, so the recovery they provide never ran.
+
+### Changed
+
+- The issuer is stamped on each invoice when it is created and frozen there. Changing the
+  setting affects new invoices only: anything already issued keeps its issuer, its number
+  and its e-Factura owner permanently.
+- Switching to an external issuer is blocked while issuance attempts are unresolved, while
+  invoices are still awaiting a number, or while e-Factura submissions are mid-flight to
+  ANAF.
+
+### Known limitations
+
+- Only ordinary positive VAT rates (EN16931 category S) can be issued through SmartBill.
+  EU B2B reverse charge, zero-rated and out-of-scope supplies are refused, because the API
+  carries no tax-category or exemption-reason field. Those customers stay on the built-in
+  issuer.
+- Partial refunds cannot be reversed at the provider: its storno takes no amounts and
+  reverses the whole document. They raise an alert for manual correction.
+- While SmartBill owns e-Factura, PRAHO has no API-visible ANAF status, deadline tracking
+  or signed-response archive, because SmartBill exposes none. SPV status is checked in
+  SmartBill Cloud.
+- An issuance whose outcome is unknown (a lost response) is never retried automatically
+  and waits for an operator to confirm what exists at the provider.
 
 ---
 
