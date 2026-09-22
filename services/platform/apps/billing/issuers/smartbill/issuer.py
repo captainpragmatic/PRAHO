@@ -10,9 +10,10 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from django.conf import settings
+from django.utils import timezone
 
 from apps.billing.invoice_models import ISSUER_SMARTBILL
 from apps.common.types import Err, Ok, Result
@@ -100,6 +101,52 @@ class SmartBillIssuer(InvoiceIssuerGateway):
     def fetch_pdf(self, series: str, number: str) -> Result[bytes, str]:
         """The provider's own rendering: the document the customer actually gets."""
         return self._client.fetch_invoice_pdf(series, number)
+
+    def prepare_storno(self, original: Invoice) -> Result[PreparedDocument, tuple[str, ...]]:
+        """Reverse a SmartBill document by its series and number.
+
+        The request carries no amounts: `/invoice/reverse` reverses the WHOLE
+        document or nothing. A partial refund therefore has no representation here
+        and is refused upstream rather than approximated by reversing too much.
+        """
+        issuance = getattr(original, "provider_issuance", None)
+        problems: list[str] = []
+        if issuance is None or not issuance.provider_number:
+            problems.append("The original invoice has no SmartBill number to reverse")
+        if original.reversals.exists():
+            # SmartBill refuses a second reversal ("Factura este deja stornata"), and
+            # we should not spend an attempt discovering that.
+            problems.append("This invoice has already been reversed")
+        if problems:
+            return Err(tuple(problems))
+
+        assert issuance is not None
+        payload: dict[str, Any] = {
+            "companyVatCode": self._config.company_vat_code,
+            "seriesName": issuance.provider_series,
+            "number": issuance.provider_number,
+        }
+        # SmartBill refuses a storno dated before the original. Today is always valid
+        # because the original is, by definition, already issued.
+        payload["issueDate"] = timezone.now().date().isoformat()
+        return Ok(PreparedDocument(payload=payload, digest=payload_digest(payload)))
+
+    def submit_storno(self, prepared: PreparedDocument, *, attempt_id: UUID) -> IssueOutcome:
+        """Post the reversal and classify what comes back."""
+        response = self._client.reverse_invoice(prepared.payload)
+
+        if response.verdict is Verdict.AMBIGUOUS:
+            logger.error(f"🔥 [SmartBill] Ambiguous storno (attempt {attempt_id}): {response.error_text}")
+            return Ambiguous(reason=response.error_text)
+        if response.verdict is Verdict.REJECTED:
+            return Rejected(errors=(response.error_text, *response.error_codes))
+
+        return Issued(
+            number=str(response.payload.get("number") or ""),
+            series=str(response.payload.get("series") or ""),
+            provider_document_id=str(response.payload.get("documentId") or ""),
+            response_digest=payload_digest(response.payload),
+        )
 
     def prepare(self, invoice: Invoice) -> Result[PreparedDocument, tuple[str, ...]]:
         """Build the exact request. Side-effect free, so it is safe before claiming."""

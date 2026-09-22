@@ -77,3 +77,30 @@ def sweep_pending_issuances(limit: int = 100) -> dict[str, int]:
         else:
             results["skipped"] += 1
     return results
+
+
+def issue_storno_task(invoice_id: int) -> dict[str, object]:
+    """Reverse one provider-issued invoice."""
+    from .service import issue_storno_for_invoice  # noqa: PLC0415
+
+    result = issue_storno_for_invoice(invoice_id)
+    if isinstance(result, Err):
+        logger.warning(f"⚠️ [Storno] Invoice {invoice_id} not reversed: {result.error}")
+        return {"invoice_id": invoice_id, "reversed": False, "error": result.error}
+    return {"invoice_id": invoice_id, "reversed": True, "number": result.unwrap()}
+
+
+def queue_invoice_storno(invoice_id: int) -> str | None:
+    """Enqueue a reversal after the surrounding transaction commits."""
+    try:
+        from django_q.tasks import async_task  # noqa: PLC0415  # Optional at import time
+
+        task_id: str = async_task(
+            "apps.billing.issuers.tasks.issue_storno_task",
+            invoice_id,
+            task_name=f"storno-invoice-{invoice_id}",
+        )
+    except Exception as exc:
+        logger.warning(f"⚠️ [Storno] Could not queue reversal for invoice {invoice_id}: {exc}")
+        return None
+    return task_id

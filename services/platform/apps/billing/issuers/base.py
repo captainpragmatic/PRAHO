@@ -129,6 +129,28 @@ class InvoiceIssuerGateway(ABC):
         erase PRAHO's record of a document that exists at the provider.
         """
 
+    def prepare_storno(self, original: Invoice) -> Result[PreparedDocument, tuple[str, ...]]:
+        """Build the request that reverses an already-issued document.
+
+        A separate capability rather than a flag on `prepare`, because reversal is a
+        different operation with different rules: at SmartBill it takes no amounts at
+        all, can happen only once per invoice, and refers to the original by its
+        series and number rather than describing a document.
+
+        Default: unsupported. An issuer that cannot reverse says so rather than
+        silently issuing something else.
+        """
+        return Err((f"{self.provider} does not support issuing a reversal",))
+
+    def submit_storno(self, prepared: PreparedDocument, *, attempt_id: UUID) -> IssueOutcome:
+        """Send a previously prepared reversal.
+
+        Carries the same non-idempotency hazard as issuance: a lost response may
+        have reversed the document, and reversing twice is refused by the provider
+        but leaves us unsure which attempt succeeded.
+        """
+        return Rejected(errors=(f"{self.provider} does not support issuing a reversal",))
+
     def issue_invoice(self, invoice: Invoice, *, attempt_id: UUID) -> IssueOutcome:
         """Convenience for callers that do not keep a durable attempt record.
 

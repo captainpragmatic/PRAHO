@@ -511,6 +511,9 @@ def handle_invoice_created_or_updated(sender: type[Invoice], instance: Invoice, 
                 # REFUND: Post-refund side effects
                 if instance.status == "refunded" and old_status != "refunded":
                     _handle_invoice_refund_completion(instance)
+                elif instance.status == "partially_refunded" and old_status != "partially_refunded":
+                    # A provider that reverses whole documents cannot express this.
+                    _warn_partial_refund_cannot_be_reversed(instance)
 
         # An existing invoice's transition to issued is handled above by
         # _handle_invoice_status_change(). Only cover invoices created directly
@@ -1192,6 +1195,7 @@ def _remove_payment_credit_adjustment(payment: Payment, event_type: str) -> None
 
 def _handle_invoice_refund_completion(invoice: Invoice) -> None:
     """Handle side effects when invoice refund is completed"""
+    _queue_provider_storno(invoice)
     try:
         # H5 fix: Send email via on_commit to prevent ghost emails on rollback.
         # If an outer transaction rolls back, the email would have already been sent.
@@ -2281,3 +2285,55 @@ def _issuance_event_type(state: str) -> str:
         IssuanceState.FAILED.value: "invoice_provider_issue_failed",
         IssuanceState.OUTCOME_UNKNOWN.value: "invoice_provider_outcome_unknown",
     }.get(state, "invoice_provider_issue_attempted")
+
+
+def _queue_provider_storno(invoice: Invoice) -> None:
+    """A provider-issued invoice is corrected by a document, not by a status change.
+
+    Locally issued invoices already produce an e-Factura credit note on refund. Their
+    provider-issued counterparts need the equivalent at the provider, or the customer
+    holds a full invoice with nothing reversing it and the accountant's books show
+    revenue that was returned.
+
+    Fired only for a FULL refund, which is the only kind `/invoice/reverse` can
+    express: it carries no amounts and reverses the whole document or nothing.
+    """
+    from apps.billing.invoice_models import ISSUER_BUILTIN
+
+    if invoice.issuer_provider == ISSUER_BUILTIN:
+        return
+    if invoice.document_kind != "invoice":
+        return  # a credit note is not itself reversible
+
+    from apps.billing.issuers.tasks import queue_invoice_storno
+
+    transaction.on_commit(lambda inv=invoice: queue_invoice_storno(inv.pk))
+    logger.info(f"↩️ [Storno] Queued provider reversal for invoice {invoice.display_number}")
+
+
+def _warn_partial_refund_cannot_be_reversed(invoice: Invoice) -> None:
+    """A partial refund of a provider-issued invoice needs a human.
+
+    SmartBill's storno takes no amounts, so there is no way to credit part of a
+    document. Reversing the whole thing would credit the customer money they were
+    never refunded, so the correction is left to an operator and made loud rather
+    than attempted.
+    """
+    from apps.billing.invoice_models import ISSUER_BUILTIN
+
+    if invoice.issuer_provider == ISSUER_BUILTIN or invoice.document_kind != "invoice":
+        return
+
+    logger.error(
+        f"🔥 [Storno] Invoice {invoice.display_number} was partially refunded but its "
+        f"provider cannot reverse part of a document. A correcting document must be "
+        f"issued manually."
+    )
+    log_security_event(
+        event_type="provider_partial_refund_needs_manual_correction",
+        details={
+            "invoice_number": str(invoice.display_number),
+            "issuer_provider": str(invoice.issuer_provider),
+            "customer_id": str(invoice.customer_id),
+        },
+    )

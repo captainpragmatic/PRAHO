@@ -294,7 +294,7 @@ def cancel_payment_reminders(invoice_id: str) -> dict[str, Any]:
         return {"success": False, "error": str(e)}
 
 
-def start_dunning_process(invoice_id: str) -> dict[str, Any]:
+def start_dunning_process(invoice_id: str) -> dict[str, Any]:  # noqa: PLR0912  # A dispatcher: one branch per document state that is not collectable
     """
     Start the dunning process for an overdue invoice.
 
@@ -315,8 +315,15 @@ def start_dunning_process(invoice_id: str) -> dict[str, Any]:
     try:
         invoice = Invoice.objects.get(id=invoice_id)
 
+        if not _is_dunnable(invoice):
+            return {
+                "success": True,
+                "invoice_id": str(invoice.id),
+                "message": "Credit notes are never dunned",
+            }
+
         if invoice.status not in ["issued", "overdue"]:
-            logger.info(f"⚠️ [Dunning] Invoice {invoice.number} is not issued/overdue, skipping dunning")
+            logger.info(f"⚠️ [Dunning] {invoice.display_number} is not issued/overdue, skipping dunning")
             return {
                 "success": True,
                 "invoice_id": str(invoice.id),
@@ -2334,3 +2341,16 @@ def setup_fx_scheduled_tasks() -> dict[str, str]:
         },
     )
     return {name: "registered"}
+
+
+def _is_dunnable(invoice: Invoice) -> bool:
+    """Whether this document can be chased for payment.
+
+    A credit note is an issued document with a NEGATIVE total. Left unguarded it
+    satisfies every "issued or overdue" check and the customer gets chased for money
+    the business owes them.
+    """
+    if invoice.document_kind != "invoice":
+        logger.info(f"⚠️ [Dunning] {invoice.display_number} is a credit note, skipping dunning")
+        return False
+    return True

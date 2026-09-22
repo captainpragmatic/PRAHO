@@ -19,11 +19,17 @@ from __future__ import annotations
 
 import logging
 import uuid
+from copy import deepcopy
 from typing import TYPE_CHECKING, assert_never
 
 from django.db import connection, transaction
 
-from apps.billing.invoice_models import Invoice
+from apps.billing.invoice_models import (
+    DOCUMENT_KIND_CREDIT_NOTE,
+    DOCUMENT_KIND_INVOICE,
+    ISSUER_BUILTIN,
+    Invoice,
+)
 from apps.common.types import Err, Ok, Result
 
 from .base import Ambiguous, Issued, PreparedDocument, Rejected
@@ -243,3 +249,99 @@ def reconcile_confirmed_issued(
         invoice.save()
     logger.info(f"✅ [Issuance] Invoice {invoice.pk} reconciled to {legal_number} by operator")
     return Ok(legal_number)
+
+
+def issue_storno_for_invoice(invoice_id: int) -> Result[str, str]:
+    """Reverse a provider-issued invoice, creating the credit note it produces.
+
+    `/invoice/reverse` carries no amounts: it reverses the whole document or
+    nothing. A partial refund therefore has no representation at the provider and
+    is refused here rather than approximated by reversing too much — the difference
+    between a customer being credited what they are owed and being credited the
+    entire invoice.
+
+    The reversal is a real document with its own legal number, so it becomes its
+    own Invoice row (negative, `document_kind=credit_note`) rather than a flag on
+    the original. Reporting that sums invoice rows then sees the correction without
+    needing to know this integration exists.
+    """
+    _refuse_if_inside_transaction()
+
+    try:
+        original = Invoice.objects.select_related("currency", "customer").get(pk=invoice_id)
+    except Invoice.DoesNotExist:
+        return Err(f"Invoice {invoice_id} does not exist")
+
+    eligibility = _storno_refusal_reason(original)
+    if eligibility is not None:
+        return Err(eligibility)
+
+    issuer = resolve_issuer(original)
+    prepared_result = issuer.prepare_storno(original)
+    if isinstance(prepared_result, Err):
+        return Err("; ".join(prepared_result.error))
+    prepared = prepared_result.unwrap()
+
+    credit_note = _create_credit_note_row(original)
+    attempt_id = uuid.uuid4()
+    claim_result = _claim(credit_note, issuer.provider, attempt_id, prepared)
+    if isinstance(claim_result, Err):
+        return claim_result
+    issuance_id = claim_result.unwrap()
+
+    # ---- no transaction is open here, deliberately ----
+    outcome = issuer.submit_storno(prepared, attempt_id=attempt_id)
+
+    return _finalize(credit_note.pk, issuance_id, attempt_id, outcome)
+
+
+def _storno_refusal_reason(original: Invoice) -> str | None:
+    """Why this invoice must not be reversed at the provider, or None."""
+    if original.document_kind != DOCUMENT_KIND_INVOICE:
+        # SmartBill refuses this too ("Factura este de tip storno"), but spending an
+        # attempt to be told so is worse than knowing.
+        return "A credit note cannot itself be reversed"
+    if original.issuer_provider == ISSUER_BUILTIN:
+        return "Built-in invoices are corrected through the e-Factura credit-note path"
+    if original.status != "refunded":
+        # The decisive constraint. `/invoice/reverse` takes no amounts, so there is
+        # no way to express "reverse 40 of 100". Reversing the whole document for a
+        # partial refund would credit the customer money they were not refunded.
+        return (
+            f"Only a fully refunded invoice can be reversed at the provider "
+            f"(this one is {original.status!r}). A partial refund has no representation "
+            f"in SmartBill's storno, which reverses the whole document or nothing."
+        )
+    if original.reversals.exists():
+        return "This invoice has already been reversed"
+    return None
+
+
+def _create_credit_note_row(original: Invoice) -> Invoice:
+    """Mirror the original with the signs flipped, unnumbered until the provider answers."""
+    with transaction.atomic():
+        credit_note = Invoice.objects.create(
+            customer=original.customer,
+            currency=original.currency,
+            number=None,
+            status="draft",
+            document_kind=DOCUMENT_KIND_CREDIT_NOTE,
+            reverses_invoice=original,
+            issuer_provider=original.issuer_provider,
+            subtotal_cents=-original.subtotal_cents,
+            tax_cents=-original.tax_cents,
+            total_cents=-original.total_cents,
+            # The reversal inherits the original's fiscal identity: it is a correction
+            # to that document, not a new commercial event.
+            bill_to_name=original.bill_to_name,
+            bill_to_tax_id=original.bill_to_tax_id,
+            bill_to_email=original.bill_to_email,
+            bill_to_address1=original.bill_to_address1,
+            bill_to_city=original.bill_to_city,
+            bill_to_region=original.bill_to_region,
+            bill_to_postal=original.bill_to_postal,
+            bill_to_country=original.bill_to_country,
+            vat_evidence=deepcopy(original.vat_evidence),
+        )
+        ProviderIssuance.objects.get_or_create(invoice=credit_note, defaults={"provider": original.issuer_provider})
+    return credit_note
