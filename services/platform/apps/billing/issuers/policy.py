@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 
 from apps.billing.invoice_models import ISSUER_BUILTIN
 
-from .base import InvoiceIssuerGateway, get_invoice_issuer
+from .base import InvoiceIssuerGateway, get_invoice_issuer, get_registered_issuers
 
 if TYPE_CHECKING:
     from apps.billing.invoice_models import Invoice
@@ -67,3 +67,29 @@ def resolve_issuer(invoice: Invoice) -> InvoiceIssuerGateway:
     a switch keep behaving like a built-in invoice forever.
     """
     return get_invoice_issuer(invoice.issuer_provider)
+
+
+def default_issuer_provider() -> str:
+    """Which provider a NEW document should be stamped with.
+
+    This is the one place a global setting legitimately applies: choosing the issuer
+    for a document that does not exist yet. Once stamped it is frozen, so flipping
+    this never reaches a document already created.
+
+    Phase 9 moves it into the settings catalog with a preflight; reading an
+    undeclared key through SettingsService now would break the ADR-0042 consumer
+    contract, so it is a deployment setting for the moment.
+    """
+    from django.conf import settings  # noqa: PLC0415
+
+    provider = str(getattr(settings, "INVOICE_ISSUER", ISSUER_BUILTIN) or ISSUER_BUILTIN)
+    return provider if provider in get_registered_issuers() else ISSUER_BUILTIN
+
+
+def issues_externally(provider: str) -> bool:
+    """Whether issuance for this provider needs a network call.
+
+    The built-in issuer allocates from a local sequence inside the caller's
+    transaction; an external one cannot, which is why its number arrives later.
+    """
+    return provider != ISSUER_BUILTIN

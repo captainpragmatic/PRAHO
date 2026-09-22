@@ -16,9 +16,9 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from apps.common.types import Result
+from apps.common.types import Err, Result
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -78,6 +78,20 @@ IssueOutcome = Issued | Rejected | Ambiguous
 
 
 @dataclass(frozen=True)
+class PreparedDocument:
+    """Exactly what will be sent, frozen before anything is claimed or posted.
+
+    Split out from submission because the durable attempt record must contain the
+    real payload BEFORE the provider call. If the process dies mid-call, the only
+    thread back is what we wrote down first — and "we sent something" is not enough
+    for a human to identify a document at a provider offering no lookup.
+    """
+
+    payload: dict[str, Any]
+    digest: str
+
+
+@dataclass(frozen=True)
 class ConfigurationReport:
     """What a 'Test connection' action reports back to an operator."""
 
@@ -97,16 +111,34 @@ class InvoiceIssuerGateway(ABC):
         """Check credentials and account-coupled configuration without issuing anything."""
 
     @abstractmethod
-    def issue_invoice(self, invoice: Invoice, *, attempt_id: UUID) -> IssueOutcome:
-        """Assign a legal number to an already-persisted, unnumbered invoice.
+    def prepare(self, invoice: Invoice) -> Result[PreparedDocument, tuple[str, ...]]:
+        """Build the exact request, or return every reason it must not be sent.
+
+        Pure and side-effect free: it must be safe to call before claiming, because
+        the orchestrator stores the result durably first.
+        """
+
+    @abstractmethod
+    def submit(self, prepared: PreparedDocument, *, attempt_id: UUID) -> IssueOutcome:
+        """Send a previously prepared request.
 
         `attempt_id` identifies one attempt so an ambiguous outcome can be
         reconciled later against whatever evidence the provider exposes.
 
-        Implementations MUST NOT be called inside a transaction when they perform
-        network I/O (ADR-0045): an outer rollback would erase PRAHO's record of a
-        document that exists at the provider.
+        MUST NOT be called inside a transaction (ADR-0045): an outer rollback would
+        erase PRAHO's record of a document that exists at the provider.
         """
+
+    def issue_invoice(self, invoice: Invoice, *, attempt_id: UUID) -> IssueOutcome:
+        """Convenience for callers that do not keep a durable attempt record.
+
+        Used by the built-in numbering path, where preparation cannot fail and no
+        provider state can be orphaned.
+        """
+        prepared = self.prepare(invoice)
+        if isinstance(prepared, Err):
+            return Rejected(errors=tuple(prepared.error))
+        return self.submit(prepared.unwrap(), attempt_id=attempt_id)
 
 
 # =============================================================================

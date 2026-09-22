@@ -23,6 +23,7 @@ from apps.billing.issuers.base import (
     InvoiceIssuerGateway,
     Issued,
     IssueOutcome,
+    PreparedDocument,
     Rejected,
     get_invoice_issuer,
     get_registered_issuers,
@@ -49,7 +50,10 @@ class RecordingIssuer(InvoiceIssuerGateway):
     def validate_configuration(self) -> Result[ConfigurationReport, str]:
         return Ok(ConfigurationReport(provider=self.provider, ok=True))
 
-    def issue_invoice(self, invoice: Invoice, *, attempt_id: UUID) -> IssueOutcome:
+    def prepare(self, invoice: Invoice) -> Result[PreparedDocument, tuple[str, ...]]:
+        return Ok(PreparedDocument(payload={"invoice": invoice.pk}, digest="test-digest"))
+
+    def submit(self, prepared: PreparedDocument, *, attempt_id: UUID) -> IssueOutcome:
         RecordingIssuer.seen.append(attempt_id)
         return Issued(number="EXT-000001", series="EXT", provider_document_id="doc-1")
 
@@ -280,7 +284,7 @@ class SignalUsesTheGatewayTests(TestCase):
         class RefusingIssuer(RecordingIssuer):
             provider = "refusing-test-issuer"
 
-            def issue_invoice(self, invoice: Invoice, *, attempt_id: UUID) -> IssueOutcome:
+            def submit(self, prepared: PreparedDocument, *, attempt_id: UUID) -> IssueOutcome:
                 return Rejected(errors=("series not configured",))
 
         invoice = self._unnumbered()

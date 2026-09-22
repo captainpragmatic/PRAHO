@@ -52,6 +52,9 @@ from .invoice_service import (
     generate_invoice_pdf,
     send_invoice_email,
 )
+from .issuers.models import ProviderIssuance
+from .issuers.policy import default_issuer_provider, issues_externally
+from .issuers.tasks import queue_invoice_issuance
 
 # Import usage-based billing services
 from .metering_service import (
@@ -321,9 +324,16 @@ class ProformaConversionService:
                     "" if business_tax_id else validated_cnp_or_empty(getattr(proforma, "bill_to_cnp", ""))
                 )
 
+                # The issuer is chosen once, here, and then frozen on the document.
+                # An external issuer cannot assign a number inside this transaction,
+                # so the invoice is created unnumbered and issued after commit.
+                issuer_provider = default_issuer_provider()
+                external = issues_externally(issuer_provider)
+
                 invoice = Invoice.objects.create(
                     customer=proforma.customer,
-                    number=InvoiceNumberingService.get_next_number(),
+                    issuer_provider=issuer_provider,
+                    number=None if external else InvoiceNumberingService.get_next_number(),
                     currency=currency,
                     subtotal_cents=subtotal_cents,
                     tax_cents=tax_cents,
@@ -373,8 +383,18 @@ class ProformaConversionService:
                 # #103: freeze the FX snapshot at this reversible conversion moment so
                 # issue() consumes it — a later FXRate row cannot flip the invoice's RON VAT.
                 invoice.freeze_fx_snapshot()
-                invoice.issue()
-                invoice.save()
+                if external:
+                    # Stays `draft` until the provider answers. Provisioning keys off
+                    # payment, not issuance, so nothing downstream waits on this.
+                    invoice.save()
+                    # The work item commits WITH the invoice. If the process dies
+                    # before the queue callback runs, a sweep can still find an
+                    # unnumbered invoice with a pending issuance rather than silence.
+                    ProviderIssuance.objects.get_or_create(invoice=invoice, defaults={"provider": issuer_provider})
+                    transaction.on_commit(lambda: queue_invoice_issuance(invoice.pk))
+                else:
+                    invoice.issue()
+                    invoice.save()
 
                 from apps.billing.metering_models import BillingCycle  # noqa: PLC0415
 

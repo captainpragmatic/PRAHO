@@ -20,6 +20,7 @@ class BillingConfig(AppConfig):
 
         from . import checks, signals  # noqa: F401  # System-check + signal registration
         from .issuers import builtin  # noqa: F401  # Registers the built-in invoice issuer
+        from .issuers.smartbill import issuer  # noqa: F401  # Registers the SmartBill issuer
 
         # Schedule e-Factura recurring tasks if enabled
         if getattr(settings, "EFACTURA_ENABLED", False):

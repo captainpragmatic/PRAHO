@@ -27,7 +27,7 @@ from .currency_models import Currency, FXRate
 from .efactura.models import EFacturaDocument, EFacturaDocumentType, EFacturaStatus
 from .efactura.token_storage import OAuthToken
 from .invoice_models import Invoice, InvoiceLine, InvoiceSequence
-from .issuers.models import SmartBillRateGate
+from .issuers.models import IssuanceState, ProviderIssuance, SmartBillRateGate
 
 # Usage-based billing model imports
 from .metering_models import (
@@ -109,6 +109,8 @@ __all__ = [  # noqa: RUF022  # Grouped by billing domain for discoverability
     "Currency",
     # E-Factura models
     "EFacturaDocument",
+    "IssuanceState",
+    "ProviderIssuance",
     "SmartBillRateGate",
     "EFacturaDocumentType",
     "EFacturaStatus",

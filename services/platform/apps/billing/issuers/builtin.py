@@ -17,6 +17,7 @@ from .base import (
     InvoiceIssuerGateway,
     Issued,
     IssueOutcome,
+    PreparedDocument,
     register_invoice_issuer,
 )
 
@@ -45,7 +46,11 @@ class BuiltinIssuer(InvoiceIssuerGateway):
             )
         )
 
-    def issue_invoice(self, invoice: Invoice, *, attempt_id: UUID) -> IssueOutcome:
+    def prepare(self, invoice: Invoice) -> Result[PreparedDocument, tuple[str, ...]]:
+        """Nothing to build: the number comes from a local sequence, not a request."""
+        return Ok(PreparedDocument(payload={}, digest=""))
+
+    def submit(self, prepared: PreparedDocument, *, attempt_id: UUID) -> IssueOutcome:
         """Consume the next number from the local sequence.
 
         Stated precisely: this adapter returns `Issued` or propagates a database

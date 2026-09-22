@@ -37,6 +37,7 @@ from apps.audit.services import (
 from apps.common.validators import log_security_event
 
 from .fiscal_identity import normalize_country_code
+from .issuers.models import IssuanceState, ProviderIssuance
 from .models import (
     CreditLedger,
     Invoice,
@@ -2191,3 +2192,92 @@ def _trigger_virtualmin_provisioning_on_payment(invoice: Invoice) -> None:
 
     except Exception as e:
         logger.error(f"🔥 [CrossApp] Failed to trigger Virtualmin provisioning on payment: {e}")
+
+
+# ===============================================================================
+# PROVIDER ISSUANCE AUDIT (ADR-0016)
+# ===============================================================================
+#
+# An invoice issued through an external provider must leave the same audit trail as
+# one issued locally. Provenance changes who assigns the number; it does not change
+# what the business is obliged to be able to reconstruct afterwards.
+#
+# The Invoice receivers already cover the document itself. These cover the ATTEMPT,
+# which is the part that has no local equivalent: which payload was sent, what came
+# back, and — for an ambiguous outcome — the evidence a human will need.
+
+
+@receiver(pre_save, sender=ProviderIssuance)
+def store_original_issuance_values(sender: type[ProviderIssuance], instance: ProviderIssuance, **kwargs: Any) -> None:
+    """Capture the before-state so the audit event can show a real transition."""
+    try:
+        if instance.pk:
+            try:
+                original = ProviderIssuance.objects.get(pk=instance.pk)
+                instance._original_issuance_values = {
+                    "state": original.state,
+                    "attempts": original.attempts,
+                    "provider_number": original.provider_number,
+                }
+            except ProviderIssuance.DoesNotExist:
+                instance._original_issuance_values = {}
+    except Exception as e:
+        logger.exception(f"🔥 [Issuance Signal] Failed to store original values: {e}")
+
+
+@receiver(post_save, sender=ProviderIssuance)
+def handle_issuance_audit(
+    sender: type[ProviderIssuance], instance: ProviderIssuance, created: bool, **kwargs: Any
+) -> None:
+    """Record every state change of an external issuance attempt."""
+    try:
+        old_values = getattr(instance, "_original_issuance_values", {}) or {}
+        new_values = {
+            "state": instance.state,
+            "attempts": instance.attempts,
+            "provider_number": instance.provider_number,
+        }
+        event_type = "invoice_provider_issue_attempted" if created else _issuance_event_type(instance.state)
+
+        AuditService.log_simple_event(
+            event_type=event_type,
+            content_object=instance,
+            description=(f"Provider issuance {instance.provider} for invoice {instance.invoice_id}: {instance.state}"),
+            old_values=old_values,
+            new_values=new_values,
+            # str()-forced: a lazy proxy here would poison the audit JSON and can
+            # silently roll the surrounding transaction back.
+            metadata={
+                "provider": str(instance.provider),
+                "request_hash": str(instance.request_hash),
+                "needs_human_reconciliation": instance.needs_human_reconciliation,
+            },
+            actor_type="system",
+        )
+    except Exception as e:
+        logger.exception(f"🔥 [Issuance Signal] Failed to log issuance audit event: {e}")
+
+
+@receiver(post_delete, sender=ProviderIssuance)
+def handle_issuance_deletion(sender: type[ProviderIssuance], instance: ProviderIssuance, **kwargs: Any) -> None:
+    """Deleting the record of a provider call destroys the only evidence it happened."""
+    try:
+        log_security_event(
+            event_type="provider_issuance_deleted",
+            details={
+                "provider": str(instance.provider),
+                "invoice_id": str(instance.invoice_id),
+                "state": str(instance.state),
+                "provider_number": str(instance.provider_number),
+            },
+        )
+    except Exception as e:
+        logger.exception(f"🔥 [Issuance Signal] Failed to log issuance deletion: {e}")
+
+
+def _issuance_event_type(state: str) -> str:
+    return {
+        IssuanceState.ISSUED.value: "invoice_provider_issued",
+        IssuanceState.FAILED.value: "invoice_provider_issue_failed",
+        IssuanceState.OUTCOME_UNKNOWN.value: "invoice_provider_outcome_unknown",
+    }.get(state, "invoice_provider_issue_attempted")
