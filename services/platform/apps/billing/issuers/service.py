@@ -36,6 +36,7 @@ from apps.common.types import Err, Ok, Result
 from .base import Ambiguous, Issued, PreparedDocument, Rejected
 from .models import IssuanceState, ProviderIssuance
 from .policy import resolve_issuer
+from .smartbill.client import RateGateWait
 
 if TYPE_CHECKING:
     from .base import IssueOutcome
@@ -93,7 +94,10 @@ def issue_invoice_externally(invoice_id: int) -> Result[str, str]:
     issuance_id = claim_result.unwrap()
 
     # ---- no transaction is open here, deliberately ----
-    outcome = issuer.submit(prepared, attempt_id=attempt_id)
+    try:
+        outcome = issuer.submit(prepared, attempt_id=attempt_id)
+    except RateGateWait as deferred:
+        return _defer_claim(issuance_id, deferred)
 
     return _finalize(invoice.pk, issuance_id, attempt_id, outcome)
 
@@ -138,6 +142,26 @@ def _claim(
         issuance.claim(token=attempt_id, payload=prepared.payload, payload_hash=prepared.digest)
         issuance.save()
         return Ok(issuance.pk)
+
+
+def _defer_claim(issuance_id: uuid.UUID, deferred: RateGateWait) -> Result[str, str]:
+    """Hand the claim back so pacing costs a wait rather than a manual reconciliation.
+
+    Without this the claim simply stays `claimed` until its lease expires and is then
+    quarantined into `outcome_unknown` - a state only a human can leave. That would
+    make an ordinary burst of traffic, which the rate gate exists to absorb, generate
+    manual work per invoice. The gate refuses before anything is sent, so returning
+    to `pending` is safe here and nowhere else; the sweep retries it.
+    """
+    with transaction.atomic():
+        issuance = ProviderIssuance.objects.select_for_update().get(pk=issuance_id)
+        if issuance.state != IssuanceState.CLAIMED.value:
+            # Someone else already moved it on; leave their decision alone.
+            return Err(f"Issuance is {issuance.state}, not deferred")
+        issuance.release_unsent(reason=f"Paced by the provider rate gate until {deferred.available_at.isoformat()}")
+        issuance.save()
+    logger.info(f"🐢 [Issuance] Deferred until {deferred.available_at.isoformat()}; claim released for retry")
+    return Err(f"Deferred by pacing until {deferred.available_at.isoformat()}")
 
 
 def _finalize(
@@ -305,7 +329,10 @@ def issue_storno_for_invoice(invoice_id: int) -> Result[str, str]:
     credit_note_pk, issuance_id = opened.unwrap()
 
     # ---- no transaction is open here, deliberately ----
-    outcome = issuer.submit_storno(prepared, attempt_id=attempt_id)
+    try:
+        outcome = issuer.submit_storno(prepared, attempt_id=attempt_id)
+    except RateGateWait as deferred:
+        return _defer_claim(issuance_id, deferred)
 
     return _finalize(credit_note_pk, issuance_id, attempt_id, outcome)
 

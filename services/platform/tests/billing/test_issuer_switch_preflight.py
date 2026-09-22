@@ -237,3 +237,29 @@ class PreflightIsEnforcedTests(TestCase):
         result = self._write(ISSUER_BUILTIN)
 
         self.assertTrue(result.is_ok(), msg=getattr(result, "error", ""))
+
+    def test_the_write_path_never_calls_the_provider(self) -> None:
+        """`update_setting` is wrapped in a retrying atomic block.
+
+        Probing SmartBill from inside it would hold row locks across a third-party
+        HTTP call and re-issue that call on every retry. Credential health is checked
+        by "Test connection" and again at issuance, neither of which holds a lock.
+        """
+        with patch(
+            "apps.billing.issuers.smartbill.issuer.SmartBillIssuer.validate_configuration",
+            side_effect=AssertionError("the settings write path must not reach the network"),
+        ):
+            result = self._write(ISSUER_SMARTBILL)
+
+        self.assertTrue(result.is_ok(), msg=getattr(result, "error", ""))
+
+    def test_the_standalone_preflight_still_probes_by_default(self) -> None:
+        """Only the transactional caller opts out; the operator-facing check does not."""
+        with patch(
+            "apps.billing.issuers.smartbill.issuer.SmartBillIssuer.validate_configuration",
+            return_value=Err("credentials rejected"),
+        ):
+            outcome = can_switch_invoice_issuer(ISSUER_SMARTBILL)
+
+        self.assertTrue(outcome.is_err())
+        self.assertTrue(any("not usable" in b.reason for b in outcome.error))

@@ -329,7 +329,10 @@ class SettingsService:
             # would let unrelated in-flight work block an unrelated settings save.
             return None
 
-        outcome = can_switch_invoice_issuer(target)
+        # `probe_provider=False` is load-bearing: this runs inside `update_setting`'s
+        # retrying atomic block, and a credential probe here would hold row locks
+        # across a SmartBill HTTP call and re-issue it on every retry.
+        outcome = can_switch_invoice_issuer(target, probe_provider=False)
         if isinstance(outcome, Err):
             return SettingValidationError(
                 key=key,

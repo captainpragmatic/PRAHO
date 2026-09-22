@@ -135,7 +135,7 @@ class SwitchBlocker:
     detail: str
 
 
-def can_switch_invoice_issuer(target: str) -> Result[None, tuple[SwitchBlocker, ...]]:
+def can_switch_invoice_issuer(target: str, *, probe_provider: bool = True) -> Result[None, tuple[SwitchBlocker, ...]]:
     """Whether the issuer may be changed for NEW documents right now.
 
     The switch only ever affects documents that do not exist yet — provenance is
@@ -146,6 +146,14 @@ def can_switch_invoice_issuer(target: str) -> Result[None, tuple[SwitchBlocker, 
     Reversibility is partial by nature, and the UI should say so: turning SmartBill
     off does not un-issue anything it issued, and those documents still need its
     credentials for reversal and PDF retrieval.
+
+    `probe_provider` controls the one check that leaves the machine. Callers running
+    inside a transaction must pass False: holding row locks across a third-party HTTP
+    call is bad on its own, and under a retrying atomic decorator the call would be
+    re-issued on every attempt. Credential health is a point-in-time network fact
+    rather than a transactional invariant, so the write path checks only durable
+    state and leaves the probe to "Test connection" and to issuance itself, which
+    already refuses and alerts rather than issuing against a broken account.
     """
     from apps.billing.efactura.models import EFacturaDocument, EFacturaStatus  # noqa: PLC0415
     from apps.billing.invoice_models import Invoice  # noqa: PLC0415
@@ -198,13 +206,14 @@ def can_switch_invoice_issuer(target: str) -> Result[None, tuple[SwitchBlocker, 
                 )
             )
 
-        report = get_invoice_issuer(target).validate_configuration()
-        if isinstance(report, Err):
-            blockers.append(
-                SwitchBlocker(
-                    reason=f"{target} is not usable yet",
-                    detail=operator_safe_detail(report.error),
+        if probe_provider:
+            report = get_invoice_issuer(target).validate_configuration()
+            if isinstance(report, Err):
+                blockers.append(
+                    SwitchBlocker(
+                        reason=f"{target} is not usable yet",
+                        detail=operator_safe_detail(report.error),
+                    )
                 )
-            )
 
     return Err(tuple(blockers)) if blockers else Ok(None)

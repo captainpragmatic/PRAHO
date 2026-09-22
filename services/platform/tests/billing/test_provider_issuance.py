@@ -14,6 +14,7 @@ cancelled or reversed.
 from __future__ import annotations
 
 import uuid
+from datetime import timedelta
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -22,13 +23,14 @@ from django.test import TransactionTestCase
 from django.utils import timezone
 
 from apps.billing.invoice_models import ISSUER_BUILTIN, ISSUER_SMARTBILL, Currency, Invoice
-from apps.billing.issuers.base import Ambiguous, Issued, Rejected
+from apps.billing.issuers.base import Ambiguous, Issued, PreparedDocument, Rejected
 from apps.billing.issuers.models import IssuanceState, ProviderIssuance
 from apps.billing.issuers.service import (
     IssuanceTransactionError,
     issue_invoice_externally,
     reconcile_confirmed_issued,
 )
+from apps.billing.issuers.smartbill.client import RateGateWait
 from apps.common.types import Ok
 from tests.factories.billing_factories import CustomerFactory, InvoiceLineFactory
 
@@ -248,9 +250,7 @@ class AuditTests(IssuanceTestBase):
 
         self._issue_returning(Issued(number="000123", series="FCT"))
 
-        actions = set(
-            AuditEvent.objects.filter(action__startswith="invoice_provider").values_list("action", flat=True)
-        )
+        actions = set(AuditEvent.objects.filter(action__startswith="invoice_provider").values_list("action", flat=True))
         self.assertIn("invoice_provider_issue_attempted", actions)
         self.assertIn("invoice_provider_issued", actions)
 
@@ -315,9 +315,7 @@ class DeferredConversionTests(TransactionTestCase):
                 bill_to_name="Test Company SRL",
                 issuer_provider=ISSUER_SMARTBILL,
             )
-            ProviderIssuance.objects.get_or_create(
-                invoice=invoice, defaults={"provider": ISSUER_SMARTBILL}
-            )
+            ProviderIssuance.objects.get_or_create(invoice=invoice, defaults={"provider": ISSUER_SMARTBILL})
 
         issuance = ProviderIssuance.objects.get(invoice=invoice)
         self.assertEqual(issuance.state, IssuanceState.PENDING.value)
@@ -380,16 +378,12 @@ class ReconciliationGuardTests(IssuanceTestBase):
         return ProviderIssuance.objects.get(invoice=self.invoice)
 
     def test_a_number_is_required(self) -> None:
-        result = reconcile_confirmed_issued(
-            self._quarantined().pk, series="FCT", number="   ", operator_note="checked"
-        )
+        result = reconcile_confirmed_issued(self._quarantined().pk, series="FCT", number="   ", operator_note="checked")
         self.assertTrue(result.is_err())
 
     def test_a_note_is_required(self) -> None:
         """What was checked at the provider is the evidence for the whole decision."""
-        result = reconcile_confirmed_issued(
-            self._quarantined().pk, series="FCT", number="000123", operator_note=""
-        )
+        result = reconcile_confirmed_issued(self._quarantined().pk, series="FCT", number="000123", operator_note="")
         self.assertTrue(result.is_err())
 
     def test_the_same_document_cannot_be_adopted_twice(self) -> None:
@@ -411,3 +405,61 @@ class ReconciliationGuardTests(IssuanceTestBase):
 
         self.assertTrue(result.is_err())
         self.assertIn("already adopted", result.error)
+
+
+class PacingDoesNotPoisonTheClaimTests(TransactionTestCase):
+    """An ordinary burst must cost a wait, not a person.
+
+    The rate gate refuses before anything is sent. If the claim were simply left
+    behind, its lease would expire and the sweep would quarantine it into
+    `outcome_unknown` - a state only an operator can leave. Traffic the gate exists
+    to absorb would then generate manual reconciliation per invoice.
+    """
+
+    def setUp(self) -> None:
+        self.customer = CustomerFactory()
+        self.currency, _ = Currency.objects.get_or_create(code="RON", defaults={"symbol": "L", "decimals": 2})
+        self.available_at = timezone.now() + timedelta(seconds=30)
+
+    def _invoice(self) -> Invoice:
+        invoice = Invoice.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            number=None,
+            status="draft",
+            issued_at=timezone.now(),
+            subtotal_cents=10000,
+            tax_cents=2100,
+            total_cents=12100,
+            bill_to_name="Test Company SRL",
+            bill_to_country="RO",
+            issuer_provider=ISSUER_SMARTBILL,
+            vat_evidence={"version": 1, "scenario": "romania_b2b", "category": "S", "is_business": True},
+        )
+        ProviderIssuance.objects.create(invoice=invoice, provider=ISSUER_SMARTBILL)
+        return invoice
+
+    def test_a_paced_call_returns_the_claim_instead_of_quarantining_it(self) -> None:
+        invoice = self._invoice()
+
+        with (
+            patch(
+                "apps.billing.issuers.smartbill.issuer.SmartBillIssuer.prepare",
+                return_value=Ok(PreparedDocument(payload={"x": 1}, digest="d")),
+            ),
+            patch(
+                "apps.billing.issuers.smartbill.issuer.SmartBillIssuer.submit",
+                side_effect=RateGateWait(self.available_at),
+            ),
+        ):
+            result = issue_invoice_externally(invoice.pk)
+
+        self.assertTrue(result.is_err())
+        issuance = ProviderIssuance.objects.get(invoice=invoice)
+        self.assertEqual(
+            issuance.state,
+            IssuanceState.PENDING.value,
+            "pacing must hand the claim back so the sweep retries it",
+        )
+        self.assertIsNone(issuance.claim_token)
+        self.assertNotEqual(issuance.state, IssuanceState.OUTCOME_UNKNOWN.value)

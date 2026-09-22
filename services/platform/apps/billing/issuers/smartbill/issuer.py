@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 
 from django.utils import timezone
 
+from apps.billing.efactura.settings import ro_local_date
 from apps.billing.invoice_models import ISSUER_SMARTBILL
 from apps.common.types import Err, Ok, Result
 
@@ -112,10 +113,6 @@ class SmartBillIssuer(InvoiceIssuerGateway):
         problems: list[str] = []
         if issuance is None or not issuance.provider_number:
             problems.append("The original invoice has no SmartBill number to reverse")
-        if original.reversals.exists():
-            # SmartBill refuses a second reversal ("Factura este deja stornata"), and
-            # we should not spend an attempt discovering that.
-            problems.append("This invoice has already been reversed")
         if problems:
             return Err(tuple(problems))
 
@@ -126,8 +123,11 @@ class SmartBillIssuer(InvoiceIssuerGateway):
             "number": issuance.provider_number,
         }
         # SmartBill refuses a storno dated before the original. Today is always valid
-        # because the original is, by definition, already issued.
-        payload["issueDate"] = timezone.now().date().isoformat()
+        # because the original is, by definition, already issued - but it has to be
+        # *today in Romania*. Between Romanian and UTC midnight `.date()` yields
+        # yesterday, which can predate the original and be refused outright, and near
+        # month-end assigns the correction to a VAT period that has closed.
+        payload["issueDate"] = ro_local_date(timezone.now()).isoformat()
         return Ok(PreparedDocument(payload=payload, digest=payload_digest(payload)))
 
     def submit_storno(self, prepared: PreparedDocument, *, attempt_id: UUID) -> IssueOutcome:

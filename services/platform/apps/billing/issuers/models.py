@@ -255,6 +255,21 @@ class ProviderIssuance(models.Model):
         self.claim_token = None
         self.claim_expires_at = None
 
+    @transition(field=state, source=IssuanceState.CLAIMED.value, target=IssuanceState.PENDING.value)
+    def release_unsent(self, *, reason: str) -> None:
+        """Give the claim back, for the one case where nothing can have been sent.
+
+        The rate gate refuses BEFORE any request leaves, so unlike an abandoned
+        claim - where a crash before and after the POST look identical - this is the
+        one moment we can prove the provider never heard from us. That proof is the
+        entire justification for the only edge back to `pending`; do not reuse it for
+        any failure that happens once a request is in flight, or a retry will create
+        a second legally numbered document.
+        """
+        self.last_error = reason
+        self.claim_token = None
+        self.claim_expires_at = None
+
     @transition(
         field=state,
         source=[IssuanceState.CLAIMED.value, IssuanceState.PENDING.value],

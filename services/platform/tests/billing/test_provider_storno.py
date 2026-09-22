@@ -13,6 +13,7 @@ reversing the whole document would credit the customer money they never got back
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -29,8 +30,10 @@ from apps.billing.invoice_models import (
 from apps.billing.issuers.base import Ambiguous, Issued, PreparedDocument, Rejected
 from apps.billing.issuers.models import IssuanceState, ProviderIssuance
 from apps.billing.issuers.service import issue_storno_for_invoice
+from apps.billing.issuers.smartbill.issuer import SmartBillIssuer
 from apps.billing.refund_models import Refund
 from apps.common.types import Ok
+from apps.settings.services import SettingsService
 from tests.factories.billing_factories import CustomerFactory, InvoiceLineFactory
 from tests.helpers.fsm_helpers import force_status
 
@@ -294,9 +297,7 @@ class StornoResumeTests(StornoTestBase):
             bill_to_name=self.invoice.bill_to_name,
             bill_to_country="RO",
         )
-        ProviderIssuance.objects.create(
-            invoice=orphan, provider=ISSUER_SMARTBILL, state=IssuanceState.PENDING.value
-        )
+        ProviderIssuance.objects.create(invoice=orphan, provider=ISSUER_SMARTBILL, state=IssuanceState.PENDING.value)
 
         result = self._storno_returning(Issued(number="000501", series="STORNO"))
 
@@ -388,3 +389,71 @@ class SplitCorrectionTests(StornoTestBase):
 
         self.assertTrue(result.is_err())
         self.assertIn("4000 cents", result.error)
+
+
+class StornoResumeWithRealMapperTests(StornoTestBase):
+    """The resume path must survive the real `prepare_storno`, not a mocked one.
+
+    The first version of this suite mocked `prepare_storno` everywhere, which hid a
+    second copy of the row-existence check living inside it. The orphan-wedge fix in
+    `service.py` was unreachable in production because the mapper refused first, and
+    no test could see it. Only `submit_storno` is mocked here.
+    """
+
+    def _submit_only(self, outcome: object, invoice: Invoice) -> object:
+        with patch(
+            "apps.billing.issuers.smartbill.issuer.SmartBillIssuer.submit_storno",
+            return_value=outcome,
+        ):
+            return issue_storno_for_invoice(invoice.pk)
+
+    def _config(self) -> None:
+        for key, value in (
+            ("integrations.smartbill_cif", "RO12345678"),
+            ("integrations.smartbill_storno_series", "STORNO"),
+        ):
+            SettingsService.update_setting(key, value, reason="test")
+
+    def test_an_unsubmitted_credit_note_is_resumed_through_the_real_mapper(self) -> None:
+        self._config()
+        self._refund_fully(self.invoice)
+
+        orphan = Invoice.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            number=None,
+            status="draft",
+            document_kind=DOCUMENT_KIND_CREDIT_NOTE,
+            reverses_invoice=self.invoice,
+            issuer_provider=ISSUER_SMARTBILL,
+            subtotal_cents=-10000,
+            tax_cents=-2100,
+            total_cents=-12100,
+            bill_to_name=self.invoice.bill_to_name,
+            bill_to_country="RO",
+        )
+        ProviderIssuance.objects.create(invoice=orphan, provider=ISSUER_SMARTBILL, state=IssuanceState.PENDING.value)
+
+        result = self._submit_only(Issued(number="000501", series="STORNO"), self.invoice)
+
+        self.assertTrue(result.is_ok(), msg=getattr(result, "error", ""))
+        orphan.refresh_from_db()
+        self.assertEqual(orphan.number, "STORNO-000501")
+
+    def test_the_storno_is_dated_in_the_romanian_day(self) -> None:
+        """A storno dated before its original is refused by SmartBill outright.
+
+        The instant is pinned rather than taken from the clock: for most of the day
+        the UTC and Romanian dates agree, so a live-clock assertion passes whether or
+        not the conversion happens and proves nothing.
+        """
+        self._config()
+        self._refund_fully(self.invoice)
+
+        # 22:30 UTC on 31 January is 00:30 on 1 February in Bucharest.
+        straddling = datetime(2026, 1, 31, 22, 30, tzinfo=UTC)
+        with patch("apps.billing.issuers.smartbill.issuer.timezone.now", return_value=straddling):
+            prepared = SmartBillIssuer().prepare_storno(self.invoice)
+
+        self.assertTrue(prepared.is_ok(), msg=getattr(prepared, "error", ""))
+        self.assertEqual(prepared.unwrap().payload["issueDate"], "2026-02-01")
