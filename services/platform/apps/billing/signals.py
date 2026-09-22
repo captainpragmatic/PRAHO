@@ -16,7 +16,7 @@ from datetime import datetime
 from decimal import Decimal
 from enum import Enum
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from django.conf import settings
 from django.core.cache import cache
@@ -558,7 +558,8 @@ def handle_invoice_number_generation(sender: type[Invoice], instance: Invoice, *
     number that would diverge from the document the customer and ANAF received.
     """
     from .invoice_models import ISSUER_BUILTIN
-    from .numbering_service import InvoiceNumberingService
+    from .issuers.base import Issued
+    from .issuers.policy import resolve_issuer
 
     try:
         if instance._state.adding or instance.status != "issued":
@@ -582,7 +583,17 @@ def handle_invoice_number_generation(sender: type[Invoice], instance: Invoice, *
             return  # Existing locked history cannot be renumbered by a later save.
 
         old_number = instance.number
-        new_number = InvoiceNumberingService.get_next_number()
+
+        # Through the gateway rather than the numbering service directly. Behaviour is
+        # identical for the built-in issuer. Note the limit of what this achieves: the
+        # three invoice-creation services still allocate inline at Invoice.objects.create,
+        # before a row exists, so they cannot use this interface yet. Consolidating them
+        # into a shared issuance workflow is Phase 6 work.
+        outcome = resolve_issuer(instance).issue_invoice(instance, attempt_id=uuid4())
+        if not isinstance(outcome, Issued):
+            raise ValueError(f"Issuer {instance.issuer_provider!r} did not assign a number: {outcome}")
+
+        new_number = outcome.legal_number
         instance.number = new_number
         if instance.issued_at is None:
             instance.issued_at = timezone.now()

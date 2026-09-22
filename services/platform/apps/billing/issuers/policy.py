@@ -19,6 +19,8 @@ from typing import TYPE_CHECKING
 
 from apps.billing.invoice_models import ISSUER_BUILTIN
 
+from .base import InvoiceIssuerGateway, get_invoice_issuer
+
 if TYPE_CHECKING:
     from apps.billing.invoice_models import Invoice
 
@@ -55,3 +57,13 @@ def assert_efactura_submission_allowed(invoice: Invoice) -> None:
     reason = efactura_submission_denied_reason(invoice)
     if reason is not None:
         raise EFacturaProviderConflictError(reason)
+
+
+def resolve_issuer(invoice: Invoice) -> InvoiceIssuerGateway:
+    """Return the gateway that owns this document.
+
+    Resolved from the document's own stamped provenance, never from a global
+    "current provider" setting. That is what lets a built-in invoice issued before
+    a switch keep behaving like a built-in invoice forever.
+    """
+    return get_invoice_issuer(invoice.issuer_provider)
