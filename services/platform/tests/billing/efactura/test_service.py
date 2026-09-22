@@ -24,6 +24,7 @@ from apps.billing.efactura.service import (
     submit_invoice_to_efactura,
 )
 from apps.billing.efactura.validator import ValidationResult
+from apps.billing.invoice_models import ISSUER_BUILTIN
 
 
 class SubmissionResultTestCase(TestCase):
@@ -73,6 +74,12 @@ class StatusCheckResultTestCase(TestCase):
 class MockInvoice:
     """Mock Invoice object for testing."""
 
+    # Provenance decides who may file this document with ANAF. The double has to
+    # carry it, because the guard deliberately does not getattr-default: a guard
+    # that fails open when it cannot determine provenance is worse than none.
+    # Set as a class attribute so __init__ keeps its original arity.
+    issuer_provider = ISSUER_BUILTIN
+
     def __init__(
         self,
         id=None,
@@ -90,6 +97,10 @@ class MockInvoice:
         self.status = status
         self.issued_at = timezone.now()
         self._efactura_document = None
+
+    @property
+    def display_number(self):
+        return self.number or "Pending issuance"
 
     @property
     def efactura_document(self):

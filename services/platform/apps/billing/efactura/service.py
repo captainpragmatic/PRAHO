@@ -31,6 +31,10 @@ from django.db import transaction
 from django.utils import timezone
 
 from apps.billing.fiscal_identity import normalize_country_code
+from apps.billing.issuers.policy import (
+    assert_efactura_submission_allowed,
+    efactura_submission_denied_reason,
+)
 
 from .client import (
     AuthenticationError,
@@ -143,6 +147,14 @@ class EFacturaService:
         Returns:
             SubmissionResult with success/failure info
         """
+        # Refuse before any row is written or claim taken: a document issued by an
+        # external provider is filed with SPV by that provider, and a second upload
+        # of the same invoice is not something we can take back.
+        denied = efactura_submission_denied_reason(invoice)
+        if denied is not None:
+            logger.info(f"⏭️ [e-Factura] Skipping {invoice.display_number}: {denied}")
+            return SubmissionResult.error(denied)
+
         # Check if e-Factura is enabled
         if not self._is_efactura_enabled():
             return SubmissionResult.error("e-Factura is disabled in settings")
@@ -163,6 +175,10 @@ class EFacturaService:
         if isinstance(claim_or_result, SubmissionResult):
             return claim_or_result
         claim = claim_or_result
+
+        # Fail-closed backstop at the lowest boundary that knows the invoice. Reaching
+        # this with a non-builtin document means a caller bypassed the check above.
+        assert_efactura_submission_allowed(invoice)
 
         try:
             if claim.is_b2c and claim.is_credit_note:

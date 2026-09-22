@@ -1739,8 +1739,15 @@ def _requires_efactura_submission(invoice: Invoice) -> bool:
 
 def _trigger_efactura_submission(invoice: Invoice) -> None:
     """Queue Romanian e-Factura submission only after the invoice commit succeeds."""
+    from apps.billing.issuers.policy import efactura_submission_denied_reason
+
+    denied = efactura_submission_denied_reason(invoice)
+    if denied is not None:
+        logger.info(f"⏭️ [e-Factura] Not queueing {invoice.display_number}: {denied}")
+        return
+
     invoice_id = str(invoice.id)
-    invoice_number = invoice.number
+    invoice_number = invoice.display_number
 
     def _queue_after_commit() -> None:
         try:
@@ -1942,6 +1949,13 @@ def _cancel_payment_retries(payment: Payment) -> None:
 
 def _handle_efactura_refund_reporting(invoice: Invoice) -> None:
     """Handle e-Factura refund reporting for Romanian compliance"""
+    from apps.billing.issuers.policy import efactura_submission_denied_reason
+
+    denied = efactura_submission_denied_reason(invoice)
+    if denied is not None:
+        logger.info(f"⏭️ [e-Factura] No credit note for {invoice.display_number}: {denied}")
+        return
+
     try:
         # Check if this invoice has an e-Factura document that was accepted
         if normalize_country_code(invoice.bill_to_country) == "RO":

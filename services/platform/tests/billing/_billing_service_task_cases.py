@@ -16,6 +16,7 @@ from unittest.mock import MagicMock, patch
 from django.test import RequestFactory, TestCase
 from django.utils import timezone
 
+from apps.billing.invoice_models import ISSUER_BUILTIN
 from apps.billing.metering_service import UsageAlertService
 from apps.billing.models import Invoice, InvoiceSequence, ProformaInvoice
 from apps.billing.proforma_models import ProformaInvoice as ProformaInvoiceModel
@@ -434,7 +435,13 @@ class CreditNoteSignalTests(TestCase):
         mock_builder.build.return_value = "<CreditNote/>"
         mock_builder_cls.return_value = mock_builder
 
-        mock_invoice = MagicMock(number="INV-1", bill_to_country="RO", updated_at=timezone.now())
+        mock_invoice = MagicMock(
+            number="INV-1",
+            bill_to_country="RO",
+            updated_at=timezone.now(),
+            # Fails closed on unknown provenance; the double must declare its issuer.
+            issuer_provider=ISSUER_BUILTIN,
+        )
         mock_doc = MagicMock(status="accepted", anaf_upload_index="UI123")
         mock_invoice.efactura_document = mock_doc
 
