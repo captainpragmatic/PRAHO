@@ -8,7 +8,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from django.db.models import CharField, Q, QuerySet, Value
-from django.http import HttpRequest
+from django.http import HttpRequest, HttpResponse
 from rest_framework import status
 from rest_framework.authentication import BaseAuthentication
 from rest_framework.decorators import api_view, authentication_classes, permission_classes
@@ -17,12 +17,13 @@ from rest_framework.response import Response
 
 from apps.api.secure_auth import public_api_endpoint, require_customer_authentication
 from apps.billing.models import Currency, Invoice
-from apps.billing.pdf_generators import RomanianInvoicePDFGenerator, RomanianProformaPDFGenerator
+from apps.billing.pdf_generators import RomanianProformaPDFGenerator
 from apps.billing.proforma_models import ProformaInvoice
 from apps.billing.recurring_authorization_service import RecurringPaymentAuthorizationService
 from apps.billing.recurring_models import RecurringPaymentAuthorization
 from apps.billing.subscription_models import Subscription
 from apps.common.request_ip import get_safe_client_ip
+from apps.common.types import Err
 from apps.customers.models import Customer, CustomerPaymentMethod
 from apps.settings.services import SettingsService
 from apps.users.models import User
@@ -448,7 +449,9 @@ def customer_invoices_api(request: HttpRequest, customer: Customer) -> Response:
         request_data = request.data if hasattr(request, "data") else {}
 
         # Build query for customer's invoices
-        invoices_qs = Invoice.objects.filter(customer=customer).select_related("currency")
+        invoices_qs = (
+            Invoice.objects.filter(customer=customer).exclude(number__isnull=True).select_related("currency")
+        )  # unnumbered = not yet issued by its provider, so not customer-visible
 
         # Apply status filter if provided in request body
         status_filter = request_data.get("status")
@@ -513,7 +516,10 @@ def customer_billing_documents_api(request: HttpRequest, customer: Customer) -> 
         status_filter = str(request_data.get("status") or "").strip()
         search = str(request_data.get("search") or "").strip()[:200]
 
-        invoice_base = Invoice.objects.filter(customer=customer)
+        # An invoice awaiting its provider has no legal number yet. It is not a
+        # document the customer can be shown, quoted or asked to pay against, and
+        # serving it would put `number: null` on the wire. Excluded until issued.
+        invoice_base = Invoice.objects.filter(customer=customer).exclude(number__isnull=True)
         proforma_base = ProformaInvoice.objects.filter(customer=customer)
         invoice_count = invoice_base.count()
         proforma_count = proforma_base.count()
@@ -742,6 +748,9 @@ def customer_invoice_summary_api(request: HttpRequest, customer: Customer) -> Re
     """
     try:
         # Build summary data for the authenticated customer
+        # Deliberately NOT filtered on number: this is a financial summary, and an
+        # invoice awaiting its provider still represents money owed or paid. Only
+        # document LISTINGS hide it, because it is not yet a document.
         invoices_qs = Invoice.objects.filter(customer=customer)
 
         summary_data = {"customer_id": customer.id, "invoices_queryset": invoices_qs}
@@ -1061,8 +1070,31 @@ def invoice_pdf_export(request: HttpRequest, customer: Customer, invoice_number:
             return Response({"success": False, "error": "Invoice not found"}, status=status.HTTP_404_NOT_FOUND)
 
         # Generate PDF using the same generator as platform
-        pdf_generator = RomanianInvoicePDFGenerator(invoice)
-        pdf_response = pdf_generator.generate_response()
+        # Through the chokepoint: for a provider-issued invoice the customer must
+        # receive the provider's own document, not a second rendering of it.
+        from apps.billing.issuers.documents import DocumentDeferred, get_invoice_pdf_bytes  # noqa: PLC0415
+
+        try:
+            pdf_result = get_invoice_pdf_bytes(invoice)
+        except DocumentDeferred as deferred:
+            # Paced, not unavailable. A retryable answer so the customer's client
+            # comes back rather than being told their invoice does not exist.
+            response = Response(
+                {"success": False, "error": "Invoice document is being prepared, please retry"},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+            response["Retry-After"] = "5"
+            logger.info(f"⏳ [Invoice PDF API] {invoice_number} deferred until {deferred.retry_at}")
+            return response
+
+        if isinstance(pdf_result, Err):
+            logger.warning(f"⚠️ [Invoice PDF API] {invoice_number}: {pdf_result.error}")
+            return Response(
+                {"success": False, "error": "Invoice document is not available yet"},
+                status=status.HTTP_409_CONFLICT,
+            )
+        pdf_response = HttpResponse(pdf_result.unwrap(), content_type="application/pdf")
+        pdf_response["Content-Disposition"] = f'attachment; filename="factura_{invoice.number}.pdf"'
 
         logger.info(
             f"✅ [Invoice PDF API] PDF generated for invoice {invoice_number} by customer {customer.company_name}"

@@ -17,11 +17,13 @@ import base64
 import json
 import logging
 from dataclasses import dataclass
+from http import HTTPStatus
 from typing import Any
 from urllib.parse import urlencode
 
 from apps.billing.issuers.models import SmartBillRateGate
 from apps.common.outbound_http import OutboundPolicy, safe_request
+from apps.common.types import Err, Ok, Result
 
 from .responses import RawReply, SmartBillResponse, Verdict, classify
 
@@ -184,10 +186,42 @@ class SmartBillClient:
         spec = _RequestSpec(base=V3_BASE, query={"limit": "100"}, bearer=True)
         return self._request("GET", f"/companies/{self._credentials.cif}/vat-rates", spec=spec)
 
-    def get_invoice_pdf_url(self, series: str, number: str) -> str:
-        """The PDF endpoint, built here so the path is defined in one place."""
+    def fetch_invoice_pdf(self, series: str, number: str) -> Result[bytes, str]:
+        """Download the issued document as the provider renders it.
+
+        Returns raw bytes rather than a classified response: this endpoint answers
+        with a PDF, not JSON, so the usual verdict machinery does not apply. It is
+        still paced through the gate, because it spends the same token.
+        """
+        retry_at = SmartBillRateGate.acquire(self._gate_token(bearer=False))
+        if retry_at is not None:
+            raise RateGateWait(retry_at)
+
         query = urlencode({"cif": self._credentials.cif, "seriesname": series, "number": number})
-        return f"{V1_BASE}/invoice/pdf?{query}"
+        url = f"{V1_BASE}/invoice/pdf?{query}"
+        try:
+            response = safe_request(
+                "GET",
+                url,
+                policy=SMARTBILL_POLICY,
+                headers={"Authorization": self._credentials.basic_auth_header()},
+            )
+        except Exception as exc:  # Transport failure on a read is merely a retry
+            # Logged in full; returned as a class of failure. The returned string
+            # reaches API logs and an exception message, and a transport exception
+            # can carry the request URL, which carries the company's CIF.
+            logger.warning(f"⚠️ [SmartBill] PDF fetch failed: {type(exc).__name__}: {exc}")
+            return Err("Could not fetch the document from SmartBill")
+
+        if response.status_code != HTTPStatus.OK:
+            return Err(f"SmartBill returned {response.status_code} for the PDF")
+
+        content = response.content or b""
+        # A JSON error body would be served with a 200 here too, so check the shape
+        # rather than trusting the status.
+        if not content.startswith(b"%PDF"):
+            return Err("SmartBill did not return a PDF document")
+        return Ok(content)
 
     # -- writes ----------------------------------------------------------------
 

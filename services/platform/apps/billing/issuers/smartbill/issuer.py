@@ -97,6 +97,10 @@ class SmartBillIssuer(InvoiceIssuerGateway):
         )
         return Ok(report) if not problems else Err("; ".join(problems))
 
+    def fetch_pdf(self, series: str, number: str) -> Result[bytes, str]:
+        """The provider's own rendering: the document the customer actually gets."""
+        return self._client.fetch_invoice_pdf(series, number)
+
     def prepare(self, invoice: Invoice) -> Result[PreparedDocument, tuple[str, ...]]:
         """Build the exact request. Side-effect free, so it is safe before claiming."""
         mapped = build_invoice_payload(invoice, self._config)
