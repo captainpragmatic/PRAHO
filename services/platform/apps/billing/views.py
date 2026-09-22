@@ -15,6 +15,8 @@ from typing import TYPE_CHECKING, Any, cast
 if TYPE_CHECKING:
     from apps.users.models import User
 
+from http import HTTPStatus
+
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import REDIRECT_FIELD_NAME
@@ -44,7 +46,7 @@ from django_fsm import TransitionNotAllowed
 
 from apps.api.secure_auth import get_authenticated_customer
 from apps.billing.efactura.settings import ro_local_date
-from apps.billing.pdf_generators import RomanianInvoicePDFGenerator, RomanianProformaPDFGenerator
+from apps.billing.pdf_generators import RomanianProformaPDFGenerator
 from apps.common.constants import DEFAULT_PAGE_SIZE
 from apps.common.decorators import (
     billing_configuration_required,
@@ -406,7 +408,7 @@ def billing_list(request: HttpRequest) -> HttpResponse:
                     "type": "invoice",
                     "obj": invoice,
                     "id": invoice.pk,
-                    "number": invoice.number,
+                    "number": invoice.display_number,
                     "customer": invoice.customer,
                     "total": invoice.total,
                     "currency": invoice.currency,
@@ -659,7 +661,7 @@ def billing_list_htmx(request: HttpRequest) -> HttpResponse:
                     "type": "invoice",
                     "obj": invoice,
                     "id": invoice.pk,
-                    "number": invoice.number,
+                    "number": invoice.display_number,
                     "customer": invoice.customer,
                     "total": invoice.total,
                     "currency": invoice.currency,
@@ -1399,9 +1401,32 @@ def invoice_pdf(request: HttpRequest, pk: int) -> HttpResponse:
     if access_denied_response:
         return access_denied_response
 
-    # Generate PDF using Romanian invoice generator
-    pdf_generator = RomanianInvoicePDFGenerator(invoice)
-    return pdf_generator.generate_response()
+    # Through the same chokepoint the customer API and the email sender use. Rendering
+    # here directly would produce a SECOND, unofficial copy of a legal document for a
+    # provider-issued invoice - one that differs from what the customer and ANAF hold.
+    from apps.billing.issuers.documents import DocumentDeferred, get_invoice_pdf_bytes  # noqa: PLC0415
+    from apps.common.types import Err  # noqa: PLC0415
+
+    try:
+        pdf_result = get_invoice_pdf_bytes(invoice)
+    except DocumentDeferred as deferred:
+        # Paced, not missing. Tell the browser to come back rather than reporting the
+        # document does not exist.
+        response = HttpResponse(
+            _("The document is being prepared. Please retry shortly."),
+            status=HTTPStatus.SERVICE_UNAVAILABLE,
+        )
+        response["Retry-After"] = "5"
+        logger.info(f"⏳ [Invoice PDF] {invoice.audit_reference} deferred until {deferred.retry_at}")
+        return response
+
+    if isinstance(pdf_result, Err):
+        logger.warning(f"⚠️ [Invoice PDF] {invoice.audit_reference}: {pdf_result.error}")
+        return HttpResponse(_("This document is not available yet."), status=HTTPStatus.CONFLICT)
+
+    response = HttpResponse(pdf_result.unwrap(), content_type="application/pdf")
+    response["Content-Disposition"] = f'attachment; filename="factura_{invoice.display_number}.pdf"'
+    return response
 
 
 @billing_staff_required

@@ -490,7 +490,7 @@ def handle_invoice_created_or_updated(sender: type[Invoice], instance: Invoice, 
                 context=AuditContext(actor_type="system"),
                 old_values=old_values,
                 new_values=new_values,
-                description=f"Invoice {instance.number} {'created' if created else 'updated'}",
+                description=f"Invoice {instance.audit_reference} {'created' if created else 'updated'}",
             )
             BillingAuditService.log_invoice_event(event_data)
 

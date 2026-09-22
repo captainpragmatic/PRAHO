@@ -18,6 +18,7 @@ from unittest.mock import patch
 from django.test import TestCase, TransactionTestCase, override_settings
 from django.utils import timezone
 
+from apps.audit.models import AuditEvent
 from apps.billing.invoice_models import (
     DOCUMENT_KIND_CREDIT_NOTE,
     ISSUER_BUILTIN,
@@ -30,6 +31,7 @@ from apps.billing.issuers.models import IssuanceState, ProviderIssuance
 from apps.billing.issuers.policy import can_switch_invoice_issuer
 from apps.billing.issuers.service import issue_invoice_externally
 from apps.billing.issuers.tasks import sweep_owed_reversals, sweep_pending_issuances
+from apps.billing.pdf_generators import RomanianInvoicePDFGenerator
 from apps.billing.refund_models import Refund
 from apps.billing.services import InvoiceService
 from apps.common.types import Ok
@@ -430,3 +432,75 @@ class LeavingTheIntegrationIsNeverBlockedTests(TestCase):
         result = SettingsService.update_setting("billing.invoice_issuer", ISSUER_BUILTIN, reason="test")
 
         self.assertTrue(result.is_ok(), msg=getattr(result, "error", ""))
+
+
+class NothingRendersTheWordNoneTests(TestCase):
+    """`number` became nullable; several consumers still read it raw.
+
+    A document awaiting issuance renders as the literal string "None" wherever a
+    surface interpolates the field instead of going through `display_number`. On an
+    audit row that is worse: `AuditEvent.description` is immutable, so "Invoice None
+    created" is permanent and untraceable.
+    """
+
+    def setUp(self) -> None:
+        self.customer = CustomerFactory()
+        self.currency = Currency.objects.get_or_create(code="RON", defaults={"symbol": "L", "decimals": 2})[0]
+
+    def _unnumbered(self) -> Invoice:
+        return Invoice.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            number=None,
+            status="draft",
+            subtotal_cents=10000,
+            tax_cents=2100,
+            total_cents=12100,
+            bill_to_name="Test Company SRL",
+            bill_to_country="RO",
+        )
+
+    def test_the_audit_row_is_traceable_without_a_number(self) -> None:
+        invoice = self._unnumbered()
+
+        descriptions = [event.description for event in AuditEvent.objects.filter(description__icontains="invoice")]
+        self.assertTrue(descriptions, "invoice creation must be audited")
+        for description in descriptions:
+            self.assertNotIn("Invoice None", description)
+        self.assertTrue(
+            any(f"invoice:{invoice.pk}" in d for d in descriptions),
+            f"the audit row must identify the document; got {descriptions}",
+        )
+
+    def test_a_numbered_invoice_still_audits_under_its_legal_number(self) -> None:
+        """The regression guard: `audit_reference` must not mask a real number."""
+        Invoice.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            number="INV-AUD-0001",
+            status="draft",
+            subtotal_cents=10000,
+            tax_cents=2100,
+            total_cents=12100,
+            bill_to_name="Test Company SRL",
+            bill_to_country="RO",
+        )
+
+        self.assertTrue(
+            AuditEvent.objects.filter(description__icontains="INV-AUD-0001").exists(),
+            "a numbered invoice must still be audited under its legal number",
+        )
+
+    def test_display_number_stands_in_for_humans(self) -> None:
+        invoice = self._unnumbered()
+
+        self.assertNotEqual(invoice.display_number, "None")
+        self.assertNotIn("None", invoice.display_number)
+        self.assertEqual(invoice.audit_reference, f"invoice:{invoice.pk}")
+
+    def test_the_pdf_filename_never_says_none(self) -> None:
+        invoice = self._unnumbered()
+
+        filename = RomanianInvoicePDFGenerator(invoice)._get_filename()
+
+        self.assertNotIn("None", filename)
