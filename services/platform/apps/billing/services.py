@@ -52,9 +52,7 @@ from .invoice_service import (
     generate_invoice_pdf,
     send_invoice_email,
 )
-from .issuers.models import ProviderIssuance
-from .issuers.policy import default_issuer_provider, issues_externally
-from .issuers.tasks import queue_invoice_issuance
+from .issuers.policy import begin_issuance, issuer_for_new_document
 
 # Import usage-based billing services
 from .metering_service import (
@@ -149,10 +147,16 @@ class InvoiceService:
                     or fiscal_identity.business_tax_id
                 )
 
+                # The issuer is chosen once, here, and then frozen on the document.
+                # An external issuer cannot assign a number inside this transaction,
+                # so the invoice is created unnumbered and issued after commit.
+                issuer_provider, external = issuer_for_new_document()
+
                 # Create invoice - all within the same atomic block to ensure consistency
                 invoice = Invoice.objects.create(
                     customer=order.customer,
-                    number=InvoiceNumberingService.get_next_number(),
+                    issuer_provider=issuer_provider,
+                    number=None if external else InvoiceNumberingService.get_next_number(),
                     currency=order.currency,
                     subtotal_cents=vat_result.subtotal_cents,
                     tax_cents=vat_result.vat_cents,
@@ -202,12 +206,17 @@ class InvoiceService:
                             tax_category_code=derive_tax_category(vat_result),
                         )
 
+                if external:
+                    # Stays `draft` until the provider answers. Nothing downstream
+                    # waits on the number: the order records the invoice either way.
+                    begin_issuance(invoice, issuer_provider)
+
                 # Log invoice creation
                 log_security_event(
                     event_type="invoice_created_from_order",
                     details={
                         "invoice_id": str(invoice.id),
-                        "invoice_number": invoice.number,
+                        "invoice_number": invoice.display_number,
                         "order_id": str(order.id),
                         "order_number": getattr(order, "order_number", ""),
                         "customer_id": str(order.customer.id),
@@ -327,8 +336,7 @@ class ProformaConversionService:
                 # The issuer is chosen once, here, and then frozen on the document.
                 # An external issuer cannot assign a number inside this transaction,
                 # so the invoice is created unnumbered and issued after commit.
-                issuer_provider = default_issuer_provider()
-                external = issues_externally(issuer_provider)
+                issuer_provider, external = issuer_for_new_document()
 
                 invoice = Invoice.objects.create(
                     customer=proforma.customer,
@@ -390,8 +398,7 @@ class ProformaConversionService:
                     # The work item commits WITH the invoice. If the process dies
                     # before the queue callback runs, a sweep can still find an
                     # unnumbered invoice with a pending issuance rather than silence.
-                    ProviderIssuance.objects.get_or_create(invoice=invoice, defaults={"provider": issuer_provider})
-                    transaction.on_commit(lambda: queue_invoice_issuance(invoice.pk))
+                    begin_issuance(invoice, issuer_provider)
                 else:
                     invoice.issue()
                     invoice.save()

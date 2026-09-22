@@ -32,6 +32,7 @@ from apps.customers.models import CustomerAddress, CustomerTaxProfile
 from . import config as billing_config
 from .fiscal_identity import billing_country_code, get_customer_fiscal_identity
 from .invoice_models import Invoice, InvoiceLine
+from .issuers.policy import begin_issuance, issuer_for_new_document
 from .metering_models import BillingCycle, UsageAggregation, UsageMeter
 from .metering_service import AggregationService, RatingEngine
 from .numbering_service import InvoiceNumberingService
@@ -54,7 +55,7 @@ class UsageInvoiceService:
     """
 
     @transaction.atomic
-    def generate_invoice_from_cycle(  # noqa: C901, PLR0911, PLR0915  # Atomic usage rating, document, tax, and credit flow
+    def generate_invoice_from_cycle(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Atomic usage rating, document, tax, credit and issuance flow
         self, billing_cycle_id: str
     ) -> Result[dict[str, Any], str]:  # Complexity: multi-step workflow  # Complexity: multi-step business logic
         """
@@ -154,9 +155,15 @@ class UsageInvoiceService:
             _notice_at, charge_at = usage_collection_schedule(billing_cycle.period_end)
 
             # Create invoice - subtotal is the NET taxable amount (matching Invoice.clean() validation)
+            # The issuer is chosen once, here, and frozen on the document. An external
+            # issuer cannot assign a number inside this transaction, so the invoice is
+            # created unnumbered and issued after commit.
+            issuer_provider, external = issuer_for_new_document()
+
             invoice = Invoice.objects.create(
                 customer=customer,
-                number=InvoiceNumberingService.get_next_number(),
+                issuer_provider=issuer_provider,
+                number=None if external else InvoiceNumberingService.get_next_number(),
                 status="draft",
                 currency=currency,
                 subtotal_cents=net_amount_cents,  # NET amount before tax (not gross)
@@ -219,8 +226,14 @@ class UsageInvoiceService:
                 agg.save()
 
             # Update billing cycle
-            invoice.issue()
-            invoice.save()
+            if external:
+                # Stays `draft` until the provider answers; the cycle records the
+                # invoice either way, so nothing downstream waits on the number.
+                invoice.save()
+                begin_issuance(invoice, issuer_provider)
+            else:
+                invoice.issue()
+                invoice.save()
 
             billing_cycle.usage_invoice = invoice
             billing_cycle.credit_applied_cents = credit_applied_cents

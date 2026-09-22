@@ -19,6 +19,8 @@ from django.test import TestCase, TransactionTestCase
 from django.utils import timezone
 
 from apps.billing.gateways.base import PaymentConfirmResult, PaymentIntentResult
+from apps.billing.invoice_models import ISSUER_SMARTBILL
+from apps.billing.issuers.models import IssuanceState, ProviderIssuance
 from apps.billing.models import (
     BillingCycle,
     CreditLedger,
@@ -934,6 +936,32 @@ class UsageInvoiceServiceTestCase(TestCase):
         zero_charge_aggregation.refresh_from_db()
         self.assertEqual(zero_charge_aggregation.status, "invoiced")
 
+    def test_an_external_issuer_defers_the_usage_invoice_number(self):
+        """Usage billing is a second invoice-creation path and must obey the issuer too.
+
+        It allocated a PRAHO fiscal number inline regardless of configuration, so
+        selecting SmartBill left usage invoices numbered by the very sequence the
+        operator had just stopped using - and stamped `builtin` permanently, which
+        also makes PRAHO file them with ANAF while SmartBill files everything else.
+        """
+        selected = SettingsService.update_setting("billing.invoice_issuer", ISSUER_SMARTBILL, reason="test")
+        self.assertTrue(selected.is_ok(), getattr(selected, "error", ""))
+
+        result = self.service.generate_invoice_from_cycle(str(self.billing_cycle.id))
+
+        self.assertTrue(result.is_ok(), getattr(result, "error", ""))
+        invoice = Invoice.objects.get(pk=result.unwrap()["invoice_id"])
+        self.assertEqual(invoice.issuer_provider, ISSUER_SMARTBILL)
+        self.assertIsNone(
+            invoice.number,
+            "PRAHO must not consume its own fiscal sequence for a document it is not issuing",
+        )
+        self.assertEqual(invoice.status, "draft", "it stays draft until the provider answers")
+        issuance = ProviderIssuance.objects.filter(invoice=invoice).first()
+        self.assertIsNotNone(issuance, "without this row a lost enqueue is unrecoverable")
+        assert issuance is not None
+        self.assertEqual(issuance.state, IssuanceState.PENDING.value)
+
     def test_usage_invoice_snapshots_individual_cnp(self):
         from apps.customers.models import CustomerTaxProfile  # noqa: PLC0415
 
@@ -968,8 +996,15 @@ class UsageInvoiceServiceTestCase(TestCase):
 
     def test_usage_invoice_records_reverse_charge_decision_and_category(self):
         CustomerTaxProfile.objects.create(customer=self.customer, vat_number="DE136695976", is_vat_payer=True)
-        CustomerAddress.objects.create(customer=self.customer, is_billing=True, address_line1="Example 1",
-            city="Berlin", county="Berlin", postal_code="10115", country="DE")
+        CustomerAddress.objects.create(
+            customer=self.customer,
+            is_billing=True,
+            address_line1="Example 1",
+            city="Berlin",
+            county="Berlin",
+            postal_code="10115",
+            country="DE",
+        )
         result = self.service.generate_invoice_from_cycle(str(self.billing_cycle.id))
         self.assertTrue(result.is_ok(), result)
         invoice = Invoice.objects.get(id=result.unwrap()["invoice_id"])

@@ -118,6 +118,37 @@ def operator_safe_detail(error: object) -> str:
     return cleaned[: limit - 1] + "\u2026" if len(cleaned) > limit else cleaned
 
 
+def issuer_for_new_document() -> tuple[str, bool]:
+    """The issuer to stamp on a document that does not exist yet, and whether it is external.
+
+    Every service that creates an invoice needs this pair, and each used to work it
+    out for itself. Two of the three never did, so selecting SmartBill left them
+    minting numbers from PRAHO's own fiscal sequence - a legal act under an authority
+    the operator had just handed elsewhere, frozen on the document forever. One
+    function now owns the decision so a fourth creation path cannot quietly skip it.
+    """
+    provider = default_issuer_provider()
+    return provider, issues_externally(provider)
+
+
+def begin_issuance(invoice: Invoice, provider: str) -> None:
+    """Record durable intent to issue, then enqueue it once the caller commits.
+
+    The row is written inside the caller's transaction on purpose: `on_commit` fires
+    in-process, so a crash or an unavailable queue between commit and callback loses
+    the enqueue but never the intent. `sweep_pending_issuances` finds an unnumbered
+    invoice with a pending issuance and picks it up again; without the row there is
+    nothing to find and the document simply never gets issued.
+    """
+    from django.db import transaction  # noqa: PLC0415  # Local: keeps this module import-light
+
+    from .models import ProviderIssuance  # noqa: PLC0415  # ADR-0007
+    from .tasks import queue_invoice_issuance  # noqa: PLC0415  # ADR-0007: tasks imports service
+
+    ProviderIssuance.objects.get_or_create(invoice=invoice, defaults={"provider": provider})
+    transaction.on_commit(lambda: queue_invoice_issuance(invoice.pk))
+
+
 def issues_externally(provider: str) -> bool:
     """Whether issuance for this provider needs a network call.
 

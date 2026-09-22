@@ -79,6 +79,50 @@ def sweep_pending_issuances(limit: int = 100) -> dict[str, int]:
     return results
 
 
+def sweep_owed_reversals(limit: int = 100) -> dict[str, int]:
+    """Pick up reversals whose queue callback never ran.
+
+    Issuance survives a lost enqueue because its work row is written in the same
+    transaction as the invoice, so a sweep can find it. A reversal has no such row:
+    the credit note is created by the task itself, so an enqueue that fails leaves
+    nothing behind at all - while the refund has already moved money, so the customer
+    holds a full invoice with nothing reversing it and the books show revenue that was
+    returned.
+
+    No new state is needed to fix that, because the durable record already exists: a
+    provider-issued invoice sitting in `refunded` with no reversal IS an outstanding
+    correction. This reads that rather than inventing a second source of truth.
+
+    Eligibility is deliberately not re-checked here. `issue_storno_for_invoice`
+    settles it under lock, and a sweep that duplicated those rules is exactly how the
+    two would drift apart.
+    """
+    from apps.billing.invoice_models import DOCUMENT_KIND_INVOICE, ISSUER_BUILTIN, Invoice  # noqa: PLC0415
+
+    owed = list(
+        Invoice.objects.filter(
+            status="refunded",
+            document_kind=DOCUMENT_KIND_INVOICE,
+            reversals__isnull=True,
+        )
+        .exclude(issuer_provider=ISSUER_BUILTIN)
+        .order_by("pk")[:limit]
+    )
+
+    queued = 0
+    for invoice in owed:
+        if queue_invoice_storno(invoice.pk):
+            queued += 1
+        else:
+            logger.error(
+                f"🔥 [Storno] Reversal still cannot be queued for invoice {invoice.pk}; "
+                f"the customer holds a refunded invoice with no credit note."
+            )
+    if owed:
+        logger.info(f"🐢 [Storno] Swept {len(owed)} owed reversal(s); {queued} queued")
+    return {"examined": len(owed), "queued": queued}
+
+
 def issue_storno_task(invoice_id: int) -> dict[str, object]:
     """Reverse one provider-issued invoice."""
     from .service import issue_storno_for_invoice  # noqa: PLC0415

@@ -2111,6 +2111,19 @@ def setup_billing_scheduled_tasks() -> dict[str, str]:
             "apps.billing.tasks.reconcile_stripe_refunds",
             "45 2 * * *",
         ),
+        # Both of these exist because `on_commit` fires in-process: a crash or an
+        # unavailable queue between commit and callback loses the enqueue while the
+        # work remains owed. Unregistered, they are elaborate dead code.
+        (
+            "billing-issuance-sweep",
+            "apps.billing.issuers.tasks.sweep_pending_issuances",
+            "*/10 * * * *",
+        ),
+        (
+            "billing-owed-reversals",
+            "apps.billing.issuers.tasks.sweep_owed_reversals",
+            "25 * * * *",
+        ),
         (
             "billing-vies-reverification",
             "apps.billing.tasks.reverify_expired_vat_validations",

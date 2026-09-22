@@ -36,6 +36,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Invoice dates sent to SmartBill use the Romanian calendar day rather than UTC's. An
   invoice issued late in the evening was dated to the previous day, and one issued late
   on the last day of a month was filed under a VAT period that had already closed.
+- Order-created and usage-billing invoices now honour the selected issuer. Both allocated
+  a PRAHO fiscal number inline regardless of configuration, so choosing SmartBill left
+  those documents numbered by PRAHO and permanently marked as its responsibility to file
+  with ANAF, while everything else went to SmartBill.
+- A reversal whose enqueue fails is recovered. A refund has already moved money by then,
+  so losing it left the customer holding a full invoice with nothing reversing it; an
+  hourly sweep now finds refunded provider invoices that have no credit note.
+- The issuance and reversal sweeps are actually scheduled. Both existed but were
+  registered nowhere, so the recovery they provide never ran.
 
 ### Changed
 
