@@ -12,7 +12,6 @@ import json
 import logging
 from typing import TYPE_CHECKING, Any
 
-from django.conf import settings
 from django.utils import timezone
 
 from apps.billing.invoice_models import ISSUER_SMARTBILL
@@ -178,27 +177,39 @@ class SmartBillIssuer(InvoiceIssuerGateway):
 
 
 def _credentials_from_settings() -> SmartBillCredentials:
-    """Deployment-level credentials.
+    """Operator-managed credentials, with a deployment fallback.
 
-    Phase 9 moves these to the settings catalog with write-only secret handling;
-    reading undeclared keys through SettingsService now would break the ADR-0042
-    consumer contract.
+    Read through SettingsService so they are editable at runtime and so secrets stay
+    write-only in the UI: the settings surface never renders a stored secret back,
+    it only reports whether one is configured.
     """
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
     return SmartBillCredentials(
-        email=getattr(settings, "SMARTBILL_EMAIL", ""),
-        token=getattr(settings, "SMARTBILL_TOKEN", ""),
-        cif=getattr(settings, "SMARTBILL_CIF", ""),
-        v3_token=getattr(settings, "SMARTBILL_V3_TOKEN", ""),
+        email=str(SettingsService.get_setting("integrations.smartbill_email", "") or ""),
+        token=str(SettingsService.get_setting("integrations.smartbill_token", "") or ""),
+        cif=str(SettingsService.get_setting("integrations.smartbill_cif", "") or ""),
+        v3_token=str(SettingsService.get_setting("integrations.smartbill_v3_token", "") or ""),
     )
 
 
 def _config_from_settings() -> SmartBillAccountConfig:
+    """Account-coupled document defaults.
+
+    `tax_names` is deliberately operator-configured rather than derived: selecting a
+    VAT rate by percentage alone is unsafe, because two configured rates can share a
+    percentage with different fiscal meaning.
+    """
+    from apps.settings.services import SettingsService  # noqa: PLC0415
+
+    tax_names = SettingsService.get_setting("integrations.smartbill_tax_names", {}) or {}
+    cif = str(SettingsService.get_setting("integrations.smartbill_cif", "") or "")
     return SmartBillAccountConfig(
-        invoice_series=getattr(settings, "SMARTBILL_INVOICE_SERIES", ""),
-        tax_names=getattr(settings, "SMARTBILL_TAX_NAMES", {}),
-        measuring_unit=getattr(settings, "SMARTBILL_MEASURING_UNIT", "buc"),
-        language=getattr(settings, "SMARTBILL_LANGUAGE", "RO"),
-        company_vat_code=getattr(settings, "SMARTBILL_CIF", ""),
+        invoice_series=str(SettingsService.get_setting("integrations.smartbill_invoice_series", "") or ""),
+        tax_names=dict(tax_names) if isinstance(tax_names, dict) else {},
+        measuring_unit=str(SettingsService.get_setting("integrations.smartbill_measuring_unit", "buc") or "buc"),
+        language=str(SettingsService.get_setting("integrations.smartbill_language", "RO") or "RO"),
+        company_vat_code=cif,
     )
 
 

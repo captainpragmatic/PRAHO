@@ -15,9 +15,11 @@ already loaded an invoice cannot have the answer change underneath it.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from apps.billing.invoice_models import ISSUER_BUILTIN
+from apps.common.types import Err, Ok, Result
 
 from .base import InvoiceIssuerGateway, get_invoice_issuer, get_registered_issuers
 
@@ -72,17 +74,17 @@ def resolve_issuer(invoice: Invoice) -> InvoiceIssuerGateway:
 def default_issuer_provider() -> str:
     """Which provider a NEW document should be stamped with.
 
-    This is the one place a global setting legitimately applies: choosing the issuer
-    for a document that does not exist yet. Once stamped it is frozen, so flipping
-    this never reaches a document already created.
+    The one place a global setting legitimately applies: choosing an issuer for a
+    document that does not exist yet. Once stamped it is frozen, so flipping this
+    never reaches a document already created.
 
-    Phase 9 moves it into the settings catalog with a preflight; reading an
-    undeclared key through SettingsService now would break the ADR-0042 consumer
-    contract, so it is a deployment setting for the moment.
+    An unrecognised value falls back to the built-in issuer rather than raising:
+    a typo in configuration should not stop invoicing, and the built-in path is
+    always available.
     """
-    from django.conf import settings  # noqa: PLC0415
+    from apps.settings.services import SettingsService  # noqa: PLC0415
 
-    provider = str(getattr(settings, "INVOICE_ISSUER", ISSUER_BUILTIN) or ISSUER_BUILTIN)
+    provider = str(SettingsService.get_setting("billing.invoice_issuer", ISSUER_BUILTIN) or ISSUER_BUILTIN)
     return provider if provider in get_registered_issuers() else ISSUER_BUILTIN
 
 
@@ -93,3 +95,86 @@ def issues_externally(provider: str) -> bool:
     transaction; an external one cannot, which is why its number arrives later.
     """
     return provider != ISSUER_BUILTIN
+
+
+@dataclass(frozen=True)
+class SwitchBlocker:
+    """One reason a provider switch must not happen right now."""
+
+    reason: str
+    detail: str
+
+
+def can_switch_invoice_issuer(target: str) -> Result[None, tuple[SwitchBlocker, ...]]:
+    """Whether the issuer may be changed for NEW documents right now.
+
+    The switch only ever affects documents that do not exist yet — provenance is
+    frozen per document — so this is not about history. It is about work already in
+    flight: an attempt whose outcome nobody knows yet, or a document the previous
+    issuer is still responsible for filing with ANAF.
+
+    Reversibility is partial by nature, and the UI should say so: turning SmartBill
+    off does not un-issue anything it issued, and those documents still need its
+    credentials for reversal and PDF retrieval.
+    """
+    from apps.billing.efactura.models import EFacturaDocument, EFacturaStatus  # noqa: PLC0415
+    from apps.billing.invoice_models import Invoice  # noqa: PLC0415
+
+    from .models import IssuanceState, ProviderIssuance  # noqa: PLC0415
+
+    blockers: list[SwitchBlocker] = []
+
+    unresolved = ProviderIssuance.objects.filter(
+        state__in=[IssuanceState.PENDING.value, IssuanceState.CLAIMED.value, IssuanceState.OUTCOME_UNKNOWN.value]
+    ).count()
+    if unresolved:
+        blockers.append(
+            SwitchBlocker(
+                reason="Issuance attempts are unresolved",
+                detail=(
+                    f"{unresolved} attempt(s) are pending, claimed, or of unknown outcome. "
+                    f"Switching now would leave work owned by a provider nobody is watching."
+                ),
+            )
+        )
+
+    awaiting = Invoice.objects.filter(number__isnull=True, status="draft").count()
+    if awaiting:
+        blockers.append(
+            SwitchBlocker(
+                reason="Invoices are awaiting a number",
+                detail=f"{awaiting} invoice(s) have no legal number yet and are still expecting their issuer.",
+            )
+        )
+
+    if issues_externally(target):
+        in_flight = EFacturaDocument.objects.filter(
+            status__in=[
+                EFacturaStatus.QUEUED.value,
+                EFacturaStatus.UPLOADING.value,
+                EFacturaStatus.SUBMITTED.value,
+                EFacturaStatus.PROCESSING.value,
+                EFacturaStatus.OUTCOME_UNKNOWN.value,
+            ]
+        ).count()
+        if in_flight:
+            blockers.append(
+                SwitchBlocker(
+                    reason="e-Factura submissions are in flight",
+                    detail=(
+                        f"{in_flight} document(s) are mid-submission to ANAF. Handing e-Factura to a "
+                        f"provider while PRAHO is still filing risks the same invoice reaching SPV twice."
+                    ),
+                )
+            )
+
+        report = get_invoice_issuer(target).validate_configuration()
+        if isinstance(report, Err):
+            blockers.append(
+                SwitchBlocker(
+                    reason=f"{target} is not usable yet",
+                    detail=str(report.error),
+                )
+            )
+
+    return Err(tuple(blockers)) if blockers else Ok(None)
