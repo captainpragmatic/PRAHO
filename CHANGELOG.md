@@ -7,7 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_No unreleased changes._
+### Added
+
+- SmartBill can now be selected as the invoice issuer, from Settings → Integrations. It
+  numbers the invoice, supplies the PDF customers receive, and files e-Factura with ANAF
+  in PRAHO's place. Proformas, payments, refunds, dunning, recurring billing, VAT
+  decisions and reporting all stay in PRAHO.
+- Test connection verifies the configured series and every mapped VAT-rate name actually
+  exist in the SmartBill account, rather than only checking that credentials authenticate.
+- A full refund of a SmartBill invoice issues a storno automatically, recorded as a credit
+  note with its own legal number so VAT and revenue reporting net the correction.
+
+### Changed
+
+- The issuer is stamped on each invoice when it is created and frozen there. Changing the
+  setting affects new invoices only: anything already issued keeps its issuer, its number
+  and its e-Factura owner permanently.
+- Switching to an external issuer is blocked while issuance attempts are unresolved, while
+  invoices are still awaiting a number, or while e-Factura submissions are mid-flight to
+  ANAF.
+
+### Known limitations
+
+- Only ordinary positive VAT rates (EN16931 category S) can be issued through SmartBill.
+  EU B2B reverse charge, zero-rated and out-of-scope supplies are refused, because the API
+  carries no tax-category or exemption-reason field. Those customers stay on the built-in
+  issuer.
+- Partial refunds cannot be reversed at the provider: its storno takes no amounts and
+  reverses the whole document. They raise an alert for manual correction.
+- While SmartBill owns e-Factura, PRAHO has no API-visible ANAF status, deadline tracking
+  or signed-response archive, because SmartBill exposes none. SPV status is checked in
+  SmartBill Cloud.
+- An issuance whose outcome is unknown (a lost response) is never retried automatically
+  and waits for an operator to confirm what exists at the provider.
 
 ---
 
