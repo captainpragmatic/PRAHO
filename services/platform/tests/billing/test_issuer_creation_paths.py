@@ -15,7 +15,7 @@ from __future__ import annotations
 from decimal import Decimal
 from unittest.mock import patch
 
-from django.test import TestCase, TransactionTestCase
+from django.test import TestCase, TransactionTestCase, override_settings
 from django.utils import timezone
 
 from apps.billing.invoice_models import (
@@ -34,6 +34,7 @@ from apps.customers.models import Customer
 from apps.orders.models import Order, OrderItem
 from apps.products.models import Product
 from apps.settings.services import SettingsService
+from config.settings.test import LOCMEM_TEST_CACHE
 from tests.factories.billing_factories import CustomerFactory
 from tests.helpers.fsm_helpers import force_status
 
@@ -132,10 +133,11 @@ class OwedReversalIsRecoverableTests(TransactionTestCase):
         self.currency = Currency.objects.get_or_create(code="RON", defaults={"symbol": "L", "decimals": 2})[0]
 
     def _refunded_provider_invoice(self) -> Invoice:
+        self._seq = getattr(self, "_seq", 0) + 1
         invoice = Invoice.objects.create(
             customer=self.customer,
             currency=self.currency,
-            number="FCT-000900",
+            number=f"FCT-00090{self._seq}",
             status="draft",
             issued_at=timezone.now(),
             subtotal_cents=10000,
@@ -150,7 +152,7 @@ class OwedReversalIsRecoverableTests(TransactionTestCase):
             provider=ISSUER_SMARTBILL,
             state=IssuanceState.ISSUED.value,
             provider_series="FCT",
-            provider_number="000900",
+            provider_number=f"00090{self._seq}",
         )
         force_status(invoice, "paid")
         force_status(invoice, "refunded")
@@ -164,6 +166,23 @@ class OwedReversalIsRecoverableTests(TransactionTestCase):
             original_amount_cents=12100,
             reference_number=f"REF-OWED-{invoice.pk}",
         )
+        return invoice
+
+    def _split_refunded_invoice(self) -> Invoice:
+        """Refunded in two instalments: eligibility refuses this one permanently."""
+        invoice = self._refunded_provider_invoice()
+        Refund.objects.filter(invoice=invoice).delete()
+        for index, amount in enumerate((4000, 8100)):
+            Refund.objects.create(
+                customer=self.customer,
+                invoice=invoice,
+                status="completed",
+                refund_type="partial",
+                amount_cents=amount,
+                currency=self.currency,
+                original_amount_cents=12100,
+                reference_number=f"REF-SPLIT-{invoice.pk}-{index}",
+            )
         return invoice
 
     def test_a_reversal_whose_enqueue_failed_is_found_again(self) -> None:
@@ -214,6 +233,34 @@ class OwedReversalIsRecoverableTests(TransactionTestCase):
             sweep_owed_reversals()
 
         self.assertEqual(queued, [], "a reversal that exists is already owned by its own claim")
+
+    @override_settings(CACHES=LOCMEM_TEST_CACHE)
+    def test_permanently_refused_invoices_do_not_starve_the_queue(self) -> None:
+        """A refusal that can never succeed must not monopolise every sweep.
+
+        An invoice refunded in instalments is refused forever, and stays refunded
+        with no reversal - so it stays a candidate forever. Taking the first N
+        candidates by primary key means the oldest few permanently-stuck documents
+        occupy every run, and a genuinely recoverable reversal behind them is never
+        reached. The money for that one has already left.
+        """
+        stuck = [self._split_refunded_invoice() for _ in range(2)]
+        recoverable = self._refunded_provider_invoice()
+
+        seen: list[int] = []
+        with patch(
+            "apps.billing.issuers.tasks.queue_invoice_storno",
+            side_effect=lambda pk: seen.append(pk) or "task-id",
+        ):
+            for _ in range(4):
+                sweep_owed_reversals(limit=2)
+
+        self.assertIn(
+            recoverable.pk,
+            seen,
+            f"the recoverable reversal was never reached; swept only {sorted(set(seen))} "
+            f"while {[i.pk for i in stuck]} are permanently refused",
+        )
 
     def test_a_builtin_invoice_is_never_swept_for_a_provider_reversal(self) -> None:
         invoice = Invoice.objects.create(

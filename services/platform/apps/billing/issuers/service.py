@@ -454,6 +454,14 @@ def _get_or_create_credit_note(original: Invoice) -> Invoice:
     """
     existing = Invoice.objects.filter(reverses_invoice=original).first()
     if existing is not None:
+        # Resuming has to repair what the interrupted attempt never wrote, not just
+        # reuse the row. An earlier implementation created the credit note without
+        # lines; numbering that document reverses the header while line-based VAT and
+        # EC-Sales reporting see no correction at all - which reads as settled and is
+        # worse than no credit note. Idempotent: a note that already has lines is left
+        # exactly as it is, including one already issued.
+        if not existing.lines.exists():
+            _mirror_lines_negated(original, existing)
         return existing
 
     credit_note = Invoice.objects.create(

@@ -16,6 +16,9 @@ from .service import issue_invoice_externally
 
 logger = logging.getLogger(__name__)
 
+# Rotation state for `sweep_owed_reversals`; its docstring explains why it exists.
+_REVERSAL_CURSOR_KEY = "billing:owed-reversal-sweep-cursor"
+
 
 def issue_invoice_task(invoice_id: int) -> dict[str, object]:
     """Issue one invoice through its provider.
@@ -97,17 +100,31 @@ def sweep_owed_reversals(limit: int = 100) -> dict[str, int]:
     settles it under lock, and a sweep that duplicated those rules is exactly how the
     two would drift apart.
     """
+    from django.core.cache import cache  # noqa: PLC0415
+
     from apps.billing.invoice_models import DOCUMENT_KIND_INVOICE, ISSUER_BUILTIN, Invoice  # noqa: PLC0415
 
-    owed = list(
-        Invoice.objects.filter(
-            status="refunded",
-            document_kind=DOCUMENT_KIND_INVOICE,
-            reversals__isnull=True,
-        )
-        .exclude(issuer_provider=ISSUER_BUILTIN)
-        .order_by("pk")[:limit]
-    )
+    candidates = Invoice.objects.filter(
+        status="refunded",
+        document_kind=DOCUMENT_KIND_INVOICE,
+        reversals__isnull=True,
+    ).exclude(issuer_provider=ISSUER_BUILTIN)
+
+    # A refusal that can never succeed - an invoice refunded in instalments, say -
+    # leaves that invoice a candidate forever. Always taking the lowest N primary keys
+    # would let a handful of permanently stuck documents occupy every run while a
+    # genuinely recoverable reversal behind them is never reached, and the money for
+    # that one has already left. The cursor advances past whatever was examined and
+    # wraps at the end, so every candidate is reached within a bounded number of runs.
+    # Losing it to cache eviction only restarts the rotation, which is harmless, and
+    # where the cache is a no-op the sweep simply degrades to always scanning from the
+    # lowest key - correct, just not fair. Fairness only matters once candidates are
+    # permanently stuck, which is itself the alarm condition.
+    cursor = cache.get(_REVERSAL_CURSOR_KEY) or 0
+    owed = list(candidates.filter(pk__gt=cursor).order_by("pk")[:limit])
+    if not owed and cursor:
+        owed = list(candidates.order_by("pk")[:limit])
+    cache.set(_REVERSAL_CURSOR_KEY, owed[-1].pk if owed else 0, timeout=None)
 
     queued = 0
     for invoice in owed:

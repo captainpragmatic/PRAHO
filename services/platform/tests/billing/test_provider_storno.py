@@ -309,6 +309,15 @@ class StornoResumeTests(StornoTestBase):
         )
         orphan.refresh_from_db()
         self.assertEqual(orphan.number, "STORNO-000501")
+        # Resuming must also repair what the interrupted attempt never wrote. A
+        # numbered credit note with no lines reverses the header while line-based
+        # VAT and EC-Sales reporting see no correction at all - arguably worse than
+        # no credit note, because it looks settled.
+        self.assertEqual(
+            [line.line_total_cents for line in orphan.lines.all()],
+            [-line.line_total_cents for line in self.invoice.lines.all()],
+            "a resumed credit note must carry the original's lines, negated",
+        )
 
     def test_the_credit_note_carries_the_originals_lines_negated(self) -> None:
         """Header totals alone are invisible to line-based VAT reporting.

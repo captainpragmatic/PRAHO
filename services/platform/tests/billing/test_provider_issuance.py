@@ -463,3 +463,36 @@ class PacingDoesNotPoisonTheClaimTests(TransactionTestCase):
         )
         self.assertIsNone(issuance.claim_token)
         self.assertNotEqual(issuance.state, IssuanceState.OUTCOME_UNKNOWN.value)
+
+    def test_a_failure_that_might_have_been_sent_never_releases_the_claim(self) -> None:
+        """The other direction, and the dangerous one.
+
+        Returning a claim to `pending` is safe for pacing ONLY because the gate
+        refuses before anything leaves the machine. A timeout, a reset connection or
+        a dead worker look identical whether or not the provider created a document,
+        so releasing there would let a retry mint a second legally numbered invoice
+        against an API with no idempotency key. Such a failure must leave the claim
+        held, to be quarantined rather than retried.
+        """
+        invoice = self._invoice()
+
+        with (
+            patch(
+                "apps.billing.issuers.smartbill.issuer.SmartBillIssuer.prepare",
+                return_value=Ok(PreparedDocument(payload={"x": 1}, digest="d")),
+            ),
+            patch(
+                "apps.billing.issuers.smartbill.issuer.SmartBillIssuer.submit",
+                side_effect=ConnectionResetError("died mid-POST"),
+            ),
+            self.assertRaises(ConnectionResetError),
+        ):
+            issue_invoice_externally(invoice.pk)
+
+        issuance = ProviderIssuance.objects.get(invoice=invoice)
+        self.assertEqual(
+            issuance.state,
+            IssuanceState.CLAIMED.value,
+            "a failure that may have reached the provider must keep the claim, not hand it back",
+        )
+        self.assertIsNotNone(issuance.claim_token)
