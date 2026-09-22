@@ -28,6 +28,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A SmartBill reply that refuses without saying why no longer lets PRAHO resend the
+  same invoice. A timeout or a throttle carries no refusal envelope, so it cannot
+  prove the document was not created; resending on one risks a second legally
+  numbered invoice, which can only be reversed, never deleted.
+
 - An interrupted storno no longer makes an invoice permanently un-reversible. A credit
   note that exists but was never submitted is resumed rather than treated as proof the
   reversal already happened.

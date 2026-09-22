@@ -81,7 +81,7 @@ class RawReply:
     is_write: bool = False
 
 
-def classify(reply: RawReply) -> SmartBillResponse:  # noqa: C901, PLR0911  # A decision table: one branch per reply shape, one return per verdict. Splitting it scatters the money-safety reasoning across functions.
+def classify(reply: RawReply) -> SmartBillResponse:  # noqa: C901, PLR0911, PLR0912  # A decision table: one branch per reply shape, one return per verdict. Splitting it scatters the money-safety reasoning across functions.
     """Decide what a reply proves, erring towards AMBIGUOUS whenever unsure.
 
     `is_write` is the important argument. On a read, a wrong verdict costs a retry
@@ -103,13 +103,38 @@ def classify(reply: RawReply) -> SmartBillResponse:  # noqa: C901, PLR0911  # A 
             error_text="No usable reply from SmartBill; the document may or may not exist.",
         )
 
-    # A rate limiter refuses before the request reaches invoicing logic, so nothing
-    # was created. ASSUMPTION, not established fact: SmartBill has not confirmed it
-    # for write endpoints, and it is question 5 in the outstanding support email. If
-    # they contradict it, this branch must become AMBIGUOUS for writes.
+    # A rate limiter conventionally refuses before the request reaches invoicing
+    # logic, so nothing would have been created - but SmartBill has not confirmed
+    # that for write endpoints (question 5 in the outstanding support email), and
+    # their limit is an account-level policy rather than an obvious edge throttle.
+    # An unconfirmed assumption is not a recognised refusal envelope, so a write does
+    # not get to replay on it. Our own gate defers before sending, so a 429 arriving
+    # at all means pacing has already failed: a rare event, and cheap to reconcile by
+    # hand compared with a duplicate fiscal invoice. Reads keep the cheap verdict.
+    #
+    # `error_codes` and `retry_after_seconds` are preserved deliberately - the client
+    # keys throttle recording off the code, not the verdict, so the token is still
+    # blocked for every worker either way.
     if status == HTTPStatus.TOO_MANY_REQUESTS:
+        # This branch runs before the V1 envelope check below, so it has to apply the
+        # same rule itself: `errorText` is the verdict whatever the status says. A
+        # documented refusal that merely arrives with a throttle status is still a
+        # recognised refusal, and answering "we cannot say" to one would send an
+        # ordinary, correctable validation failure into manual reconciliation.
+        throttled_reason = str((parsed or {}).get("errorText") or "").strip()
+        contradictory = is_write and bool(str((parsed or {}).get("number") or "").strip())
+        if throttled_reason and not contradictory:
+            return SmartBillResponse(
+                verdict=Verdict.REJECTED,
+                status=status,
+                payload=parsed or {},
+                error_text=first_sentence(throttled_reason),
+                error_codes=("rate_limit_exceeded",),
+                retry_after_seconds=retry_after,
+                raw_body=body,
+            )
         return SmartBillResponse(
-            verdict=Verdict.REJECTED,
+            verdict=Verdict.AMBIGUOUS if is_write else Verdict.REJECTED,
             status=status,
             payload=parsed or {},
             error_text="Rate limit exceeded",
@@ -188,9 +213,14 @@ def classify(reply: RawReply) -> SmartBillResponse:  # noqa: C901, PLR0911  # A 
             raw_body=body,
         )
 
+    # A 4xx carrying no refusal envelope is the ABSENCE of evidence, not evidence of
+    # absence. 408 is the plainest case - the server timed out, possibly after writing
+    # the document - and 409 and the intermediary-generated 4xx behave the same way.
+    # Everything above this point that could name a reason has already returned, so
+    # reaching here on a write means we cannot say what happened.
     if status >= HTTPStatus.BAD_REQUEST:
         return SmartBillResponse(
-            verdict=Verdict.REJECTED,
+            verdict=Verdict.AMBIGUOUS if is_write else Verdict.REJECTED,
             status=status,
             payload=parsed,
             error_text=f"SmartBill returned {status} with no errorText",
