@@ -962,6 +962,35 @@ class UsageInvoiceServiceTestCase(TestCase):
         assert issuance is not None
         self.assertEqual(issuance.state, IssuanceState.PENDING.value)
 
+    def test_customer_credit_does_not_roll_back_an_external_usage_invoice(self):
+        """The whole cycle used to roll back, permanently, and on every retry.
+
+        Deferring the number for an external issuer leaves the invoice a `draft`, and
+        `mark_as_paid` accepts only an issued invoice. When customer credit covered the
+        total, convergence therefore found a fully-settled invoice that was not `paid`,
+        returned an error and rolled back the entire generation - so the cycle was
+        never invoiced and the revenue silently disappeared, re-failing identically on
+        each retry. Nothing surfaced it: the FSM refusal is swallowed upstream.
+        """
+        selected = SettingsService.update_setting("billing.invoice_issuer", ISSUER_SMARTBILL, reason="test")
+        self.assertTrue(selected.is_ok(), getattr(selected, "error", ""))
+
+        CreditLedger.objects.create(customer=self.customer, delta_cents=500_000, reason="prepayment for test")
+
+        result = self.service.generate_invoice_from_cycle(str(self.billing_cycle.id))
+
+        self.assertTrue(
+            result.is_ok(),
+            f"credit-covered usage billing must still produce an invoice: {getattr(result, 'error', '')}",
+        )
+        invoice = Invoice.objects.get(pk=result.unwrap()["invoice_id"])
+        self.assertIsNone(invoice.number, "the number is still the provider's to assign")
+        self.assertEqual(invoice.status, "draft")
+        self.assertTrue(
+            Invoice.objects.filter(pk=invoice.pk).exists(),
+            "the generation must have committed, not rolled back",
+        )
+
     def test_usage_invoice_snapshots_individual_cnp(self):
         from apps.customers.models import CustomerTaxProfile  # noqa: PLC0415
 

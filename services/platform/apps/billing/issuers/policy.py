@@ -193,9 +193,23 @@ def can_switch_invoice_issuer(target: str, *, probe_provider: bool = True) -> Re
 
     blockers: list[SwitchBlocker] = []
 
-    unresolved = ProviderIssuance.objects.filter(
-        state__in=[IssuanceState.PENDING.value, IssuanceState.CLAIMED.value, IssuanceState.OUTCOME_UNKNOWN.value]
-    ).count()
+    # Direction matters. Unresolved work belongs to the external provider, and
+    # switching BACK to the built-in issuer is the remedy for an integration going
+    # wrong - blocking that leaves the operator unable to turn off the thing that is
+    # misbehaving. Worse, `outcome_unknown` has exactly one exit and it needs a human,
+    # so a single timeout would otherwise latch the setting permanently in every path
+    # at once, the write chokepoint being universal by design.
+    unresolved = (
+        ProviderIssuance.objects.filter(
+            state__in=[
+                IssuanceState.PENDING.value,
+                IssuanceState.CLAIMED.value,
+                IssuanceState.OUTCOME_UNKNOWN.value,
+            ]
+        ).count()
+        if issues_externally(target)
+        else 0
+    )
     if unresolved:
         blockers.append(
             SwitchBlocker(
@@ -207,7 +221,9 @@ def can_switch_invoice_issuer(target: str, *, probe_provider: bool = True) -> Re
             )
         )
 
-    awaiting = Invoice.objects.filter(number__isnull=True, status="draft").count()
+    # Same reasoning: a document stuck awaiting an external number must not prevent
+    # returning to the issuer that can number it locally.
+    awaiting = Invoice.objects.filter(number__isnull=True, status="draft").count() if issues_externally(target) else 0
     if awaiting:
         blockers.append(
             SwitchBlocker(

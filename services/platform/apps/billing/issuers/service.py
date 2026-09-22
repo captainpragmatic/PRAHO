@@ -62,7 +62,9 @@ def _refuse_if_inside_transaction() -> None:
         )
 
 
-def issue_invoice_externally(invoice_id: int) -> Result[str, str]:
+def issue_invoice_externally(  # noqa: PLR0911  # One return per distinct refusal; collapsing them hides which guard fired
+    invoice_id: int,
+) -> Result[str, str]:
     """Issue one already-persisted, unnumbered invoice through its provider."""
     _refuse_if_inside_transaction()
 
@@ -70,6 +72,15 @@ def issue_invoice_externally(invoice_id: int) -> Result[str, str]:
         invoice = Invoice.objects.select_related("currency", "customer").get(pk=invoice_id)
     except Invoice.DoesNotExist:
         return Err(f"Invoice {invoice_id} does not exist")
+
+    if invoice.document_kind != DOCUMENT_KIND_INVOICE:
+        # A credit note reaches `pending` legitimately - pacing hands its claim back
+        # that way - and the issuance sweep looks only at state and a missing number,
+        # so without this it would be POSTed to /invoice instead of /invoice/reverse.
+        # That mints a BRAND NEW fiscal document with negative amounts while the
+        # invoice it was supposed to reverse stays outstanding, and a SmartBill
+        # invoice that is not last in its series cannot be deleted afterwards.
+        return Err("A credit note is issued through the reversal endpoint, not as a new invoice")
 
     if invoice.number:
         # Already numbered. Re-issuing would create a second legal document.
@@ -203,6 +214,11 @@ def _finalize(
             invoice.number = outcome.legal_number
             invoice.issue()
             invoice.save()
+            # Money may already have been recorded against this document while it was
+            # an unnumbered draft - customer credit applied at creation, typically.
+            # `mark_as_paid` only accepts an issued invoice, so that convergence has
+            # to happen here, the moment the document legally exists.
+            invoice.update_status_from_payments()
             logger.info(f"✅ [Issuance] Invoice {invoice_id} issued as {outcome.legal_number}")
             return Ok(outcome.legal_number)
 

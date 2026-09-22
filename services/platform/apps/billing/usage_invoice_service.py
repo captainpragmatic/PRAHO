@@ -247,7 +247,7 @@ class UsageInvoiceService:
                     customer=customer,
                     invoice=invoice,
                     delta_cents=-credit_applied_cents,
-                    reason=f"Applied to invoice {invoice.number}",
+                    reason=f"Applied to invoice {invoice.audit_reference}",
                 )
                 credit_payment = Payment.objects.create(
                     customer=customer,
@@ -255,7 +255,7 @@ class UsageInvoiceService:
                     amount_cents=credit_applied_cents,
                     currency=currency,
                     payment_method="other",
-                    reference_number=f"credit:{invoice.number}",
+                    reference_number=f"credit:{invoice.audit_reference}",
                     meta={"source": "customer_credit"},
                 )
                 credit_payment.succeed()
@@ -263,10 +263,16 @@ class UsageInvoiceService:
 
                 from .payment_convergence import PaymentSuccessService  # noqa: PLC0415
 
-                convergence = PaymentSuccessService.converge_local_paid_document(credit_payment.id)
-                if convergence.is_err():
-                    transaction.set_rollback(True)
-                    return Err(f"Customer credit allocation failed: {convergence.unwrap_err()}")
+                # Only converge a document that legally exists. An externally issued
+                # invoice is still an unnumbered draft here, and `mark_as_paid` accepts
+                # only an issued invoice - so convergence would fail, return Err and roll
+                # back the entire cycle generation, permanently and on every retry. The
+                # issuance path converges these the moment the provider answers.
+                if not external:
+                    convergence = PaymentSuccessService.converge_local_paid_document(credit_payment.id)
+                    if convergence.is_err():
+                        transaction.set_rollback(True)
+                        return Err(f"Customer credit allocation failed: {convergence.unwrap_err()}")
 
             # Log invoice creation
             AuditService.log_simple_event(

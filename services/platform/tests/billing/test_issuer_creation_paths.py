@@ -27,9 +27,12 @@ from apps.billing.invoice_models import (
     InvoiceSequence,
 )
 from apps.billing.issuers.models import IssuanceState, ProviderIssuance
-from apps.billing.issuers.tasks import sweep_owed_reversals
+from apps.billing.issuers.policy import can_switch_invoice_issuer
+from apps.billing.issuers.service import issue_invoice_externally
+from apps.billing.issuers.tasks import sweep_owed_reversals, sweep_pending_issuances
 from apps.billing.refund_models import Refund
 from apps.billing.services import InvoiceService
+from apps.common.types import Ok
 from apps.customers.models import Customer
 from apps.orders.models import Order, OrderItem
 from apps.products.models import Product
@@ -287,3 +290,143 @@ class OwedReversalIsRecoverableTests(TransactionTestCase):
             sweep_owed_reversals()
 
         self.assertEqual(queued, [], "built-in invoices are corrected through e-Factura, not the provider")
+
+
+class CreditNotesAreNeverIssuedAsInvoicesTests(TransactionTestCase):
+    """A reversal must reach the reversal endpoint, or it creates a second document.
+
+    `pending` records that a provider call is owed, not which one. Pacing hands a
+    rate-gated storno's claim back to `pending` by design, so the issuance sweep sees
+    an unnumbered document with a pending claim and cannot tell it from an invoice
+    awaiting its first number. Dispatching it to the issuance task posts it to
+    `/invoice`, which mints a brand-new fiscal document with negative amounts while
+    the invoice it was meant to reverse stays outstanding - and a SmartBill invoice
+    that is not last in its series cannot be deleted afterwards.
+    """
+
+    def setUp(self) -> None:
+        self.customer = CustomerFactory()
+        self.currency = Currency.objects.get_or_create(code="RON", defaults={"symbol": "L", "decimals": 2})[0]
+
+    def _credit_note(self) -> Invoice:
+        original = Invoice.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            number="FCT-000700",
+            status="draft",
+            issued_at=timezone.now(),
+            subtotal_cents=10000,
+            tax_cents=2100,
+            total_cents=12100,
+            bill_to_name="Test Company SRL",
+            bill_to_country="RO",
+            issuer_provider=ISSUER_SMARTBILL,
+        )
+        credit_note = Invoice.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            number=None,
+            status="draft",
+            document_kind=DOCUMENT_KIND_CREDIT_NOTE,
+            reverses_invoice=original,
+            issuer_provider=ISSUER_SMARTBILL,
+            subtotal_cents=-10000,
+            tax_cents=-2100,
+            total_cents=-12100,
+            bill_to_name="Test Company SRL",
+            bill_to_country="RO",
+        )
+        ProviderIssuance.objects.create(
+            invoice=credit_note, provider=ISSUER_SMARTBILL, state=IssuanceState.PENDING.value
+        )
+        return credit_note
+
+    def test_the_issuance_entry_point_refuses_a_credit_note(self) -> None:
+        credit_note = self._credit_note()
+
+        submitted: list[object] = []
+        with patch(
+            "apps.billing.issuers.smartbill.issuer.SmartBillIssuer.submit",
+            side_effect=lambda *a, **k: submitted.append(a),
+        ):
+            result = issue_invoice_externally(credit_note.pk)
+
+        self.assertTrue(result.is_err())
+        self.assertIn("reversal endpoint", result.error)
+        self.assertEqual(submitted, [], "a credit note must never reach the issuance endpoint")
+        credit_note.refresh_from_db()
+        self.assertIsNone(credit_note.number)
+
+    def test_the_issuance_sweep_does_not_pick_up_a_credit_note(self) -> None:
+        credit_note = self._credit_note()
+
+        queued: list[int] = []
+        with patch(
+            "apps.billing.issuers.tasks.queue_invoice_issuance",
+            side_effect=lambda pk: queued.append(pk) or "task-id",
+        ):
+            sweep_pending_issuances()
+
+        self.assertNotIn(credit_note.pk, queued, "the issuance sweep must leave reversals to the reversal sweep")
+
+
+class LeavingTheIntegrationIsNeverBlockedTests(TestCase):
+    """Switching back to built-in is the remedy when the provider misbehaves.
+
+    Blocking it on unresolved provider work means one ambiguous outcome latches the
+    setting permanently, in every write path at once - the chokepoint being universal
+    is exactly what makes it unrecoverable - since `outcome_unknown` has a single exit
+    that needs a human.
+    """
+
+    def setUp(self) -> None:
+        self.customer = CustomerFactory()
+        self.currency = Currency.objects.get_or_create(code="RON", defaults={"symbol": "L", "decimals": 2})[0]
+
+    def _stuck_issuance(self) -> None:
+        invoice = Invoice.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            number=None,
+            status="draft",
+            subtotal_cents=10000,
+            tax_cents=2100,
+            total_cents=12100,
+            bill_to_name="Test Company SRL",
+            bill_to_country="RO",
+            issuer_provider=ISSUER_SMARTBILL,
+        )
+        ProviderIssuance.objects.create(
+            invoice=invoice, provider=ISSUER_SMARTBILL, state=IssuanceState.OUTCOME_UNKNOWN.value
+        )
+
+    def test_an_unknown_outcome_does_not_trap_the_operator(self) -> None:
+        self._stuck_issuance()
+
+        outcome = can_switch_invoice_issuer(ISSUER_BUILTIN)
+
+        self.assertTrue(
+            outcome.is_ok(),
+            f"returning to the built-in issuer must stay available; blocked by "
+            f"{[b.reason for b in getattr(outcome, 'error', ())]}",
+        )
+
+    def test_an_unknown_outcome_still_blocks_switching_further_in(self) -> None:
+        """The other direction must keep its guard."""
+        self._stuck_issuance()
+
+        with patch(
+            "apps.billing.issuers.smartbill.issuer.SmartBillIssuer.validate_configuration",
+            return_value=Ok(None),
+        ):
+            outcome = can_switch_invoice_issuer(ISSUER_SMARTBILL)
+
+        self.assertTrue(outcome.is_err())
+        self.assertTrue(any("unresolved" in b.reason for b in outcome.error))
+
+    def test_the_settings_write_path_lets_the_operator_leave(self) -> None:
+        self._stuck_issuance()
+
+        result = SettingsService.update_setting("billing.invoice_issuer", ISSUER_BUILTIN, reason="test")
+
+        self.assertTrue(result.is_ok(), msg=getattr(result, "error", ""))

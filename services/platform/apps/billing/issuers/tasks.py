@@ -66,10 +66,17 @@ def sweep_pending_issuances(limit: int = 100) -> dict[str, int]:
     Deliberately narrow: only `pending`. An abandoned `claimed` row is quarantined
     by the claim path itself, and `outcome_unknown` is never swept by anything.
     """
+    from apps.billing.invoice_models import DOCUMENT_KIND_INVOICE  # noqa: PLC0415  # ADR-0007
+
     from .models import IssuanceState, ProviderIssuance  # noqa: PLC0415
 
+    # Credit notes are deliberately excluded. `pending` says a provider call is owed,
+    # not WHICH call, and a rate-gated reversal returns to `pending` by design - so
+    # without this filter a storno would be dispatched to the issuance task and posted
+    # as a new invoice. `sweep_owed_reversals` owns their recovery.
     pending = ProviderIssuance.objects.filter(
         state=IssuanceState.PENDING.value,
+        invoice__document_kind=DOCUMENT_KIND_INVOICE,
         invoice__number__isnull=True,
     ).order_by("created_at")[:limit]
 
