@@ -309,9 +309,16 @@ class Invoice(models.Model):
                 condition=models.Q(reverses_invoice__isnull=False),
                 name="invoice_one_reversal_per_original",
             ),
+            # A discount points the same way as the document it belongs to. The ledger
+            # invariant every reader relies on is `line gross - discount == subtotal`,
+            # and it only holds for a reversal if the discount is negated along with
+            # everything else. Orders and proformas keep their own non-negative rules.
             models.CheckConstraint(
-                condition=models.Q(discount_cents__gte=0),
-                name="invoice_discount_non_negative",
+                condition=(
+                    models.Q(document_kind=DOCUMENT_KIND_INVOICE, discount_cents__gte=0)
+                    | models.Q(document_kind=DOCUMENT_KIND_CREDIT_NOTE, discount_cents__lte=0)
+                ),
+                name="invoice_discount_matches_document_direction",
             ),
             models.CheckConstraint(
                 condition=models.Q(
@@ -638,7 +645,12 @@ class Invoice(models.Model):
             self.exchange_rate_source = ""
             self.exchange_rate_source_reference = ""
             return
-        if self.exchange_to_ron is not None and self.exchange_rate_as_of is not None and self.exchange_rate_source:
+        if (
+            self.exchange_to_ron is not None
+            and self.exchange_rate_as_of is not None
+            and self.exchange_rate_source
+            and self.exchange_rate_source_reference
+        ):
             return  # a COMPLETE snapshot frozen at the reversible moment — consume, never re-resolve
         assert self.tax_point_date is not None  # callers (issue / freeze_fx_snapshot) set it first
         from apps.billing.exchange_rate_service import ExchangeRateError, ExchangeRateService  # noqa: PLC0415

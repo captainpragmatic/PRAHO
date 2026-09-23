@@ -491,6 +491,20 @@ def _get_or_create_credit_note(original: Invoice) -> Invoice:
         subtotal_cents=-original.subtotal_cents,
         tax_cents=-original.tax_cents,
         total_cents=-original.total_cents,
+        # Negated with the rest. Left at zero the header would contradict its own
+        # lines: they mirror the GROSS amounts while the subtotal is stored NET, so
+        # the discount is the difference and dropping it makes the document stop
+        # adding up for every reader that recovers it that way.
+        discount_cents=-original.discount_cents,
+        # The original's rate, not today's. A reversal restates the SAME taxable base,
+        # so re-resolving at the reversal date books a different RON amount from the
+        # document being reversed and leaves a residue that nets to nothing and shows
+        # up on no report. All four fields, because `_freeze_fx` consumes a snapshot
+        # only when it considers it complete.
+        exchange_to_ron=original.exchange_to_ron,
+        exchange_rate_as_of=original.exchange_rate_as_of,
+        exchange_rate_source=original.exchange_rate_source,
+        exchange_rate_source_reference=original.exchange_rate_source_reference,
         # The reversal inherits the original's fiscal identity: it is a correction
         # to that document, not a new commercial event.
         bill_to_name=original.bill_to_name,

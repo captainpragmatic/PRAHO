@@ -107,6 +107,22 @@ class SubmissionClaim:
     is_credit_note: bool
 
 
+def _document_type_for(invoice: Invoice) -> str:
+    """Which kind of document ANAF is being given.
+
+    Two call sites create an `EFacturaDocument` and both hardcoded INVOICE, so the
+    credit-note branch in `_generate_xml` could never fire: `UBLCreditNoteBuilder` was
+    unreachable and a reversal would have been filed as an ordinary invoice carrying
+    negative amounts. They share this rather than each deriving it, because a pair of
+    copies is how the first one came to be wrong without the second noticing.
+    """
+    from apps.billing.invoice_models import DOCUMENT_KIND_CREDIT_NOTE  # noqa: PLC0415  # ADR-0007
+
+    if invoice.document_kind == DOCUMENT_KIND_CREDIT_NOTE:
+        return str(EFacturaDocumentType.CREDIT_NOTE.value)
+    return str(EFacturaDocumentType.INVOICE.value)
+
+
 class EFacturaService:
     """
     High-level service for e-Factura operations.
@@ -221,7 +237,7 @@ class EFacturaService:
         document, _created = EFacturaDocument.objects.select_for_update().get_or_create(
             invoice=locked_invoice,
             defaults={
-                "document_type": EFacturaDocumentType.INVOICE.value,
+                "document_type": _document_type_for(invoice),
                 "status": EFacturaStatus.DRAFT.value,
                 "environment": getattr(settings, "EFACTURA_ENVIRONMENT", "test"),
             },
@@ -634,7 +650,7 @@ class EFacturaService:
         document, _created = EFacturaDocument.objects.get_or_create(
             invoice=invoice,
             defaults={
-                "document_type": EFacturaDocumentType.INVOICE.value,
+                "document_type": _document_type_for(invoice),
                 "status": EFacturaStatus.DRAFT.value,
                 "environment": getattr(settings, "EFACTURA_ENVIRONMENT", "test"),
             },
@@ -646,8 +662,10 @@ class EFacturaService:
         try:
             builder: UBLInvoiceBuilder | UBLCreditNoteBuilder
             if document.document_type == EFacturaDocumentType.CREDIT_NOTE.value:
-                # Get original invoice for credit note reference
-                original = getattr(invoice, "original_invoice", None)
+                # `reverses_invoice` is the link. `original_invoice` was never a field
+                # or a property on Invoice, so this always resolved to None and the
+                # credit note referenced nothing.
+                original = invoice.reverses_invoice
                 builder = UBLCreditNoteBuilder(invoice, original)
             else:
                 builder = UBLInvoiceBuilder(invoice)

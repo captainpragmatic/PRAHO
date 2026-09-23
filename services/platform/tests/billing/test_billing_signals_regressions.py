@@ -1342,6 +1342,7 @@ class TestHandleNewInvoiceCreation(TestCase):
     @patch("apps.billing.signals._send_invoice_created_email")
     def test_issued_invoice(self, mock_email, mock_reminders, mock_stats):
         invoice = MagicMock()
+        invoice.document_kind = "invoice"  # a real Invoice always has one
         invoice.status = "issued"
         _handle_new_invoice_creation(invoice)
         mock_email.assert_called_once()
@@ -1353,6 +1354,7 @@ class TestHandleNewInvoiceCreation(TestCase):
     @patch("apps.billing.signals._send_invoice_created_email")
     def test_draft_invoice_no_reminders(self, mock_email, mock_reminders, mock_stats):
         invoice = MagicMock()
+        invoice.document_kind = "invoice"  # a real Invoice always has one
         invoice.status = "draft"
         _handle_new_invoice_creation(invoice)
         mock_email.assert_called_once()
@@ -1448,6 +1450,7 @@ class TestHandleInvoiceIssued(TestCase):
     def test_with_efactura(self, mock_email, mock_reminders, mock_requires, mock_trigger, mock_audit):
         mock_requires.return_value = True
         invoice = MagicMock()
+        invoice.document_kind = "invoice"  # a real Invoice always has one
         _handle_invoice_issued(invoice)
         mock_email.assert_called_once()
         mock_reminders.assert_called_once()
@@ -2259,9 +2262,7 @@ class TestPaymentHandlersOnCommitDeferred(TestCase):
 
     @patch("apps.billing.signals._update_customer_payment_history")
     @patch("apps.billing.signals._send_payment_failed_email")
-    def test_failure_side_effects_not_called_on_rollback(
-        self, mock_email: MagicMock, mock_history: MagicMock
-    ) -> None:
+    def test_failure_side_effects_not_called_on_rollback(self, mock_email: MagicMock, mock_history: MagicMock) -> None:
         payment = MagicMock()
         payment.amount = "100.00"
         payment.currency.code = "RON"

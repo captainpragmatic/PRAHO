@@ -354,7 +354,18 @@ class BaseUBLBuilder:
         stored record.
         """
         subtotal = Decimal(int(getattr(self.invoice, "subtotal_cents", 0) or 0)) / 100
-        return max(Decimal(0), self._get_line_gross() - subtotal)
+        from apps.billing.invoice_models import (  # noqa: PLC0415  # ADR-0007
+            DOCUMENT_KIND_CREDIT_NOTE,
+            DOCUMENT_KIND_INVOICE,
+        )
+
+        derived = self._get_line_gross() - subtotal
+        # Clamped towards zero in the document's OWN direction. A flat `max(0, ...)`
+        # reads a credit note's genuine -10.00 allowance as no allowance at all, which
+        # drops the discount from the document silently.
+        if getattr(self.invoice, "document_kind", DOCUMENT_KIND_INVOICE) == DOCUMENT_KIND_CREDIT_NOTE:
+            return min(Decimal(0), derived)
+        return max(Decimal(0), derived)
 
     def _validate_supported_adjustments(self, errors: list[str]) -> None:
         """Collect unsupported adjustment errors before any XML is emitted."""

@@ -1259,15 +1259,31 @@ def _handle_invoice_refund_completion(invoice: Invoice) -> None:
 # ===============================================================================
 
 
+def _is_receivable(invoice: Invoice) -> bool:
+    """Whether this document asks the customer for money.
+
+    A credit note is an issued document with a negative total, so it satisfies every
+    "an invoice was created" and "an invoice was issued" check. Unguarded, the customer
+    receives the seeded receivable copy - a new-invoice announcement carrying a payment
+    due date - for a document that owes money TO them, and then a second one when it is
+    numbered. Only the customer-facing half is suppressed: billing statistics, e-Factura
+    and the compliance audit trail must still see the correction.
+    """
+    from .invoice_models import DOCUMENT_KIND_INVOICE  # ADR-0007: cross-module import at call time
+
+    return invoice.document_kind == DOCUMENT_KIND_INVOICE
+
+
 def _handle_new_invoice_creation(invoice: Invoice) -> None:
     """Handle new invoice creation tasks"""
     try:
-        # Send invoice notification to customer
-        _send_invoice_created_email(invoice)
+        if _is_receivable(invoice):
+            # Send invoice notification to customer
+            _send_invoice_created_email(invoice)
 
-        # Schedule payment reminders if not paid immediately
-        if invoice.status == "issued":
-            _schedule_payment_reminders(invoice)
+            # Schedule payment reminders if not paid immediately
+            if invoice.status == "issued":
+                _schedule_payment_reminders(invoice)
 
         # Update customer billing statistics
         _update_customer_billing_stats(invoice.customer)
@@ -1352,8 +1368,9 @@ def _handle_payment_status_change(payment: Payment, old_status: str, new_status:
 def _handle_invoice_issued(invoice: Invoice) -> None:
     """Handle invoice being issued"""
     try:
-        _send_invoice_issued_email(invoice)
-        _schedule_payment_reminders(invoice)
+        if _is_receivable(invoice):
+            _send_invoice_issued_email(invoice)
+            _schedule_payment_reminders(invoice)
 
         if _requires_efactura_submission(invoice):
             _trigger_efactura_submission(invoice)

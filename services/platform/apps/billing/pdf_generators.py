@@ -452,7 +452,7 @@ class RomanianDocumentPDFGenerator:
             totals_y -= 0.5 * cm
         return totals_y
 
-    def _render_totals_section(self) -> None:
+    def _render_totals_section(self) -> None:  # noqa: PLR0915  # A totals block: one statement per rendered row
         """Render totals section with the document-level discount and a VAT breakdown that
         reconciles with the e-Factura XML (BG-20 allowance + single net TaxSubtotal)."""
         currency = self._get_currency_code()
@@ -478,7 +478,11 @@ class RomanianDocumentPDFGenerator:
         # derives it (gross line sum minus the net header subtotal) so the PDF and XML
         # agree, including on legacy invoices. net/tax/total come from the invoice ledger.
         net = self.document.subtotal
-        discount = max(Decimal("0"), gross - net)
+        derived = gross - net
+        # Same clamp as the XML builder, and the same reason: a credit note's discount
+        # is negative, and `max(0, ...)` would print it as absent.
+        is_credit_note = getattr(self.document, "document_kind", "invoice") == "credit_note"
+        discount = min(Decimal("0"), derived) if is_credit_note else max(Decimal("0"), derived)
         # For a (degenerate) line-less document fall back to the stored net so Subtotal
         # is never shown as 0.00.
         subtotal_shown = gross if gross > 0 else net
