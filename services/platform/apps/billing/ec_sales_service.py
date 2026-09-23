@@ -224,8 +224,12 @@ def _document_problems(invoice: Invoice, lines: list[InvoiceLine], decision: VAT
     problems.extend(_identity_problems(invoice, decision))
     problems.extend(_vies_problems(invoice))
     gross = sum(line.subtotal_cents for line in lines)
+    # Compared as magnitudes. A correction points the other way, so the literal
+    # comparison reads `0 > -10000` as True and reports every reversal as broken
+    # while leaving the partner's declared base at the full original amount. The
+    # reconciliation on the next line is already sign-symmetric.
     if (
-        invoice.discount_cents > gross
+        abs(invoice.discount_cents) > abs(gross)
         or gross - invoice.discount_cents != invoice.subtotal_cents
         or invoice.subtotal_cents + invoice.tax_cents != invoice.total_cents
     ):
@@ -486,11 +490,13 @@ def _line_problems(line: InvoiceLine) -> list[str]:
     totals = calculate_line_totals(line.subtotal_cents, line.tax_rate)
     if (
         line.quantity <= 0
-        or line.subtotal_cents <= 0
+        # Zero, not negative. A negated line is the correction; only an empty one is
+        # meaningless, and it is meaningless in either direction.
+        or line.subtotal_cents == 0
         or totals.tax_cents != line.tax_cents
         or totals.line_total_cents != line.line_total_cents
     ):
-        problems.append("line_amount_mismatch: Positive supply amounts must reconcile to the stored line total.")
+        problems.append("line_amount_mismatch: Supply amounts must reconcile to the stored line total.")
     return problems
 
 
