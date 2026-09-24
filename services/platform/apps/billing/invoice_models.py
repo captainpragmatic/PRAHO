@@ -631,7 +631,10 @@ class Invoice(models.Model):
         """Set — or CONSUME an already-frozen — RON FX snapshot for self.tax_point_date.
 
         RON documents carry no snapshot. For a foreign currency, if a COMPLETE snapshot is
-        already frozen (rate + as_of + source all present) it is consumed unchanged — this
+        already frozen (rate + as_of + source + source_reference all present) it is
+        consumed unchanged — all four, because `ExchangeRateService.resolve` refuses to
+        return a rate whose provenance reference is blank, so three-of-four is not
+        something it can produce and is therefore not evidence it vouched for. This
         is how ``issue()`` honours a rate frozen earlier at the reversible conversion moment,
         so a later ``FXRate`` row can never change an issued invoice's RON VAT. A partial
         legacy value (a bare ``exchange_to_ron`` from before migration 0039 added the
