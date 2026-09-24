@@ -1646,7 +1646,7 @@ def _revenue_documents(customer_ids: list[Any]) -> Any:
         # absence was worse: the arm matched nothing, so a 10 RON refund on a 500 RON
         # invoice removed the whole 500 from revenue. The sale still happened; the refund
         # subtracts exactly what went back.
-        status__in=("paid", "refunded"),
+        status__in=("paid", "refunded", "partially_refunded"),
     )
 
 
