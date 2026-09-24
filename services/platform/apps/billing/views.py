@@ -2429,6 +2429,72 @@ def operator_controls(request: HttpRequest) -> HttpResponse:
 
 
 @billing_configuration_required
+@require_http_methods(["GET"])
+def provider_reconciliation_queue(request: HttpRequest) -> HttpResponse:
+    """Provider issuances whose outcome nobody knows yet.
+
+    Each row is an attempt that may or may not have created a fiscal document at the
+    provider. Nothing automated can resolve one - the provider offers no lookup by our
+    reference - so the queue exists to put a human in front of the evidence.
+    """
+    from .issuers.models import IssuanceState, ProviderIssuance  # noqa: PLC0415  # ADR-0007
+
+    unresolved = (
+        ProviderIssuance.objects.filter(state=IssuanceState.OUTCOME_UNKNOWN.value)
+        .select_related("invoice", "invoice__customer", "invoice__currency")
+        .order_by("created_at")
+    )
+    return render(
+        request,
+        "billing/provider_reconciliation_queue.html",
+        {"issuances": unresolved},
+    )
+
+
+@billing_configuration_required
+@require_http_methods(["GET", "POST"])
+def provider_reconciliation_adopt(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
+    """Adopt the provider document an operator identified by hand."""
+    from apps.common.request_ip import get_safe_client_ip  # noqa: PLC0415
+
+    from .forms import ProviderReconciliationForm  # noqa: PLC0415
+    from .issuers.models import IssuanceState, ProviderIssuance  # noqa: PLC0415  # ADR-0007
+    from .operator_controls import BillingControlActor, adopt_provider_document  # noqa: PLC0415
+
+    issuance = get_object_or_404(ProviderIssuance.objects.select_related("invoice", "invoice__customer"), pk=pk)
+    if issuance.state != IssuanceState.OUTCOME_UNKNOWN.value:
+        messages.error(request, _("That issuance is no longer awaiting reconciliation."))
+        return redirect("billing:provider_reconciliation_queue")
+
+    form = ProviderReconciliationForm(request.POST or None)
+    if request.method == "POST" and form.is_valid():
+        try:
+            legal_number = adopt_provider_document(
+                issuance_id=issuance.pk,
+                series=form.cleaned_data["series"],
+                number=form.cleaned_data["number"],
+                actor=BillingControlActor(
+                    user=cast(User, request.user),
+                    reason=form.cleaned_data["reason"],
+                    ip_address=get_safe_client_ip(request),
+                ),
+            )
+        except ValidationError as error:
+            _add_validation_errors(form, error)
+        else:
+            messages.success(
+                request,
+                _("Adopted provider document %(number)s.") % {"number": legal_number},
+            )
+            return redirect("billing:provider_reconciliation_queue")
+    return render(
+        request,
+        "billing/provider_reconciliation_form.html",
+        {"form": form, "issuance": issuance},
+    )
+
+
+@billing_configuration_required
 @require_http_methods(["GET", "POST"])
 def retry_policy_edit(request: HttpRequest, pk: uuid.UUID) -> HttpResponse:
     """Edit one retry policy through a locked, attributed write."""

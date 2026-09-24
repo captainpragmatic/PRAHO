@@ -55,6 +55,10 @@
             <p class="text-sm font-medium text-white">{% trans "Invoice numbering series" %}</p>
             <p class="mt-1 text-xs text-slate-400">{% trans "Review the current counter or start a guarded legal series." %}</p>
           </a>
+          <a href="{% url 'billing:provider_reconciliation_queue' %}" class="rounded-lg border border-slate-700 bg-slate-800 p-4 hover:border-blue-500">
+            <p class="text-sm font-medium text-white">{% trans "Provider reconciliation" %}</p>
+            <p class="mt-1 text-xs text-slate-400">{% trans "Resolve issuance attempts whose outcome at the provider is unknown." %}</p>
+          </a>
         </div>
         {% endif %}
         {% endif %}

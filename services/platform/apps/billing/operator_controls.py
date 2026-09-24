@@ -14,6 +14,8 @@ from .invoice_models import InvoiceSequence
 from .payment_models import PaymentRetryPolicy
 
 if TYPE_CHECKING:
+    import uuid
+
     from apps.users.models import User
 
 
@@ -187,3 +189,71 @@ def rotate_invoice_series(
         new_values={"prefix": replacement.prefix, "last_value": 0, "scope": replacement.scope},
     )
     return replacement
+
+
+def adopt_provider_document(
+    *,
+    issuance_id: uuid.UUID,
+    series: str,
+    number: str,
+    actor: BillingControlActor,
+) -> str:
+    """Record that an operator found a document at the provider, and adopt its number.
+
+    `outcome_unknown` means a POST may have created a fiscal document that PRAHO has
+    no way to look up: the provider exposes no search by our reference, so identifying
+    it is a human judgement. This is the only way out towards a numbered invoice, and
+    it stays manual for that reason.
+
+    Deliberately NOT `@transaction.atomic`, unlike its neighbours in this module.
+    `reconcile_confirmed_issued` refuses to run inside a transaction and opens its own,
+    so wrapping it here would break it. It also answers with a `Result` rather than
+    raising, so the error is translated into the `ValidationError` the view layer and
+    every other control in this module already speak.
+
+    The audit event lives here rather than in the issuer service because attribution
+    needs an actor, and the issuer service is reached from workers that have none. It
+    assigns a legal fiscal number on a human's word, which under ADR-0016 is exactly
+    the kind of act that must leave a trace naming who decided it.
+    """
+    from apps.billing.issuers.models import ProviderIssuance  # noqa: PLC0415  # ADR-0007
+    from apps.billing.issuers.service import reconcile_confirmed_issued  # noqa: PLC0415  # ADR-0007
+    from apps.common.types import Err  # noqa: PLC0415
+
+    _require_audit_reason(actor)
+
+    issuance = ProviderIssuance.objects.select_related("invoice").filter(pk=issuance_id).first()
+    if issuance is None:
+        raise ValidationError({"__all__": _("That reconciliation no longer exists.")})
+    before = {
+        "state": issuance.state,
+        "provider_series": issuance.provider_series,
+        "provider_number": issuance.provider_number,
+        "invoice_number": issuance.invoice.number,
+    }
+
+    outcome = reconcile_confirmed_issued(
+        issuance_id,
+        series=series,
+        number=number,
+        operator_note=actor.reason,
+    )
+    if isinstance(outcome, Err):
+        raise ValidationError({"__all__": outcome.error})
+    legal_number = outcome.unwrap()
+
+    # Re-fetched rather than refreshed: `state` is a protected FSMField, and
+    # `refresh_from_db` re-enters its setter, which refuses direct assignment.
+    issuance = ProviderIssuance.objects.select_related("invoice").get(pk=issuance_id)
+    _audit_configuration_change(
+        content_object=issuance.invoice,
+        actor=actor,
+        old_values=before,
+        new_values={
+            "state": issuance.state,
+            "provider_series": issuance.provider_series,
+            "provider_number": issuance.provider_number,
+            "invoice_number": legal_number,
+        },
+    )
+    return legal_number

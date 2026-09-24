@@ -13,6 +13,16 @@ urlpatterns = [
     path("controls/", views.operator_controls, name="operator_controls"),
     path("controls/retry-policies/<uuid:pk>/", views.retry_policy_edit, name="retry_policy_edit"),
     path("controls/invoice-series/new/", views.invoice_series_create, name="invoice_series_create"),
+    path(
+        "controls/provider-reconciliation/",
+        views.provider_reconciliation_queue,
+        name="provider_reconciliation_queue",
+    ),
+    path(
+        "controls/provider-reconciliation/<uuid:pk>/adopt/",
+        views.provider_reconciliation_adopt,
+        name="provider_reconciliation_adopt",
+    ),
     # Combined listing (proformas + invoices)
     path("invoices/", views.billing_list, name="invoice_list"),  # Updated view name
     path("invoices/list/", views.billing_list_htmx, name="billing_list_htmx"),  # HTMX endpoint

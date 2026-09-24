@@ -174,3 +174,51 @@ def _style_form_fields(form: forms.Form) -> None:
             continue
         css_class = _CHECKBOX_CLASS if isinstance(field.widget, forms.CheckboxInput) else _INPUT_CLASS
         field.widget.attrs["class"] = css_class
+
+
+class ProviderReconciliationForm(forms.Form):
+    """Adopt a provider document an operator found by hand.
+
+    Deliberately asks for the number twice. The provider exposes no lookup by our
+    reference, so this number is a human's reading of a screen, and it is about to
+    become a legal fiscal number that cannot be changed afterwards. The confirmation
+    field is the same guard `InvoiceSeriesForm` puts on a series rotation, for the
+    same reason.
+    """
+
+    series = forms.CharField(
+        max_length=30,
+        required=False,
+        help_text=_("Series exactly as the provider shows it, or blank if it has none."),
+    )
+    number = forms.CharField(
+        max_length=50,
+        help_text=_("Document number exactly as the provider shows it."),
+    )
+    confirmation = forms.CharField(
+        max_length=50,
+        help_text=_("Type the document number again to confirm."),
+    )
+    reason = forms.CharField(
+        max_length=500,
+        widget=forms.Textarea(attrs={"rows": 3}),
+        help_text=_("What you checked at the provider, and how you identified this document."),
+    )
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        _style_form_fields(self)
+
+    def clean_series(self) -> str:
+        return str(self.cleaned_data.get("series") or "").strip()
+
+    def clean_number(self) -> str:
+        return str(self.cleaned_data["number"]).strip()
+
+    def clean(self) -> dict[str, Any]:
+        cleaned = super().clean() or {}
+        number = cleaned.get("number")
+        confirmation = (cleaned.get("confirmation") or "").strip()
+        if number and confirmation != number:
+            self.add_error("confirmation", _("The confirmation must exactly match the document number."))
+        return cleaned
