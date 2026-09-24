@@ -14,7 +14,7 @@ from django.db import transaction
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
-from apps.billing.invoice_models import DOCUMENT_KIND_INVOICE, ISSUER_BUILTIN
+from apps.billing.invoice_models import DOCUMENT_KIND_CREDIT_NOTE, DOCUMENT_KIND_INVOICE, ISSUER_BUILTIN
 from apps.billing.models import (
     CreditLedger,
     Currency,
@@ -1511,6 +1511,31 @@ class TestHandleInvoiceOverdue(TestCase):
         mock_dunning.assert_called_once()
         mock_history.assert_called_once_with(invoice.customer, "negative")
         mock_suspend.assert_called_once()
+
+
+class TestHandleInvoiceOverdueIsNotDunned(TestCase):
+    """A credit note must not be chased for money the customer is owed.
+
+    `test_flow` above asserts the side effects DO fire, so it passes whether or not the
+    receivable guard exists - removing the guard broke no test in the whole billing
+    package. This is the other direction, which is the one that proves the guard.
+    """
+
+    @patch("apps.billing.signals._handle_overdue_service_suspension")
+    @patch("apps.billing.signals._update_customer_payment_history")
+    @patch("apps.billing.signals._trigger_dunning_process")
+    @patch("apps.billing.signals._send_invoice_overdue_email")
+    def test_a_credit_note_is_not_emailed_blackened_or_suspended(
+        self, mock_email: MagicMock, mock_dunning: MagicMock, mock_history: MagicMock, mock_suspend: MagicMock
+    ) -> None:
+        credit_note = MagicMock(document_kind=DOCUMENT_KIND_CREDIT_NOTE)
+
+        _handle_invoice_overdue(credit_note)
+
+        mock_email.assert_not_called()
+        mock_dunning.assert_not_called()
+        mock_history.assert_not_called()
+        mock_suspend.assert_not_called()
 
 
 class TestHandleInvoiceVoided(TestCase):

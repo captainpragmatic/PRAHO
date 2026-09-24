@@ -24,6 +24,7 @@ from apps.billing.invoice_models import ISSUER_SMARTBILL, Currency, Invoice
 from apps.billing.issuers.service import _get_or_create_credit_note
 from apps.billing.pdf_generators import RomanianInvoicePDFGenerator
 from tests.factories.billing_factories import CustomerFactory, InvoiceLineFactory
+from tests.helpers.fsm_helpers import force_status
 
 
 @override_settings(COMPANY_NAME="Test Company SRL", EFACTURA_COMPANY_CUI="12345678")
@@ -111,6 +112,22 @@ class CreditNoteTotalsBlockTests(TestCase):
         no test caught it before.
         """
         rows = self._totals_rows(self._issued_reversal(self._discounted_original("FCT-000804")))
+
+        self.assertFalse([row for row in rows if "Unpaid" in row], f"drew {rows}")
+
+    def test_a_refunded_invoice_is_not_stamped_unpaid(self) -> None:
+        """It is not unpaid - the money was returned.
+
+        The guard above covers credit notes; nothing covered this, so a refunded invoice
+        still told the customer to pay. On the built-in path that PDF is the only document
+        they hold about the invoice, because no credit note is ever produced there.
+        """
+        invoice = self._discounted_original("FCT-000806")
+        force_status(invoice, "issued")
+        force_status(invoice, "paid")
+        force_status(invoice, "refunded")
+
+        rows = self._totals_rows(Invoice.objects.get(pk=invoice.pk))
 
         self.assertFalse([row for row in rows if "Unpaid" in row], f"drew {rows}")
 

@@ -186,6 +186,9 @@ class RevenueRecognitionTests(TestCase):
 
         self.assertEqual(total, 0, "counting both the refund and its credit note subtracts twice")
 
+    def _total(self) -> int:
+        return self._report()[1]
+
     def _vat_total(self) -> int:
         response = self.client.get(
             reverse("billing:vat_report"),
@@ -216,6 +219,43 @@ class RevenueRecognitionTests(TestCase):
         """The regression guard: this must not stop counting VAT that is genuinely owed."""
         invoice = self._paid_invoice(50000, month=2)
         Invoice.objects.filter(pk=invoice.pk).update(tax_cents=9500)
+
+        self.assertEqual(self._vat_total(), 9500)
+
+    def test_a_refund_against_an_uncounted_invoice_subtracts_nothing(self) -> None:
+        """The refund population has to match the revenue population.
+
+        Requiring only that a refund reference SOME invoice let a completed refund against
+        an unissued draft subtract money the report never added - revenue adds 0 and takes
+        away 200. Nothing covered it, so the filter could have been loosened back without
+        a single test noticing.
+        """
+        baseline = self._total()
+        draft = Invoice.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            number=None,
+            status="draft",
+            subtotal_cents=20000,
+            tax_cents=0,
+            total_cents=20000,
+            bill_to_name="Test Company SRL",
+            bill_to_country="RO",
+            issuer_provider=ISSUER_SMARTBILL,
+        )
+        self._refund(draft, 20000, month=4)
+
+        self.assertEqual(self._total(), baseline, "a draft was never revenue; its refund subtracts nothing")
+
+    def test_an_overdue_invoice_still_owes_vat(self) -> None:
+        """Ageing past a due date does not un-declare a filing.
+
+        `overdue` was absent from the VAT population, so a period's VAT fell to zero the
+        moment an invoice aged and came back if it was later paid. Nothing covered it.
+        """
+        invoice = self._paid_invoice(50000, month=6)
+        Invoice.objects.filter(pk=invoice.pk).update(tax_cents=9500)
+        force_status(Invoice.objects.get(pk=invoice.pk), "overdue")
 
         self.assertEqual(self._vat_total(), 9500)
 
