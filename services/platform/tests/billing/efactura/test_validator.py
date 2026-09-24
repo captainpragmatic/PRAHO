@@ -318,6 +318,27 @@ class CIUSROValidatorTestCase(TestCase):
         self.assertFalse(result.is_valid)
         self.assertTrue(any(e.code == "BR-CO-16" for e in result.errors), [e.code for e in result.errors])
 
+    def test_br_co_16_prepaid_must_not_exceed_the_document_total(self):
+        """The rule is PRAHO's own, and nothing pinned it.
+
+        It is compared as MAGNITUDES so a credit note's negative total is not read as an
+        overpayment (`0 > -108.90`). That relaxation must not cost the rule its teeth on
+        the documents it was written for, so this is the ordinary invoice it must still
+        reject. PayableAmount is set to 1190 - 2000 so BR-CO-16 itself stays quiet and
+        only the prepaid rule can account for the failure.
+        """
+        xml = self._get_minimal_valid_xml().replace(
+            '<cbc:PayableAmount currencyID="RON">1190.00</cbc:PayableAmount>',
+            '<cbc:PrepaidAmount currencyID="RON">2000.00</cbc:PrepaidAmount>\n'
+            '            <cbc:PayableAmount currencyID="RON">-810.00</cbc:PayableAmount>',
+        )
+
+        result = self.validator.validate(xml)
+
+        codes = [e.code for e in result.errors]
+        self.assertIn("BR-CO-16-PREPAID", codes, codes)
+        self.assertNotIn("BR-CO-16", codes, f"only the prepaid rule may explain this: {codes}")
+
     def test_br_co_14_standard_tax_must_equal_base_times_rate(self):
         """BR-CO-14: standard-rate category tax must equal taxable base * rate."""
         xml = self._get_minimal_valid_xml().replace(

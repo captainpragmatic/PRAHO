@@ -266,13 +266,14 @@ def generate_invoice_pdf(invoice: Invoice) -> bytes:
 def generate_e_factura_xml(invoice: Invoice) -> str:
     """Generate e-Factura (CIUS-RO UBL 2.1) XML via the canonical builder.
 
-    Delegates to UBLInvoiceBuilder so the staff download and the ANAF submission path
-    emit the identical, fully-conformant document (#188).
+    Shares `builder_for` with the ANAF submission path so the staff download emits the
+    identical, fully-conformant document (#188) - including for a credit note, which this
+    function used to restate as an `<Invoice>` because it named one builder directly.
     """
-    from apps.billing.efactura.xml_builder import UBLInvoiceBuilder  # noqa: PLC0415
+    from apps.billing.efactura.xml_builder import builder_for  # noqa: PLC0415
 
     try:
-        xml_content = UBLInvoiceBuilder(invoice).build()
+        xml_content = builder_for(invoice).build()
         logger.info(f"🇷🇴 [e-Factura] Generated XML for invoice {invoice.number}")
         return xml_content
     except Exception as e:

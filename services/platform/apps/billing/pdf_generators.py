@@ -412,7 +412,10 @@ class RomanianDocumentPDFGenerator:
         """
         self.canvas.setFont(_FONT, 11)
         line_tmpl = _t("TVA {rate}%: {tax} {currency} (baza: {base} {currency})")
-        if discount > 0:
+        # Signed: a credit note's discount is negative. Gated on `> 0` this branch never
+        # ran for one, so the breakdown re-derived the tax from the GROSS lines and printed
+        # a rate line contradicting the Total TVA directly beneath it.
+        if discount != 0:
             # Deterministically pick the dominant (largest-base) rate for the collapsed
             # net bucket — independent of queryset ordering. Single-category invoices
             # (the only kind this system issues) have exactly one bucket, so this is the
@@ -452,6 +455,12 @@ class RomanianDocumentPDFGenerator:
             totals_y -= 0.5 * cm
         return totals_y
 
+    def _is_credit_note(self) -> bool:
+        """A correction, not something to collect."""
+        from apps.billing.invoice_models import DOCUMENT_KIND_CREDIT_NOTE  # noqa: PLC0415  # ADR-0007
+
+        return getattr(self.document, "document_kind", "") == DOCUMENT_KIND_CREDIT_NOTE
+
     def _render_totals_section(self) -> None:  # noqa: PLR0915  # A totals block: one statement per rendered row
         """Render totals section with the document-level discount and a VAT breakdown that
         reconciles with the e-Factura XML (BG-20 allowance + single net TaxSubtotal)."""
@@ -481,21 +490,20 @@ class RomanianDocumentPDFGenerator:
         derived = gross - net
         # Same clamp as the XML builder, and the same reason: a credit note's discount
         # is negative, and `max(0, ...)` would print it as absent.
-        is_credit_note = getattr(self.document, "document_kind", "invoice") == "credit_note"
-        discount = min(Decimal("0"), derived) if is_credit_note else max(Decimal("0"), derived)
+        discount = min(Decimal("0"), derived) if self._is_credit_note() else max(Decimal("0"), derived)
         # For a (degenerate) line-less document fall back to the stored net so Subtotal
         # is never shown as 0.00.
-        subtotal_shown = gross if gross > 0 else net
+        subtotal_shown = gross if lines else net
 
         # Page-break if the whole totals block would collide with the footer. The block
         # height is variable (one VAT line when discounted, else one per rate; plus the
         # optional discount / reverse-charge / exchange / status lines), so estimate it
         # from what will actually be drawn rather than a fixed guess.
-        vat_lines = 1 if discount > 0 else max(1, len(vat_groups))
+        vat_lines = 1 if discount else max(1, len(vat_groups))
         block_lines = (
             3  # subtotal, total-VAT, grand-total
             + vat_lines
-            + (1 if discount > 0 else 0)  # discount line
+            + (1 if discount else 0)  # discount line
             + (1 if has_reverse_charge else 0)
             + 2  # generous allowance for exchange-rate + status lines
         )
@@ -515,12 +523,12 @@ class RomanianDocumentPDFGenerator:
         totals_y -= 0.5 * cm
 
         # Document discount (BG-20), only when present
-        if discount > 0:
+        if discount != 0:
             self.canvas.setFont(_FONT, 11)
             self.canvas.drawString(
                 12 * cm,
                 totals_y,
-                str(_t("Discount: -{amount} {currency}")).format(amount=f"{discount:.2f}", currency=currency),
+                str(_t("Discount: {amount} {currency}")).format(amount=f"{-discount:.2f}", currency=currency),
             )
             totals_y -= 0.5 * cm
 
@@ -650,6 +658,11 @@ class RomanianInvoicePDFGenerator(RomanianDocumentPDFGenerator):
 
     def _render_status_information(self, totals_y: float) -> None:
         """Render payment status information."""
+        # A credit note has nothing to collect - `issued` is its terminal status - so the
+        # `!= "paid"` branch below would stamp "Unpaid invoice - Due: undefined" on every
+        # one of them, permanently, on the copy the customer receives.
+        if self._is_credit_note():
+            return
         if self.invoice.status != "paid":
             self.canvas.setFont(_FONT_BOLD, 10)
             due_date_str = format_romanian_date(self.invoice.due_at) if self.invoice.due_at else str(_t("undefined"))

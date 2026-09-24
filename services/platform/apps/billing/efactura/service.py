@@ -45,7 +45,7 @@ from .client import (
 )
 from .models import EFacturaDocument, EFacturaDocumentType, EFacturaStatus
 from .validator import CIUSROValidator, ValidationResult
-from .xml_builder import UBLCreditNoteBuilder, UBLInvoiceBuilder, XMLBuilderError
+from .xml_builder import XMLBuilderError, builder_for
 
 if TYPE_CHECKING:
     from apps.billing.invoice_models import Invoice
@@ -660,17 +660,7 @@ class EFacturaService:
     def _generate_xml(self, invoice: Invoice, document: EFacturaDocument) -> str:
         """Generate UBL XML for invoice."""
         try:
-            builder: UBLInvoiceBuilder | UBLCreditNoteBuilder
-            if document.document_type == EFacturaDocumentType.CREDIT_NOTE.value:
-                # `reverses_invoice` is the link. `original_invoice` was never a field
-                # or a property on Invoice, so this always resolved to None and the
-                # credit note referenced nothing.
-                original = invoice.reverses_invoice
-                builder = UBLCreditNoteBuilder(invoice, original)
-            else:
-                builder = UBLInvoiceBuilder(invoice)
-
-            xml_content = builder.build()
+            xml_content = builder_for(invoice).build()
 
             # Update document
             document.xml_content = xml_content

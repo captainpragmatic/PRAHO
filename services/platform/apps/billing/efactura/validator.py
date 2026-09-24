@@ -698,7 +698,10 @@ class CIUSROValidator:
         # BR-CO-16: PayableAmount == TaxInclusive - Prepaid, and Prepaid must not exceed TaxInclusive
         if tax_incl is not None and payable is not None and payable != tax_incl - prepaid:
             result.add_error("BR-CO-16", f"PayableAmount {payable} != TaxInclusive {tax_incl} - Prepaid {prepaid}")
-        if tax_incl is not None and prepaid > tax_incl:
+        # Compared as magnitudes: this is a local sanity rule, not an EN16931 one, and a
+        # credit note's totals are negative - the literal comparison reads `0 > -108.90`
+        # as True and rejects every reversal before it can be submitted.
+        if tax_incl is not None and abs(prepaid) > abs(tax_incl):
             result.add_error("BR-CO-16-PREPAID", f"PrepaidAmount {prepaid} exceeds TaxInclusiveAmount {tax_incl}")
 
         # The document-level TaxTotal must equal the sum of the per-category TaxSubtotal amounts —

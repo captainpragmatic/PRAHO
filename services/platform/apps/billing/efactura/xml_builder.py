@@ -382,7 +382,10 @@ class BaseUBLBuilder:
         document tax category (reason code 95 = Discount). No-op when discount is zero.
         """
         discount = self._get_document_discount()
-        if discount <= 0:
+        # Signed. A credit note's allowance points the way its lines do, so only a ZERO
+        # discount means there is nothing to emit. On an invoice the derivation is clamped
+        # at zero, which makes `== 0` and `<= 0` the same test there.
+        if discount == 0:
             return
         currency = self.invoice.currency.code
         ac = self._add_cac(self.root, "AllowanceCharge")
@@ -1192,7 +1195,9 @@ class UBLCreditNoteBuilder(BaseUBLBuilder):
         tax_excl.set("currencyID", currency)
         tax_incl = self._add_cbc(monetary_total, "TaxInclusiveAmount", self._format_amount(tax_inclusive))
         tax_incl.set("currencyID", currency)
-        if discount > 0:
+        # BT-107 must be present whenever `tax_exclusive` above consumed a discount,
+        # or BR-CO-13 has an unexplained gap between the lines and the tax-exclusive total.
+        if discount != 0:
             allow_elem = self._add_cbc(monetary_total, "AllowanceTotalAmount", self._format_amount(discount))
             allow_elem.set("currencyID", currency)
         payable = self._add_cbc(monetary_total, "PayableAmount", self._format_amount(tax_inclusive))
@@ -1239,3 +1244,21 @@ class UBLCreditNoteBuilder(BaseUBLBuilder):
         price = self._add_cac(cn_line, "Price")
         price_amount = self._add_cbc(price, "PriceAmount", self._format_amount(unit_price))
         price_amount.set("currencyID", self.invoice.currency.code)
+
+
+def builder_for(invoice: Invoice) -> UBLInvoiceBuilder | UBLCreditNoteBuilder:
+    """Pick the builder the document's kind requires.
+
+    Two call sites selected a builder independently - the ANAF submission path and the
+    staff XML download - and only one of them learned about credit notes, so the same
+    reversal was filed as a `<CreditNote>` and downloaded from our own UI as an
+    `<Invoice>`: type code 380, no reference to the document it reverses, and its
+    allowance dropped by a guard that only holds for invoices. They share this now,
+    because a pair of copies is how the first one came to be wrong unnoticed.
+    """
+    from apps.billing.invoice_models import DOCUMENT_KIND_CREDIT_NOTE  # noqa: PLC0415  # ADR-0007
+
+    if invoice.document_kind == DOCUMENT_KIND_CREDIT_NOTE:
+        # `reverses_invoice` is the link; `original_invoice` was never a field.
+        return UBLCreditNoteBuilder(invoice, invoice.reverses_invoice)
+    return UBLInvoiceBuilder(invoice)

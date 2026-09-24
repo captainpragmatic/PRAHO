@@ -10,9 +10,8 @@ OWN original. `reverses_invoice` is the link that was missing.
 from __future__ import annotations
 
 from decimal import Decimal
-from unittest.mock import patch
 
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from apps.billing.efactura.models import EFacturaDocumentType
@@ -23,6 +22,7 @@ from apps.billing.invoice_models import (
     Currency,
     Invoice,
 )
+from apps.billing.invoice_service import generate_e_factura_xml
 from tests.factories.billing_factories import CustomerFactory, InvoiceLineFactory
 
 
@@ -62,6 +62,7 @@ class CreditNoteDocumentTypeTests(TestCase):
             currency=self.currency,
             number="CN-000001",
             status="draft",
+            issued_at=timezone.now(),
             document_kind=DOCUMENT_KIND_CREDIT_NOTE,
             reverses_invoice=original,
             issuer_provider=ISSUER_BUILTIN,
@@ -88,20 +89,63 @@ class CreditNoteDocumentTypeTests(TestCase):
 
         self.assertEqual(document.document_type, EFacturaDocumentType.INVOICE.value)
 
-    def test_the_builder_receives_the_real_original_not_the_credit_note(self) -> None:
-        """It used to pass the credit note as its own original, which references nothing."""
+    def test_the_generated_document_references_the_invoice_it_reverses(self) -> None:
+        """It used to pass the credit note as its own original, which references nothing.
+
+        Asserted on the emitted BillingReference rather than on a mocked constructor:
+        the builder is now selected by a shared helper, so a test that patched this
+        module's name would have kept passing while pointing at nothing.
+        """
         original = self._invoice("FCT-000902")
         credit_note = self._credit_note(original)
         document = EFacturaService()._get_or_create_document(credit_note)
 
-        with patch("apps.billing.efactura.service.UBLCreditNoteBuilder") as builder:
-            builder.return_value.build.return_value = "<CreditNote/>"
-            EFacturaService()._generate_xml(credit_note, document)
+        with override_settings(
+            COMPANY_NAME="Test Company SRL",
+            EFACTURA_COMPANY_CUI="12345678",
+            COMPANY_STREET="Test Street 123",
+            COMPANY_CITY="Bucharest",
+            COMPANY_POSTAL_CODE="010101",
+            COMPANY_COUNTRY_CODE="RO",
+        ):
+            xml = EFacturaService()._generate_xml(credit_note, document)
 
-        builder.assert_called_once()
-        passed_original = builder.call_args.args[1]
-        self.assertEqual(
-            passed_original.pk,
-            original.pk,
-            "the builder must reference the invoice being reversed, not the reversal",
-        )
+        reference = xml.split("<cac:BillingReference>")[1].split("</cac:BillingReference>")[0]
+        self.assertIn("FCT-000902", reference, "the reversal must name the invoice it reverses")
+        self.assertNotIn("CN-000001", reference, "and it cannot reference itself")
+
+
+@override_settings(
+    COMPANY_NAME="Test Company SRL",
+    EFACTURA_COMPANY_CUI="12345678",
+    COMPANY_STREET="Test Street 123",
+    COMPANY_CITY="Bucharest",
+    COMPANY_POSTAL_CODE="010101",
+    COMPANY_COUNTRY_CODE="RO",
+)
+class StaffXmlDownloadTests(CreditNoteDocumentTypeTests):
+    """The submission path dispatches on document kind; the staff download did not.
+
+    `generate_e_factura_xml` is what `billing:generate_e_factura` hands a staff member,
+    and it called `UBLInvoiceBuilder` unconditionally - so the same credit note that ANAF
+    receives as a `<CreditNote>` downloads from our own UI as an `<Invoice>` with a 380
+    type code, no BillingReference to the document it reverses, and its allowance dropped
+    by the `allowance_total > 0` guard on that builder. Two builders selected in two
+    places is how the first selection came to be wrong; they now share one.
+    """
+
+    def test_a_credit_note_downloads_as_a_credit_note(self) -> None:
+        original = self._invoice("FCT-000910")
+
+        xml = generate_e_factura_xml(self._credit_note(original))
+
+        self.assertIn("<CreditNote", xml, "the staff download must not restate a reversal as an invoice")
+        self.assertIn("<cbc:CreditNoteTypeCode>381</cbc:CreditNoteTypeCode>", xml)
+        self.assertIn("FCT-000910", xml, "and it must still reference the invoice it reverses")
+
+    def test_an_ordinary_invoice_still_downloads_as_an_invoice(self) -> None:
+        """The regression guard."""
+        xml = generate_e_factura_xml(self._invoice("FCT-000911"))
+
+        self.assertIn("<Invoice", xml)
+        self.assertNotIn("<CreditNote", xml)

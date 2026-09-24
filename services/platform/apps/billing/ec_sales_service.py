@@ -21,7 +21,7 @@ from django.utils.dateparse import parse_datetime
 
 from apps.billing.document_adjustments import UnsupportedDocumentAdjustmentError, validate_no_unsupported_adjustments
 from apps.billing.efactura.settings import ro_local_date
-from apps.billing.invoice_models import Invoice, InvoiceLine
+from apps.billing.invoice_models import DOCUMENT_KIND_CREDIT_NOTE, Invoice, InvoiceLine
 from apps.billing.refund_models import Refund
 from apps.billing.tax_evidence import TaxEvidenceError, VATDecision, read_vat_evidence, vat_country, vat_identity
 from apps.common.eu_vat_validator import EU_COUNTRIES, validate_vat_format
@@ -223,6 +223,15 @@ def _document_problems(invoice: Invoice, lines: list[InvoiceLine], decision: VAT
             problems.append("late_tax_decision: VAT decision was recorded after invoice issuance.")
     problems.extend(_identity_problems(invoice, decision))
     problems.extend(_vies_problems(invoice))
+    # The direction is a property of the document, not of a line. The header's sign is
+    # already pinned by `invoice_subtotal_sign_matches_kind` and the reconciliation below
+    # only sums the lines, so a document mixing +200 and -100 satisfies both while quietly
+    # understating the partner's base by 100. One wrong-facing term excludes the WHOLE
+    # document: declaring the remainder would report it as if the excluded line had never
+    # been billed. Zero lines are `_line_problems`' business and are left alone here.
+    reversing = invoice.document_kind == DOCUMENT_KIND_CREDIT_NOTE
+    if any((line.subtotal_cents > 0) if reversing else (line.subtotal_cents < 0) for line in lines):
+        problems.append("line_direction_mismatch: Every line must point the way the document kind implies.")
     gross = sum(line.subtotal_cents for line in lines)
     # Compared as magnitudes. A correction points the other way, so the literal
     # comparison reads `0 > -10000` as True and reports every reversal as broken

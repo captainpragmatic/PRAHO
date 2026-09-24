@@ -144,6 +144,59 @@ class DocumentSignGuardTests(TestCase):
 
         self.assertNotIn("totals_mismatch", problems, f"the reversal reconciles; got {problems}")
 
+    def _ordinary(self, *, subtotal: int) -> Invoice:
+        self._seq += 1
+        return Invoice.objects.create(
+            customer=self.customer,
+            currency=self.currency,
+            number=f"EC-INV-{self._seq}",
+            status="draft",
+            issued_at=timezone.now(),
+            locked_at=timezone.now(),
+            tax_point_date=timezone.now().date(),
+            subtotal_cents=subtotal,
+            tax_cents=0,
+            total_cents=subtotal,
+            bill_to_name="Partner GmbH",
+            bill_to_country="DE",
+        )
+
+    def test_a_negative_line_on_an_ordinary_invoice_is_rejected(self) -> None:
+        """The direction has to be read from the document, not from one line.
+
+        `invoice_subtotal_sign_matches_kind` pins the HEADER's sign, and the arithmetic
+        check only sums the lines - so a document that mixes +200 and -100 reconciles to
+        a legitimate +100 and passes both. Before relaxing the per-line guard the negative
+        term was rejected on its own; now nothing sees it, and the partner's declared base
+        silently loses 100 with no exception raised anywhere.
+        """
+        invoice = self._ordinary(subtotal=10000)
+
+        problems = " ".join(_document_problems(invoice, [_StubLine(20000), _StubLine(-10000)], None))
+
+        self.assertIn("line_direction", problems, f"got {problems}")
+
+    def test_a_positive_line_on_a_reversal_is_rejected(self) -> None:
+        """The mirror image: a correction carrying a term that adds to the base."""
+        credit_note, _ = self._reversal(subtotal=-10000, discount=0, line_gross=-10000)
+
+        problems = " ".join(_document_problems(credit_note, [_StubLine(-20000), _StubLine(10000)], None))
+
+        self.assertIn("line_direction", problems, f"got {problems}")
+
+    def test_a_document_whose_lines_all_agree_is_not_flagged(self) -> None:
+        """Both regression guards: neither ordinary nor reversing documents may be caught."""
+        invoice = self._ordinary(subtotal=10000)
+        credit_note, _ = self._reversal(subtotal=-10000, discount=0, line_gross=-10000)
+
+        invoice_problems = " ".join(_document_problems(invoice, [_StubLine(6000), _StubLine(4000)], None))
+        reversal_problems = " ".join(
+            _document_problems(credit_note, [_StubLine(-6000), _StubLine(-4000)], None)
+        )
+
+        self.assertNotIn("line_direction", invoice_problems, f"got {invoice_problems}")
+        self.assertNotIn("line_direction", reversal_problems, f"got {reversal_problems}")
+
     def test_a_genuine_mismatch_is_still_reported(self) -> None:
         """The regression guard: relaxing the sign must not accept an unbalanced document."""
         credit_note, lines = self._reversal(subtotal=-9000, discount=-1000, line_gross=-12345)
