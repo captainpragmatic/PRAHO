@@ -20,7 +20,7 @@ from __future__ import annotations
 import logging
 import uuid
 from copy import deepcopy
-from typing import TYPE_CHECKING, assert_never
+from typing import TYPE_CHECKING, Any, assert_never
 
 from django.db import connection, transaction
 
@@ -309,6 +309,14 @@ def reconcile_confirmed_issued(
         invoice.number = legal_number
         invoice.issue()
         invoice.save()
+        # The same convergence `_finalize` performs the moment a document legally exists,
+        # and for the same reason: money may already be recorded against what was an
+        # unnumbered draft. Without it an invoice already covered by payment or customer
+        # credit stays `issued` at a zero balance, so `paid_at` is never set, payment
+        # history and pending-service activation never run, and the issue signal can
+        # schedule reminders for a customer who owes nothing. It is a no-op for a credit
+        # note, which `update_status_from_payments` refuses to collect.
+        invoice.update_status_from_payments()
     logger.info(f"✅ [Issuance] Invoice {invoice.pk} reconciled to {legal_number} by operator")
     return Ok(legal_number)
 
@@ -482,6 +490,51 @@ def _split_correction_refusal(original: Invoice) -> str | None:
     return None
 
 
+# Copied from the original at creation, and the two that a row created by an older
+# implementation can be missing. `subtotal/tax/total_cents` and the `bill_to_*` set have
+# been written on the create path since the first version, so they cannot be stale.
+_REVERSAL_FIELDS_TO_REPAIR = (
+    "exchange_to_ron",
+    "exchange_rate_as_of",
+    "exchange_rate_source",
+    "exchange_rate_source_reference",
+)
+
+
+def _repair_unissued_reversal(original: Invoice, credit_note: Invoice) -> None:
+    """Restore what an earlier attempt never wrote, while it is still repairable.
+
+    A reversal left pending by an interrupted or rate-gated attempt predates the fields
+    added since. `_freeze_fx` consumes a snapshot only when it finds all four fields, so
+    a note missing them resolves TODAY's rate at issuance and books the correction against
+    a different rate from the document it reverses - the residue the copy exists to
+    prevent. The same row can carry `discount_cents=0` against negated GROSS lines, which
+    makes the header contradict its own lines for every reader that recovers the discount
+    as the difference.
+
+    Only while unnumbered. A numbered credit note is a legal document: whatever it says is
+    what was filed, so repairing it would rewrite history rather than finish an attempt.
+
+    Written through the queryset so the protected `status` FSMField is never re-entered.
+    """
+    if credit_note.number:
+        return
+
+    repairs: dict[str, Any] = {}
+    if credit_note.discount_cents != -original.discount_cents:
+        repairs["discount_cents"] = -original.discount_cents
+    for field in _REVERSAL_FIELDS_TO_REPAIR:
+        expected = getattr(original, field)
+        if getattr(credit_note, field) != expected:
+            repairs[field] = expected
+    if not repairs:
+        return
+
+    Invoice.objects.filter(pk=credit_note.pk).update(**repairs)
+    for field, value in repairs.items():
+        setattr(credit_note, field, value)
+
+
 def _get_or_create_credit_note(original: Invoice) -> Invoice:
     """The reversal document for `original`, created once and reused thereafter.
 
@@ -499,6 +552,7 @@ def _get_or_create_credit_note(original: Invoice) -> Invoice:
         # exactly as it is, including one already issued.
         if not existing.lines.exists():
             _mirror_lines_negated(original, existing)
+        _repair_unissued_reversal(original, existing)
         return existing
 
     credit_note = Invoice.objects.create(

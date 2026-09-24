@@ -216,9 +216,28 @@ class ProviderReconciliationForm(forms.Form):
         return str(self.cleaned_data["number"]).strip()
 
     def clean(self) -> dict[str, Any]:
+        from .invoice_models import Invoice  # noqa: PLC0415  # deferred: forms is imported early
+
         cleaned = super().clean() or {}
         number = cleaned.get("number")
         confirmation = (cleaned.get("confirmation") or "").strip()
         if number and confirmation != number:
             self.add_error("confirmation", _("The confirmation must exactly match the document number."))
+
+        # Composed exactly as `reconcile_confirmed_issued` composes it, and measured
+        # against the column rather than a literal, so the two cannot drift apart. The
+        # field limits are checked separately and never see the join: a 30-character
+        # series with a 50-character number is valid twice over and 81 characters once,
+        # which PostgreSQL answers with a DataError - a 500 instead of a field error, on
+        # the one screen whose output cannot be changed afterwards.
+        series = (cleaned.get("series") or "").strip()
+        if number:
+            legal_number = f"{series}-{number}" if series else number
+            limit = Invoice._meta.get_field("number").max_length
+            if limit is not None and len(legal_number) > limit:
+                self.add_error(
+                    "number",
+                    _("Series and number together make %(length)d characters; the legal number allows %(limit)d.")
+                    % {"length": len(legal_number), "limit": limit},
+                )
         return cleaned

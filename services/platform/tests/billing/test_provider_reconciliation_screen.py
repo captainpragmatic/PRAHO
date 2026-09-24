@@ -23,7 +23,12 @@ from apps.audit.models import AuditEvent
 from apps.billing.invoice_models import ISSUER_SMARTBILL, Currency, Invoice
 from apps.billing.issuers.models import IssuanceState, ProviderIssuance
 from apps.billing.operator_controls import BillingControlActor, adopt_provider_document
-from tests.factories.billing_factories import CustomerFactory, InvoiceLineFactory
+from tests.factories.billing_factories import (
+    CustomerFactory,
+    InvoiceLineFactory,
+    PaymentCreationRequest,
+    create_payment,
+)
 from tests.factories.core_factories import create_admin_user, create_staff_user
 
 
@@ -200,6 +205,40 @@ class AdoptProviderDocumentTests(TransactionTestCase):
             unchanged.invoice.number,
             "a fiscal number assigned with no record of who ordered it must not survive",
         )
+
+    def test_adopting_a_settled_invoice_converges_it_to_paid(self) -> None:
+        """Money can already be recorded against a document that was an unnumbered draft.
+
+        `_finalize` converges payment state the moment the document legally exists, for
+        exactly this reason; the manual path numbered the invoice and stopped. It then
+        sat at `issued` with a zero balance, so `paid_at` was never set, payment history
+        and pending-service activation never ran, and the issue signal could schedule
+        payment reminders for a customer who owes nothing.
+        """
+        issuance = _unresolved_issuance(self.customer, self.currency, number="I")
+        create_payment(
+            PaymentCreationRequest(
+                customer=self.customer,
+                invoice=issuance.invoice,
+                currency=self.currency,
+                amount_cents=issuance.invoice.total_cents,
+                status="succeeded",
+            )
+        )
+
+        adopt_provider_document(issuance_id=issuance.pk, series="FCT", number="000905", actor=self._actor())
+
+        settled = Invoice.objects.get(pk=issuance.invoice_id)
+        self.assertEqual(settled.status, "paid", "a fully covered invoice must not stay issued")
+        self.assertIsNotNone(settled.paid_at)
+
+    def test_adopting_an_unpaid_invoice_leaves_it_issued(self) -> None:
+        """The regression guard: convergence must not invent a payment."""
+        issuance = _unresolved_issuance(self.customer, self.currency, number="J")
+
+        adopt_provider_document(issuance_id=issuance.pk, series="FCT", number="000906", actor=self._actor())
+
+        self.assertEqual(Invoice.objects.get(pk=issuance.invoice_id).status, "issued")
 
     def test_a_number_already_adopted_elsewhere_is_refused(self) -> None:
         """Two PRAHO records claiming one legal number is the failure to prevent."""
