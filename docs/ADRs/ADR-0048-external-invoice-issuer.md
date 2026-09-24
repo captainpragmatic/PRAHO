@@ -138,9 +138,17 @@ cost the estimate assumed, and the operator accepted SPV blindness knowingly.
 - There is no automated proof an invoice reached SPV, no deadline tracking and no
   signed-ZIP evidence in PRAHO while SmartBill owns e-Factura. This is the accepted
   cost of the decision, and the operator checks SmartBill Cloud for it.
-- A credit note is a real invoice row with a negative total, so reporting nets
-  corrections for free — but it satisfies every "issued or overdue" check, and
-  dunning had to exclude it explicitly or customers get chased for money owed them.
+- A credit note is a real invoice row with a negative total, and it satisfies every
+  "issued or overdue" check, so dunning had to exclude it explicitly or customers get
+  chased for money owed them.
+- **Revised (PR #533): reporting does NOT net corrections for free.** This consequence
+  originally said it did. It does not, because a credit note exists only on the provider
+  path — the built-in issuer produces no correcting document at all — so any report that
+  nets via the credit note answers differently depending on which issuer is configured,
+  and cannot represent a partial refund at all, since `/invoice/reverse` refuses one so no
+  credit note is ever minted for it. Revenue and VAT therefore exclude credit notes and
+  take the correction from the `Refund` row, which both paths write at a single site. The
+  credit note remains the fiscal document; it is no longer the reporting mechanism.
 - Every invoice-touching feature now has two paths. The built-in issuer is kept
   exercised through the same gateway so the fallback stays real rather than becoming
   code that merely still compiles.
