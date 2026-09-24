@@ -190,14 +190,26 @@ class StornoEligibilityTests(StornoTestBase):
         result = self._storno_returning(Issued(number="000501", series="STORNO"))
         self.assertTrue(result.is_err())
 
-    def test_a_builtin_invoice_uses_the_efactura_credit_note_path(self) -> None:
+    def test_a_builtin_invoice_is_not_reversed_at_a_provider(self) -> None:
+        """It is refused here, and nothing corrects it anywhere else.
+
+        This test was named for an "e-Factura credit-note path" that has never existed:
+        `_get_or_create_credit_note` is the only thing that mints a credit note and this
+        guard is what keeps built-in invoices away from it. The refusal is correct - there
+        is no provider document to reverse - but it must not imply a correction happens
+        elsewhere, because none does.
+        """
         builtin = self._issued_invoice(issuer=ISSUER_BUILTIN, number="INV-LOCAL-0500")
         self._refund_fully(builtin)
 
         result = issue_storno_for_invoice(builtin.pk)
 
         self.assertTrue(result.is_err())
-        self.assertIn("e-Factura credit-note path", result.error)
+        self.assertIn("no provider document exists", result.error)
+        self.assertFalse(
+            Invoice.objects.filter(reverses_invoice=builtin).exists(),
+            "and no correcting document is produced for it anywhere",
+        )
 
     def test_an_invoice_is_never_reversed_twice(self) -> None:
         """SmartBill refuses a second reversal; we should not spend an attempt on it."""

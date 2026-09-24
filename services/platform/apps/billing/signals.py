@@ -1415,6 +1415,13 @@ def _handle_invoice_paid(invoice: Invoice) -> None:
 
 def _handle_invoice_overdue(invoice: Invoice) -> None:
     """Handle invoice becoming overdue"""
+    # Its three siblings - created, issued and paid - all check this; only overdue did
+    # not. A credit note has a negative total and nothing to collect, so reaching here
+    # would email the customer about an overdue document, blacken their payment history
+    # and schedule a service suspension over money they are owed.
+    if not _is_receivable(invoice):
+        return
+
     try:
         _send_invoice_overdue_email(invoice)
         _trigger_dunning_process(invoice)
@@ -2304,7 +2311,9 @@ def _issuance_event_type(state: str) -> str:
 def _queue_provider_storno(invoice: Invoice) -> None:
     """A provider-issued invoice is corrected by a document, not by a status change.
 
-    Locally issued invoices already produce an e-Factura credit note on refund. Their
+    Built-in invoices produce no correcting document at all - this comment used to claim
+    they "already produce an e-Factura credit note on refund", and they never have. Their
+    refund is a status change and nothing more. Their
     provider-issued counterparts need the equivalent at the provider, or the customer
     holds a full invoice with nothing reversing it and the accountant's books show
     revenue that was returned.

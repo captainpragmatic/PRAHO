@@ -14,7 +14,7 @@ from django.db import transaction
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
-from apps.billing.invoice_models import ISSUER_BUILTIN
+from apps.billing.invoice_models import DOCUMENT_KIND_INVOICE, ISSUER_BUILTIN
 from apps.billing.models import (
     CreditLedger,
     Currency,
@@ -1503,7 +1503,9 @@ class TestHandleInvoiceOverdue(TestCase):
     @patch("apps.billing.signals._trigger_dunning_process")
     @patch("apps.billing.signals._send_invoice_overdue_email")
     def test_flow(self, mock_email, mock_dunning, mock_history, mock_suspend):
-        invoice = MagicMock()
+        # `document_kind` matters now: the handler refuses to chase anything that is not
+        # a receivable, so a double without one silently takes the early return.
+        invoice = MagicMock(document_kind=DOCUMENT_KIND_INVOICE)
         _handle_invoice_overdue(invoice)
         mock_email.assert_called_once()
         mock_dunning.assert_called_once()

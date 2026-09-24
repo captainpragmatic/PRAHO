@@ -26,7 +26,7 @@ from django.core.exceptions import ImproperlyConfigured, PermissionDenied, Valid
 from django.core.paginator import Paginator
 from django.db import DatabaseError, transaction
 from django.db.models import Count, Q, QuerySet, Sum
-from django.db.models.functions import ExtractMonth
+from django.db.models.functions import Coalesce, ExtractMonth, ExtractYear
 from django.http import (
     Http404,
     HttpRequest,
@@ -1626,23 +1626,84 @@ def process_payment(  # noqa: C901, PLR0911  # Explicit financial validation and
 
 
 def _revenue_documents(customer_ids: list[Any]) -> Any:
-    """Cash revenue: invoices that were actually collected.
+    """Invoices whose money was collected, counted in the month of the invoice.
 
-    A credit note is deliberately NOT included. It only ever exists for an invoice that
-    is already `refunded` - `_storno_refusal_reason` refuses to reverse anything else,
-    because SmartBill's storno carries no amount and reverses the whole document - and a
-    refunded invoice has already dropped out of `paid`. Adding the credit note on top
-    therefore subtracts the same money twice: a fully refunded 500 RON invoice reported
-    -500 instead of zero.
+    `refunded` counts here: the sale happened, and the refund is a separate event with a
+    date of its own. Dropping a refunded invoice rewrites the month it was sold in, so a
+    January report run in April answered differently from the same report run in February.
 
-    This query is also grouped by month in `billing_reports`, so "net the correction into
-    the current period" is not a neutral change: it moves revenue between periods. What
-    the monthly series should show when a refund lands in a later month than the sale,
-    and whether `vat_report` (issued + paid, which counts the credit note while excluding
-    the refunded original) should agree, is a revenue-recognition decision rather than a
-    detail of this integration. Tracked in #534.
+    Credit notes are deliberately NOT here. A credit note is the provider path's fiscal
+    record of a refund that `_refund_corrections` already counts, so including it would
+    subtract the same money twice - and it exists on that path ONLY, which would make one
+    refund move revenue differently depending on which issuer happens to be configured.
     """
-    return Invoice.objects.filter(customer_id__in=customer_ids).filter(status="paid")
+    from .invoice_models import DOCUMENT_KIND_INVOICE  # noqa: PLC0415
+
+    return Invoice.objects.filter(
+        customer_id__in=customer_ids,
+        document_kind=DOCUMENT_KIND_INVOICE,
+        # `partially_refunded` belongs here for the same reason `refunded` does, and its
+        # absence was worse: the arm matched nothing, so a 10 RON refund on a 500 RON
+        # invoice removed the whole 500 from revenue. The sale still happened; the refund
+        # subtracts exactly what went back.
+        status__in=("paid", "refunded", "partially_refunded"),
+    )
+
+
+def _refund_corrections(customer_ids: list[Any]) -> Any:
+    """Money returned, counted in the month it was returned.
+
+    `Refund` is the one record BOTH issuers write, and it is written at a single site, so
+    it is the only thing that can date a correction consistently. The built-in path creates
+    no credit note at all, and SmartBill refuses a partial storno - so a credit note can
+    never represent a partial refund, while a `Refund` row always carries the exact amount
+    that went back.
+    """
+    from .refund_models import Refund  # noqa: PLC0415
+
+    return (
+        Refund.objects.filter(customer_id__in=customer_ids, status="completed")
+        # Against an invoice, directly or through its payment - the same two links
+        # `_project_settled_refunds` uses to decide an invoice is refunded. A refund
+        # attached only to an order or a proforma would otherwise subtract money that
+        # `_revenue_documents` never added.
+        .filter(Q(invoice__isnull=False) | Q(payment__invoice__isnull=False))
+        .distinct()
+    )
+
+
+def _monthly_revenue(customer_ids: list[Any]) -> list[dict[str, Any]]:
+    """Collected invoices less refunds, per month, each dated to its own event."""
+    invoiced = {
+        (row["year"], row["month"]): (row["revenue"] or 0, row["count"])
+        for row in _revenue_documents(customer_ids)
+        .annotate(year=ExtractYear("created_at"), month=ExtractMonth("created_at"))
+        .values("year", "month")
+        .annotate(revenue=Sum("total_cents"), count=Count("id"))
+    }
+    refunded = {
+        (row["year"], row["month"]): (row["refunded"] or 0)
+        for row in _refund_corrections(customer_ids)
+        # `processed_at` is when the money went back; `created_at` is when someone asked.
+        # A refund raised in January and settled in March belongs to March, which is the
+        # whole point of dating the correction to its own event.
+        .annotate(
+            settled=Coalesce("processed_at", "created_at"),
+        )
+        .annotate(year=ExtractYear("settled"), month=ExtractMonth("settled"))
+        .values("year", "month")
+        .annotate(refunded=Sum("amount_cents"))
+    }
+    # Keyed by (year, month): a bare month number merges January 2025 into January 2026.
+    return [
+        {
+            "year": year,
+            "month": month,
+            "revenue": invoiced.get((year, month), (0, 0))[0] - refunded.get((year, month), 0),
+            "count": invoiced.get((year, month), (0, 0))[1],
+        }
+        for year, month in sorted(set(invoiced) | set(refunded))
+    ]
 
 
 @billing_staff_required
@@ -1658,16 +1719,14 @@ def billing_reports(request: HttpRequest) -> HttpResponse:
 
     # Monthly revenue - using Django ORM ExtractMonth instead of deprecated .extra()
     # to prevent SQL injection (OWASP A03:2021 - Injection)
-    monthly_stats = (
-        _revenue_documents(customer_ids)
-        .annotate(month=ExtractMonth("created_at"))
-        .values("month")
-        .annotate(revenue=Sum("total_cents"), count=Count("id"))
-    )
+    monthly_stats = _monthly_revenue(customer_ids)
+
+    collected = _revenue_documents(customer_ids).aggregate(total=Sum("total_cents"))["total"] or 0
+    returned = _refund_corrections(customer_ids).aggregate(total=Sum("amount_cents"))["total"] or 0
 
     context = {
         "monthly_stats": monthly_stats,
-        "total_revenue": _revenue_documents(customer_ids).aggregate(total=Sum("total_cents"))["total"] or Decimal("0"),
+        "total_revenue": collected - returned,
     }
 
     return render(request, "billing/reports.html", context)
@@ -1689,7 +1748,14 @@ def vat_report(request: HttpRequest) -> HttpResponse:
     end_date = request.GET.get("end_date", timezone.now().date())
 
     invoices = Invoice.objects.filter(
-        customer_id__in=customer_ids, created_at__date__range=[start_date, end_date], status__in=["issued", "paid"]
+        customer_id__in=customer_ids,
+        created_at__date__range=[start_date, end_date],
+        # `refunded` belongs here for the same reason the revenue query keeps the original:
+        # VAT is declared when a document is ISSUED, and a declaration already filed with
+        # ANAF cannot be un-filed by a later refund. Excluding it made a period's VAT change
+        # retroactively, which is the one thing a tax report must never do. The correction
+        # arrives as the credit note, in the period the credit note was issued.
+        status__in=["issued", "paid", "refunded", "partially_refunded"],
     )
 
     total_vat = invoices.aggregate(total_vat=Sum("tax_cents"))["total_vat"] or Decimal("0")

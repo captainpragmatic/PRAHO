@@ -431,7 +431,12 @@ def _ineligible_by_provenance(original: Invoice) -> str | None:
         # attempt to be told so is worse than knowing.
         return "A credit note cannot itself be reversed"
     if original.issuer_provider == ISSUER_BUILTIN:
-        return "Built-in invoices are corrected through the e-Factura credit-note path"
+        # NOT "corrected through the e-Factura credit-note path" - that path does not
+        # exist. `_get_or_create_credit_note` below is the only thing in the codebase that
+        # mints a credit note, and this guard is what keeps built-in invoices away from it.
+        # A built-in refund today produces no correcting document at all; the refusal is
+        # accurate about the provider, and must not imply a correction happens elsewhere.
+        return "Built-in invoices are not reversed at a provider; no provider document exists to correct"
     return None
 
 

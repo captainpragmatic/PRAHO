@@ -111,6 +111,18 @@ class CIUSROValidator:
     # Every element that carries money, named once. Both the currency check and the
     # credit-note magnitude check ask a question about "an amount", and a second copy of
     # this list is how the two would come to disagree about what one is.
+    # A credit note's own statement of how large the correction is. Its LINES are not
+    # here: EN16931 allows a negative one, so a blanket sweep over every amount would
+    # reject a legitimate mixed correction.
+    CREDIT_NOTE_MAGNITUDE_XPATH: ClassVar[str] = (
+        ".//cac:LegalMonetaryTotal/cbc:LineExtensionAmount | "
+        ".//cac:LegalMonetaryTotal/cbc:TaxExclusiveAmount | "
+        ".//cac:LegalMonetaryTotal/cbc:TaxInclusiveAmount | "
+        ".//cac:LegalMonetaryTotal/cbc:AllowanceTotalAmount | "
+        ".//cac:LegalMonetaryTotal/cbc:ChargeTotalAmount | "
+        ".//cac:LegalMonetaryTotal/cbc:PayableAmount"
+    )
+
     MONETARY_ELEMENT_XPATH: ClassVar[str] = (
         ".//cbc:Amount | .//cbc:BaseAmount | .//cbc:PriceAmount | "
         ".//cac:TaxTotal[cac:TaxSubtotal]/cbc:TaxAmount | "
@@ -641,15 +653,21 @@ class CIUSROValidator:
     def _validate_credit_note_magnitudes(self, doc: etree._Element, result: ValidationResult) -> None:
         """A credit note states its direction once, in CreditNoteTypeCode 381.
 
-        A local rule rather than an EN16931 one: the standard expresses this through the
-        individual non-negativity rules (BR-27 and the allowance family) rather than as a
-        single statement. Collected here because a document that negates EVERY amount
-        satisfies BR-CO-10/13/15/16 exactly - they are equalities, and negation preserves
-        them - so without this the validator is a partial-flip detector that cannot see a
-        consistent whole-document flip. That is how the negative representation looked
-        correct for as long as it did.
+        Scoped to the document's OWN totals, and deliberately not to its lines. EN16931
+        permits a credit note to carry a negative LINE - a correction that moves two lines
+        in opposite directions is a normal document - and BR-27 constrains the item price,
+        not every monetary element. An earlier version of this rule covered every amount in
+        the document and would have rejected such a credit note outright, on the built-in
+        e-Factura path too, since nothing gates this validator behind the provider setting.
+
+        What remains is the invariant that was actually broken: a credit note's own totals
+        state the magnitude of the correction, and its direction is `CreditNoteTypeCode`
+        381. A local rule rather than an EN16931 one, collected here because a document
+        that negates every total satisfies BR-CO-10/13/15/16 exactly - they are equalities,
+        and negation preserves them - so without it the validator is a partial-flip
+        detector that cannot see a consistent whole-document flip.
         """
-        for amount in self._find_all(doc, self.MONETARY_ELEMENT_XPATH):
+        for amount in self._find_all(doc, self.CREDIT_NOTE_MAGNITUDE_XPATH):
             text = (amount.text or "").strip()
             if not text:
                 continue

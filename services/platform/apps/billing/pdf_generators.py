@@ -668,6 +668,12 @@ class RomanianInvoicePDFGenerator(RomanianDocumentPDFGenerator):
         # one of them, permanently, on the copy the customer receives.
         if self._is_credit_note():
             return
+        # A refunded or cancelled invoice is not "unpaid". Stamping it as such tells the
+        # customer to pay money they have already been given back - and on the built-in
+        # path it is the ONLY document they hold about that invoice, because no credit
+        # note is ever produced there.
+        if self.invoice.status in ("refunded", "partially_refunded", "void"):
+            return
         if self.invoice.status != "paid":
             self.canvas.setFont(_FONT_BOLD, 10)
             due_date_str = format_romanian_date(self.invoice.due_at) if self.invoice.due_at else str(_t("undefined"))

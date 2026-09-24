@@ -362,25 +362,47 @@ class CIUSROValidatorTestCase(TestCase):
 
         self.assertNotIn("BR-27", codes, codes)
 
-    def test_a_credit_note_may_not_carry_a_negative_amount(self):
-        """A credit note states its direction once, in CreditNoteTypeCode 381."""
-        xml = (
+    def _credit_note_xml(self) -> str:
+        return (
             self._get_minimal_valid_xml()
             .replace("<Invoice ", "<CreditNote ")
             .replace("</Invoice>", "</CreditNote>")
             .replace("Invoice-2", "CreditNote-2")
             .replace("cac:InvoiceLine", "cac:CreditNoteLine")
             .replace("cbc:InvoicedQuantity", "cbc:CreditedQuantity")
-            .replace("<cbc:InvoiceTypeCode>380</cbc:InvoiceTypeCode>", "<cbc:CreditNoteTypeCode>381</cbc:CreditNoteTypeCode>")
             .replace(
-                '<cbc:TaxInclusiveAmount currencyID="RON">1190.00</cbc:TaxInclusiveAmount>',
-                '<cbc:TaxInclusiveAmount currencyID="RON">-1190.00</cbc:TaxInclusiveAmount>',
+                "<cbc:InvoiceTypeCode>380</cbc:InvoiceTypeCode>",
+                "<cbc:CreditNoteTypeCode>381</cbc:CreditNoteTypeCode>",
             )
+        )
+
+    def test_a_credit_note_may_not_carry_a_negative_total(self):
+        """A credit note states its direction once, in CreditNoteTypeCode 381."""
+        xml = self._credit_note_xml().replace(
+            '<cbc:TaxInclusiveAmount currencyID="RON">1190.00</cbc:TaxInclusiveAmount>',
+            '<cbc:TaxInclusiveAmount currencyID="RON">-1190.00</cbc:TaxInclusiveAmount>',
         )
 
         codes = [e.code for e in self.validator.validate(xml).errors]
 
         self.assertIn("BR-CN-SIGN", codes, codes)
+
+    def test_a_credit_note_may_carry_a_negative_line(self):
+        """EN16931 allows it, so the rule must not reach into the lines.
+
+        A correction that moves two lines in opposite directions is an ordinary document:
+        one line credited, another re-charged. An earlier version of this rule swept every
+        monetary element and would have rejected it - on the BUILT-IN e-Factura path too,
+        because nothing gates this validator behind the provider setting.
+        """
+        xml = self._credit_note_xml().replace(
+            '<cbc:LineExtensionAmount currencyID="RON">1000.00</cbc:LineExtensionAmount>\n        <cac:Item>',
+            '<cbc:LineExtensionAmount currencyID="RON">-1000.00</cbc:LineExtensionAmount>\n        <cac:Item>',
+        )
+
+        codes = [e.code for e in self.validator.validate(xml).errors]
+
+        self.assertNotIn("BR-CN-SIGN", codes, f"a negative credit-note line is legitimate; got {codes}")
 
     def test_an_invoice_is_not_subject_to_the_credit_note_sign_rule(self):
         """The regression guard: the rule is about how a REVERSAL states its direction."""
