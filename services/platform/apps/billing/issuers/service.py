@@ -34,7 +34,7 @@ from apps.billing.invoice_models import (
 from apps.common.types import Err, Ok, Result
 
 from .base import Ambiguous, Issued, PreparedDocument, Rejected
-from .models import IssuanceState, ProviderIssuance
+from .models import MAX_SUBMISSIONS, IssuanceState, ProviderIssuance
 from .policy import resolve_issuer
 from .smartbill.client import RateGateWait
 
@@ -149,6 +149,18 @@ def _claim(
                 f"for manual reconciliation rather than retried."
             )
             return Err("A previous attempt was abandoned mid-flight; reconcile it manually")
+
+        # The budget is only real where ownership is taken. It lived in the sweep's WHERE
+        # clause alone, so two sweeps running before a worker drained the queue enqueued
+        # the same row twice and each task claimed independently - a live probe reached
+        # five submissions against a cap of three. Checked AFTER the branches above so a
+        # row that may hold a document at the provider is still routed to a human, and
+        # before the claim so the counters and the provider's own words survive intact.
+        if issuance.submissions >= MAX_SUBMISSIONS:
+            return Err(
+                f"This document has spent its {MAX_SUBMISSIONS} submission attempts; "
+                f"an operator must decide what happens next."
+            )
 
         issuance.claim(token=attempt_id, payload=prepared.payload, payload_hash=prepared.digest)
         issuance.save()
@@ -266,9 +278,13 @@ def reconcile_confirmed_issued(
     working the same queue would otherwise both pass a state check on their own
     stale copies, and the later save would silently overwrite the first adopted
     number with a different one.
-    """
-    _refuse_if_inside_transaction()
 
+    No `_refuse_if_inside_transaction` here, unlike its neighbours: that guard exists so
+    a claim COMMITS before a provider call, and this command makes no call - an operator
+    already checked by hand. Refusing an enclosing transaction only forced the caller to
+    write the attribution for this act in a SEPARATE one, which is how a legal fiscal
+    number could be assigned with no record of who decided it.
+    """
     if not (number or "").strip():
         return Err("A provider document number is required to adopt a document")
     if not (operator_note or "").strip():

@@ -64,5 +64,47 @@
       </table>
     </div>
   {% end_section_card %}
+
+  {% if exhausted %}
+  {% trans "Out of submission budget" as exhausted_title %}
+  {% section_card title=exhausted_title %}
+    <p class="mb-4 text-sm text-slate-400">
+      {% blocktrans trimmed with attempts=max_submissions %}
+        The provider refused each of these {{ attempts }} times and nothing was created,
+        so they are not retried and no sweep will pick them up again. Fix what the
+        provider objected to; renewing the budget is a separate, recorded decision.
+      {% endblocktrans %}
+    </p>
+    <div class="overflow-x-auto">
+      <table class="min-w-full divide-y divide-slate-700 text-sm">
+        <thead>
+          <tr class="text-left text-slate-400">
+            <th class="py-2 pr-4">{% trans "Customer" %}</th>
+            <th class="py-2 pr-4">{% trans "Document" %}</th>
+            <th class="py-2 pr-4">{% trans "Total" %}</th>
+            <th class="py-2 pr-4">{% trans "Attempts" %}</th>
+            <th class="py-2">{% trans "What the provider said" %}</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-700/60">
+          {% for issuance in exhausted %}
+          <tr>
+            <td class="py-3 pr-4 text-white">{{ issuance.invoice.customer }}</td>
+            <td class="py-3 pr-4 text-slate-300">
+              {{ issuance.invoice.display_number }}
+              <span class="block text-xs text-slate-500">{{ issuance.provider }}</span>
+            </td>
+            <td class="py-3 pr-4 text-slate-300">
+              {{ issuance.invoice.total }} {{ issuance.invoice.currency.code }}
+            </td>
+            <td class="py-3 pr-4 text-slate-400">{{ issuance.submissions }}</td>
+            <td class="py-3 text-slate-400">{{ issuance.last_error }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% end_section_card %}
+  {% endif %}
 </div>
 {% endblock %}

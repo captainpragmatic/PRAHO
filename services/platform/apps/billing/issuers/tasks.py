@@ -115,9 +115,13 @@ def sweep_pending_issuances(limit: int = 100) -> dict[str, int]:
     ).count()
     if exhausted:
         results["exhausted"] = exhausted
-        logger.error(
-            f"🔥 [Issuance] {exhausted} document(s) have spent their {MAX_SUBMISSIONS} "
-            f"submission attempts and need an operator."
+        # A gauge, not an event. This is a standing backlog, so raising it as an error on
+        # every sweep run alarmed repeatedly about a condition that does not change between
+        # runs and that nothing in this process can act on. It now has a screen and an
+        # owner - the reconciliation queue - and the number is returned for whoever wants it.
+        logger.warning(
+            f"⚠️ [Issuance] {exhausted} document(s) awaiting an operator after spending "
+            f"their {MAX_SUBMISSIONS} submission attempts; listed in the reconciliation queue."
         )
     return results
 

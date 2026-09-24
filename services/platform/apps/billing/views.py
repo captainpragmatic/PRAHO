@@ -2444,23 +2444,32 @@ def operator_controls(request: HttpRequest) -> HttpResponse:
 @billing_configuration_required
 @require_http_methods(["GET"])
 def provider_reconciliation_queue(request: HttpRequest) -> HttpResponse:
-    """Provider issuances whose outcome nobody knows yet.
+    """Provider issuances no automated path will move again.
 
-    Each row is an attempt that may or may not have created a fiscal document at the
-    provider. Nothing automated can resolve one - the provider offers no lookup by our
-    reference - so the queue exists to put a human in front of the evidence.
+    Two kinds, deliberately listed apart because they need different decisions. An
+    `outcome_unknown` attempt MAY have created a fiscal document that PRAHO cannot look
+    up - the provider offers no search by our reference - so a human must identify it.
+    An exhausted row is a document the provider REFUSED until its retry budget ran out;
+    nothing was created, and what it needs is the underlying problem fixed.
+
+    Exhausted rows are derived from their persisted fields rather than given a state of
+    their own: the cap that stops them retrying is the same cap that excludes them from
+    the sweep, so no further `_claim` may ever happen for one and there is no later
+    moment at which to label it.
     """
-    from .issuers.models import IssuanceState, ProviderIssuance  # noqa: PLC0415  # ADR-0007
+    from .issuers.models import MAX_SUBMISSIONS, IssuanceState, ProviderIssuance  # noqa: PLC0415  # ADR-0007
 
-    unresolved = (
-        ProviderIssuance.objects.filter(state=IssuanceState.OUTCOME_UNKNOWN.value)
-        .select_related("invoice", "invoice__customer", "invoice__currency")
-        .order_by("created_at")
-    )
+    rows = ProviderIssuance.objects.select_related("invoice", "invoice__customer", "invoice__currency")
+    unresolved = rows.filter(state=IssuanceState.OUTCOME_UNKNOWN.value).order_by("created_at")
+    exhausted = rows.filter(
+        state=IssuanceState.FAILED.value,
+        invoice__number__isnull=True,
+        submissions__gte=MAX_SUBMISSIONS,
+    ).order_by("created_at")
     return render(
         request,
         "billing/provider_reconciliation_queue.html",
-        {"issuances": unresolved},
+        {"issuances": unresolved, "exhausted": exhausted, "max_submissions": MAX_SUBMISSIONS},
     )
 
 

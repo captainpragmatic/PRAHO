@@ -205,11 +205,12 @@ def adopt_provider_document(
     it is a human judgement. This is the only way out towards a numbered invoice, and
     it stays manual for that reason.
 
-    Deliberately NOT `@transaction.atomic`, unlike its neighbours in this module.
-    `reconcile_confirmed_issued` refuses to run inside a transaction and opens its own,
-    so wrapping it here would break it. It also answers with a `Result` rather than
-    raising, so the error is translated into the `ValidationError` the view layer and
-    every other control in this module already speak.
+    One transaction owns both the adoption and the record of who ordered it. The audit
+    used to be written after `reconcile_confirmed_issued` had already committed, so a
+    failure between them left a legal fiscal number assigned with nothing saying who
+    decided it or why. `reconcile_confirmed_issued` answers with a `Result` rather than
+    raising, so the error is still translated into the `ValidationError` the view layer
+    and every other control in this module already speak.
 
     The audit event lives here rather than in the issuer service because attribution
     needs an actor, and the issuer service is reached from workers that have none. It
@@ -222,38 +223,42 @@ def adopt_provider_document(
 
     _require_audit_reason(actor)
 
-    issuance = ProviderIssuance.objects.select_related("invoice").filter(pk=issuance_id).first()
-    if issuance is None:
-        raise ValidationError({"__all__": _("That reconciliation no longer exists.")})
-    before = {
-        "state": issuance.state,
-        "provider_series": issuance.provider_series,
-        "provider_number": issuance.provider_number,
-        "invoice_number": issuance.invoice.number,
-    }
-
-    outcome = reconcile_confirmed_issued(
-        issuance_id,
-        series=series,
-        number=number,
-        operator_note=actor.reason,
-    )
-    if isinstance(outcome, Err):
-        raise ValidationError({"__all__": outcome.error})
-    legal_number = outcome.unwrap()
-
-    # Re-fetched rather than refreshed: `state` is a protected FSMField, and
-    # `refresh_from_db` re-enters its setter, which refuses direct assignment.
-    issuance = ProviderIssuance.objects.select_related("invoice").get(pk=issuance_id)
-    _audit_configuration_change(
-        content_object=issuance.invoice,
-        actor=actor,
-        old_values=before,
-        new_values={
+    with transaction.atomic():
+        # Locked before the snapshot is taken, so the before-state cannot be read from a
+        # copy another operator is already adopting. The invoice row itself is locked by
+        # `reconcile_confirmed_issued`, second, which keeps the existing lock order.
+        issuance = ProviderIssuance.objects.select_for_update().filter(pk=issuance_id).first()
+        if issuance is None:
+            raise ValidationError({"__all__": _("That reconciliation no longer exists.")})
+        before = {
             "state": issuance.state,
             "provider_series": issuance.provider_series,
             "provider_number": issuance.provider_number,
-            "invoice_number": legal_number,
-        },
-    )
+            "invoice_number": issuance.invoice.number,
+        }
+
+        outcome = reconcile_confirmed_issued(
+            issuance_id,
+            series=series,
+            number=number,
+            operator_note=actor.reason,
+        )
+        if isinstance(outcome, Err):
+            raise ValidationError({"__all__": outcome.error})
+        legal_number = outcome.unwrap()
+
+        # Re-fetched rather than refreshed: `state` is a protected FSMField, and
+        # `refresh_from_db` re-enters its setter, which refuses direct assignment.
+        issuance = ProviderIssuance.objects.select_related("invoice").get(pk=issuance_id)
+        _audit_configuration_change(
+            content_object=issuance.invoice,
+            actor=actor,
+            old_values=before,
+            new_values={
+                "state": issuance.state,
+                "provider_series": issuance.provider_series,
+                "provider_number": issuance.provider_number,
+                "invoice_number": legal_number,
+            },
+        )
     return legal_number

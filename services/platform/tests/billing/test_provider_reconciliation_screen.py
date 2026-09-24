@@ -12,6 +12,7 @@ event, which ADR-0016 does not permit for an act of that kind.
 from __future__ import annotations
 
 from decimal import Decimal
+from unittest.mock import patch
 
 from django.core.exceptions import ValidationError
 from django.test import TestCase, TransactionTestCase
@@ -106,7 +107,12 @@ class ReconciliationQueueContentTests(TestCase):
 
 
 class AdoptProviderDocumentTests(TransactionTestCase):
-    """The service refuses to run inside a transaction, so this cannot be a TestCase."""
+    """`TransactionTestCase` so a rollback inside the command is a real rollback.
+
+    A `TestCase` wraps each test in its own transaction, which would turn the command's
+    atomic block into a savepoint and hide whether the adoption actually survives an
+    audit failure - the one thing these tests exist to prove.
+    """
 
     def setUp(self) -> None:
         self.customer = CustomerFactory()
@@ -165,6 +171,35 @@ class AdoptProviderDocumentTests(TransactionTestCase):
         )
         unchanged = ProviderIssuance.objects.get(pk=issuance.pk)
         self.assertEqual(unchanged.state, IssuanceState.OUTCOME_UNKNOWN.value)
+
+    def test_an_audit_failure_rolls_the_adoption_back(self) -> None:
+        """Attribution is the point of this command, so it cannot be best-effort.
+
+        The audit was written AFTER `reconcile_confirmed_issued` had committed, so a
+        failure between the two left a legal fiscal number assigned to an invoice with
+        no record of who decided it or why - which ADR-0016 does not permit for a manual
+        act of this kind. The number is unchangeable afterwards, so there is no second
+        chance to attach the missing attribution.
+        """
+        issuance = _unresolved_issuance(self.customer, self.currency, number="H")
+
+        with (
+            patch(
+                "apps.billing.operator_controls._audit_configuration_change",
+                side_effect=RuntimeError("audit backend unavailable"),
+            ),
+            self.assertRaises(RuntimeError),
+        ):
+            adopt_provider_document(
+                issuance_id=issuance.pk, series="FCT", number="000904", actor=self._actor()
+            )
+
+        unchanged = ProviderIssuance.objects.select_related("invoice").get(pk=issuance.pk)
+        self.assertEqual(unchanged.state, IssuanceState.OUTCOME_UNKNOWN.value)
+        self.assertIsNone(
+            unchanged.invoice.number,
+            "a fiscal number assigned with no record of who ordered it must not survive",
+        )
 
     def test_a_number_already_adopted_elsewhere_is_refused(self) -> None:
         """Two PRAHO records claiming one legal number is the failure to prevent."""
