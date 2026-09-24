@@ -63,8 +63,10 @@ def sweep_pending_issuances(limit: int = 100) -> dict[str, int]:
     callback loses the enqueue but not the row, which is why the row is created in
     that transaction. This is the other half of that arrangement.
 
-    Deliberately narrow: only `pending`. An abandoned `claimed` row is quarantined
-    by the claim path itself, and `outcome_unknown` is never swept by anything.
+    Narrow on purpose: `pending` and `failed` only. `outcome_unknown` is never swept by
+    anything, and an expired `claimed` row is `sweep_abandoned_claims`' business - it used
+    to say the claim path handled that, which was true only if some later attempt happened
+    to reach `_claim` for the same invoice, and nothing guaranteed one ever would.
     """
     from apps.billing.invoice_models import DOCUMENT_KIND_CREDIT_NOTE  # noqa: PLC0415  # ADR-0007
 
@@ -124,6 +126,49 @@ def sweep_pending_issuances(limit: int = 100) -> dict[str, int]:
             f"their {MAX_SUBMISSIONS} submission attempts; listed in the reconciliation queue."
         )
     return results
+
+
+def sweep_abandoned_claims(limit: int = 100) -> dict[str, int]:
+    """Route claims whose worker never reported back to a human.
+
+    A worker that dies after committing `claimed` leaves a row that no sweep selects -
+    they look at `pending` and `failed` - and that no screen lists, because the operator
+    queue shows `outcome_unknown`. Quarantine happened only if another attempt for the
+    same invoice later reached `_claim`, which depends on a redelivery that may never
+    come and which `prepare` can fail before, returning an ordinary task result while the
+    expired claim stays invisible. `ProviderIssuance.abandoned()` was written for exactly
+    this case and had no caller.
+
+    Never resubmits, and never will: a crash immediately before the POST and one
+    immediately after the provider created the document leave identical durable state, so
+    an expired lease is evidence of nothing. That uncertainty IS `outcome_unknown`, and
+    only an operator who has checked the provider can resolve it.
+    """
+    from django.db import transaction  # noqa: PLC0415
+
+    from .models import IssuanceState, ProviderIssuance  # noqa: PLC0415
+
+    quarantined = 0
+    for candidate in list(ProviderIssuance.abandoned().order_by("created_at")[:limit]):
+        with transaction.atomic():
+            issuance = ProviderIssuance.objects.select_for_update().get(pk=candidate.pk)
+            # Re-read under the lock. Between the selection above and here a worker may
+            # have finalised this attempt or renewed its lease, and whatever it decided
+            # outranks a sweep that only knows the row looked stale a moment ago.
+            if issuance.state != IssuanceState.CLAIMED.value or issuance.claim_is_live:
+                continue
+            issuance.mark_outcome_unknown(
+                reason="A worker abandoned this claim mid-flight; the provider may hold a document."
+            )
+            issuance.save()
+            quarantined += 1
+
+    if quarantined:
+        logger.warning(
+            f"⚠️ [Issuance] Quarantined {quarantined} abandoned claim(s) for manual "
+            f"reconciliation; a document may exist at the provider for each."
+        )
+    return {"quarantined": quarantined}
 
 
 def sweep_owed_reversals(limit: int = 100) -> dict[str, int]:

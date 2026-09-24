@@ -1,6 +1,6 @@
 """The retry budget lived only in the sweep's WHERE clause, so nothing enforced it.
 
-`MAX_SUBMISSIONS` decided which rows `sweep_owed_issuances` picked up, but `_claim` -
+`MAX_SUBMISSIONS` decided which rows `sweep_pending_issuances` picked up, but `_claim` -
 the one place that takes exclusive ownership before a provider call - never looked at
 it. Two sweeps running before a worker drains the queue enqueue the same row twice,
 and each enqueued task claims and submits, so the count walks past the cap. The budget
