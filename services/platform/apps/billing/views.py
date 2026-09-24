@@ -1625,6 +1625,22 @@ def process_payment(  # noqa: C901, PLR0911  # Explicit financial validation and
     return JsonResponse({"error": "Invalid method"}, status=405)
 
 
+def _revenue_documents(customer_ids: list[Any]) -> Any:
+    """Documents that count towards revenue, corrections included.
+
+    A reversal is a negative Invoice row precisely so that reporting which sums invoice
+    rows nets the correction without knowing the issuer integration exists. But its life
+    ends at `issued` - there is nothing to collect - so a plain `status="paid"` filter
+    counts the original and silently ignores the document that takes it back, while the
+    VAT report (issued + paid) nets it. Same event, two screens, two numbers.
+    """
+    from .invoice_models import DOCUMENT_KIND_CREDIT_NOTE  # noqa: PLC0415
+
+    return Invoice.objects.filter(customer_id__in=customer_ids).filter(
+        Q(status="paid") | Q(status="issued", document_kind=DOCUMENT_KIND_CREDIT_NOTE)
+    )
+
+
 @billing_staff_required
 def billing_reports(request: HttpRequest) -> HttpResponse:
     """
@@ -1639,7 +1655,7 @@ def billing_reports(request: HttpRequest) -> HttpResponse:
     # Monthly revenue - using Django ORM ExtractMonth instead of deprecated .extra()
     # to prevent SQL injection (OWASP A03:2021 - Injection)
     monthly_stats = (
-        Invoice.objects.filter(customer_id__in=customer_ids, status="paid")
+        _revenue_documents(customer_ids)
         .annotate(month=ExtractMonth("created_at"))
         .values("month")
         .annotate(revenue=Sum("total_cents"), count=Count("id"))
@@ -1647,10 +1663,7 @@ def billing_reports(request: HttpRequest) -> HttpResponse:
 
     context = {
         "monthly_stats": monthly_stats,
-        "total_revenue": Invoice.objects.filter(customer_id__in=customer_ids, status="paid").aggregate(
-            total=Sum("total_cents")
-        )["total"]
-        or Decimal("0"),
+        "total_revenue": _revenue_documents(customer_ids).aggregate(total=Sum("total_cents"))["total"] or Decimal("0"),
     }
 
     return render(request, "billing/reports.html", context)

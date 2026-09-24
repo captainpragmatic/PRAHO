@@ -123,6 +123,16 @@ DOCUMENT_KIND_CHOICES: tuple[tuple[str, Any], ...] = (
 # ===============================================================================
 
 
+def _document_is_collectable(instance: models.Model) -> bool:
+    """Module-level so the transition condition is typed rather than an inline lambda.
+
+    django-fsm declares a condition as `Callable[[Model], bool]`, so the signature has
+    to be the framework's and the narrowing happens here - a lambda would simply lose
+    the type and mypy could not see the method it calls.
+    """
+    return cast("Invoice", instance)._is_collectable()
+
+
 class Invoice(models.Model):
     """
     Romanian compliant invoice model with address snapshots.
@@ -692,7 +702,27 @@ class Invoice(models.Model):
             self.tax_point_date = timezone.localdate()
         self._freeze_fx()
 
-    @transition(field=status, source=["issued", "overdue"], target="paid")
+    def _is_collectable(self) -> bool:
+        """Whether this document can be paid at all.
+
+        A credit note's remaining amount clamps to zero because there is nothing to
+        collect, not because anyone settled it - so every "fully settled" check reads
+        true and it would walk into the paid lifecycle: a payment receipt, credited
+        payment history, activated services. `paid` carries collection semantics a
+        reversal does not have; its life ends at `issued`.
+
+        Expressed as a transition condition rather than a caller-side check because
+        four call sites can move an invoice to paid, and guarding callers leaves the
+        invariant breakable at the ones nobody remembered.
+        """
+        return self.document_kind == DOCUMENT_KIND_INVOICE
+
+    @transition(
+        field=status,
+        source=["issued", "overdue"],
+        target="paid",
+        conditions=[_document_is_collectable],
+    )
     def mark_as_paid(self) -> None:
         """Mark invoice as paid."""
         self.paid_at = timezone.now()
@@ -757,6 +787,11 @@ class Invoice(models.Model):
         """Update invoice status based on associated payments."""
         if self.status in ("paid", "void", "refunded"):
             return  # Terminal states — do not touch
+        if not self._is_collectable():
+            # Not a failure worth logging: a reversal was never going to be paid, and
+            # letting it reach the transition only produces a warning about a document
+            # behaving exactly as intended.
+            return
 
         remaining = self.amount_due
         if remaining <= 0:

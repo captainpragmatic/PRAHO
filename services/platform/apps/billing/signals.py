@@ -1395,6 +1395,10 @@ def _handle_invoice_issued(invoice: Invoice) -> None:
 def _handle_invoice_paid(invoice: Invoice) -> None:
     """Handle invoice being paid"""
     try:
+        if not _is_receivable(invoice):
+            # Defence behind the transition guard, and it covers more than the receipt:
+            # this handler also credits payment history and activates pending services.
+            return
         if not invoice.paid_at:
             Invoice.objects.filter(pk=invoice.pk).update(paid_at=timezone.now())
 

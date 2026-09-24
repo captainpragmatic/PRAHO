@@ -1476,6 +1476,7 @@ class TestHandleInvoicePaid(TestCase):
     @patch("apps.billing.signals._send_payment_received_email")
     def test_sets_paid_at(self, mock_email, mock_cancel, mock_history, mock_activate):
         invoice = MagicMock()
+        invoice.document_kind = "invoice"  # a real Invoice always has one
         invoice.paid_at = None
         invoice.pk = 1
         _handle_invoice_paid(invoice)
@@ -1490,6 +1491,7 @@ class TestHandleInvoicePaid(TestCase):
     @patch("apps.billing.signals._send_payment_received_email")
     def test_already_paid_at(self, mock_email, mock_cancel, mock_history, mock_activate):
         invoice = MagicMock()
+        invoice.document_kind = "invoice"  # a real Invoice always has one
         invoice.paid_at = timezone.now()
         _handle_invoice_paid(invoice)
         # Should still process but not update paid_at
