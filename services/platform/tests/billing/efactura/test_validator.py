@@ -376,39 +376,31 @@ class CIUSROValidatorTestCase(TestCase):
             )
         )
 
-    def test_a_credit_note_may_not_carry_a_negative_total(self):
-        """A credit note states its direction once, in CreditNoteTypeCode 381."""
-        xml = self._credit_note_xml().replace(
-            '<cbc:TaxInclusiveAmount currencyID="RON">1190.00</cbc:TaxInclusiveAmount>',
-            '<cbc:TaxInclusiveAmount currencyID="RON">-1190.00</cbc:TaxInclusiveAmount>',
-        )
+    def test_a_credit_note_may_carry_negative_amounts(self):
+        """EN16931 allows it, for both lines and totals.
 
-        codes = [e.code for e in self.validator.validate(xml).errors]
-
-        self.assertIn("BR-CN-SIGN", codes, codes)
-
-    def test_a_credit_note_may_carry_a_negative_line(self):
-        """EN16931 allows it, so the rule must not reach into the lines.
-
-        A correction that moves two lines in opposite directions is an ordinary document:
-        one line credited, another re-charged. An earlier version of this rule swept every
-        monetary element and would have rejected it - on the BUILT-IN e-Factura path too,
-        because nothing gates this validator behind the provider setting.
+        A rule forbidding every negative amount on a credit note lived here briefly and
+        rejected valid documents - unconditionally, so on the built-in e-Factura path too.
+        BR-27 is the sign constraint the standard actually states, and it catches the
+        whole-document flip this was written for anyway, because such a document emits a
+        negative item price as well.
         """
-        xml = self._credit_note_xml().replace(
-            '<cbc:LineExtensionAmount currencyID="RON">1000.00</cbc:LineExtensionAmount>\n        <cac:Item>',
-            '<cbc:LineExtensionAmount currencyID="RON">-1000.00</cbc:LineExtensionAmount>\n        <cac:Item>',
+        xml = (
+            self._credit_note_xml()
+            .replace(
+                '<cbc:TaxInclusiveAmount currencyID="RON">1190.00</cbc:TaxInclusiveAmount>',
+                '<cbc:TaxInclusiveAmount currencyID="RON">-1190.00</cbc:TaxInclusiveAmount>',
+            )
+            .replace(
+                '<cbc:LineExtensionAmount currencyID="RON">1000.00</cbc:LineExtensionAmount>\n        <cac:Item>',
+                '<cbc:LineExtensionAmount currencyID="RON">-1000.00</cbc:LineExtensionAmount>\n        <cac:Item>',
+            )
         )
 
         codes = [e.code for e in self.validator.validate(xml).errors]
 
-        self.assertNotIn("BR-CN-SIGN", codes, f"a negative credit-note line is legitimate; got {codes}")
-
-    def test_an_invoice_is_not_subject_to_the_credit_note_sign_rule(self):
-        """The regression guard: the rule is about how a REVERSAL states its direction."""
-        codes = [e.code for e in self.validator.validate(self._get_minimal_valid_xml()).errors]
-
-        self.assertNotIn("BR-CN-SIGN", codes, codes)
+        self.assertNotIn("BR-CN-SIGN", codes, f"that rule is retired; got {codes}")
+        self.assertNotIn("BR-27", codes, "the item price is still positive")
 
     def test_br_co_14_standard_tax_must_equal_base_times_rate(self):
         """BR-CO-14: standard-rate category tax must equal taxable base * rate."""

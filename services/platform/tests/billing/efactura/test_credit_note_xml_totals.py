@@ -141,7 +141,8 @@ class DiscountedCreditNoteReconciliationTests(TestCase):
         codes = self._codes(xml)
 
         self.assertNotIn("BR-27", codes, f"a negative item net price is not filable; got {codes}")
-        self.assertNotIn("BR-CN-SIGN", codes, f"got {codes}")
+        self.assertNotIn("-", xml.split("<cac:LegalMonetaryTotal>")[1].split("</cac:LegalMonetaryTotal>")[0],
+                         "the document's own totals are magnitudes")
 
     def test_the_ledger_stays_signed(self) -> None:
         """Only the representation changes. The rows the rest of the system reads - and

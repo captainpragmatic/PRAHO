@@ -1661,13 +1661,15 @@ def _refund_corrections(customer_ids: list[Any]) -> Any:
     """
     from .refund_models import Refund  # noqa: PLC0415
 
+    # Against an invoice THIS REPORT COUNTED, reached directly or through its payment -
+    # the same two links `_project_settled_refunds` uses to decide an invoice is refunded.
+    # Merely having an invoice link is not enough: a refund against an unissued draft, or
+    # against a credit note, would subtract money `_revenue_documents` never added. A
+    # refund attached only to an order or a proforma is likewise not this report's.
+    counted = _revenue_documents(customer_ids)
     return (
-        Refund.objects.filter(customer_id__in=customer_ids, status="completed")
-        # Against an invoice, directly or through its payment - the same two links
-        # `_project_settled_refunds` uses to decide an invoice is refunded. A refund
-        # attached only to an order or a proforma would otherwise subtract money that
-        # `_revenue_documents` never added.
-        .filter(Q(invoice__isnull=False) | Q(payment__invoice__isnull=False))
+        Refund.objects.filter(status="completed")
+        .filter(Q(invoice__in=counted) | Q(payment__invoice__in=counted))
         .distinct()
     )
 
@@ -1750,12 +1752,18 @@ def vat_report(request: HttpRequest) -> HttpResponse:
     invoices = Invoice.objects.filter(
         customer_id__in=customer_ids,
         created_at__date__range=[start_date, end_date],
-        # `refunded` belongs here for the same reason the revenue query keeps the original:
-        # VAT is declared when a document is ISSUED, and a declaration already filed with
-        # ANAF cannot be un-filed by a later refund. Excluding it made a period's VAT change
-        # retroactively, which is the one thing a tax report must never do. The correction
-        # arrives as the credit note, in the period the credit note was issued.
-        status__in=["issued", "paid", "refunded", "partially_refunded"],
+        # `refunded` is deliberately ABSENT, and that is not satisfactory - it is the least
+        # wrong of two wrong answers pending a decision. Keeping a refunded original would
+        # be right IF something corrected it: VAT is declared when a document is issued, and
+        # a filing already made cannot be un-filed by a later refund. But only the provider
+        # path produces a correcting credit note. Keeping it on the built-in path would
+        # leave that VAT overstated permanently, which is worse than the retroactive
+        # restatement that excluding it causes. Completing this needs a built-in correction
+        # document, or a rule for deriving the correction from the `Refund` row.
+        # `overdue` is an ISSUED document whose VAT is owed; omitting it made a period's
+        # VAT fall to zero the moment an invoice aged past its due date, and reappear if it
+        # was later paid. `refunded` is NOT here - see the note above.
+        status__in=["issued", "overdue", "paid", "partially_refunded"],
     )
 
     total_vat = invoices.aggregate(total_vat=Sum("tax_cents"))["total_vat"] or Decimal("0")

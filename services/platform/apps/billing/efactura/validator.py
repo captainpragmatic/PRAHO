@@ -111,18 +111,6 @@ class CIUSROValidator:
     # Every element that carries money, named once. Both the currency check and the
     # credit-note magnitude check ask a question about "an amount", and a second copy of
     # this list is how the two would come to disagree about what one is.
-    # A credit note's own statement of how large the correction is. Its LINES are not
-    # here: EN16931 allows a negative one, so a blanket sweep over every amount would
-    # reject a legitimate mixed correction.
-    CREDIT_NOTE_MAGNITUDE_XPATH: ClassVar[str] = (
-        ".//cac:LegalMonetaryTotal/cbc:LineExtensionAmount | "
-        ".//cac:LegalMonetaryTotal/cbc:TaxExclusiveAmount | "
-        ".//cac:LegalMonetaryTotal/cbc:TaxInclusiveAmount | "
-        ".//cac:LegalMonetaryTotal/cbc:AllowanceTotalAmount | "
-        ".//cac:LegalMonetaryTotal/cbc:ChargeTotalAmount | "
-        ".//cac:LegalMonetaryTotal/cbc:PayableAmount"
-    )
-
     MONETARY_ELEMENT_XPATH: ClassVar[str] = (
         ".//cbc:Amount | .//cbc:BaseAmount | .//cbc:PriceAmount | "
         ".//cac:TaxTotal[cac:TaxSubtotal]/cbc:TaxAmount | "
@@ -236,8 +224,6 @@ class CIUSROValidator:
 
         # Step 7: Validate line items
         self._validate_invoice_lines(doc, result, is_credit_note)
-        if is_credit_note:
-            self._validate_credit_note_magnitudes(doc, result)
 
         # Step 8: Romanian-specific rules
         self._validate_romanian_rules(doc, result)
@@ -631,7 +617,14 @@ class CIUSROValidator:
             if not line_amount:
                 result.add_error("BR-25", "Line extension amount is mandatory", line_path)
 
-            # BR-27: BT-146 item net price shall not be negative. A credit note carries
+            # BR-27: BT-146 item net price shall not be negative. This is the whole of
+            # the sign checking here, deliberately. A broader "no negative amount on a
+            # credit note" rule lived here briefly and was wrong twice over: EN16931 allows
+            # a credit note to carry a negative LINE, and it allows a negative TOTAL, so
+            # the rule rejected valid documents - unconditionally, on the built-in
+            # e-Factura path too, since nothing gates this validator behind the provider
+            # setting. BR-27 alone catches the defect it was written for, because a
+            # whole-document sign flip emits a negative price as well. A credit note carries
             # its direction in CreditNoteTypeCode 381, so negating the price states the
             # reversal twice and breaks a rule EN16931 states outright - unlike the
             # reconciliation rules, which are equalities that negation preserves and which
@@ -649,38 +642,6 @@ class CIUSROValidator:
             item_tax_cat = self._get_text(line, ".//cac:Item/cac:ClassifiedTaxCategory/cbc:ID")
             if not item_tax_cat:
                 result.add_error("BR-31", "Item tax category is mandatory", line_path)
-
-    def _validate_credit_note_magnitudes(self, doc: etree._Element, result: ValidationResult) -> None:
-        """A credit note states its direction once, in CreditNoteTypeCode 381.
-
-        Scoped to the document's OWN totals, and deliberately not to its lines. EN16931
-        permits a credit note to carry a negative LINE - a correction that moves two lines
-        in opposite directions is a normal document - and BR-27 constrains the item price,
-        not every monetary element. An earlier version of this rule covered every amount in
-        the document and would have rejected such a credit note outright, on the built-in
-        e-Factura path too, since nothing gates this validator behind the provider setting.
-
-        What remains is the invariant that was actually broken: a credit note's own totals
-        state the magnitude of the correction, and its direction is `CreditNoteTypeCode`
-        381. A local rule rather than an EN16931 one, collected here because a document
-        that negates every total satisfies BR-CO-10/13/15/16 exactly - they are equalities,
-        and negation preserves them - so without it the validator is a partial-flip
-        detector that cannot see a consistent whole-document flip.
-        """
-        for amount in self._find_all(doc, self.CREDIT_NOTE_MAGNITUDE_XPATH):
-            text = (amount.text or "").strip()
-            if not text:
-                continue
-            try:
-                value = Decimal(text)
-            except (InvalidOperation, ValueError):
-                continue  # BR-DEC-15 / BR-AMOUNT own malformed numbers
-            if value < 0:
-                result.add_error(
-                    "BR-CN-SIGN",
-                    f"{etree.QName(amount).localname} {value} must be a positive magnitude on a "
-                    f"credit note; the reversal is expressed by CreditNoteTypeCode 381",
-                )
 
     def _validate_romanian_rules(self, doc: etree._Element, result: ValidationResult) -> None:
         """Validate Romania-specific CIUS-RO rules."""
