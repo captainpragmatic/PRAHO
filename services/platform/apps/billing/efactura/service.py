@@ -107,6 +107,47 @@ class SubmissionClaim:
     is_credit_note: bool
 
 
+def _repair_stale_document_type(document: EFacturaDocument, invoice: Invoice) -> None:
+    """Correct a row written before its invoice's kind was consulted.
+
+    `get_or_create(defaults=…)` applies `defaults` only on create, so a document row
+    written when both call sites hardcoded INVOICE keeps that value for a credit note
+    forever. `_prepare_and_claim_submission` reads `is_credit_note` from this stored
+    field, so the row would be submitted to ANAF as an ordinary invoice carrying negative
+    amounts and no reference to the document it reverses.
+
+    Bounded by `repairable_statuses()`: once anything has been sent, our copy has to keep
+    describing what was sent.
+    """
+    from apps.billing.invoice_models import DOCUMENT_KIND_CREDIT_NOTE  # noqa: PLC0415  # ADR-0007
+
+    # One direction only: a credit note still typed as an invoice. The opposite pairing is
+    # NOT corrected - a document deliberately typed CREDIT_NOTE against an ordinary invoice
+    # row is how the credit-note submission route is exercised, and forcing agreement both
+    # ways silently rerouted it, which two existing tests caught.
+    #
+    # Written as the whole predicate rather than the type check alone, to read identically
+    # to migration 0056's. The kind half cannot change an outcome today - for an ordinary
+    # invoice the expected type already equals the stored one - so mutation cannot kill it;
+    # it is here so the two statements of one rule stay legible side by side.
+    stale_credit_note = (
+        invoice.document_kind == DOCUMENT_KIND_CREDIT_NOTE
+        and document.document_type == EFacturaDocumentType.INVOICE.value
+    )
+    if not stale_credit_note:
+        return
+
+    expected = _document_type_for(invoice)
+    if document.status not in EFacturaStatus.repairable_statuses():
+        logger.warning(
+            f"⚠️ [e-Factura] Document for invoice {invoice.pk} is typed {document.document_type!r} "
+            f"but the invoice is a {expected!r}; left as filed because it is {document.status!r}."
+        )
+        return
+    document.document_type = expected
+    document.save(update_fields=["document_type", "updated_at"])
+
+
 def _document_type_for(invoice: Invoice) -> str:
     """Which kind of document ANAF is being given.
 
@@ -242,6 +283,10 @@ class EFacturaService:
                 "environment": getattr(settings, "EFACTURA_ENVIRONMENT", "test"),
             },
         )
+        # Under the lock, before anything reads `document.document_type` to choose a
+        # builder or to set `is_credit_note` on the claim below. A no-op for a row this
+        # call just created, whose type already agrees.
+        _repair_stale_document_type(document, locked_invoice)
         now = timezone.now()
 
         if document.status in {
@@ -655,6 +700,7 @@ class EFacturaService:
                 "environment": getattr(settings, "EFACTURA_ENVIRONMENT", "test"),
             },
         )
+        _repair_stale_document_type(document, invoice)
         return document
 
     def _generate_xml(self, invoice: Invoice, document: EFacturaDocument) -> str:

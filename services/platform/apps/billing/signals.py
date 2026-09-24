@@ -2001,23 +2001,16 @@ def _handle_efactura_refund_reporting(invoice: Invoice) -> None:
 
                 efactura_doc = getattr(invoice, "efactura_document", None)
                 if efactura_doc and efactura_doc.status == EFacturaStatus.ACCEPTED.value:
-                    # Generate credit note XML via UBLCreditNoteBuilder
-                    try:
-                        from apps.billing.efactura.xml_builder import UBLCreditNoteBuilder
-
-                        builder = UBLCreditNoteBuilder(invoice, original_invoice=invoice)
-                        credit_note_xml = builder.build()
-
-                        # Store as EFacturaDocument for later submission
-                        EFacturaDocument.objects.create(
-                            invoice=invoice,
-                            document_type="credit_note",
-                            xml_content=credit_note_xml,
-                            status=EFacturaStatus.DRAFT.value,
-                        )
-                        logger.info(f"✅ [e-Factura] Credit note generated for refunded invoice {invoice.number}")
-                    except Exception as cn_err:
-                        logger.error(f"🔥 [e-Factura] Failed to generate credit note for {invoice.number}: {cn_err}")
+                    # A credit note is NOT generated here, and never was. This block used
+                    # to try, and could not succeed on any execution: it passed the
+                    # refunded original as its own `original_invoice`, and then wrote an
+                    # `EFacturaDocument` for an invoice whose own branch condition proves
+                    # it already has one - a OneToOneField, so an IntegrityError that the
+                    # surrounding `except` logged and swallowed every single time.
+                    #
+                    # The reversal is a real document with its own row, created by
+                    # `issue_storno_for_invoice` and typed by `_document_type_for`. All
+                    # that belongs here is the record that one is owed.
 
                     # Log compliance event
                     compliance_request = ComplianceEventRequest(
