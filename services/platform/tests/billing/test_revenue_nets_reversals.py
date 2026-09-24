@@ -1,10 +1,14 @@
-"""Revenue and VAT must agree about a reversal.
+"""Revenue must not subtract a refunded invoice twice.
 
-The design's bet is that a correction is a negative Invoice row, so "reporting that
-sums invoice rows sees the correction without needing to know this integration exists"
-(`issue_storno_for_invoice`). The VAT report honours that - it sums `issued` and `paid`.
-The revenue report sums `paid` only, and a credit note's life ends at `issued` because
-there is nothing to collect. Same event, two staff screens, two different numbers.
+A credit note only ever exists for an invoice that is ALREADY `refunded`:
+`_storno_refusal_reason` refuses to reverse anything else, because SmartBill's storno
+carries no amount and reverses the whole document. A refunded invoice has already left
+the `paid` filter, so counting the credit note on top removes the same money a second
+time - a fully refunded 500 RON invoice reported -500 instead of zero.
+
+The earlier version of this test left the original `paid`, which the real flow never
+does, so it asserted a state the system cannot reach and missed the double subtraction
+entirely.
 """
 
 from __future__ import annotations
@@ -75,39 +79,31 @@ class RevenueNetsAnIssuedReversalTests(TestCase):
         self.assertEqual(response.status_code, 200)
         return response.context["total_revenue"] or 0
 
-    def test_revenue_subtracts_a_reversal(self) -> None:
+    def test_a_refunded_invoice_and_its_reversal_net_to_zero(self) -> None:
+        """The whole lifecycle, in the order the system actually produces it."""
+        baseline = self._total_revenue()
+
         original = self._paid_invoice("FCT-REV-1", 50000)
-        before = self._total_revenue()
+        self.assertEqual(self._total_revenue(), baseline + 50000, "a collected invoice is revenue")
+
+        force_status(original, "refunded")
+        after_refund = self._total_revenue()
+        self.assertEqual(after_refund, baseline, "refunding it takes the money back out")
 
         self._issued_credit_note(original, 50000)
 
         self.assertEqual(
             self._total_revenue(),
-            before - 50000,
-            "a reversal the VAT report already nets must not be invisible to revenue",
+            baseline,
+            "the credit note is the fiscal record of a refund already reflected here; "
+            "counting it too subtracts the same money twice",
         )
 
-    def test_revenue_still_counts_ordinary_paid_invoices(self) -> None:
-        """The regression guard."""
-        self._paid_invoice("FCT-REV-2", 30000)
+    def test_an_uncollected_invoice_is_not_revenue(self) -> None:
+        """The regression guard on the other side: only collected money counts."""
+        baseline = self._total_revenue()
 
-        self.assertEqual(self._total_revenue(), 30000)
+        invoice = self._paid_invoice("FCT-REV-2", 12100)
+        force_status(invoice, "refunded")
 
-    def test_an_unissued_reversal_is_not_counted(self) -> None:
-        """A draft credit note is not yet a document."""
-        original = self._paid_invoice("FCT-REV-3", 40000)
-        Invoice.objects.create(
-            customer=self.customer,
-            currency=self.currency,
-            number=None,
-            status="draft",
-            document_kind=DOCUMENT_KIND_CREDIT_NOTE,
-            reverses_invoice=original,
-            subtotal_cents=-40000,
-            tax_cents=0,
-            total_cents=-40000,
-            bill_to_name="Test Company SRL",
-            bill_to_country="RO",
-        )
-
-        self.assertEqual(self._total_revenue(), 40000)
+        self.assertEqual(self._total_revenue(), baseline)

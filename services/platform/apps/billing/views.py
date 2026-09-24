@@ -1626,19 +1626,23 @@ def process_payment(  # noqa: C901, PLR0911  # Explicit financial validation and
 
 
 def _revenue_documents(customer_ids: list[Any]) -> Any:
-    """Documents that count towards revenue, corrections included.
+    """Cash revenue: invoices that were actually collected.
 
-    A reversal is a negative Invoice row precisely so that reporting which sums invoice
-    rows nets the correction without knowing the issuer integration exists. But its life
-    ends at `issued` - there is nothing to collect - so a plain `status="paid"` filter
-    counts the original and silently ignores the document that takes it back, while the
-    VAT report (issued + paid) nets it. Same event, two screens, two numbers.
+    A credit note is deliberately NOT included. It only ever exists for an invoice that
+    is already `refunded` - `_storno_refusal_reason` refuses to reverse anything else,
+    because SmartBill's storno carries no amount and reverses the whole document - and a
+    refunded invoice has already dropped out of `paid`. Adding the credit note on top
+    therefore subtracts the same money twice: a fully refunded 500 RON invoice reported
+    -500 instead of zero.
+
+    This query is also grouped by month in `billing_reports`, so "net the correction into
+    the current period" is not a neutral change: it moves revenue between periods. What
+    the monthly series should show when a refund lands in a later month than the sale,
+    and whether `vat_report` (issued + paid, which counts the credit note while excluding
+    the refunded original) should agree, is a revenue-recognition decision rather than a
+    detail of this integration. Tracked in #534.
     """
-    from .invoice_models import DOCUMENT_KIND_CREDIT_NOTE  # noqa: PLC0415
-
-    return Invoice.objects.filter(customer_id__in=customer_ids).filter(
-        Q(status="paid") | Q(status="issued", document_kind=DOCUMENT_KIND_CREDIT_NOTE)
-    )
+    return Invoice.objects.filter(customer_id__in=customer_ids).filter(status="paid")
 
 
 @billing_staff_required
