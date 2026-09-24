@@ -421,6 +421,13 @@ def _open_storno_attempt(
             # evidence an operator has to reconcile against.
             return Err(claim_result.error)
 
+        # Only now. Holding the claim proves this reversal was `pending` or `failed` -
+        # not claimed, issued, or outcome_unknown - so it cannot be a document the provider
+        # may already hold. It also puts the write after the ProviderIssuance lock, which
+        # is the order `_finalize` and `adopt_provider_document` use; repairing before the
+        # claim took Invoice -> ProviderIssuance and could deadlock against them.
+        _repair_unissued_reversal(original, credit_note)
+
         return Ok((credit_note.pk, claim_result.unwrap()))
 
 
@@ -535,7 +542,18 @@ def _repair_unissued_reversal(original: Invoice, credit_note: Invoice) -> None:
     if not repairs:
         return
 
-    Invoice.objects.filter(pk=credit_note.pk).update(**repairs)
+    # Compare-and-swap. The guard above read an unlocked copy, so between that read and
+    # this write another worker may have numbered and locked this document. Putting the
+    # state in the WHERE clause is what makes the check and the write one decision -
+    # PostgreSQL re-evaluates it after granting the row lock. `queryset.update()` bypasses
+    # `Invoice.save()`, so the locked-invoice guard would never have caught it.
+    applied = Invoice.objects.filter(pk=credit_note.pk, number__isnull=True, locked_at__isnull=True).update(**repairs)
+    if not applied:
+        logger.info(f"⏭️ [Issuance] Reversal {credit_note.pk} was issued concurrently; left as filed.")
+        return
+    # `.update()` fires no signals, so nothing else would record that a financial document
+    # was rewritten.
+    logger.info(f"✅ [Issuance] Repaired unissued reversal {credit_note.pk} from {original.pk}: {sorted(repairs)}")
     for field, value in repairs.items():
         setattr(credit_note, field, value)
 
@@ -557,7 +575,12 @@ def _get_or_create_credit_note(original: Invoice) -> Invoice:
         # exactly as it is, including one already issued.
         if not existing.lines.exists():
             _mirror_lines_negated(original, existing)
-        _repair_unissued_reversal(original, existing)
+        # The FX/discount repair deliberately does NOT happen here. This function runs
+        # before the reversal's own issuance state has been looked at, so a credit note in
+        # `outcome_unknown` - the state that exists precisely because the provider may hold
+        # a numbered document we never heard about - would be rewritten anyway, and the
+        # refusal that follows is deliberately not rolled back. It runs once a claim is
+        # held instead; see `_open_storno_attempt`.
         return existing
 
     credit_note = Invoice.objects.create(

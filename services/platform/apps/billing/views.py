@@ -1743,6 +1743,8 @@ def vat_report(request: HttpRequest) -> HttpResponse:
     if not isinstance(request.user, User):
         return redirect("users:login")
 
+    from .invoice_models import DOCUMENT_KIND_INVOICE  # noqa: PLC0415
+
     customer_ids = _get_accessible_customer_ids(request.user)
 
     # VAT calculations for the selected period
@@ -1764,6 +1766,13 @@ def vat_report(request: HttpRequest) -> HttpResponse:
         # VAT fall to zero the moment an invoice aged past its due date, and reappear if it
         # was later paid. `refunded` is NOT here - see the note above.
         status__in=["issued", "overdue", "paid", "partially_refunded"],
+        # Ordinary invoices only. Excluding the refunded original ALREADY restates the
+        # period, so summing its credit note's negative tax on top corrects the same refund
+        # twice - and only on the provider path, since that is the only one that mints a
+        # credit note. Excluding both keeps the pair netting to zero and makes the two
+        # issuers answer identically. It is the same tradeoff as the note above: restated
+        # rather than corrected, until there is a correction document on both paths.
+        document_kind=DOCUMENT_KIND_INVOICE,
     )
 
     total_vat = invoices.aggregate(total_vat=Sum("tax_cents"))["total_vat"] or Decimal("0")

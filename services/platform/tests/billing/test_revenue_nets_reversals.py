@@ -186,6 +186,39 @@ class RevenueRecognitionTests(TestCase):
 
         self.assertEqual(total, 0, "counting both the refund and its credit note subtracts twice")
 
+    def _vat_total(self) -> int:
+        response = self.client.get(
+            reverse("billing:vat_report"),
+            {"start_date": "2026-01-01", "end_date": "2026-12-31"},
+        )
+        self.assertEqual(response.status_code, 200)
+        return response.context["total_vat"] or 0
+
+    def test_vat_corrects_a_refund_exactly_once(self) -> None:
+        """Dropping the refunded original AND counting its credit note corrects twice.
+
+        The original leaves the report the moment it becomes `refunded`, so the period is
+        already restated; summing the credit note's negative tax on top subtracts the same
+        VAT a second time. It only bites on the provider path, because that is the only one
+        that produces a credit note - so the same refund would move VAT differently
+        depending on which issuer was configured.
+        """
+        invoice = self._paid_invoice(50000, issuer=ISSUER_SMARTBILL, month=1)
+        Invoice.objects.filter(pk=invoice.pk).update(tax_cents=9500)
+        force_status(invoice, "refunded")
+        self._refund(invoice, 50000, month=3)
+        credit_note = self._issued_credit_note(invoice, 50000, month=3)
+        Invoice.objects.filter(pk=credit_note.pk).update(tax_cents=-9500)
+
+        self.assertEqual(self._vat_total(), 0, "the correction must be applied once, not twice")
+
+    def test_vat_keeps_an_ordinary_issued_invoice(self) -> None:
+        """The regression guard: this must not stop counting VAT that is genuinely owed."""
+        invoice = self._paid_invoice(50000, month=2)
+        Invoice.objects.filter(pk=invoice.pk).update(tax_cents=9500)
+
+        self.assertEqual(self._vat_total(), 9500)
+
     def test_a_collected_invoice_is_revenue(self) -> None:
         """The regression guard: none of this may disturb an ordinary sale."""
         self._paid_invoice(12100, month=5)
