@@ -16,7 +16,8 @@ from unittest.mock import MagicMock, patch
 from django.test import RequestFactory, TestCase
 from django.utils import timezone
 
-from apps.billing.invoice_models import ISSUER_BUILTIN
+from apps.billing.efactura.models import EFacturaDocument, EFacturaStatus
+from apps.billing.invoice_models import ISSUER_BUILTIN, Currency
 from apps.billing.metering_service import UsageAlertService
 from apps.billing.models import Invoice, InvoiceSequence, ProformaInvoice
 from apps.billing.proforma_models import ProformaInvoice as ProformaInvoiceModel
@@ -38,6 +39,7 @@ from apps.billing.tasks import (
 )
 from apps.billing.views import api_process_refund, generate_e_factura, invoice_refund
 from apps.users.models import User
+from tests.factories.billing_factories import CustomerFactory
 
 # ===============================================================================
 # GROUP A: services.py Placeholder Classes
@@ -422,33 +424,71 @@ class ApiRefundViewTests(TestCase):
 
 
 class CreditNoteSignalTests(TestCase):
-    """E1: Credit note for e-Factura refund"""
+    """E1: what the refund handler does about e-Factura, and what it does not.
 
-    @patch("apps.billing.efactura.models.EFacturaDocument")
-    @patch("apps.billing.efactura.models.EFacturaStatus")
-    @patch("apps.billing.efactura.xml_builder.UBLCreditNoteBuilder")
-    def test_credit_note_generated(self, mock_builder_cls, mock_status, mock_doc_cls):
-        mock_status.ACCEPTED.value = "accepted"
-        mock_status.DRAFT.value = "draft"
+    It used to try to generate a credit note here, and could not succeed on any
+    execution: it passed the refunded original as its own `original_invoice`, then wrote
+    an `EFacturaDocument` for an invoice whose own branch condition proves it already has
+    one - a OneToOneField, so an IntegrityError the surrounding handler logged and
+    swallowed every time.
 
-        mock_builder = MagicMock()
-        mock_builder.build.return_value = "<CreditNote/>"
-        mock_builder_cls.return_value = mock_builder
+    The previous version of this test asserted that it worked, and passed, because every
+    collaborator was mocked - including the constraint that guaranteed the failure. It is
+    rewritten against real rows so it cannot pass vacuously again.
+    """
 
-        mock_invoice = MagicMock(
-            number="INV-1",
+    def setUp(self) -> None:
+        self.currency = Currency.objects.get_or_create(code="RON", defaults={"symbol": "L", "decimals": 2})[0]
+        self.invoice = Invoice.objects.create(
+            customer=CustomerFactory(),
+            currency=self.currency,
+            number="FCT-000970",
+            status="draft",
+            issued_at=timezone.now(),
+            subtotal_cents=10000,
+            tax_cents=2100,
+            total_cents=12100,
+            bill_to_name="Test Company SRL",
             bill_to_country="RO",
-            updated_at=timezone.now(),
-            # Fails closed on unknown provenance; the double must declare its issuer.
             issuer_provider=ISSUER_BUILTIN,
         )
-        mock_doc = MagicMock(status="accepted", anaf_upload_index="UI123")
-        mock_invoice.efactura_document = mock_doc
+        document = EFacturaDocument.objects.create(invoice=self.invoice, environment="test")
+        EFacturaDocument.objects.filter(pk=document.pk).update(
+            status=EFacturaStatus.ACCEPTED.value, anaf_upload_index="UI123"
+        )
+        # Re-fetched: the reverse one-to-one descriptor cached the row as it was at
+        # create(), so the handler would otherwise read the pre-update status.
+        self.invoice = Invoice.objects.get(pk=self.invoice.pk)
 
-        _handle_efactura_refund_reporting(mock_invoice)
+    def test_no_second_document_is_written_for_the_refunded_original(self) -> None:
+        _handle_efactura_refund_reporting(self.invoice)
 
-        mock_builder_cls.assert_called_once()
-        mock_doc_cls.objects.create.assert_called_once()
+        self.assertEqual(
+            EFacturaDocument.objects.filter(invoice=self.invoice).count(),
+            1,
+            "the reversal is its own document, created elsewhere; this invoice keeps only its own",
+        )
+
+    def test_the_refund_path_reports_no_error(self) -> None:
+        """The observable cost of the removed block, and the only thing that can detect it.
+
+        It failed on every execution and its handler logged the failure, so each refunded
+        Romanian invoice with an accepted e-Factura emitted an error line that nothing
+        could act on and that meant nothing. The document count alone cannot see the
+        difference - the failed write was swallowed and left the count at one either way.
+        """
+        with self.assertNoLogs("apps.billing.signals", level="ERROR"):
+            _handle_efactura_refund_reporting(self.invoice)
+
+    def test_the_outstanding_correction_is_recorded(self) -> None:
+        """What the handler is actually for: leaving a trace that a credit note is owed."""
+        with patch("apps.billing.signals.AuditService.log_compliance_event") as logged:
+            _handle_efactura_refund_reporting(self.invoice)
+
+        logged.assert_called_once()
+        request = logged.call_args.args[0]
+        self.assertEqual(request.status, "pending")
+        self.assertIn("credit note pending", request.description)
 
 
 # ===============================================================================

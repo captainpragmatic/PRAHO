@@ -339,6 +339,55 @@ class CIUSROValidatorTestCase(TestCase):
         self.assertIn("BR-CO-16-PREPAID", codes, codes)
         self.assertNotIn("BR-CO-16", codes, f"only the prepaid rule may explain this: {codes}")
 
+    def test_br_27_rejects_a_negative_item_net_price(self):
+        """The one element where a negated credit note broke a STATED EN16931 rule.
+
+        Without this the validator cannot see the convention at all: BR-CO-10/13/15/16 are
+        equalities, and negation preserves them, so a consistently negated document passes
+        every one. Deleting this rule would therefore break no other test - which is the
+        whole reason it needs a test of its own.
+        """
+        xml = self._get_minimal_valid_xml().replace(
+            '<cbc:PriceAmount currencyID="RON">1000.00</cbc:PriceAmount>',
+            '<cbc:PriceAmount currencyID="RON">-1000.00</cbc:PriceAmount>',
+        )
+
+        codes = [e.code for e in self.validator.validate(xml).errors]
+
+        self.assertIn("BR-27", codes, codes)
+
+    def test_a_positive_item_net_price_is_accepted(self):
+        """The regression guard: BR-27 must not fire on an ordinary document."""
+        codes = [e.code for e in self.validator.validate(self._get_minimal_valid_xml()).errors]
+
+        self.assertNotIn("BR-27", codes, codes)
+
+    def test_a_credit_note_may_not_carry_a_negative_amount(self):
+        """A credit note states its direction once, in CreditNoteTypeCode 381."""
+        xml = (
+            self._get_minimal_valid_xml()
+            .replace("<Invoice ", "<CreditNote ")
+            .replace("</Invoice>", "</CreditNote>")
+            .replace("Invoice-2", "CreditNote-2")
+            .replace("cac:InvoiceLine", "cac:CreditNoteLine")
+            .replace("cbc:InvoicedQuantity", "cbc:CreditedQuantity")
+            .replace("<cbc:InvoiceTypeCode>380</cbc:InvoiceTypeCode>", "<cbc:CreditNoteTypeCode>381</cbc:CreditNoteTypeCode>")
+            .replace(
+                '<cbc:TaxInclusiveAmount currencyID="RON">1190.00</cbc:TaxInclusiveAmount>',
+                '<cbc:TaxInclusiveAmount currencyID="RON">-1190.00</cbc:TaxInclusiveAmount>',
+            )
+        )
+
+        codes = [e.code for e in self.validator.validate(xml).errors]
+
+        self.assertIn("BR-CN-SIGN", codes, codes)
+
+    def test_an_invoice_is_not_subject_to_the_credit_note_sign_rule(self):
+        """The regression guard: the rule is about how a REVERSAL states its direction."""
+        codes = [e.code for e in self.validator.validate(self._get_minimal_valid_xml()).errors]
+
+        self.assertNotIn("BR-CN-SIGN", codes, codes)
+
     def test_br_co_14_standard_tax_must_equal_base_times_rate(self):
         """BR-CO-14: standard-rate category tax must equal taxable base * rate."""
         xml = self._get_minimal_valid_xml().replace(

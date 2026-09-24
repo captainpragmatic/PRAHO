@@ -556,7 +556,16 @@ class UBLInvoiceBuilder(BaseUBLBuilder):
 
     def _validate_invoice(self) -> None:
         """Validate invoice has required data for e-Factura."""
+        from apps.billing.invoice_models import DOCUMENT_KIND_CREDIT_NOTE  # noqa: PLC0415  # ADR-0007
+
         errors = []
+
+        if self.invoice.document_kind == DOCUMENT_KIND_CREDIT_NOTE:
+            # Fail closed rather than emit a 380 carrying negative amounts with no
+            # reference to the document it reverses. `builder_for` routes correctly, but
+            # nothing else stopped a caller naming this builder directly - which is how
+            # the staff download came to restate reversals as invoices.
+            errors.append("A credit note must be built by UBLCreditNoteBuilder, not as an invoice")
 
         if not self.invoice.number:
             errors.append("Invoice number is required")
@@ -1019,6 +1028,38 @@ class UBLCreditNoteBuilder(BaseUBLBuilder):
     def __init__(self, invoice: Invoice, original_invoice: Invoice | None = None):
         super().__init__(invoice)
         self.original_invoice = original_invoice
+
+    def _format_amount(self, amount: Decimal | float | int) -> str:
+        """Emit UBL magnitudes, while the ledger stays signed.
+
+        EN16931 states a credit note's direction once, in `CreditNoteTypeCode` 381; the
+        amounts are magnitudes, and BR-27 forbids a negative item net price outright.
+        PRAHO's ledger negates every amount on a reversal, so the two conventions are
+        reconciled here - the single boundary all eleven monetary emissions on this path
+        cross, including the allowance inherited from `BaseUBLBuilder`, which a reader of
+        this class's own body would never see.
+
+        Converted here rather than in `_get_line_gross` / `_get_document_discount` /
+        `_get_tax_amount` because those feed a chain - tax-exclusive, then tax-inclusive,
+        then payable, plus a taxable amount recomputed independently and required to stay
+        numerically identical - and flipping sources is where a partial application
+        silently breaks BR-CO-13.
+
+        Negated rather than `abs()`-ed: negation is linear, so every reconciliation that
+        held over the signed values holds exactly over these. `abs()` would not survive a
+        mixed-sign line, because the absolute value of a sum is not the sum of absolutes.
+
+        Gated on the document's KIND, not on this class: the credit-note builder is also
+        handed ordinary invoice rows by tests that exercise its structure, and those carry
+        positive amounts already.
+        """
+        from apps.billing.invoice_models import DOCUMENT_KIND_CREDIT_NOTE  # noqa: PLC0415  # ADR-0007
+
+        if getattr(self.invoice, "document_kind", None) != DOCUMENT_KIND_CREDIT_NOTE:
+            return super()._format_amount(amount)
+        negated = -Decimal(str(amount))
+        # `-Decimal("0")` renders as "-0.00", which is not a magnitude.
+        return super()._format_amount(negated or Decimal(0))
 
     def build(self) -> str:
         """Generate complete UBL 2.1 Credit Note XML."""

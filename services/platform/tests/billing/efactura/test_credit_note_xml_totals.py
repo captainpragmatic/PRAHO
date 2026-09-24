@@ -20,7 +20,7 @@ from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from apps.billing.efactura.validator import CIUSROValidator
-from apps.billing.efactura.xml_builder import UBLCreditNoteBuilder, UBLInvoiceBuilder
+from apps.billing.efactura.xml_builder import UBLCreditNoteBuilder, UBLInvoiceBuilder, XMLBuilderError
 from apps.billing.invoice_models import ISSUER_SMARTBILL, Currency, Invoice
 from apps.billing.issuers.service import _get_or_create_credit_note
 from tests.factories.billing_factories import CustomerFactory, InvoiceLineFactory
@@ -119,8 +119,55 @@ class DiscountedCreditNoteReconciliationTests(TestCase):
         xml = UBLCreditNoteBuilder(credit_note, original).build()
 
         self.assertIn("AllowanceTotalAmount", xml, "BT-107 must be present")
-        self.assertIn("-10.00", xml, "the allowance carries the document's own direction")
+        self.assertIn(">10.00<", xml, "as a magnitude: the direction is the document's type code")
         self.assertIn("AllowanceChargeReasonCode", xml, "the BG-20 detail must be emitted too")
+
+    def test_the_credit_note_carries_positive_magnitudes(self) -> None:
+        """Direction belongs to `CreditNoteTypeCode` 381, not to the sign of each amount.
+
+        Negating them states the reversal twice. `PriceAmount` is the element where that
+        breaks a rule EN16931 states outright (BR-27); the rest is a convention, and 381
+        with negative amounts is wrong under either reading of it.
+
+        The reconciliation rules cannot see this: BR-CO-10/13/15/16 are equalities, and
+        negation preserves them exactly, so a consistently negated document satisfies all
+        four. That is why this needs rules of its own rather than an assertion on the
+        emitted string.
+        """
+        original = self._discounted_original("FCT-000704")
+        credit_note = self._issued_reversal(original)
+
+        xml = UBLCreditNoteBuilder(credit_note, original).build()
+        codes = self._codes(xml)
+
+        self.assertNotIn("BR-27", codes, f"a negative item net price is not filable; got {codes}")
+        self.assertNotIn("BR-CN-SIGN", codes, f"got {codes}")
+
+    def test_the_ledger_stays_signed(self) -> None:
+        """Only the representation changes. The rows the rest of the system reads - and
+        the constraints that pin a credit note's totals non-positive - are untouched."""
+        original = self._discounted_original("FCT-000705")
+
+        credit_note = self._issued_reversal(original)
+
+        self.assertEqual(credit_note.total_cents, -original.total_cents)
+        self.assertEqual(credit_note.discount_cents, -original.discount_cents)
+
+    def test_the_invoice_builder_refuses_a_credit_note(self) -> None:
+        """Fail closed rather than emit a 380 carrying negative amounts.
+
+        `builder_for` routes correctly, but nothing stopped a caller naming this builder
+        directly - which is exactly how the staff XML download came to restate reversals
+        as invoices. Refusing here also retires the last sign-blind allowance guard, which
+        lives on this builder and was only ever reachable this way.
+        """
+        original = self._discounted_original("FCT-000706")
+        credit_note = self._issued_reversal(original)
+
+        with self.assertRaises(XMLBuilderError) as caught:
+            UBLInvoiceBuilder(credit_note).build()
+
+        self.assertIn("UBLCreditNoteBuilder", str(caught.exception))
 
     def test_a_discounted_ordinary_invoice_is_unaffected(self) -> None:
         """The regression guard: the shared emitter must not change for invoices."""

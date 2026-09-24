@@ -484,8 +484,13 @@ class RomanianDocumentPDFGenerator:
                 has_reverse_charge = True
 
         # Document-level discount (BT-92/107), DERIVED the same way the e-Factura XML
-        # derives it (gross line sum minus the net header subtotal) so the PDF and XML
-        # agree, including on legacy invoices. net/tax/total come from the invoice ledger.
+        # derives it (gross line sum minus the net header subtotal), including on legacy
+        # invoices. net/tax/total come from the invoice ledger.
+        #
+        # The two agree on MAGNITUDE, and deliberately not on sign: this is the copy a
+        # customer reads, where a storno conventionally shows negative totals, while the
+        # XML states its direction once in CreditNoteTypeCode 381 and carries magnitudes
+        # because EN16931 requires it (BR-27). Same derivation, two readers.
         net = self.document.subtotal
         derived = gross - net
         # Same clamp as the XML builder, and the same reason: a credit note's discount

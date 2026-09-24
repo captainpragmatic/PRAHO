@@ -73,6 +73,35 @@ was refunded would credit the customer money they never got back.
 
 An invoice can be reversed once. A credit note cannot itself be reversed.
 
+### Which sign a reversal carries, and where
+
+Three readers, two conventions, and they are not a contradiction:
+
+| Reader | Convention | Why |
+|---|---|---|
+| The **ledger** | signed — every amount negated | reporting that sums invoice rows nets the correction without knowing this integration exists; DB constraints pin a credit note's subtotal, tax and total non-positive |
+| The **e-Factura XML** | positive magnitudes | EN16931 states direction once, in `CreditNoteTypeCode` **381**. BR-27 forbids a negative item net price outright, and 381 carrying negative amounts is wrong under either valid reading (380-with-negatives being the other) |
+| The **PDF** | signed | it is the copy a customer reads, and a Romanian storno conventionally shows negative totals |
+
+The XML and the PDF therefore agree on every magnitude and deliberately differ on sign.
+
+The conversion happens at one place — `UBLCreditNoteBuilder._format_amount`, the single
+boundary all eleven monetary emissions cross — and nowhere upstream of it. Converting in
+the source helpers instead would feed a chain (tax-exclusive → tax-inclusive → payable,
+plus a taxable amount recomputed independently and required to stay numerically identical),
+which is where a partial application silently breaks BR-CO-13.
+
+It negates rather than taking an absolute value. Negation is linear, so every EN16931
+reconciliation that held over the signed amounts holds exactly over the magnitudes;
+`abs()` would not survive a mixed-sign line, because the absolute value of a sum is not
+the sum of the absolutes.
+
+`CIUSROValidator` enforces this (BR-27 and the local `BR-CN-SIGN`) because the
+reconciliation rules cannot: BR-CO-10/13/15/16 are equalities, and a consistently negated
+document satisfies all four. Without a rule of its own, the validator is a partial-flip
+detector that cannot see a whole-document flip — which is why the negative representation
+looked correct for as long as it did.
+
 ## e-Factura
 
 While SmartBill is the issuer, **it** files with ANAF and PRAHO does not. PRAHO's

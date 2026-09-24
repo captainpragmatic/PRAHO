@@ -90,7 +90,12 @@ class CreditNoteTotalsBlockTests(TestCase):
         self.assertIn("-100.00", subtotal, f"got {subtotal}")
 
     def test_the_credit_note_vat_base_matches_the_xml(self) -> None:
-        """The XML emits TaxableAmount -90.00; the PDF must not state -100.00."""
+        """The taxable base is the discounted 90.00, not the gross 100.00.
+
+        The XML states the same base as a magnitude; this document shows it signed, which
+        is what a customer reading a storno expects. The two must agree on the number,
+        which is the thing a wrong VAT breakdown would get wrong.
+        """
         rows = self._totals_rows(self._issued_reversal(self._discounted_original("FCT-000802")))
 
         vat = next(row for row in rows if "baza" in row)
