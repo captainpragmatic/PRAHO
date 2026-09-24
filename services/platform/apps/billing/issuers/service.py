@@ -200,6 +200,11 @@ def _finalize(
             )
             return Err("Lost ownership of this issuance attempt; outcome not applied")
 
+        # Reaching `_finalize` at all means `submit` returned rather than raising
+        # `RateGateWait`, so a request did leave the machine. This is the honest place
+        # to spend the retry budget.
+        issuance.submissions += 1
+
         if isinstance(outcome, Issued):
             issuance.mark_issued(
                 series=outcome.series,

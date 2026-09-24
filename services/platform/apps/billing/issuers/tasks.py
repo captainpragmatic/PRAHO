@@ -66,26 +66,59 @@ def sweep_pending_issuances(limit: int = 100) -> dict[str, int]:
     Deliberately narrow: only `pending`. An abandoned `claimed` row is quarantined
     by the claim path itself, and `outcome_unknown` is never swept by anything.
     """
-    from apps.billing.invoice_models import DOCUMENT_KIND_INVOICE  # noqa: PLC0415  # ADR-0007
+    from apps.billing.invoice_models import DOCUMENT_KIND_CREDIT_NOTE  # noqa: PLC0415  # ADR-0007
 
-    from .models import IssuanceState, ProviderIssuance  # noqa: PLC0415
+    from .models import MAX_SUBMISSIONS, IssuanceState, ProviderIssuance  # noqa: PLC0415
 
-    # Credit notes are deliberately excluded. `pending` says a provider call is owed,
-    # not WHICH call, and a rate-gated reversal returns to `pending` by design - so
-    # without this filter a storno would be dispatched to the issuance task and posted
-    # as a new invoice. `sweep_owed_reversals` owns their recovery.
-    pending = ProviderIssuance.objects.filter(
-        state=IssuanceState.PENDING.value,
-        invoice__document_kind=DOCUMENT_KIND_INVOICE,
-        invoice__number__isnull=True,
-    ).order_by("created_at")[:limit]
+    # `pending` records that a provider call is owed, not WHICH one, so this dispatches
+    # by document kind rather than filtering one out. Excluding credit notes stopped a
+    # rate-gated reversal being POSTed to /invoice, but `sweep_owed_reversals` skips any
+    # invoice that already has a reversal row - and a deferred storno always has one -
+    # so the reversal was then recovered by neither sweep while the refund had moved.
+    #
+    # `failed` is included because `claim()` accepts it: a refusal earns REJECTED only
+    # from a recognised refusal envelope, which is the classifier's guarantee that
+    # nothing was created. The cap is what keeps a permanent validation error from
+    # being resubmitted forever against a rate-limited third party.
+    owed = (
+        ProviderIssuance.objects.filter(
+            state__in=(IssuanceState.PENDING.value, IssuanceState.FAILED.value),
+            invoice__number__isnull=True,
+            submissions__lt=MAX_SUBMISSIONS,
+        )
+        .select_related("invoice")
+        .order_by("created_at")[:limit]
+    )
 
-    results = {"queued": 0, "skipped": 0}
-    for issuance in pending:
-        if queue_invoice_issuance(issuance.invoice_id):
-            results["queued"] += 1
+    results = {"queued": 0, "skipped": 0, "exhausted": 0}
+    for issuance in owed:
+        invoice = issuance.invoice
+        if invoice.document_kind == DOCUMENT_KIND_CREDIT_NOTE:
+            # The reversal service is addressed by the ORIGINAL's id: it is the document
+            # being reversed, and the credit note is what the call produces.
+            if invoice.reverses_invoice_id is None:
+                logger.error(
+                    f"🔥 [Issuance] Credit note {invoice.pk} has no original to reverse; "
+                    f"it cannot be recovered automatically."
+                )
+                results["skipped"] += 1
+                continue
+            queued = queue_invoice_storno(invoice.reverses_invoice_id)
         else:
-            results["skipped"] += 1
+            queued = queue_invoice_issuance(invoice.pk)
+        results["queued" if queued else "skipped"] += 1
+
+    exhausted = ProviderIssuance.objects.filter(
+        state=IssuanceState.FAILED.value,
+        invoice__number__isnull=True,
+        submissions__gte=MAX_SUBMISSIONS,
+    ).count()
+    if exhausted:
+        results["exhausted"] = exhausted
+        logger.error(
+            f"🔥 [Issuance] {exhausted} document(s) have spent their {MAX_SUBMISSIONS} "
+            f"submission attempts and need an operator."
+        )
     return results
 
 
