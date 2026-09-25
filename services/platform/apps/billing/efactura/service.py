@@ -145,7 +145,23 @@ def _repair_stale_document_type(document: EFacturaDocument, invoice: Invoice) ->
         )
         return
     document.document_type = expected
-    document.save(update_fields=["document_type", "updated_at"])
+    # The stored bytes were produced while this row said INVOICE, so `UBLInvoiceBuilder` wrote
+    # them: a 380 carrying negative amounts, with no reference to the document being reversed.
+    # Correcting the label and keeping the bytes leaves the row inconsistent in the one way that
+    # matters, because submission re-validates and files what is STORED, not what the label now
+    # claims. Blanking `xml_content` is sufficient rather than merely necessary: `submit`
+    # regenerates whenever it is empty, and `_generate_xml` picks the builder with
+    # `builder_for(invoice)`, which reads the INVOICE's `document_kind` and never this field.
+    #
+    # It is also permitted, which is worth stating because the XML is guarded. `save` refuses a
+    # change when a claim is held OR the stored status is one ANAF may have seen; this path is
+    # bounded by `repairable_statuses()`, none of which is frozen, and
+    # `efactura_claim_state_consistent` guarantees at the database level that nothing outside
+    # `uploading` holds a claim. `xml_hash` is recomputed by `save`, which adds it to
+    # `update_fields` itself, so setting it here would only be redundant.
+    document.xml_content = ""
+    document.xml_generated_at = None
+    document.save(update_fields=["document_type", "xml_content", "xml_generated_at", "updated_at"])
 
 
 def _document_type_for(invoice: Invoice) -> str:
