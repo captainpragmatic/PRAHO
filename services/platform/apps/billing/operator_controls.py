@@ -6,9 +6,10 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from django.core.exceptions import ValidationError
-from django.db import IntegrityError, transaction
+from django.core.exceptions import ObjectDoesNotExist, ValidationError
+from django.db import DataError, IntegrityError, transaction
 from django.utils.translation import gettext_lazy as _
+from django_fsm import TransitionNotAllowed
 
 from .invoice_models import InvoiceSequence
 from .payment_models import PaymentRetryPolicy
@@ -237,12 +238,40 @@ def adopt_provider_document(
             "invoice_number": issuance.invoice.number,
         }
 
-        outcome = reconcile_confirmed_issued(
-            issuance_id,
-            series=series,
-            number=number,
-            operator_note=actor.reason,
-        )
+        # Everything this can raise becomes a form error, for the same reason
+        # `rotate_invoice_series` translates its `IntegrityError`: this is the only screen an
+        # operator can reach `outcome_unknown` from, and its output assigns a legal fiscal number
+        # that cannot be changed afterwards. A 500 here leaves them with no next move.
+        #
+        # No savepoint work is needed. `reconcile_confirmed_issued` opens its own unconditional
+        # `transaction.atomic()`, and each arm below raises immediately, so the enclosing block
+        # rolls back whole either way and nothing is half-adopted.
+        try:
+            outcome = reconcile_confirmed_issued(
+                issuance_id,
+                series=series,
+                number=number,
+                operator_note=actor.reason,
+            )
+        except TransitionNotAllowed as exc:
+            # `reconcile_confirmed_issued` settles the ISSUANCE's state under lock and never the
+            # invoice's, while `invoice.issue()` is `source="draft"`. An invoice that moved on
+            # since the ambiguous attempt raised straight through the view. Not about the number,
+            # so it belongs in the non-field slot.
+            raise ValidationError(
+                {"__all__": _("This invoice can no longer be issued. Reload the queue and check its status.")}
+            ) from exc
+        except (IntegrityError, DataError) as exc:
+            # The clash pre-check does not lock the row it checked, so two operators adopting the
+            # same provider document can both pass it and collide at commit. An over-length
+            # composed number arrives here too, from a caller that did not come through the form.
+            # Keyed to `number`, which is the field they would retype.
+            raise ValidationError(
+                {"number": _("That number could not be adopted. Re-check it at the provider and try again.")}
+            ) from exc
+        except ObjectDoesNotExist as exc:
+            # Deleted between this command's lock and the service's own re-read.
+            raise ValidationError({"__all__": _("That reconciliation no longer exists.")}) from exc
         if isinstance(outcome, Err):
             raise ValidationError({"__all__": outcome.error})
         legal_number = outcome.unwrap()
