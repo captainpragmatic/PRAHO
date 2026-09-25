@@ -45,8 +45,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   guard in `0054` names the offending rows and the manual recipe, and stays out of the way
   when nothing offends. Operators should know one consequence: `0055`'s reverse drops
   `ProviderIssuance.submissions` before the guard is reached, so a refused rollback leaves
-  the database at `0054` without that column. Re-applying `0055` and `0057` re-derives the
-  same values from `attempts`.
+  the database at `0054` without that column. Re-applying `0055` and `0057` rebuilds it from
+  `attempts`, but conservatively rather than identically: a row that spent one submission
+  across four claims returns at the cap, so remaining retries are lost even though no record
+  is.
 - Provider issuance rows that pre-date the `submissions` column no longer read as though
   they had never submitted anything. Migration `0057` carries their spent budget forward
   from `attempts`, and the exhausted gauge and reconciliation queue now derive their set

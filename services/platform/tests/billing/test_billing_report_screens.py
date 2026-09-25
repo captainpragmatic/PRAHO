@@ -118,3 +118,59 @@ class VatReportScreenTests(BillingReportScreenTestCase):
 
         self.assertContains(response, TOTAL_NET)
         self.assertContains(response, TOTAL_GROSS)
+
+
+class MixedCurrencyReportTests(TestCase):
+    """Adding lei to euros produces a number that is wrong under any label.
+
+    EUR and USD are staff-selectable `Currency` rows, and an invoice inherits its order's
+    currency, so both reports could genuinely hold more than one. The aggregates sum
+    `total_cents` with no conversion and no grouping, and the templates hardcoded `RON` - so a
+    100-lei invoice beside a 100-euro one displayed as 200,00 RON. Rendering the figure is what
+    exposed it; a label cannot fix it, because the sum itself means nothing.
+    """
+
+    def setUp(self) -> None:
+        self.customer = CustomerFactory()
+        self.client.force_login(create_admin_user(username="mixed_currency"))
+        self.ron = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei", "decimals": 2})[0]
+        self.eur = Currency.objects.get_or_create(code="EUR", defaults={"symbol": "\u20ac", "decimals": 2})[0]
+
+    def _paid(self, currency: Currency, amounts: tuple[int, int, int], number: str) -> None:
+        net, vat, gross = amounts
+        invoice = Invoice.objects.create(
+            customer=self.customer,
+            currency=currency,
+            number=number,
+            status="draft",
+            issued_at=timezone.now(),
+            subtotal_cents=net,
+            tax_cents=vat,
+            total_cents=gross,
+            bill_to_name="Test Company SRL",
+            bill_to_country="RO",
+            issuer_provider=ISSUER_BUILTIN,
+        )
+        Invoice.objects.filter(pk=invoice.pk).update(status="paid")
+
+    def _both(self) -> None:
+        self._paid(self.ron, FIRST, "FCT-000710")
+        self._paid(self.eur, SECOND, "FCT-000711")
+
+    def test_the_revenue_screen_keeps_the_currencies_apart(self) -> None:
+        self._both()
+
+        response = self.client.get(reverse("billing:reports"))
+
+        self.assertContains(response, "107,36 RON")
+        self.assertContains(response, "62,16 EUR")
+        self.assertNotContains(response, TOTAL_GROSS)
+
+    def test_the_vat_screen_keeps_the_currencies_apart(self) -> None:
+        self._both()
+
+        response = self.client.get(reverse("billing:vat_report"))
+
+        self.assertContains(response, "18,63 RON")
+        self.assertContains(response, "10,79 EUR")
+        self.assertNotContains(response, TOTAL_VAT)

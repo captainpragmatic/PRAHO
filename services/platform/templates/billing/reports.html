@@ -14,11 +14,15 @@
     <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
       <div class="bg-slate-800 shadow-sm ring-1 ring-slate-700 rounded-lg p-6">
         <h3 class="text-lg font-medium text-white mb-2">{% trans "Revenue collected, all time" %}</h3>
+        {% for row in revenue_by_currency %}
         <p class="text-2xl font-bold text-green-400">
-          {{ total_revenue|default:0|cents_to_currency|romanian_currency:"RON" }}
+          {{ row.revenue|cents_to_currency|romanian_currency:row.currency }}
         </p>
+        {% empty %}
+        <p class="text-2xl font-bold text-slate-500">{% trans "Nothing collected yet" %}</p>
+        {% endfor %}
         <p class="mt-2 text-sm text-slate-400">
-          {% trans "Paid and refunded invoices, less the refunds that were settled against them." %}
+          {% trans "Paid and refunded invoices, less the refunds settled against them. Listed per currency because the amounts are never converted." %}
         </p>
       </div>
 
@@ -43,6 +47,9 @@
               <th class="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">
                 {% trans "Month" %}
               </th>
+              <th class="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">
+                {% trans "Currency" %}
+              </th>
               <th class="px-6 py-3 text-right text-xs font-medium text-slate-400 uppercase tracking-wider">
                 {% trans "Invoices" %}
               </th>
@@ -57,11 +64,14 @@
               <td class="px-6 py-4 whitespace-nowrap text-sm text-white">
                 {{ row.month|stringformat:"02d" }}.{{ row.year }}
               </td>
+              <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-400">
+                {{ row.currency }}
+              </td>
               <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-400 text-right">
                 {{ row.count }}
               </td>
               <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-white text-right">
-                {{ row.revenue|cents_to_currency|romanian_currency:"RON" }}
+                {{ row.revenue|cents_to_currency|romanian_currency:row.currency }}
               </td>
             </tr>
             {% endfor %}
@@ -69,7 +79,7 @@
         </table>
       </div>
       <p class="mt-3 text-sm text-slate-500">
-        {% trans "Invoices are counted in the month they were issued; refunds are subtracted in the month they were settled." %}
+        {% trans "Invoices are counted in the month the document was created; refunds are subtracted in the month they were settled." %}
       </p>
       {% else %}
       <div class="text-center text-slate-500">

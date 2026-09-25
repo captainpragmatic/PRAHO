@@ -30,9 +30,11 @@ def refuse_while_signed_documents_exist(apps, schema_editor):
     issued a credit note can still be rolled back.
 
     By the time this runs, `0055`'s reverse has already dropped `ProviderIssuance.submissions`,
-    because Django commits reversals per migration rather than across the whole plan. That
-    column is recoverable - `attempts` is untouched, so re-applying `0055` and `0057` re-derives
-    the same values - and the refusal says so rather than leaving it to be discovered.
+    because Django commits reversals per migration rather than across the whole plan. `attempts`
+    survives, so re-applying `0055` and `0057` rebuilds the column - but CONSERVATIVELY, not
+    identically: `0057` derives `min(attempts, 3)`, and a row that had spent one submission
+    across four claims comes back at the cap. What is lost is remaining retries, not records,
+    and the refusal says exactly that rather than promising the counts back.
     """
     from django.db.migrations.exceptions import IrreversibleError  # noqa: PLC0415
     from django.db.models import Q  # noqa: PLC0415
@@ -82,8 +84,9 @@ def refuse_while_signed_documents_exist(apps, schema_editor):
         + ". These are fiscal corrections, so neutralising them is a decision for a human and "
         "not for this migration - delete or zero the offending rows deliberately, then roll "
         "back again. Note that 0055's reverse has already dropped "
-        "ProviderIssuance.submissions by the time this runs; re-applying 0055 and 0057 "
-        "re-derives the same values from attempts, so nothing is permanently lost."
+        "ProviderIssuance.submissions by the time this runs. Re-applying 0055 and 0057 rebuilds "
+        "it from attempts, but conservatively: a row that spent one submission across four "
+        "claims returns at the cap of 3, so remaining retries are lost even though no record is."
     )
 
 

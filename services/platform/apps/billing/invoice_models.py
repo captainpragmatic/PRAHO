@@ -912,10 +912,8 @@ class InvoiceLine(models.Model):
             original = type(self).objects.filter(pk=self.pk).first() if self.pk else None
             if original:
                 parent_ids.add(original.invoice_id)
-            # Keyed rather than iterated: on a reassignment this holds BOTH documents, and the
-            # one that governs this line's direction is the one it is being saved onto.
-            parents = {parent.pk: parent for parent in Invoice.objects.select_for_update().filter(pk__in=parent_ids)}
-            if any(parent.locked_at for parent in parents.values()):
+            parents = list(Invoice.objects.select_for_update().filter(pk__in=parent_ids))
+            if any(parent.locked_at for parent in parents):
                 mutable = {"service", "billing_cycle"}
                 changed = original is None or any(
                     getattr(self, field.attname) != getattr(original, field.attname)
@@ -931,13 +929,44 @@ class InvoiceLine(models.Model):
                 super().save(*args, **kwargs)
                 return
             self.calculate_totals()
+            # On a reassignment `parents` holds BOTH documents, and the one that governs this
+            # line's direction is the one it is being saved ONTO. Matched as text because
+            # `invoice_id` is whatever the caller assigned - `str(pk)` is valid Django input and
+            # reaches the same row through the query above, while a lookup keyed on the column's
+            # own Python type missed it entirely, and the check's "no such document" exit then
+            # made that bypass indistinguishable from a clean save.
+            governing = next((parent for parent in parents if str(parent.pk) == str(self.invoice_id)), None)
             # After `calculate_totals`, never before: `subtotal_cents` is a property and both
             # `tax_cents` and `line_total_cents` are derived from it here, so an earlier check
             # would judge whatever the previous save left behind.
-            self._refuse_a_line_pointing_against_its_document(parents.get(self.invoice_id))
+            self._refuse_a_line_pointing_against_its_document(governing, original, kwargs.get("update_fields"))
             super().save(*args, **kwargs)
 
-    def _refuse_a_line_pointing_against_its_document(self, parent: Invoice | None) -> None:
+    def _amounts_that_will_be_stored(
+        self, original: InvoiceLine | None, update_fields: Iterable[str] | None
+    ) -> tuple[int, int, int]:
+        """The three signed amounts as the ROW will hold them once this save returns.
+
+        `update_fields` decides what is written, so it has to decide what is judged. A save
+        carrying a positive price in memory but writing only `invoice` leaves the STORED
+        negative amounts sitting under a new parent - which passes a check that reads the
+        in-memory object, and produces exactly the state that check exists to refuse.
+        """
+        names = ("unit_price_cents", "tax_cents", "line_total_cents")
+        if update_fields is None or original is None:
+            return cast("tuple[int, int, int]", tuple(getattr(self, name) for name in names))
+        written = set(update_fields)
+        return cast(
+            "tuple[int, int, int]",
+            tuple(getattr(self if name in written else original, name) for name in names),
+        )
+
+    def _refuse_a_line_pointing_against_its_document(
+        self,
+        parent: Invoice | None,
+        original: InvoiceLine | None = None,
+        update_fields: Iterable[str] | None = None,
+    ) -> None:
         """Refuse a line whose direction disagrees with its document's kind.
 
         `invoiceline_amounts_share_one_sign` proves this line's three amounts agree with each
@@ -962,7 +991,7 @@ class InvoiceLine(models.Model):
             # The document does not exist; the foreign key is about to say so more clearly.
             return
         reversing = parent.document_kind == DOCUMENT_KIND_CREDIT_NOTE
-        amounts = (self.unit_price_cents, self.tax_cents, self.line_total_cents)
+        amounts = self._amounts_that_will_be_stored(original, update_fields)
         points_the_wrong_way = (
             any(amount > 0 for amount in amounts) if reversing else any(amount < 0 for amount in amounts)
         )

@@ -1677,14 +1677,14 @@ def _refund_corrections(customer_ids: list[Any]) -> Any:
 def _monthly_revenue(customer_ids: list[Any]) -> list[dict[str, Any]]:
     """Collected invoices less refunds, per month, each dated to its own event."""
     invoiced = {
-        (row["year"], row["month"]): (row["revenue"] or 0, row["count"])
+        (row["year"], row["month"], row["currency__code"]): (row["revenue"] or 0, row["count"])
         for row in _revenue_documents(customer_ids)
         .annotate(year=ExtractYear("created_at"), month=ExtractMonth("created_at"))
-        .values("year", "month")
+        .values("year", "month", "currency__code")
         .annotate(revenue=Sum("total_cents"), count=Count("id"))
     }
     refunded = {
-        (row["year"], row["month"]): (row["refunded"] or 0)
+        (row["year"], row["month"], row["currency__code"]): (row["refunded"] or 0)
         for row in _refund_corrections(customer_ids)
         # `processed_at` is when the money went back; `created_at` is when someone asked.
         # A refund raised in January and settled in March belongs to March, which is the
@@ -1693,18 +1693,47 @@ def _monthly_revenue(customer_ids: list[Any]) -> list[dict[str, Any]]:
             settled=Coalesce("processed_at", "created_at"),
         )
         .annotate(year=ExtractYear("settled"), month=ExtractMonth("settled"))
-        .values("year", "month")
+        .values("year", "month", "currency__code")
         .annotate(refunded=Sum("amount_cents"))
     }
     # Keyed by (year, month): a bare month number merges January 2025 into January 2026.
+    # Grouped by currency as well as by month. Summing `total_cents` across currencies adds
+    # lei to euros - EUR and USD are staff-selectable and an invoice inherits its order's
+    # currency - so a combined figure is wrong under any label, and labelling it RON is how
+    # 100 lei beside 100 euro read as 200 lei.
     return [
         {
             "year": year,
             "month": month,
-            "revenue": invoiced.get((year, month), (0, 0))[0] - refunded.get((year, month), 0),
-            "count": invoiced.get((year, month), (0, 0))[1],
+            "currency": currency,
+            "revenue": invoiced.get(key, (0, 0))[0] - refunded.get(key, 0),
+            "count": invoiced.get(key, (0, 0))[1],
         }
-        for year, month in sorted(set(invoiced) | set(refunded))
+        for key in sorted(set(invoiced) | set(refunded))
+        for year, month, currency in (key,)
+    ]
+
+
+def _revenue_by_currency(customer_ids: list[Any]) -> list[dict[str, Any]]:
+    """Collected less returned, per currency, for the figure the screen actually shows.
+
+    The scalar beside this one is kept because it is what the revenue-recognition tests pin,
+    and it is correct wherever a single currency is in use. It cannot be DISPLAYED with a
+    currency label, though: it sums `total_cents` across currencies without conversion, so a
+    100-lei invoice beside a 100-euro one produced 200 - a number with no meaning and no
+    truthful label.
+    """
+    collected = {
+        row["currency__code"]: row["total"] or 0
+        for row in _revenue_documents(customer_ids).values("currency__code").annotate(total=Sum("total_cents"))
+    }
+    returned = {
+        row["currency__code"]: row["total"] or 0
+        for row in _refund_corrections(customer_ids).values("currency__code").annotate(total=Sum("amount_cents"))
+    }
+    return [
+        {"currency": code, "revenue": collected.get(code, 0) - returned.get(code, 0)}
+        for code in sorted(set(collected) | set(returned))
     ]
 
 
@@ -1728,7 +1757,10 @@ def billing_reports(request: HttpRequest) -> HttpResponse:
 
     context = {
         "monthly_stats": monthly_stats,
+        # The scalar is what the revenue-recognition tests pin; the breakdown is what the
+        # screen renders, because only the breakdown can carry a currency truthfully.
         "total_revenue": collected - returned,
+        "revenue_by_currency": _revenue_by_currency(customer_ids),
     }
 
     return render(request, "billing/reports.html", context)
@@ -1778,8 +1810,23 @@ def vat_report(request: HttpRequest) -> HttpResponse:
     total_vat = invoices.aggregate(total_vat=Sum("tax_cents"))["total_vat"] or Decimal("0")
     total_net = invoices.aggregate(total_net=Sum("subtotal_cents"))["total_net"] or Decimal("0")
 
+    # Per currency for the same reason the revenue screen is: these aggregate `tax_cents` and
+    # `subtotal_cents` with no conversion, so one combined trio cannot be labelled.
+    vat_summary_by_currency = [
+        {
+            "currency": row["currency__code"],
+            "net": row["net"] or 0,
+            "vat": row["vat"] or 0,
+            "gross": (row["net"] or 0) + (row["vat"] or 0),
+        }
+        for row in invoices.values("currency__code")
+        .annotate(net=Sum("subtotal_cents"), vat=Sum("tax_cents"))
+        .order_by("currency__code")
+    ]
+
     context = {
         "invoices": invoices,
+        "vat_summary_by_currency": vat_summary_by_currency,
         "total_vat": total_vat,
         "total_net": total_net,
         # Supplied rather than derived in the template. The summary cards used to read

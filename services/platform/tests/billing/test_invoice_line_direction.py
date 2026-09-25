@@ -131,6 +131,38 @@ class InvoiceLineDirectionTests(TestCase):
         with self.assertRaises(ValidationError):
             line.save()
 
+    def test_a_string_parent_id_does_not_bypass_the_guard(self) -> None:
+        """`invoice_id="3"` is valid Django input, and the lock returns the row for it.
+
+        The parents are keyed by `pk`, which is the column's own Python type, so a string id
+        missed the lookup and the guard took its "document does not exist" exit - silently
+        allowing exactly what it is there to refuse.
+        """
+        invoice = self._invoice()
+        line = self._line(invoice, -10000)
+        line.invoice_id = str(invoice.pk)
+
+        with self.assertRaises(ValidationError):
+            line.save()
+
+    def test_a_partial_save_is_judged_on_what_will_actually_be_stored(self) -> None:
+        """`update_fields` decides what lands, so it must decide what is judged.
+
+        Reassigning a negative credit-note line onto an ordinary invoice while setting a
+        positive price IN MEMORY passes a check that reads the in-memory row. But
+        `update_fields=["invoice"]` writes only the parent, so the ordinary invoice ends up
+        holding the original negative amounts - the state the guard exists to prevent,
+        reached through the guard.
+        """
+        credit_note = self._credit_note()
+        line = self._line(credit_note, -10000)
+        line.save()
+        line.invoice = self._invoice()
+        line.unit_price_cents = 10000
+
+        with self.assertRaises(ValidationError):
+            line.save(update_fields=["invoice"])
+
     # --- what must still be allowed ------------------------------------------------
 
     def test_a_positive_line_is_allowed_on_an_ordinary_invoice(self) -> None:
