@@ -6,7 +6,10 @@ escaped as a server error instead.
 
 `invoice.issue()` is `@transition(source="draft")`, and `reconcile_confirmed_issued` checks the
 ISSUANCE's state but never the invoice's - so an invoice that has moved on raises
-`TransitionNotAllowed`, which is caught nowhere in `apps/billing/`. `invoice.save()` can raise
+`TransitionNotAllowed`. Seven sites in `apps/billing/` already catch that exception, including
+`invoice_models.py`'s own `update_status_from_payments`, which this very call chain reaches - so
+the gap was never "nobody catches it", it was this one raise going uncaught on a screen that
+cannot answer a 500. `invoice.save()` can raise
 `IntegrityError` on the unique number, because the clash pre-check does not lock the row it
 checked. And an over-long composed number reaches the column as a `DataError`; the form guards
 that, but the service function is public and callable directly.

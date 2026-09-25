@@ -29,6 +29,7 @@ from __future__ import annotations
 from decimal import Decimal
 
 from django.core.exceptions import ValidationError
+from django.db import connection
 from django.test import TestCase
 from django.utils import timezone
 
@@ -82,6 +83,22 @@ class InvoiceLineDirectionTests(TestCase):
             bill_to_country="RO",
             issuer_provider=ISSUER_BUILTIN,
         )
+
+    @staticmethod
+    def _corrupt_amounts_in_place(line: InvoiceLine, unit_price_cents: int, tax_cents: int, total_cents: int) -> None:
+        """Manufacture a row that points against its document, the only way still possible.
+
+        `save()`, `bulk_create()` and `queryset.update()` all refuse this now, which is the whole
+        point of the guard - so a legacy row has to be written underneath the ORM, exactly as
+        history wrote it before `0053` relaxed the three non-negative constraints. The intra-row
+        constraint still applies, so the three amounts must agree with each other.
+        """
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE billing_invoice_lines SET unit_price_cents = %s, tax_cents = %s, line_total_cents = %s "
+                "WHERE id = %s",
+                [unit_price_cents, tax_cents, total_cents, line.pk],
+            )
 
     @staticmethod
     def _line(invoice: Invoice, unit_price_cents: int) -> InvoiceLine:
@@ -242,21 +259,10 @@ class InvoiceLineDirectionTests(TestCase):
         would make the one save that repairs the row the one save that cannot happen.
         """
         credit_note = self._credit_note()
-        InvoiceLine.objects.bulk_create(
-            [
-                InvoiceLine(
-                    invoice=credit_note,
-                    kind="service",
-                    description="Stored the wrong way round",
-                    quantity=Decimal("1"),
-                    unit_price_cents=10000,
-                    tax_rate=Decimal("0.2100"),
-                    tax_cents=2100,
-                    line_total_cents=12100,
-                )
-            ]
-        )
-        line = InvoiceLine.objects.get(invoice=credit_note)
+        line = self._line(credit_note, -10000)
+        line.save()
+        self._corrupt_amounts_in_place(line, 10000, 2100, 12100)
+        line.refresh_from_db()
 
         line.unit_price_cents = -10000
         line.save()
@@ -268,21 +274,9 @@ class InvoiceLineDirectionTests(TestCase):
     def test_a_linkage_only_save_on_a_locked_document_is_not_re_judged(self) -> None:
         """The frozen-document branch must not start refusing historical rows."""
         invoice = self._invoice()
-        # `bulk_create` bypasses `save()`, which is how a wrong-signed line can already exist.
-        InvoiceLine.objects.bulk_create(
-            [
-                InvoiceLine(
-                    invoice=invoice,
-                    kind="service",
-                    description="Legacy",
-                    quantity=Decimal("1"),
-                    unit_price_cents=-10000,
-                    tax_rate=Decimal("0.2100"),
-                    tax_cents=-2100,
-                    line_total_cents=-12100,
-                )
-            ]
-        )
+        line = self._line(invoice, 10000)
+        line.save()
+        self._corrupt_amounts_in_place(line, -10000, -2100, -12100)
         Invoice.objects.filter(pk=invoice.pk).update(locked_at=timezone.now())
         line = InvoiceLine.objects.get(invoice=invoice)
 
@@ -308,3 +302,82 @@ class InvoiceLineDirectionTests(TestCase):
         stored = InvoiceLine.objects.get(pk=line.pk)
         self.assertEqual(stored.description, "Renamed")
         self.assertEqual(stored.unit_price_cents, 10000)
+
+    # --- the two chokepoints that bypass save() but already hold the parent -----------
+
+    def test_reassigning_lines_in_bulk_onto_the_other_kind_is_refused(self) -> None:
+        """`queryset.update()` bypasses `save()`, but it is not unguarded.
+
+        `InvoiceLineQuerySet.update` already loads the reassignment target under
+        `select_for_update()` to check `locked_at`, so the parent whose kind decides this is
+        in hand. Without the direction check there, moving positive lines onto a credit note
+        was the whole `save()` guard walked around in one statement.
+        """
+        invoice = self._invoice()
+        line = self._line(invoice, 10000)
+        line.save()
+        credit_note = self._credit_note()
+
+        with self.assertRaises(ValidationError):
+            InvoiceLine.objects.filter(pk=line.pk).update(invoice=credit_note)
+
+    def test_bulk_creating_a_wrong_signed_line_is_refused(self) -> None:
+        """`bulk_create` is the other guarded chokepoint: it already locks the parents."""
+        credit_note = self._credit_note()
+
+        with self.assertRaises(ValidationError):
+            InvoiceLine.objects.bulk_create(
+                [
+                    InvoiceLine(
+                        invoice=credit_note,
+                        kind="service",
+                        description="Positive line on a credit note",
+                        quantity=Decimal("1"),
+                        unit_price_cents=10000,
+                        tax_rate=Decimal("0.2100"),
+                        tax_cents=2100,
+                        line_total_cents=12100,
+                    )
+                ]
+            )
+
+    def test_bulk_creating_negated_credit_note_lines_still_works(self) -> None:
+        """This is how every credit note gets its lines; breaking it breaks reversals."""
+        credit_note = self._credit_note()
+
+        InvoiceLine.objects.bulk_create(
+            [
+                InvoiceLine(
+                    invoice=credit_note,
+                    kind="service",
+                    description="Hosting reversal",
+                    quantity=Decimal("1"),
+                    unit_price_cents=-10000,
+                    tax_rate=Decimal("0.2100"),
+                    tax_cents=-2100,
+                    line_total_cents=-12100,
+                )
+            ]
+        )
+
+        self.assertEqual(credit_note.lines.count(), 1)
+
+    def test_a_bulk_update_that_touches_no_sign_and_no_parent_is_untouched(self) -> None:
+        """An existing test does exactly this; the guard must not start refusing it."""
+        invoice = self._invoice()
+        line = self._line(invoice, 10000)
+        line.save()
+
+        InvoiceLine.objects.filter(pk=line.pk).update(kind="credit", discount_amount_cents=50)
+
+        self.assertEqual(InvoiceLine.objects.get(pk=line.pk).kind, "credit")
+
+    def test_reassigning_lines_in_bulk_onto_the_same_kind_still_works(self) -> None:
+        invoice = self._invoice()
+        line = self._line(invoice, 10000)
+        line.save()
+        other = self._invoice()
+
+        InvoiceLine.objects.filter(pk=line.pk).update(invoice=other)
+
+        self.assertEqual(InvoiceLine.objects.get(pk=line.pk).invoice_id, other.pk)
