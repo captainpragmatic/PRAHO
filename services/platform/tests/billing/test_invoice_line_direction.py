@@ -196,6 +196,22 @@ class InvoiceLineDirectionTests(TestCase):
         with self.assertRaises(ValidationError):
             line.save(update_fields=("unit_price_cents", "tax_cents", "line_total_cents"))
 
+    def test_a_line_with_a_zero_primary_key_is_still_judged(self) -> None:
+        """`if self.pk` read an explicit key of 0 as "unsaved".
+
+        Both helpers then received `original=None` and fell back to the in-memory state, which is
+        the one thing they must not trust on an update.
+        """
+        invoice = self._invoice()
+        line = self._line(invoice, 10000)
+        line.pk = 0
+        line.save()
+        line.invoice = self._credit_note()
+        line.unit_price_cents = -10000
+
+        with self.assertRaises(ValidationError):
+            line.save(update_fields=("unit_price_cents", "tax_cents", "line_total_cents"))
+
     # --- what must still be allowed ------------------------------------------------
 
     def test_a_positive_line_is_allowed_on_an_ordinary_invoice(self) -> None:
@@ -274,3 +290,21 @@ class InvoiceLineDirectionTests(TestCase):
         line.save()
 
         self.assertEqual(InvoiceLine.objects.get(pk=line.pk).unit_price_cents, -10000)
+
+    def test_update_fields_given_as_a_generator_still_saves(self) -> None:
+        """`update_fields` is inspected twice, so a generator was exhausted by the first look.
+
+        Django then received an empty field set: normally that means the write is silently
+        dropped, and under `python -O`, where its own assertion is stripped, it falls through to
+        a full update of amounts nothing validated.
+        """
+        invoice = self._invoice()
+        line = self._line(invoice, 10000)
+        line.save()
+
+        line.description = "Renamed"
+        line.save(update_fields=(name for name in ["description"]))
+
+        stored = InvoiceLine.objects.get(pk=line.pk)
+        self.assertEqual(stored.description, "Renamed")
+        self.assertEqual(stored.unit_price_cents, 10000)

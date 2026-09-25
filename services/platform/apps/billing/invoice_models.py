@@ -907,9 +907,19 @@ class InvoiceLine(models.Model):
         ]
 
     def save(self, *args: Any, **kwargs: Any) -> None:
+        # Materialised once, and handed back, because this method inspects `update_fields` more
+        # than once and it may be any iterable. A generator was exhausted by the first look, so
+        # Django then received an empty field set - normally a silently dropped write, and under
+        # `python -O`, where its own assertion is stripped, a full update of amounts that nothing
+        # validated.
+        if kwargs.get("update_fields") is not None:
+            kwargs["update_fields"] = frozenset(kwargs["update_fields"])
         with transaction.atomic():
             parent_ids = {self.invoice_id}
-            original = type(self).objects.filter(pk=self.pk).first() if self.pk else None
+            # `is not None`, not truthiness: an explicit primary key of 0 is a saved row, and
+            # reading it as unsaved left both checks below with nothing to compare against and
+            # trusting the in-memory state - which is the one thing they must not do on an update.
+            original = type(self).objects.filter(pk=self.pk).first() if self.pk is not None else None
             if original:
                 parent_ids.add(original.invoice_id)
             parents = list(Invoice.objects.select_for_update().filter(pk__in=parent_ids))
@@ -960,6 +970,16 @@ class InvoiceLine(models.Model):
         same row - so comparing the raw values, or even their text, misses spellings that store
         perfectly well and leaves the check taking its "no such document" exit. Coercing through
         the primary-key field closes the class instead of one member of it.
+
+        Two known limits, both left alone deliberately. This reads the default database rather
+        than the alias a `save(using=...)` will write to, so a deployment with more than one
+        business database could validate against one and persist to another; PRAHO has a single
+        business database and the portal has none, so there is nothing to thread the alias
+        through today. And `original` is read before the parent is locked, so under READ COMMITTED
+        a concurrent change to the parent between those two points is not seen. The window is
+        real but was never reproduced against PostgreSQL, and `select_for_update` is a no-op on
+        SQLite, so neither the defect nor a fix is observable from this suite - which makes an
+        extra query on every line save the wrong trade against an unverifiable claim.
         """
         target_id = self.invoice_id
         if update_fields is not None and original is not None and not ({"invoice", "invoice_id"} & set(update_fields)):
