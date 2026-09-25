@@ -381,3 +381,19 @@ class InvoiceLineDirectionTests(TestCase):
         InvoiceLine.objects.filter(pk=line.pk).update(invoice=other)
 
         self.assertEqual(InvoiceLine.objects.get(pk=line.pk).invoice_id, other.pk)
+
+    def test_a_linkage_only_bulk_update_on_a_legacy_row_is_not_re_judged(self) -> None:
+        """The same concession the locked branch of `save()` makes, at the bulk path.
+
+        Gating the direction check on the signed and parent fields is not only about cost: a row
+        that already points the wrong way cannot be corrected any more, and running the check on
+        every `update()` would refuse the linkage-only maintenance that is still legitimate on it.
+        """
+        invoice = self._invoice()
+        line = self._line(invoice, 10000)
+        line.save()
+        self._corrupt_amounts_in_place(line, -10000, -2100, -12100)
+
+        InvoiceLine.objects.filter(pk=line.pk).update(service=None)
+
+        self.assertEqual(InvoiceLine.objects.get(pk=line.pk).unit_price_cents, -10000)
