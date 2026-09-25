@@ -318,6 +318,79 @@ test-portal:
 	@$(PYTHON_PORTAL) -m pytest -v
 	@echo "✅ Portal tests completed - database access properly blocked!"
 
+# ===============================================================================
+# TEST COVERAGE 📊
+# ===============================================================================
+# The invocation lives here and nowhere else, because two things were wrong in CI and
+# both are easy to get wrong again.
+#
+# 1. Coverage does NOT walk up for its config. Run from `services/platform`, it found no
+#    `[tool.coverage.*]` at all - so `source`, the `omit` of tests and migrations, and
+#    `branch` were all silently inactive, and test files were counted as covered source.
+#    `COVERAGE_RCFILE` is what points it at the repo-root config.
+# 2. Django's `--parallel` forks workers through multiprocessing. Without
+#    `concurrency = multiprocessing` their data is discarded and only the parent is
+#    measured - which imports everything and executes almost no test code. Per-process
+#    files must then be merged with `combine` before any report.
+#
+# Together those produced a reported 28% on every PR. Portal is deliberately NOT routed
+# through here: its `--cov=apps` flag in `services/portal/pytest.ini` already scopes it
+# correctly, pytest-cov does its own combining, and forcing this config on it would risk
+# a number that is currently right.
+COVERAGE_BIN = $(PWD)/$(VENV_DIR)/bin/coverage
+COVERAGE_RC = COVERAGE_RCFILE=$(PWD)/pyproject.toml
+# Global floor. 50 was the agreed minimum, but the measured number is 72.39%, and a gate 22
+# points below reality would let coverage rot silently. Set just under the real figure so it
+# ratchets. Raise it as the number climbs; never lower it to make a run pass.
+PLATFORM_COVERAGE_FLOOR ?= 70
+# Packages that carry money, provisioning and access decisions get their own floor, because
+# a healthy global average can hide a weak one.
+# Measured 2026-09-26: billing 88.44, settings 78.50, users 74.57, provisioning 55.50.
+# Floors sit just under those so they ratchet and cannot silently slip. The AGREED TARGET is
+# 80% for every one of these; provisioning is the real gap. Raise a floor when the number
+# rises; never lower one to make a run pass.
+PLATFORM_PACKAGE_FLOORS = billing:85 settings:75 users:70 provisioning:55
+
+coverage-platform:
+	@echo "📊 [Platform] Coverage over apps/ and config/ — tests and migrations excluded..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@cd services/platform && rm -f .coverage .coverage.*
+	@cd services/platform && $(COVERAGE_RC) PYTHONPATH=$(PWD)/services/platform $(COVERAGE_BIN) run manage.py test tests --settings=$(PLATFORM_TEST_SETTINGS) --verbosity=2 --parallel
+	@cd services/platform && $(COVERAGE_RC) $(COVERAGE_BIN) combine
+	@cd services/platform && $(COVERAGE_RC) $(COVERAGE_BIN) xml -o coverage-platform.xml
+	@cd services/platform && $(COVERAGE_RC) $(COVERAGE_BIN) report --show-missing --fail-under=$(PLATFORM_COVERAGE_FLOOR)
+	@echo "✅ Platform coverage complete (floor $(PLATFORM_COVERAGE_FLOOR)%)."
+
+coverage-platform-packages:
+	@echo "📊 [Platform] Per-package floors for the packages that carry money and access..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@cd services/platform && failed=""; \
+	for pair in $(PLATFORM_PACKAGE_FLOORS); do \
+		pkg="$${pair%%:*}"; floor="$${pair##*:}"; \
+		pct=$$($(COVERAGE_RC) $(COVERAGE_BIN) report --include="*/apps/$$pkg/*" 2>/dev/null \
+			| awk '/^TOTAL/ { gsub("%","",$$NF); print $$NF; exit }'); \
+		if [ -z "$$pct" ]; then \
+			printf "  %-14s %8s   floor %3s%%   NO DATA\n" "$$pkg" "-" "$$floor"; \
+			failed="$$failed $$pkg(no-data)"; \
+		elif awk -v p="$$pct" -v f="$$floor" 'BEGIN { exit !(p+0 < f+0) }'; then \
+			printf "  %-14s %7.2f%%   floor %3s%%   BELOW\n" "$$pkg" "$$pct" "$$floor"; \
+			failed="$$failed $$pkg"; \
+		else \
+			printf "  %-14s %7.2f%%   floor %3s%%   ok\n" "$$pkg" "$$pct" "$$floor"; \
+		fi; \
+	done; \
+	if [ -n "$$failed" ]; then echo "❌ Below floor:$$failed"; echo "   (reads the combined data — run 'make coverage-platform' first)"; exit 1; fi; \
+	echo "✅ Every critical package is at or above its floor."
+
+coverage-portal:
+	@echo "📊 [Portal] Coverage over apps/ — already scoped by pytest.ini --cov=apps..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@$(PYTHON_PORTAL) -m pytest -q
+	@echo "✅ Portal coverage complete — see services/portal/htmlcov/."
+
+coverage: coverage-platform coverage-platform-packages coverage-portal
+	@echo "✅ Coverage measured for both services."
+
 test-integration:
 	@echo "🔄 [Integration] Testing services communication and cache functionality..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

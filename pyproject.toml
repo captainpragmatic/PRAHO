@@ -727,6 +727,14 @@ disable_error_code = ["union-attr", "return-value", "misc"]
 [tool.coverage.run]
 # compliance requires high test coverage
 source = ["apps", "config", "ui"]
+# Django's `manage.py test --parallel` forks worker processes through multiprocessing, and
+# without this coverage measures only the parent - which imports everything and executes
+# almost no test code. That is why the platform PR number read 28% while the nightly run,
+# which omits --parallel, reported 88% on the same suite and the same source. Data files are
+# written per process and MUST be merged with `coverage combine` before any report.
+concurrency = ["multiprocessing", "thread"]
+parallel = true
+sigterm = true
 omit = [
     "*/migrations/*",
     "*/tests/*",
@@ -735,7 +743,10 @@ omit = [
     "*/.venv/*",
     "*/.venv-*/*",
     "manage.py",
-    "*/settings/*",
+    # Narrowed from "*/settings/*", which was meant for Django's settings modules but also
+    # silently omitted the whole `apps/settings` app - 262 runtime settings' worth of code,
+    # invisible to coverage for as long as this config has existed.
+    "*/config/settings/*",
     "*/wsgi.py",
     "*/asgi.py",
 ]

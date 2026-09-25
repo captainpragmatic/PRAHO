@@ -142,6 +142,8 @@ services/platform/*.sqlite3
 services/platform/e2e-*.sqlite3-*
 services/platform/media/
 services/platform/.coverage
+services/platform/coverage-platform.xml
+services/portal/coverage-portal.xml
 services/platform/htmlcov/
 services/platform/.pytest_cache/
 services/platform/__pycache__/
