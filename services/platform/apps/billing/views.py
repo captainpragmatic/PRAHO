@@ -2543,13 +2543,20 @@ def provider_reconciliation_queue(request: HttpRequest) -> HttpResponse:
     their own: the cap that stops them retrying is the same cap that excludes them from
     the sweep, so no further `_claim` may ever happen for one and there is no later
     moment at which to label it.
+
+    That derivation reads `pending` as well as `failed`. It read `failed` alone while that
+    was the only state a capped row could be in - `_finalize` spends the budget and always
+    leaves a terminal state behind. Migration 0057 backfills budgets spent before the column
+    existed, and `attempts` cannot say which state the spending ended in, so a capped
+    `pending` row is now reachable. Listing it is the point of deriving this set rather than
+    storing it.
     """
     from .issuers.models import MAX_SUBMISSIONS, IssuanceState, ProviderIssuance  # noqa: PLC0415  # ADR-0007
 
     rows = ProviderIssuance.objects.select_related("invoice", "invoice__customer", "invoice__currency")
     unresolved = rows.filter(state=IssuanceState.OUTCOME_UNKNOWN.value).order_by("created_at")
     exhausted = rows.filter(
-        state=IssuanceState.FAILED.value,
+        state__in=(IssuanceState.PENDING.value, IssuanceState.FAILED.value),
         invoice__number__isnull=True,
         submissions__gte=MAX_SUBMISSIONS,
     ).order_by("created_at")

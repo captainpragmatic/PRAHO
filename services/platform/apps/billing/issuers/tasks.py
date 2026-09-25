@@ -110,8 +110,15 @@ def sweep_pending_issuances(limit: int = 100) -> dict[str, int]:
             queued = queue_invoice_issuance(invoice.pk)
         results["queued" if queued else "skipped"] += 1
 
+    # The sweep's own state set, not `FAILED` alone. `_finalize` is the only thing that
+    # spends the budget and it always lands on a terminal state, so a capped row used to be
+    # `failed` by construction. Migration 0057 backfills budgets spent before the column
+    # existed, and `attempts` cannot say which state that spending ended in - so a capped
+    # `pending` row became reachable for the first time. Read narrowly, this gauge answered
+    # zero for it while `submissions__lt` kept the sweep off it and the reconciliation queue
+    # listed it nowhere. Exhausted means the rows the sweep would take but for the cap.
     exhausted = ProviderIssuance.objects.filter(
-        state=IssuanceState.FAILED.value,
+        state__in=(IssuanceState.PENDING.value, IssuanceState.FAILED.value),
         invoice__number__isnull=True,
         submissions__gte=MAX_SUBMISSIONS,
     ).count()
