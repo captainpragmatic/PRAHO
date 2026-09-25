@@ -4,6 +4,89 @@ from django.conf import settings
 from django.db import migrations, models
 
 
+def noop_forward(apps, schema_editor):
+    # Nothing to do going forward. This operation exists only for its reverse: it changes
+    # whether the rollback is PERMITTED, not what the rollback does.
+    pass
+
+
+def refuse_while_signed_documents_exist(apps, schema_editor):
+    """Refuse a rollback that would restore a constraint the current data violates.
+
+    Reversing this migration re-adds `invoice_discount_non_negative`, which every credit note
+    carrying a discount now breaks. The database answered that with a bare CHECK violation -
+    accurate, and useless at the moment an operator is rolling a deployment back.
+
+    It is not the only wall on the way down. `0053`'s reverse restores the three
+    `invoiceline_*_non_negative` constraints, which negated credit-note lines break, and
+    `0049`'s restores the three `invoice_*_non_negative`, which negative credit-note totals
+    break. Both of those are older than this branch. One guard covers all three because a
+    rollback cannot reach them without unapplying this migration first, and an operation
+    appended here runs FIRST in the reverse direction - Django builds the historical states
+    before executing any database reversal, so the appended operation is reached before the
+    constraint is restored.
+
+    It returns silently when nothing offends, which is the point: an environment that never
+    issued a credit note can still be rolled back.
+
+    By the time this runs, `0055`'s reverse has already dropped `ProviderIssuance.submissions`,
+    because Django commits reversals per migration rather than across the whole plan. That
+    column is recoverable - `attempts` is untouched, so re-applying `0055` and `0057` re-derives
+    the same values - and the refusal says so rather than leaving it to be discovered.
+    """
+    from django.db.migrations.exceptions import IrreversibleError  # noqa: PLC0415
+    from django.db.models import Q  # noqa: PLC0415
+
+    invoice = apps.get_model("billing", "Invoice")
+    invoice_line = apps.get_model("billing", "InvoiceLine")
+
+    # Spelled out rather than imported: a migration must keep describing the rule as it stood
+    # on the day it ran, even if the document kinds are renamed later.
+    credit_notes = invoice.objects.filter(document_kind="credit_note")
+    offenders = (
+        (
+            "negative discount_cents, which this migration's own reverse forbids",
+            credit_notes.filter(discount_cents__lt=0),
+            "credit note(s)",
+        ),
+        (
+            "negative totals, which 0049's reverse forbids",
+            credit_notes.filter(Q(subtotal_cents__lt=0) | Q(tax_cents__lt=0) | Q(total_cents__lt=0)),
+            "credit note(s)",
+        ),
+        (
+            "negative amounts, which 0053's reverse forbids",
+            invoice_line.objects.filter(
+                Q(unit_price_cents__lt=0) | Q(tax_cents__lt=0) | Q(line_total_cents__lt=0)
+            ),
+            "invoice line(s)",
+        ),
+    )
+
+    clauses = []
+    for rule, queryset, noun in offenders:
+        count = queryset.count()
+        if not count:
+            continue
+        sample = list(queryset.order_by("pk").values_list("pk", flat=True)[:5])
+        listed = ", ".join(str(pk) for pk in sample)
+        more = ", and more" if count > len(sample) else ""
+        clauses.append(f"{count} {noun} carry {rule} (pk {listed}{more})")
+
+    if not clauses:
+        return
+
+    raise IrreversibleError(
+        "billing.0054 cannot be reversed while signed correction documents exist: "
+        + "; ".join(clauses)
+        + ". These are fiscal corrections, so neutralising them is a decision for a human and "
+        "not for this migration - delete or zero the offending rows deliberately, then roll "
+        "back again. Note that 0055's reverse has already dropped "
+        "ProviderIssuance.submissions by the time this runs; re-applying 0055 and 0057 "
+        "re-derives the same values from attempts, so nothing is permanently lost."
+    )
+
+
 class Migration(migrations.Migration):
 
     dependencies = [
@@ -21,4 +104,7 @@ class Migration(migrations.Migration):
             model_name='invoice',
             constraint=models.CheckConstraint(condition=models.Q(models.Q(('discount_cents__gte', 0), ('document_kind', 'invoice')), models.Q(('discount_cents__lte', 0), ('document_kind', 'credit_note')), _connector='OR'), name='invoice_discount_matches_document_direction'),
         ),
+        # LAST on purpose. Reverses run bottom-to-top, so this is the first thing a rollback
+        # reaches - before either constraint operation above is undone.
+        migrations.RunPython(noop_forward, refuse_while_signed_documents_exist),
     ]

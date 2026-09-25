@@ -38,6 +38,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reversal already happened.
 - Credit notes now carry the original's lines, negated, so line-based VAT and EC-Sales
   reporting can attribute the correction instead of seeing a total with no composition.
+- Rolling a deployment back below this release now refuses with an explanation instead of
+  aborting on a database CHECK violation. Migration `0054`'s reverse restores
+  `discount_cents >= 0`, and `0053`'s and `0049`'s restore the six matching
+  `*_non_negative` constraints — all of which signed credit notes violate by design. The
+  guard in `0054` names the offending rows and the manual recipe, and stays out of the way
+  when nothing offends. Operators should know one consequence: `0055`'s reverse drops
+  `ProviderIssuance.submissions` before the guard is reached, so a refused rollback leaves
+  the database at `0054` without that column. Re-applying `0055` and `0057` re-derives the
+  same values from `attempts`.
+- Provider issuance rows that pre-date the `submissions` column no longer read as though
+  they had never submitted anything. Migration `0057` carries their spent budget forward
+  from `attempts`, and the exhausted gauge and reconciliation queue now derive their set
+  from the sweep's own states so a carried-forward row cannot be listed nowhere.
 - Invoice dates sent to SmartBill use the Romanian calendar day rather than UTC's. An
   invoice issued late in the evening was dated to the previous day, and one issued late
   on the last day of a month was filed under a VAT period that had already closed.

@@ -36,6 +36,12 @@ def repair_credit_note_document_types(apps, schema_editor):
 def unrepair(apps, schema_editor):
     # No-op: the corrected value is the true one, and the rows this touched cannot be
     # distinguished afterwards from rows that were always correct.
+    #
+    # A no-op reverse here reads as though the branch rolls back cleanly, and it does not.
+    # `0054`'s reverse restores `invoice_discount_non_negative`, which any credit note with a
+    # discount violates, and it refuses rather than letting the database abort - see
+    # `refuse_while_signed_documents_exist` there for the walls and the manual recipe. Rolling
+    # back only as far as `0055` is unaffected.
     pass
 
 
